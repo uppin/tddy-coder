@@ -112,6 +112,17 @@ pub type SubagentSessionTable = tokio::sync::Mutex<SubagentConversations>;
 /// Process-wide session table — `PermissionServer` merges the subagent router at construction
 /// time, but the conversation must survive across separate `tools/call` invocations, so the table
 /// lives outside any single `PermissionServer` instance.
+///
+/// # Precondition: one session per process
+///
+/// This is a `OnceLock`, so every caller in the process shares **one** conversation table, keyed
+/// by conversation id alone with no session in the key. That was sound where this code came from —
+/// `tddy-tools` is one in-jail process serving exactly one session — but `tddy-discovery` is
+/// linked by `tddy-daemon`, which serves **many sessions per process**. A second session calling
+/// this in the same process would share the first's open conversations and its retired accounting,
+/// and could retire or resolve a turn belonging to the other session. A multi-session host needs a
+/// `SubagentSessionTable` per session (`SubagentConversations::default()` is all this constructs),
+/// not this singleton. Nothing in `tddy-discovery` or `tddy-daemon` calls it today.
 pub fn subagent_sessions() -> &'static SubagentSessionTable {
     static SESSIONS: OnceLock<SubagentSessionTable> = OnceLock::new();
     SESSIONS.get_or_init(|| tokio::sync::Mutex::new(SubagentConversations::default()))

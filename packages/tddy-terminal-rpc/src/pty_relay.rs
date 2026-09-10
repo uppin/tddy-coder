@@ -757,6 +757,11 @@ async fn connectrpc_post_streaming(
 // Terminal helpers
 // ---------------------------------------------------------------------------
 
+/// The LiveKit mode's name for the same OSC resize sequence every other mode sends.
+///
+/// The delegation is a compile-time identity, so it needs no test of its own — asserting
+/// `encode_resize() == encode_resize_osc()` would stay green through any change to either. The
+/// format itself is pinned by `encode_resize_osc_uses_format_expected_by_daemon`.
 #[cfg(feature = "livekit")]
 fn encode_resize() -> Option<Vec<u8>> {
     encode_resize_osc()
@@ -824,16 +829,5 @@ mod tests {
             "resize must terminate with BEL (\\x07) but got: {:?}",
             String::from_utf8_lossy(&bytes)
         );
-    }
-}
-
-#[cfg(all(test, feature = "livekit"))]
-mod livekit_tests {
-    use super::*;
-
-    #[test]
-    fn encode_resize_delegates_to_osc_format() {
-        // When / Then
-        assert_eq!(encode_resize(), encode_resize_osc());
     }
 }

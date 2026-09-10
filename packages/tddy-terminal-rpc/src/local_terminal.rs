@@ -12,6 +12,13 @@ const DEFAULT_COLS: u16 = 220;
 /// Read the local terminal size via `TIOCGWINSZ`, falling back to a default.
 pub(crate) fn terminal_size() -> (u16, u16) {
     #[cfg(unix)]
+    // SAFETY: `libc::winsize` is a plain POD struct of four `u16`s, so all-zero is a valid value
+    // for it and `zeroed()` needs no further initialisation. `TIOCGWINSZ` is the ioctl whose
+    // third argument is exactly a `*mut winsize`, and `&mut ws` is a valid, uniquely borrowed,
+    // correctly aligned pointer to one that outlives the call. `STDOUT_FILENO` is a borrowed fd
+    // this function neither closes nor takes ownership of; an invalid or non-tty fd is reported
+    // as a non-zero return, which is the branch that falls through to the defaults. `ws` is read
+    // only after the call reported success.
     unsafe {
         let mut ws: libc::winsize = std::mem::zeroed();
         if libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) == 0
@@ -34,6 +41,15 @@ pub(crate) struct RawMode {
 impl RawMode {
     pub(crate) fn enable() -> Self {
         #[cfg(unix)]
+        // SAFETY: `libc::termios` is a plain POD struct of integers and a byte array, so all-zero
+        // is a valid value for it and `zeroed()` needs no further initialisation. `tcgetattr` and
+        // `tcsetattr` take `*mut termios` / `*const termios` respectively, and `&mut saved` /
+        // `&raw` are valid, correctly aligned pointers to live locals that outlive their call;
+        // `cfmakeraw` takes the same `*mut termios`. `STDIN_FILENO` is a borrowed fd, neither
+        // closed nor owned here. `saved` is only copied into `raw`, and `raw` only written back,
+        // after `tcgetattr` reported success, so no uninitialised termios is ever installed on
+        // this path. Both setters' return codes are deliberately ignored: a stdin that is not a
+        // tty leaves the terminal untouched, which is the intended outcome.
         unsafe {
             let mut saved: libc::termios = std::mem::zeroed();
             if libc::tcgetattr(libc::STDIN_FILENO, &mut saved) == 0 {
@@ -45,6 +61,10 @@ impl RawMode {
         }
         Self {
             #[cfg(unix)]
+            // SAFETY: as above, all-zero is a valid `libc::termios`. This is the arm where
+            // `tcgetattr` failed, so there is no saved state to restore and nothing was changed;
+            // the zeroed value exists only so the field is initialised, and `Drop`'s `tcsetattr`
+            // on a non-tty stdin fails and is ignored.
             saved: unsafe { std::mem::zeroed() },
         }
     }
@@ -53,6 +73,10 @@ impl RawMode {
 impl Drop for RawMode {
     fn drop(&mut self) {
         #[cfg(unix)]
+        // SAFETY: `tcsetattr` takes a `*const termios`, and `&self.saved` is a valid, correctly
+        // aligned pointer to a field that lives until this `Drop` returns. `STDIN_FILENO` is a
+        // borrowed fd, neither closed nor owned here, and the return code is ignored because a
+        // stdin that is no longer a tty simply leaves the terminal as it is.
         unsafe {
             libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &self.saved);
         }

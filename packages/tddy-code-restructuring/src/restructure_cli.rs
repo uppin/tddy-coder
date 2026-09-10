@@ -162,7 +162,7 @@ fn options_for(args: RestructureArgs) -> Options {
         RestructureCommand::Anchors(anchors) => Options {
             command: Command::Anchors,
             target: Some(anchors.file),
-            items: anchors.items,
+            items: normalised_items(anchors.items),
             indexing_budget: anchors.indexing_budget,
             ..Options::default()
         },
@@ -172,6 +172,22 @@ fn options_for(args: RestructureArgs) -> Options {
             ..Options::default()
         },
     }
+}
+
+/// `--items` as the runner has always received it: trimmed, with empty elements dropped.
+///
+/// clap's `value_delimiter = ','` splits on the comma and stops there, so `--items "One, Two"`
+/// would otherwise resolve an item literally named `" Two"` and `--items "A,,B"` would carry an
+/// empty one — a wrong answer with no error. `runner::comma_separated` did this normalisation
+/// while the dispatch lived in `tddy-tools`; the call site keeps doing it now that the parsed
+/// arguments cross no package boundary.
+fn normalised_items(items: Vec<String>) -> Vec<String> {
+    items
+        .iter()
+        .map(|item| item.trim())
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// rust-analyzer, launched with the handshake the restructure backend needs.
@@ -280,6 +296,24 @@ mod tests {
         assert_eq!(options.command, Command::Anchors);
         assert_eq!(options.target, Some(PathBuf::from("src/lib.rs")));
         assert_eq!(options.items, vec!["One", "Two", "Three"]);
+    }
+
+    #[test]
+    fn anchors_resolves_an_item_written_with_a_space_after_the_comma() {
+        // Given an items list spelled the way a human writes one
+        let options = parse(&["anchors", "src/lib.rs", "--items", "One, Two ,Three"]);
+
+        // Then the runner receives the item names, not the whitespace around them
+        assert_eq!(options.items, vec!["One", "Two", "Three"]);
+    }
+
+    #[test]
+    fn anchors_drops_an_empty_element_rather_than_looking_for_an_unnamed_item() {
+        // Given an items list with a stray comma at both ends and in the middle
+        let options = parse(&["anchors", "src/lib.rs", "--items", ",One,,Two, ,"]);
+
+        // Then only the two named items reach the runner
+        assert_eq!(options.items, vec!["One", "Two"]);
     }
 
     #[test]

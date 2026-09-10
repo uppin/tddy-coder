@@ -107,6 +107,27 @@ This PR explicitly does **not**:
 
   The rule throughout is seam B's, one level down: the shape of a CLI subcommand belongs to the
   crate that parses arguments. Earns a `## Scope` line and a milestone note.
+
+  ⚠ **The exception, stated here rather than left for a reader to find** (recorded in review, after
+  M9). This document uses two rules above — *stdout must not go where the TUI links*, and *the clap
+  surface stays where arguments are parsed* — to justify keeping `list_models`,
+  `session_actions_cli`, `PtyRelayArgs` and seam B in `tddy-tools`. M3 did not apply either rule to
+  `build_cli`. `tddy_bsp::build_cli` now holds six direct-stdout sites and a hard exit —
+  `println!` at `build_cli.rs:86`, `106`, `181` and `195`, `eprintln!` at `180`, and
+  `std::process::exit(1)` at `182` — and **`tddy-coder` links `tddy-bsp`** (`tddy-coder`'s
+  `Cargo.toml:31`), so the exact hazard the `list_models` bullet refused to create is present one
+  crate over. `clap` also entered three library crates in the same wave — `tddy-bsp`,
+  `tddy-code-analysis` and `tddy-code-restructuring` — where the later milestones kept it out of
+  `tddy-terminal-rpc` and `tddy-workflow-recipes` on principle.
+
+  Neither is a live TUI corruption today: nothing in the TUI's own paths calls `build_cli`'s
+  dispatch, and `clap` in a library is a build cost rather than a hazard. But the document must
+  state **one** rule, not two, and it currently argues both ways. **Deliberately not fixed here**:
+  splitting `build_cli`'s dispatch the way M5 split `list_models` — logic down, surface and stdout
+  left in the binary — is a follow-up, and this PR's diff is already 130 files with four stacked
+  PRs above it. The follow-up is the same shape as the `## Delta` note on
+  `tddy-workflow-recipes`' new dependencies: an M3/M4 decision the later milestones would not have
+  taken.
 - Move `pty_relay`'s clap surface, or seam C's MCP surface, out of `tddy-tools`.
   **Changed during green at M6 — the plan said both moved whole.** Same rule, twice more:
   - **`PtyRelayArgs` stays.** It is a `#[derive(Args)]` struct with twenty `#[arg]`s and their
@@ -482,6 +503,25 @@ them. `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` do not depend 
 #### tddy-workflow-recipes
 - **API**: gains the PR-stack MCP tool surface, the GitHub PR REST client, and schema validation —
   which reads the `goals.json` and `generated/` it already owns, without a cross-package `include_dir!`
+- **Dependencies**: `+include_dir`, `+jsonschema`, `+tempfile` (`Cargo.toml:20,21,23`) — three
+  **production** dependencies gained at M4, and this line was missing from the original `## Delta`.
+  `include_dir` and `jsonschema` came with `schema.rs`, `tempfile` with `github_pr.rs`. Nothing new
+  enters the workspace — all three were `tddy-tools` dependencies, and the same M4 dropped them
+  from there — but the *set of crates that build them* grew, because
+  **ten crates depend on `tddy-workflow-recipes`** (`tddy-coder`, `tddy-daemon`, `tddy-demo-runner`,
+  `tddy-e2e`, `tddy-integration-tests`, `tddy-livekit`, `tddy-sandbox-recipes`, `tddy-service`,
+  `tddy-tools`, `tddy-tui-testkit`) against `tddy-tools`' four, all but one of them dev. In-jail
+  binaries that reach the recipes crate now build `jsonschema`.
+- **Cost, stated rather than glossed — and it is an asymmetry in this document.** `## Boundaries`
+  refused to move seam B **specifically** to avoid this: *"moving that would mean adding `rmcp` and
+  `schemars` to `tddy-workflow-recipes`, which has neither — every consumer of that crate,
+  `tddy-coder` included, would then build `rmcp`."* M4 had already added three dependencies to the
+  same crate on the same reasoning's other side. Both calls may be right on their merits —
+  `jsonschema` is a smaller build than `rmcp`, and `schema.rs` cannot be split from the data it
+  validates the way seam B's adapters split from `pr_stack` — but the document should not argue one
+  way in `## Boundaries` and the other way silently in a manifest. Recorded in review, after M9;
+  not reversed, because reversing it would put the cross-package `include_dir!` reach and
+  `tddy-tools`' `build.rs` back.
 
 #### tddy-session-tool-client (new)
 - **API**: `SessionToolTransport`, `detect_session_tool_transport`, `dispatch_session_tool` and the
@@ -796,6 +836,17 @@ afterwards, verified by grep over the destinations rather than by assumption.
   `tddy_livekit::` path is left anywhere in `tddy-tools`' `src` or `tests`. Its `livekit` feature
   is now pure forwarding — `["tddy-terminal-rpc/livekit", "tddy-session-tool-client/livekit"]` —
   which is what a crate that assembles a router rather than opening a connection should have.
+- **M5 moved two sets of log targets too, and the bullets below had not recorded them.** Added in
+  review, after M9, because a list of "the targets that moved" that omits two of its members reads
+  as a complete audit and is not one. `tddy_core::session_context` at
+  `packages/tddy-core/src/session_context.rs:32,51,61` (3 sites, was
+  `tddy_tools::session_context`), and `tddy_core::session_actions::session_dir` at
+  `packages/tddy-core/src/session_actions/session_dir.rs:90,98` (2 sites, was
+  `tddy_tools::session_actions_cli` — the other two of that module's four sites stayed in
+  `tddy-tools` with the surface, at `session_actions_cli.rs:27,49`). So the node moved **19** log
+  target strings in total, not 14, and M5 rather than M7 is where the practice starts. The
+  operator-visible consequence is M7's and M8's: `RUST_LOG=tddy_tools=debug` no longer shows
+  session-context resolution or session-directory resolution; `RUST_LOG=tddy_core=debug` does.
 - **The roster's and the runtime's log targets moved with them at M8**, on M7's precedent below:
   `tddy_tools::session_agents` is now `tddy_discovery::roster` (12 sites) and
   `tddy_discovery::subagent_runtime` (2), so `target:` keeps naming where the code is. Same
@@ -905,8 +956,10 @@ afterwards, verified by grep over the destinations rather than by assumption.
   so the method was sound and only the distinct-count was not.
 - **Two defects were found by the verification and recorded rather than fixed, and the line is the
   same one every other milestone drew.** M9 is closeout; both fixes are behaviour changes.
-  `tddy-workflow-recipes` still emits `target: "tddy_tools::schema"` from nine sites, which M6, M7
-  and M8 would have moved with the code and M4 did not — but node 4's recorded policy is the
+  `tddy-workflow-recipes` still emits a `tddy_tools::` target from **22 sites in three modules**
+  (`schema.rs` 6, `schema_manifest.rs` 3, `github_pr.rs` 13 — the last found in review after M9,
+  and the todo entry corrected from nine to 22), which M6, M7 and M8 would have moved with the
+  code and M4 did not — but node 4's recorded policy is the
   opposite one (keep the target, because renaming silently breaks an operator's `RUST_LOG` filter
   and the failure mode is missing logs), so the stack currently ships both rules and the thing to
   settle is which. And `local_pty_relay`'s smoke test hangs indefinitely when its stdin is an open
@@ -1132,7 +1185,7 @@ during M5b.
 | `tddy-discovery` | **109** | 0 | 0 | unchanged from post-M8 |
 | `tddy-service` | **111** | 0 | 0 | unchanged from post-M8 |
 | `tddy-workflow-recipes` | **559** | **1** ⚠ | 0 | the failure is pre-existing and macOS-only — see below |
-| `tddy-code-restructuring` | **294** | 0 | 1 | — |
+| `tddy-code-restructuring` | **296** | 0 | 1 | 294 at M9 **+2**, the two regression tests for the `anchors --items` drift found in review — see below |
 | `tddy-testing-commons` | **24** | 0 | 2 | — |
 | `tddy-terminal-rpc` | **24** | 0 | 0 | matches post-M6 exactly |
 | `tddy-code-analysis` | **34** | 0 | 0 | — |
@@ -1158,6 +1211,39 @@ were measured. Characterised and recorded in
 [`docs/dev/todo/2026-09-10-local-pty-relay-never-returns-when-its-stdin-is-an-open-pipe.md`](../todo/2026-09-10-local-pty-relay-never-returns-when-its-stdin-is-an-open-pipe.md);
 the relay code is byte-identical to its pre-node-5 form, so the hang predates the move.
 
+⚠ **One behaviour regression, and it *was* this node's. Found in review after M9, fixed.**
+This is the only genuine behaviour drift the whole node produced, and it is recorded here rather
+than repaired quietly, because "behaviour-preserving restructure" is the claim
+`## Related Feature Documentation` makes and one exception to it is worth more than the claim.
+
+M3 moved `restructure_cli.rs` into `tddy-code-restructuring` and, in deleting `cli_vector()`,
+handed clap's parsed `Vec<String>` straight to the runner: `items: anchors.items`
+(`packages/tddy-code-restructuring/src/restructure_cli.rs:165`). But the pre-move path did not
+hand it over raw — `runner::comma_separated` (`runner.rs:826-834`) ran it through
+`.split(',').map(str::trim).filter(|i| !i.is_empty())`, and clap's `value_delimiter = ','` splits
+on the comma and stops there. So:
+
+| `restructure anchors --items …` | Before M3 | After M3 | Now |
+|---|---|---|---|
+| `"One,Two"` | `["One", "Two"]` | `["One", "Two"]` | `["One", "Two"]` |
+| `"One, Two"` | `["One", "Two"]` | `["One", " Two"]` ❌ | `["One", "Two"]` |
+| `"A,,B"` | `["A", "B"]` | `["A", "", "B"]` ❌ | `["A", "B"]` |
+
+The failure mode is what makes it worth the paragraph: **no error**. An items list written the way
+a human writes one resolved an item literally named `" Two"`, the anchor came back not covering it,
+and nothing said why. The reason M9's verification did not catch it is instructive too — the test
+that guards this call site,
+`anchors_carries_its_items_as_a_list_rather_than_a_comma_joined_string`, used `"One,Two,Three"`,
+the one input where the two normalisations agree.
+
+Fixed at the call site by `normalised_items`, which is `comma_separated`'s body without the
+argument-fetching half, and pinned by **two new tests** in the same module —
+`anchors_resolves_an_item_written_with_a_space_after_the_comma` and
+`anchors_drops_an_empty_element_rather_than_looking_for_an_unnamed_item`. Both were observed
+failing against the unfixed call site (`["One", " Two ", "Three"]` and
+`["", "One", "", "Two", " ", ""]`) before the fix went back in, so they pin the drift rather than
+merely describing it. `tddy-code-restructuring` goes 294 → **296**.
+
 **Per-milestone package baselines.** Every drop is accounted for by a named move; a package whose
 number falls without one is a regression, not a milestone.
 
@@ -1170,7 +1256,7 @@ number falls without one is a regression, not a milestone.
 | Package | Pre-M6 | Post-M6 | Accounted for |
 |---|---:|---:|---|
 | `tddy-tools` | 334 | **331** | −3 `pty_relay` tests moved, −1 `is_native_tool_denied_in_remote_mode` moved, −1 vacuous guard test deleted, +2 new arg-hand-off tests |
-| `tddy-terminal-rpc` | 23 (+1 failing) | **24** / 25 with `--features livekit` | −2 fabricated stub tests deleted, +3 moved from `pty_relay` (one of them LiveKit-gated) |
+| `tddy-terminal-rpc` | 23 (+1 failing) | **24**, and 24 with `--features livekit` too | −2 fabricated stub tests deleted, +3 moved from `pty_relay`. *One of the three was LiveKit-gated and made the count 25 under that feature; it asserted `encode_resize() == encode_resize_osc()` where the first function's whole body is `encode_resize_osc()` — a tautology no change to either function could fail — and it was **deleted in review after M9**, not weakened. The OSC format stays pinned unconditionally by `encode_resize_osc_uses_format_expected_by_daemon`.* |
 | `tddy-tool-engine` | 9 (+2 failing) | **11** | −2 fabricated stub tests deleted, +2 for the moved remote-mode denial |
 
 | Package | Pre-M7 | Post-M7 | Accounted for |
@@ -1247,7 +1333,7 @@ merely unused.
       | [`…-tddy-livekit-depends-on-tddy-service-for-two-call-sites.md`](../todo/2026-09-10-tddy-livekit-depends-on-tddy-service-for-two-call-sites.md) | the two call sites that forced M7's twelfth crate |
       | [`…-three-crates-gained-a-transitive-tddy-tui-dependency.md`](../todo/2026-09-10-three-crates-gained-a-transitive-tddy-tui-dependency.md) | M6, M7 **and** M8's `tddy-service` edges, with blast radius, cross-referenced to node 4's root-cause entry |
       | [`…-two-duplications-left-standing-by-the-tools-thinning.md`](../todo/2026-09-10-two-duplications-left-standing-by-the-tools-thinning.md) | `MAX_MANIFEST_BYTES` ×2 and the third `non_empty_env` |
-      | [`…-schema-validation-still-logs-under-the-tddy-tools-target-after-moving-crates.md`](../todo/2026-09-10-schema-validation-still-logs-under-the-tddy-tools-target-after-moving-crates.md) | **found at M9**: M4 left nine `tddy_tools::schema*` log targets behind in `tddy-workflow-recipes`, against M6/M7/M8's practice and node 4's stated policy — the stack ships both rules |
+      | [`…-schema-validation-still-logs-under-the-tddy-tools-target-after-moving-crates.md`](../todo/2026-09-10-schema-validation-still-logs-under-the-tddy-tools-target-after-moving-crates.md) | **found at M9, extended in review**: M4 left **22** `tddy_tools::` log targets behind in `tddy-workflow-recipes` across three modules — `schema.rs` 6, `schema_manifest.rs` 3 and `github_pr.rs` **13** — against M6/M7/M8's practice and node 4's stated policy; the stack ships both rules |
 
       An eighth was written for a defect the verification itself turned up:
       [`…-local-pty-relay-never-returns-when-its-stdin-is-an-open-pipe.md`](../todo/2026-09-10-local-pty-relay-never-returns-when-its-stdin-is-an-open-pipe.md).

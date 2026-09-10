@@ -62,6 +62,17 @@ pub fn seed_subagents_or_report() -> Vec<SpecializedAgentDef> {
 /// Process-wide because the registry outlives any one MCP `tools/call`: the stream task writes it
 /// and every tool handler reads it, and a per-request registry is exactly the thing that used to
 /// re-read a frozen env var on every call.
+///
+/// # Precondition: one session per process
+///
+/// This is a `OnceLock` seeded from the **spawn environment** on first touch, so the whole process
+/// gets the roster of whichever session touched it first. That was sound where this code came from
+/// — `tddy-tools` is one in-jail process serving exactly one session — but `tddy-discovery` is
+/// linked by `tddy-daemon`, which serves **many sessions per process**. A second session calling
+/// this in the same process would silently share the first session's roster: its agents, its
+/// session id, its tool withdrawals. Any multi-session host needs a `LiveAgentRoster` per session
+/// (`LiveAgentRoster::seeded_from` takes everything this function reads from the environment),
+/// not this singleton. Nothing in `tddy-discovery` or `tddy-daemon` calls it today.
 pub fn session_agent_roster() -> &'static LiveAgentRoster {
     static ROSTER: OnceLock<LiveAgentRoster> = OnceLock::new();
     ROSTER.get_or_init(|| {
