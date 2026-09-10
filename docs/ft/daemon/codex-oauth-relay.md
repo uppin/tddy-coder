@@ -6,7 +6,7 @@ The **`tddy_daemon::codex_oauth_relay`** module validates **HTTPS** authorize UR
 
 ## Operator loopback tunnel (`tddy-daemon`)
 
-With **`livekit.common_room`** set, the daemon’s common-room **`Room`** drives **`run_oauth_tunnel_supervisor`**: scan **`daemon-*`** participants for pending **`codex_oauth`** metadata, open **`authorize_url`** in the system browser, listen on **`127.0.0.1:{callback_port}`**, and bridge TCP to **`loopback_tunnel.LoopbackTunnelService`** on the chosen session participant. **`codex_oauth_participant_metadata`** parses the same JSON shape as the desktop **`codex-oauth-metadata`** helper. Package reference: **[`oauth-loopback-tunnel.md`](../../../packages/tddy-daemon/docs/oauth-loopback-tunnel.md)**; room lifecycle ties to **[livekit-peer-discovery.md](livekit-peer-discovery.md)**.
+With **`livekit.common_room`** set, the daemon’s common-room **`Room`** drives **`run_oauth_tunnel_supervisor`**: scan **`daemon-*`** participants for pending **`codex_oauth`** metadata, open **`authorize_url`** in the system browser, listen on **`127.0.0.1:{callback_port}`**, and bridge TCP to **`loopback_tunnel.LoopbackTunnelService`** on the chosen session participant. **`codex_oauth_participant_metadata`** parses the same JSON shape as the desktop **`codex-oauth-metadata`** helper. Package reference: **[`oauth-loopback-tunnel.md`](../../../packages/tddy-daemon-auth/docs/oauth-loopback-tunnel.md)**; room lifecycle ties to **[livekit-peer-discovery.md](livekit-peer-discovery.md)**.
 
 ## Validation
 
@@ -23,6 +23,7 @@ Logging uses **`log::`** with target **`tddy_daemon::codex_oauth`**; full query 
 
 ## Technical reference
 
-- **[`codex-oauth-relay.md`](../../../packages/tddy-daemon/docs/codex-oauth-relay.md)** — API, tests, and commands
-- **[`oauth-loopback-tunnel.md`](../../../packages/tddy-daemon/docs/oauth-loopback-tunnel.md)** — operator TCP + LiveKit tunnel supervisor
+- **[The identity boundary and the LiveKit service](auth-livekit-services.md)** — the crate these modules live in
+- **[`codex-oauth-relay.md`](../../../packages/tddy-daemon-auth/docs/codex-oauth-relay.md)** — API, tests, and commands
+- **[`oauth-loopback-tunnel.md`](../../../packages/tddy-daemon-auth/docs/oauth-loopback-tunnel.md)** — operator TCP + LiveKit tunnel supervisor
 - **[Codex OAuth web relay (product)](../web/codex-oauth-web-relay.md)** — dashboard UX and scope

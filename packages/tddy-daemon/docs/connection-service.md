@@ -43,8 +43,11 @@ sibling services on the same transports, and their methods are not listed below:
 |---|---|---|
 | `host.HostService` | `ListEligibleDaemons`, `ListKnownHosts`, `GetHostTooling`, `StreamHostPrompts`, `AnswerHostPrompt`, `AddHostKey`, `ListHostKeyCandidates`, `StreamHostStats` | [`packages/tddy-host-service`](../../tddy-host-service/docs/host-service.md) |
 | `worktree.WorktreeService` | `ListWorktreesForProject`, `RemoveWorktree`, `StreamWorktreeStats`, `CalculateWorktreeSize`, `CleanWorktree`, `RestoreSessionWorktree`, `ListWorktreeDirectory`, `ReadWorktreeFile`, `StreamReadWorktreeFile` | [`packages/tddy-worktree-service`](../../tddy-worktree-service/docs/worktree-service.md) |
+| `livekit.LiveKitService` | `StreamLiveKitRooms` | [`packages/tddy-daemon-livekit`](../../tddy-daemon-livekit/docs/livekit-service.md) |
 
-A client reaches all three at the same coordinates it always did — `/rpc` over Connect-HTTP, the
+`connection.ConnectionService` serves the other **72**.
+
+A client reaches all four at the same coordinates it always did — `/rpc` over Connect-HTTP, the
 LiveKit common room, and the local UDS socket — because each is a `ServiceEntry` registered beside
 this one rather than a second endpoint.
 
@@ -61,7 +64,7 @@ this one rather than a second endpoint.
 | `ListSessionWorkflowFiles` | Lists workflow file **basenames** present on disk under `{sessions_base}/sessions/{session_id}/` using a **fixed server allowlist** (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`). Requires the same **`session_token`** → user → **`sessions_base`** resolution as **`ListSessions`**; **`session_id`** is validated with **`validate_session_id_segment`** before path construction. Entries whose canonical path falls outside the canonical session directory (e.g. symlink escape) are omitted from the list. |
 | `ReadSessionWorkflowFile` | Returns UTF-8 text for one allowlisted **basename** under the same resolved session directory. Rejects empty, non-allowlisted, or path-segment-unsafe **`basename`** values (`..`, `/`, `\`). Uses canonical path checks so resolved file paths cannot sit outside the session root. |
 | `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). For a new-branch-from-base worktree with an empty `selected_integration_base_ref`, the base ref is the project's stored **`main_branch_ref`** when set; a legacy project (no stored default) falls through to worktree setup's live default resolution — so the project default applies to web sessions, not only Telegram. When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. When `session_type == "claude-cli"` or `"cursor-cli"`, the tool-spawn path is bypassed — see [Claude Code CLI sessions](#claude-code-cli-sessions) and [Cursor Agent CLI sessions](#cursor-agent-cli-sessions). When **`create_remote_branch`** is set (claude-cli/cursor-cli, new-branch-from-base only), the daemon **`git push -u origin <branch>`** right after worktree setup (**`tddy_core::worktree::push_new_branch_to_origin`**) and sets **`Changeset.remote_pushed`**; a push failure fails the RPC (no fallback). When **`on_branch_conflict = "reject"`** and a session already owns **`new_branch_name`**, the RPC creates nothing and answers with **`branch_conflict`** instead of a session id — see [Branch-conflict guard](#branch-conflict-guard-on-startsession). When **`pr_stack_base_session_id`** is set, the named session must be able to seed a `pr-stack` orchestrator's stack, checked before anything spawns — see [Stack-seed base session](#stack-seed-base-session-on-startsession). |
-| `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata); `session_id` is validated as a single path segment before resolving `{sessions_base}/sessions/{session_id}/`. For `session_type == "claude-cli"` or `"cursor-cli"` sessions, `ConnectSession` returns empty LiveKit fields (no token RPC) — those are the *terminal* room's coordinates and such a session has none. It still opens the session's own room `session-{id}` first, and bridges its terminal into the common room, because connecting is what creates both ([session-room.md](session-room.md)). |
+| `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata); `session_id` is validated as a single path segment before resolving `{sessions_base}/sessions/{session_id}/`. For `session_type == "claude-cli"` or `"cursor-cli"` sessions, `ConnectSession` returns empty LiveKit fields (no token RPC) — those are the *terminal* room's coordinates and such a session has none. It still opens the session's own room `session-{id}` first, and bridges its terminal into the common room, because connecting is what creates both ([session-room.md](../../tddy-daemon-livekit/docs/session-room.md)). |
 | `StreamSessionTerminalIO` | Bidi stream for raw terminal I/O with a running CLI child (`claude` or Cursor Agent CLI). First client message must carry `session_token` + `session_id` for auth. Subsequent messages carry raw stdin bytes; the server forwards them to the child process stdin and broadcasts stdout/stderr back as `SessionTerminalOutput` messages. Resize: if the input starts with `\x1b]resize;{cols};{rows}\x07`, the daemon updates the terminal size instead of forwarding to stdin. Session must have `session_type == "claude-cli"` or `"cursor-cli"`; returns `FAILED_PRECONDITION` when no active process is found. Accepts an optional `terminal_id` on the first message (empty ⇒ the reserved `"main"` terminal); an unknown id returns `NOT_FOUND`. |
 | `StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions` | Manage the **tools** running in a session — see [Session tools](#session-tools-multiple-terminals-per-session) below. |
 | `ExecuteTool` | Runs one exec-tool (Read, Write, StrReplace, Delete, Grep, Glob, Shell, Await, ReadLints, SemanticSearch) against the session's worktree. After execution, appends a `ToolCallRecord` to the durable JSONL log `~/.tddy/sessions/{session_id}/tool-calls.jsonl` (non-fatal: a write failure is logged as a warning and never blocks the response). Authenticates via `session_token` → OS user, validates `session_id`; optional `daemon_instance_id` for peer routing. |
@@ -359,7 +362,7 @@ A "host" is a daemon instance; the selectable set is the connected `tddy-daemon`
 - **Adding to a host** (`AddProjectToHost`) routes to the target daemon (local, or forwarded over LiveKit) which clones the repo and writes a row reusing the `project_id`. **`project_storage::add_or_get_project`** makes this idempotent (append only when the id is absent; otherwise return the existing row).
 - **Cross-host visibility** relies on `peer_project_entries` fanning out to peers' `ListProjects` with **`local_only = true`** — the flag is what stops a fanned-out call from recursing back into peers. `EligibleDaemonSource::peer_project_entries` is an `async` trait method (`#[async_trait]`), so the `ListProjects` handler awaits the fan-out directly on its runtime — no worker thread is parked and no multi-threaded runtime is required. `aggregate_peer_project_entries` fans out to all peers **concurrently** (`join_all`), so the aggregate is bounded by the slowest responsive peer (or the per-peer `PEER_PROJECT_FANOUT_TIMEOUT`), not the serial sum across peers; a peer that errors or times out contributes no rows.
 - `ProjectData.host_repo_paths` / `project_storage::main_repo_path_for_host` resolve the per-host checkout path for a shared `project_id`.
-- **Each daemon advertises its base clone location** (`repos_base_path`) on the `DaemonAdvertisement` published to the common room (`livekit_peer_discovery.rs`, populated from `config.repos_base_path_or_default()`, parsed back by `parse_daemon_advertisement_json`). The web reads the same `repos_base_path` JSON key into `DaemonHost.reposBasePath`.
+- **Each daemon advertises its base clone location** (`repos_base_path`) on the `DaemonAdvertisement` published to the common room (`tddy_daemon_livekit::livekit_peer_discovery`, populated from `config.repos_base_path_or_default()`, parsed back by `parse_daemon_advertisement_json`). The web reads the same `repos_base_path` JSON key into `DaemonHost.reposBasePath`.
 - **A daemon also publishes its durable `host_id`** as a separate key beside the advertisement's own (`PublishedDaemonMetadata`, `parse_peer_daemon_json` → `PeerDaemon`). It is the id without the per-run startup-timestamp suffix, so anything that must outlive a peer's restart — the host registry above all — keys on it while routing keys on `instance_id`. Metadata carrying no `host_id` falls back to `instance_id`. See [host-registry.md](../../tddy-host-service/docs/host-registry.md).
 
 ### Auto-provisioning on session start
@@ -423,7 +426,7 @@ second mechanism beside `AttachSessionAgent`. Feature doc:
 | `seed_session_agent_roster` | The split/workspace path: per record, refuse an unenforceable withdrawal, claim a clone if the agent is not co-located with the worktree, then `session_agent_rosters.attach`. Any failure unwinds what came before it |
 | `claim_co_located_seed_clones` | The co-located twin: claims the same clones and stamps each record's `codebase_session_id`, but writes no entry — a co-located start persists its roster inline in the `.session.yaml` it writes once the agent has a pid |
 | `SeededCloneGuard` | Holds the clones a co-located start claimed until `keep()` is called after that metadata write. Dropped unkept — on any `?` between the claim and the write — it spawns the same `unwind_agent_clone_claim` releases `unwind_seeded_roster` performs |
-| `SeededAgentClones` | The trait the guard is obtained through, so the free-function `cursor_cli_spawn` path can claim without naming `ConnectionServiceImpl` — the same reason `session_room::SessionRoomHost` is a trait, and the same object in practice |
+| `SeededAgentClones` | The trait the guard is obtained through, so the free-function `cursor_cli_spawn` path can claim without naming `ConnectionServiceImpl` — the same reason `tddy_daemon_livekit::session_room`'s ports (`SessionTerminalBridge`, `WorktreeSource`) are traits, and the same object in practice |
 | `unwind_seeded_roster` | Detach + release, in reverse order, logging and swallowing every failure so the original refusal is what the operator sees |
 
 **Ordering is the point.** A spawn's `--allowedTools`/`--disallowedTools` are fixed at launch, so an
@@ -666,56 +669,6 @@ Because `get_terminal` **rebuilds a `PtyHandle` per RPC**, the offset accumulato
 `subscribe_acked_offset`), not on the handle — so an ACK from the input path reaches an already-open
 output stream. The tddy-coder session participant serves the same contract for its bash terminals.
 
-## LiveKit rooms (Rooms panel)
-
-One server-streaming RPC feeds the web's **LiveKit rooms panel** (see
-[docs/ft/web/livekit-rooms-panel.md](../../../docs/ft/web/livekit-rooms-panel.md)) with every room
-on the LiveKit server and the participants joined to each:
-
-- `StreamLiveKitRooms(session_token)` → `stream LiveKitRoomsEvent`. Authenticated like every other
-  endpoint, and addressed to the daemon participant directly (no `daemon_instance_id` payload — the
-  LiveKit transport already targets `daemon-{instanceId}`).
-
-**Snapshot then changes.** The first message always carries `LiveKitRoomsSnapshot` (every room, with
-its participants); every message after it carries exactly one `LiveKitRoomsChange` —
-`room_added` (the full row, so a consumer never infers a room from a partial event), `room_removed`,
-`participant_joined`, `participant_left`, `participant_metadata_changed`, `participant_state_changed`.
-Metadata and state are diffed independently, so a participant that republishes both on one tick
-produces two events; the feed's contract is one event per delta throughout. A client folds changes
-onto the snapshot and never re-requests the list.
-
-**The daemon owns the cadence.** LiveKit's server API has no change feed, so `pump_rooms`
-(`livekit_rooms_stream.rs`) polls it every 3 s and calls `diff_rosters` against the roster it last
-sent **on that stream**. Per-subscriber baselines are what stop two watchers desynchronizing each
-other — a shared baseline would let watcher B's tick consume a delta watcher A had not been sent. A
-tick with no delta emits nothing, so an idle server yields an idle stream. Ticks are
-`MissedTickBehavior::Skip`: a read slower than the cadence must not queue up the ticks it outlasted,
-since bursting them fires another `1 + rooms` calls exactly when the server API is already slow.
-
-**The loop lives and dies with its subscriber.** `pump_rooms` selects on `tx.closed()` alongside the
-tick. That is load-bearing rather than defensive: an idle stream sends nothing, so a loop that
-learned about departure only from a failed send would never learn at all, and every subscription
-would leave a permanent 3 s poll of the LiveKit server behind it. It works only because the generated
-server-streaming pump propagates the teardown — see
-[tddy-codegen § Server-streaming teardown](../../tddy-codegen/docs/server-streaming.md).
-
-**Errors are never an empty list.** A roster read that fails — or a daemon with no LiveKit
-credentials — terminates the stream with the reason. Reporting zero rooms would read to the panel as
-"the server has no rooms", which is a different fact. A configuration gap is `FAILED_PRECONDITION`; a
-read failure is `INTERNAL`.
-
-Backed by the `RoomRoster` trait (`livekit_rooms_stream.rs`), injected via
-`ConnectionServiceImpl::with_room_roster` so tests drive a scripted roster sequence without a LiveKit
-server, and built for production from `DaemonConfig.livekit` inside `ConnectionServiceImpl::new` —
-not at the `main.rs` call site, so no second construction site can forget it. The implementation is
-[`tddy_livekit::room_roster`](../../tddy-livekit/docs/room-roster.md).
-
-**Cost.** Each subscription runs its own poller, so load is `1 + room count` calls every 3 s **per
-open subscription**, not per daemon. It is bounded by panels actually open (the loop ends with its
-subscriber). One shared poller broadcasting full rosters, with each subscriber diffing locally, would
-preserve the same per-subscriber guarantee at one poller per daemon — the escape hatch if this panel
-becomes commonly-open.
-
 ## Spawn worker
 
 Spawn and **git clone** requests run through a forked single-threaded worker (`tddy_spawn::spawn_worker`) so fork+setuid from a Tokio process avoids deadlocks. JSON protocol: `WorkerRequest` (`spawn` | `clone`) and `WorkerResponse` (`spawn_ok` | `clone_ok` | `error`).
@@ -790,6 +743,8 @@ so every host writes the same format; see [tddy-core architecture § Agent activ
 
 - **Hosts**: the eight methods, the pre-authentication peer routing five of them need, and the registry, probe and prompt machinery behind them: [`tddy-host-service`](../../tddy-host-service/docs/host-service.md).
 - **Worktrees**: the nine methods, the lazy size stream, the code-pane file gate and the git-remote service: [`tddy-worktree-service`](../../tddy-worktree-service/docs/worktree-service.md).
+- **LiveKit**: `StreamLiveKitRooms`, the session room, and common-room peer discovery: [`tddy-daemon-livekit`](../../tddy-daemon-livekit/docs/livekit-service.md).
+- **Identity and credentials**: `auth.AuthService`, `auth.LiveKitTokenService`, `token.TokenService`, `loopback_tunnel.LoopbackTunnelService`, and the `SessionUserResolver` every service here authenticates with: [`tddy-daemon-auth`](../../tddy-daemon-auth/docs/auth-service.md).
 - Feature: [Session directory layout](../../../docs/ft/coder/session-layout.md)
 - Feature: [docs/ft/daemon/project-concept.md](../../../docs/ft/daemon/project-concept.md)
 - Feature: [Cursor Agent CLI session](../../../docs/ft/daemon/cursor-cli-session.md)

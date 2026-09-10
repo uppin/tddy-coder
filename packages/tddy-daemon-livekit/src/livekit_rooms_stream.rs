@@ -6,7 +6,7 @@
 //! timing test against a live server.
 //!
 //! Feature: `docs/ft/web/livekit-rooms-panel.md`
-//! Reference: `packages/tddy-daemon/docs/connection-service.md` § LiveKit rooms
+//! Reference: `packages/tddy-daemon-livekit/docs/livekit-service.md` § `livekit.LiveKitService`
 
 use async_trait::async_trait;
 use std::collections::BTreeMap;

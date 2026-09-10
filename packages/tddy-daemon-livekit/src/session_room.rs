@@ -2,7 +2,7 @@
 //! task that hosts it.
 //!
 //! Product contract: `docs/ft/daemon/session-room.md`; module docs:
-//! `packages/tddy-daemon/docs/session-room.md`.
+//! `packages/tddy-daemon-livekit/docs/session-room.md`.
 //!
 //! Naming and the snapshot→event rules are pure, and snapshotting is `git` against a checkout on
 //! disk, so the room's lifecycle at the bottom of this file is built on a layer that is already
