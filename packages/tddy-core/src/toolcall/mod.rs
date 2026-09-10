@@ -7,12 +7,20 @@
 //! [`crate::presenter::Presenter::poll_tool_calls`]).
 
 pub mod build;
+mod client;
+mod client_wire;
 mod listener;
 pub mod lsp;
 pub mod transition;
 
 pub use build::{
     build_executor, register_build_executor, BuildExecutor, BuildListQuery, BuildOptions,
+};
+pub use client::dispatch_toolcall;
+pub use client_wire::{
+    AskQuestionItem, AskRequest, AskResponse, InvokeActionRelayRequest, InvokeActionRelayResponse,
+    ListActionsRelayRequest, ListActionsRelayResponse, SubmitRequest, SubmitResponse,
+    TransitionRequest,
 };
 pub use listener::{
     set_toolcall_log_dir, start_toolcall_listener,

@@ -1,0 +1,336 @@
+//! Integration tests for JSON Schema validation of structured agent output.
+
+use tddy_workflow_recipes::schema::{
+    format_validation_errors, get_schema, validate_output, SchemaError,
+};
+
+/// plan.schema.json must not contain the `plan_dir_suggestion` property.
+///
+/// Fails until `plan_dir_suggestion` is removed from the discovery object in the schema file.
+#[test]
+fn plan_schema_does_not_include_removed_plan_dir_suggestion_property() {
+    // When
+    let content = get_schema("plan").expect("plan schema should exist");
+
+    // Then
+    assert!(
+        !content.contains("plan_dir_suggestion"),
+        "plan.schema.json must not contain 'plan_dir_suggestion' property after R2 removal"
+    );
+}
+
+const VALID_GOALS: &[&str] = &[
+    "plan",
+    "acceptance-tests",
+    "red",
+    "green",
+    "post-green-review",
+    "branch-review",
+    "evaluate-changes",
+    "validate",
+    "refactor",
+    "update-docs",
+    "demo",
+];
+
+#[test]
+fn schema_files_are_embedded_and_retrievable() {
+    // When / Then
+    for goal in VALID_GOALS {
+        let content =
+            get_schema(goal).unwrap_or_else(|| panic!("schema for {} should exist", goal));
+        assert!(
+            !content.is_empty(),
+            "schema for {} should not be empty",
+            goal
+        );
+        assert!(
+            content.contains("$schema"),
+            "schema for {} should contain $schema",
+            goal
+        );
+    }
+}
+
+#[test]
+fn valid_plan_passes_schema_validation() {
+    // Given
+    let json = include_str!("fixtures/valid/plan.json");
+
+    // When / Then
+    assert!(validate_output("plan", json).is_ok());
+}
+
+#[test]
+fn valid_acceptance_tests_passes_schema_validation() {
+    // Given
+    let json = include_str!("fixtures/valid/acceptance-tests.json");
+
+    // When / Then
+    assert!(validate_output("acceptance-tests", json).is_ok());
+}
+
+#[test]
+fn valid_red_passes_schema_validation() {
+    // Given
+    let json = include_str!("fixtures/valid/red.json");
+
+    // When / Then
+    assert!(validate_output("red", json).is_ok());
+}
+
+#[test]
+fn valid_green_passes_schema_validation() {
+    // Given
+    let json = include_str!("fixtures/valid/green.json");
+
+    // When / Then
+    assert!(validate_output("green", json).is_ok());
+}
+
+#[test]
+fn valid_evaluate_passes_schema_validation() {
+    // Given
+    let json = include_str!("fixtures/valid/evaluate.json");
+
+    // When / Then
+    assert!(validate_output("evaluate-changes", json).is_ok());
+}
+
+#[test]
+fn valid_validate_subagents_passes_schema_validation() {
+    // Given
+    let json = include_str!("fixtures/valid/validate-subagents.json");
+
+    // When / Then
+    assert!(validate_output("validate", json).is_ok());
+}
+
+#[test]
+fn valid_refactor_passes_schema_validation() {
+    // Given
+    let json = r#"{"goal":"refactor","summary":"Completed 3 tasks.","tasks_completed":3,"tests_passing":true}"#;
+
+    // When / Then
+    assert!(validate_output("refactor", json).is_ok());
+}
+
+#[test]
+fn valid_update_docs_passes_schema_validation() {
+    // Given
+    let json = r#"{"goal":"update-docs","summary":"Updated 3 docs.","docs_updated":3}"#;
+
+    // When / Then
+    assert!(validate_output("update-docs", json).is_ok());
+}
+
+#[test]
+fn valid_demo_passes_schema_validation() {
+    // Given
+    let json = r#"{"goal":"demo","summary":"Demo completed.","demo_type":"cli","steps_completed":2,"verification":"All steps passed."}"#;
+
+    // When / Then
+    assert!(validate_output("demo", json).is_ok());
+}
+
+#[test]
+fn valid_post_green_review_passes_schema_validation() {
+    // Given
+    let json = r#"{"goal":"post-green-review","summary":"s","risk_level":"low","validity_assessment":"ok","tests_report_written":true,"prod_ready_report_written":false,"clean_code_report_written":true}"#;
+
+    // When / Then
+    assert!(validate_output("post-green-review", json).is_ok());
+}
+
+#[test]
+fn invalid_update_docs_wrong_goal_fails() {
+    // Given
+    let json = r#"{"goal":"refactor","summary":"Updated docs.","docs_updated":2}"#;
+
+    // When
+    let err = validate_output("update-docs", json).unwrap_err();
+
+    // Then
+    assert!(!err.is_empty());
+}
+
+#[test]
+fn invalid_plan_missing_prd_fails_with_descriptive_errors() {
+    // Given
+    let json = include_str!("fixtures/invalid/plan-missing-prd.json");
+
+    // When
+    let err = validate_output("plan", json).unwrap_err();
+
+    // Then
+    assert!(!err.is_empty());
+    assert!(
+        err.iter()
+            .any(|e| e.message.contains("prd") || e.instance_path.contains("prd")),
+        "errors should mention prd: {:?}",
+        err
+    );
+}
+
+#[test]
+fn output_with_red_phase_markers_passes_schema_validation() {
+    // Given
+    let json = r#"{"goal":"red","summary":"Created skeletons and failing tests with logging markers.","tests":[{"name":"test_auth","file":"src/auth.rs","line":10,"status":"failing"}],"skeletons":[{"name":"AuthService","file":"src/auth.rs","line":5,"kind":"struct"}],"markers":[{"marker_id":"M001","test_name":"test_auth","scope":"auth_service::validate","data":{"user":"test@example.com"}}],"marker_results":[{"marker_id":"M001","test_name":"test_auth","scope":"auth_service::validate","collected":true,"investigation":null}]}"#;
+
+    // When / Then
+    assert!(validate_output("red", json).is_ok());
+}
+
+#[test]
+fn invalid_red_wrong_test_type_fails_with_field_path() {
+    // Given
+    let json = include_str!("fixtures/invalid/red-wrong-test-type.json");
+
+    // When
+    let err = validate_output("red", json).unwrap_err();
+
+    // Then
+    assert!(!err.is_empty());
+    assert!(
+        err.iter()
+            .any(|e| e.instance_path.contains("tests") || e.message.contains("integer")),
+        "errors should mention tests or type: {:?}",
+        err
+    );
+}
+
+#[test]
+fn invalid_green_missing_summary_fails() {
+    // Given
+    let json = include_str!("fixtures/invalid/green-missing-summary.json");
+
+    // When
+    let err = validate_output("green", json).unwrap_err();
+
+    // Then
+    assert!(!err.is_empty());
+}
+
+#[test]
+fn invalid_evaluate_missing_goal_fails() {
+    // Given
+    let json = include_str!("fixtures/invalid/evaluate-missing-goal.json");
+
+    // When
+    let err = validate_output("evaluate-changes", json).unwrap_err();
+
+    // Then
+    assert!(!err.is_empty());
+}
+
+/// Evaluate output should not require changeset sync counters when the workflow only needs a
+/// successful submit and report generation; those fields are not used for state transitions.
+#[test]
+fn evaluate_schema_accepts_partial_changeset_sync_status_only() {
+    // Given
+    let json =
+        r#"{"goal":"evaluate-changes","summary":"Done.","changeset_sync":{"status":"skipped"}}"#;
+
+    // When / Then
+    assert!(
+        validate_output("evaluate-changes", json).is_ok(),
+        "evaluate-changes schema should accept changeset_sync with only status; workflow does not require items_updated/items_added for hooks"
+    );
+}
+
+#[test]
+fn invalid_evaluate_build_results_use_name_instead_of_package_fails() {
+    // Given
+    let json = r#"{"goal":"evaluate-changes","summary":"x","risk_level":"low","build_results":[{"name":"tddy-core","status":"pass"}],"issues":[],"changed_files":[],"affected_tests":[],"validity_assessment":"x"}"#;
+
+    // When
+    let err = validate_output("evaluate-changes", json).unwrap_err();
+
+    // Then
+    assert!(!err.is_empty());
+    assert!(
+        err.iter().any(|e| {
+            e.instance_path.contains("build_results")
+                && (e.message.contains("package") || e.schema_path.contains("package"))
+        }),
+        "errors should reference required package on build_results items: {:?}",
+        err
+    );
+}
+
+#[test]
+fn invalid_acceptance_tests_missing_summary_fails() {
+    // Given
+    let json = include_str!("fixtures/invalid/acceptance-tests-empty-summary.json");
+
+    // When
+    let err = validate_output("acceptance-tests", json).unwrap_err();
+
+    // Then
+    assert!(!err.is_empty());
+}
+
+#[test]
+fn invalid_validate_subagents_wrong_goal_fails() {
+    // Given
+    let json = include_str!("fixtures/invalid/validate-subagents-wrong-goal.json");
+
+    // When
+    let err = validate_output("validate", json).unwrap_err();
+
+    // Then
+    assert!(!err.is_empty());
+}
+
+#[test]
+fn goal_schema_includes_source_file_field() {
+    // When
+    const RED_SCHEMA: &str =
+        include_str!("../../tddy-workflow-recipes/generated/tdd/red.schema.json");
+
+    // Then
+    assert!(
+        RED_SCHEMA.contains("\"source_file\""),
+        "red.schema.json markers items must include source_file for production-only validation"
+    );
+}
+
+/// Acceptance: `analyze` goal schema is embedded in tddy-tools (see `goals.json` / generated registry).
+#[test]
+fn analyze_goal_schema_embedded() {
+    // When
+    let content = get_schema("analyze").expect("analyze schema must be registered");
+
+    // Then
+    assert!(!content.is_empty(), "analyze schema must be non-empty JSON");
+    assert!(
+        content.contains("$schema") || content.contains("branch_suggestion"),
+        "analyze schema should be valid embedded JSON Schema"
+    );
+}
+
+#[test]
+fn format_validation_errors_produces_readable_output() {
+    // Given
+    let errors = vec![
+        SchemaError {
+            instance_path: "/summary".to_string(),
+            schema_path: "/properties/summary".to_string(),
+            message: "\"summary\" is a required property".to_string(),
+        },
+        SchemaError {
+            instance_path: "/tests/0/line".to_string(),
+            schema_path: "/properties/tests/items/properties/line/type".to_string(),
+            message: "\"ten\" is not of type \"integer\"".to_string(),
+        },
+    ];
+
+    // When
+    let formatted = format_validation_errors(&errors);
+
+    // Then
+    assert!(formatted.contains("/summary"));
+    assert!(formatted.contains("required property"));
+    assert!(formatted.contains("/tests/0/line"));
+    assert!(formatted.contains("integer"));
+}

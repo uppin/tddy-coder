@@ -25,11 +25,13 @@ pub mod session_activity;
 pub mod session_agent;
 pub mod session_catalog;
 pub mod session_chain;
+pub mod session_context;
 pub mod session_label;
 pub mod session_lifecycle;
 pub mod session_metadata;
 pub mod session_participant_metadata;
 pub mod source_path;
+pub mod spawn_env;
 pub mod stdio_safety;
 pub mod stream;
 #[cfg(test)]

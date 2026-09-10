@@ -21,6 +21,8 @@ pub mod proto {
 
 pub mod bridge;
 pub mod local_pty_relay;
+mod local_terminal;
+pub mod pty_relay;
 pub mod session;
 
 pub use bridge::{

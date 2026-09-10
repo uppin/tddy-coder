@@ -32,7 +32,7 @@ Workflow **behavior** (graphs, hooks, parsers) lives in **`tddy-workflow-recipes
 
 **`tddy-tools set-session-context`** merges a JSON object into the workflow session file (`.workflow/<id>.session.json`). Environment: **`TDDY_SESSION_DIR`** (session root), **`TDDY_WORKFLOW_SESSION_ID`** (session id). The merge aligns with the workflow engine: values feed **`Context::merge_json_object_sync`** so **`goal_conditions`** on transitions evaluate against the same key/value map.
 
-This command is **not** listed in **`goals.json`**; it is a session utility, not a JSON-schema-backed planning goal. See **`packages/tddy-tools/docs/json-schema.md`** for the CLI table.
+This command is **not** listed in **`goals.json`**; it is a session utility, not a JSON-schema-backed planning goal. See **`packages/tddy-workflow-recipes/docs/json-schema.md`** for the CLI table.
 
 ## Changeset workflow (`persist-changeset-workflow`)
 
@@ -65,5 +65,5 @@ Product behavior for end-of-session prompts, presenter wiring, GitHub REST execu
 - [GitHub pull request tools (tddy-tools MCP)](github-pr-tools-mcp.md) — optional **`github_pr_tools_metadata`** on **`changeset-workflow`**, MCP tool names, environment gating  
 - [Post-workflow GitHub PR and worktree elicitation](post-workflow-github-pr-elicitation.md) — **`changeset.workflow`** post-workflow fields, **`merge_persisted_workflow_into_context`**, **`post_workflow`** policy helpers  
 - `docs/dev/1-WIP/workflow-schema-pipeline.md` — build pipeline and editing workflow  
-- `packages/tddy-tools/docs/json-schema.md` — CLI and library technical details  
+- `packages/tddy-workflow-recipes/docs/json-schema.md` — the schema library, and CLI technical details  
 - `packages/tddy-workflow-recipes/docs/workflow-schemas.md` — crate-owned schema and proto layout  

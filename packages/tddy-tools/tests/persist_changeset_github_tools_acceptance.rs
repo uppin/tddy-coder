@@ -1,6 +1,6 @@
 //! PRD: `changeset-workflow` JSON Schema still accepts representative payloads after GitHub tools metadata lands.
 
-use tddy_tools::schema::validate_output;
+use tddy_workflow_recipes::schema::validate_output;
 
 /// Representative persist payload including optional GitHub PR tool routing metadata (PRD §6).
 const CHANGESET_WORKFLOW_WITH_GITHUB_TOOLS: &str = r#"{

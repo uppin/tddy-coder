@@ -13,67 +13,13 @@ use tddy_pty::{PtyRegistry, PtyRuntime, PtySpawnSpec};
 use tddy_task::TaskRegistry;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-/// Default terminal size when the local terminal size cannot be read.
-const DEFAULT_ROWS: u16 = 24;
-const DEFAULT_COLS: u16 = 220;
-
-/// Read the local terminal size via `TIOCGWINSZ`, falling back to a default.
-fn local_terminal_size() -> (u16, u16) {
-    #[cfg(unix)]
-    unsafe {
-        let mut ws: libc::winsize = std::mem::zeroed();
-        if libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) == 0
-            && ws.ws_row > 0
-            && ws.ws_col > 0
-        {
-            return (ws.ws_row, ws.ws_col);
-        }
-    }
-    (DEFAULT_ROWS, DEFAULT_COLS)
-}
-
-/// Raw-mode guard: puts the local stdin into raw mode for the lifetime of the returned value so the
-/// spawned command receives keystrokes verbatim. Restores the saved termios on drop.
-struct RawMode {
-    #[cfg(unix)]
-    saved: libc::termios,
-}
-
-impl RawMode {
-    fn enable() -> Self {
-        #[cfg(unix)]
-        unsafe {
-            let mut saved: libc::termios = std::mem::zeroed();
-            if libc::tcgetattr(libc::STDIN_FILENO, &mut saved) == 0 {
-                let mut raw = saved;
-                libc::cfmakeraw(&mut raw);
-                libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &raw);
-                return Self { saved };
-            }
-        }
-        Self {
-            #[cfg(unix)]
-            saved: unsafe { std::mem::zeroed() },
-        }
-    }
-}
-
-impl Drop for RawMode {
-    fn drop(&mut self) {
-        #[cfg(unix)]
-        unsafe {
-            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &self.saved);
-        }
-    }
-}
-
 /// Spawn `argv` in a PTY inside `cwd` (with extra `env`) and relay its I/O to the local
 /// stdin/stdout until the child exits. Resizes the PTY on local `SIGWINCH`.
 pub async fn run(argv: Vec<String>, cwd: PathBuf, env: Vec<(String, String)>) -> Result<()> {
     if argv.is_empty() {
         anyhow::bail!("local_pty_relay: empty argv");
     }
-    let (rows, cols) = local_terminal_size();
+    let (rows, cols) = crate::local_terminal::terminal_size();
 
     let registry = TaskRegistry::new();
     let pty_registry = PtyRegistry::new();
@@ -104,7 +50,7 @@ pub async fn run(argv: Vec<String>, cwd: PathBuf, env: Vec<(String, String)>) ->
         .ok_or_else(|| anyhow::anyhow!("PTY channel has no stdin"))?;
     let mut stdout_rx = channel.subscribe();
 
-    let _raw = RawMode::enable();
+    let _raw = crate::local_terminal::RawMode::enable();
 
     // Output: PTY → local stdout.
     let stdout_pump = tokio::spawn({
@@ -164,7 +110,7 @@ pub async fn run(argv: Vec<String>, cwd: PathBuf, env: Vec<(String, String)>) ->
                 if sig.recv().await.is_none() {
                     break;
                 }
-                let (r, c) = local_terminal_size();
+                let (r, c) = crate::local_terminal::terminal_size();
                 pty_registry_for_resize.resize(&task_id, r, c).await;
             }
         }

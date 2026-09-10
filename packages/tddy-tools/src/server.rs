@@ -1,8 +1,8 @@
 //! Permission server implementing the approval_prompt MCP tool and GitHub PR REST tools.
 
-use crate::github_pr::{
-    create_pull_request_via_rest_api, update_pull_request_via_rest_api, CreatePullRequestParams,
-    UpdatePullRequestParams,
+use crate::mcp_primitives::{
+    cancel_remote_conversation, open_remote_agent_session, schema_object, subagent_config_from_env,
+    subagent_route, RemoteToolDef,
 };
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -11,13 +11,20 @@ use rmcp::{
 };
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::OnceLock;
-use tddy_discovery::agent_def::SpecializedAgentDef;
-use tddy_discovery::subagent::{
-    resolve_replaced_tools_for_defs, CodebaseAccess, PromptOutcome, SubagentConfig,
-    SubagentRegistry, SubagentSession,
+use tddy_discovery::roster::seed_subagents_or_report;
+use tddy_discovery::subagent::{resolve_replaced_tools_for_defs, SubagentRegistry};
+// The conversation runtime the six `subagent_*` tools drive: the table of open conversations, the
+// turns that outlived the calls that started them, and the accounting of both. It moved to
+// `tddy-discovery` with the roster at `#unbundle` node 5 — it is logic over that crate's own
+// session types — while the tool bodies, their schemas and the router stayed here.
+use tddy_discovery::subagent_runtime::{
+    conversation_records, report_local_conversation_state, run_turn, subagent_error_json,
+    subagent_sessions, wait_for_turn, write_accounting_file, DeferredTurn, SubagentConversation,
+};
+use tddy_workflow_recipes::github_pr::{
+    create_pull_request_via_rest_api, update_pull_request_via_rest_api, CreatePullRequestParams,
+    UpdatePullRequestParams,
 };
 use tddy_workflow_recipes::orchestrate_pr_stack::{
     github::{PrSearchHit, PrState},
@@ -310,13 +317,18 @@ impl PermissionServer {
                 .collect();
             tool_router.merge(dynamic_tool_router(&catalog));
             // Session-action tools (request_action/list_actions/invoke_action). All three are host
-            // round-trips over this very transport — `EstablishAction`, `ListActions`,
-            // `InvokeAction` — since the session directory the actions live in exists only on the
-            // host. So having that surface to reach is the whole of what they need, and the whole
-            // of what gates them. Nothing here reads a def's `replaces`: an action surface is not
-            // granted by an agent happening to name a particular tool
+            // round-trips — `EstablishAction`, `ListActions`, `InvokeAction` — since the session
+            // directory the actions live in exists only on the host. A reachable transport is
+            // therefore necessary but *not* sufficient: it says a host is there, not that the host
+            // routes these three to anything. `tddy-daemon`'s handler does not
+            // (`tddy_tool_engine::execute_tool_with_env` has no arm for them), so the host says so
+            // itself through `TDDY_SESSION_ACTION_TOOLS` — the same shape as the `TDDY_LSP_TOOLS`
+            // gate below. Nothing here reads a def's `replaces`: an action surface is not granted
+            // by an agent happening to name a particular tool
             // (docs/ft/daemon/session-agent-roster.md § Tool replacement, without behaviour).
-            tool_router.merge(crate::action_tools::action_tool_router());
+            if tddy_core::session_actions::session_action_tools_enabled() {
+                tool_router.merge(crate::action_tools::action_tool_router());
+            }
         }
         // Discovery-subagent tools (ACP-shaped: subagent_new_session/prompt/cancel) — registered
         // unconditionally, and *advertised* only while the roster has someone to address (see
@@ -327,8 +339,8 @@ impl PermissionServer {
         // LSP tools: the single language-agnostic `Lsp*` set is exposed only when the owner
         // signalled (via `TDDY_LSP_TOOLS`) that a language server is available for the repo.
         // They forward over the same session-tool transport as the exec tools.
-        if crate::lsp_tools::lsp_tools_enabled() {
-            tool_router.merge(dynamic_tool_router(&crate::lsp_tools::lsp_tool_catalog()));
+        if tddy_lsp_executor::lsp_tools::lsp_tools_enabled() {
+            tool_router.merge(dynamic_tool_router(&lsp_tool_defs()));
         }
         Self {
             tool_router,
@@ -898,7 +910,7 @@ impl PermissionServer {
             .to_string();
         };
         let request = serde_json::json!({ "type": "spawn-child", "node_id": p.node_id });
-        match crate::toolcall_client::dispatch_toolcall(&socket, request).await {
+        match tddy_core::toolcall::dispatch_toolcall(&socket, request).await {
             Ok(resp) => resp.to_string(),
             Err(e) => serde_json::json!({ "error": e }).to_string(),
         }
@@ -971,7 +983,7 @@ impl PermissionServer {
         };
         let request =
             spawn_conversation_request_json(&p.prompt, p.branch.as_deref(), p.base_ref.as_deref());
-        match crate::toolcall_client::dispatch_toolcall(&socket, request).await {
+        match tddy_core::toolcall::dispatch_toolcall(&socket, request).await {
             Ok(resp) => resp.to_string(),
             Err(e) => serde_json::json!({ "error": e }).to_string(),
         }
@@ -1490,13 +1502,6 @@ impl rmcp::ServerHandler for PermissionServer {
 
 // --- Remote-codebase mode: dynamic tool catalog helpers ---
 
-/// A tool definition fetched from the relay daemon (or configured statically for testing).
-pub struct RemoteToolDef {
-    pub name: String,
-    pub description: String,
-    pub input_schema_json: String,
-}
-
 /// Returns the names of tools that are always statically registered and never forwarded to a relay.
 pub fn static_tool_names() -> Vec<&'static str> {
     vec!["approval_prompt", "submit"]
@@ -1545,14 +1550,6 @@ pub async fn build_dynamic_tool_list(
     Ok(tools)
 }
 
-/// Returns true if `tool_name` is a native mutation tool that must be hard-denied
-/// when the agent is running in remote mode (TDDY_REMOTE_SESSION_ID is set).
-///
-/// In remote mode the working dir is read-only; native write tools would corrupt it.
-pub fn is_native_tool_denied_in_remote_mode(tool_name: &str) -> bool {
-    matches!(tool_name, "Write" | "Edit" | "NotebookEdit")
-}
-
 /// Dispatch a call to a dynamic (non-static) tool via the session daemon.
 ///
 /// Uses [`crate::session_tool_client::dispatch_session_tool`] — sandbox IPC when
@@ -1572,68 +1569,44 @@ pub async fn dispatch_dynamic_tool(tool_name: &str, args: serde_json::Value) -> 
     crate::session_tool_client::dispatch_session_tool(tool_name, args).await
 }
 
-/// Static catalog of the "cursor" exec tools forwarded to Claude Code when a session-tool
-/// transport (sandbox IPC or daemon HTTP) is configured. Names/descriptions/schemas mirror
-/// `tddy_daemon::tool_catalog::tool_catalog()` verbatim (adapted from `ToolDef` to
-/// `RemoteToolDef`) — the two must never drift; `exec_tool_catalog_names_match_workspace_exec_tool_names`
-/// and `tddy_daemon`'s own `workspace_exec_tool_names_match_tool_catalog` test both guard this.
+/// The exec tools forwarded to Claude Code when a session-tool transport (sandbox IPC or daemon
+/// HTTP) is configured, in the MCP shape.
 ///
-/// TODO: both transport variants currently use this same static catalog rather than live-fetching
-/// the catalog from the daemon over the transport (there is no such message type over
-/// SandboxIpc, and it was deliberately scoped out for DaemonHttp too for now).
+/// There is one catalog and it is [`tddy_tool_engine::tool_catalog`] — the crate that executes
+/// these tools also defines them. This function is the single place their `ToolDef` is mapped to
+/// the `RemoteToolDef` the MCP router advertises, exactly as [`lsp_tool_defs`] maps
+/// `tddy_lsp_executor`'s. Until `#unbundle` node 5 the ten entries were hand-copied here and kept
+/// in step by a guard test on each side; the copy is gone, so the names cannot drift.
+///
+/// TODO: both transport variants still advertise this static catalog rather than live-fetching the
+/// remote host's over the transport — there is no such message type over SandboxIpc, and it was
+/// deliberately scoped out for DaemonHttp too for now.
 pub fn exec_tool_catalog() -> Vec<RemoteToolDef> {
-    vec![
-        RemoteToolDef {
-            name: "Read".to_string(),
-            description: "Read file contents from the workspace.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "Write".to_string(),
-            description: "Write file contents to the workspace.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["path","contents"],"properties":{"path":{"type":"string"},"contents":{"type":"string"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "StrReplace".to_string(),
-            description: "Replace a string in a file.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["path","old_string","new_string"],"properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "Delete".to_string(),
-            description: "Delete a file from the workspace.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["path"],"properties":{"path":{"type":"string"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "Grep".to_string(),
-            description: "Search for a pattern in files.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"},"path":{"type":"string"},"include":{"type":"string"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "Glob".to_string(),
-            description: "Find files matching a glob pattern.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "Shell".to_string(),
-            description: "Run a shell command in the workspace.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["command"],"properties":{"command":{"type":"string"},"block_until_ms":{"type":"integer"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "Await".to_string(),
-            description: "Wait for a background shell job to complete.".to_string(),
-            input_schema_json: r#"{"type":"object","properties":{"job_id":{"type":"string"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer"},"block_until_ms":{"type":"integer"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "ReadLints".to_string(),
-            description: "Read linting diagnostics for the workspace.".to_string(),
-            input_schema_json: r#"{"type":"object","properties":{"path":{"type":"string"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "SemanticSearch".to_string(),
-            description: "Search the codebase semantically.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["query"],"properties":{"query":{"type":"string"},"path":{"type":"string"}}}"#.to_string(),
-        },
-    ]
+    tddy_tool_engine::tool_catalog()
+        .into_iter()
+        .map(|tool| RemoteToolDef {
+            name: tool.name,
+            description: tool.description,
+            input_schema_json: tool.input_schema_json,
+        })
+        .collect()
+}
+
+/// The five language-agnostic LSP operations as MCP tool defs.
+///
+/// `tddy-lsp-executor` owns the operations, their descriptions and their argument schemas — it is
+/// what answers the calls. The MCP shape they are advertised in belongs here, which is the same
+/// split `mcp_primitives` documents: what leaves this crate is a tool's implementation, not the
+/// shape of an MCP tool.
+fn lsp_tool_defs() -> Vec<RemoteToolDef> {
+    tddy_lsp_executor::lsp_tools::lsp_tool_catalog()
+        .into_iter()
+        .map(|tool| RemoteToolDef {
+            name: tool.name.to_string(),
+            description: tool.description.to_string(),
+            input_schema_json: tool.input_schema_json.to_string(),
+        })
+        .collect()
 }
 
 /// Build a live `ToolRouter<PermissionServer>` from an arbitrary catalog of [`RemoteToolDef`]s.
@@ -1696,167 +1669,6 @@ fn subagent_tool_names() -> Vec<String> {
         .collect()
 }
 
-/// Open a conversation with `entry` on the daemon that runs it, for an agent this process holds no
-/// def for.
-///
-/// A roster entry carries no endpoint or credential — deliberately — so an agent owned by another
-/// daemon, and a local one attached after spawn, are run by asking the facilitating daemon to run
-/// them (docs/ft/daemon/session-agent-roster.md § Invoking an agent). The refusal names the agent
-/// and the daemon its conversations are routed by, so an operator reads which host to go and look
-/// at rather than "this session cannot reach it".
-async fn open_remote_agent_session(
-    entry: &tddy_service::proto::connection::SessionAgentEntry,
-    conversation_id: &str,
-) -> Result<OpenedAgent, String> {
-    let refused = |e: String| {
-        format!(
-            "agent '{}' is routed by daemon '{}': {e}",
-            entry.agent_id, entry.daemon_instance_id
-        )
-    };
-    let link = std::sync::Arc::new(
-        crate::session_agents::AgentConversationLink::connect()
-            .await
-            .map_err(refused)?,
-    );
-    let opened = link
-        .open(&entry.agent_id, conversation_id)
-        .await
-        .map_err(refused)?;
-    Ok(OpenedAgent {
-        agent_id: entry.agent_id.clone(),
-        session: Box::new(link.session(opened.clone(), &entry.model)),
-        remote: Some(link.handle(opened)),
-    })
-}
-
-/// An agent opened for one turn loop: what to prompt, and — when the loop runs on another daemon —
-/// what to close when the conversation ends.
-pub(crate) struct OpenedAgent {
-    pub(crate) agent_id: String,
-    pub(crate) session: Box<dyn SubagentSession>,
-    /// `None` for an agent this process runs itself: there is nothing on another host to close.
-    pub(crate) remote: Option<crate::session_agents::RemoteConversationHandle>,
-}
-
-/// Open a turn loop with the roster agent `agent_id`, for a tool that runs one bounded exchange of
-/// its own instead of handing a conversation to the main agent (`request_action`).
-///
-/// Resolved against the live roster exactly as [`subagent_new_session_tool`] resolves it — same
-/// ids, same refusals, no default for a call that names none — so which agents are addressable does
-/// not depend on which tool is asking, and no tool confers a role on an agent by inspecting what it
-/// `replaces`.
-///
-/// No conversation is registered with the roster: the exchange opens and ends inside the call, so
-/// there is nothing a later `subagent_cancel` or a detach could address.
-pub(crate) async fn open_roster_agent_session(agent_id: &str) -> Result<OpenedAgent, String> {
-    let roster = crate::session_agents::session_agent_roster();
-    let entry = roster.resolve(Some(agent_id)).map_err(|e| e.to_string())?;
-    let Some(def) = roster.local_def_for(&entry) else {
-        // The daemon mints the conversation id here: nothing outside this call can name the
-        // exchange, so there is nothing a caller-chosen id would let it cancel. The caller closes
-        // it through the handle instead.
-        return open_remote_agent_session(&entry, "").await;
-    };
-    let name = def.name.clone();
-    let session = SubagentRegistry::from_defs(vec![def])
-        .create(&name, subagent_config_from_env())
-        .map_err(|e| format!("agent '{}': {e}", entry.agent_id))?;
-    Ok(OpenedAgent {
-        agent_id: entry.agent_id,
-        session,
-        remote: None,
-    })
-}
-
-pub(crate) fn env_non_empty(key: &str) -> Option<String> {
-    std::env::var(key).ok().filter(|v| !v.trim().is_empty())
-}
-
-/// One open subagent conversation plus the accounting metadata that lives alongside the session
-/// (its agent name, model, turn count and cumulative token usage).
-///
-/// The accounting is **copied out of the session** — at open, and again at the end of every turn —
-/// rather than read back through it. A turn runs in its own task holding [`Self::session`], so a
-/// record read off the session would either block behind the turn or report a partially-billed one;
-/// the fields here report the conversation as of its last completed turn, which is the truthful
-/// answer while another is in flight (docs/ft/coder/managed-codebase-subagents.md criterion 32).
-struct SubagentConversation {
-    agent: String,
-    turns: u32,
-    /// The model the session talks to, as it named itself at open.
-    model: String,
-    /// Token usage across the turns that have **ended**. A turn in flight has spent nothing this
-    /// session can attribute to it yet.
-    usage: tddy_discovery::openai::TokenUsage,
-    /// The turn loop, behind the lock that serializes turns on *this* conversation and nothing
-    /// else. A conversation's history is one sequence, so two turns must not run against it at
-    /// once; `tokio::sync::Mutex` is fair, so waiting for it is the queue (criterion 30).
-    session: std::sync::Arc<tokio::sync::Mutex<Box<dyn SubagentSession>>>,
-    /// The daemon-side conversation this one is a handle to, when the turn loop runs elsewhere.
-    /// Ending it here has to close it there too: the owning daemon otherwise keeps the loop, and
-    /// its own registration of it, for the life of its process.
-    remote: Option<crate::session_agents::RemoteConversationHandle>,
-}
-
-impl SubagentConversation {
-    /// Adopt a freshly opened session, taking its accounting identity from the session itself.
-    fn opened(
-        agent: String,
-        session: Box<dyn SubagentSession>,
-        remote: Option<crate::session_agents::RemoteConversationHandle>,
-    ) -> Self {
-        Self {
-            agent,
-            turns: 0,
-            model: session.model().to_string(),
-            usage: session.cumulative_usage(),
-            session: std::sync::Arc::new(tokio::sync::Mutex::new(session)),
-            remote,
-        }
-    }
-}
-
-/// Every conversation this process has run: the ones still open, and the accounting of the ones
-/// that ended.
-#[derive(Default)]
-struct SubagentConversations {
-    open: HashMap<String, SubagentConversation>,
-    /// Conversations that ended — cancelled by the main agent, or whose agent was detached
-    /// underneath them.
-    ///
-    /// Their tokens were spent, so they stay enumerable: the accounting file is rewritten wholesale
-    /// from this table, and dropping a conversation before the rewrite erases its totals from the
-    /// host's view of what the session cost.
-    retired: Vec<tddy_core::token_accounting::ConversationRecord>,
-    /// Turns that outlived the call that started them, keyed by the `responseId` their caller was
-    /// given. They live in the same table as the conversations they belong to, so one lock covers
-    /// both a turn's accounting and the publication of its result.
-    pending: PendingTurns,
-}
-
-impl SubagentConversations {
-    /// End `conversation_id`, keeping its accounting. Returns whether it was open.
-    fn retire(&mut self, conversation_id: &str) -> bool {
-        let Some(conversation) = self.open.remove(conversation_id) else {
-            return false;
-        };
-        self.retired
-            .push(conversation_record(conversation_id, &conversation));
-        true
-    }
-}
-
-type SubagentSessionTable = tokio::sync::Mutex<SubagentConversations>;
-
-/// Process-wide session table — `PermissionServer` merges the subagent router at construction
-/// time, but the conversation must survive across separate `tools/call` invocations, so the table
-/// lives outside any single `PermissionServer` instance.
-fn subagent_sessions() -> &'static SubagentSessionTable {
-    static SESSIONS: OnceLock<SubagentSessionTable> = OnceLock::new();
-    SESSIONS.get_or_init(|| tokio::sync::Mutex::new(SubagentConversations::default()))
-}
-
 /// How long a conversation tool blocks before it hands the caller a receipt rather than an answer:
 /// the default for `subagent_prompt`'s `graceMs` and for `subagent_await`'s `timeoutMs`.
 ///
@@ -1864,131 +1676,6 @@ fn subagent_sessions() -> &'static SubagentSessionTable {
 /// which is a different question from how long the subagent may take
 /// (docs/ft/coder/managed-codebase-subagents.md § Long turns).
 const SUBAGENT_PROMPT_GRACE: std::time::Duration = std::time::Duration::from_secs(25);
-
-/// Where a turn that outlived the call that started it has got to.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum TurnState {
-    Running,
-    /// The turn ended. Carries its already-serialized result — an outcome or a failure alike, since
-    /// both are answers and only a turn still running is not.
-    Done(String),
-}
-
-/// One turn that outlived its call: which conversation it belongs to, how its result reaches
-/// everyone waiting, and how to stop it if the conversation is closed underneath it.
-///
-/// The **table** holds the `watch::Sender`, not the running task. A turn therefore publishes its
-/// result by taking the table lock at its end — the lock it already needs to update the
-/// conversation's accounting — and any number of awaiters hold a `Receiver` without holding the
-/// table.
-struct PendingTurn {
-    conversation_id: String,
-    publish: tokio::sync::watch::Sender<TurnState>,
-    abort: tokio::task::AbortHandle,
-}
-
-/// Every turn this process deferred, keyed by the `responseId` its caller was given.
-///
-/// Entries are not consumed by collecting them: a tool result lost between this process and the
-/// main agent would otherwise make a computed answer permanently unreachable
-/// (docs/ft/coder/managed-codebase-subagents.md criterion 29).
-#[derive(Default)]
-struct PendingTurns {
-    turns: HashMap<String, PendingTurn>,
-}
-
-impl PendingTurns {
-    /// Register a turn about to run on `conversation_id` under the id its caller will be given.
-    fn start(&mut self, response_id: &str, conversation_id: &str, abort: tokio::task::AbortHandle) {
-        let (publish, _) = tokio::sync::watch::channel(TurnState::Running);
-        self.turns.insert(
-            response_id.to_string(),
-            PendingTurn {
-                conversation_id: conversation_id.to_string(),
-                publish,
-                abort,
-            },
-        );
-    }
-
-    /// A receiver for `response_id`, for a caller that wants to wait on it. `None` means no turn
-    /// was ever registered under that id — which a tool reports as an error, never as "still
-    /// running".
-    fn watch(&self, response_id: &str) -> Option<tokio::sync::watch::Receiver<TurnState>> {
-        self.turns
-            .get(response_id)
-            .map(|turn| turn.publish.subscribe())
-    }
-
-    /// Publish `result` as the answer to `response_id`, releasing everyone waiting on it.
-    ///
-    /// A turn that has already ended keeps the answer it ended with: a result landing after a
-    /// cancel would otherwise overwrite the cancellation everyone was already told about.
-    fn resolve(&mut self, response_id: &str, result: String) {
-        let Some(turn) = self.turns.get(response_id) else {
-            return;
-        };
-        turn.publish.send_if_modified(|state| match state {
-            TurnState::Running => {
-                *state = TurnState::Done(result);
-                true
-            }
-            TurnState::Done(_) => false,
-        });
-    }
-
-    /// Answer every turn still running on `conversation_id` with `reason`, and stop them.
-    ///
-    /// Every turn, not just the one in flight: prompts queued behind it belong to a conversation
-    /// that is gone, so each one has a caller holding an id nothing else will ever answer. A turn
-    /// that already ended is left as it ended — a cancel arriving after the answer must not replace
-    /// it with a cancellation.
-    fn cancel_conversation(&mut self, conversation_id: &str, reason: &str) {
-        for turn in self.turns.values() {
-            if turn.conversation_id != conversation_id {
-                continue;
-            }
-            let stopped = turn.publish.send_if_modified(|state| match state {
-                TurnState::Running => {
-                    *state = TurnState::Done(subagent_error_json(reason));
-                    true
-                }
-                TurnState::Done(_) => false,
-            });
-            if stopped {
-                turn.abort.abort();
-            }
-        }
-    }
-
-    /// Drop a turn whose id its caller was never given — one that yielded inside its grace period,
-    /// so nothing can ever name it.
-    fn forget(&mut self, response_id: &str) {
-        self.turns.remove(response_id);
-    }
-}
-
-/// Block on `watched` until the turn behind it has ended, for at most `budget`.
-///
-/// `Some` is the turn's already-serialized result; `None` means it is still running, which is a
-/// deferral rather than a failure — the turn keeps going and its id stays collectable.
-async fn wait_for_turn(
-    watched: &mut tokio::sync::watch::Receiver<TurnState>,
-    budget: std::time::Duration,
-) -> Option<String> {
-    let deadline = tokio::time::Instant::now() + budget;
-    loop {
-        if let TurnState::Done(result) = &*watched.borrow_and_update() {
-            return Some(result.clone());
-        }
-        // A closed channel is a turn whose entry was dropped while this caller held a receiver.
-        // Nothing more will ever be published on it, so waiting on it again would never return.
-        match tokio::time::timeout_at(deadline, watched.changed()).await {
-            Ok(Ok(())) => continue,
-            Ok(Err(_)) | Err(_) => return None,
-        }
-    }
-}
 
 /// `{responseId, pending: true}` — the second shape a conversation tool can return, told apart from
 /// an outcome by a key an outcome never carries.
@@ -2015,140 +1702,6 @@ fn blocking_budget(
                 "{field} must be a whole number of milliseconds to block for, got: {value}"
             )),
         },
-    }
-}
-
-/// Resolve how a subagent's internal READ/GLOB/GREP calls reach the codebase: explicit
-/// `TDDY_SUBAGENT_CODEBASE_ACCESS` override, else `Managed` when a session-tool transport is
-/// configured (mirrors the exec-tool gating above), else `Local`.
-fn subagent_codebase_access_from_env() -> CodebaseAccess {
-    match env_non_empty("TDDY_SUBAGENT_CODEBASE_ACCESS").as_deref() {
-        Some("local") => CodebaseAccess::Local,
-        Some("managed") => managed_codebase_access(),
-        _ => {
-            if crate::session_tool_client::detect_session_tool_transport().is_some() {
-                managed_codebase_access()
-            } else {
-                CodebaseAccess::Local
-            }
-        }
-    }
-}
-
-/// Wrap [`crate::session_tool_client::dispatch_session_tool`] as a `CodebaseAccess::Managed`
-/// dispatch fn — the same proxy transport the exec-tool catalog already uses.
-fn managed_codebase_access() -> CodebaseAccess {
-    CodebaseAccess::managed(|tool_name: String, args: serde_json::Value| {
-        Box::pin(async move {
-            crate::session_tool_client::dispatch_session_tool(&tool_name, args).await
-        })
-    })
-}
-
-/// Parse `TDDY_SUBAGENTS_JSON` (a JSON array of [`SpecializedAgentDef`] — see
-/// docs/ft/coder/specialized-subagents.md) into the resolved specialized-agent defs for this
-/// process. Empty when the env var is unset or blank: with no def there is no agent, since every
-/// agent this process can address came from a def source someone wrote.
-///
-/// A value that is *set* and does not parse is an error, never an empty seed. `SpecializedAgentDef`
-/// is `deny_unknown_fields`, so a `tddy-tools` older than the daemon that wrote the value parses
-/// exactly this way — and an empty seed means no agent is attached and none of the withdrawn tools
-/// are served by anyone, with nothing naming the variable that caused it.
-///
-/// The message carries serde's position, never the value: a def carries a provider credential.
-pub fn subagents_from_env() -> Result<Vec<SpecializedAgentDef>, String> {
-    let Some(json) = env_non_empty("TDDY_SUBAGENTS_JSON") else {
-        return Ok(Vec::new());
-    };
-    serde_json::from_str::<Vec<SpecializedAgentDef>>(&json).map_err(|e| {
-        format!(
-            "TDDY_SUBAGENTS_JSON is set but does not parse as an array of agent defs: {e}. \
-             This is what a tddy-tools older than the daemon that spawned it sees, and treating \
-             it as 'no agents are attached' would silently un-withdraw every tool the session's \
-             agents took over"
-        )
-    })
-}
-
-/// The spawn seed for the two lazy constructions that have no caller to refuse to — the MCP
-/// server's router and the process-wide roster.
-///
-/// `--mcp` already refused to start on an unparseable value (see `run_mcp_server`), so reaching the
-/// error arm means a caller that never passed that gate. It is reported at `error` naming the
-/// variable rather than passed off as a session nobody attached an agent to.
-pub(crate) fn seed_subagents_or_report() -> Vec<SpecializedAgentDef> {
-    subagents_from_env().unwrap_or_else(|e| {
-        log::error!(target: "tddy_tools::server", "{e}");
-        Vec::new()
-    })
-}
-
-/// The only thing a caller supplies that a def cannot: how this process reaches the codebase.
-/// Endpoint, model, credential and turn budget come from the def itself.
-pub(crate) fn subagent_config_from_env() -> SubagentConfig {
-    SubagentConfig {
-        access: subagent_codebase_access_from_env(),
-    }
-}
-
-pub(crate) fn subagent_error_json(message: impl std::fmt::Display) -> String {
-    serde_json::json!({ "error": message.to_string(), "is_error": true }).to_string()
-}
-
-fn prompt_outcome_json(outcome: PromptOutcome) -> String {
-    serde_json::json!({
-        "stopReason": outcome.stop_reason,
-        "content": outcome.content,
-        "usage": {
-            "inputTokens": outcome.usage.input_tokens,
-            "outputTokens": outcome.usage.output_tokens,
-            "totalTokens": outcome.usage.total(),
-        },
-    })
-    .to_string()
-}
-
-/// One conversation as the shared [`tddy_core::token_accounting::ConversationRecord`] shape used by
-/// `subagent_list` and the accounting file.
-fn conversation_record(
-    id: &str,
-    conv: &SubagentConversation,
-) -> tddy_core::token_accounting::ConversationRecord {
-    tddy_core::token_accounting::ConversationRecord {
-        agent: conv.agent.clone(),
-        id: id.to_string(),
-        model: conv.model.clone(),
-        input_tokens: conv.usage.input_tokens,
-        output_tokens: conv.usage.output_tokens,
-        total_tokens: conv.usage.total(),
-        turns: conv.turns,
-    }
-}
-
-/// Every conversation this process has run, open ones first. The retired ones are included because
-/// their tokens were spent by this session: an accounting file that lists only what is still open
-/// reports a detached agent's consumption as zero.
-fn conversation_records(
-    conversations: &SubagentConversations,
-) -> Vec<tddy_core::token_accounting::ConversationRecord> {
-    conversations
-        .open
-        .iter()
-        .map(|(id, conv)| conversation_record(id, conv))
-        .chain(conversations.retired.iter().cloned())
-        .collect()
-}
-
-/// Overwrite the host-visible accounting file (`TDDY_TOOLS_ACCOUNTING_FILE`, pointed by the runner
-/// into the session egress dir) with the current conversation list. A no-op when the env var is
-/// unset; write failures are ignored — accounting is best-effort telemetry, never load-bearing.
-fn write_accounting_file(conversations: &SubagentConversations) {
-    let Some(path) = env_non_empty("TDDY_TOOLS_ACCOUNTING_FILE") else {
-        return;
-    };
-    let payload = serde_json::json!({ "conversations": conversation_records(conversations) });
-    if let Ok(text) = serde_json::to_string_pretty(&payload) {
-        let _ = std::fs::write(&path, text);
     }
 }
 
@@ -2346,156 +1899,6 @@ async fn subagent_await_tool(args: serde_json::Value) -> String {
     match wait_for_turn(&mut watched, timeout).await {
         Some(result) => result,
         None => pending_turn_json(response_id),
-    }
-}
-
-/// One prompt turn, and everything it needs to run without the table lock.
-struct DeferredTurn {
-    response_id: String,
-    conversation_id: String,
-    prompt_text: String,
-    session: std::sync::Arc<tokio::sync::Mutex<Box<dyn SubagentSession>>>,
-    /// The agent to report this conversation's state as, when the loop runs in this process.
-    reported_agent: Option<String>,
-}
-
-/// Run one turn to completion, whether or not the call that started it is still waiting.
-///
-/// Acquires the conversation's turn lock first and prompts second, so a prompt that arrives
-/// mid-turn queues behind the running one and runs against the history it leaves (criterion 30).
-/// At the end it takes the table lock once — for the conversation's accounting, the accounting
-/// file, and the publication of the result — so no awaiter can read a turn as done before what it
-/// spent has been recorded.
-async fn run_turn(turn: DeferredTurn) {
-    let mut session = turn.session.lock().await;
-    if let Some(agent_id) = turn.reported_agent.as_deref() {
-        report_local_conversation_state(
-            agent_id,
-            tddy_service::proto::connection::SessionAgentStatus::Running,
-            &format!("prompted: {}", turn.prompt_text),
-        )
-        .await;
-    }
-    let ended = TurnEnd::from(session.prompt(&turn.prompt_text).await);
-    // Read while the turn lock is still held, and kept held until the table is updated: releasing
-    // it first would let the next queued turn end and record its own totals underneath this one.
-    let usage = session.cumulative_usage();
-
-    let mut sessions = subagent_sessions().lock().await;
-    if let Some(conv) = sessions.open.get_mut(&turn.conversation_id) {
-        // A turn that failed still counts what it spent reaching that failure, but is not a turn
-        // the conversation took: nothing was added to its history.
-        conv.usage = usage;
-        if ended.took_a_turn {
-            conv.turns += 1;
-        }
-    }
-    write_accounting_file(&sessions);
-    sessions.pending.resolve(&turn.response_id, ended.result);
-    drop(sessions);
-    drop(session);
-
-    if let Some(agent_id) = turn.reported_agent.as_deref() {
-        // Idle either way, including on a failure: the agent is still attached and still
-        // promptable, and ERROR on a roster row means the checkout is broken. The summary is what
-        // says what happened.
-        report_local_conversation_state(
-            agent_id,
-            tddy_service::proto::connection::SessionAgentStatus::Idle,
-            &ended.summary,
-        )
-        .await;
-    }
-}
-
-/// How a turn ended, in the three forms its end is recorded in: the result its caller collects, the
-/// line the roster row shows, and whether the conversation's history grew by it.
-struct TurnEnd {
-    /// The serialized answer — an outcome or a failure, since both are answers.
-    result: String,
-    /// One line for the agent's roster row, saying what happened.
-    summary: String,
-    /// Whether this counts as a turn the conversation took. A failure spent tokens but added
-    /// nothing to the history, so it is not one.
-    took_a_turn: bool,
-}
-
-impl From<Result<PromptOutcome, tddy_discovery::subagent::SubagentError>> for TurnEnd {
-    fn from(outcome: Result<PromptOutcome, tddy_discovery::subagent::SubagentError>) -> Self {
-        match outcome {
-            Ok(outcome) => {
-                let chars = outcome
-                    .content
-                    .iter()
-                    .map(|block| block.text.chars().count())
-                    .sum::<usize>();
-                Self {
-                    result: prompt_outcome_json(outcome),
-                    summary: format!("answered ({chars} chars)"),
-                    took_a_turn: true,
-                }
-            }
-            Err(e) => Self {
-                result: subagent_error_json(&e),
-                summary: format!("turn failed: {e}"),
-                took_a_turn: false,
-            },
-        }
-    }
-}
-
-/// Tell the facilitating daemon what a conversation **this process** runs is doing.
-///
-/// Only for a loop that runs here. A conversation the daemon runs is one the daemon already sees —
-/// it serves the open and the prompt itself — and a second account of it from this side would race
-/// the daemon's own, which is how a row gets parked at RUNNING after the turn it describes has
-/// finished.
-///
-/// Best-effort throughout, including the connect: a status is a display signal, and failing a turn
-/// because a badge could not be updated would trade a stale badge for a broken conversation. Logged
-/// at `debug` rather than `error` for the same reason — a session with no daemon in the loop at all
-/// (`tddy-sandbox-app`) reaches this on every turn, and it is not a fault there.
-async fn report_local_conversation_state(
-    agent_id: &str,
-    status: tddy_service::proto::connection::SessionAgentStatus,
-    summary: &str,
-) {
-    let link = match crate::session_agents::AgentConversationLink::connect().await {
-        Ok(link) => link,
-        Err(e) => {
-            log::debug!(
-                target: "tddy_tools::session_agents",
-                "not reporting '{agent_id}' as {status:?}: {e}"
-            );
-            return;
-        }
-    };
-    if let Err(e) = link.report_state(agent_id, status, summary).await {
-        log::debug!(
-            target: "tddy_tools::session_agents",
-            "could not report '{agent_id}' as {status:?}: {e}"
-        );
-    }
-}
-
-/// Close a conversation on the daemon running its turn loop, when it runs on one.
-///
-/// Failure is logged rather than returned: the conversation is already gone on this side, so there
-/// is nothing the caller could do differently, and reporting a cancel as failed would tell the main
-/// agent a conversation it can no longer prompt is still open. Logged at `error` because a
-/// conversation left open on the owning daemon is a leak an operator has to be able to find.
-pub(crate) async fn cancel_remote_conversation(
-    remote: Option<crate::session_agents::RemoteConversationHandle>,
-) {
-    let Some(remote) = remote else {
-        return;
-    };
-    if let Err(e) = remote.cancel().await {
-        log::error!(
-            target: "tddy_tools::session_agents",
-            "conversation '{}' was closed here but not on the daemon running it: {e}",
-            remote.conversation_id()
-        );
     }
 }
 
@@ -2863,36 +2266,6 @@ fn agent_parameter_description(agents: &[crate::session_agents::AddressableAgent
         "Required. One of the agents attached to this session: {}.",
         choices.join("; ")
     )
-}
-
-pub(crate) fn schema_object(
-    json: serde_json::Value,
-) -> std::sync::Arc<serde_json::Map<String, serde_json::Value>> {
-    std::sync::Arc::new(json.as_object().cloned().unwrap_or_default())
-}
-
-/// Wraps a subagent tool handler (`async fn(Value) -> String`) into a `ToolRoute` — the same
-/// success-envelope-with-embedded-error convention `dynamic_tool_router` uses for exec tools.
-pub(crate) fn subagent_route<F>(
-    tool: rmcp::model::Tool,
-    handler: F,
-) -> rmcp::handler::server::router::tool::ToolRoute<PermissionServer>
-where
-    F: Fn(serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send>>
-        + Send
-        + Sync
-        + 'static,
-{
-    rmcp::handler::server::router::tool::ToolRoute::new_dyn(tool, move |ctx| {
-        let arguments = serde_json::Value::Object(ctx.arguments.clone().unwrap_or_default());
-        let result_future = handler(arguments);
-        Box::pin(async move {
-            let result_string = result_future.await;
-            Ok(rmcp::model::CallToolResult::success(vec![
-                rmcp::model::Content::text(result_string),
-            ]))
-        })
-    })
 }
 
 /// The `subagent_prompt` input schema. Named, like [`subagent_new_session_schema`], so the router
@@ -3803,13 +3176,8 @@ mod tests {
 
     use std::time::Duration;
     use tddy_discovery::openai::TokenUsage;
-    use tddy_discovery::subagent::{ContentBlock, StopReason};
-
-    /// A task that will never finish on its own — the abort handle a registered turn is held by,
-    /// with nothing else about a real turn to get in the way.
-    fn a_turn_still_running() -> tokio::task::AbortHandle {
-        tokio::spawn(std::future::pending::<()>()).abort_handle()
-    }
+    use tddy_discovery::subagent::{ContentBlock, PromptOutcome, StopReason};
+    use tddy_discovery::subagent_runtime::prompt_outcome_json;
 
     fn an_end_turn_outcome(answer: &str) -> PromptOutcome {
         PromptOutcome {
@@ -3820,11 +3188,6 @@ mod tests {
                 output_tokens: 12,
             },
         }
-    }
-
-    /// What a `watch` receiver is holding right now, as a test reads it.
-    fn state_of(receiver: &tokio::sync::watch::Receiver<TurnState>) -> TurnState {
-        receiver.borrow().clone()
     }
 
     // ─── The dual return shape ────────────────────────────────────────────────
@@ -3918,152 +3281,6 @@ mod tests {
         assert!(
             refusal.contains("graceMs"),
             "the refusal must name the field the caller got wrong; got: {refusal:?}"
-        );
-    }
-
-    // ─── The table of turns that outlived their call ──────────────────────────
-
-    /// Registering a turn is what makes its id answerable at all — before it resolves, the honest
-    /// answer to "is it done" is "no", not "I have never heard of it".
-    #[tokio::test]
-    async fn a_started_turn_is_watchable_and_reads_as_running() {
-        // Given a turn registered against its conversation
-        let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
-
-        // When a caller asks to watch it
-        let watched = pending
-            .watch("response-1")
-            .expect("a started turn must be watchable");
-
-        // Then it reads as still running
-        assert_eq!(state_of(&watched), TurnState::Running);
-    }
-
-    /// Every caller parked on a turn has to be released by it — an await that arrived while the
-    /// turn ran and one that arrived after must not get different answers.
-    #[tokio::test]
-    async fn resolving_a_turn_answers_everyone_watching_it() {
-        // Given two callers already watching one running turn
-        let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
-        let first = pending
-            .watch("response-1")
-            .expect("a started turn must be watchable");
-        let second = pending
-            .watch("response-1")
-            .expect("a started turn must be watchable");
-
-        // When the turn ends
-        pending.resolve(
-            "response-1",
-            prompt_outcome_json(an_end_turn_outcome("src/auth.rs:1-50")),
-        );
-
-        // Then both hold the same finished result
-        let done = TurnState::Done(prompt_outcome_json(an_end_turn_outcome("src/auth.rs:1-50")));
-        assert_eq!(state_of(&first), done);
-        assert_eq!(state_of(&second), done);
-    }
-
-    /// A tool result lost between this process and the main agent must not make a computed answer
-    /// permanently unreachable, so collecting one does not consume it.
-    #[tokio::test]
-    async fn a_resolved_turn_stays_claimable() {
-        // Given a turn that has already ended and been collected once
-        let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
-        pending.resolve(
-            "response-1",
-            prompt_outcome_json(an_end_turn_outcome("src/auth.rs:1-50")),
-        );
-        let _collected = pending
-            .watch("response-1")
-            .expect("a resolved turn must be watchable");
-
-        // When a later caller asks for it again
-        let again = pending
-            .watch("response-1")
-            .expect("a claimed turn must stay watchable");
-
-        // Then the same answer is still there
-        assert_eq!(
-            state_of(&again),
-            TurnState::Done(prompt_outcome_json(an_end_turn_outcome("src/auth.rs:1-50")))
-        );
-    }
-
-    /// An id nothing was ever stored under has to be distinguishable from one whose turn is slow —
-    /// a caller told "running" would poll forever for an answer that is never coming.
-    #[tokio::test]
-    async fn a_turn_nobody_started_is_unknown_rather_than_running() {
-        // Given a table with one turn in it
-        let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
-
-        // When a caller asks about an id that was never handed out
-        let watched = pending.watch("response-that-never-was");
-
-        // Then there is nothing to watch, so the tool can refuse rather than wait
-        assert!(
-            watched.is_none(),
-            "an unregistered response id must not read as a running turn"
-        );
-    }
-
-    /// Closing a conversation has to answer everyone parked on its turns. Leaving them unresolved
-    /// would strand an agent on an await that nothing will ever complete.
-    #[tokio::test]
-    async fn cancelling_a_conversation_resolves_every_turn_it_had_in_flight() {
-        // Given two turns running on one conversation and one on another
-        let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-doomed", a_turn_still_running());
-        pending.start("response-2", "conv-doomed", a_turn_still_running());
-        pending.start("response-3", "conv-untouched", a_turn_still_running());
-
-        // When the first conversation is closed
-        pending.cancel_conversation("conv-doomed", "the agent was detached");
-
-        // Then both of its turns are answered, naming why
-        for response_id in ["response-1", "response-2"] {
-            let watched = pending
-                .watch(response_id)
-                .expect("a cancelled turn stays watchable");
-            let TurnState::Done(result) = state_of(&watched) else {
-                panic!("{response_id} must be resolved by the cancel, not left running");
-            };
-            assert!(
-                result.contains("the agent was detached"),
-                "a cancelled turn must say why it will never answer; got: {result}"
-            );
-        }
-
-        // And the other conversation's turn is untouched
-        let untouched = pending
-            .watch("response-3")
-            .expect("an unrelated turn stays watchable");
-        assert_eq!(state_of(&untouched), TurnState::Running);
-    }
-
-    /// A turn that yielded inside its grace period was answered on the call itself, so its id was
-    /// never handed out. Keeping it would be a per-turn leak with no reader.
-    #[tokio::test]
-    async fn a_turn_whose_id_was_never_handed_out_is_forgotten() {
-        // Given a turn that resolved before its caller gave up waiting
-        let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
-        pending.resolve(
-            "response-1",
-            prompt_outcome_json(an_end_turn_outcome("src/auth.rs:1-50")),
-        );
-
-        // When the call that started it returns the outcome directly
-        pending.forget("response-1");
-
-        // Then nothing holds it any more
-        assert!(
-            pending.watch("response-1").is_none(),
-            "a response id the caller was never given must not be retained"
         );
     }
 

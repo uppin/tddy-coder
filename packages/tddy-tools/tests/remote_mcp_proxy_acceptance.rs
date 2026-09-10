@@ -19,13 +19,13 @@ use tddy_tools::server::{build_dynamic_tool_list, static_tool_names};
 async fn dynamic_tool_list_merges_catalog_with_static_tools() {
     // Given
     let catalog = vec![
-        tddy_tools::server::RemoteToolDef {
+        tddy_tools::mcp_primitives::RemoteToolDef {
             name: "Read".to_string(),
             description: "Read a file".to_string(),
             input_schema_json: r#"{"type":"object","properties":{"path":{"type":"string"}}}"#
                 .to_string(),
         },
-        tddy_tools::server::RemoteToolDef {
+        tddy_tools::mcp_primitives::RemoteToolDef {
             name: "Write".to_string(),
             description: "Write a file".to_string(),
             input_schema_json: r#"{"type":"object","properties":{"path":{"type":"string"},"contents":{"type":"string"}}}"#
@@ -72,12 +72,12 @@ async fn dynamic_tool_list_merges_catalog_with_static_tools() {
 #[tokio::test]
 async fn dynamic_tool_list_reflects_catalog_renames() {
     // Given
-    let catalog_v1 = vec![tddy_tools::server::RemoteToolDef {
+    let catalog_v1 = vec![tddy_tools::mcp_primitives::RemoteToolDef {
         name: "OldName".to_string(),
         description: "A tool".to_string(),
         input_schema_json: r#"{"type":"object"}"#.to_string(),
     }];
-    let catalog_v2 = vec![tddy_tools::server::RemoteToolDef {
+    let catalog_v2 = vec![tddy_tools::mcp_primitives::RemoteToolDef {
         name: "NewName".to_string(),
         description: "A tool".to_string(),
         input_schema_json: r#"{"type":"object"}"#.to_string(),

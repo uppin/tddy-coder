@@ -29,5 +29,5 @@ The **`changeset-workflow`** JSON Schema allows optional **`github_pr_tools_meta
 
 - [Workflow recipes](workflow-recipes.md) — **`MergePrRecipe`**, **`TddSmallRecipe`**, hook behavior  
 - [Workflow JSON Schemas](workflow-json-schemas.md) — **`changeset-workflow`**, schema registry  
-- **`packages/tddy-tools/docs/json-schema.md`** — CLI and MCP transport notes  
+- **`packages/tddy-workflow-recipes/docs/json-schema.md`** — the schema library, and the CLI and MCP transport notes  
 - **`packages/tddy-workflow-recipes/docs/workflow-schemas.md`** — **`goals.json`** and generated schemas  

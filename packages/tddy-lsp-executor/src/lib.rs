@@ -4,6 +4,8 @@
 //! reused language server. `tddy-core` deliberately owns only the trait; this crate owns
 //! the impl (mirroring how `tddy-coder` owns the concrete `BuildExecutor`).
 
+pub mod lsp_tools;
+
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;

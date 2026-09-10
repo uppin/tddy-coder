@@ -6,6 +6,7 @@ mod codex;
 pub mod codex_acp;
 mod cursor;
 mod mock;
+pub mod model_catalog;
 mod stub;
 mod tool_executor;
 
@@ -19,6 +20,9 @@ pub use codex::{CodexBackend, CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_I
 pub use codex_acp::CodexAcpBackend;
 pub use cursor::CursorBackend;
 pub use mock::MockBackend;
+pub use model_catalog::{
+    render_models_json, resolve_agent_models, BackendCliPaths, CLAUDE_CLI_AGENT, CURSOR_CLI_AGENT,
+};
 pub use stub::StubBackend;
 pub use tool_executor::{InMemoryToolExecutor, ProcessToolExecutor, ToolExecutor};
 

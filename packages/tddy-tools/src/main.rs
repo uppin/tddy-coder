@@ -3,12 +3,9 @@
 //! - CLI mode (default): `submit` and `ask` subcommands relay to tddy-coder via Unix socket
 //! - MCP mode (`--mcp`): Retains approval_prompt MCP server for backwards compatibility
 
-mod analyze_cli;
-mod build_cli;
 mod cli;
 mod pty_relay;
 mod remote_cli;
-mod restructure_cli;
 mod session_hook;
 
 use anyhow::Result;
@@ -70,10 +67,10 @@ enum Subcommand {
     InvokeAction(cli::InvokeActionArgs),
 
     /// List build targets from `BUILD.yaml` manifests (machine-readable JSON).
-    BuildList(build_cli::BuildListArgs),
+    BuildList(tddy_bsp::build_cli::BuildListArgs),
 
     /// Build a target from a `BUILD.yaml` manifest.
-    Build(build_cli::BuildArgs),
+    Build(tddy_bsp::build_cli::BuildArgs),
 
     /// Spawn a command in a PTY and relay keyboard+output — same wiring as the daemon uses
     /// for claude-cli sessions. Also start/connect to daemon sessions (including sandbox):
@@ -93,10 +90,10 @@ enum Subcommand {
     ListModels(tddy_tools::list_models::ListModelsArgs),
 
     /// Rust code analysis: coverage, CRAP report, duplicate-tests.
-    Analyze(analyze_cli::AnalyzeArgs),
+    Analyze(tddy_code_analysis::analyze_cli::AnalyzeArgs),
 
     /// Plan-driven Rust refactoring via rust-analyzer (through tddy-lsp).
-    Restructure(restructure_cli::RestructureArgs),
+    Restructure(tddy_code_restructuring::restructure_cli::RestructureArgs),
 }
 
 /// Initialise logging. When `TDDY_TOOLS_LOG_FILE` is set (e.g. by the sandbox runner, which points
@@ -149,14 +146,16 @@ async fn main() -> Result<()> {
         Some(Subcommand::PersistChangesetWorkflow(s)) => cli::run_persist_changeset_workflow(s)?,
         Some(Subcommand::ListActions(s)) => cli::run_list_actions(s).await?,
         Some(Subcommand::InvokeAction(s)) => cli::run_invoke_action(s).await?,
-        Some(Subcommand::BuildList(s)) => build_cli::run_build_list(s).await?,
-        Some(Subcommand::Build(s)) => build_cli::run_build(s).await?,
+        Some(Subcommand::BuildList(s)) => tddy_bsp::build_cli::run_build_list(s).await?,
+        Some(Subcommand::Build(s)) => tddy_bsp::build_cli::run_build(s).await?,
         Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
         Some(Subcommand::Remote(s)) => remote_cli::run_remote(s).await?,
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         Some(Subcommand::ListModels(s)) => tddy_tools::list_models::run_list_models(&s).await?,
-        Some(Subcommand::Analyze(s)) => analyze_cli::run(s)?,
-        Some(Subcommand::Restructure(s)) => restructure_cli::run(s).await?,
+        Some(Subcommand::Analyze(s)) => tddy_code_analysis::analyze_cli::run(s)?,
+        Some(Subcommand::Restructure(s)) => {
+            tddy_code_restructuring::restructure_cli::run(s).await?
+        }
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);
@@ -172,7 +171,7 @@ async fn run_mcp_server() -> Result<()> {
     // main agent back every tool the session's agents took over, with no line anywhere naming the
     // cause. A security control that turns itself off on version skew is worse than one that
     // refuses to start.
-    let seed = tddy_tools::server::subagents_from_env().map_err(|e| anyhow::anyhow!(e))?;
+    let seed = tddy_discovery::roster::subagents_from_env().map_err(|e| anyhow::anyhow!(e))?;
     log::info!(
         target: "tddy_tools::server",
         "spawn seed carries {} specialized agent def(s)",

@@ -14,6 +14,7 @@ pub mod ledger;
 pub mod overlay;
 pub mod plan;
 pub mod registry;
+pub mod restructure_cli;
 pub mod runner;
 pub mod verify;
 
