@@ -256,7 +256,7 @@ impl ConnectionServiceImpl {
             // The registry wins over a YAML def of the same name, the same way it does in
             // `resolvable_agent_defs`.
             if let Some(def) =
-                crate::model_registry::registry_agent_def_with_credential(registry, agent, caller)
+                tddy_model_registry::registry_agent_def_with_credential(registry, agent, caller)
                     .await
                     .map_err(Status::from)?
             {
@@ -276,7 +276,7 @@ impl ConnectionServiceImpl {
         &self,
     ) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
         match &self.model_registry {
-            Some(registry) => crate::model_registry::registry_agent_defs(registry)
+            Some(registry) => tddy_model_registry::registry_agent_defs(registry)
                 .await
                 .map_err(Status::from),
             None => Ok(Vec::new()),

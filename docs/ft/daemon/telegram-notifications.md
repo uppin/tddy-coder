@@ -118,7 +118,7 @@ per-session indicators — are described in
 
 ## Presenter stream: elicitation (`ModeChanged`)
 
-With Telegram enabled, **`TelegramSessionWatcher::on_server_message`** classifies **`ServerMessage`** **`ModeChanged`** payloads from **`PresenterObserver.ObserveEvents`**. Modes that require a human gate—document review, markdown viewer, feature input, clarification (**`Select`** / **`MultiSelect`**), and free-text **`TextInput`**—produce Telegram traffic per qualifying event. Autonomous modes **`Running`** and **`Done`** do not produce elicitation Telegram lines. Identical **`ModeChanged`** signatures per session id dedupe repeat sends so stream replays do not flood configured chats. Module **`tddy_daemon::elicitation`** centralizes classification, dedupe key material, and line templates; **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)** records the public hooks.
+With Telegram enabled, **`TelegramSessionWatcher::on_server_message`** classifies **`ServerMessage`** **`ModeChanged`** payloads from **`PresenterObserver.ObserveEvents`**. Modes that require a human gate—document review, markdown viewer, feature input, clarification (**`Select`** / **`MultiSelect`**), and free-text **`TextInput`**—produce Telegram traffic per qualifying event. Autonomous modes **`Running`** and **`Done`** do not produce elicitation Telegram lines. Identical **`ModeChanged`** signatures per session id dedupe repeat sends so stream replays do not flood configured chats. Module **`tddy_telegram::elicitation`** (re-exported as **`tddy_daemon::elicitation`**) centralizes classification, dedupe key material, and line templates; **[telegram-notifier.md](../../../packages/tddy-telegram/docs/telegram-notifier.md)** records the public hooks.
 
 ### Document review and markdown viewer
 
@@ -144,7 +144,7 @@ Outbound **`MultiSelect`** notifications append a shortcut row (**Choose none**,
 - **`ActiveElicitationCoordinator`:** A process-wide structure (shared with inbound **`telegram_session_control`**) records, per Telegram chat id, an ordered list of sessions that need elicitation surface. The list front is the session that may receive the **primary** inline keyboard for **`ModeChanged`** elicitation — **`Select`** (**`eli:s:`** / **`eli:o:`**), **`MultiSelect`** (**`eli:mn:`** / **`eli:mr:`** when present), document review (**`doc:`**), etc.
 - **Registration:** Each outbound **`ModeChanged`** that represents user-facing elicitation registers the session for every configured **`chat_ids`** entry. Duplicate ids in the queue for the same chat are ignored.
 - **Deferred surface:** When a session is registered but is **not** at the head of its chat queue, the notifier sends the action line as **text** (with a short “queued” explanation) and **does not** attach the full primary inline keyboard for that session (including **`Select`** numeric rows, **`MultiSelect`** **`eli:mn:`** / **`eli:mr:`** shortcuts, **`doc:`** review rows — whichever applies), so only the head session attaches a competing primary **`ModeChanged`** keyboard in the chat.
-- **Depth monitoring:** When the per-chat queue length exceeds an internal threshold, the daemon emits a **warning** log line for operators (see **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)** and **`active_elicitation`**).
+- **Depth monitoring:** When the per-chat queue length exceeds an internal threshold, the daemon emits a **warning** log line for operators (see **[telegram-notifier.md](../../../packages/tddy-telegram/docs/telegram-notifier.md)** and **`active_elicitation`**).
 
 ### Telegram-tracked session (keyboard gate)
 
@@ -162,7 +162,7 @@ Each configured Telegram **`chat_id`** holds an optional **tracked** workflow **
 
 For modes that are **not** full-document review (feature input, free-text **`TextInput`**), messages remain short hints: short session label and explicit **approval** or **input** wording. **`Select`** adds the numbered listing above; primary-queue **`MultiSelect`** adds the shortcut row described in **Clarification multi-select**; deferred-queue sessions omit competing primary keyboards while still emitting the queued explanatory text line.
 
-Callers that read **`.session.yaml`** (or equivalent) on an interval can still use **`TelegramSessionWatcher::on_metadata_tick`** with **`session_id`**, **`status`**, **`is_active`**, **`DaemonConfig`**, and **`TelegramSender`**. Technical detail lives in **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)**.
+Callers that read **`.session.yaml`** (or equivalent) on an interval can still use **`TelegramSessionWatcher::on_metadata_tick`** with **`session_id`**, **`status`**, **`is_active`**, **`DaemonConfig`**, and **`TelegramSender`**. Technical detail lives in **[telegram-notifier.md](../../../packages/tddy-telegram/docs/telegram-notifier.md)**.
 
 ## Tests
 
@@ -174,6 +174,6 @@ The **`tddy_daemon::telegram_session_control`** module implements parsing, chunk
 
 ## Related documentation
 
-- **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)** — implementation reference (`tddy-daemon`).
+- **[telegram-notifier.md](../../../packages/tddy-telegram/docs/telegram-notifier.md)** — implementation reference. The transport half lives in `tddy-telegram`; `TelegramSessionWatcher` is still `tddy-daemon`'s (`#unbundle` node 2).
 - **[ConnectionService](../../../packages/tddy-daemon/docs/connection-service.md)** — session listing and metadata sources used elsewhere in the daemon.
 - **[systemd-install.md](systemd-install.md)** — where **`daemon.yaml`** is installed in production.

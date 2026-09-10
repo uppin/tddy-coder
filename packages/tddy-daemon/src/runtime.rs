@@ -636,13 +636,13 @@ pub async fn build(
         // and projects): `NewSessionRequest.cwd` is client-chosen, and an assistant may be
         // assigned `Shell`, so the answer must be "the directories this caller already owns"
         // rather than "anywhere the daemon process can reach".
-        let chat_workspace_roots: crate::model_registry::ChatWorkspaceRoots = {
+        let chat_workspace_roots: tddy_model_registry::ChatWorkspaceRoots = {
             let user_resolver = user_resolver.clone();
             let config = config.clone();
             let sessions_base_resolver = sessions_base_resolver.clone();
             let projects_dir_resolver = projects_dir_resolver.clone();
             Arc::new(move |token: &str| {
-                use crate::model_registry::ModelRegistryError;
+                use tddy_model_registry::ModelRegistryError;
                 let github_user = (user_resolver)(token).ok_or_else(|| {
                     ModelRegistryError::PermissionDenied(
                         "invalid or expired session token".to_string(),
@@ -691,7 +691,7 @@ pub async fn build(
         // assistants composed from them. Opened before ConnectionService so an assistant is
         // listed by `ListAgents` as a selectable `--agent`.
         let model_registry = Arc::new(
-            crate::model_registry::ModelRegistryStore::open(
+            tddy_model_registry::ModelRegistryStore::open(
                 &tddy_data_dir.join("models.db"),
                 &crate::livekit_peer_discovery::local_instance_id_for_config(&config),
                 // The same directory `ConnectionServiceImpl` resolves YAML defs from, so an
@@ -875,33 +875,24 @@ pub async fn build(
 
         // ModelRegistryService — this daemon's providers, models and assistants. Rides the same
         // entries as every other service, so it is reachable over HTTP `/rpc` and LiveKit alike.
-        let model_registry_server = tddy_service::ModelRegistryServiceServer::new(
-            crate::model_registry::ModelRegistryServiceImpl::new(
-                Arc::clone(&model_registry),
-                Arc::new(crate::model_registry::DefaultProviderClients),
-                vm_user_resolver.clone(),
-            ),
-        );
-        rpc_entries.push(tddy_rpc::ServiceEntry {
-            name: "models.ModelRegistryService",
-            service: Arc::new(model_registry_server) as Arc<dyn tddy_rpc::RpcService>,
-        });
+        // The entry comes from `tddy-model-registry` rather than being assembled here: the
+        // subsystem's whole contract with this wiring layer is the `ServiceEntry` it returns.
+        rpc_entries.push(tddy_model_registry::build_model_registry_entry(
+            Arc::clone(&model_registry),
+            Arc::new(tddy_model_registry::DefaultProviderClients),
+            vm_user_resolver.clone(),
+        ));
 
         // The model-addressed ACP surface: chatting with a registry model or assistant. The
         // *session*-addressed `acp.AcpService` is mounted per session process
         // (`session_view_adapter_surface`); this one is the daemon's own, so the Models & Agents
         // screen can open a chat without a session existing at all.
-        let model_acp_server =
-            tddy_service::AcpServiceServer::new(crate::model_registry::ModelAcpService::new(
-                Arc::clone(&model_registry),
-                task_registry.clone(),
-                vm_user_resolver.clone(),
-                chat_workspace_roots,
-            ));
-        rpc_entries.push(tddy_rpc::ServiceEntry {
-            name: tddy_service::AcpServiceServer::<crate::model_registry::ModelAcpService>::NAME,
-            service: Arc::new(model_acp_server) as Arc<dyn tddy_rpc::RpcService>,
-        });
+        rpc_entries.push(tddy_model_registry::build_model_acp_entry(
+            Arc::clone(&model_registry),
+            task_registry.clone(),
+            vm_user_resolver.clone(),
+            chat_workspace_roots,
+        ));
 
         // TaskService — backed by the same registry as ConnectionService.
         let task_service_impl = crate::task_service::TaskServiceImpl::new(
@@ -1009,9 +1000,9 @@ pub async fn build(
         // Wire `sessions_base` with the daemon's resolved `tddy_data_dir` so vaults live
         // under the config-only tddy home (config → profile default → `$HOME/.tddy`),
         // matching `sessions_base_resolver` above — not a statically-derived `$HOME/.tddy`.
-        let ss_key_cache: crate::screen_sharing_service::ScreenSharingKeyCache =
+        let ss_key_cache: tddy_screen_sharing::ScreenSharingKeyCache =
             Arc::new(Mutex::new(HashMap::new()));
-        let ss_sessions_base: crate::screen_sharing_service::SessionsBase = {
+        let ss_sessions_base: tddy_screen_sharing::SessionsBase = {
             let dd = tddy_data_dir.clone();
             Arc::new(move |user: &str| {
                 crate::user_sessions_path::sessions_base_for_user(user, Some(&dd))
@@ -1031,18 +1022,16 @@ pub async fn build(
             Arc::new(crate::host_keypair::FileHostKeypair::new(
                 crate::host_registry::host_registry_dir(&tddy_data_dir),
             ));
-        let ss_svc = crate::screen_sharing_service::ScreenSharingServiceImpl::new(
+        let ss_svc = tddy_screen_sharing::ScreenSharingServiceImpl::new(
             ss_user_resolver,
             ss_sessions_base,
             Arc::clone(&ss_key_cache),
         )
         .with_config(Arc::clone(&config_arc))
         .with_host_scope(ss_host_targets, ss_host_keypair, Arc::clone(&host_prompts));
-        let ss_server = tddy_service::ScreenSharingServiceServer::new(ss_svc);
-        rpc_entries.push(tddy_rpc::ServiceEntry {
-            name: "screen_sharing.ScreenSharingService",
-            service: Arc::new(ss_server) as Arc<dyn tddy_rpc::RpcService>,
-        });
+        // The entry comes from `tddy-screen-sharing` rather than being assembled here: the
+        // subsystem's whole contract with this wiring layer is the `ServiceEntry` it returns.
+        rpc_entries.push(tddy_screen_sharing::build_screen_sharing_entry(ss_svc));
     }
 
     // The daemon's own settings, read and written by its UI. Registered for every host — a desktop
