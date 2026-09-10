@@ -593,7 +593,8 @@ fn tears_a_forwarded_stream_down_no_faster_than_a_pass_needs_to_last_to_count_as
         tddy_daemon::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT;
 
     // When
-    let a_pass_counts_as_service_after = tddy_tools::session_agents::PASS_LONG_ENOUGH_TO_BE_SERVICE;
+    let a_pass_counts_as_service_after =
+        tddy_service::session_agents::PASS_LONG_ENOUGH_TO_BE_SERVICE;
 
     // Then
     assert!(

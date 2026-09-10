@@ -31,6 +31,7 @@ pub mod session_lifecycle;
 pub mod session_metadata;
 pub mod session_participant_metadata;
 pub mod source_path;
+pub mod spawn_env;
 pub mod stdio_safety;
 pub mod stream;
 #[cfg(test)]

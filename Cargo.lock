@@ -12093,12 +12093,14 @@ dependencies = [
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-sandbox-cgroups",
+ "tddy-sandbox-darwin",
  "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
  "tddy-screen-sharing",
  "tddy-semantic-index",
  "tddy-service",
  "tddy-session-sync",
+ "tddy-session-tool-client",
  "tddy-spawn",
  "tddy-stdio",
  "tddy-supervisor",
@@ -12107,7 +12109,6 @@ dependencies = [
  "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-tool-engine",
- "tddy-tools",
  "tddy-vm",
  "tddy-workflow",
  "tddy-workflow-recipes",
@@ -12696,11 +12697,11 @@ dependencies = [
  "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
  "tddy-service",
+ "tddy-session-tool-client",
  "tddy-stdio",
  "tddy-task",
  "tddy-testing-commons",
  "tddy-tool-engine",
- "tddy-tools",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -12739,8 +12740,8 @@ dependencies = [
  "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
  "tddy-service",
+ "tddy-session-tool-client",
  "tddy-testing-commons",
- "tddy-tools",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -12937,6 +12938,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-session-tool-client"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "livekit",
+ "log",
+ "prost 0.13.5",
+ "reqwest 0.12.28",
+ "serde_json",
+ "serial_test",
+ "tddy-core",
+ "tddy-livekit",
+ "tddy-rpc",
+ "tddy-sandbox",
+ "tddy-service",
+ "tddy-stdio",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-spawn"
 version = "0.1.0"
 dependencies = [
@@ -13118,8 +13139,6 @@ dependencies = [
  "clap",
  "env_logger",
  "libc",
- "livekit",
- "livekit-api",
  "log",
  "predicates",
  "pretty_assertions",
@@ -13136,11 +13155,11 @@ dependencies = [
  "tddy-code-restructuring",
  "tddy-core",
  "tddy-discovery",
- "tddy-livekit",
  "tddy-lsp-executor",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-service",
+ "tddy-session-tool-client",
  "tddy-stdio",
  "tddy-terminal-rpc",
  "tddy-testing-commons",

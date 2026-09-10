@@ -15,19 +15,19 @@
 //! type for exactly that reason: `action_tools` builds its routes with it and is destined for
 //! `tddy-core`, so a route type that named this crate's `ServerHandler` would turn today's
 //! in-crate cycle into a cross-crate one — the error step zero exists to prevent.
+//!
+//! One of the eight has since left: `env_non_empty` is `tddy_core::spawn_env::env_non_empty`. It
+//! was the item `session_agents/stream` reached *back* for, and it is a rule about environment
+//! variables rather than about MCP, so it went to the crate both sides already depend on instead
+//! of staying an edge out of here. `seed_subagents_or_report` is the other half of that same
+//! return edge and follows the roster to `tddy-discovery`, where the seed belongs with the
+//! registry it seeds.
 
+use tddy_core::spawn_env::env_non_empty;
 use tddy_discovery::agent_def::SpecializedAgentDef;
 use tddy_discovery::subagent::{CodebaseAccess, SubagentConfig, SubagentRegistry, SubagentSession};
 
 // --- The spawn environment ---
-
-/// An environment variable's value, or `None` when it is unset **or blank**.
-///
-/// Blank is treated as unset because every caller here reads a variable an outer process may have
-/// exported empty, and a blank `TDDY_SOCKET` is not a socket path — it is the absence of one.
-pub(crate) fn env_non_empty(key: &str) -> Option<String> {
-    std::env::var(key).ok().filter(|v| !v.trim().is_empty())
-}
 
 /// Parse `TDDY_SUBAGENTS_JSON` (a JSON array of [`SpecializedAgentDef`] — see
 /// docs/ft/coder/specialized-subagents.md) into the resolved specialized-agent defs for this
@@ -257,7 +257,6 @@ pub(crate) async fn cancel_remote_conversation(
 mod tests {
     use super::*;
     use serde_json::json;
-    use serial_test::serial;
 
     /// The server type a caller outside this module supplies to [`subagent_route`]. It is a bare
     /// marker on purpose: what the route needs of `S` is a type parameter, nothing more.
@@ -269,49 +268,6 @@ mod tests {
             "A tool an attached agent may call.",
             schema_object(json!({"type": "object"})),
         )
-    }
-
-    /// A blank exported variable is the absence of a value, not a value of "". Every caller reads
-    /// something an outer process may have exported empty.
-    #[test]
-    #[serial]
-    fn reads_an_empty_variable_as_unset() {
-        // Given
-        std::env::set_var("TDDY_TEST_BLANK", "");
-
-        // When
-        let found = env_non_empty("TDDY_TEST_BLANK");
-
-        // Then
-        assert_eq!(found, None);
-    }
-
-    /// A variable exported as whitespace is blank too — a spawn environment that interpolated an
-    /// empty value into a quoted assignment has still said nothing.
-    #[test]
-    #[serial]
-    fn reads_a_whitespace_only_variable_as_unset() {
-        // Given
-        std::env::set_var("TDDY_TEST_WHITESPACE", "  \t ");
-
-        // When
-        let found = env_non_empty("TDDY_TEST_WHITESPACE");
-
-        // Then
-        assert_eq!(found, None);
-    }
-
-    #[test]
-    #[serial]
-    fn reads_a_variable_that_has_a_value() {
-        // Given
-        std::env::set_var("TDDY_TEST_SET", "/run/tddy.sock");
-
-        // When
-        let found = env_non_empty("TDDY_TEST_SET");
-
-        // Then
-        assert_eq!(found.as_deref(), Some("/run/tddy.sock"));
     }
 
     /// A tool failure has to come back as a readable result, because an agent cannot act on a

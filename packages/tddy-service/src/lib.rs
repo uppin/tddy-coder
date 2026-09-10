@@ -18,7 +18,6 @@ pub mod service;
 pub mod service_acp;
 pub mod session_activity;
 pub mod session_agents;
-pub mod session_tool_client;
 pub mod terminal_service;
 pub mod token_service;
 pub mod worktree_activity;

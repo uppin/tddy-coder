@@ -390,7 +390,7 @@ async fn sandbox_runner_session_channel_tool_exec_round_trips() {
         // When
         let ipc_result = tokio::time::timeout(
             Duration::from_secs(10),
-            tddy_tools::session_tool_client::dispatch_session_tool(
+            tddy_session_tool_client::dispatch_session_tool(
                 "Read",
                 serde_json::json!({"path": "README.md"}),
             ),

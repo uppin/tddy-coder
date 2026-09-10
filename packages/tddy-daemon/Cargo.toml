@@ -127,7 +127,11 @@ tokio-stream = "0.1"
 
 [dev-dependencies]
 assert_cmd = "2"
-tddy-tools = { path = "../tddy-tools" }
+# The acceptance suites dispatch through the very client the in-jail MCP server uses, over the same
+# in-jail socket, rather than re-implementing its wire format. `livekit` because this crate also
+# exercises the split-session transport.
+tddy-session-tool-client = { path = "../tddy-session-tool-client", features = ["livekit"] }
+tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 # Dev-only since the spawn subsystem left: `supervisor_spawn_delegation.rs` builds a
 # `SpawnSessionRequest` directly to pin what the daemon asks the supervisor for, and its two

@@ -20,3 +20,19 @@
 /// deciding who is interested — which it cannot know, since a browser tab or a newly admitted
 /// owning daemon joins at any time.
 pub const SESSION_AGENTS_TOPIC: &str = "session.agents";
+
+/// How long a pass of the roster stream must last to count as service rather than churn.
+///
+/// Here, beside [`SESSION_AGENTS_TOPIC`] and for the same reason: it is a constant two crates have
+/// to agree on. The subscriber paces its reconnects by it (`StreamSessionAgents`, whose request and
+/// snapshot are both defined in this package), and it is bounded from above by a constant in
+/// `tddy-daemon` — a relay tears a forwarded stream down after its own idle deadline, and such a
+/// teardown must read as *service*, because a keepalive path that goes quiet costs one reconnect
+/// per deadline. Classifying that as churn would park a working cross-host subscription at the
+/// subscriber's backoff ceiling. The relation is asserted where both constants are visible, in
+/// `tddy-daemon`'s `livekit_peer_discovery`.
+///
+/// Comfortably longer than the two deadlines a fruitless pass can burn — opening the stream and
+/// waiting for its first frame — so a pass that spent its whole life waiting never reads as
+/// service.
+pub const PASS_LONG_ENOUGH_TO_BE_SERVICE: std::time::Duration = std::time::Duration::from_secs(30);

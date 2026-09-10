@@ -1,0 +1,41 @@
+[package]
+name = "tddy-session-tool-client"
+version = "0.1.0"
+edition = "2021"
+description = "Reaching a session's daemon from inside it: transport detection and tool dispatch over sandbox IPC, daemon HTTP or LiveKit RPC"
+
+[lib]
+name = "tddy_session_tool_client"
+path = "src/lib.rs"
+
+[dependencies]
+# Every message this crate sends is defined by a proto in tddy-service.
+tddy-service = { path = "../tddy-service" }
+# `session_id_from_env` — the jail's own name for the session it belongs to.
+tddy-sandbox = { path = "../tddy-sandbox" }
+# The sandbox socket is a duplex byte stream; `StdioEndpoint::from_duplex` wraps it as one.
+tddy-stdio = { path = "../tddy-stdio" }
+tddy-rpc = { path = "../tddy-rpc" }
+# `env_non_empty` — one spelling of "unset or blank" for the whole workspace.
+tddy-core = { path = "../tddy-core" }
+async-trait = "0.1"
+log = "0.4"
+prost = "0.13"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros", "sync", "net", "time", "io-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# The LiveKit transport, for a split session whose worktree is on another host.
+tddy-livekit = { path = "../tddy-livekit", optional = true }
+livekit = { version = "0.7", optional = true }
+
+[features]
+# Off by default, unlike `tddy-tools`' own: this crate is dev-depended on by `tddy-sandbox-app` and
+# `tddy-sandbox-darwin`, whose suites only ever dispatch over the in-jail socket, and neither should
+# link the LiveKit SDK to do it. The consumers that need a split session — `tddy-tools` and
+# `tddy-daemon` — enable it explicitly, so `tddy-tools`' shipped default is unchanged.
+default = []
+livekit = ["dep:tddy-livekit", "dep:livekit"]
+
+[dev-dependencies]
+serial_test = "3"
+tokio = { version = "1", features = ["rt-multi-thread"] }

@@ -1,10 +1,30 @@
 //! Generic session tool dispatch — forwards MCP tool calls to `tddy-daemon` via sandbox IPC,
 //! direct HTTP, or LiveKit RPC to a remote daemon, depending on environment.
+//!
+//! Moved out of `tddy-tools` by `#unbundle` node 5. It is a crate of its own rather than part of
+//! `tddy-service` — where the plan first put it — because [`dispatch_session_tool`] selects
+//! between all four transports in one place, and the LiveKit arm needs `tddy-livekit`, which
+//! itself depends on `tddy-service`. Cargo rejects that edge outright (`cyclic package
+//! dependency`), and the alternatives were worse: splitting the selector in two would duplicate
+//! the transport decision, and injecting the LiveKit connector at runtime would reintroduce
+//! exactly the function-pointer transport the same node deleted from `tddy-bsp`.
+//!
+//! Sitting above both `tddy-service` and `tddy-livekit` also settles a debt the plan recorded
+//! against the original destination: `tddy-service` depends on `tddy-tui`, so a client hosted
+//! there would have pulled the TUI into every in-jail binary that dispatches a tool call.
+//!
+//! `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` reach the daemon through this crate
+//! and no longer depend on `tddy-tools` at all.
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+/// Read an environment variable, treating unset and blank alike — a blank join token or server
+/// identity configures nothing. One spelling for the whole workspace, in the crate that owns the
+/// rule.
+use tddy_core::spawn_env::env_non_empty as non_empty_env;
 
 pub use tddy_sandbox::session_id_from_env;
 
@@ -75,7 +95,7 @@ pub const MAX_REMOTE_BLOCK_MS: u64 = 20_000;
 /// What the remote tool engine blocks for when a call names no block time.
 ///
 /// Mirrored from `tddy_tool_engine`'s `tool_await` and `tool_shell` (`unwrap_or(30_000)`);
-/// `tddy-tools` does not depend on that crate. It matters here because it sits *above* the ceiling:
+/// this crate does not depend on that crate. It matters here because it sits *above* the ceiling:
 /// the two request shapes an agent actually emits — `Await {job_id}` and `Shell {command}` — carry
 /// no block time at all, so the ceiling has to be written in rather than left to the engine.
 const REMOTE_ENGINE_DEFAULT_BLOCK_MS: u64 = 30_000;
@@ -163,12 +183,6 @@ pub fn clamp_remote_blocking_args(tool_name: &str, args: &serde_json::Value) -> 
         .unwrap_or(REMOTE_ENGINE_DEFAULT_BLOCK_MS);
     fields.insert((*key).to_string(), clamp_remote_block_ms(requested).into());
     clamped
-}
-
-/// Read an environment variable, treating an empty value as unset — a blank join token or server
-/// identity configures nothing.
-fn non_empty_env(key: &str) -> Option<String> {
-    std::env::var(key).ok().filter(|v| !v.is_empty())
 }
 
 /// Every variable the LiveKit transport needs, reported missing in this order.
@@ -515,9 +529,9 @@ fn spawn_worktree_activity_log(room: std::sync::Arc<livekit::Room>) {
     tokio::spawn(async move {
         while let Some(message) = activity.recv().await {
             match worktree_activity_line(&message.payload) {
-                Ok(line) => log::debug!(target: "tddy_tools::session_tool_client", "{line}"),
+                Ok(line) => log::debug!(target: "tddy_session_tool_client", "{line}"),
                 Err(e) => log::warn!(
-                    target: "tddy_tools::session_tool_client",
+                    target: "tddy_session_tool_client",
                     "worktree activity payload from {:?} did not decode: {e}",
                     message.from
                 ),
@@ -569,7 +583,7 @@ pub async fn dispatch_via_livekit(
         ..
     } = key;
     log::info!(
-        target: "tddy_tools::session_tool_client",
+        target: "tddy_session_tool_client",
         "dispatching {tool_name} to \"{server_identity}\" in room \"{room}\" at {url}"
     );
     let session = match livekit_room_cache()
@@ -579,7 +593,7 @@ pub async fn dispatch_via_livekit(
         Ok(session) => session,
         Err(e) => {
             log::error!(
-                target: "tddy_tools::session_tool_client",
+                target: "tddy_session_tool_client",
                 "{tool_name} failed: cannot reach codebase daemon \"{server_identity}\" \
                  in room \"{room}\" at {url}: {e}"
             );
@@ -591,7 +605,7 @@ pub async fn dispatch_via_livekit(
     // this, the call would hang instead of failing. Checked per call for that reason.
     if !session.peer_present() {
         log::error!(
-            target: "tddy_tools::session_tool_client",
+            target: "tddy_session_tool_client",
             "{tool_name} failed: codebase daemon \"{server_identity}\" left room \"{room}\" \
              at {url} — the held connection publishes to nobody until it rejoins"
         );
@@ -621,7 +635,7 @@ pub async fn dispatch_via_livekit(
     // A build-time omission, not a runtime fault — but it presents as every tool call failing, so
     // it is logged where an operator will find it like any other dispatch failure.
     log::error!(
-        target: "tddy_tools::session_tool_client",
+        target: "tddy_session_tool_client",
         "{tool_name} failed: this tddy-tools was built without the 'livekit' feature, so the \
          codebase daemon \"{}\" in room \"{}\" cannot be reached at all",
         key.server_identity,
@@ -856,7 +870,7 @@ pub async fn dispatch_via_streaming_rpc(
         Ok(frames) => frames,
         Err(e) => {
             log::error!(
-                target: "tddy_tools::session_tool_client",
+                target: "tddy_session_tool_client",
                 "{tool_name} failed: StreamExecuteTool call to daemon \"{daemon_instance_id}\" \
                  for session {session_id} was not accepted: {e}"
             );
@@ -877,7 +891,7 @@ pub async fn dispatch_via_streaming_rpc(
             Ok(bytes) => bytes,
             Err(e) => {
                 log::error!(
-                    target: "tddy_tools::session_tool_client",
+                    target: "tddy_session_tool_client",
                     "{tool_name} failed: StreamExecuteTool from daemon \"{daemon_instance_id}\" \
                      for session {session_id} errored after {} bytes: {e}",
                     result.len()
@@ -893,7 +907,7 @@ pub async fn dispatch_via_streaming_rpc(
             Ok(frame) => frame,
             Err(e) => {
                 log::error!(
-                    target: "tddy_tools::session_tool_client",
+                    target: "tddy_session_tool_client",
                     "{tool_name} failed: undecodable frame ({} bytes) from daemon \
                      \"{daemon_instance_id}\" for session {session_id} — the two hosts disagree \
                      about ExecuteToolChunk: {e}",
@@ -916,7 +930,7 @@ pub async fn dispatch_via_streaming_rpc(
             Ok(text) => text,
             Err(e) => {
                 log::error!(
-                    target: "tddy_tools::session_tool_client",
+                    target: "tddy_session_tool_client",
                     "{tool_name} failed: frames from daemon \"{daemon_instance_id}\" for session \
                      {session_id} did not reassemble as UTF-8: {e}"
                 );
@@ -940,7 +954,7 @@ pub async fn dispatch_via_streaming_rpc(
     // result, and returning them would hand the agent a half-read file that looks whole — the exact
     // failure this RPC exists to make visible.
     log::error!(
-        target: "tddy_tools::session_tool_client",
+        target: "tddy_session_tool_client",
         "{tool_name} failed: StreamExecuteTool from daemon \"{daemon_instance_id}\" for session \
          {session_id} ended after {} bytes without its final frame; the partial result was \
          discarded",

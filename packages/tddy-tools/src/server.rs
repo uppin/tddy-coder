@@ -1,9 +1,8 @@
 //! Permission server implementing the approval_prompt MCP tool and GitHub PR REST tools.
 
 use crate::mcp_primitives::{
-    cancel_remote_conversation, env_non_empty, open_remote_agent_session, schema_object,
-    seed_subagents_or_report, subagent_config_from_env, subagent_error_json, subagent_route,
-    RemoteToolDef,
+    cancel_remote_conversation, open_remote_agent_session, schema_object, seed_subagents_or_report,
+    subagent_config_from_env, subagent_error_json, subagent_route, RemoteToolDef,
 };
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -15,6 +14,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use tddy_core::spawn_env::env_non_empty;
 use tddy_discovery::subagent::{
     resolve_replaced_tools_for_defs, PromptOutcome, SubagentRegistry, SubagentSession,
 };

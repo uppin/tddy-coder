@@ -54,13 +54,12 @@ const RECONNECT_BACKOFF_CEILING: Duration = Duration::from_secs(30);
 /// Comfortably longer than the two deadlines a fruitless pass can burn ([`STREAM_OPEN_TIMEOUT`],
 /// [`FIRST_FRAME_TIMEOUT`]), so a pass that spent its life waiting never reads as service.
 ///
-/// Public because it is also bounded from above, by a constant in another crate: a relay tears a
-/// forwarded stream down after its own idle deadline, and such a teardown must read as service —
-/// a keepalive path that goes quiet costs one reconnect per deadline, which is service, whereas
-/// classifying it as churn would park a working cross-host subscription at the ceiling below. The
-/// relation is asserted where both constants are visible, in `tddy-daemon`'s
-/// `livekit_peer_discovery`.
-pub const PASS_LONG_ENOUGH_TO_BE_SERVICE: Duration = Duration::from_secs(30);
+/// Declared in `tddy-service`, beside the `StreamSessionAgents` messages it paces, because it is a
+/// constant two other crates read: `tddy-daemon` bounds it from above and asserts the relation, and
+/// this module reconnects by it. Re-exported rather than restated — two spellings of one duration
+/// would drift silently, and the symptom would be a working cross-host subscription parked at the
+/// backoff ceiling.
+pub use tddy_service::session_agents::PASS_LONG_ENOUGH_TO_BE_SERVICE;
 
 /// Consecutive failures before the roster is declared unavailable and subagent calls are refused.
 ///
@@ -214,7 +213,7 @@ impl RosterMutability {
     /// a session that says nothing about its roster is one whose roster can change, which is the
     /// reading that refuses rather than the one that answers from a stale seed.
     fn declared_by_the_spawn_environment() -> Self {
-        match crate::mcp_primitives::env_non_empty(STATIC_ROSTER_ENV) {
+        match tddy_core::spawn_env::env_non_empty(STATIC_ROSTER_ENV) {
             Some(_) => Self::Static,
             None => Self::Live,
         }
