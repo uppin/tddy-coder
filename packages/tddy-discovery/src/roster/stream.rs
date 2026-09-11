@@ -15,7 +15,7 @@
 use std::time::{Duration, Instant};
 
 use prost::Message;
-use tddy_service::proto::connection::{SessionAgentRoster, StreamSessionAgentsRequest};
+use tddy_service::proto::session_agents_svc::{SessionAgentRoster, StreamSessionAgentsRequest};
 
 use tddy_session_tool_client::{
     detect_session_tool_transport, SessionToolEnvelope, SessionToolTransport,
@@ -459,7 +459,7 @@ async fn open_roster_stream(
         daemon_instance_id: envelope.daemon_instance_id,
     };
     let call = client.call_server_stream(
-        "connection.ConnectionService",
+        tddy_service::session_agents::SESSION_AGENT_SERVICE,
         "StreamSessionAgents",
         request.encode_to_vec(),
     );

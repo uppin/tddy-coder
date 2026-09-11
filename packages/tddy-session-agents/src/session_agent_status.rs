@@ -24,7 +24,8 @@ use std::sync::Mutex;
 use tddy_daemon_kernel::now_unix_ms;
 
 use tddy_core::session_activity::SessionActivityStatus;
-use tddy_service::proto::connection::{AgentCloneState, SessionAgentActivity, SessionAgentStatus};
+use tddy_service::proto::session_agents_svc::AgentCloneState;
+use tddy_service::proto::types::{SessionAgentActivity, SessionAgentStatus};
 
 /// How much of a summary line a roster entry carries.
 ///

@@ -3,9 +3,9 @@
 use prost::Message as _;
 use tddy_service::proto::connection::ExecuteToolRequest;
 
-use tddy_service::proto::connection::OpenAgentConversationResponse;
+use tddy_service::proto::session_agents_svc::OpenAgentConversationResponse;
 
-use tddy_service::proto::connection::OpenAgentConversationRequest;
+use tddy_service::proto::session_agents_svc::OpenAgentConversationRequest;
 
 use std::{path::Path, sync::Arc};
 
@@ -140,7 +140,7 @@ impl ConnectionServiceImpl {
         session_id: &str,
         record: &tddy_core::SessionAgentRecord,
     ) -> Result<(), Status> {
-        use tddy_service::proto::connection::AgentCloneState;
+        use tddy_service::proto::session_agents_svc::AgentCloneState;
         let clone = self
             .session_agent_clones
             .get(session_id, &record.daemon_instance_id);
@@ -210,7 +210,7 @@ impl ConnectionServiceImpl {
         let answered = crate::livekit_peer_discovery::forward_to_peer(
             slot,
             owner,
-            "connection.ConnectionService",
+            tddy_session_agents::SERVICE_NAME,
             "OpenAgentConversation",
             forwarded.encode_to_vec(),
         )

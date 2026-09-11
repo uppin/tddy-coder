@@ -1765,7 +1765,7 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
             // roster row can stop reporting UNSPECIFIED.
             report_local_conversation_state(
                 &agent_id,
-                tddy_service::proto::connection::SessionAgentStatus::Idle,
+                tddy_service::proto::types::SessionAgentStatus::Idle,
                 "conversation opened",
             )
             .await;
@@ -1940,7 +1940,7 @@ async fn subagent_cancel_tool(args: serde_json::Value) -> String {
         // in flight would be one nothing can ever finish.
         report_local_conversation_state(
             agent_id,
-            tddy_service::proto::connection::SessionAgentStatus::Idle,
+            tddy_service::proto::types::SessionAgentStatus::Idle,
             "conversation cancelled",
         )
         .await;
@@ -1962,7 +1962,7 @@ async fn subagent_list_tool(_args: serde_json::Value) -> String {
 /// telling the main agent it is idle would have it dispatch work to a row the daemon cannot
 /// currently account for.
 fn agent_status_word(status: i32) -> &'static str {
-    use tddy_service::proto::connection::SessionAgentStatus;
+    use tddy_service::proto::types::SessionAgentStatus;
     match SessionAgentStatus::try_from(status) {
         Ok(SessionAgentStatus::Idle) => "idle",
         Ok(SessionAgentStatus::Running) => "running",
@@ -1977,7 +1977,7 @@ fn agent_status_word(status: i32) -> &'static str {
 /// The clone state as a word. `local` is a state of its own, not a synonym for `ready`: there is no
 /// checkout behind a local agent, so saying "ready" would imply one exists.
 fn clone_state_word(state: i32) -> &'static str {
-    use tddy_service::proto::connection::AgentCloneState;
+    use tddy_service::proto::session_agents_svc::AgentCloneState;
     match AgentCloneState::try_from(state) {
         Ok(AgentCloneState::Local) => "local",
         Ok(AgentCloneState::Provisioning) => "provisioning",
@@ -2044,7 +2044,7 @@ const SUBAGENT_STATUS_MAX_WAIT_MS: u64 = 120_000;
 /// but only one of them is worth waiting through, so this is the wait's condition rather than
 /// promptability itself.
 fn readiness_is_settled(status: i32) -> bool {
-    use tddy_service::proto::connection::SessionAgentStatus as Status;
+    use tddy_service::proto::types::SessionAgentStatus as Status;
     match Status::try_from(status) {
         // The one state a later frame is expected to move out of: the checkout behind the agent is
         // still being built, which is precisely what the caller asked to be told about.

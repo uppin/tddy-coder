@@ -38,19 +38,16 @@ use tddy_session_agents::ports::{
     AdmittedAgent, AgentAdmission, AgentCatalog, AgentConversationPeers, AgentSessions,
     RosterBroadcast, SessionAgentPorts,
 };
-use tddy_session_agents::{roster_at_the_new_coordinate, SessionAgentServiceImpl};
+use tddy_session_agents::SessionAgentServiceImpl;
 use tddy_worktree_service::stream::MpscResultStream;
 
 use super::{agent_roster, seed_codebase, ConnectionServiceImpl};
 use crate::livekit_peer_discovery::local_instance_id_for_config;
 
-/// The coordinate a forwarded family-B call is addressed at on the peer.
-///
-/// TODO(session-agent-services): still `connection.ConnectionService`, because that is what every
-/// peer on the current release answers these nine on. Re-pointing it is the same milestone that
-/// cuts the old coordinate — doing it earlier would break a forward to any peer that has not been
-/// upgraded yet.
-const PEER_FAMILY_B_SERVICE: &str = "connection.ConnectionService";
+/// The coordinate a forwarded family-B call is addressed at on the peer — the same one this daemon
+/// serves, read from the crate that owns it so a forward cannot be addressed at a name nothing
+/// answers.
+const PEER_FAMILY_B_SERVICE: &str = tddy_session_agents::SERVICE_NAME;
 
 impl ConnectionServiceImpl {
     /// The `session_agents.SessionAgentService` entry this daemon registers.
@@ -61,7 +58,7 @@ impl ConnectionServiceImpl {
     #[must_use]
     pub fn session_agents_entry(&self) -> tddy_rpc::ServiceEntry {
         tddy_rpc::ServiceEntry {
-            name: "session_agents.SessionAgentService",
+            name: PEER_FAMILY_B_SERVICE,
             service: Arc::new(tddy_service::SessionAgentServiceServer::new(
                 self.session_agents_service(),
             )) as Arc<dyn tddy_rpc::RpcService>,
@@ -219,7 +216,7 @@ impl RosterBroadcast for TheSessionsOwnRoom {
     async fn broadcast(
         &self,
         session_id: &str,
-        roster: &tddy_service::proto::connection::SessionAgentRoster,
+        roster: &tddy_service::proto::session_agents_svc::SessionAgentRoster,
     ) {
         self.connection.broadcast_roster(session_id, roster).await;
     }
@@ -297,7 +294,7 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
     ) -> Result<(), Status> {
         self.connection
             .forward_open_agent_conversation(
-                &tddy_service::proto::connection::OpenAgentConversationRequest {
+                &tddy_service::proto::session_agents_svc::OpenAgentConversationRequest {
                     session_token: request.session_token.clone(),
                     session_id: request.session_id.clone(),
                     daemon_instance_id: owner.to_string(),
@@ -319,7 +316,7 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
         let slot = self
             .connection
             .common_room_slot("PromptAgentConversation")?;
-        let forwarded = tddy_service::proto::connection::PromptAgentConversationRequest {
+        let forwarded = tddy_service::proto::session_agents_svc::PromptAgentConversationRequest {
             session_token: request.session_token.clone(),
             session_id: request.session_id.clone(),
             daemon_instance_id: owner.to_string(),
@@ -333,17 +330,16 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
             "PromptAgentConversation",
             forwarded.encode_to_vec(),
             |bytes| {
-                tddy_service::proto::connection::AgentConversationChunk::decode(bytes.as_slice())
-                    .map_err(|e| {
-                        Status::internal(format!("decode AgentConversationChunk from peer: {e}"))
-                    })
+                tddy_service::proto::session_agents_svc::AgentConversationChunk::decode(
+                    bytes.as_slice(),
+                )
+                .map_err(|e| {
+                    Status::internal(format!("decode AgentConversationChunk from peer: {e}"))
+                })
             },
         )
         .await?;
-        Ok(mapped_stream(
-            peer,
-            conversation_chunk_at_the_new_coordinate,
-        ))
+        Ok(peer)
     }
 
     async fn cancel(
@@ -357,47 +353,6 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
             .forward_cancel_agent_conversation(session_token, session_id, owner, conversation_id)
             .await
     }
-}
-
-/// One conversation frame, re-addressed from the coordinate a peer still answers on to the one this
-/// service serves.
-///
-/// TODO(session-agent-services): retired with the old coordinate, once a peer answers
-/// `session_agents.SessionAgentService` directly.
-fn conversation_chunk_at_the_new_coordinate(
-    chunk: tddy_service::proto::connection::AgentConversationChunk,
-) -> AgentConversationChunk {
-    AgentConversationChunk {
-        content_chunk: chunk.content_chunk,
-        stop_reason: chunk.stop_reason,
-        last: chunk.last,
-    }
-}
-
-/// Relay one stream onto another frame type, preserving order and errors exactly.
-///
-/// A spawned task rather than a `Stream` combinator because the receiver is an mpsc channel the
-/// forwarding layer hands back, and the caller wants the same shape back. An error item terminates
-/// the relay after being delivered: it is the peer's own refusal, and a caller that saw frames and
-/// then nothing could not tell it from a truncation.
-fn mapped_stream<T, U>(
-    mut items: tokio::sync::mpsc::UnboundedReceiver<Result<T, Status>>,
-    convert: fn(T) -> U,
-) -> tokio::sync::mpsc::UnboundedReceiver<Result<U, Status>>
-where
-    T: Send + 'static,
-    U: Send + 'static,
-{
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
-        while let Some(item) = items.recv().await {
-            let failed = item.is_err();
-            if tx.send(item.map(convert)).is_err() || failed {
-                break;
-            }
-        }
-    });
-    rx
 }
 
 /// The crate's nine handlers, with the seven routed ones answered by the daemon that holds the
@@ -435,15 +390,14 @@ impl PeerRoutedSessionAgents {
     where
         Req: prost::Message,
     {
-        Ok(self
-            .connection
-            .rpc_served_by_peer::<Req, tddy_service::proto::connection::SessionAgentRoster>(
+        self.connection
+            .rpc_served_by_peer::<Req, tddy_service::proto::session_agents_svc::SessionAgentRoster>(
+                PEER_FAMILY_B_SERVICE,
                 rpc_name,
                 daemon_instance_id,
                 request,
             )
-            .await?
-            .map(roster_at_the_new_coordinate))
+            .await
     }
 }
 
@@ -460,7 +414,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
             .roster_from_peer(
                 "AttachSessionAgent",
                 &req.daemon_instance_id,
-                &tddy_service::proto::connection::AttachSessionAgentRequest {
+                &tddy_service::proto::session_agents_svc::AttachSessionAgentRequest {
                     session_token: req.session_token.clone(),
                     session_id: req.session_id.clone(),
                     daemon_instance_id: req.daemon_instance_id.clone(),
@@ -486,7 +440,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
             .roster_from_peer(
                 "DetachSessionAgent",
                 &req.daemon_instance_id,
-                &tddy_service::proto::connection::DetachSessionAgentRequest {
+                &tddy_service::proto::session_agents_svc::DetachSessionAgentRequest {
                     session_token: req.session_token.clone(),
                     session_id: req.session_id.clone(),
                     daemon_instance_id: req.daemon_instance_id.clone(),
@@ -512,7 +466,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
             .roster_from_peer(
                 "ListSessionAgents",
                 &req.daemon_instance_id,
-                &tddy_service::proto::connection::ListSessionAgentsRequest {
+                &tddy_service::proto::session_agents_svc::ListSessionAgentsRequest {
                     session_token: req.session_token.clone(),
                     session_id: req.session_id.clone(),
                     daemon_instance_id: req.daemon_instance_id.clone(),
@@ -537,11 +491,11 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         let req = request.get_ref();
         if let Some(rx) = self
             .connection
-            .stream_served_by_peer::<_, tddy_service::proto::connection::SessionAgentRoster>(
+            .stream_served_by_peer::<_, tddy_service::proto::session_agents_svc::SessionAgentRoster>(
                 PEER_FAMILY_B_SERVICE,
                 "StreamSessionAgents",
                 &req.daemon_instance_id,
-                &tddy_service::proto::connection::StreamSessionAgentsRequest {
+                &tddy_service::proto::session_agents_svc::StreamSessionAgentsRequest {
                     session_token: req.session_token.clone(),
                     session_id: req.session_id.clone(),
                     daemon_instance_id: req.daemon_instance_id.clone(),
@@ -549,10 +503,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
             )
             .await?
         {
-            return Ok(Response::new(MpscResultStream::from(mapped_stream(
-                rx,
-                roster_at_the_new_coordinate,
-            ))));
+            return Ok(Response::new(MpscResultStream::from(rx)));
         }
         self.local.stream_session_agents(request).await
     }
@@ -568,10 +519,11 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         let req = request.get_ref();
         if let Some(opened) = self
             .connection
-            .rpc_served_by_peer::<_, tddy_service::proto::connection::OpenAgentConversationResponse>(
+            .rpc_served_by_peer::<_, tddy_service::proto::session_agents_svc::OpenAgentConversationResponse>(
+                PEER_FAMILY_B_SERVICE,
                 "OpenAgentConversation",
                 &req.daemon_instance_id,
-                &tddy_service::proto::connection::OpenAgentConversationRequest {
+                &tddy_service::proto::session_agents_svc::OpenAgentConversationRequest {
                     session_token: req.session_token.clone(),
                     session_id: req.session_id.clone(),
                     daemon_instance_id: req.daemon_instance_id.clone(),
@@ -601,11 +553,11 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         let req = request.get_ref();
         if let Some(rx) = self
             .connection
-            .stream_served_by_peer::<_, tddy_service::proto::connection::AgentConversationChunk>(
+            .stream_served_by_peer::<_, tddy_service::proto::session_agents_svc::AgentConversationChunk>(
                 PEER_FAMILY_B_SERVICE,
                 "PromptAgentConversation",
                 &req.daemon_instance_id,
-                &tddy_service::proto::connection::PromptAgentConversationRequest {
+                &tddy_service::proto::session_agents_svc::PromptAgentConversationRequest {
                     session_token: req.session_token.clone(),
                     session_id: req.session_id.clone(),
                     daemon_instance_id: req.daemon_instance_id.clone(),
@@ -615,10 +567,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
             )
             .await?
         {
-            return Ok(Response::new(MpscResultStream::from(mapped_stream(
-                rx,
-                conversation_chunk_at_the_new_coordinate,
-            ))));
+            return Ok(Response::new(MpscResultStream::from(rx)));
         }
         self.local.prompt_agent_conversation(request).await
     }
@@ -633,10 +582,11 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         let req = request.get_ref();
         if self
             .connection
-            .rpc_served_by_peer::<_, tddy_service::proto::connection::CancelAgentConversationResponse>(
+            .rpc_served_by_peer::<_, tddy_service::proto::session_agents_svc::CancelAgentConversationResponse>(
+                PEER_FAMILY_B_SERVICE,
                 "CancelAgentConversation",
                 &req.daemon_instance_id,
-                &tddy_service::proto::connection::CancelAgentConversationRequest {
+                &tddy_service::proto::session_agents_svc::CancelAgentConversationRequest {
                     session_token: req.session_token.clone(),
                     session_id: req.session_id.clone(),
                     daemon_instance_id: req.daemon_instance_id.clone(),
@@ -671,10 +621,11 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         let req = request.get_ref();
         if self
             .connection
-            .rpc_served_by_peer::<_, tddy_service::proto::connection::ReportAgentConversationStateResponse>(
+            .rpc_served_by_peer::<_, tddy_service::proto::session_agents_svc::ReportAgentConversationStateResponse>(
+                PEER_FAMILY_B_SERVICE,
                 "ReportAgentConversationState",
                 &req.daemon_instance_id,
-                &tddy_service::proto::connection::ReportAgentConversationStateRequest {
+                &tddy_service::proto::session_agents_svc::ReportAgentConversationStateRequest {
                     session_token: req.session_token.clone(),
                     session_id: req.session_id.clone(),
                     daemon_instance_id: req.daemon_instance_id.clone(),

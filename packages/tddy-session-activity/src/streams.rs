@@ -105,7 +105,7 @@ pub async fn relay_agent_activity(
         match broadcast_rx.recv().await {
             Ok(record) => {
                 if tx
-                    .send(tddy_service::agent_activity_to_activity_proto(record))
+                    .send(tddy_service::agent_activity_to_proto(record))
                     .is_err()
                 {
                     break;

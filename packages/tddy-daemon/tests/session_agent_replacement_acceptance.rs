@@ -26,8 +26,11 @@ use tddy_discovery::subagent::normalize_replaced_tools;
 use tddy_rpc::{Code, Request};
 use tddy_sandbox_recipes::{build_claude_allowlist, build_claude_disallowlist};
 use tddy_service::proto::connection::{
-    AttachSessionAgentRequest, ConnectionService as ConnectionServiceTrait,
-    DetachSessionAgentRequest, ListSubagentsRequest, SessionAgentRoster,
+    ConnectionService as ConnectionServiceTrait, ListSubagentsRequest,
+};
+use tddy_service::proto::session_agents_svc::{
+    AttachSessionAgentRequest, DetachSessionAgentRequest, SessionAgentRoster,
+    SessionAgentService as _,
 };
 
 /// The session-action tools a `Shell`-replacing def used to be granted automatically.
@@ -50,6 +53,7 @@ struct RosteredSession {
 impl RosteredSession {
     async fn attach(&self, agent_id: &str) -> Result<SessionAgentRoster, tddy_rpc::Status> {
         self.service
+            .session_agents_service()
             .attach_session_agent(Request::new(AttachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
@@ -62,6 +66,7 @@ impl RosteredSession {
 
     async fn detach(&self, agent_id: &str) -> SessionAgentRoster {
         self.service
+            .session_agents_service()
             .detach_session_agent(Request::new(DetachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),

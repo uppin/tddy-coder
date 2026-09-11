@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
-import type { ConnectionService } from "../../gen/connection_pb";
+import type { ActivityService } from "../../gen/activity_pb";
 import { agentActivityRegistry } from "../sessions/agentActivityRegistry";
 
 /** Why a body lookup could not be answered. The hosts reserve `NOT_FOUND` for "no such
@@ -33,7 +33,7 @@ const MISSING_ID: AcpToolCallDetailState = { status: "error", kind: "missingId" 
 
 /**
  * Resolves one tool call's `raw_input`/`raw_output` through the unary
- * `ConnectionService.GetAcpToolCallDetail`, on open.
+ * `ActivityService.GetAcpToolCallDetail`, on open.
  *
  * `StreamAcpReplay` strips both bodies out of every streamed frame (so the transcript's size tracks
  * the *number* of tool calls, not the volume of their I/O), which leaves the transcript entry with
@@ -53,7 +53,7 @@ const MISSING_ID: AcpToolCallDetailState = { status: "error", kind: "missingId" 
 export function useAcpToolCallDetail(args: {
   sessionId: string;
   sessionToken: string;
-  client: Client<typeof ConnectionService>;
+  client: Client<typeof ActivityService>;
   /** The ACP `tool_call_id` of the call whose bodies to fetch (`ChatMessage.toolCallId`). Empty for a
    *  transcript entry that carried no id: nothing is requested and the state is `missingId`. */
   toolCallId: string;

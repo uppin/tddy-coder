@@ -11,9 +11,10 @@ use std::sync::Mutex;
 use tokio::sync::watch;
 
 use tddy_core::session_agent::AgentId;
-use tddy_service::proto::connection::{
-    AgentCloneState, SessionAgentEntry, SessionAgentRoster, SessionAgentStatus,
+use tddy_service::proto::session_agents_svc::{
+    AgentCloneState, SessionAgentEntry, SessionAgentRoster,
 };
+use tddy_service::proto::types::SessionAgentStatus;
 
 use crate::agent_def::SpecializedAgentDef;
 use crate::subagent::normalize_replaced_tools;

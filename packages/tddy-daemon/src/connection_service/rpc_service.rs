@@ -10,48 +10,28 @@ use tddy_service::proto::connection::start_session_event::Event as StartSessionE
 use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 use tddy_service::proto::connection::SessionEntry as ProtoSessionEntry;
 use tddy_service::proto::connection::{
-    AcpReplayFrame, AddPlannedPrRequest, AddPlannedPrResponse, GetAcpReplayPageRequest,
-    GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
-    GetPrStatusRequest, GetPrStatusResponse, GetWorktreeSnapshotRequest,
-    GetWorktreeSnapshotResponse, LinkStackNodeRequest, LinkStackNodeResponse,
-    MintLocalTokenRequest, MintLocalTokenResponse, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
-    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ResolveStackBaseRequest, ResolveStackBaseResponse,
-    SessionNotificationEvent as ProtoSessionNotificationEvent, StartSessionEvent,
-    StreamAcpReplayRequest,
+    AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
+    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, LinkStackNodeRequest,
+    LinkStackNodeResponse, MintLocalTokenRequest, MintLocalTokenResponse,
+    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
+    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
+    RepointPlannedPrResponse, ResolveStackBaseRequest, ResolveStackBaseResponse, StartSessionEvent,
 };
 use tddy_service::proto::connection::{
-    AgentActivityDeltaChunk, AgentActivityDeltaRequest, ExecuteToolRequest,
-    ProjectEntry as ProtoProjectEntry,
-};
-use tddy_service::proto::connection::{
-    AgentActivityRecord as ProtoAgentActivityRecord, StreamSessionNotificationsRequest,
-};
-use tddy_service::proto::connection::{
-    DemoVmState, GetDemoVmStatusRequest, GetDemoVmStatusResponse, ReportAgentActivityRequest,
-    ReportAgentActivityResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
-    StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
-    StreamSessionActivityRequest, ToolCallInfo as ProtoToolCallInfo,
+    DemoVmState, GetDemoVmStatusRequest, GetDemoVmStatusResponse, StartDemoVmRequest,
+    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, ToolCallInfo as ProtoToolCallInfo,
 };
 use tddy_service::proto::connection::{
     ExecuteToolChunk, ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
     ListSessionToolCallsResponse,
 };
+use tddy_service::proto::connection::{ExecuteToolRequest, ProjectEntry as ProtoProjectEntry};
 
 use crate::{
     connection_service::{activity_hub, agent_roster, hooks_and_urls, service_util},
     project_storage, session_deletion, session_list_enrichment, session_reader,
 };
 use tddy_spawn::{spawn_worker, spawner};
-
-use tddy_service::proto::activity::ActivityService as _;
-use tddy_service::proto::session_agents_svc::SessionAgentService as _;
-
-use super::svc_old_coordinate_shim::{
-    activity_record_at_the_old_coordinate, relayed_onto_this_coordinate,
-    roster_at_the_old_coordinate,
-};
 
 use super::base_sync_unavailable;
 
@@ -135,33 +115,11 @@ use tddy_service::proto::connection::ListSessionsResponse;
 
 use tddy_service::proto::connection::ListSessionsRequest;
 
-use tddy_service::proto::connection::CancelAgentConversationResponse;
-
-use tddy_service::proto::connection::CancelAgentConversationRequest;
-
-use tddy_service::proto::connection::PromptAgentConversationRequest;
-
-use tddy_service::proto::connection::AgentConversationChunk;
-
 use std::sync::Arc;
 
 use uuid::Uuid;
 
-use tddy_service::proto::connection::OpenAgentConversationResponse;
-
-use tddy_service::proto::connection::OpenAgentConversationRequest;
-
-use tddy_service::proto::connection::StreamSessionAgentsRequest;
-
 use super::MpscResultStream;
-
-use tddy_service::proto::connection::ListSessionAgentsRequest;
-
-use tddy_service::proto::connection::DetachSessionAgentRequest;
-
-use tddy_service::proto::connection::SessionAgentRoster;
-
-use tddy_service::proto::connection::AttachSessionAgentRequest;
 
 use tddy_service::proto::connection::SubagentInfo;
 
@@ -208,6 +166,11 @@ use tddy_service::proto::connection::ListToolsRequest;
 use tddy_rpc::Request;
 
 use super::ConnectionServiceImpl;
+
+/// The coordinate a forwarded call from *this* service is addressed at on the peer. A forward has
+/// to land on the same method of the same service there, and the four routed unaries below are the
+/// ones this service still declares.
+const CONNECTION_SERVICE: &str = "connection.ConnectionService";
 
 #[async_trait::async_trait]
 impl ConnectionServiceTrait for ConnectionServiceImpl {
@@ -385,230 +348,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
     // ── Session agent roster (docs/ft/daemon/session-agent-roster.md) ─────────────────────────
 
-    /// Attach one agent to a live session, or report the roster unchanged when it is already there.
-    ///
-    /// The order is the contract: the caller is authenticated, then the id is resolved, then the
-    /// session is checked for being able to enforce what the agent withdraws, then the roster is
-    /// written. Every step before the write is one that must not happen for a caller who turns out
-    /// not to be allowed — resolving a remote id contacts a peer and provisions a checkout on it
-    /// (PRD AC12).
-    /// Family B moved to `session_agents.SessionAgentService` in `#unbundle` node 7. This
-    /// coordinate keeps answering all nine by delegating to that surface — the routed one, so a
-    /// request naming another daemon is served there exactly as it was here.
-    ///
-    /// Every one of the nine below is this shape: re-address the request to the new coordinate,
-    /// hand it to [`ConnectionServiceImpl::session_agents_service`], and re-address the answer
-    /// back. The two messages are field-for-field identical, so the re-addressing is a relabelling
-    /// rather than a mapping; it exists only because the two coordinates are two generated types.
-    ///
-    /// TODO(session-agent-services): the whole block goes when this coordinate stops declaring
-    /// these nine rpcs, which is the next milestone. Nothing new should be added to it.
-    async fn attach_session_agent(
-        &self,
-        request: Request<AttachSessionAgentRequest>,
-    ) -> Result<Response<SessionAgentRoster>, Status> {
-        let req = request.into_inner();
-        let roster = self
-            .session_agents_surface()
-            .attach_session_agent(Request::new(
-                tddy_service::proto::session_agents_svc::AttachSessionAgentRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                    agent_id: req.agent_id,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(roster_at_the_old_coordinate(roster)))
-    }
-
-    async fn detach_session_agent(
-        &self,
-        request: Request<DetachSessionAgentRequest>,
-    ) -> Result<Response<SessionAgentRoster>, Status> {
-        let req = request.into_inner();
-        let roster = self
-            .session_agents_surface()
-            .detach_session_agent(Request::new(
-                tddy_service::proto::session_agents_svc::DetachSessionAgentRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                    agent_id: req.agent_id,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(roster_at_the_old_coordinate(roster)))
-    }
-
-    async fn list_session_agents(
-        &self,
-        request: Request<ListSessionAgentsRequest>,
-    ) -> Result<Response<SessionAgentRoster>, Status> {
-        let req = request.into_inner();
-        let roster = self
-            .session_agents_surface()
-            .list_session_agents(Request::new(
-                tddy_service::proto::session_agents_svc::ListSessionAgentsRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(roster_at_the_old_coordinate(roster)))
-    }
-
-    type StreamSessionAgentsStream = MpscResultStream<SessionAgentRoster>;
-
-    async fn stream_session_agents(
-        &self,
-        request: Request<StreamSessionAgentsRequest>,
-    ) -> Result<Response<Self::StreamSessionAgentsStream>, Status> {
-        let req = request.into_inner();
-        let frames = self
-            .session_agents_surface()
-            .stream_session_agents(Request::new(
-                tddy_service::proto::session_agents_svc::StreamSessionAgentsRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(relayed_onto_this_coordinate(
-            frames,
-            roster_at_the_old_coordinate,
-        )))
-    }
-
-    async fn open_agent_conversation(
-        &self,
-        request: Request<OpenAgentConversationRequest>,
-    ) -> Result<Response<OpenAgentConversationResponse>, Status> {
-        let req = request.into_inner();
-        let opened = self
-            .session_agents_surface()
-            .open_agent_conversation(Request::new(
-                tddy_service::proto::session_agents_svc::OpenAgentConversationRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                    agent_id: req.agent_id,
-                    conversation_id: req.conversation_id,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(OpenAgentConversationResponse {
-            conversation_id: opened.conversation_id,
-        }))
-    }
-
-    type PromptAgentConversationStream = MpscResultStream<AgentConversationChunk>;
-
-    async fn prompt_agent_conversation(
-        &self,
-        request: Request<PromptAgentConversationRequest>,
-    ) -> Result<Response<Self::PromptAgentConversationStream>, Status> {
-        let req = request.into_inner();
-        let frames = self
-            .session_agents_surface()
-            .prompt_agent_conversation(Request::new(
-                tddy_service::proto::session_agents_svc::PromptAgentConversationRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                    conversation_id: req.conversation_id,
-                    prompt: req.prompt,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(relayed_onto_this_coordinate(
-            frames,
-            |chunk: tddy_service::proto::session_agents_svc::AgentConversationChunk| {
-                AgentConversationChunk {
-                    content_chunk: chunk.content_chunk,
-                    stop_reason: chunk.stop_reason,
-                    last: chunk.last,
-                }
-            },
-        )))
-    }
-
-    async fn cancel_agent_conversation(
-        &self,
-        request: Request<CancelAgentConversationRequest>,
-    ) -> Result<Response<CancelAgentConversationResponse>, Status> {
-        let req = request.into_inner();
-        self.session_agents_surface()
-            .cancel_agent_conversation(Request::new(
-                tddy_service::proto::session_agents_svc::CancelAgentConversationRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                    conversation_id: req.conversation_id,
-                },
-            ))
-            .await?;
-        Ok(Response::new(CancelAgentConversationResponse {}))
-    }
-
-    async fn report_agent_clone_state(
-        &self,
-        request: Request<tddy_service::proto::connection::ReportAgentCloneStateRequest>,
-    ) -> Result<Response<tddy_service::proto::connection::ReportAgentCloneStateResponse>, Status>
-    {
-        let req = request.into_inner();
-        self.session_agents_surface()
-            .report_agent_clone_state(Request::new(
-                tddy_service::proto::session_agents_svc::ReportAgentCloneStateRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                    codebase_session_id: req.codebase_session_id,
-                    clone_state: req.clone_state,
-                    clone_error: req.clone_error,
-                    worktree_path: req.worktree_path,
-                    divergences: req.divergences,
-                },
-            ))
-            .await?;
-        Ok(Response::new(
-            tddy_service::proto::connection::ReportAgentCloneStateResponse {},
-        ))
-    }
-
-    async fn report_agent_conversation_state(
-        &self,
-        request: Request<tddy_service::proto::connection::ReportAgentConversationStateRequest>,
-    ) -> Result<
-        Response<tddy_service::proto::connection::ReportAgentConversationStateResponse>,
-        Status,
-    > {
-        let req = request.into_inner();
-        self.session_agents_surface()
-            .report_agent_conversation_state(Request::new(
-                tddy_service::proto::session_agents_svc::ReportAgentConversationStateRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                    agent_id: req.agent_id,
-                    status: req.status,
-                    summary: req.summary,
-                },
-            ))
-            .await?;
-        Ok(Response::new(
-            tddy_service::proto::connection::ReportAgentConversationStateResponse {},
-        ))
-    }
-
     async fn list_sessions(
         &self,
         request: Request<ListSessionsRequest>,
@@ -688,8 +427,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         // (docs/ft/daemon/agent-session-status.md). UNSPECIFIED with no activity is
                         // the honest value for a session nothing has been observed on, and stays the
                         // value for every session type that runs no agent.
-                        agent_status:
-                            tddy_service::proto::connection::SessionAgentStatus::Unspecified as i32,
+                        agent_status: tddy_service::proto::types::SessionAgentStatus::Unspecified
+                            as i32,
                         last_activity: None,
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
@@ -1663,47 +1402,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(DeleteSessionResponse { ok: true }))
     }
 
-    type StreamAgentActivityDeltaStream = MpscResultStream<AgentActivityDeltaChunk>;
-
-    /// Families M and N moved to `activity.ActivityService` in `#unbundle` node 7. This coordinate
-    /// keeps answering all eight by delegating to that surface — the routed one, so a request
-    /// naming another daemon is forwarded (or refused) there exactly as it was here.
-    ///
-    /// TODO(session-agent-services): the eight delegations go when this coordinate stops declaring
-    /// these rpcs, which is the next milestone. Nothing new should be added to them.
-    async fn stream_agent_activity_delta(
-        &self,
-        request: Request<AgentActivityDeltaRequest>,
-    ) -> Result<Response<Self::StreamAgentActivityDeltaStream>, Status> {
-        let req = request.into_inner();
-        let frames = self
-            .activity_surface()
-            .stream_agent_activity_delta(Request::new(
-                tddy_service::proto::activity::AgentActivityDeltaRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                    call_id: req.call_id,
-                    scope: req.scope,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(relayed_onto_this_coordinate(
-            frames,
-            |chunk: tddy_service::proto::activity::AgentActivityDeltaChunk| {
-                AgentActivityDeltaChunk {
-                    patch: chunk.patch,
-                    seq: chunk.seq,
-                    prev_seq: chunk.prev_seq,
-                    base_commit: chunk.base_commit,
-                    total_byte_size: chunk.total_byte_size,
-                    scoped_paths: chunk.scoped_paths,
-                }
-            },
-        )))
-    }
-
     async fn list_project_branches(
         &self,
         request: Request<ListProjectBranchesRequest>,
@@ -1779,7 +1477,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
         if let Some(answered) = self
-            .rpc_served_by_peer("ExecuteTool", &req.daemon_instance_id, &req)
+            .rpc_served_by_peer(
+                CONNECTION_SERVICE,
+                "ExecuteTool",
+                &req.daemon_instance_id,
+                &req,
+            )
             .await?
         {
             return Ok(Response::new(answered));
@@ -2039,51 +1742,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(ListSessionToolCallsResponse { tool_calls }))
     }
 
-    async fn report_session_status(
-        &self,
-        request: Request<ReportSessionStatusRequest>,
-    ) -> Result<Response<ReportSessionStatusResponse>, Status> {
-        let req = request.into_inner();
-        let answer = self
-            .activity_surface()
-            .report_session_status(Request::new(
-                tddy_service::proto::activity::ReportSessionStatusRequest {
-                    session_id: req.session_id,
-                    hook_token: req.hook_token,
-                    os_user: req.os_user,
-                    status: req.status,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(ReportSessionStatusResponse { ok: answer.ok }))
-    }
-
-    async fn report_agent_activity(
-        &self,
-        request: Request<ReportAgentActivityRequest>,
-    ) -> Result<Response<ReportAgentActivityResponse>, Status> {
-        let req = request.into_inner();
-        let answer = self
-            .activity_surface()
-            .report_agent_activity(Request::new(
-                tddy_service::proto::activity::ReportAgentActivityRequest {
-                    session_id: req.session_id,
-                    hook_token: req.hook_token,
-                    os_user: req.os_user,
-                    event: req.event,
-                    tool_name: req.tool_name,
-                    input_json: req.input_json,
-                    result_json: req.result_json,
-                    is_error: req.is_error,
-                    error_message: req.error_message,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(ReportAgentActivityResponse { ok: answer.ok }))
-    }
-
     async fn start_demo_vm(
         &self,
         request: Request<StartDemoVmRequest>,
@@ -2313,140 +1971,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
     // --- agent activity ---
 
-    type StreamSessionActivityStream = MpscResultStream<ProtoAgentActivityRecord>;
-
-    async fn stream_session_activity(
-        &self,
-        request: Request<StreamSessionActivityRequest>,
-    ) -> Result<Response<Self::StreamSessionActivityStream>, Status> {
-        let req = request.into_inner();
-        let frames = self
-            .activity_surface()
-            .stream_session_activity(Request::new(
-                tddy_service::proto::activity::StreamSessionActivityRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                    mode: req.mode,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(relayed_onto_this_coordinate(
-            frames,
-            activity_record_at_the_old_coordinate,
-        )))
-    }
-
-    type StreamSessionNotificationsStream = MpscResultStream<ProtoSessionNotificationEvent>;
-
-    async fn stream_session_notifications(
-        &self,
-        request: Request<StreamSessionNotificationsRequest>,
-    ) -> Result<Response<Self::StreamSessionNotificationsStream>, Status> {
-        let req = request.into_inner();
-        let frames = self
-            .activity_surface()
-            .stream_session_notifications(Request::new(
-                tddy_service::proto::activity::StreamSessionNotificationsRequest {
-                    session_token: req.session_token,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(relayed_onto_this_coordinate(
-            frames,
-            |event: tddy_service::proto::activity::SessionNotificationEvent| {
-                ProtoSessionNotificationEvent {
-                    session_id: event.session_id,
-                    label: event.label,
-                    kind: event.kind,
-                    source: event.source,
-                    text: event.text,
-                    at_unix_ms: event.at_unix_ms,
-                }
-            },
-        )))
-    }
-
-    type StreamAcpReplayStream = MpscResultStream<AcpReplayFrame>;
-
-    async fn stream_acp_replay(
-        &self,
-        request: Request<StreamAcpReplayRequest>,
-    ) -> Result<Response<Self::StreamAcpReplayStream>, Status> {
-        let req = request.into_inner();
-        let frames = self
-            .activity_surface()
-            .stream_acp_replay(Request::new(
-                tddy_service::proto::activity::StreamAcpReplayRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                    mode: req.mode,
-                    page_size: req.page_size,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(relayed_onto_this_coordinate(
-            frames,
-            |frame: tddy_service::proto::activity::AcpReplayFrame| AcpReplayFrame {
-                acp_agent_message: frame.acp_agent_message,
-                activity_count: frame.activity_count,
-                seq: frame.seq,
-            },
-        )))
-    }
-
-    async fn get_acp_tool_call_detail(
-        &self,
-        request: Request<GetAcpToolCallDetailRequest>,
-    ) -> Result<Response<GetAcpToolCallDetailResponse>, Status> {
-        let req = request.into_inner();
-        let answer = self
-            .activity_surface()
-            .get_acp_tool_call_detail(Request::new(
-                tddy_service::proto::activity::GetAcpToolCallDetailRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                    tool_call_id: req.tool_call_id,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(GetAcpToolCallDetailResponse {
-            raw_input: answer.raw_input,
-            raw_output: answer.raw_output,
-        }))
-    }
-
-    async fn get_acp_replay_page(
-        &self,
-        request: Request<GetAcpReplayPageRequest>,
-    ) -> Result<Response<GetAcpReplayPageResponse>, Status> {
-        let req = request.into_inner();
-        let answer = self
-            .activity_surface()
-            .get_acp_replay_page(Request::new(
-                tddy_service::proto::activity::GetAcpReplayPageRequest {
-                    session_token: req.session_token,
-                    session_id: req.session_id,
-                    daemon_instance_id: req.daemon_instance_id,
-                    before_seq: req.before_seq,
-                    page_size: req.page_size,
-                },
-            ))
-            .await?
-            .into_inner();
-        Ok(Response::new(GetAcpReplayPageResponse {
-            frames: answer.frames,
-            first_seq: answer.first_seq,
-            at_oldest: answer.at_oldest,
-        }))
-    }
-
     // --- PR-Stack Chat Screen: manually adding a planned PR ---
 
     /// Append a manually-created planned PR to a "pr-stack" orchestrator session's stack,
@@ -2564,7 +2088,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // checkout by addressing the codebase daemon. Sharing the classifier and the forward keeps
         // one answer to "which daemon owns this session's files".
         if let Some(answered) = self
-            .rpc_served_by_peer("GetWorktreeSnapshot", &req.daemon_instance_id, &req)
+            .rpc_served_by_peer(
+                CONNECTION_SERVICE,
+                "GetWorktreeSnapshot",
+                &req.daemon_instance_id,
+                &req,
+            )
             .await?
         {
             return Ok(Response::new(answered));
@@ -2773,7 +2302,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let req = request.into_inner();
 
         if let Some(answered) = self
-            .rpc_served_by_peer("ResolveStackBase", &req.daemon_instance_id, &req)
+            .rpc_served_by_peer(
+                CONNECTION_SERVICE,
+                "ResolveStackBase",
+                &req.daemon_instance_id,
+                &req,
+            )
             .await?
         {
             return Ok(Response::new(answered));
@@ -2847,7 +2381,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let req = request.into_inner();
 
         if let Some(answered) = self
-            .rpc_served_by_peer("LinkStackNode", &req.daemon_instance_id, &req)
+            .rpc_served_by_peer(
+                CONNECTION_SERVICE,
+                "LinkStackNode",
+                &req.daemon_instance_id,
+                &req,
+            )
             .await?
         {
             return Ok(Response::new(answered));

@@ -129,7 +129,7 @@ pub trait RosterBroadcast: Send + Sync {
     async fn broadcast(
         &self,
         session_id: &str,
-        roster: &tddy_service::proto::connection::SessionAgentRoster,
+        roster: &tddy_service::proto::session_agents_svc::SessionAgentRoster,
     );
 }
 

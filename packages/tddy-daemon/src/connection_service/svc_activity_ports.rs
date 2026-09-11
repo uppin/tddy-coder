@@ -38,14 +38,9 @@ use crate::livekit_peer_discovery::PeerRoute;
 /// The coordinate a forward is addressed at on the peer. A forwarded call has to land on the same
 /// method of the same service there, which is where the peer declares these eight.
 ///
-/// TODO(session-agent-services): the two unary forwards below still address
-/// `connection.ConnectionService`, because that is what every peer on the current release answers
-/// on. Re-pointing them is the same milestone that cuts the old coordinate — doing it earlier would
-/// break a forward to any peer that has not been upgraded yet.
-const ACTIVITY_SERVICE: &str = "activity.ActivityService";
-
-/// The coordinate a peer still answers a forwarded unary activity call on.
-const CONNECTION_SERVICE: &str = "connection.ConnectionService";
+/// Read from `tddy-service` so the entry this daemon mounts, the peer it forwards to and every
+/// out-of-process subscriber are named from one place.
+const ACTIVITY_SERVICE: &str = tddy_service::session_activity::ACTIVITY_SERVICE;
 
 impl ConnectionServiceImpl {
     /// The `activity.ActivityService` entry this daemon registers.
@@ -241,7 +236,7 @@ impl PeerRoutedActivity {
         let answered = crate::livekit_peer_discovery::forward_to_peer(
             slot,
             peer,
-            CONNECTION_SERVICE,
+            ACTIVITY_SERVICE,
             rpc_name,
             request.encode_to_vec(),
         )
@@ -337,10 +332,10 @@ impl ActivityService for PeerRoutedActivity {
         let req = request.get_ref();
         if let Some(peer) = self.forward_target("GetAcpToolCallDetail", &req.daemon_instance_id)? {
             let answer = self
-                .forwarded::<_, tddy_service::proto::connection::GetAcpToolCallDetailResponse>(
+                .forwarded::<_, tddy_service::proto::activity::GetAcpToolCallDetailResponse>(
                     "GetAcpToolCallDetail",
                     &peer,
-                    &tddy_service::proto::connection::GetAcpToolCallDetailRequest {
+                    &tddy_service::proto::activity::GetAcpToolCallDetailRequest {
                         session_token: req.session_token.clone(),
                         session_id: req.session_id.clone(),
                         daemon_instance_id: req.daemon_instance_id.clone(),
@@ -364,10 +359,10 @@ impl ActivityService for PeerRoutedActivity {
         let req = request.get_ref();
         if let Some(peer) = self.forward_target("GetAcpReplayPage", &req.daemon_instance_id)? {
             let answer = self
-                .forwarded::<_, tddy_service::proto::connection::GetAcpReplayPageResponse>(
+                .forwarded::<_, tddy_service::proto::activity::GetAcpReplayPageResponse>(
                     "GetAcpReplayPage",
                     &peer,
-                    &tddy_service::proto::connection::GetAcpReplayPageRequest {
+                    &tddy_service::proto::activity::GetAcpReplayPageRequest {
                         session_token: req.session_token.clone(),
                         session_id: req.session_id.clone(),
                         daemon_instance_id: req.daemon_instance_id.clone(),

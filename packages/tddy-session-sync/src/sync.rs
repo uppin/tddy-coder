@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use prost::Message as _;
 use tddy_livekit::RpcClient;
-use tddy_service::proto::connection::{
+use tddy_service::proto::activity::{
     AgentActivityDeltaChunk, AgentActivityDeltaRequest, AgentActivityRecord, DeltaScope,
 };
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
@@ -34,7 +34,9 @@ use crate::credentials::{Credentials, DaemonToken};
 use crate::mirror::{Mirror, MirrorError, MirrorMarker};
 
 /// The service the delta stream is served by, in the session's room.
-const CONNECTION_SERVICE: &str = "connection.ConnectionService";
+/// The coordinate `StreamAgentActivityDelta` is served at, read from `tddy-service` so this
+/// subscriber and the daemon serving it cannot disagree about the name.
+const ACTIVITY_SERVICE: &str = tddy_service::session_activity::ACTIVITY_SERVICE;
 const STREAM_DELTA_METHOD: &str = "StreamAgentActivityDelta";
 
 /// The git transport that already exists: `GIT_SSH_COMMAND` looked up on `PATH`, exactly as
@@ -694,7 +696,7 @@ impl Syncer {
         let mut frames = self
             .client
             .call_server_stream(
-                CONNECTION_SERVICE,
+                ACTIVITY_SERVICE,
                 STREAM_DELTA_METHOD,
                 request.encode_to_vec(),
             )

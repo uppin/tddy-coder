@@ -42,11 +42,12 @@ const MAIN_TERMINAL_ID: &str = "main";
 ///
 /// Also forwards the roster and conversation RPCs — `StreamSessionAgents`,
 /// `OpenAgentConversation`, `PromptAgentConversation`, `CancelAgentConversation` and
-/// `ReportAgentConversationState` — to the
+/// `ReportAgentConversationState`, the five
+/// `tddy_service::session_agents::IN_JAIL_RELAYABLE` names — to the
 /// facilitating daemon over the `SessionChannel`, multiplexed by `request_id` so a
 /// lifetime-long `StreamSessionAgents` shares the channel with the tool calls behind it. The
 /// host side (`run_host_relay_with_rpc`) dispatches them to its `HostRpcHandler`, which the
-/// daemon implements over its `ConnectionServiceImpl`. `ExecuteTool` still rides the
+/// daemon implements over its family-B surface. `ExecuteTool` still rides the
 /// poll-gated `ToolRequest`/`ToolResponse` pair (one at a time, as it was built for); the new
 /// RPCs ride `RpcRequest`/`RpcStreamFrame` on the outbound stream directly, the way tunnel
 /// frames do, so they never block a tool call.
@@ -78,22 +79,17 @@ impl tddy_rpc::RpcService for ToolExecService {
             return tddy_rpc::RpcResult::Unary(Ok(resp.encode_to_vec()));
         }
         // The roster and conversation RPCs live on the facilitating daemon's
-        // `ConnectionService`, not on the runner — forward them over the `SessionChannel` as a
-        // multiplexed `RpcRequest` and hand the caller the response stream. `StreamSessionAgents`
-        // and `PromptAgentConversation` are server streams (held for the turn / the process
-        // lifetime); `OpenAgentConversation` and `CancelAgentConversation` are unary. The runner
-        // does not know which is which, and does not need to: a unary RPC is a stream that ends
-        // after one frame, and the caller drains the receiver the same way either way.
-        const FORWARDED_RPCS: &[(&str, &str)] = &[
-            ("connection.ConnectionService", "StreamSessionAgents"),
-            ("connection.ConnectionService", "OpenAgentConversation"),
-            ("connection.ConnectionService", "PromptAgentConversation"),
-            ("connection.ConnectionService", "CancelAgentConversation"),
-            (
-                "connection.ConnectionService",
-                "ReportAgentConversationState",
-            ),
-        ];
+        // `session_agents.SessionAgentService`, not on the runner — forward them over the
+        // `SessionChannel` as a multiplexed `RpcRequest` and hand the caller the response stream.
+        // `StreamSessionAgents` and `PromptAgentConversation` are server streams (held for the turn
+        // / the process lifetime); `OpenAgentConversation` and `CancelAgentConversation` are unary.
+        // The runner does not know which is which, and does not need to: a unary RPC is a stream
+        // that ends after one frame, and the caller drains the receiver the same way either way.
+        //
+        // Read from `tddy-service` rather than spelled out here, so this allowlist and the
+        // coordinate the daemon actually serves cannot drift: a tuple naming a service nobody
+        // answers fails *closed*, silently, at runtime.
+        const FORWARDED_RPCS: &[(&str, &str)] = &tddy_service::session_agents::IN_JAIL_RELAYABLE;
         if !FORWARDED_RPCS
             .iter()
             .any(|(s, m)| (*s == service) && (*m == method))

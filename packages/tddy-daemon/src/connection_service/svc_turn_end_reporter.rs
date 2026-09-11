@@ -10,7 +10,7 @@ use crate::{
     connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
 };
 
-use tddy_service::proto::connection::CancelAgentConversationRequest;
+use tddy_service::proto::session_agents_svc::CancelAgentConversationRequest;
 
 use tddy_rpc::Status;
 
@@ -29,7 +29,7 @@ impl ConnectionServiceImpl {
         crate::livekit_peer_discovery::forward_to_peer(
             slot,
             daemon_instance_id,
-            "connection.ConnectionService",
+            tddy_session_agents::SERVICE_NAME,
             "CancelAgentConversation",
             CancelAgentConversationRequest {
                 // The detaching caller's own token: the peer authenticates a cancel exactly as it

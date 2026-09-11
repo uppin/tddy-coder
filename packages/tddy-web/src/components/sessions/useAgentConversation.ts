@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ConnectError, type Client } from "@connectrpc/connect";
-import type { ConnectionService } from "../../gen/connection_pb";
+import type { SessionAgentService } from "../../gen/session_agents_pb";
 import {
   appendAnswerChunk,
   appendOperatorTurn,
@@ -18,10 +18,10 @@ import {
  * Feature: docs/ft/web/session-drawer.md § Add agent; invariants: packages/tddy-web/docs/session-agent-conversation.md.
  */
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type SessionAgentClient = Client<typeof SessionAgentService>;
 
 export interface AgentConversationParams {
-  readonly client: ConnectionClient;
+  readonly client: SessionAgentClient;
   readonly sessionToken: string;
   readonly sessionId: string;
   /** The daemon facilitating the session — it owns the roster and routes to the agent's host. */

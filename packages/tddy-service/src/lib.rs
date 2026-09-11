@@ -4,6 +4,12 @@
 //! clients send UserIntent, receive PresenterView events.
 //! Also provides EchoServiceImpl and TerminalServiceVirtualTui for LiveKit/gRPC terminal streaming.
 
+// The tonic adapters `tddy-codegen` emits convert a refusal through `to_tonic_status` /
+// `to_rpc_status` reached as `tddy_service::…`, which is the one such pair in the workspace and
+// deliberately not configurable. Adapters generated *into this crate* — node 7's two — therefore
+// need the crate to be nameable from inside itself.
+extern crate self as tddy_service;
+
 pub mod acp_replay;
 pub mod codex_oauth_scan;
 pub mod codex_oauth_validate;
@@ -133,6 +139,29 @@ pub mod proto {
     pub mod activity {
         include!(concat!(env!("OUT_DIR"), "/activity.rs"));
     }
+
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `session_agents.proto`, sharing
+    /// [`session_agents_svc`]'s message types via `extern_path`.
+    ///
+    /// In its own module because tonic-build emits a `SessionAgentService` trait of its own: the
+    /// two flavors share the proto's name and would collide in one namespace. The generated
+    /// `SessionAgentServiceTonicAdapter` beside the tddy-rpc trait reaches this one through
+    /// `session_agent_service_server::SessionAgentService`, which is what lets the daemon serve one
+    /// implementation on its local Unix socket and on every other transport at once.
+    pub mod tonic_session_agents {
+        #![allow(unused_imports, clippy::all)]
+        include!(concat!(
+            env!("OUT_DIR"),
+            "/tonic_session_agents/session_agents.rs"
+        ));
+    }
+
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `activity.proto`. Same shape and
+    /// same reason as [`tonic_session_agents`].
+    pub mod tonic_activity {
+        #![allow(unused_imports, clippy::all)]
+        include!(concat!(env!("OUT_DIR"), "/tonic_activity/activity.rs"));
+    }
     /// `RemoteGitService`: a daemon project served as a git remote. See
     /// `docs/ft/daemon/remote-git-repo.md`.
     #[allow(unused_imports, unused_variables)]
@@ -258,39 +287,16 @@ fn json_to_prost_value(value: &serde_json::Value) -> prost_types::Value {
 }
 
 /// Map a durable [`tddy_core::agent_activity::AgentActivityRecord`] onto its protobuf wire form
-/// [`proto::connection::AgentActivityRecord`].
+/// [`proto::activity::AgentActivityRecord`].
+///
+/// `activity.ActivityService` is the record's one coordinate since `#unbundle` node 7 moved
+/// `StreamSessionActivity` there, so there is one such mapping again rather than two carrying
+/// identical fields onto two generated types.
 ///
 /// The structured `input` / `result` JSON values are carried as `google.protobuf.Value` via
 /// [`json_to_proto_value`], so a top-level `Null` leaves the corresponding proto field unset.
 /// All scalar fields are copied through verbatim.
 pub fn agent_activity_to_proto(
-    record: tddy_core::agent_activity::AgentActivityRecord,
-) -> proto::connection::AgentActivityRecord {
-    proto::connection::AgentActivityRecord {
-        call_id: record.call_id,
-        tool_name: record.tool_name,
-        input: json_to_proto_value(&record.input),
-        status: record.status,
-        result: json_to_proto_value(&record.result),
-        error_message: record.error_message,
-        started_unix_ms: record.started_unix_ms,
-        completed_unix_ms: record.completed_unix_ms,
-        source: record.source,
-        head_commit: record.head_commit,
-        activity_seq: record.activity_seq,
-        changed_paths: record.changed_paths,
-    }
-}
-
-/// Map a durable [`tddy_core::agent_activity::AgentActivityRecord`] onto
-/// [`proto::activity::AgentActivityRecord`] — the same record at the coordinate `#unbundle` node 7
-/// moved `StreamSessionActivity` to.
-///
-/// A second function rather than a conversion from the `connection` form, because the two are
-/// distinct generated types carrying identical fields: going through `connection` would make every
-/// record on the new coordinate pay for a form it never uses, and would tie the new schema's shape
-/// to the old one's at exactly the moment the old one is being retired.
-pub fn agent_activity_to_activity_proto(
     record: tddy_core::agent_activity::AgentActivityRecord,
 ) -> proto::activity::AgentActivityRecord {
     proto::activity::AgentActivityRecord {

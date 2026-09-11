@@ -29,8 +29,8 @@ use tddy_service::proto::session_agents_svc::{
     CancelAgentConversationResponse, DetachSessionAgentRequest, ListSessionAgentsRequest,
     OpenAgentConversationRequest, OpenAgentConversationResponse, PromptAgentConversationRequest,
     ReportAgentCloneStateRequest, ReportAgentCloneStateResponse,
-    ReportAgentConversationStateRequest, ReportAgentConversationStateResponse, SessionAgentEntry,
-    SessionAgentRoster, StreamSessionAgentsRequest,
+    ReportAgentConversationStateRequest, ReportAgentConversationStateResponse, SessionAgentRoster,
+    StreamSessionAgentsRequest,
 };
 use tddy_service::SessionAgentServiceServer;
 use tddy_worktree_service::stream::MpscResultStream;
@@ -193,52 +193,6 @@ pub fn agent_conversation_frames(content: &str, stop_reason: &str) -> Vec<AgentC
     frames
 }
 
-/// One roster snapshot, re-addressed from the coordinate the stores build to the one this service
-/// serves.
-///
-/// The two messages are field-for-field identical — `session_agents.proto` imports
-/// `types.proto` for the two `ListSessions` also reaches, where `connection.proto` declares its
-/// own copies — so this is a re-labelling rather than a mapping. It exists because the stores still
-/// build the `connection` form: `ListSessions` (family C, which stays in the daemon) reports the
-/// same rows through `SessionEntry`, and the `session.agents` room broadcast carries the same
-/// message to clients that have not moved yet.
-///
-/// TODO(session-agent-services): retire this once the old coordinate is cut and the stores build
-/// `session_agents.SessionAgentRoster` directly. It is a copy of every entry on every snapshot,
-/// which a `StreamSessionAgents` keepalive pays for on its cadence.
-#[must_use]
-pub fn roster_at_the_new_coordinate(
-    roster: tddy_service::proto::connection::SessionAgentRoster,
-) -> SessionAgentRoster {
-    SessionAgentRoster {
-        session_id: roster.session_id,
-        rev: roster.rev,
-        agents: roster
-            .agents
-            .into_iter()
-            .map(|agent| SessionAgentEntry {
-                agent_id: agent.agent_id,
-                name: agent.name,
-                daemon_instance_id: agent.daemon_instance_id,
-                label: agent.label,
-                model: agent.model,
-                replaces: agent.replaces,
-                tools: agent.tools,
-                codebase_session_id: agent.codebase_session_id,
-                clone_state: agent.clone_state,
-                clone_error: agent.clone_error,
-                status: agent.status,
-                last_activity: agent.last_activity.map(|activity| {
-                    tddy_service::proto::types::SessionAgentActivity {
-                        at_unix_ms: activity.at_unix_ms,
-                        summary: activity.summary,
-                    }
-                }),
-            })
-            .collect(),
-    }
-}
-
 #[async_trait]
 impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAgentServiceImpl {
     /// Attach one agent to a session's live roster.
@@ -298,7 +252,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             roster.agents.len(),
             roster.rev
         );
-        Ok(Response::new(roster_at_the_new_coordinate(roster)))
+        Ok(Response::new(roster))
     }
 
     /// Detach one agent. An id the roster does not hold is `NOT_FOUND`, never a silent success.
@@ -387,7 +341,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             roster.agents.len(),
             roster.rev
         );
-        Ok(Response::new(roster_at_the_new_coordinate(roster)))
+        Ok(Response::new(roster))
     }
 
     async fn list_session_agents(
@@ -397,7 +351,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
         let roster = self.ports.rosters.snapshot(&req.session_id, &session_dir)?;
-        Ok(Response::new(roster_at_the_new_coordinate(roster)))
+        Ok(Response::new(roster))
     }
 
     type StreamSessionAgentsStream = MpscResultStream<SessionAgentRoster>;
@@ -424,7 +378,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         // [`crate::ports::SessionAgentPorts::roster_keepalive`]. It tracks the last frame *sent*
         // rather than the opening snapshot, so a subscriber that reads only a keepalive is never
         // told a superseded roster is the current one.
-        let mut last_sent = roster_at_the_new_coordinate(snapshot);
+        let mut last_sent = snapshot;
         if tx.send(Ok(last_sent.clone())).is_err() {
             return Err(Status::internal(
                 "StreamSessionAgents: the subscriber went away before its first frame",
@@ -436,7 +390,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             loop {
                 match tokio::time::timeout(keepalive, published.recv()).await {
                     Ok(Ok(roster)) => {
-                        last_sent = roster_at_the_new_coordinate(roster);
+                        last_sent = roster;
                         if tx.send(Ok(last_sent.clone())).is_err() {
                             break;
                         }
@@ -764,8 +718,9 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
         // An unrecognised state number becomes `Unspecified`, which the store's own checks refuse.
         // Defaulting it to a real state would let a garbled report mark a checkout ready.
-        let state = tddy_service::proto::connection::AgentCloneState::try_from(req.clone_state)
-            .unwrap_or(tddy_service::proto::connection::AgentCloneState::Unspecified);
+        let state =
+            tddy_service::proto::session_agents_svc::AgentCloneState::try_from(req.clone_state)
+                .unwrap_or(tddy_service::proto::session_agents_svc::AgentCloneState::Unspecified);
         self.ports
             .clones
             .record_report(&crate::session_agent_clone::AgentCloneReport {
@@ -854,8 +809,8 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             )));
         }
 
-        let status = tddy_service::proto::connection::SessionAgentStatus::try_from(req.status)
-            .unwrap_or(tddy_service::proto::connection::SessionAgentStatus::Unspecified);
+        let status = tddy_service::proto::types::SessionAgentStatus::try_from(req.status)
+            .unwrap_or(tddy_service::proto::types::SessionAgentStatus::Unspecified);
         let state = crate::session_agent_status::reported_state(status).ok_or_else(|| {
             Status::invalid_argument(format!(
                 "{status:?} is not a conversation state: CONNECTING and ERROR describe the \

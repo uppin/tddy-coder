@@ -12,18 +12,14 @@
  * The handlers are exported separately from the backend for the same reason the roster fake's are:
  * Connect's router fills every method a service implementation omits with an `Unimplemented`
  * handler, so a screen-level backend must spread them into its ONE
- * `.implement(ConnectionService, …)` call rather than registering the service twice.
+ * `.implement(SessionAgentService, …)` call rather than registering the service twice.
  */
 
 import { Code, ConnectError, type ServiceImpl } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import {
-  AgentConversationChunkSchema,
-  CancelAgentConversationResponseSchema,
-  ConnectionService,
-  OpenAgentConversationResponseSchema,
-} from "../../../src/gen/connection_pb";
+import { SessionAgentService } from "../../../src/gen/session_agents_pb";
+import { AgentConversationChunkSchema, CancelAgentConversationResponseSchema, OpenAgentConversationResponseSchema } from "../../../src/gen/session_agents_pb";
 
 /** What `OpenAgentConversation` was asked for — the routing half of the call plus who it names. */
 export interface OpenedConversation {
@@ -83,7 +79,7 @@ export interface AgentConversationControls {
 }
 
 export interface AgentConversationFake extends AgentConversationControls {
-  handlers: Partial<ServiceImpl<typeof ConnectionService>>;
+  handlers: Partial<ServiceImpl<typeof SessionAgentService>>;
 }
 
 export interface AgentConversationBackend extends AgentConversationControls {
@@ -105,7 +101,7 @@ export function anAgentConversationFake(
         })
       : null;
 
-  const handlers: Partial<ServiceImpl<typeof ConnectionService>> = {
+  const handlers: Partial<ServiceImpl<typeof SessionAgentService>> = {
     async openAgentConversation(req) {
       if (scenario.openFails !== undefined) {
         throw new ConnectError(scenario.openFails, Code.FailedPrecondition);
@@ -175,7 +171,7 @@ export function anAgentConversationBackend(
 ): AgentConversationBackend {
   const { handlers, ...controls } = anAgentConversationFake(scenario);
   return {
-    backend: anInMemoryRpcBackend().implement(ConnectionService, handlers),
+    backend: anInMemoryRpcBackend().implement(SessionAgentService, handlers),
     ...controls,
   };
 }

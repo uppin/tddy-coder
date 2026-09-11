@@ -32,9 +32,8 @@ use crate::user_sessions_path::projects_path_for_user;
 use crate::workspace_session;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
 use tddy_daemon_livekit::session_room::ActivityDelta;
-use tddy_service::proto::connection::{
-    AgentActivityDeltaChunk, ExecuteToolChunk, ExecuteToolResponse,
-};
+use tddy_service::proto::activity::AgentActivityDeltaChunk;
+use tddy_service::proto::connection::{ExecuteToolChunk, ExecuteToolResponse};
 use tddy_spawn::spawn_worker;
 use tddy_spawn::spawner::{self};
 use tddy_task::TaskRegistry;
@@ -56,9 +55,8 @@ use tddy_rpc::Request;
 use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 #[cfg(test)]
 use tddy_service::proto::connection::{
-    AddPlannedPrRequest, ExecuteToolRequest, GetAcpToolCallDetailRequest, ListProjectsRequest,
-    ReportAgentActivityRequest, Signal, SignalSessionRequest, StartSessionRequest,
-    StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
+    AddPlannedPrRequest, ExecuteToolRequest, ListProjectsRequest, Signal, SignalSessionRequest,
+    StartSessionRequest,
 };
 
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
@@ -1169,10 +1167,13 @@ mod svc_activity_ports;
 /// reads, and the routing the daemon keeps. `#unbundle` node 7.
 mod svc_session_agent_ports;
 
-/// What keeps `connection.ConnectionService` answering the 17 methods node 7 moved: two surface
-/// accessors and four relabellings, deleted with the old coordinate.
-mod svc_old_coordinate_shim;
 pub use svc_session_files_ports::PeerRoutedSessionFiles;
+
+/// Node 7's two served surfaces, named because the local Unix socket mounts them: the bundle
+/// `local_socket_server` takes is generic over the implementation each generated adapter wraps, so
+/// the host that assembles it has to be able to write these two types down.
+pub use svc_activity_ports::PeerRoutedActivity;
+pub use svc_session_agent_ports::PeerRoutedSessionAgents;
 
 /// Merge local `ListProjects` rows with [`EligibleDaemonSource::peer_project_entries`].
 async fn merge_listed_projects_with_peers(

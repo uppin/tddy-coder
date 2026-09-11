@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { ConnectionService } from "../../gen/connection_pb";
+import { SessionAgentService } from "../../gen/session_agents_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { Button } from "../ui/button";
 import { useAgentConversation } from "./useAgentConversation";
@@ -27,7 +27,7 @@ export interface SessionAgentConversationPaneProps {
   readonly conversationId: string;
   /** Explicit client override — session-scoped routing where available. Falls back to the shared
    *  HTTP client from the transport context. */
-  readonly client?: Client<typeof ConnectionService>;
+  readonly client?: Client<typeof SessionAgentService>;
 }
 
 const ROLE_NAMES: Record<"operator" | "agent", string> = {
@@ -44,7 +44,7 @@ export function SessionAgentConversationPane({
   client,
 }: SessionAgentConversationPaneProps) {
   // `useHttpClient` is called unconditionally (hook rules); the explicit prop wins when present.
-  const httpClient = useHttpClient(ConnectionService);
+  const httpClient = useHttpClient(SessionAgentService);
   const resolvedClient = client ?? httpClient;
 
   const { turns, error, answering, prompt } = useAgentConversation({

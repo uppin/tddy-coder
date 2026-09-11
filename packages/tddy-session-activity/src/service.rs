@@ -559,7 +559,7 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
                 tddy_core::agent_activity::read_agent_activity(&session_dir).unwrap_or_default();
             for record in snapshot {
                 if tx
-                    .send(tddy_service::agent_activity_to_activity_proto(record))
+                    .send(tddy_service::agent_activity_to_proto(record))
                     .is_err()
                 {
                     // Receiver already gone — hand back a stream that terminates immediately.

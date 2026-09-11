@@ -1,8 +1,6 @@
 use crate::connection_service::agent_roster;
 use std::sync::Mutex as StdMutex;
 
-use super::DaemonRpcHandler;
-
 use tddy_task::TerminalCapture;
 
 use std::path::Path;
@@ -271,9 +269,7 @@ impl ConnectionServiceImpl {
             Arc::new(session_env),
             session_dir.to_path_buf(),
             self.agent_activity_hub(),
-            Arc::new(DaemonRpcHandler {
-                conn: self.self_arc(),
-            }),
+            self.sandbox_rpc_handler(),
         )
         .await
         .map_err(|e| {

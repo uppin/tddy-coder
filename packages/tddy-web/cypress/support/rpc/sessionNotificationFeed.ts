@@ -1,5 +1,5 @@
 /**
- * Test double for **`ConnectionService.StreamSessionNotifications`** — the one daemon-level feed
+ * Test double for **`ActivityService.StreamSessionNotifications`** — the one daemon-level feed
  * the session drawer subscribes to for every row (PRD:
  * `docs/ft/daemon/session-notifications.md`).
  *
@@ -11,12 +11,7 @@
  */
 
 import { create } from "@bufbuild/protobuf";
-import {
-  SessionNotificationEventSchema,
-  SessionNotificationKind,
-  SessionNotificationSource,
-  type SessionNotificationEvent,
-} from "../../../src/gen/connection_pb";
+import { SessionNotificationEventSchema, SessionNotificationKind, SessionNotificationSource, type SessionNotificationEvent } from "../../../src/gen/activity_pb";
 
 /** One notification, as a spec states it. */
 export interface SessionNotificationFrame {
@@ -33,7 +28,7 @@ export interface SessionNotificationFrame {
 }
 
 export interface SessionNotificationFeed {
-  /** The `StreamSessionNotifications` handler, spreadable into a `ConnectionService` backend. */
+  /** The `StreamSessionNotifications` handler, spreadable into an `ActivityService` backend. */
   readonly handlers: Record<string, unknown>;
   /** Deliver one notification to every subscribed client, now. */
   readonly push: (frame: SessionNotificationFrame) => void;

@@ -27,10 +27,9 @@ use prost::Message as _;
 use tddy_livekit::client_connect::{connect_client, ConnectedClient};
 use tddy_livekit::{BroadcastChannel, RpcClient, TokenGenerator};
 use tddy_rpc::Status;
-use tddy_service::proto::connection::{
-    AgentActivityDeltaChunk, AgentActivityRecord, AgentCloneState, ExecuteToolChunk,
-    ExecuteToolRequest, ReportAgentCloneStateRequest,
-};
+use tddy_service::proto::activity::{AgentActivityDeltaChunk, AgentActivityRecord};
+use tddy_service::proto::connection::{ExecuteToolChunk, ExecuteToolRequest};
+use tddy_service::proto::session_agents_svc::{AgentCloneState, ReportAgentCloneStateRequest};
 use tddy_service::proto::worktree_activity::WorktreeActivityEvent;
 use tddy_service::session_activity::SESSION_ACTIVITY_TOPIC;
 use tddy_service::worktree_activity::WORKTREE_ACTIVITY_TOPIC;
@@ -38,6 +37,9 @@ use tddy_session_sync::{
     decide_record, reassemble, ApplyOutcome, Mirror, MirrorMarker, RecordDecision,
 };
 
+/// The coordinate the tool call the mirror makes is served at. Only `StreamExecuteTool` is left
+/// here: the clone report and the activity-delta stream moved to
+/// `session_agents.SessionAgentService` and `activity.ActivityService` in `#unbundle` node 7.
 const CONNECTION_SERVICE: &str = "connection.ConnectionService";
 
 /// How long the owning daemon waits for the facilitating daemon to be visible in the session room
@@ -378,7 +380,7 @@ impl HostedClone {
         if let Err(e) = self
             .client
             .call_unary(
-                CONNECTION_SERVICE,
+                crate::SERVICE_NAME,
                 "ReportAgentCloneState",
                 request.encode_to_vec(),
             )
@@ -1058,7 +1060,7 @@ impl CloneMirror {
         link: &HostedClone,
         call_id: &str,
     ) -> Result<tddy_session_sync::Delta, String> {
-        let request = tddy_service::proto::connection::AgentActivityDeltaRequest {
+        let request = tddy_service::proto::activity::AgentActivityDeltaRequest {
             session_token: link.session_token.clone(),
             session_id: self.session_id.clone(),
             // Routed explicitly: the daemon in the room is the one that owns the session, but a
@@ -1070,7 +1072,7 @@ impl CloneMirror {
         let mut frames = link
             .client
             .call_server_stream(
-                CONNECTION_SERVICE,
+                tddy_service::session_activity::ACTIVITY_SERVICE,
                 "StreamAgentActivityDelta",
                 request.encode_to_vec(),
             )

@@ -38,7 +38,7 @@ pub use ports::{
 };
 pub use service::{
     agent_conversation_frames, agent_stop_reason, build_session_agents_entry,
-    roster_at_the_new_coordinate, SessionAgentServiceImpl,
+    SessionAgentServiceImpl,
 };
 pub use status_reporting::{note_agent_activity, republish_quietly};
 
@@ -53,31 +53,14 @@ pub enum SessionAgentError {
     NoAddressableAgent { session_id: String },
 }
 
-/// The `(service, method)` pairs an in-jail agent may relay to its host, for family B.
+/// The coordinate this crate serves, and the `(service, method)` pairs an in-jail agent may relay
+/// to its host.
 ///
-/// Exposed as data so `tddy-sandbox-runner`'s allowlist and this service cannot drift: the runner
-/// reads this rather than repeating the strings. That is the mitigation for the failure mode the
-/// node's changeset names — an allowlist that no longer matches the served coordinate fails closed,
-/// silently.
-pub const IN_JAIL_RELAYABLE: [(&str, &str); 5] = [
-    ("session_agents.SessionAgentService", "StreamSessionAgents"),
-    (
-        "session_agents.SessionAgentService",
-        "OpenAgentConversation",
-    ),
-    (
-        "session_agents.SessionAgentService",
-        "PromptAgentConversation",
-    ),
-    (
-        "session_agents.SessionAgentService",
-        "CancelAgentConversation",
-    ),
-    (
-        "session_agents.SessionAgentService",
-        "ReportAgentConversationState",
-    ),
-];
+/// Defined in `tddy-service` beside `session_agents.proto`'s other cross-crate constants and
+/// re-exported here, because the second reader of the allowlist is `tddy-sandbox-runner` — the
+/// binary that runs *inside every jail*, and one that does not link this crate's `livekit`
+/// dependencies. See [`tddy_service::session_agents::IN_JAIL_RELAYABLE`] for why.
+pub use tddy_service::session_agents::{IN_JAIL_RELAYABLE, SESSION_AGENT_SERVICE as SERVICE_NAME};
 
 #[cfg(test)]
 mod tests {
@@ -91,7 +74,7 @@ mod tests {
     use tddy_core::SessionAgentRecord;
     use tddy_discovery::subagent::SubagentSession;
     use tddy_rpc::Status;
-    use tddy_service::proto::connection::SessionAgentRoster;
+    use tddy_service::proto::session_agents_svc::SessionAgentRoster;
     use tddy_service::proto::session_agents_svc::{
         AgentConversationChunk, OpenAgentConversationRequest, PromptAgentConversationRequest,
     };

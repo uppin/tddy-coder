@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import type { Client } from "@connectrpc/connect";
-import { ConnectionService } from "../../gen/connection_pb";
+import { ActivityService } from "../../gen/activity_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { AgentChatView } from "../chat/AgentChat";
 import type { ChatMessage } from "../chat/useAgentChat";
@@ -16,12 +16,12 @@ interface AgentActivityOverlayProps {
   sessionType?: string;
   /** Explicit client override — session-scoped routing where available. Falls back to the shared
    *  HTTP client from the transport context. */
-  client?: Client<typeof ConnectionService>;
+  client?: Client<typeof ActivityService>;
 }
 
 /**
  * Per-session, top-bar overlay that replays the agent's own ACP conversation as a read-only
- * transcript (streamed via `ConnectionService.StreamAcpReplay`). The icon appears only once the
+ * transcript (streamed via `ActivityService.StreamAcpReplay`). The icon appears only once the
  * session has produced at least one transcript entry; an unread badge flags activity that arrived
  * since the overlay was last opened. The body is the shared `AgentChatView` in read-only mode:
  * agent text interleaved with enriched tool calls, each stamped with a "+Ns" elapsed badge — no
@@ -47,7 +47,7 @@ export function AgentActivityOverlay({
   client,
 }: AgentActivityOverlayProps) {
   // `useHttpClient` is called unconditionally (hook rules); the explicit prop wins when present.
-  const httpClient = useHttpClient(ConnectionService);
+  const httpClient = useHttpClient(ActivityService);
   const resolvedClient = client ?? httpClient;
 
   const chat = useAcpReplay({ sessionId, sessionToken, client: resolvedClient });

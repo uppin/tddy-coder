@@ -20,9 +20,11 @@ use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
-    AgentConversationChunk, AttachSessionAgentRequest, CancelAgentConversationRequest,
     ConnectionService as ConnectionServiceTrait, ListSubagentsRequest,
-    OpenAgentConversationRequest, PromptAgentConversationRequest,
+};
+use tddy_service::proto::session_agents_svc::{
+    AgentConversationChunk, AttachSessionAgentRequest, CancelAgentConversationRequest,
+    OpenAgentConversationRequest, PromptAgentConversationRequest, SessionAgentService as _,
 };
 
 // ---------------------------------------------------------------------------
@@ -41,6 +43,7 @@ struct ConversingSession {
 impl ConversingSession {
     async fn open_conversation(&self) -> String {
         self.service
+            .session_agents_service()
             .open_agent_conversation(Request::new(OpenAgentConversationRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
@@ -60,6 +63,7 @@ impl ConversingSession {
     ) -> impl futures_util::Stream<Item = Result<AgentConversationChunk, tddy_rpc::Status>> + Unpin
     {
         self.service
+            .session_agents_service()
             .prompt_agent_conversation(Request::new(PromptAgentConversationRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
@@ -74,6 +78,7 @@ impl ConversingSession {
 
     async fn cancel(&self, conversation_id: &str) -> Result<(), tddy_rpc::Status> {
         self.service
+            .session_agents_service()
             .cancel_agent_conversation(Request::new(CancelAgentConversationRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
@@ -111,6 +116,7 @@ async fn a_session_conversing_with_a_local_agent(model: StubModel) -> Conversing
         .expect("the fixture must advertise a def named 'explorer'")
         .agent_id;
     service
+        .session_agents_service()
         .attach_session_agent(Request::new(AttachSessionAgentRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.clone(),

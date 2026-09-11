@@ -1,15 +1,35 @@
 use futures_util::StreamExt;
-// A `ConnectionService` trait method is called on `self` here, so the trait must be in scope.
-use tddy_service::proto::connection::CancelAgentConversationRequest;
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
+use tddy_service::proto::session_agents_svc::{
+    CancelAgentConversationRequest, OpenAgentConversationRequest, PromptAgentConversationRequest,
+    ReportAgentConversationStateRequest, StreamSessionAgentsRequest,
+};
+// The calls below are `SessionAgentService` trait methods on the daemon's family-B surface, so the
+// trait must be in scope.
+use tddy_service::proto::session_agents_svc::SessionAgentService as _;
 
-use tddy_service::proto::connection::PromptAgentConversationRequest;
+use std::sync::Arc;
 
-use tddy_service::proto::connection::OpenAgentConversationRequest;
+use super::{ConnectionServiceImpl, DaemonRpcHandler};
 
-use tddy_service::proto::connection::StreamSessionAgentsRequest;
+/// The coordinate an in-jail agent relays family B at, read from the crate that serves it so this
+/// bridge and `tddy-sandbox-runner`'s allowlist cannot disagree about the name.
+const SESSION_AGENT_SERVICE: &str = tddy_session_agents::SERVICE_NAME;
 
-use super::DaemonRpcHandler;
+impl ConnectionServiceImpl {
+    /// The host-side dispatch a sandboxed session's `SessionChannel` relays family B to.
+    ///
+    /// Named here rather than assembled at each of the three sandboxed-session spawn paths, so a
+    /// jail reaches one handler built one way. Public because it is the thing under test in
+    /// `in_jail_conversation_acceptance.rs`: five of family B's nine methods are what
+    /// `tddy-sandbox-runner`'s relay allowlist permits, and a test that built its own handler would
+    /// prove the allowlist against a lookalike rather than against what a real session spawns.
+    #[must_use]
+    pub fn sandbox_rpc_handler(&self) -> Arc<dyn tddy_sandbox_runner::HostRpcHandler> {
+        Arc::new(DaemonRpcHandler {
+            conn: self.self_arc(),
+        })
+    }
+}
 
 #[async_trait::async_trait]
 impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
@@ -18,9 +38,9 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
         use tddy_rpc::Request;
         // Only the RPCs the runner forwards ride this bridge; anything else is a wiring bug
         // (the runner's `ToolExecService` would not forward it) and is refused with `not_found`
-        // rather than reaching arbitrary `ConnectionService` surface from inside a jail.
+        // rather than reaching arbitrary `SessionAgentService` surface from inside a jail.
         match (service, method) {
-            ("connection.ConnectionService", "StreamSessionAgents") => {
+            (SESSION_AGENT_SERVICE, "StreamSessionAgents") => {
                 let req = match StreamSessionAgentsRequest::decode(payload) {
                     Ok(r) => r,
                     Err(e) => {
@@ -31,7 +51,12 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                         ));
                     }
                 };
-                match self.conn.stream_session_agents(Request::new(req)).await {
+                match self
+                    .conn
+                    .session_agents_service()
+                    .stream_session_agents(Request::new(req))
+                    .await
+                {
                     Ok(resp) => {
                         let mut stream = resp.into_inner();
                         let (tx, rx) = tokio::sync::mpsc::channel(16);
@@ -50,7 +75,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                     Err(status) => tddy_rpc::RpcResult::ServerStream(Err(status)),
                 }
             }
-            ("connection.ConnectionService", "OpenAgentConversation") => {
+            (SESSION_AGENT_SERVICE, "OpenAgentConversation") => {
                 let req = match OpenAgentConversationRequest::decode(payload) {
                     Ok(r) => r,
                     Err(e) => {
@@ -61,12 +86,17 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                         ));
                     }
                 };
-                match self.conn.open_agent_conversation(Request::new(req)).await {
+                match self
+                    .conn
+                    .session_agents_service()
+                    .open_agent_conversation(Request::new(req))
+                    .await
+                {
                     Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
                     Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
                 }
             }
-            ("connection.ConnectionService", "PromptAgentConversation") => {
+            (SESSION_AGENT_SERVICE, "PromptAgentConversation") => {
                 let req = match PromptAgentConversationRequest::decode(payload) {
                     Ok(r) => r,
                     Err(e) => {
@@ -77,7 +107,12 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                         ));
                     }
                 };
-                match self.conn.prompt_agent_conversation(Request::new(req)).await {
+                match self
+                    .conn
+                    .session_agents_service()
+                    .prompt_agent_conversation(Request::new(req))
+                    .await
+                {
                     Ok(resp) => {
                         let mut stream = resp.into_inner();
                         let (tx, rx) = tokio::sync::mpsc::channel(16);
@@ -94,7 +129,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                     Err(status) => tddy_rpc::RpcResult::ServerStream(Err(status)),
                 }
             }
-            ("connection.ConnectionService", "CancelAgentConversation") => {
+            (SESSION_AGENT_SERVICE, "CancelAgentConversation") => {
                 let req = match CancelAgentConversationRequest::decode(payload) {
                     Ok(r) => r,
                     Err(e) => {
@@ -105,13 +140,18 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                         ));
                     }
                 };
-                match self.conn.cancel_agent_conversation(Request::new(req)).await {
+                match self
+                    .conn
+                    .session_agents_service()
+                    .cancel_agent_conversation(Request::new(req))
+                    .await
+                {
                     Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
                     Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
                 }
             }
-            ("connection.ConnectionService", "ReportAgentConversationState") => {
-                let req = match tddy_service::proto::connection::ReportAgentConversationStateRequest::decode(payload) {
+            (SESSION_AGENT_SERVICE, "ReportAgentConversationState") => {
+                let req = match ReportAgentConversationStateRequest::decode(payload) {
                     Ok(r) => r,
                     Err(e) => {
                         return tddy_rpc::RpcResult::Unary(Err(
@@ -123,6 +163,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 };
                 match self
                     .conn
+                    .session_agents_service()
                     .report_agent_conversation_state(Request::new(req))
                     .await
                 {

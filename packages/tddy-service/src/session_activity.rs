@@ -7,7 +7,7 @@
 //! *silence* — every receiver filters by topic, and a mismatch delivers nothing and reports
 //! nothing.
 //!
-//! The payload is [`crate::proto::connection::AgentActivityRecord`], the same message
+//! The payload is [`crate::proto::activity::AgentActivityRecord`], the same message
 //! `StreamSessionActivity` returns. One schema for the record however it is delivered: a broadcast
 //! that drifted from the stream would give two participants two different accounts of one call.
 
@@ -19,3 +19,12 @@
 /// different schemas, and a receiver that wants only commits should not have to decode every tool
 /// call to discover that.
 pub const SESSION_ACTIVITY_TOPIC: &str = "session.activity";
+
+/// The coordinate `activity.ActivityService` is served at, named once.
+///
+/// Here for the reason [`SESSION_ACTIVITY_TOPIC`] is here: the parties that have to agree on it
+/// live in different crates — the `ServiceEntry` the daemon mounts, the peer a routed call is
+/// forwarded to, `tddy-session-sync`'s delta subscriber, the agent-clone mirror, and
+/// `tddy-coder`'s session participant. A name each of them spelled for itself fails as
+/// `not_found` at runtime, one caller at a time.
+pub const ACTIVITY_SERVICE: &str = "activity.ActivityService";

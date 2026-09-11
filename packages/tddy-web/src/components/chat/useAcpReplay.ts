@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { fromBinary } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
-import { type ConnectionService, StreamMode } from "../../gen/connection_pb";
+import { type ActivityService, StreamMode } from "../../gen/activity_pb";
 import { AcpAgentMessageSchema } from "../../gen/tddy/acp/v1/acp_pb";
 import { agentActivityRegistry } from "../sessions/agentActivityRegistry";
 import { createReplayProjector, projectReplayFrames } from "./acpReplayProjection";
@@ -47,7 +47,7 @@ export interface UseAcpReplayResult extends UseAgentChatResult {
 const NOOP_SEND = () => false;
 
 /**
- * Subscribes to `ConnectionService.StreamAcpReplay` for one session in two phases, backed by the
+ * Subscribes to `ActivityService.StreamAcpReplay` for one session in two phases, backed by the
  * module-level {@link agentActivityRegistry} so state survives a session switch:
  *
  * - a **count** feed (`COUNT_THEN_LIVE`), opened while the session is focused, whose frames carry
@@ -74,7 +74,7 @@ const NOOP_SEND = () => false;
 export function useAcpReplay(args: {
   sessionId: string;
   sessionToken: string;
-  client: Client<typeof ConnectionService>;
+  client: Client<typeof ActivityService>;
 }): UseAcpReplayResult {
   const { sessionId, sessionToken, client } = args;
 

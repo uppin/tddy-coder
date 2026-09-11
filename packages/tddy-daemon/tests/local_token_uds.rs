@@ -1,4 +1,4 @@
-//! The daemon's Unix-domain socket, and the four services mounted on it.
+//! The daemon's Unix-domain socket, and the six services mounted on it.
 //!
 //! Two things are only true over this transport. `MintLocalToken` is the first: the socket is the
 //! only place a caller's SO_PEERCRED uid is available, so minting is exercised end to end here — a
@@ -7,12 +7,13 @@
 //!
 //! The second is that `host.HostService` and `worktree.WorktreeService` reach their implementations
 //! at all. Both are served through **hand-written** tonic adapters
-//! (`host_tonic_adapter.rs`, `worktree_tonic_adapter.rs`): `tddy-codegen`'s `generate_tonic_adapter`
-//! is a stub and `#[tonic::async_trait]` cannot see through a macro, so all 17 delegations are
-//! spelled out by hand. A method wired to the wrong inner call, or a stream arm that drops the
-//! error mapping, compiles and ships. Nothing but a call over the wire catches that, so each
-//! adapter is exercised here through a real client: one unary method, one server-streaming method,
-//! and the refusal a streaming method must propagate rather than swallow.
+//! (`host_tonic_adapter.rs`, `worktree_tonic_adapter.rs`), written before `tddy-codegen`'s
+//! `generate_tonic_adapter` existed, so all 17 delegations are spelled out by hand. A method wired
+//! to the wrong inner call, or a stream arm that drops the error mapping, compiles and ships.
+//! Nothing but a call over the wire catches that, so each adapter is exercised here through a real
+//! client: one unary method, one server-streaming method, and the refusal a streaming method must
+//! propagate rather than swallow. The later families' adapters — the terminal one from node 6 and
+//! node 7's session-agent and activity pair — are generated, and carry no such hazard.
 //!
 //! The third is that `terminal_session.TerminalSessionService` is reachable here at all. The in-jail
 //! `tddy-sandbox-app` has no transport but this socket, and its whole terminal bridge is the bidi
@@ -30,14 +31,16 @@ use hyper_util::rt::TokioIo;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_tonic_adapter::{ConnectionServiceTonicAdapter, UidToUsername};
 use tddy_daemon::host_tonic_adapter::HostServiceTonicAdapter;
-use tddy_daemon::local_socket_server::serve_connection_uds;
+use tddy_daemon::local_socket_server::{serve_connection_uds, LocalSocketServices};
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_daemon::user_sessions_path::username_for_uid;
 use tddy_daemon::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_github::{SessionTokenSigner, TokenKind};
+use tddy_service::proto::activity::ActivityServiceTonicAdapter;
 use tddy_service::proto::connection::MintLocalTokenRequest;
 use tddy_service::proto::host::{ListEligibleDaemonsRequest, StreamHostStatsRequest};
+use tddy_service::proto::session_agents_svc::SessionAgentServiceTonicAdapter;
 use tddy_service::proto::worktree::{
     ListWorktreesForProjectRequest, StreamWorktreeStatsRequest, WorktreeRow,
 };
@@ -110,6 +113,14 @@ fn start_local_socket_server(
             &current_username(),
         )));
 
+    // Node 7's two coordinates, likewise built from the same `ConnectionServiceImpl`: five of the
+    // nine family-B methods are what `tddy-sandbox-runner`'s relay allowlist permits an in-jail
+    // agent to reach, and this socket is the only transport a jail has.
+    let session_agent_adapter =
+        SessionAgentServiceTonicAdapter::new(Arc::new(connection.session_agents_service()));
+    let activity_adapter =
+        ActivityServiceTonicAdapter::new(Arc::new(connection.activity_service()));
+
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let serve_path = socket_path.clone();
     tokio::spawn(async move {
@@ -118,10 +129,14 @@ fn start_local_socket_server(
         };
         serve_connection_uds(
             &serve_path,
-            adapter,
-            host_adapter,
-            worktree_adapter,
-            terminal_adapter,
+            LocalSocketServices {
+                connection: adapter,
+                host: host_adapter,
+                worktree: worktree_adapter,
+                terminal: terminal_adapter,
+                session_agents: session_agent_adapter,
+                activity: activity_adapter,
+            },
             shutdown,
         )
         .await

@@ -135,7 +135,7 @@ pub(crate) struct OpenedAgent {
 /// and the daemon its conversations are routed by, so an operator reads which host to go and look
 /// at rather than "this session cannot reach it".
 pub(crate) async fn open_remote_agent_session(
-    entry: &tddy_service::proto::connection::SessionAgentEntry,
+    entry: &tddy_service::proto::session_agents_svc::SessionAgentEntry,
     conversation_id: &str,
 ) -> Result<OpenedAgent, String> {
     let refused = |e: String| {

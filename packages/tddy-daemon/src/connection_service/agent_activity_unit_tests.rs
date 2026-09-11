@@ -8,6 +8,12 @@ use tddy_core::agent_activity::{
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
+// `#unbundle` node 7 moved these onto `activity.ActivityService`, so `use super::*` — which
+// reaches `connection.proto`'s types — no longer carries them.
+use tddy_service::proto::activity::{
+    ActivityService as _, GetAcpReplayPageRequest, GetAcpToolCallDetailRequest,
+    ReportAgentActivityRequest, StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
+};
 
 const TEST_HOOK_TOKEN: &str = "tok-activity-hook-xyz789";
 const TEST_OS_USER: &str = "u";
@@ -144,6 +150,7 @@ async fn report_pre_then_post_tool_use_coalesces_into_one_completed_call() {
 
     // When the hook reports PreToolUse (Bash starts) then PostToolUse (Bash finished).
     service
+        .activity_service()
         .report_agent_activity(Request::new(a_pre_tool_use(
             session_id,
             "Bash",
@@ -152,6 +159,7 @@ async fn report_pre_then_post_tool_use_coalesces_into_one_completed_call() {
         .await
         .unwrap();
     service
+        .activity_service()
         .report_agent_activity(Request::new(a_post_tool_use(
             session_id,
             "Bash",
@@ -186,6 +194,7 @@ async fn report_pre_tool_use_alone_appends_a_running_row() {
 
     // When only a PreToolUse is reported.
     service
+        .activity_service()
         .report_agent_activity(Request::new(a_pre_tool_use(
             session_id,
             "Read",
@@ -218,6 +227,7 @@ async fn report_agent_activity_rejects_bad_hook_token() {
     let mut req = a_pre_tool_use(session_id, "Bash", "{}");
     req.hook_token = "wrong-token".to_string();
     let err = service
+        .activity_service()
         .report_agent_activity(Request::new(req))
         .await
         .unwrap_err();
@@ -250,6 +260,7 @@ async fn stream_session_activity_replays_the_persisted_snapshot() {
 
     // When a client subscribes to the activity stream.
     let mut stream = service
+        .activity_service()
         .stream_session_activity(Request::new(StreamSessionActivityRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -287,6 +298,7 @@ async fn stream_session_activity_delivers_a_live_record_after_the_snapshot() {
     let hub = service.agent_activity_hub();
 
     let mut stream = service
+        .activity_service()
         .stream_session_activity(Request::new(StreamSessionActivityRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -331,11 +343,12 @@ async fn stream_session_activity_in_live_only_mode_skips_the_snapshot_and_delive
 
     // When a client subscribes in LIVE_ONLY mode.
     let mut stream = service
+        .activity_service()
         .stream_session_activity(Request::new(StreamSessionActivityRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
             daemon_instance_id: String::new(),
-            mode: tddy_service::proto::connection::StreamMode::LiveOnly as i32,
+            mode: tddy_service::proto::activity::StreamMode::LiveOnly as i32,
         }))
         .await
         .unwrap()
@@ -366,6 +379,7 @@ async fn report_agent_activity_parses_the_hooks_json_input_into_a_structured_rec
 
     // When the hook reports a PreToolUse whose input is a JSON object string.
     service
+        .activity_service()
         .report_agent_activity(Request::new(a_pre_tool_use(
             session_id,
             "Bash",
@@ -397,6 +411,7 @@ async fn report_agent_activity_stores_a_non_json_input_string_as_a_string_scalar
 
     // When the hook reports input that is not valid JSON.
     service
+        .activity_service()
         .report_agent_activity(Request::new(a_pre_tool_use(
             session_id,
             "Bash",
@@ -417,8 +432,10 @@ async fn report_agent_activity_stores_a_non_json_input_string_as_a_string_scalar
 /// Await the next stream item with a bounded timeout so a missing record fails loudly instead
 /// of hanging the test.
 async fn next_record(
-    stream: &mut super::MpscResultStream<tddy_service::proto::connection::AgentActivityRecord>,
-) -> tddy_service::proto::connection::AgentActivityRecord {
+    stream: &mut tddy_worktree_service::stream::MpscResultStream<
+        tddy_service::proto::activity::AgentActivityRecord,
+    >,
+) -> tddy_service::proto::activity::AgentActivityRecord {
     tokio::time::timeout(Duration::from_secs(1), stream.next())
         .await
         .expect("no agent-activity record arrived within the timeout")
@@ -428,7 +445,9 @@ async fn next_record(
 
 /// Await the next replay frame with a bounded timeout, decoding its inner ACP `AcpAgentMessage`.
 async fn next_replay_frame(
-    stream: &mut super::MpscResultStream<tddy_service::proto::connection::AcpReplayFrame>,
+    stream: &mut tddy_worktree_service::stream::MpscResultStream<
+        tddy_service::proto::activity::AcpReplayFrame,
+    >,
 ) -> tddy_service::proto::acp::AcpAgentMessage {
     let envelope = tokio::time::timeout(Duration::from_secs(1), stream.next())
         .await
@@ -496,6 +515,7 @@ async fn stream_acp_replay_replays_the_persisted_snapshot() {
 
     // When a client subscribes to the ACP replay stream.
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -532,6 +552,7 @@ async fn stream_acp_replay_delivers_a_live_frame_after_the_snapshot() {
     let hub = service.agent_activity_hub();
 
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -558,8 +579,10 @@ async fn stream_acp_replay_delivers_a_live_frame_after_the_snapshot() {
 /// Pull one raw `AcpReplayFrame` envelope (the count-carrying wrapper), with a timeout so a
 /// count-mode subscription that never broadcasts a count fails fast instead of hanging.
 async fn next_replay_envelope(
-    stream: &mut super::MpscResultStream<tddy_service::proto::connection::AcpReplayFrame>,
-) -> tddy_service::proto::connection::AcpReplayFrame {
+    stream: &mut tddy_worktree_service::stream::MpscResultStream<
+        tddy_service::proto::activity::AcpReplayFrame,
+    >,
+) -> tddy_service::proto::activity::AcpReplayFrame {
     tokio::time::timeout(Duration::from_secs(1), stream.next())
         .await
         .expect("no replay frame arrived within the timeout")
@@ -598,6 +621,7 @@ async fn stream_acp_replay_count_then_live_broadcasts_the_activity_count() {
 
     // When a client subscribes in count-first mode.
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -642,6 +666,7 @@ async fn stream_acp_replay_count_then_live_counts_a_tool_call_once_across_its_tw
     let hub = service.agent_activity_hub();
 
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -692,6 +717,7 @@ async fn stream_acp_replay_replays_persisted_agent_activity_when_no_acp_transcri
 
     // When a client subscribes to the ACP replay snapshot.
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -731,6 +757,7 @@ async fn stream_acp_replay_count_then_live_counts_persisted_agent_activity_rows(
 
     // When a client subscribes in count-first mode.
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -783,6 +810,7 @@ async fn stream_acp_replay_snapshot_frames_omit_tool_bodies() {
 
     // When a client subscribes to the snapshot replay.
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -815,6 +843,7 @@ async fn stream_acp_replay_live_frames_omit_tool_bodies() {
     let service = make_unit_service(sessions_base);
     let hub = service.agent_activity_hub();
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -855,6 +884,7 @@ async fn get_acp_tool_call_detail_returns_the_full_tool_bodies() {
 
     // When the detail for that call is requested.
     let detail = service
+        .activity_service()
         .get_acp_tool_call_detail(Request::new(GetAcpToolCallDetailRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -893,6 +923,7 @@ async fn get_acp_tool_call_detail_is_not_found_for_an_unknown_tool_call_id() {
 
     // When the detail for a non-existent call is requested.
     let status = service
+        .activity_service()
         .get_acp_tool_call_detail(Request::new(GetAcpToolCallDetailRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -909,8 +940,6 @@ async fn get_acp_tool_call_detail_is_not_found_for_an_unknown_tool_call_id() {
 // -----------------------------------------------------------------------
 // Tail-first replay and the reverse cursor
 // -----------------------------------------------------------------------
-
-use tddy_service::proto::connection::GetAcpReplayPageRequest;
 
 /// Seed a session dir with `entry_count` agent-text frames labelled `Entry 1` … `Entry N`
 /// (1-based, naming the entry's position in the whole transcript) and return its dir.
@@ -939,6 +968,7 @@ async fn stream_acp_replay_in_tail_mode_replays_only_the_newest_page() {
 
     // When a client subscribes tail-first for a page of two.
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -973,6 +1003,7 @@ async fn stream_acp_replay_tail_frames_carry_their_absolute_transcript_position(
 
     // When the newest page of two is replayed.
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -1002,6 +1033,7 @@ async fn get_acp_replay_page_serves_the_frames_before_the_cursor() {
 
     // When the page before seq 3 is requested, two frames wide.
     let page = service
+        .activity_service()
         .get_acp_replay_page(Request::new(GetAcpReplayPageRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -1047,6 +1079,7 @@ async fn get_acp_replay_page_strips_tool_bodies_like_the_replay_stream_does() {
 
     // When that call is paged back rather than streamed.
     let page = service
+        .activity_service()
         .get_acp_replay_page(Request::new(GetAcpReplayPageRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -1093,6 +1126,7 @@ async fn stream_acp_replay_gives_a_tool_calls_terminal_record_the_position_of_it
     let service = make_unit_service(sessions_base);
     let hub = service.agent_activity_hub();
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -1129,6 +1163,7 @@ async fn stream_acp_replay_gives_the_call_after_a_refinement_the_next_position()
     let service = make_unit_service(sessions_base);
     let hub = service.agent_activity_hub();
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -1168,6 +1203,7 @@ async fn stream_acp_replay_live_only_frames_are_numbered_from_the_recorded_trans
     let service = make_unit_service(sessions_base);
     let hub = service.agent_activity_hub();
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),
@@ -1208,6 +1244,7 @@ async fn stream_acp_replay_gives_a_live_terminal_record_the_position_its_call_ho
     let service = make_unit_service(sessions_base);
     let hub = service.agent_activity_hub();
     let mut stream = service
+        .activity_service()
         .stream_acp_replay(Request::new(StreamAcpReplayRequest {
             session_token: "valid".to_string(),
             session_id: session_id.to_string(),

@@ -17,7 +17,7 @@ use prost::Message as _;
 use serde::Deserialize;
 use std::io::Read;
 use tddy_core::{activity_status_from_hook, parse_hook_event};
-use tddy_service::proto::connection::{ReportAgentActivityRequest, ReportSessionStatusRequest};
+use tddy_service::proto::activity::{ReportAgentActivityRequest, ReportSessionStatusRequest};
 
 #[derive(Args)]
 pub struct SessionHookArgs {
