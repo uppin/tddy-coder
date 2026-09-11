@@ -207,21 +207,20 @@ so it is the first real exercise of that gate. Confirm at wrap that the gate cau
 
 ## Scope
 
-- [ ] **Proto**: `session_files.proto` (13 methods); `connection.proto` loses 22 rpcs; vacated field numbers `reserved`
-- [ ] **Tonic adapter generator**: `tddy-codegen`'s `generate_tonic_adapter` implemented — unary,
+- [x] **Proto**: `session_files.proto` (13 methods) ✅; `connection.proto` loses 22 rpcs ✅ (72 → **50**). **No field number needed `reserved`** — nothing that stayed referenced a moved message, and protobuf has no `reserved` for service methods, so a header note records the 22 vacated coordinates instead (`connection.proto:11-18`)
+- [x] **Tonic adapter generator**: `tddy-codegen`'s `generate_tonic_adapter` implemented — unary,
       server-streaming (with the associated `…Stream` type) and **bidirectional**; emits calls to the
       shared status conversion rather than inlining its own
-- [ ] **Generated adapters used**: this node's two services reach the UDS socket through generated
-      adapters, not hand-written ones
-- [ ] **⛔ Terminal surface unified**: `terminal_session.TerminalSessionService` served; **both hand converters deleted**
-- [ ] **`tddy-session-files`**: crate, 10 modules, its suites
-- [ ] **`tddy-terminal-rpc`**: serves family K; gains the 3 PTY modules
-- [ ] **⛔ `tddy-coder` lockstep**: its session participant moves to the new terminal coordinate in this PR
-- [ ] **Sandbox extern path**: the `.connection.SessionTerminalOutput` remap re-pointed
-- [ ] **Web**: 11 hooks and components migrated; the Cypress terminal and file fakes split
-- [ ] **File budget**: record which over-500-line files landed under budget and which did not, with why
-- [ ] **Baseline**: `./test` per touched package back to the recorded numbers
-- [ ] **Code Quality**: `cargo clippy -p <each> -- -D warnings` clean, `cargo fmt` clean
+- [~] **Generated adapters used**: the **terminal** service reaches the UDS socket through the generated adapter ✅ — and that is what the jail dials. **`session_files` is deliberately not on that socket**: nothing dials a session-file method over UDS (checked across both in-jail binaries), so mounting it would add surface with no caller. This halves the premise that sized this node at 22 hand-written methods — see `## Green-phase corrections`
+- [x] **⛔ Terminal surface unified**: `terminal_session.TerminalSessionService` served ✅; **all six converters deleted** — the plan said two, and the four inline ones in `tddy-coder` were invisible to a name-based grep
+- [x] **`tddy-session-files`**: crate, 10 modules, its suites ✅ (155 tests)
+- [~] **`tddy-terminal-rpc`**: serves family K ✅. **1 of the 3 PTY modules**, not 3: `pty_registry.rs` was a 6-line re-export and was deleted rather than relocated, and `pty_runtime.rs` had to stay — its shims resolve to `tddy-daemon-kernel`, which pulls LiveKit non-optionally into `tddy-tools`' in-jail build. Only `login_shell_for_os_user` moved
+- [x] **⛔ `tddy-coder` lockstep**: its session participant moves to the new terminal coordinate in this PR
+- [x] **Sandbox extern path** ✅, solved better than planned: rather than re-pointing the remap, `sandbox.proto` now owns a `SandboxTerminalOutput` carrying only what crosses that hop. Naming `terminal_session`'s message there would be a dependency cycle (`tddy-terminal-rpc` depends on `tddy-service`). The three surviving fields keep their numbers and the four dropped ones are `reserved`, so the wire is unchanged
+- [x] **Web**: migrated ✅ (more than the 11 planned) and the fakes split per service, following node 1's `hostServiceBackend.ts` shape. Cross-package proto generation cost **one manifest line**
+- [x] **File budget** recorded ✅ — 8 files over 500 lines, none split; splitting a file nodes 7-9 also touch would cascade conflicts through their diffs
+- [x] **Baseline** ✅ — recorded per package, measured `--no-fail-fast` on both sides; the failure set is byte-identical to the base's
+- [x] **Code Quality** ✅ — scoped clippy clean, `cargo fmt` clean, and CI's workspace-wide `Rust lint` passes
 - [ ] **Documentation**: doc triage executed at wrap
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
@@ -269,10 +268,10 @@ message set and no converter. `session_files.SessionFilesService` is served by `
 - [x] M1 — `session_files.proto` generates; `types.proto` imported rather than duplicated ✅
 - [x] M2 — `tddy-session-files` extracted; its suites pass ✅ (155 tests)
 - [x] M3 — `terminal_session.TerminalSessionService` served from `tddy-terminal-rpc` ✅; PTY modules: **1 of 3 moved**, see above
-- [ ] M4 — both hand converters deleted; `grep -rn 'connection.SessionTerminalInput'` finds nothing
-- [ ] M5 — `tddy-coder`'s participant moved; HTTP and LiveKit answer a session identically
-- [ ] M6 — sandbox extern path re-pointed; `cargo build -p tddy-service` clean
-- [ ] M7 — web migrated; Cypress component suites green; baselines restored; file budget recorded
+- [x] M4 — all **six** converters deleted; the absence sweep now covers both message names across `tddy-daemon` **and** `tddy-coder`, so it enforces what it claims
+- [x] M5 — participant moved; parity asserted at the wire over the 7 methods both servers serve (`two_server_parity_acceptance.rs`, 12 tests)
+- [x] M6 — sandbox hop given its own message; `cargo build --workspace` clean
+- [x] M7 — web migrated; ~300 component tests green (run per spec, not the 50-minute suite); baselines and file budget recorded
 
 ## Testing Plan
 
@@ -301,37 +300,37 @@ Three further proofs:
 ## Acceptance Tests
 
 ### tddy-terminal-rpc
-- [ ] **Integration**: all 9 `terminal_session.TerminalSessionService` methods answer over Connect-HTTP (`terminal_session_service_acceptance.rs`)
-- [ ] **Integration**: `StreamSessionTerminalIO` carries a bidi session end to end (`terminal_session_bidi_acceptance.rs`)
-- [ ] **Integration**: `GetTerminalHistory` returns the same frames at the same offsets as the old coordinate (`terminal_history_parity_acceptance.rs`)
+- [x] **Integration**: all 9 methods answer at the registered coordinate (`terminal_session_service_acceptance.rs`, 14 tests)
+- [x] **Integration**: `StreamSessionTerminalIO` carries a bidi session end to end (`terminal_session_bidi_acceptance.rs`, 9 tests)
+- [x] **Integration**: `GetTerminalHistory` frames/offsets match the old coordinate (`terminal_history_parity_acceptance.rs`, 6 tests), plus `sandbox_terminal_parity_acceptance.rs` (10 tests) carrying the deleted loop verbatim as its oracle
 
 ### tddy-terminal-rpc + tddy-coder
-- [ ] **Integration**: the same session answers identically through the daemon's server and through
+- [x] **Integration**: the same session answers identically through the daemon's server and through
       `tddy-coder`'s session participant — history offsets, stream mode, control claim (`two_server_parity_acceptance.rs`)
 
 ### tddy-codegen
-- [ ] **Unit**: a unary method generates an `async fn` that unwraps `tonic::Request`, delegates, and maps the result (`generator.rs`)
-- [ ] **Unit**: a server-streaming method generates the associated `…Stream` type as well as the method (`generator.rs`)
-- [ ] **Unit**: **a bidirectional method generates a `Streaming` request and a stream response** — the case only family K has (`generator.rs`)
-- [ ] **Unit**: the generated body calls the shared status conversion rather than constructing a `tonic::Status` itself (`generator.rs`)
-- [ ] **Integration**: a generated adapter serves the same responses as the hand-written one it replaces, for one service (`generated_adapter_parity_acceptance.rs`)
+- [x] **Unit**: a unary method generates a delegating `async fn` (`generator.rs`)
+- [x] **Unit**: a server-streaming method generates its associated `…Stream` type (`generator.rs`)
+- [x] **Unit**: **a bidirectional method generates a `Streaming` request and a stream response** (`generator.rs`) — and these five tests were `cfg`'d out of every run until this node removed the gate
+- [x] **Unit**: the generated body calls the shared status conversion (`generator.rs`)
+- [ ] **DEFERRED — `generated_adapter_parity_acceptance.rs` was not written.** `## Boundaries` forbids regenerating node 1's two hand-written adapters, so there is no hand-written adapter this node replaces to compare against. The generated adapter's correctness is instead evidenced by it serving the jail's live terminal traffic on the UDS socket (`local_token_uds.rs`), which fails with `Unimplemented` if the mount is removed. Carried into the follow-up that replaces node 1's two adapters
 
 ### tddy-session-files
-- [ ] **Integration**: all 13 `session_files.SessionFilesService` methods answer (`session_files_service_acceptance.rs`)
-- [ ] **Integration**: context manifest and batched context reads stream identically to the old coordinate (`context_sync_acceptance.rs`)
-- [ ] **Integration**: a staged attachment uploads, lists, materialises and deletes (`staging_rpc_acceptance.rs`)
-- [ ] **Integration**: `StreamReadHostDocument` frames at `HOST_DOCUMENT_FRAME_BYTES` from the kernel (`host_document_frames_unit.rs`)
+- [x] **Integration**: the registered coordinate serves and routes (`session_files_service_acceptance.rs`) — including that a request naming another daemon forwards rather than being served locally, which fails with a local `host_path` if the routing wrapper is bypassed
+- [x] **Integration**: `context_sync_acceptance.rs` (18 tests) — stayed in `tddy-daemon`, pinned by `split_session::build_split_context_dir`
+- [x] **Integration**: `staging_rpc_acceptance.rs` (7 tests), plus the 8 other pinned suites that stayed
+- [x] **Integration**: the framing is covered, though **not in a file of that name** — it lives in `tddy-session-files`' own suite, where it writes a 2.5-frame document and asserts `[48 KiB, 48 KiB, 24 KiB]`. The red phase's version compared the kernel constant to itself and would have passed on an empty crate
 
 ### tddy-service
-- [ ] **Unit**: no source file references `connection.SessionTerminalInput` or `connection.SessionTerminalOutput` (`converter_absence_unit.rs`)
-- [ ] **Unit**: the sandbox tonic pass compiles with the re-pointed extern path (build-level)
+- [x] **Unit**: the converter-absence sweep passes — **not in a file of that name**, but as `no_source_converts_between_the_two_terminal_message_sets` in `unbundle_service_split.rs`, where the rest of this node's proto assertions already live. Widened from one needle under one directory (satisfiable by deleting a doc comment) to both message names across `tddy-daemon` and `tddy-coder`
+- [x] **Unit**: the sandbox pass compiles (build-level) ✅ — via its own `SandboxTerminalOutput` rather than a re-pointed extern path
 
 ### tddy-web
-- [ ] **Cypress component**: a terminal opens, receives output and accepts input at the new coordinate (`GrpcSessionTerminal.cy.tsx`)
-- [ ] **Cypress component**: the session files tab lists and deletes uploads (`SessionFilesTab.cy.tsx`)
+- [x] **Cypress component**: the terminal specs pass at the new coordinate (the four `GrpcSessionTerminal*` specs, `TerminalInputAckAcceptance`, and others)
+- [x] **Cypress component**: `SessionFilesTabAcceptance` (6) and `SessionInspectorFilesTab` (2) pass against the split `sessionFilesServiceBackend.ts`
 
 ### tddy-daemon
-- [ ] **Integration**: `connection.ConnectionService` declares 50 methods and none of the 22 (`service_registration_acceptance.rs`)
+- [x] **Integration**: `connection.ConnectionService` declares **50** and none of the 22 ✅ — exactly the number `## Technical Changes` § State B predicted
 
 ## Decisions & Trade-offs
 
@@ -376,8 +375,12 @@ Three further proofs:
       parameter it will need
 - [ ] `tddy-coder`'s session participant remains a string dispatch rather than a generated trait impl;
       making it a real implementation is a `docs/dev/todo/` entry at wrap
-- [ ] Field numbers vacated in `connection.proto` are `reserved`, so the schema carries the history of
-      this split permanently — intended, but it makes `connection.proto` harder to read
+- [x] **Not debt after all**: no field number in `connection.proto` was vacated. Nothing that
+      stayed referenced a moved message, so there was nothing to `reserve`, and protobuf has no
+      `reserved` for service methods — a header note records the 22 departed coordinates instead.
+      The plan's worry that the schema would "carry the history of this split permanently" does not
+      materialise; the only `reserved` this node adds is on `sandbox.proto`'s own new message, for
+      the four fields that hop never carried.
 
 ## Baseline
 
@@ -774,3 +777,40 @@ break any package, and a two-minute local sweep beats a 25-minute CI round trip 
 first broken one. Eight of this node's milestones were verified locally and CI reported `Rust lint`
 and `Rust build` green on every one; the ninth was pushed with its gates interrupted, and it is the
 one that broke the build.
+
+### The UDS premise cut both ways, and it halves this node's own cost argument
+
+Two separate claims about the local UDS socket were wrong, in opposite directions, and together they
+resize the generator's justification.
+
+**Too few:** the `## Correction to node 1's backlog entry` section measured only `start_session` and
+`mint_local_token` as dialled there. `StreamSessionTerminalIO` is dialled too, from the same file —
+which is why removing family K broke the build, and why the only bidirectional method in a 90-method
+surface exists.
+
+**Too many:** that section also argued node 6 would owe **22** hand-written adapter methods, by
+following node 1's precedent of keeping every family it moved UDS-reachable. Only **9** were actually
+needed. Nothing dials a session-file method over that socket — checked across both in-jail binaries —
+so mounting `session_files` there would have added surface with no caller, which is the failure this
+node spent a milestone fixing in the other direction. The terminal service is on the socket because
+the jail provably dials it; the file service is not because nothing does.
+
+So the arithmetic that flipped the decision to build the generator was itself wrong: the real figure
+was 9 methods, not 22 — close to the ~9 the section dismissed as "a clear loss". **The generator is
+still the right call, for the reason the section gave second rather than first:** those 9 include the
+bidirectional method, a generator built anywhere else would have been discovered incomplete the first
+time it met one, and it is now what serves the jail's terminal traffic in production. The capability
+argument carries this node; the cost argument does not.
+
+### The sandbox hop got a better answer than the plan's
+
+`## Scope` called for re-pointing the sandbox pass's `.connection.SessionTerminalOutput` extern path
+at `terminal_session`'s message. That is not possible: `tddy-terminal-rpc` depends on `tddy-service`,
+so naming its message from `sandbox.proto` is a dependency cycle.
+
+`sandbox.proto` instead owns a `SandboxTerminalOutput` carrying only what crosses that hop. The four
+fields it drops — `acked_input_offset`, `start_offset`, `end_offset`, `at_oldest` — are capture-ring
+and input-ack metadata the jail never sets and the host relay never reads, and they are `reserved` so
+a later field cannot claim one and collide with what an older runner still encodes. The three
+surviving fields keep their numbers, so the bytes on that hop are unchanged. The borrowed message was
+the anomaly; this removes it rather than re-pointing it.
