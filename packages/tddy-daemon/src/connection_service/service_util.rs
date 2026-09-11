@@ -132,6 +132,11 @@ pub(crate) fn resolved_terminal_id(raw: &str) -> &str {
 /// Maximum size of a single terminal-output frame published to a client on attach. Chosen to stay
 /// well under the LiveKit/WebRTC data-channel and gRPC-web message size limits while keeping the
 /// number of replay frames for a long-lived session reasonable.
+///
+/// Retained for the `sandbox_replay_tests` unit tests below, like the two helpers it bounds: since
+/// `#unbundle` node 6 the sandbox path replays through `tddy_terminal_rpc`'s bridge, which is
+/// bounded by that crate's own `DEFAULT_INITIAL_FRAME_BYTES`.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const TERMINAL_OUTPUT_FRAME_MAX_BYTES: usize = 32 * 1024;
 
 /// Split a terminal capture buffer into ordered frames of at most `max_frame_bytes` each so a long

@@ -872,6 +872,12 @@ pub async fn build(
             });
         }
 
+        // TerminalSessionService — the nine terminal methods, served by `tddy-terminal-rpc` on top
+        // of the streaming bridge it already owned. `#unbundle` node 6 mounted this coordinate;
+        // `connection.ConnectionService` still declares the same nine while every client is
+        // repointed at it, and both are backed by the same managers (`terminal_session_entry`).
+        rpc_entries.push(connection_arc.terminal_session_entry());
+
         let connection_server = tddy_service::ConnectionServiceServer::from_arc(connection_arc);
         rpc_entries.push(tddy_rpc::ServiceEntry {
             name: "connection.ConnectionService",

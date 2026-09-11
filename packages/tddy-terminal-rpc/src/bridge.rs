@@ -243,7 +243,12 @@ async fn open_replay_ack_live(
             // Resize the PTY to the client's dimensions before bridging live output so the shell
             // redraws at the browser's actual width. Drain any pre-resize broadcast so the bridge
             // only forwards the fresh post-resize frame.
-            if initial_cols > 0 && initial_rows > 0 {
+            //
+            // Both are skipped for a terminal with no PTY master to resize: there is no pre-resize
+            // output to discard there, so draining would only throw away live bytes the replay
+            // chunk above does not cover.
+            let resizing = initial_cols > 0 && initial_rows > 0 && session.resizable();
+            if resizing {
                 session
                     .resize(
                         req_initial_rows_as_u16(initial_rows),
@@ -253,7 +258,7 @@ async fn open_replay_ack_live(
                 session.trigger_redraw();
             }
             let mut stdout_rx = session.subscribe_stdout();
-            if initial_cols > 0 && initial_rows > 0 {
+            if resizing {
                 use tokio::sync::broadcast::error::TryRecvError;
                 loop {
                     match stdout_rx.try_recv() {

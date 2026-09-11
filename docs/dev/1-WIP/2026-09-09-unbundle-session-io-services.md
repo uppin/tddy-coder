@@ -266,9 +266,9 @@ message set and no converter. `session_files.SessionFilesService` is served by `
 
 ## Implementation Milestones
 
-- [ ] M1 — `session_files.proto` generates; `types.proto` imported rather than duplicated
-- [ ] M2 — `tddy-session-files` extracted; its suites pass
-- [ ] M3 — `terminal_session.TerminalSessionService` served from `tddy-terminal-rpc`; PTY modules moved
+- [x] M1 — `session_files.proto` generates; `types.proto` imported rather than duplicated ✅
+- [x] M2 — `tddy-session-files` extracted; its suites pass ✅ (155 tests)
+- [x] M3 — `terminal_session.TerminalSessionService` served from `tddy-terminal-rpc` ✅; PTY modules: **1 of 3 moved**, see above
 - [ ] M4 — both hand converters deleted; `grep -rn 'connection.SessionTerminalInput'` finds nothing
 - [ ] M5 — `tddy-coder`'s participant moved; HTTP and LiveKit answer a session identically
 - [ ] M6 — sandbox extern path re-pointed; `cargo build -p tddy-service` clean
@@ -383,12 +383,29 @@ Three further proofs:
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-daemon` | **1027 passed / 1 failed**, 25 suites (inherited from node 1) | |
-| `cargo clippy -p tddy-session-files -p tddy-service --all-targets -- -D warnings` | ✅ exit 0 | |
-| `./dev bun run --filter tddy-web cypress:component` | not yet run — no web change in commit 2 | |
+| `./test -p tddy-daemon` | **1027 passed / 1 failed** (a *fail-fast* count — see below) | **37 failures, byte-identical set to the base**, measured `--no-fail-fast` over 135 binaries; all three families environmental |
+| `cargo clippy -p tddy-session-files -p tddy-service --all-targets -- -D warnings` | ✅ exit 0 | ✅ exit 0, and CI's workspace-wide `Rust lint` passes |
+| `cargo test -p tddy-session-files` | crate did not exist | ✅ **155 passed / 0 failed** |
+| `cargo test -p tddy-codegen` | 0 tests (the 5 were `cfg`'d out of every run) | ✅ **5 passed**, now reachable from a plain `cargo test` |
+| `scripts/generated-code.sh check` | 2 files never committed (drift) | ✅ all four gated packages up to date |
+| CI on `54ac24ef` | — | `Rust lint` ✅ · `Rust build` ✅ · `Rust build (arm64)` ✅ · `Generated code` ✅ · `Web tests` ✅ **2630/2630** · `Rust tests` **6560/6562** |
 
-**8 failing tests** define this node: 3 in `tddy-session-files` and 5 in `tddy-service` (the
-inherited ones plus `session_files`/terminal shape and the converter-absence sweep).
+**The "Before" row was misleading, not merely stale.** `1027 passed / 1 failed` is a fail-fast
+number — `cargo test` stops at the first failing binary — so it was never comparable to a
+whole-suite figure, and any later node reading it as one would mis-measure its own regression. The
+`## Green-phase corrections` section records the both-sides measurement that replaces it.
+
+**The two tests still red are this node's own definition of done**, and nothing else in the
+workspace is: CI's only failures on `54ac24ef` are
+`connection_service_no_longer_declares_the_session_file_or_terminal_methods` and
+`no_source_converts_between_the_two_terminal_message_sets` — the 22 rpcs and the converters, which
+leave in the milestone that removes them. The "8 failing tests" this section originally claimed was
+also wrong: node 6 added **6** tests, of which 2 failed, and both predecessors' inherited reds have
+since been fixed by their own owners.
+
+CI also settles the local noise: the 37 failures measured on this machine are **environmental**
+(the documented sandbox `self_arc` family, no LiveKit testkit, and the sqlx model store), and CI's
+proper environment passes all of them — 6560 of 6562.
 
 ### The shared types file arrived here, for one enum
 
@@ -517,13 +534,15 @@ phase **mirrors the real code** rather than implementing the invented shapes.
 
 ### Two hazards the plan does not mention
 
-- **`unbundle_service_split.rs:139` pins `ConnectionService` at exactly 73 rpcs and passes today.**
-  Removing 22 takes it to 51, so that literal must move or the test flips red *because* this node
-  succeeded. Worse, 73 is only correct because node 4's `StreamLiveKitRooms` removal never happened —
-  `connection_service_no_longer_declares_the_rooms_stream` (node 4's criterion) is **failing on
-  arrival** at `connection.proto:283`, and `tddy-web/src/gen` has no `livekit_pb.ts`. The count is
-  computed from the proto rather than hand-bumped, and node 4's inherited red is reported, not fixed
-  here.
+- **`connection_service_keeps_exactly_the_methods_node_one_leaves_behind` pins the rpc count and
+  passes today, so it flips red *because* this node succeeds.** The literal is a running total every
+  node has to bump: it was `73` when this node's green phase started, and node 4's
+  `StreamLiveKitRooms` removal landing mid-flight took it to `72`. Removing this node's 22 takes it
+  to **50** — which is exactly what `## Technical Changes` § State B predicted, so the plan's
+  end-state number was right all along and only the intermediate was off. Bumped rather than
+  computed from the proto: a count derived from its own input asserts nothing, whereas a literal
+  still catches removing 21 or 23 by accident. It carries a comment saying each node updates it.
+  Node 4's inherited red (below) is **resolved** as of this rebase.
 - **The converter-absence sweep is satisfiable by deleting a doc comment.** It greps one needle
   (`connection::SessionTerminalInput`) under `packages/tddy-daemon/src` only, so it misses the second
   converter entirely and every one of the coder's four inline copies. The green phase widens it to
@@ -536,11 +555,13 @@ implementing a predecessor's owned symbol is the duplicate-development failure `
 exists to prevent. They will nonetheless show in this PR's CI, so they are recorded to stop them
 being read as node 6 damage:
 
-1. **Node 4 (#473)** — `connection_service_no_longer_declares_the_rooms_stream`, node 4's own
-   completion criterion, fails on arrival: `StreamLiveKitRooms` is still declared at
-   `connection.proto:283`, and `packages/tddy-web/src/gen` has no `livekit_pb.ts`. This is also what
-   makes the `73` literal at `unbundle_service_split.rs:139` arithmetically correct today — when node
-   4 finishes, the pre-node-6 count is 72.
+1. **Node 4 (#473)** — *resolved while this node was in green.*
+   `connection_service_no_longer_declares_the_rooms_stream`, node 4's own completion criterion,
+   failed on arrival with `StreamLiveKitRooms` still declared in `connection.proto`. It has since
+   landed: the rpc no longer appears, the count literal moved 73 → 72, and the pre-node-6 total is
+   now 72. Recorded because it is the second predecessor red that fixed itself mid-flight, which is
+   the argument for re-verifying inherited failures after every rebase rather than carrying the
+   first reading forward.
 2. **Node 5 (#474)** — *resolved while this node was in green.* At the first rebase,
    `session_tool_client::tests::refuses_a_call_on_a_session_with_no_transport` panicked with
    `not implemented: dispatch_session_tool` at `packages/tddy-service/src/session_tool_client.rs:79`,
@@ -625,3 +646,87 @@ parallelism, not this node's.
 alone cuts cohesive units and puts churn on top of a rename, and the diffs are far more reviewable
 while they stay pure renames. `host_documents.rs` is the honest refactor target — it grew by the
 framing function it absorbed.
+
+### The sandbox terminal branch was a second copy of the bridge
+
+The plan treated family K as nine handlers to relocate. Four of them — `StreamSessionTerminalIO`,
+`StreamTerminalOutput`, `SendTerminalInput`, `GetTerminalHistory` — also branched on
+`sandbox_manager`, and the `StreamTerminalOutput` branch was a hand-rolled ~90-line reimplementation
+of the bridge's replay and offset arithmetic. Its own comment said so: *"matching
+`tddy_terminal_rpc::bridge`."* Two implementations of one offset contract, in the surface whose
+entire purpose is to be the single terminal surface, and this repo has already been bitten by two
+terminal paths disagreeing.
+
+It is unified through `TerminalSessionStore`, which is what that trait was written for: a
+`SandboxTerminalSession` adapter in `tddy-daemon` (beside the existing `DaemonTerminalSession`), and
+a composite store that resolves a sandbox session first. All four branches are gone, along with 104
+further lines in `connection_service.rs` that nothing constructed once they went.
+
+**No predecessor crate was touched.** `SandboxSessionState`'s `stdout_tx`, `capture` — literally the
+same `tddy_task::TerminalCapture` arc — and `stdin_tx` are already public, so the adapter maps them
+directly; the three the sandbox lacks are synthesised to preserve today's behaviour: the acked-offset
+watch is dropped immediately so the bridge emits **no** ACK frames, `resize` is a no-op, and
+`pty_done` is derived from the stdout broadcast closing. Editing `tddy-daemon-sandbox` would have
+been reaching into node 3's crate.
+
+One defaulted trait method was added: `TerminalSession::resizable() -> bool`, default `true`. It
+guards the bridge's post-resize **drain**, which would otherwise have discarded live bytes that no
+replay chunk covers whenever a client supplied dimensions for a sandbox session — a real gap, not a
+port detail. Defaulting it meant no implementor outside the crate changed, which is why `tddy-coder`
+was not touched here.
+
+**Three observable changes for sandboxed sessions, accepted deliberately** (decision taken
+2026-09-11) because this node is where the terminal surface is unified or the split is locked in —
+the two `docs/dev/todo/2026-07-28-terminal-*` entries are exactly this:
+
+| | Before | After |
+|---|---|---|
+| `GetTerminalHistory` | `not_found` | real offset-anchored chunks |
+| `StreamSessionTerminalIO` | live only — no prologue, replay or anchoring frame | replays like every other terminal |
+| `StreamTerminalOutput`, TAIL | the whole retained buffer, 32 KiB frames | prologue + last 8 KiB, scroll-up for the rest |
+
+The third is the only regression-shaped one, and it is only coherent *because* of the first: the
+scrollback is still reachable, paged rather than pushed on open, which is how every non-sandboxed
+terminal has always behaved. The alternative — keeping a mode branch for sandbox sessions — was
+rejected: it leaves a sandbox-specific arm in the one surface that is supposed to have none.
+
+Evidence: `packages/tddy-daemon/tests/sandbox_terminal_parity_acceptance.rs` (10 tests) builds a
+**real** `SandboxSessionState` and carries the deleted loop verbatim as an oracle, comparing served
+frames against it and against literal expected frames across both replay modes, the prologue,
+forward fill, and drifted-offset clamping.
+
+⚠ **An honest gap in the end-to-end evidence.** The two daemon tests that would catch a
+sandbox-terminal regression through the full stack —
+`sandboxed_claude_cli_terminal_io_round_trips` and
+`sandboxed_session_streams_demo_tui_dimensions_in_terminal` — die on the pre-existing
+`ConnectionServiceImpl::self_arc called before set_self_handle` harness fault *before reaching any
+terminal RPC*, so they neither confirm nor deny this change. That is why the parity suite exists at
+the store/adapter level. Fixing that harness gap is not this node's, and it is the reason the
+`self_arc` family is worth someone owning.
+
+### Only one of the three PTY modules could move, and for a measured reason
+
+`## Affected Packages` says `tddy-terminal-rpc` "gains the 3 PTY modules". It gains one function.
+
+- **`pty_registry.rs` was deleted, not moved.** Six lines of `pub use tddy_pty::{PtyControl,
+  PtyRegistry};` with two importers. Relocating a re-export shim moves nothing; the importers now
+  name `tddy_pty` directly.
+- **`pty_runtime.rs` stays in `tddy-daemon`.** Its `crate::` paths are shims — the plan was right
+  that there is no *daemon* coupling — but the crates behind them are not free:
+  `privilege_drop` and `spawn_path_extra_for_home` come from `tddy-daemon-kernel`, which depends
+  **non-optionally** on `tddy-livekit`. `tddy-tools` depends on `tddy-terminal-rpc`
+  non-optionally and carries a `livekit` feature (`Cargo.toml:75`) whose entire purpose is to keep
+  the LiveKit/webrtc SDK out of an in-jail build that only speaks gRPC. Measured:
+  `cargo tree -p tddy-tools --no-default-features -e normal | grep -c livekit` is **0** today, and
+  moving `pty_runtime` would make it non-zero unconditionally. The extraction is not worth defeating
+  that flag.
+- **What did move is `login_shell_for_os_user`** → `tddy-terminal-rpc/src/login_shell.rs`, a pure
+  passwd lookup with no daemon state, because `StartTerminalSession` is served from this crate now.
+  `connection.ConnectionService` was re-pointed at the same function, so the two coordinates cannot
+  start a session in different shells while both are mounted.
+- **`terminal_session_adapter.rs` stays**, as `## Boundaries` implies: it binds the daemon's own
+  managers to the trait, which is what the trait is for, and it is where the sandbox adapter went.
+
+Both coordinates are mounted from the **same** managers in `runtime.rs`, so while
+`connection.ConnectionService` still declares family K, the two address one set of PTYs and one
+control lease.

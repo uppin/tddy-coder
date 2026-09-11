@@ -72,62 +72,11 @@ use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 mod service_util;
 pub(crate) use service_util::*;
 
-/// Stream adapter that yields [`SessionTerminalOutput`] from a broadcast receiver.
-///
-/// Implements [`futures_util::stream::Stream`] so it can be returned from
-/// [`ConnectionServiceTrait::stream_session_terminal_io`].
-pub struct TerminalOutputStream {
-    rx: tokio::sync::broadcast::Receiver<bytes::Bytes>,
-    /// The session and terminal the broadcast belongs to — stamped on every frame this adapter
-    /// yields, since a client cannot tell whose bytes an unidentified frame carries.
-    identity: TerminalFrameIdentity,
-}
-
-impl Stream for TerminalOutputStream {
-    type Item = Result<SessionTerminalOutput, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        use tokio::sync::broadcast::error::TryRecvError;
-        loop {
-            match self.rx.try_recv() {
-                Ok(chunk) => {
-                    return std::task::Poll::Ready(Some(Ok(self
-                        .identity
-                        .data_frame(chunk.to_vec()))));
-                }
-                Err(TryRecvError::Lagged(_)) => {
-                    // Skip lagged messages and try again.
-                    continue;
-                }
-                Err(TryRecvError::Closed) => {
-                    return std::task::Poll::Ready(None);
-                }
-                Err(TryRecvError::Empty) => {
-                    // Register the waker with a new future so we get notified when data arrives.
-                    let mut rx_clone = self.rx.resubscribe();
-                    let waker = cx.waker().clone();
-                    tokio::spawn(async move {
-                        // Wait for the next message, then wake the task.
-                        let _ = rx_clone.recv().await;
-                        waker.wake();
-                    });
-                    return std::task::Poll::Pending;
-                }
-            }
-        }
-    }
-}
-
-impl Unpin for TerminalOutputStream {}
-
 /// Stream adapter backed by an mpsc channel — used for `StreamTerminalOutput` (browser-compatible
 /// server-streaming RPC).
 ///
-/// Unlike `TerminalOutputStream` (broadcast-based), this correctly registers the waker via
-/// `poll_recv` so the stream is woken as soon as data arrives. A background task bridges the
+/// Registers the waker via `poll_recv` so the stream is woken as soon as data arrives, which the
+/// broadcast-backed adapter it replaced could not. A background task bridges the
 /// broadcast channel into the mpsc sender so no messages can be lost between `try_recv()` and
 /// waker registration.
 pub struct MpscTerminalOutputStream {
@@ -145,57 +94,6 @@ impl Stream for MpscTerminalOutputStream {
             std::task::Poll::Ready(Some(msg)) => std::task::Poll::Ready(Some(Ok(msg))),
             std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
             std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-/// The session and terminal a stream's frames belong to. Every frame carries it, so a client can
-/// tell its own terminal's bytes from another terminal's and drop what is not its own instead of
-/// silently painting it. `terminal_id` is always the RESOLVED id (an empty request id resolves to
-/// the reserved main terminal), matching `tddy_terminal_rpc::bridge`.
-#[derive(Clone)]
-struct TerminalFrameIdentity {
-    session_id: String,
-    terminal_id: String,
-}
-
-impl TerminalFrameIdentity {
-    fn new(session_id: &str, terminal_id: &str) -> Self {
-        Self {
-            session_id: session_id.to_string(),
-            terminal_id: service_util::resolved_terminal_id(terminal_id).to_string(),
-        }
-    }
-
-    /// A terminal output-data frame (no ACK).
-    fn data_frame(&self, data: Vec<u8>) -> SessionTerminalOutput {
-        SessionTerminalOutput {
-            data,
-            acked_input_offset: 0,
-            session_id: self.session_id.clone(),
-            terminal_id: self.terminal_id.clone(),
-            ..Default::default()
-        }
-    }
-
-    /// A replay / catch-up frame tagged with its absolute byte offsets and whether it reaches the
-    /// capture ring's oldest retained byte. Used by the sandbox path so a reconnecting client can
-    /// resume by offset (FROM_OFFSET) instead of re-receiving the whole retained buffer.
-    fn replay_frame(
-        &self,
-        data: Vec<u8>,
-        start_offset: u64,
-        end_offset: u64,
-        at_oldest: bool,
-    ) -> SessionTerminalOutput {
-        SessionTerminalOutput {
-            data,
-            acked_input_offset: 0,
-            start_offset,
-            end_offset,
-            at_oldest,
-            session_id: self.session_id.clone(),
-            terminal_id: self.terminal_id.clone(),
         }
     }
 }
@@ -1660,6 +1558,8 @@ mod svc_materialize_staged_attachment;
 mod svc_spawn_split_agent;
 
 mod svc_start_session_core;
+
+mod svc_terminal_ports;
 
 /// Merge local `ListProjects` rows with [`EligibleDaemonSource::peer_project_entries`].
 async fn merge_listed_projects_with_peers(

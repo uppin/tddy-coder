@@ -35,7 +35,18 @@ pub trait TerminalSession: Send + Sync {
     /// Watch the applied-input-offset for ACK frames interleaved on the output stream.
     fn subscribe_acked_offset(&self) -> watch::Receiver<u64>;
 
-    /// Resize the PTY (SIGWINCH) to the given dimensions.
+    /// Whether this terminal has a PTY master to resize.
+    ///
+    /// `true` by default. A terminal answering `false` has no SIGWINCH — [`Self::resize`] cannot
+    /// change anything — so the bridge neither resizes it nor drains its broadcast afterwards. The
+    /// drain exists to discard output produced *before* a resize took effect; with no resize it
+    /// would instead discard live bytes that no replay chunk covers, leaving the client a gap.
+    fn resizable(&self) -> bool {
+        true
+    }
+
+    /// Resize the PTY (SIGWINCH) to the given dimensions. Never called on a terminal that reports
+    /// itself not [`resizable`](Self::resizable).
     async fn resize(&self, rows: u16, cols: u16);
 
     /// Forward input to the PTY stdin, intercepting an embedded OSC resize escape, and advance the

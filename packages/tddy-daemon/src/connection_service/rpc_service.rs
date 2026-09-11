@@ -115,8 +115,6 @@ use super::to_connection_output;
 
 use super::to_bridge_terminal_input;
 
-use super::TerminalFrameIdentity;
-
 use tddy_service::proto::connection::SessionTerminalOutput;
 
 use crate::cli_session_manager::MAIN_TERMINAL_ID;
@@ -2724,44 +2722,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             terminal_id
         );
 
-        if let Some(sandbox) = self.sandbox_manager.get(&session_id).await {
-            if terminal_id != MAIN_TERMINAL_ID {
-                return Err(Status::not_found("terminal not found or not running"));
-            }
-            let stdin_tx = sandbox.stdin_tx.clone();
-            if !first.data.is_empty() {
-                let _ = stdin_tx.send(bytes::Bytes::from(first.data));
-            }
-            // Sandbox bidi path stays live-only (no capture-ring replay on this surface): forward
-            // subsequent input chunks to stdin, and bridge the sandbox stdout broadcast into the
-            // mpsc-backed stream the tonic/RpcService trait drains.
-            let stdin_tx2 = stdin_tx.clone();
-            tokio::spawn(async move {
-                while let Some(Ok(msg)) = in_stream.next().await {
-                    if !msg.data.is_empty() {
-                        let _ = stdin_tx2.send(bytes::Bytes::from(msg.data));
-                    }
-                }
-            });
-            let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SessionTerminalOutput>();
-            let mut stdout_rx = sandbox.stdout_tx.subscribe();
-            let identity = TerminalFrameIdentity::new(&session_id, &terminal_id);
-            tokio::spawn(async move {
-                loop {
-                    match stdout_rx.recv().await {
-                        Ok(chunk) => {
-                            if tx.send(identity.data_frame(chunk.to_vec())).is_err() {
-                                break;
-                            }
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    }
-                }
-            });
-            return Ok(Response::new(MpscTerminalOutputStream { rx }));
-        }
-
         if !self
             .claude_cli_manager
             .verify_control(&session_id, &first.control_token)
@@ -2772,9 +2732,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             ));
         }
 
-        let store = crate::terminal_session_adapter::DaemonTerminalSessionStore::new(Arc::clone(
-            &self.claude_cli_manager,
-        ));
+        let store = self.terminal_store();
         let session = store
             .get_terminal(&session_id, &terminal_id)
             .await
@@ -2869,105 +2827,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             terminal_id
         );
 
-        if let Some(sandbox) = self.sandbox_manager.get(&session_id).await {
-            if terminal_id != MAIN_TERMINAL_ID {
-                return Err(Status::not_found("terminal not found or not running"));
-            }
-            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            // Every frame this stream emits names the session and terminal it came from, so a client
-            // rendering another terminal drops it instead of painting it.
-            let identity = TerminalFrameIdentity::new(&session_id, &terminal_id);
-
-            // Re-issue the mouse-tracking modes still in effect as the very first frame (not part of
-            // the cumulative byte stream, so zeroed offsets), then forward-fill the retained buffer
-            // from the appropriate offset. TAIL (first connect) clamps `from_offset = 0` up to the
-            // ring's `start_offset`, replaying the full retained buffer; FROM_OFFSET (reconnect)
-            // replays only the gap from the client's tracked offset to the tip. Each chunk is tagged
-            // with its absolute offsets so the client advances its `currentOffset` to the tip and can
-            // resume by offset on the next reconnect — no duplicate replay.
-            let is_from_offset =
-                req.mode == tddy_service::proto::connection::StreamReplayMode::FromOffset as i32;
-            let from_offset = if is_from_offset { req.from_offset } else { 0 };
-
-            let prologue = sandbox
-                .capture
-                .lock()
-                .map(|cap| cap.mode_prologue())
-                .unwrap_or_default();
-            if !prologue.is_empty() {
-                let _ = tx.send(identity.data_frame(prologue));
-            }
-
-            // `from_offset` is clamped DOWN to the tip: a client whose cumulative counter drifted
-            // ahead of the stream would otherwise be handed its own bogus offset back and would keep
-            // asking for bytes the capture will never hold. Exactly one offset-anchored frame is
-            // always emitted (an empty one tagged with the tip when there is no gap), so every open
-            // SETS the client's cumulative offset instead of leaving it to be inferred from the
-            // frames that carry none — matching `tddy_terminal_rpc::bridge`.
-            let tip = sandbox
-                .capture
-                .lock()
-                .map(|cap| cap.end_offset())
-                .unwrap_or_default();
-            let mut cursor = from_offset.min(tip);
-            let mut anchored = false;
-            loop {
-                let chunk = sandbox
-                    .capture
-                    .lock()
-                    .map(|cap| {
-                        cap.replay_from(cursor, 0, service_util::TERMINAL_OUTPUT_FRAME_MAX_BYTES)
-                    })
-                    .unwrap_or_else(|_| tddy_task::CaptureChunk {
-                        data: Vec::new(),
-                        start_offset: cursor,
-                        end_offset: cursor,
-                        at_oldest: true,
-                        at_end: true,
-                    });
-                let (end_offset, at_end) = (chunk.end_offset, chunk.at_end);
-                if !chunk.data.is_empty() || !anchored {
-                    let _ = tx.send(identity.replay_frame(
-                        chunk.data,
-                        chunk.start_offset,
-                        chunk.end_offset,
-                        chunk.at_oldest,
-                    ));
-                    anchored = true;
-                }
-                cursor = end_offset;
-                if at_end {
-                    break;
-                }
-            }
-
-            let mut stdout_rx = sandbox.stdout_tx.subscribe();
-            // Sandbox sessions have no unary input-offset ACK source; data frames only.
-            tokio::spawn(async move {
-                loop {
-                    match stdout_rx.recv().await {
-                        Ok(chunk) => {
-                            if tx.send(identity.data_frame(chunk.to_vec())).is_err() {
-                                break;
-                            }
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    }
-                }
-            });
-            return Ok(Response::new(MpscTerminalOutputStream { rx }));
-        }
-
-        let store = crate::terminal_session_adapter::DaemonTerminalSessionStore::new(Arc::clone(
-            &self.claude_cli_manager,
-        ));
-        // Delegate the claude-cli terminal stream to the unified bridge in `tddy-terminal-rpc`, which
-        // sends the mode prologue + current last frame first (tagged with absolute offsets), resizes
-        // and drains on client dimensions, emits the current ACK up front, then bridges live
-        // broadcast output interleaved with ACKs until the child exits. Older history is fetched on
-        // demand via `get_terminal_history` as the user scrolls up. The bridge resolves an empty
-        // `terminal_id` to the reserved main terminal, matching the daemon's `resolved_terminal_id`.
+        // Delegate to the unified bridge in `tddy-terminal-rpc`, which sends the mode prologue +
+        // current last frame first (tagged with absolute offsets), resizes and drains on client
+        // dimensions, emits the current ACK up front, then bridges live broadcast output
+        // interleaved with ACKs until the child exits. Older history is fetched on demand via
+        // `get_terminal_history` as the user scrolls up. The bridge resolves an empty `terminal_id`
+        // to the reserved main terminal, matching the daemon's `resolved_terminal_id`.
+        //
+        // Every terminal this daemon serves is reached through one store, sandboxed sessions
+        // included — `#unbundle` node 6 replaced the per-handler sandbox branch, and the second
+        // copy of the replay/offset loop that lived inside it, with `terminal_store`.
+        let store = self.terminal_store();
         let bridge_req = tddy_terminal_rpc::proto::terminal_session::StreamTerminalOutputRequest {
             session_token: req.session_token.clone(),
             session_id: req.session_id.clone(),
@@ -3006,7 +2876,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(MpscTerminalOutputStream { rx }))
     }
 
-    /// Unary input — browser-compatible alternative to the client-streaming half of `StreamSessionTerminalIO`.
+    /// Unary input — browser-compatible alternative to the client-streaming half of
+    /// `StreamSessionTerminalIO`. Delegates the OSC-resize interception and the input-offset ACK to
+    /// the unified bridge over [`Self::terminal_store`].
     async fn send_terminal_input(
         &self,
         request: Request<SessionTerminalInput>,
@@ -3022,16 +2894,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_id = req.session_id.trim().to_string();
         let terminal_id = service_util::resolved_terminal_id(&req.terminal_id).to_string();
 
-        if let Some(sandbox) = self.sandbox_manager.get(&session_id).await {
-            if terminal_id != MAIN_TERMINAL_ID {
-                return Err(Status::not_found("terminal not found or not running"));
-            }
-            if !req.data.is_empty() {
-                let _ = sandbox.stdin_tx.send(bytes::Bytes::from(req.data));
-            }
-            return Ok(Response::new(SendTerminalInputResponse {}));
-        }
-
         if !self
             .claude_cli_manager
             .verify_control(&session_id, &req.control_token)
@@ -3042,12 +2904,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             ));
         }
 
-        let handle = self
-            .claude_cli_manager
-            .get_terminal(&session_id, &terminal_id)
-            .await
-            .ok_or_else(|| Status::not_found("terminal not found or not running"))?;
-
         if !req.data.is_empty() {
             log::trace!(
                 target: "tddy_daemon::connection_service",
@@ -3057,16 +2913,18 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 req.data.len(),
                 String::from_utf8_lossy(&req.data)
             );
-            let input_offset = req.input_offset;
-            handle.send_input(bytes::Bytes::from(req.data), input_offset);
         }
+        let store = self.terminal_store();
+        tddy_terminal_rpc::serve_send_terminal_input(&store, to_bridge_terminal_input(&req))
+            .await?;
         Ok(Response::new(SendTerminalInputResponse {}))
     }
 
-    /// `GetTerminalHistory`: lazy scroll-up — one chunk of older output ending just before the
-    /// request's `before_offset`, then the stream closes. Delegates to the unified bridge in
-    /// `tddy-terminal-rpc` over a [`DaemonTerminalSessionStore`]. Sandbox sessions have no capture
-    /// ring wired here, so they report `not_found` (the sandbox path streams its own replay).
+    /// `GetTerminalHistory`: lazy scroll-up — one forward chunk of older output from the request's
+    /// `from_offset`, then the stream closes. Delegates to the unified bridge in `tddy-terminal-rpc`
+    /// over [`Self::terminal_store`], which reads a sandboxed session's capture ring as readily as a
+    /// claude-cli one — before `#unbundle` node 6 this method refused a sandboxed session outright,
+    /// so its terminal had no scroll-up at all.
     async fn get_terminal_history(
         &self,
         request: Request<GetTerminalHistoryRequest>,
@@ -3079,14 +2937,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
-        let session_id = req.session_id.trim().to_string();
-        if self.sandbox_manager.get(&session_id).await.is_some() {
-            return Err(Status::not_found("terminal not found or not running"));
-        }
-
-        let store = crate::terminal_session_adapter::DaemonTerminalSessionStore::new(Arc::clone(
-            &self.claude_cli_manager,
-        ));
+        let store = self.terminal_store();
         let bridge_req = tddy_terminal_rpc::proto::terminal_session::GetTerminalHistoryRequest {
             session_token: req.session_token.clone(),
             session_id: req.session_id.clone(),
@@ -3145,10 +2996,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         // The Bash tool is built-in: the target user's passwd login shell (not the daemon's own
         // `$SHELL`, which under systemd/nix is not the user's interactive shell), falling back to
-        // `$SHELL`, then /bin/bash.
-        let shell = crate::pty_runtime::login_shell_for_os_user(os_user)
-            .or_else(|| std::env::var("SHELL").ok())
-            .unwrap_or_else(|| "/bin/bash".to_string());
+        // `$SHELL`, then /bin/bash. The chain lives in `tddy-terminal-rpc` beside the
+        // `StartTerminalSession` handler that answers the same request at the new coordinate, so
+        // the two cannot come up in different shells.
+        let shell = tddy_terminal_rpc::login_shell_for(os_user);
 
         let handle = self
             .claude_cli_manager

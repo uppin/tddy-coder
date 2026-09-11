@@ -74,7 +74,6 @@ pub use tddy_host_service::{
 };
 pub mod local_socket_server;
 pub mod presenter_intent_client;
-pub mod pty_registry;
 pub mod pty_runtime;
 pub mod relay_idle;
 pub mod runtime;
