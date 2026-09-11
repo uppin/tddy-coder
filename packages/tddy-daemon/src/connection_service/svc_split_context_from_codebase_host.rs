@@ -3,23 +3,46 @@ use std::time::Duration;
 use tddy_service::proto::connection::ResumeSessionResponse;
 use tddy_service::proto::session_files::{
     ContextFileBatchChunk, ContextManifestEntry, ContextManifestRequest,
-    ReadContextFileBatchRequest,
+    ReadContextFileBatchRequest, SessionFilesService,
 };
 
-use tddy_rpc::Response;
+use futures_util::StreamExt;
+use tddy_rpc::{Request, Response};
+use tddy_worktree_service::stream::MpscResultStream;
 
 use std::path::PathBuf;
 
 use tddy_rpc::Status;
 
-use super::ConnectionServiceImpl;
+use super::{ConnectionServiceImpl, PeerRoutedSessionFiles};
 
-/// The coordinate the two context reads below are served at — this daemon's own when the codebase
-/// lives here, a peer's otherwise. Named because a forward has to be addressed at the service that
-/// *declares* the method, and `connection.ConnectionService` has not since `#unbundle` node 6.
-const SESSION_FILES_SERVICE: &str = "session_files.SessionFilesService";
+/// Every frame of one served context read, as the single value the split path below needs.
+///
+/// Drained rather than sampled: the handler answers a refusal as the call's own error *before* the
+/// stream exists, so an error item here can only be one the serving host raised mid-stream — and a
+/// manifest that stopped half way must fail this read rather than reach the caller as a project
+/// with fewer rules than it has.
+async fn every_frame_of<Frame>(mut frames: MpscResultStream<Frame>) -> Result<Vec<Frame>, Status> {
+    let mut collected = Vec::new();
+    while let Some(frame) = frames.next().await {
+        collected.push(frame?);
+    }
+    Ok(collected)
+}
 
 impl ConnectionServiceImpl {
+    /// This daemon's `session_files.SessionFilesService` surface — the one coordinate the two
+    /// context reads below are served at, whichever host holds the codebase.
+    ///
+    /// Reached through an `Arc` of a clone, as [`Self::session_room_roster`] is reached from the
+    /// split start (`svc_spawn_split_agent`): `Clone` here is the documented shallow, shared clone,
+    /// so the surface talks to this daemon's own config, roster and room slot. Deliberately not
+    /// [`Self::self_arc`], which panics unless `runtime.rs` recorded the self handle — a split
+    /// session's context read must not depend on wiring only the daemon binary performs.
+    fn session_files_of_this_daemon(&self) -> PeerRoutedSessionFiles {
+        std::sync::Arc::new(self.clone()).session_files_service()
+    }
+
     /// The project's own guidance, fetched from the daemon that holds the codebase.
     ///
     /// Routed through this daemon's own handlers, exactly as
@@ -41,11 +64,12 @@ impl ConnectionServiceImpl {
     /// Every allow-listed path in the addressed host's checkout, with the hash that says whether
     /// it moved.
     ///
-    /// Routed before anything is read, exactly as the served coordinate routes it: this daemon is
-    /// usually the *agent* host asking the one that holds the codebase, and answered locally it
-    /// would report an empty session directory as the project's guidance. When the codebase is
-    /// here, the read is gated by [`ConnectionServiceImpl::session_context_scope`] — the same
-    /// resolution `session_files.SessionFilesService` serves a wire caller through.
+    /// Asked of the *service* rather than read here, even when the codebase is on this host: that
+    /// surface is what classifies the route, gates the read by
+    /// [`ConnectionServiceImpl::session_context_scope`] and bounds it by this host's
+    /// `spawn_worker_request_timeout`. A second local read beside it would be a second answer to
+    /// all three — and an unbounded one, which is what a stalled checkout turns into a split start
+    /// that never finishes and never says why.
     ///
     /// Collected rather than streamed because the caller bounds the whole set against this host's
     /// attachment cap before spending a read on any of it.
@@ -53,67 +77,26 @@ impl ConnectionServiceImpl {
         &self,
         req: ContextManifestRequest,
     ) -> Result<Vec<ContextManifestEntry>, Status> {
-        if let Some(mut frames) = self
-            .stream_served_by_peer::<_, ContextManifestEntry>(
-                SESSION_FILES_SERVICE,
-                "StreamContextManifest",
-                &req.daemon_instance_id,
-                &req,
-            )
+        let frames = self
+            .session_files_of_this_daemon()
+            .stream_context_manifest(Request::new(req))
             .await?
-        {
-            let mut entries = Vec::new();
-            while let Some(frame) = frames.recv().await {
-                entries.push(frame?);
-            }
-            return Ok(entries);
-        }
-
-        let scope = self.session_context_scope(&req.session_token, &req.session_id, &req.agent)?;
-        let max_bytes = self.config.max_attachment_bytes;
-        tokio::task::spawn_blocking(move || {
-            crate::context_files::context_manifest(&scope.worktree_root, scope.globs, max_bytes)
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?
+            .into_inner();
+        every_frame_of(frames).await
     }
 
-    /// The bytes of every path in one request, from the same host and under the same gate as
-    /// [`Self::context_manifest_of`].
+    /// The bytes of every path in one request, from the same host and under the same gate and
+    /// deadline as [`Self::context_manifest_of`].
     async fn context_file_batch_of(
         &self,
         req: ReadContextFileBatchRequest,
     ) -> Result<Vec<ContextFileBatchChunk>, Status> {
-        if let Some(mut frames) = self
-            .stream_served_by_peer::<_, ContextFileBatchChunk>(
-                SESSION_FILES_SERVICE,
-                "StreamReadContextFileBatch",
-                &req.daemon_instance_id,
-                &req,
-            )
+        let frames = self
+            .session_files_of_this_daemon()
+            .stream_read_context_file_batch(Request::new(req))
             .await?
-        {
-            let mut chunks = Vec::new();
-            while let Some(frame) = frames.recv().await {
-                chunks.push(frame?);
-            }
-            return Ok(chunks);
-        }
-
-        let scope = self.session_context_scope(&req.session_token, &req.session_id, &req.agent)?;
-        let max_bytes = self.config.max_attachment_bytes;
-        let rel_paths = req.rel_paths;
-        let files = tokio::task::spawn_blocking(move || {
-            crate::context_files::read_context_files_bytes(
-                &scope.worktree_root,
-                &rel_paths,
-                scope.globs,
-                max_bytes,
-            )
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))??;
-        Ok(crate::context_files::context_file_batch_frames(&files))
+            .into_inner();
+        every_frame_of(frames).await
     }
 
     pub(crate) async fn split_context_from_codebase_host(
@@ -386,5 +369,187 @@ impl ConnectionServiceImpl {
             livekit_url: String::new(),
             livekit_server_identity: String::new(),
         }))
+    }
+}
+
+/// The deadline a split session's own context read is bounded by.
+///
+/// In-crate rather than under `tests/` because [`ConnectionServiceImpl::split_context_from_codebase_host`]
+/// is `pub(crate)`: the behaviour worth pinning is what *this* path does with a checkout that
+/// stalls, and an integration test could only reach it by starting a whole split session against a
+/// peer.
+///
+/// Co-located deliberately: when the codebase is on this host, the read is this daemon's own
+/// filesystem work, and a filesystem can genuinely stall (a network mount, a device that stopped
+/// answering). Unbounded, the split start waits for exactly as long as the stall lasts, with
+/// nothing for the caller to retry and nothing for an operator to raise.
+///
+/// **How a read is made to stall here.** The read runs on the runtime's blocking pool, so this
+/// gives the runtime exactly one blocking thread and hands it a read that does not return until the
+/// assertion has been made — the same technique as
+/// `tddy-session-files/tests/context_read_deadline_acceptance.rs`, and for the same reason: a slow
+/// filesystem or a `sleep` would be a wall-clock race that passes or fails with the load on the
+/// machine.
+///
+/// PRD: docs/ft/daemon/agent-context-sync.md.
+#[cfg(test)]
+mod the_deadline_a_split_sessions_context_read_is_bounded_by {
+    use std::future::Future;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use pretty_assertions::assert_eq;
+    use tddy_rpc::Code;
+
+    use super::*;
+    use crate::cli_session_manager::CliSessionManager;
+    use crate::test_util::{test_config, TEST_TOKEN, TEST_USER};
+
+    /// The instance id this daemon answers to — and the one the split session records as holding
+    /// its codebase, which is what makes the read below local rather than a peer forward.
+    const THIS_HOST: &str = "the-codebase-host";
+
+    /// The workspace session a split session's agent fetches its guidance from.
+    const CODEBASE_SESSION: &str = "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa";
+
+    /// The agent half, recorded on the codebase session as the pairing that makes it a split one.
+    const AGENT_SESSION: &str = "bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb";
+
+    /// The budget this host is configured to allow one context read.
+    ///
+    /// One second because `spawn_worker_request_timeout_secs` is whole seconds and the refusal
+    /// quotes them: the shortest budget an operator can configure, so the message asserted below is
+    /// one production can really produce.
+    const A_ONE_SECOND_READ_BUDGET_SECS: u64 = 1;
+
+    /// How long this test waits for the fetch itself, which is *not* the behaviour under test: ten
+    /// times the budget above, so a context read bounded by nothing at all fails saying what never
+    /// happened instead of hanging the suite.
+    const A_CALLS_OWN_PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
+
+    /// A split session whose codebase half lives on this very daemon, with a checkout to read.
+    struct ASplitSession {
+        _data_dir: tempfile::TempDir,
+        _checkout: tempfile::TempDir,
+        service: ConnectionServiceImpl,
+    }
+
+    /// This daemon holding the codebase of one split session, allowing a context read `budget_secs`.
+    fn a_split_session_whose_codebase_read_may_take(budget_secs: u64) -> ASplitSession {
+        let data_dir = tempfile::tempdir().expect("a data dir");
+        let checkout = tempfile::tempdir().expect("a checkout");
+        std::fs::write(checkout.path().join("CLAUDE.md"), b"# the project's rules")
+            .expect("the guidance file");
+        a_codebase_session_in(data_dir.path(), checkout.path());
+
+        let mut config = test_config();
+        config.daemon_instance_id = Some(THIS_HOST.to_string());
+        config.spawn_worker_request_timeout_secs = budget_secs;
+        let base = data_dir.path().to_path_buf();
+        let sessions_base: tddy_daemon_kernel::SessionsBaseResolver =
+            Arc::new(move |_| Some(base.clone()));
+        let users: tddy_daemon_kernel::SessionUserResolver =
+            Arc::new(|token| (token == TEST_TOKEN).then(|| TEST_USER.to_string()));
+        let service = ConnectionServiceImpl::new(
+            config,
+            sessions_base,
+            data_dir.path().to_path_buf(),
+            users,
+            None,
+            None,
+            None,
+            Arc::new(CliSessionManager::new()),
+        );
+        ASplitSession {
+            _data_dir: data_dir,
+            _checkout: checkout,
+            service,
+        }
+    }
+
+    /// The `workspace` session a split start records on the codebase host: the checkout it holds,
+    /// and the agent half it is paired with — the pairing is what makes the `claude` allow-list the
+    /// row this session is served.
+    fn a_codebase_session_in(data_dir: &Path, checkout: &Path) {
+        let session_dir =
+            tddy_core::session_lifecycle::unified_session_dir_path(data_dir, CODEBASE_SESSION);
+        std::fs::create_dir_all(&session_dir).expect("the session dir");
+        std::fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            format!(
+                "session_id: {CODEBASE_SESSION}\n\
+                 project_id: 019d105b-ac0f-78d3-9a89-409731145a40\n\
+                 created_at: 2026-09-11T09:00:00Z\n\
+                 updated_at: 2026-09-11T09:00:00Z\n\
+                 status: active\n\
+                 session_type: workspace\n\
+                 repo_path: {checkout}\n\
+                 agent_daemon_instance_id: the-agent-host\n\
+                 agent_session_id: {AGENT_SESSION}\n",
+                checkout = checkout.display()
+            ),
+        )
+        .expect("the session metadata");
+    }
+
+    /// Drive one fetch on a runtime whose only blocking thread is held by a read that never
+    /// returns, and give back the refusal it answered with.
+    ///
+    /// The held read is released once the fetch has answered, so the queued read drains and the
+    /// runtime shuts down rather than the test leaking a parked thread.
+    fn the_refusal_when_the_read_cannot_start<Call, Answer, Fetched>(call: Call) -> Status
+    where
+        Call: FnOnce() -> Answer,
+        Answer: Future<Output = Result<Fetched, Status>>,
+    {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .max_blocking_threads(1)
+            .build()
+            .expect("a runtime with exactly one blocking thread");
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        runtime.spawn_blocking(move || {
+            let _ = held.recv();
+        });
+
+        let answer = runtime.block_on(async {
+            tokio::time::timeout(A_CALLS_OWN_PATIENCE, call())
+                .await
+                .expect("the fetch never answered: the context read was bounded by no deadline")
+        });
+
+        release.send(()).expect("the held read to be releasable");
+        answer
+            .err()
+            .expect("a read that cannot start inside the budget must refuse the start")
+    }
+
+    #[test]
+    fn refuses_a_split_start_whose_codebase_read_does_not_return_inside_the_hosts_budget() {
+        // Given this host holding the codebase, allowing one context read a second
+        let split = a_split_session_whose_codebase_read_may_take(A_ONE_SECOND_READ_BUDGET_SECS);
+
+        // When the start fetches the project's guidance while that read cannot start
+        let refusal = the_refusal_when_the_read_cannot_start(|| {
+            split.service.split_context_from_codebase_host(
+                TEST_TOKEN,
+                CODEBASE_SESSION,
+                THIS_HOST,
+                "claude",
+                "start",
+            )
+        });
+
+        // Then the start is refused, naming the read that stalled and the key an operator raises
+        assert_eq!(refusal.code(), Code::DeadlineExceeded);
+        assert_eq!(
+            refusal.message,
+            format!(
+                "cannot start a split session without the guidance held beside its codebase: \
+                 reading the context manifest from session {CODEBASE_SESSION} on daemon \
+                 {THIS_HOST} failed: StreamContextManifest: timed out after 1s \
+                 (spawn_worker_request_timeout_secs)"
+            )
+        );
     }
 }
