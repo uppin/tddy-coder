@@ -19,6 +19,9 @@ use std::sync::Arc;
 
 use tddy_daemon_kernel::AgentActivityHub;
 
+pub mod session_notification_subscribers;
+pub mod session_notifications;
+
 /// The wire's "no tick yet" value.
 pub const NO_TICK: u64 = 0;
 
@@ -37,15 +40,47 @@ pub enum ActivityError {
 }
 
 /// The `activity.ActivityService` entry the daemon's wiring layer registers.
+///
+/// # Not yet constructible from a hub alone
+///
+/// The eight methods this coordinate serves need more of the host than the hub is: seven of them
+/// read a session directory resolved from the caller's token, four route to a peer daemon before
+/// they look a session up, `ReportSessionStatus` and `ReportAgentActivity` publish onto the
+/// notification bus, and `StreamAgentActivityDelta` answers from the session room's delta store.
+/// The hub carries none of that — it is a per-session broadcast of live activity records and a
+/// stack of in-flight `call_id`s, and nothing else.
+///
+/// So this constructor takes the wrong argument, not merely too few: what it wants is a ports
+/// struct, the shape `tddy_session_files::build_session_files_entry` already takes for the same
+/// reason. Panicking is deliberate until it has one. A service mounted on the daemon's local Unix
+/// socket answering `unimplemented` to all eight would be a silent capability removal on a
+/// privileged interface — the failure mode this node's changeset exists to prevent — whereas a
+/// panic at the wiring site cannot be mistaken for a working mount.
+///
+/// TODO(session-agent-services): take `ActivityPorts` (session-token-to-OS-user resolver, data
+/// dir, `Arc<SessionNotificationBus>`, the session-room delta store, the peer-route classifier and
+/// this hub) and move the eight handlers out of `tddy-daemon`'s `connection_service::rpc_service`
+/// behind it, leaving the daemon's routing preamble in the daemon as node 6 left its own.
 pub fn build_activity_entry(_hub: Arc<AgentActivityHub>) -> tddy_rpc::ServiceEntry {
-    // TODO(session-agent-services): implement
-    unimplemented!("build_activity_entry")
+    unimplemented!("build_activity_entry needs the ports the eight handlers read the host through")
 }
 
 /// The tick to stamp a session's next delta with, given the last one stamped.
-pub fn next_tick(_last: Option<u64>) -> u64 {
-    // TODO(session-agent-services): implement
-    unimplemented!("next_tick")
+///
+/// `None` — no delta has been stamped for this session yet — is [`FIRST_TICK`], not [`NO_TICK`].
+/// That is the whole point of the change: on the old coordinate the first delta and "no delta yet"
+/// were both 0, and a consumer could not tell them apart.
+///
+/// Saturating rather than wrapping at the top of the range, for the same reason: a wrap would land
+/// the next tick on [`NO_TICK`] and reintroduce the ambiguity this function exists to remove. A
+/// session would have to produce 2^64 deltas to reach it, and two deltas sharing the last tick is
+/// a smaller lie than one claiming it does not exist.
+#[must_use]
+pub fn next_tick(last: Option<u64>) -> u64 {
+    match last {
+        None => FIRST_TICK,
+        Some(last) => last.saturating_add(1),
+    }
 }
 
 #[cfg(test)]

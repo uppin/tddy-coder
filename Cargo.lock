@@ -12098,6 +12098,7 @@ dependencies = [
  "tddy-screen-sharing",
  "tddy-semantic-index",
  "tddy-service",
+ "tddy-session-activity",
  "tddy-session-files",
  "tddy-session-sync",
  "tddy-session-tool-client",
@@ -12927,12 +12928,18 @@ dependencies = [
 name = "tddy-session-activity"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "log",
  "pretty_assertions",
  "rstest 0.24.0",
  "tddy-core",
  "tddy-daemon-kernel",
  "tddy-rpc",
+ "tddy-service",
+ "tddy-telegram",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

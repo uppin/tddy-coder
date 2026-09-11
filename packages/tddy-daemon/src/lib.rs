@@ -85,7 +85,13 @@ pub mod session_agent_roster;
 pub mod session_agent_status;
 pub mod session_deletion;
 pub mod session_list_enrichment;
+/// The daemon's Telegram subscriber, plus a re-export of the stream subscriber that moved to
+/// `tddy-session-activity` with `#unbundle` node 7. Both are reached as
+/// `crate::session_notification_subscribers::X`, as before.
 pub mod session_notification_subscribers;
+/// A session's display label and the publish context built on it, plus a re-export of the
+/// notification bus, its event and its subscriber trait, which moved to `tddy-session-activity`
+/// with `#unbundle` node 7. All are reached as `crate::session_notifications::X`, as before.
 pub mod session_notifications;
 pub mod session_reader;
 pub mod session_toolcall;
