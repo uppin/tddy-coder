@@ -814,3 +814,64 @@ and input-ack metadata the jail never sets and the host relay never reads, and t
 a later field cannot claim one and collide with what an older runner still encodes. The three
 surviving fields keep their numbers, so the bytes on that hop are unchanged. The borrowed message was
 the anomaly; this removes it rather than re-pointing it.
+
+## Validation Results
+
+### Test Fixes (/fix-tests)
+
+**Last Run**: 2026-09-11
+**Status**: ✅ All 23 fixed, plus 2 uncovered regressions closed
+
+**Summary**:
+- Suites diagnosed: 4 (each isolated; cross-host suites re-run alone, since they bind LiveKit ports)
+- Root causes: **3 distinct**, not one
+- New tests added: 4. Tests weakened or deleted: **0**
+- All fixes verified against the production symptom, not the assertion
+
+| Suites | Class | Root cause | Outcome |
+|---|---|---|---|
+| `session_attach_cross_host` (5) | production | the routing fork sat on the **transport**, so `session_files_service()` returned an unrouted impl and every in-process caller was served locally whatever `daemon_instance_id` it named | routing moved onto the generated `SessionFilesService` trait — ✅ 8/8 |
+| `remote_managed_worktree_cross_host`, `session_room_cross_host`, `split_session_resume` (18) | test infrastructure | each suite had its **own** `serve_rpc_participant` mounting only `connection.ConnectionService`, so forwarded calls reached a peer that did not serve them | one shared `test_util` helper across all 4 call sites — ✅ 10/10, 4/4, 8/8 |
+| context handlers | production, **uncovered** | the move dropped `tokio::time::timeout`; a stalled read hung the RPC forever instead of answering `DEADLINE_EXCEEDED` | deadline restored as a port; 3 tests — ✅ |
+| split context read | production, **uncovered** | the caller re-implemented the read when the handler moved into the crate, losing the deadline, the gate and the single path | duplicate **deleted**, reads through the served surface; 1 test — ✅ |
+
+### Key insights worth keeping
+
+**Two tests were passing for the wrong reason, which is worse than the five that failed.**
+`stream_read_host_document_forwards_to_the_peer_that_owns_the_document` staged onto what it believed
+was the peer, read back from the same host, and asserted success **without a byte crossing**. The
+green run of this suite recorded during the session-files milestone was therefore partly hollow. A
+cross-host suite can pass while proving nothing, so "the suite is green" is not evidence that
+forwarding works — only an assertion on the *peer's* state is.
+
+**Four silent losses came out of one 3,500-line relocation**, and every one was invisible to the
+suite as it stood: the in-jail UDS break (a compile error, no test), the unrouted in-process calls,
+and two dropped deadlines. Three of the four were surfaced by CI or by an implementer checking a
+premise, not by the verification run for the milestone that caused them. The pattern is specific:
+**a mechanical call-site substitution silently changes which layer answers.** Both the UDS break and
+the routing break were `X.method(...)` → `X.something().method(...)` rewrites that compiled and
+type-checked perfectly.
+
+**Moving routing up also fixed an ordering the wrapper had inverted.** The five staging methods now
+authenticate *before* classifying, as `connection.ConnectionService` did; the transport wrapper
+classified first, which let an unauthenticated request drive an outbound forward — the exact
+inversion `stream_start_session_refuses_an_invalid_token_before_it_classifies_the_route` exists to
+forbid. That test did not catch it because it covers `StartSession`, which never moved.
+
+**Deadline tests need a deterministic stall, not a sleep.** Both new suites use a current-thread
+runtime with `max_blocking_threads(1)`, that one thread occupied by a read parked on a channel until
+the assertion is made, so the code under test's own `spawn_blocking` cannot start whatever the
+machine is doing. The obvious seam — a `ContextSource` double — does not work, because that trait
+belongs to the syncer and no handler goes through it; nor does a FIFO, since both readers gate on
+`is_file()` and refuse one rather than blocking.
+
+### Environment notes
+
+- The shared `tddy-livekit-testkit` container can be **unusable** while appearing healthy: its
+  LiveKit advertises `127.0.0.1:7881`/`7882` for ICE while Docker maps those elsewhere, so every
+  participant fails at connect with `wait_pc_connection timed out` — 8 tests "failing" in 542s with
+  no assertion reached. Unsetting `LIVEKIT_TESTKIT_WS_URL` lets testcontainers start a correctly
+  mapped one, and the suites run in 20-90s.
+- The cross-host suites start two daemons against one LiveKit container and are genuinely
+  load-sensitive: one run of `session_attach_cross_host` failed 1/8 with two tests exceeding 60s and
+  passed 8/8 on re-run. Run them individually and re-run a failure in isolation before believing it.
