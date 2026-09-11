@@ -12197,7 +12197,6 @@ dependencies = [
  "tddy-livekit-testkit",
  "tddy-rpc",
  "tddy-service",
- "tddy-session-activity",
  "tddy-testing-commons",
  "tddy-workflow",
  "tddy-worktree-service",
@@ -13011,7 +13010,6 @@ dependencies = [
  "serde_json",
  "tddy-livekit",
  "tddy-service",
- "tddy-session-activity",
  "tempfile",
  "tokio",
 ]

@@ -275,7 +275,12 @@ impl AnActivityEndpoint {
             listener.local_addr().expect("activity endpoint local addr")
         );
         let serving = tokio::spawn(async move {
-            let _ = axum::serve(listener, router).await;
+            // Not swallowed: every assertion in this suite reads "the hook reached no such
+            // coordinate" from an endpoint that recorded no call. A harness that failed to serve
+            // records none either, and would be reported as a coordinate bug.
+            axum::serve(listener, router)
+                .await
+                .expect("the activity endpoint served");
         });
         Self {
             base_url,

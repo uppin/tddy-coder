@@ -387,6 +387,7 @@ impl HostedClone {
             .await
         {
             log::error!(
+                target: "tddy_daemon::session_agent_clone",
                 "agent clone {}: daemon {} did not accept a {state:?} report: {}",
                 self.codebase_session_id,
                 self.facilitating_daemon_instance_id,
@@ -508,6 +509,7 @@ pub async fn run_clone_mirror(
     let handshake_enabled =
         !spec.first_admission_token.is_empty() && spec.common_room_slot.is_some();
     log::info!(
+        target: "tddy_daemon::session_agent_clone",
         "agent clone {}: starting mirror of session {} into {} (handshake={}, \
          facilitator={})",
         spec.codebase_session_id,
@@ -634,6 +636,7 @@ pub async fn run_clone_mirror(
             .await;
         if first_iteration {
             log::info!(
+                target: "tddy_daemon::session_agent_clone",
                 "agent clone {}: mirroring session {} from {room_name} into {}",
                 spec.codebase_session_id,
                 spec.session_id,
@@ -641,6 +644,7 @@ pub async fn run_clone_mirror(
             );
         } else {
             log::info!(
+                target: "tddy_daemon::session_agent_clone",
                 "agent clone {}: re-admitted to {room_name} after a reconnect",
                 spec.codebase_session_id
             );
@@ -698,6 +702,7 @@ pub async fn run_clone_mirror(
         // is a fault, not a refresh.
         if !handshake_enabled {
             log::warn!(
+                target: "tddy_daemon::session_agent_clone",
                 "agent clone {}: the session room {room_name} closed and the handshake is not \
                  enabled (no first-admission token from the facilitating daemon); the mirror stops",
                 spec.codebase_session_id
@@ -717,6 +722,7 @@ pub async fn run_clone_mirror(
         // success hands back a token the next iteration joins with; a `FAILED_PRECONDITION` is the
         // revocation (the last agent this daemon owned detached), and the mirror stops.
         log::info!(
+            target: "tddy_daemon::session_agent_clone",
             "agent clone {}: the session room {room_name} closed; asking the facilitating daemon \
              {} to re-admit (AdmitOwningDaemon over the common room)",
             spec.codebase_session_id,
@@ -725,6 +731,7 @@ pub async fn run_clone_mirror(
         match re_admit(&spec, &room_name).await {
             Ok((token, url)) => {
                 log::info!(
+                    target: "tddy_daemon::session_agent_clone",
                     "agent clone {}: re-admitted by the facilitating daemon; rejoining {room_name} \
                      on {url}",
                     spec.codebase_session_id
@@ -734,6 +741,7 @@ pub async fn run_clone_mirror(
             }
             Err(reason) => {
                 log::warn!(
+                    target: "tddy_daemon::session_agent_clone",
                     "agent clone {}: re-admit failed, leaving the session room: {reason}",
                     spec.codebase_session_id
                 );
@@ -768,6 +776,7 @@ async fn re_admit(spec: &CloneMirrorSpec, _room_name: &str) -> Result<(String, S
     }
     .encode_to_vec();
     log::debug!(
+        target: "tddy_daemon::session_agent_clone",
         "agent clone {}: re-admit → forwarding AdmitOwningDaemon to daemon {} over the common \
          room (session {})",
         spec.codebase_session_id,
@@ -784,6 +793,7 @@ async fn re_admit(spec: &CloneMirrorSpec, _room_name: &str) -> Result<(String, S
     .await
     .map_err(|e| {
         log::warn!(
+            target: "tddy_daemon::session_agent_clone",
             "agent clone {}: re-admit RPC returned an error: code={:?} message={}",
             spec.codebase_session_id,
             e.code(),
@@ -997,7 +1007,7 @@ impl CloneMirror {
             self.worktree_path.display(),
             changed.join(", ")
         );
-        log::error!("agent clone: {reason}; restoring it from the session's WIP ref");
+        log::error!(target: "tddy_daemon::session_agent_clone", "agent clone: {reason}; restoring it from the session's WIP ref");
         self.divergences.push(reason);
     }
 
@@ -1008,7 +1018,7 @@ impl CloneMirror {
         let (call_id, seq) = match decide_record(&record, self.mirror.marker().last_seq) {
             RecordDecision::FetchDelta { call_id, seq } => (call_id, seq),
             RecordDecision::Ignore(reason) => {
-                log::debug!("{} ({}): {reason}", record.tool_name, record.call_id);
+                log::debug!(target: "tddy_daemon::session_agent_clone", "{} ({}): {reason}", record.tool_name, record.call_id);
                 return Ok(());
             }
         };
@@ -1017,6 +1027,7 @@ impl CloneMirror {
         match self.mirror.apply(&delta).map_err(|e| e.to_string())? {
             ApplyOutcome::Applied => {
                 log::debug!(
+                    target: "tddy_daemon::session_agent_clone",
                     "agent clone: applied tick {seq} ({} bytes) from {}",
                     delta.patch.len(),
                     record.tool_name
@@ -1026,7 +1037,7 @@ impl CloneMirror {
             ApplyOutcome::AlreadyApplied => Ok(()),
             ApplyOutcome::NeedsReconcile(reason) => {
                 let reason = format!("the clone diverged at tick {seq}: {reason}");
-                log::error!("agent clone: {reason}");
+                log::error!(target: "tddy_daemon::session_agent_clone", "agent clone: {reason}");
                 self.divergences.push(reason);
                 self.restore().await
             }
@@ -1047,6 +1058,7 @@ impl CloneMirror {
             format!("a \"{WORKTREE_ACTIVITY_TOPIC}\" broadcast did not decode: {e}")
         })?;
         log::debug!(
+            target: "tddy_daemon::session_agent_clone",
             "agent clone: session worktree moved (seq {}, head {}); restoring from its WIP ref",
             event.seq,
             event.head_commit
@@ -1073,7 +1085,7 @@ impl CloneMirror {
             .client
             .call_server_stream(
                 tddy_service::session_activity::ACTIVITY_SERVICE,
-                "StreamAgentActivityDelta",
+                tddy_session_sync::STREAM_DELTA_METHOD,
                 request.encode_to_vec(),
             )
             .await

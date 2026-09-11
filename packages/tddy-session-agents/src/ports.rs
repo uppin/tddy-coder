@@ -247,11 +247,11 @@ pub struct SessionAgentPorts {
     pub clones: Arc<SessionAgentCloneStore>,
     /// Every conversation open on this host, keyed by conversation id.
     ///
-    /// Injected rather than created by the service because it is *state*, and the old coordinate
-    /// still answers the same four methods: a prompt arriving on
-    /// `connection.ConnectionService` has to find the conversation an open on
-    /// `session_agents.SessionAgentService` created, and two maps would answer `NOT_FOUND` for a
-    /// conversation that is open. The daemon holds the one `Arc` and hands it to both.
+    /// Injected rather than created by the service because it is *state*, and this crate's handlers
+    /// are not its only reader: the daemon dispatches a local agent's own tool calls against the
+    /// same map, outside any RPC on this coordinate. Two maps would have a prompt answer
+    /// `NOT_FOUND` for a conversation an open had just created. The daemon holds the one `Arc` and
+    /// hands it to both.
     pub conversations: Arc<OpenAgentConversations>,
     /// What an attach must settle before a roster entry may be written — see [`AgentAdmission`].
     pub admission: Arc<dyn AgentAdmission>,

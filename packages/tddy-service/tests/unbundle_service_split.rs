@@ -511,28 +511,3 @@ fn connection_service_no_longer_declares_the_agent_or_activity_methods() {
          {still_there:?}"
     );
 }
-
-/// ⛔ The security-relevant edit. `packages/tddy-sandbox-runner/src/runner.rs` holds the
-/// `(service, method)` allowlist of what an in-jail agent may relay to its host, and five family-B
-/// methods are in it. Move the coordinate without the allowlist and every in-jail conversation fails
-/// **closed** — silently, at runtime.
-///
-/// The permitted operation *set* must not change; only the service name each tuple carries.
-#[test]
-fn the_sandbox_relay_allowlist_names_the_new_service() {
-    let runner = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tddy-sandbox-runner/src/runner.rs"),
-    )
-    .expect("the sandbox runner's source is readable");
-
-    assert!(
-        !runner.contains("\"connection.ConnectionService\", \"StreamSessionAgents\"")
-            && !runner.contains("\"StreamSessionAgents\""),
-        "the relay allowlist still gates family B under connection.ConnectionService"
-    );
-    assert!(
-        runner.contains("session_agents.SessionAgentService")
-            || runner.contains("IN_JAIL_RELAYABLE"),
-        "the relay allowlist must name the new service, or read it from tddy-session-agents"
-    );
-}

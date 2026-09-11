@@ -59,6 +59,7 @@ pub fn republish_quietly(
 ) {
     if let Err(e) = rosters.republish(session_id, session_dir) {
         log::debug!(
+            target: "tddy_daemon::connection_service",
             "could not republish the roster of session {session_id} after '{agent_id}' changed \
              status ({})",
             e.message()

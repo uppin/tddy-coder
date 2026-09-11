@@ -44,10 +44,10 @@ use tddy_worktree_service::stream::MpscResultStream;
 use super::{agent_roster, seed_codebase, ConnectionServiceImpl};
 use crate::livekit_peer_discovery::local_instance_id_for_config;
 
-/// The coordinate a forwarded family-B call is addressed at on the peer — the same one this daemon
-/// serves, read from the crate that owns it so a forward cannot be addressed at a name nothing
-/// answers.
-const PEER_FAMILY_B_SERVICE: &str = tddy_session_agents::SERVICE_NAME;
+/// The coordinate this daemon serves family B at, and the one a forwarded family-B call is
+/// addressed at on a peer — the same name, read from the crate that owns it so a forward cannot be
+/// addressed at a name nothing answers.
+const SESSION_AGENT_SERVICE: &str = tddy_session_agents::SERVICE_NAME;
 
 impl ConnectionServiceImpl {
     /// The `session_agents.SessionAgentService` entry this daemon registers.
@@ -58,7 +58,7 @@ impl ConnectionServiceImpl {
     #[must_use]
     pub fn session_agents_entry(&self) -> tddy_rpc::ServiceEntry {
         tddy_rpc::ServiceEntry {
-            name: PEER_FAMILY_B_SERVICE,
+            name: SESSION_AGENT_SERVICE,
             service: Arc::new(tddy_service::SessionAgentServiceServer::new(
                 self.session_agents_service(),
             )) as Arc<dyn tddy_rpc::RpcService>,
@@ -326,7 +326,7 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
         let peer = crate::livekit_peer_discovery::forward_server_stream_to_peer(
             slot,
             owner,
-            PEER_FAMILY_B_SERVICE,
+            SESSION_AGENT_SERVICE,
             "PromptAgentConversation",
             forwarded.encode_to_vec(),
             |bytes| {
@@ -392,7 +392,7 @@ impl PeerRoutedSessionAgents {
     {
         self.connection
             .rpc_served_by_peer::<Req, tddy_service::proto::session_agents_svc::SessionAgentRoster>(
-                PEER_FAMILY_B_SERVICE,
+                SESSION_AGENT_SERVICE,
                 rpc_name,
                 daemon_instance_id,
                 request,
@@ -492,7 +492,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         if let Some(rx) = self
             .connection
             .stream_served_by_peer::<_, tddy_service::proto::session_agents_svc::SessionAgentRoster>(
-                PEER_FAMILY_B_SERVICE,
+                SESSION_AGENT_SERVICE,
                 "StreamSessionAgents",
                 &req.daemon_instance_id,
                 &tddy_service::proto::session_agents_svc::StreamSessionAgentsRequest {
@@ -520,7 +520,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         if let Some(opened) = self
             .connection
             .rpc_served_by_peer::<_, tddy_service::proto::session_agents_svc::OpenAgentConversationResponse>(
-                PEER_FAMILY_B_SERVICE,
+                SESSION_AGENT_SERVICE,
                 "OpenAgentConversation",
                 &req.daemon_instance_id,
                 &tddy_service::proto::session_agents_svc::OpenAgentConversationRequest {
@@ -554,7 +554,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         if let Some(rx) = self
             .connection
             .stream_served_by_peer::<_, tddy_service::proto::session_agents_svc::AgentConversationChunk>(
-                PEER_FAMILY_B_SERVICE,
+                SESSION_AGENT_SERVICE,
                 "PromptAgentConversation",
                 &req.daemon_instance_id,
                 &tddy_service::proto::session_agents_svc::PromptAgentConversationRequest {
@@ -583,7 +583,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         if self
             .connection
             .rpc_served_by_peer::<_, tddy_service::proto::session_agents_svc::CancelAgentConversationResponse>(
-                PEER_FAMILY_B_SERVICE,
+                SESSION_AGENT_SERVICE,
                 "CancelAgentConversation",
                 &req.daemon_instance_id,
                 &tddy_service::proto::session_agents_svc::CancelAgentConversationRequest {
@@ -622,7 +622,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         if self
             .connection
             .rpc_served_by_peer::<_, tddy_service::proto::session_agents_svc::ReportAgentConversationStateResponse>(
-                PEER_FAMILY_B_SERVICE,
+                SESSION_AGENT_SERVICE,
                 "ReportAgentConversationState",
                 &req.daemon_instance_id,
                 &tddy_service::proto::session_agents_svc::ReportAgentConversationStateRequest {

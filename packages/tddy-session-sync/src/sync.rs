@@ -37,7 +37,13 @@ use crate::mirror::{Mirror, MirrorError, MirrorMarker};
 /// The coordinate `StreamAgentActivityDelta` is served at, read from `tddy-service` so this
 /// subscriber and the daemon serving it cannot disagree about the name.
 const ACTIVITY_SERVICE: &str = tddy_service::session_activity::ACTIVITY_SERVICE;
-const STREAM_DELTA_METHOD: &str = "StreamAgentActivityDelta";
+
+/// The method this subscriber calls to read a session's deltas.
+///
+/// `pub` because the agent-clone mirror in `tddy-session-agents` calls the same method against the
+/// same service, and a second spelling of it there fails as `not_found` at runtime rather than at
+/// compile time.
+pub const STREAM_DELTA_METHOD: &str = "StreamAgentActivityDelta";
 
 /// The git transport that already exists: `GIT_SSH_COMMAND` looked up on `PATH`, exactly as
 /// `git clone udoo-1780828020298:my-app` uses it. See `packages/tddy-remote-git-repo/README.md`.
@@ -254,7 +260,7 @@ pub fn decide_record(record: &AgentActivityRecord, last_seq: u64) -> RecordDecis
     // node 7 numbers a session's deltas from `FIRST_TICK` (1), so this arm means "no tick has
     // covered this call yet" and nothing else. On the coordinate before it, a first delta was also
     // numbered 0 and this arm silently discarded it.
-    if record.activity_seq == tddy_session_activity::NO_TICK {
+    if record.activity_seq == tddy_service::session_activity::NO_TICK {
         return RecordDecision::Ignore(IgnoreReason::NoTickYet);
     }
     if record.activity_seq <= last_seq {

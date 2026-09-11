@@ -14,11 +14,12 @@ path = "src/main.rs"
 
 [dependencies]
 tddy-livekit = { path = "../tddy-livekit" }
+# The RPC surface this binary dials, and `session_activity::NO_TICK` — the wire's "no poll tick has
+# covered this call yet". Read from the crate that owns `activity.proto` rather than spelled as a
+# literal here, so the daemon producing the ticks and this consumer cannot drift about which value
+# means absence. This is a shipped standalone binary; the crate that *serves* the deltas carries a
+# `livekit` and `teloxide` tree that has no business inside it.
 tddy-service = { path = "../tddy-service" }
-# `NO_TICK` — the wire's "no poll tick has covered this call yet". Read from the crate that numbers
-# the ticks rather than spelled as a literal here, so the producer and this consumer cannot drift
-# about which value means absence.
-tddy-session-activity = { path = "../tddy-session-activity" }
 clap = { version = "4", features = ["derive", "env"] }
 env_logger = "0.11"
 log = "0.4"

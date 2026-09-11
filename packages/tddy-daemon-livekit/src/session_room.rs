@@ -2369,7 +2369,8 @@ struct SessionRoomPoll {
     next_seq: u64,
     /// The tick the last delta this room produced carried — its **own** sequence, not the one
     /// [`Self::next_seq`] numbers activity events with. `None` until it has produced one, and
-    /// [`tddy_session_activity::next_tick`] is what turns either answer into the next number.
+    /// [`tddy_service::session_activity::next_tick`] is what turns either answer into the next
+    /// number.
     ///
     /// Two counters because the two streams are de-duplicated separately and a gap means the same
     /// thing in both: "one was lost". A delta numbered out of the event space would inherit the
@@ -2379,10 +2380,10 @@ struct SessionRoomPoll {
     /// tick, an unmeasurable one, and a tick whose tree did not change all cost nothing: what a
     /// client sees is `1, 2, 3, …` with a gap only where a delta really was lost.
     ///
-    /// Numbered from [`tddy_session_activity::FIRST_TICK`] (1) rather than 0, because 0 is the
-    /// wire's [`tddy_session_activity::NO_TICK`] — an `AgentActivityRecord` no tick has covered yet
-    /// carries it — so a first delta numbered 0 could not be told from "no delta yet". Held as the
-    /// *last* rather than the next so there is one place the rule lives.
+    /// Numbered from [`tddy_service::session_activity::FIRST_TICK`] (1) rather than 0, because 0 is
+    /// the wire's [`tddy_service::session_activity::NO_TICK`] — an `AgentActivityRecord` no tick
+    /// has covered yet carries it — so a first delta numbered 0 could not be told from "no delta
+    /// yet". Held as the *last* rather than the next so there is one place the rule lives.
     last_delta_seq: Option<u64>,
     /// Set when this room stops being hosted, by `close`/`Drop` or by the serving task noticing the
     /// connection ended. Polling past that point measures a checkout to broadcast into a connection
@@ -2634,7 +2635,7 @@ impl SessionRoomPoll {
             ..self.previous.clone()
         };
         let next = measured.clone();
-        let seq = tddy_session_activity::next_tick(self.last_delta_seq);
+        let seq = tddy_service::session_activity::next_tick(self.last_delta_seq);
         let session_id = self.session_id.clone();
         let room_name = self.room_name.clone();
         let git_timeout = self.git_timeout;
@@ -2807,7 +2808,7 @@ impl SessionRoomPoll {
         match recorded_delta_seq {
             Some(seq) => TickAttributionTarget::ThisTicksDelta { seq },
             None => TickAttributionTarget::AnEmptyDelta {
-                next_seq: tddy_session_activity::next_tick(self.last_delta_seq),
+                next_seq: tddy_service::session_activity::next_tick(self.last_delta_seq),
                 base_commit: head_commit.to_string(),
             },
         }

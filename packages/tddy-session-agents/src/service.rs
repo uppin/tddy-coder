@@ -32,7 +32,6 @@ use tddy_service::proto::session_agents_svc::{
     ReportAgentConversationStateRequest, ReportAgentConversationStateResponse, SessionAgentRoster,
     StreamSessionAgentsRequest,
 };
-use tddy_service::SessionAgentServiceServer;
 use tddy_worktree_service::stream::MpscResultStream;
 
 use crate::agent_conversations::{AgentConversation, PromptRouting};
@@ -247,6 +246,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             .broadcast(&req.session_id, &roster)
             .await;
         log::info!(
+            target: "tddy_daemon::connection_service",
             "AttachSessionAgent: session {} holds {} agent(s) at rev {}",
             req.session_id,
             roster.agents.len(),
@@ -336,6 +336,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             .broadcast(&req.session_id, &roster)
             .await;
         log::info!(
+            target: "tddy_daemon::connection_service",
             "DetachSessionAgent: session {} holds {} agent(s) at rev {}",
             req.session_id,
             roster.agents.len(),
@@ -400,6 +401,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                     // survivor does not also carry.
                     Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(missed))) => {
                         log::debug!(
+                            target: "tddy_daemon::connection_service",
                             "StreamSessionAgents: subscriber to session {session_id} fell {missed} \
                              snapshot(s) behind; the next one supersedes them"
                         );
@@ -735,6 +737,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                 divergences: req.divergences.clone(),
             })?;
         log::info!(
+            target: "tddy_daemon::connection_service",
             "ReportAgentCloneState: daemon {} reports session {}'s clone {} as {state:?}{}",
             req.daemon_instance_id,
             req.session_id,
@@ -746,6 +749,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         );
         for divergence in &req.divergences {
             log::error!(
+                target: "tddy_daemon::connection_service",
                 "session {}'s clone on daemon {} diverged and was reconciled: {divergence}",
                 req.session_id,
                 req.daemon_instance_id
@@ -756,6 +760,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         // `provisioning` until the next attach, which may never come.
         if let Err(e) = self.ports.rosters.republish(&req.session_id, &session_dir) {
             log::warn!(
+                target: "tddy_daemon::connection_service",
                 "could not republish session {}'s roster to its subscribers: {}",
                 req.session_id,
                 e.message()
@@ -860,27 +865,12 @@ impl SessionAgentServiceImpl {
                 .await
             {
                 log::error!(
+                    target: "tddy_daemon::connection_service",
                     "could not cancel conversation {conversation_id} with '{agent_id}' on daemon \
                      {daemon_instance_id} ({}); its turn loop may still be running there",
                     e.message()
                 );
             }
         }
-    }
-}
-
-/// The `session_agents.SessionAgentService` entry the daemon's wiring layer registers.
-///
-/// `#unbundle` node 7 moved family B out of `connection.ConnectionService` and into the crate that
-/// owns its four modules. The ports stay injected because each one is *wiring*: which directory a
-/// token may reach, which def an agent id resolves to, whether a checkout on a peer could be
-/// claimed, how a roster change reaches a room and how a conversation reaches the daemon owning the
-/// agent are the daemon's answers, not this subsystem's behaviour.
-#[must_use]
-pub fn build_session_agents_entry(ports: SessionAgentPorts) -> tddy_rpc::ServiceEntry {
-    let server = SessionAgentServiceServer::new(SessionAgentServiceImpl::new(ports));
-    tddy_rpc::ServiceEntry {
-        name: "session_agents.SessionAgentService",
-        service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
     }
 }

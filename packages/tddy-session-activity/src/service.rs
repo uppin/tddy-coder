@@ -38,7 +38,6 @@ use tddy_service::proto::activity::{
     StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
     StreamSessionNotificationsRequest,
 };
-use tddy_service::ActivityServiceServer;
 use tddy_worktree_service::stream::MpscResultStream;
 
 use crate::session_notifications::{
@@ -502,6 +501,7 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         // The durable log is the source of truth; a write failure must not fail the hook call.
         if let Err(e) = tddy_core::agent_activity::append_agent_activity(&session_dir, &record) {
             log::warn!(
+                target: "tddy_daemon::connection_service",
                 "agent_activity: failed to persist {} for session {}: {}",
                 req.event,
                 req.session_id,
@@ -815,21 +815,5 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
             first_seq: page.first_seq,
             at_oldest: page.at_oldest,
         }))
-    }
-}
-
-/// The `activity.ActivityService` entry the daemon's wiring layer registers.
-///
-/// `#unbundle` node 7 moved families M and N out of `connection.ConnectionService` and into the
-/// crate that owns their notification bus and their replay reads. The ports stay injected because
-/// each one is *wiring*: which OS user a token maps to, where this host keeps its data, which hub
-/// its sandboxes publish into, whether it raises notifications at all, how it names a session and
-/// which session rooms it measures are the daemon's answers, not this subsystem's behaviour.
-#[must_use]
-pub fn build_activity_entry(ports: ActivityPorts) -> tddy_rpc::ServiceEntry {
-    let server = ActivityServiceServer::new(ActivityServiceImpl::new(ports));
-    tddy_rpc::ServiceEntry {
-        name: "activity.ActivityService",
-        service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
     }
 }
