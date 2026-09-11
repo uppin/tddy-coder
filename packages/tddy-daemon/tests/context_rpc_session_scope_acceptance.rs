@@ -84,7 +84,7 @@ fn register_project(sessions_base: &Path, repo_path: &Path) {
 struct ASession {
     /// The three context reads left `connection.ConnectionService` with `#unbundle` node 6; this is
     /// the coordinate that declares them, built from the daemon that started the session.
-    service: tddy_session_files::SessionFilesServiceImpl,
+    service: tddy_daemon::connection_service::PeerRoutedSessionFiles,
     session_id: String,
     session_dir: PathBuf,
     worktree: PathBuf,

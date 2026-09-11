@@ -114,3 +114,43 @@ pub async fn wait_until_peer_discovered(
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
     }
 }
+
+/// Join `ws_url` with `token`, serving every coordinate a daemon's RPC participant answers a
+/// *forwarded* call on, and run it until the returned handle is dropped or aborted.
+///
+/// One helper rather than one per suite. Which coordinates a peer serves is a fact about the
+/// daemon, not about the suite that pins a forward, and a peer that does not mount a coordinate
+/// answers a forward to it with `Unknown service` — so four copies of this list is how three
+/// cross-host suites came to still be serving `connection.ConnectionService` alone after
+/// `#unbundle` node 6 moved the thirteen session-file RPCs onto
+/// `session_files.SessionFilesService`.
+///
+/// The production roster is `runtime::build`'s, which mounts these two among several more; the
+/// extras are the ones no forward in these suites addresses, and each needs wiring a test daemon
+/// does not have.
+pub async fn serve_daemon_rpc_participant(
+    ws_url: &str,
+    token: &str,
+    service: &Arc<ConnectionServiceImpl>,
+) -> tokio::task::JoinHandle<()> {
+    let roster = tddy_rpc::MultiRpcService::new(vec![
+        service.session_files_entry(),
+        tddy_rpc::ServiceEntry {
+            name: "connection.ConnectionService",
+            service: Arc::new(tddy_service::ConnectionServiceServer::from_arc(Arc::clone(
+                service,
+            ))) as Arc<dyn tddy_rpc::RpcService>,
+        },
+    ]);
+    let participant = tddy_livekit::LiveKitParticipant::connect(
+        ws_url,
+        token,
+        roster,
+        Default::default(),
+        None,
+        None,
+    )
+    .await
+    .expect("daemon joins the room as its RPC participant");
+    tokio::spawn(async move { participant.run().await })
+}

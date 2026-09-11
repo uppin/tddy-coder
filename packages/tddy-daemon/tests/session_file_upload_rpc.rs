@@ -234,7 +234,7 @@ users:
 fn test_service(
     sessions_base: PathBuf,
     os_user: &str,
-) -> tddy_session_files::SessionFilesServiceImpl {
+) -> tddy_daemon::connection_service::PeerRoutedSessionFiles {
     let config = test_config_for_os_user(os_user);
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =

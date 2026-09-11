@@ -1432,6 +1432,7 @@ mod svc_start_session_core;
 mod svc_terminal_ports;
 
 mod svc_session_files_ports;
+pub use svc_session_files_ports::PeerRoutedSessionFiles;
 
 /// Merge local `ListProjects` rows with [`EligibleDaemonSource::peer_project_entries`].
 async fn merge_listed_projects_with_peers(

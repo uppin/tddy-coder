@@ -9,33 +9,37 @@
 //! Eight of the thirteen also **route**: a request naming another daemon is served by that daemon,
 //! not here. That decision needs the eligible-daemon roster, the common room slot and the LiveKit
 //! forwarding clients, none of which `tddy-session-files` may reach for — its module header says so
-//! — which is why [`PeerRoutedSessionFiles`] wraps the crate's entry rather than the crate growing a
-//! transport. Every decision below is made by a [`ConnectionServiceImpl`] method rather than
-//! re-derived here, so a request that arrives on the wire and one this daemon makes for itself
+//! — which is why [`PeerRoutedSessionFiles`] wraps the crate's implementation rather than the crate
+//! growing a transport. Every decision below is made by a [`ConnectionServiceImpl`] method rather
+//! than re-derived here, so a request that arrives on the wire and one this daemon makes for itself
 //! cannot disagree about which host holds a file.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use livekit::prelude::Room;
-use prost::Message as _;
-use tddy_rpc::{RpcMessage, RpcResult, RpcService, Status};
+use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::connection::ExecuteToolRequest;
 use tddy_service::proto::session_files::{
     ContextFileBatchChunk, ContextFileChunk, ContextManifestEntry, ContextManifestRequest,
-    DeleteStagedAttachmentRequest, HostDocumentChunk, ListStagedAttachmentsRequest,
-    ReadContextFileBatchRequest, ReadContextFileRequest, ReadHostDocumentRequest,
-    UploadStagedAttachmentChunkRequest,
+    DeleteSessionUploadRequest, DeleteSessionUploadResponse, DeleteStagedAttachmentRequest,
+    DeleteStagedAttachmentResponse, HostDocumentChunk, ListSessionUploadsRequest,
+    ListSessionUploadsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
+    ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, ReadContextFileBatchRequest,
+    ReadContextFileRequest, ReadHostDocumentRequest, ReadHostDocumentResponse,
+    ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse, SessionFilesService,
+    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
+    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
 };
 use tddy_session_files::service::{SessionContextScope, SessionContextScopes};
-use tddy_session_files::SessionFilesPorts;
-use tokio::sync::mpsc;
+use tddy_session_files::{SessionFilesPorts, SessionFilesServiceImpl};
+use tddy_worktree_service::stream::MpscResultStream;
 
 use super::ConnectionServiceImpl;
 use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
 
-/// The coordinate this module mounts. Compared against the dispatched service name so a call that
-/// somehow arrived for another service is refused by the crate's own server rather than routed.
+/// The coordinate a forward is addressed at on the peer. A forwarded call has to land on the same
+/// method of the same service there, which is where the peer declares these eight.
 const SESSION_FILES_SERVICE: &str = "session_files.SessionFilesService";
 
 /// The label the daemon's exec-tool authorization logs name a context read by.
@@ -62,13 +66,11 @@ impl ConnectionServiceImpl {
     /// request has to address the entry the host mounts rather than a re-assembled lookalike.
     #[must_use]
     pub fn session_files_entry(self: &Arc<Self>) -> tddy_rpc::ServiceEntry {
-        let entry = tddy_session_files::build_session_files_entry(self.session_files_ports());
         tddy_rpc::ServiceEntry {
-            name: entry.name,
-            service: Arc::new(PeerRoutedSessionFiles {
-                connection: Arc::clone(self),
-                local: entry.service,
-            }) as Arc<dyn RpcService>,
+            name: SESSION_FILES_SERVICE,
+            service: Arc::new(tddy_service::SessionFilesServiceServer::new(
+                self.session_files_service(),
+            )) as Arc<dyn tddy_rpc::RpcService>,
         }
     }
 
@@ -88,20 +90,26 @@ impl ConnectionServiceImpl {
                 name: "connection.ConnectionService",
                 service: Arc::new(tddy_service::ConnectionServiceServer::from_arc(Arc::clone(
                     self,
-                ))) as Arc<dyn RpcService>,
+                ))) as Arc<dyn tddy_rpc::RpcService>,
             },
         ])
     }
 
-    /// The served implementation itself, without the routing wrapper or transport entry around it.
+    /// This daemon's session-file surface: the crate's thirteen handlers, with the eight routed
+    /// ones answered by the daemon that holds the bytes.
     ///
-    /// Public for the reason [`Self::session_files_entry`] is: an acceptance test asking what this
-    /// daemon's session-file coordinate does with a request it *owns* must address the same six
-    /// ports the host mounts, and a re-assembled lookalike would be asserting about its own wiring.
-    /// A test about the routing fork addresses the entry instead, which is where routing lives.
+    /// Public because it *is* the surface — the entry above is this served over a transport, and a
+    /// caller inside the daemon (or an acceptance test) that holds the service rather than the
+    /// entry must make the same routing decision a request on the wire does. Before `#unbundle`
+    /// node 6 these were `ConnectionServiceImpl`'s own methods and routed for every caller; a
+    /// surface that routed only for wire callers would serve a request naming another host out of
+    /// this host's own directories.
     #[must_use]
-    pub fn session_files_service(self: &Arc<Self>) -> tddy_session_files::SessionFilesServiceImpl {
-        tddy_session_files::SessionFilesServiceImpl::new(self.session_files_ports())
+    pub fn session_files_service(self: &Arc<Self>) -> PeerRoutedSessionFiles {
+        PeerRoutedSessionFiles {
+            connection: Arc::clone(self),
+            local: SessionFilesServiceImpl::new(self.session_files_ports()),
+        }
     }
 
     /// The six host answers the thirteen handlers need, each read off this daemon.
@@ -184,268 +192,297 @@ impl ConnectionServiceImpl {
     }
 }
 
-/// The crate's entry, with the eight routed methods answered by the daemon that holds the bytes.
+/// The crate's thirteen handlers, with the eight routed ones answered by the daemon that holds the
+/// bytes.
 ///
 /// The wrapper is *this* side of the boundary on purpose: `HostDocumentPicker` browses another
 /// host by `browsedDaemonInstanceId`, and a coordinate that served every request locally would
 /// answer such a browse with this host's files — an empty or refused list that a client cannot
 /// tell from a genuinely empty directory.
-struct PeerRoutedSessionFiles {
+///
+/// It implements the generated service trait rather than wrapping the entry's encoded
+/// [`tddy_rpc::RpcService`], so the fork sits in front of the *handler* — the layer it was in
+/// before `#unbundle` node 6 moved these methods off `connection.ConnectionService`. Routing a
+/// step later, at the transport, would leave every in-process caller of the surface serving a
+/// request that names another host out of this host's own directories, and would decode each
+/// routed request a second time to find the id it routes on.
+pub struct PeerRoutedSessionFiles {
     connection: Arc<ConnectionServiceImpl>,
-    /// The `tddy-session-files` entry, which serves every request this daemon keeps.
-    local: Arc<dyn RpcService>,
+    /// The `tddy-session-files` implementation, which serves every request this daemon keeps.
+    local: SessionFilesServiceImpl,
 }
 
 impl PeerRoutedSessionFiles {
-    /// The peer a request names, with the request decoded and the room to forward it over.
+    /// The peer one of the five staging and host-document calls is addressed at, with the room to
+    /// forward it over — or `None` when the call is this daemon's own to serve.
     ///
-    /// `Ok(None)` means the call is this daemon's own to serve. The decision is
-    /// [`ConnectionServiceImpl::classify_daemon_route`], refusals and all — the same one every
-    /// other routed RPC on this daemon makes.
-    ///
-    /// `Req` is the `session_files` message the caller sent, and the forward is addressed at
-    /// [`SESSION_FILES_SERVICE`], so the bytes are decoded once as the type that coordinate will
-    /// decode them as — nothing is converted between two spellings of one message.
-    fn peer_forward<Req>(
+    /// The caller is authenticated **first**, which is the order the `connection.ConnectionService`
+    /// handlers these five moved off used: an anonymous request must not be able to drive an
+    /// outbound forward and hold a pending-call slot on two hosts for the forward's whole deadline.
+    /// The route itself is [`ConnectionServiceImpl::classify_daemon_route`], refusals and all — the
+    /// same decision every other routed RPC on this daemon makes.
+    fn forward_target(
         &self,
         rpc_name: &str,
-        payload: &[u8],
-        daemon_instance_id: fn(&Req) -> &str,
-    ) -> Result<Option<(&CommonRoomSlot, String, Req)>, Status>
-    where
-        Req: prost::Message + Default,
-    {
-        let request = Req::decode(payload).map_err(|e| Status::invalid_argument(e.to_string()))?;
-        let PeerRoute::Forward { peer_instance_id } = self
-            .connection
-            .classify_daemon_route(daemon_instance_id(&request))?
+        session_token: &str,
+        daemon_instance_id: &str,
+    ) -> Result<Option<(&CommonRoomSlot, String)>, Status> {
+        self.connection.resolve_os_user(session_token)?;
+        let PeerRoute::Forward { peer_instance_id } =
+            self.connection.classify_daemon_route(daemon_instance_id)?
         else {
             return Ok(None);
         };
         log::info!("{rpc_name}: forwarding RPC to remote daemon_instance_id={peer_instance_id}");
         let slot = self.connection.common_room_slot(rpc_name)?;
-        Ok(Some((slot, peer_instance_id, request)))
+        Ok(Some((slot, peer_instance_id)))
     }
 
-    /// A context RPC the daemon addressed by the request should answer.
+    /// The peer's frames for one of the three context reads, or `None` when this daemon serves it.
     ///
-    /// `None` means this daemon serves it. [`ConnectionServiceImpl::stream_served_by_peer`] is the
-    /// whole decision *and* the forward, addressed at [`SESSION_FILES_SERVICE`] because that is
-    /// where the peer declares these three — including its `InvalidArgument` for a daemon id no
-    /// peer answers to.
+    /// [`ConnectionServiceImpl::stream_served_by_peer`] is the whole decision *and* the forward,
+    /// addressed at [`SESSION_FILES_SERVICE`] because that is where the peer declares these three —
+    /// including its `InvalidArgument` for a daemon id no peer answers to. Routed **before** the
+    /// caller is authenticated, as these three were on `connection.ConnectionService`: the caller
+    /// is usually a split session's agent host, whose token the codebase host is the one to verify.
     async fn context_served_by_peer<Req, Frame>(
         &self,
         rpc_name: &str,
-        payload: &[u8],
-        daemon_instance_id: fn(&Req) -> &str,
-    ) -> Option<RpcResult>
+        request: &Req,
+        daemon_instance_id: &str,
+    ) -> Result<Option<MpscResultStream<Frame>>, Status>
     where
-        Req: prost::Message + Default,
+        Req: prost::Message,
         Frame: prost::Message + Default + Send + 'static,
     {
-        let request = match Req::decode(payload) {
-            Ok(request) => request,
-            Err(e) => {
-                return Some(RpcResult::ServerStream(Err(Status::invalid_argument(
-                    e.to_string(),
-                ))))
-            }
-        };
-        match self
+        Ok(self
             .connection
             .stream_served_by_peer::<Req, Frame>(
                 SESSION_FILES_SERVICE,
                 rpc_name,
-                daemon_instance_id(&request),
-                &request,
+                daemon_instance_id,
+                request,
             )
-            .await
-        {
-            Ok(None) => None,
-            Ok(Some(frames)) => Some(relayed(frames)),
-            Err(status) => Some(RpcResult::ServerStream(Err(status))),
-        }
+            .await?
+            .map(MpscResultStream::from))
     }
 
-    /// The peer's answer to one of the eight routed methods, or `None` when this daemon serves it.
-    async fn served_by_peer(&self, method: &str, payload: &[u8]) -> Option<RpcResult> {
-        match method {
-            "StreamContextManifest" => {
-                self.context_served_by_peer::<ContextManifestRequest, ContextManifestEntry>(
-                    method,
-                    payload,
-                    |req| &req.daemon_instance_id,
-                )
-                .await
-            }
-            "StreamReadContextFile" => {
-                self.context_served_by_peer::<ReadContextFileRequest, ContextFileChunk>(
-                    method,
-                    payload,
-                    |req| &req.daemon_instance_id,
-                )
-                .await
-            }
-            "StreamReadContextFileBatch" => {
-                self.context_served_by_peer::<ReadContextFileBatchRequest, ContextFileBatchChunk>(
-                    method,
-                    payload,
-                    |req| &req.daemon_instance_id,
-                )
-                .await
-            }
-            "UploadStagedAttachmentChunk" => {
-                match self.peer_forward::<UploadStagedAttachmentChunkRequest>(
-                    method,
-                    payload,
-                    |req| &req.daemon_instance_id,
-                ) {
-                    Ok(None) => None,
-                    Ok(Some((slot, peer, request))) => Some(RpcResult::Unary(
-                        crate::livekit_peer_discovery::forward_upload_staged_attachment_chunk_via_livekit(
-                            slot, &peer, &request,
-                        )
-                        .await
-                        .map(|answer| answer.encode_to_vec()),
-                    )),
-                    Err(status) => Some(RpcResult::Unary(Err(status))),
-                }
-            }
-            "ListStagedAttachments" => {
-                match self.peer_forward::<ListStagedAttachmentsRequest>(method, payload, |req| {
-                    &req.daemon_instance_id
-                }) {
-                    Ok(None) => None,
-                    Ok(Some((slot, peer, request))) => Some(RpcResult::Unary(
-                        crate::livekit_peer_discovery::forward_list_staged_attachments_via_livekit(
-                            slot, &peer, &request,
-                        )
-                        .await
-                        .map(|answer| answer.encode_to_vec()),
-                    )),
-                    Err(status) => Some(RpcResult::Unary(Err(status))),
-                }
-            }
-            "DeleteStagedAttachment" => {
-                match self.peer_forward::<DeleteStagedAttachmentRequest>(method, payload, |req| {
-                    &req.daemon_instance_id
-                }) {
-                    Ok(None) => None,
-                    Ok(Some((slot, peer, request))) => Some(RpcResult::Unary(
-                        crate::livekit_peer_discovery::forward_delete_staged_attachment_via_livekit(
-                            slot, &peer, &request,
-                        )
-                        .await
-                        .map(|answer| answer.encode_to_vec()),
-                    )),
-                    Err(status) => Some(RpcResult::Unary(Err(status))),
-                }
-            }
-            "ReadHostDocument" => {
-                match self.peer_forward::<ReadHostDocumentRequest>(method, payload, |req| {
-                    &req.daemon_instance_id
-                }) {
-                    Ok(None) => None,
-                    Ok(Some((slot, peer, request))) => Some(RpcResult::Unary(
-                        crate::livekit_peer_discovery::forward_read_host_document_via_livekit(
-                            slot, &peer, &request,
-                        )
-                        .await
-                        .map(|answer| answer.encode_to_vec()),
-                    )),
-                    Err(status) => Some(RpcResult::Unary(Err(status))),
-                }
-            }
-            "StreamReadHostDocument" => {
-                match self.peer_forward::<ReadHostDocumentRequest>(method, payload, |req| {
-                    &req.daemon_instance_id
-                }) {
-                    Ok(None) => None,
-                    // The owning host resolves the document under its own `os_user` mapping and
-                    // applies its own cap, so nothing is read here.
-                    Ok(Some((slot, peer, request))) => Some(
-                        match crate::livekit_peer_discovery::forward_stream_read_host_document_via_livekit(
-                            slot, &peer, &request,
-                        )
-                        .await
-                        {
-                            Ok(frames) => relayed::<HostDocumentChunk>(frames),
-                            Err(status) => RpcResult::ServerStream(Err(status)),
-                        },
-                    ),
-                    Err(status) => Some(RpcResult::ServerStream(Err(status))),
-                }
-            }
-            _ => None,
-        }
+    /// The same bump every `connection.ConnectionService` handler makes: in relay mode the idle
+    /// monitor shuts the process down, and a client that has moved to this coordinate is still a
+    /// client using it.
+    fn record_activity(&self) {
+        self.connection.record_rpc_activity();
     }
 }
 
 #[async_trait]
-impl RpcService for PeerRoutedSessionFiles {
-    fn is_bidi_stream(&self, service: &str, method: &str) -> bool {
-        self.local.is_bidi_stream(service, method)
-    }
-
-    async fn handle_rpc(&self, service: &str, method: &str, message: &RpcMessage) -> RpcResult {
-        // The same bump every `connection.ConnectionService` handler makes: in relay mode the idle
-        // monitor shuts the process down, and a client that has moved to this coordinate is still
-        // a client using it.
-        self.connection.record_rpc_activity();
-        if service == SESSION_FILES_SERVICE {
-            if let Some(answered_by_peer) = self.served_by_peer(method, &message.payload).await {
-                return answered_by_peer;
-            }
-        }
-        self.local.handle_rpc(service, method, message).await
-    }
-
-    async fn handle_rpc_stream(
+impl SessionFilesService for PeerRoutedSessionFiles {
+    async fn list_session_workflow_files(
         &self,
-        service: &str,
-        method: &str,
-        messages: &[RpcMessage],
-    ) -> RpcResult {
-        // A single-message stream is the server-streaming case, and it routes like any other call;
-        // anything else is the crate's to refuse, exactly as it does on the unwrapped entry.
-        if messages.len() == 1 {
-            return self.handle_rpc(service, method, &messages[0]).await;
-        }
-        self.local
-            .handle_rpc_stream(service, method, messages)
-            .await
+        request: Request<ListSessionWorkflowFilesRequest>,
+    ) -> Result<Response<ListSessionWorkflowFilesResponse>, Status> {
+        self.record_activity();
+        self.local.list_session_workflow_files(request).await
     }
 
-    async fn start_bidi_stream(
+    async fn read_session_workflow_file(
         &self,
-        service: &str,
-        method: &str,
-        input_rx: mpsc::Receiver<RpcMessage>,
-    ) -> Result<tddy_rpc::BidiStreamOutput, Status> {
-        self.local
-            .start_bidi_stream(service, method, input_rx)
-            .await
+        request: Request<ReadSessionWorkflowFileRequest>,
+    ) -> Result<Response<ReadSessionWorkflowFileResponse>, Status> {
+        self.record_activity();
+        self.local.read_session_workflow_file(request).await
     }
-}
 
-/// A peer's frames, encoded onto the bounded channel the transport drains.
-///
-/// The relay ends on a closed receiver rather than filling a channel nobody reads, and an error
-/// item from the peer is carried through as one — a stream that stopped short must not read as a
-/// short answer.
-fn relayed<Frame>(
-    mut frames: tokio::sync::mpsc::UnboundedReceiver<Result<Frame, Status>>,
-) -> RpcResult
-where
-    Frame: prost::Message + Send + 'static,
-{
-    let (tx, rx) = mpsc::channel(256);
-    tokio::spawn(async move {
-        while let Some(frame) = frames.recv().await {
-            if tx.send(frame.map(|f| f.encode_to_vec())).await.is_err() {
-                break;
-            }
+    type StreamContextManifestStream = MpscResultStream<ContextManifestEntry>;
+
+    async fn stream_context_manifest(
+        &self,
+        request: Request<ContextManifestRequest>,
+    ) -> Result<Response<Self::StreamContextManifestStream>, Status> {
+        self.record_activity();
+        if let Some(frames) = self
+            .context_served_by_peer::<_, ContextManifestEntry>(
+                "StreamContextManifest",
+                request.get_ref(),
+                &request.get_ref().daemon_instance_id,
+            )
+            .await?
+        {
+            return Ok(Response::new(frames));
         }
-    });
-    RpcResult::ServerStream(Ok(rx))
+        self.local.stream_context_manifest(request).await
+    }
+
+    type StreamReadContextFileStream = MpscResultStream<ContextFileChunk>;
+
+    async fn stream_read_context_file(
+        &self,
+        request: Request<ReadContextFileRequest>,
+    ) -> Result<Response<Self::StreamReadContextFileStream>, Status> {
+        self.record_activity();
+        if let Some(frames) = self
+            .context_served_by_peer::<_, ContextFileChunk>(
+                "StreamReadContextFile",
+                request.get_ref(),
+                &request.get_ref().daemon_instance_id,
+            )
+            .await?
+        {
+            return Ok(Response::new(frames));
+        }
+        self.local.stream_read_context_file(request).await
+    }
+
+    type StreamReadContextFileBatchStream = MpscResultStream<ContextFileBatchChunk>;
+
+    async fn stream_read_context_file_batch(
+        &self,
+        request: Request<ReadContextFileBatchRequest>,
+    ) -> Result<Response<Self::StreamReadContextFileBatchStream>, Status> {
+        self.record_activity();
+        if let Some(frames) = self
+            .context_served_by_peer::<_, ContextFileBatchChunk>(
+                "StreamReadContextFileBatch",
+                request.get_ref(),
+                &request.get_ref().daemon_instance_id,
+            )
+            .await?
+        {
+            return Ok(Response::new(frames));
+        }
+        self.local.stream_read_context_file_batch(request).await
+    }
+
+    async fn upload_session_file_chunk(
+        &self,
+        request: Request<UploadSessionFileChunkRequest>,
+    ) -> Result<Response<UploadSessionFileChunkResponse>, Status> {
+        self.record_activity();
+        self.local.upload_session_file_chunk(request).await
+    }
+
+    async fn list_session_uploads(
+        &self,
+        request: Request<ListSessionUploadsRequest>,
+    ) -> Result<Response<ListSessionUploadsResponse>, Status> {
+        self.record_activity();
+        self.local.list_session_uploads(request).await
+    }
+
+    async fn delete_session_upload(
+        &self,
+        request: Request<DeleteSessionUploadRequest>,
+    ) -> Result<Response<DeleteSessionUploadResponse>, Status> {
+        self.record_activity();
+        self.local.delete_session_upload(request).await
+    }
+
+    async fn upload_staged_attachment_chunk(
+        &self,
+        request: Request<UploadStagedAttachmentChunkRequest>,
+    ) -> Result<Response<UploadStagedAttachmentChunkResponse>, Status> {
+        self.record_activity();
+        let req = request.get_ref();
+        if let Some((slot, peer)) = self.forward_target(
+            "UploadStagedAttachmentChunk",
+            &req.session_token,
+            &req.daemon_instance_id,
+        )? {
+            let answer =
+                crate::livekit_peer_discovery::forward_upload_staged_attachment_chunk_via_livekit(
+                    slot, &peer, req,
+                )
+                .await?;
+            return Ok(Response::new(answer));
+        }
+        self.local.upload_staged_attachment_chunk(request).await
+    }
+
+    async fn list_staged_attachments(
+        &self,
+        request: Request<ListStagedAttachmentsRequest>,
+    ) -> Result<Response<ListStagedAttachmentsResponse>, Status> {
+        self.record_activity();
+        let req = request.get_ref();
+        if let Some((slot, peer)) = self.forward_target(
+            "ListStagedAttachments",
+            &req.session_token,
+            &req.daemon_instance_id,
+        )? {
+            let answer =
+                crate::livekit_peer_discovery::forward_list_staged_attachments_via_livekit(
+                    slot, &peer, req,
+                )
+                .await?;
+            return Ok(Response::new(answer));
+        }
+        self.local.list_staged_attachments(request).await
+    }
+
+    async fn delete_staged_attachment(
+        &self,
+        request: Request<DeleteStagedAttachmentRequest>,
+    ) -> Result<Response<DeleteStagedAttachmentResponse>, Status> {
+        self.record_activity();
+        let req = request.get_ref();
+        if let Some((slot, peer)) = self.forward_target(
+            "DeleteStagedAttachment",
+            &req.session_token,
+            &req.daemon_instance_id,
+        )? {
+            let answer =
+                crate::livekit_peer_discovery::forward_delete_staged_attachment_via_livekit(
+                    slot, &peer, req,
+                )
+                .await?;
+            return Ok(Response::new(answer));
+        }
+        self.local.delete_staged_attachment(request).await
+    }
+
+    async fn read_host_document(
+        &self,
+        request: Request<ReadHostDocumentRequest>,
+    ) -> Result<Response<ReadHostDocumentResponse>, Status> {
+        self.record_activity();
+        let req = request.get_ref();
+        if let Some((slot, peer)) = self.forward_target(
+            "ReadHostDocument",
+            &req.session_token,
+            &req.daemon_instance_id,
+        )? {
+            let answer = crate::livekit_peer_discovery::forward_read_host_document_via_livekit(
+                slot, &peer, req,
+            )
+            .await?;
+            return Ok(Response::new(answer));
+        }
+        self.local.read_host_document(request).await
+    }
+
+    type StreamReadHostDocumentStream = MpscResultStream<HostDocumentChunk>;
+
+    async fn stream_read_host_document(
+        &self,
+        request: Request<ReadHostDocumentRequest>,
+    ) -> Result<Response<Self::StreamReadHostDocumentStream>, Status> {
+        self.record_activity();
+        let req = request.get_ref();
+        if let Some((slot, peer)) = self.forward_target(
+            "StreamReadHostDocument",
+            &req.session_token,
+            &req.daemon_instance_id,
+        )? {
+            // The owning host resolves the document under its own `os_user` mapping and applies its
+            // own cap, so nothing is read here. A peer-side failure — or a stream that stops without
+            // its terminator — arrives as an error item, terminating this stream.
+            let frames =
+                crate::livekit_peer_discovery::forward_stream_read_host_document_via_livekit(
+                    slot, &peer, req,
+                )
+                .await?;
+            return Ok(Response::new(MpscResultStream::from(frames)));
+        }
+        self.local.stream_read_host_document(request).await
+    }
 }

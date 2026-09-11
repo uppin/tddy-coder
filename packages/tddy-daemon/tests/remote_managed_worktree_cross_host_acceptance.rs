@@ -28,7 +28,6 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use livekit::prelude::RoomOptions;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
@@ -37,12 +36,11 @@ use tddy_daemon::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_daemon::test_util::wait_until_peer_discovered;
+use tddy_daemon::test_util::{self, wait_until_peer_discovered};
 use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
 use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
-use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_sandbox::SandboxError;
@@ -193,7 +191,7 @@ fn create_test_repo_with_origin(dir: &Path) {
 }
 
 struct Daemon {
-    service: ConnectionServiceImpl,
+    service: Arc<ConnectionServiceImpl>,
     sessions_base: PathBuf,
     _sessions: tempfile::TempDir,
     _config: tempfile::TempDir,
@@ -244,28 +242,28 @@ async fn a_daemon(
     };
 
     Daemon {
-        service,
+        service: Arc::new(service),
         sessions_base: sessions.path().to_path_buf(),
         _sessions: sessions,
         _config: config_dir,
     }
 }
 
+/// Joins the common room as `daemon-{instance_id}` — the identity a forward addresses — serving
+/// every coordinate a forward can name. The coordinate list is
+/// [`test_util::serve_daemon_rpc_participant`]'s rather than this suite's: a split start forwards
+/// both a `connection.ConnectionService` call and the `session_files.SessionFilesService` context
+/// reads, and a suite-local list is how one of them stops being served.
 async fn serve_rpc_participant(
     livekit: &LiveKitTestkit,
     ws_url: &str,
     instance_id: &str,
-    service: ConnectionServiceImpl,
+    service: Arc<ConnectionServiceImpl>,
 ) -> tokio::task::JoinHandle<()> {
     let token = livekit
         .generate_token(ROOM, &rpc_identity(instance_id))
         .expect("LiveKit token for a daemon's RPC participant");
-    let server = tddy_service::ConnectionServiceServer::new(service);
-    let participant =
-        LiveKitParticipant::connect(ws_url, &token, server, RoomOptions::default(), None, None)
-            .await
-            .expect("daemon joins the common room as its RPC participant");
-    tokio::spawn(async move { participant.run().await })
+    test_util::serve_daemon_rpc_participant(ws_url, &token, &service).await
 }
 
 /// 45s: both daemons publish their advertisement on the common room's own metadata cadence, and a
@@ -290,8 +288,8 @@ async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id
 /// Daemon A (agent) and daemon B (codebase), each serving on its production RPC identity and each
 /// able to route to the other.
 struct SplitHosts {
-    agent: ConnectionServiceImpl,
-    codebase: ConnectionServiceImpl,
+    agent: Arc<ConnectionServiceImpl>,
+    codebase: Arc<ConnectionServiceImpl>,
     agent_sessions_base: PathBuf,
     codebase_sessions_base: PathBuf,
     _agent_rpc_run: tokio::task::JoinHandle<()>,

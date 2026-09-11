@@ -22,7 +22,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{Stream, StreamExt};
-use livekit::prelude::RoomOptions;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
@@ -31,8 +30,7 @@ use tddy_daemon::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_daemon::test_util::{wait_until_peer_discovered, TEST_TOKEN};
-use tddy_livekit::LiveKitParticipant;
+use tddy_daemon::test_util::{self, wait_until_peer_discovered, TEST_TOKEN};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::connection::{
@@ -195,8 +193,13 @@ async fn a_daemon(
     }
 }
 
-/// Joins the common room as `daemon-{instance_id}` serving `ConnectionService` — the identity a
-/// caller must address, and the only one that answers.
+/// Joins the common room as `daemon-{instance_id}` — the identity a caller must address, and the
+/// only one that answers.
+///
+/// Which coordinates it serves is [`test_util::serve_daemon_rpc_participant`]'s answer rather than
+/// this suite's: `StartSession` is still `connection.ConnectionService`'s, while the staging and
+/// host-document RPCs a forward addresses became `session_files.SessionFilesService`'s with
+/// `#unbundle` node 6, and a suite-local list is how one of them stops being served.
 async fn serve_rpc_participant(
     livekit: &LiveKitTestkit,
     ws_url: &str,
@@ -206,22 +209,7 @@ async fn serve_rpc_participant(
     let token = livekit
         .generate_token(ROOM, &rpc_identity(instance_id))
         .expect("LiveKit token for a daemon's RPC participant");
-    // Both coordinates: `StartSession` is still `connection.ConnectionService`'s, while the staging
-    // and host-document RPCs a forward addresses became `session_files.SessionFilesService`'s with
-    // `#unbundle` node 6.
-    let server = tddy_rpc::MultiRpcService::new(vec![
-        service.session_files_entry(),
-        tddy_rpc::ServiceEntry {
-            name: "connection.ConnectionService",
-            service: Arc::new(tddy_service::ConnectionServiceServer::from_arc(service))
-                as Arc<dyn tddy_rpc::RpcService>,
-        },
-    ]);
-    let participant =
-        LiveKitParticipant::connect(ws_url, &token, server, RoomOptions::default(), None, None)
-            .await
-            .expect("daemon joins the common room as its RPC participant");
-    tokio::spawn(async move { participant.run().await })
+    test_util::serve_daemon_rpc_participant(ws_url, &token, &service).await
 }
 
 /// Blocks until `service` lists `peer_instance_id` as eligible, so a route to it classifies as a
