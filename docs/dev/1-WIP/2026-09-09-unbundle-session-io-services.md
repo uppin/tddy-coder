@@ -730,3 +730,47 @@ the store/adapter level. Fixing that harness gap is not this node's, and it is t
 Both coordinates are mounted from the **same** managers in `runtime.rs`, so while
 `connection.ConnectionService` still declares family K, the two address one set of PTYs and one
 control lease.
+
+### The fourth transport: `tddy-sandbox-app` dials the terminal family over the local UDS socket
+
+Removing the 22 rpcs broke the build on a consumer no document in this stack accounts for.
+`tddy-sandbox-app` is the binary that runs **inside every jail**; it connects back to the daemon over
+the local UDS socket with tonic and opens the bidirectional terminal stream
+(`daemon_client.rs::run_daemon_terminal_bridge`). Checking the daemon, `tddy-coder` and `tddy-web`
+was not enough, because consumers of `connection.ConnectionService` are spread across **four**
+transports, not three:
+
+1. Connect-HTTP — `tddy-web`
+2. LiveKit — `tddy-coder`'s session participant
+3. in-process `ServiceEntry` — the daemon itself
+4. **the local UDS/tonic socket** — `packages/tddy-daemon/src/local_socket_server.rs`, dialled by
+   `tddy-sandbox-app`
+
+**This falsifies the `## Correction to node 1's backlog entry` section above.** That section argues,
+against the plan, that *"measured over production callers alone, only two methods are dialled there
+at all (`tddy-sandbox-app/src/daemon_client.rs`: `start_session` and `mint_local_token`, both node
+9's)"*, and uses it to size the whole remaining adapter debt at ~9 methods. `StreamSessionTerminalIO`
+is dialled there too, from the same file — which is precisely why the only bidirectional method in a
+90-method surface exists. The section's *conclusion* (build the generator) survives; its second
+measurement does not, and the reasoning it corrected was wrong in a different way than it claimed.
+
+Removing the rpcs left the jail with nothing to dial, because the socket had never served the new
+coordinate: `local_socket_server.rs` mounted three tonic services, and the removal stripped the
+now-dangling terminal stream bounds from `serve_connection_uds`'s `where` clause without adding the
+replacement. The symptom was a **compile error in `tddy-sandbox-app`**, not a failing test — so no
+amount of test-suite green would have caught it.
+
+The socket now mounts a fourth service, and it is the **generated** adapter: nine delegations
+including the bidirectional one, none hand-written. That makes this the first production traffic the
+milestone-1 generator carries, and the concrete vindication of putting it in this node rather than
+hand-writing adapters. `ConnectionServiceImpl::terminal_session_service()` already returned the typed
+impl the adapter needs — the type-erased `ServiceEntry` cannot be wrapped — and both mounts are built
+from the same ports over the same `Arc`s, so the socket and the Connect-HTTP entry address one set of
+PTYs and one control lease.
+
+**Process note worth carrying to nodes 7, 8 and 9:** run `cargo build --workspace` once before any
+proto removal. It is the documented exception to this repo's scope-it-locally rule — a removal can
+break any package, and a two-minute local sweep beats a 25-minute CI round trip that only reveals the
+first broken one. Eight of this node's milestones were verified locally and CI reported `Rust lint`
+and `Rust build` green on every one; the ninth was pushed with its gates interrupted, and it is the
+one that broke the build.
