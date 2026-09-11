@@ -38,9 +38,10 @@ tddy-workflow = { path = "../tddy-workflow" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 # `async_trait` on the generated `SessionFilesService` trait the service implements.
 async-trait = "0.1"
-# `spawn_blocking` for the hashing and reading passes, and the unbounded channels behind the four
-# server-streaming methods.
-tokio = { version = "1", features = ["rt", "sync", "macros"] }
+# `spawn_blocking` for the hashing and reading passes, the unbounded channels behind the four
+# server-streaming methods, and `time::timeout` — the bound a context read is refused past, since a
+# read of a stalled filesystem would otherwise hold the RPC open for as long as it stalls.
+tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
 # Every module here logs its refusals — a rejected path is the thing an operator needs in the log.
 log = "0.4"
 # `SyncState` — the record a context directory keeps of what it holds, read back on the next tick
@@ -59,8 +60,9 @@ pretty_assertions = { workspace = true }
 rstest = { workspace = true }
 # The acceptance suites build real session and worktree trees on disk.
 tempfile = "3"
-# `#[tokio::test]` for the service entry's dispatch tests.
-tokio = { version = "1", features = ["rt", "macros"] }
+# `#[tokio::test]` for the service entry's dispatch tests, and `rt` plus `time` to build the
+# one-blocking-thread runtime the context-read deadline suite holds the read on.
+tokio = { version = "1", features = ["rt", "macros", "time"] }
 # `Message::{encode_to_vec, decode}`: the entry's dispatch test speaks the wire the transport does,
 # rather than calling the trait method behind it and proving nothing about the registration.
 prost = "0.13"

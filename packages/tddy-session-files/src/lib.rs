@@ -210,6 +210,7 @@ mod tests {
                 max_attachment_bytes: 4 * 1024 * 1024,
                 daemon_instance_id: "the-serving-host".to_string(),
                 context_scopes: Arc::new(NoContextScope),
+                context_read_deadline: std::time::Duration::from_secs(300),
             }
         }
 

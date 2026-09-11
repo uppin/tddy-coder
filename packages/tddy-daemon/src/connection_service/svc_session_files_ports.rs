@@ -1,10 +1,11 @@
 //! What this daemon hands `tddy-session-files` so that crate can serve
 //! `session_files.SessionFilesService`, and the routing it keeps for itself.
 //!
-//! The thirteen session-file methods are `tddy-session-files`'; what stays here is the six answers
-//! only a daemon has — which OS user a session token belongs to, where this host keeps its data and
-//! its staging area, what it caps an attachment at, which instance id it stamps on a staged entry,
-//! and which checkout a session's agent guidance is read from.
+//! The thirteen session-file methods are `tddy-session-files`'; what stays here is the seven
+//! answers only a daemon has — which OS user a session token belongs to, where this host keeps its
+//! data and its staging area, what it caps an attachment at, which instance id it stamps on a
+//! staged entry, which checkout a session's agent guidance is read from, and how long a read of
+//! that checkout may take.
 //!
 //! Eight of the thirteen also **route**: a request naming another daemon is served by that daemon,
 //! not here. That decision needs the eligible-daemon roster, the common room slot and the LiveKit
@@ -112,7 +113,7 @@ impl ConnectionServiceImpl {
         }
     }
 
-    /// The six host answers the thirteen handlers need, each read off this daemon.
+    /// The seven host answers the thirteen handlers need, each read off this daemon.
     fn session_files_ports(self: &Arc<Self>) -> SessionFilesPorts {
         let for_tokens = Arc::clone(self);
         SessionFilesPorts {
@@ -129,6 +130,10 @@ impl ConnectionServiceImpl {
             context_scopes: Arc::new(SessionsOfThisDaemon {
                 connection: Arc::clone(self),
             }),
+            // The same budget this daemon gives its other filesystem work, so a context read and a
+            // worktree build on this host cannot disagree about how long it may take — and the
+            // budget an operator already tunes rather than a second key to discover.
+            context_read_deadline: self.config.spawn_worker_request_timeout(),
         }
     }
 }

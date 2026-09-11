@@ -17,6 +17,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
@@ -77,7 +78,7 @@ pub trait SessionContextScopes: Send + Sync {
 
 /// Everything the thirteen handlers need from the host they run on.
 ///
-/// A struct rather than six positional parameters: they are all wiring, and two of them are
+/// A struct rather than seven positional parameters: they are all wiring, and two of them are
 /// `PathBuf`s that a call site could silently swap for each other — a data dir passed as a staging
 /// base would resolve every scope root one directory off and refuse everything as absent.
 pub struct SessionFilesPorts {
@@ -98,6 +99,15 @@ pub struct SessionFilesPorts {
     pub daemon_instance_id: String,
     /// Where a context read is served from.
     pub context_scopes: Arc<dyn SessionContextScopes>,
+    /// How long one blocking context read may take before the call is refused — this host's
+    /// `spawn_worker_request_timeout` (`spawn_worker_request_timeout_secs`), which is the key the
+    /// refusal names so an operator who hits it knows what to raise.
+    ///
+    /// Supplied by the daemon rather than chosen here, like every other field above: the budget is
+    /// an operator's tuning of the host doing the reading, not a property of this subsystem. It is
+    /// the same budget the daemon gives its other filesystem work, so a context read and a worktree
+    /// build on one host cannot disagree about how long that host is allowed to take.
+    pub context_read_deadline: Duration,
 }
 
 /// The `session_files.SessionFilesService` implementation.
@@ -205,6 +215,40 @@ fn streamed<T>(frames: Vec<T>) -> Response<MpscResultStream<T>> {
     Response::new(MpscResultStream::from(rx))
 }
 
+/// Run one blocking context read off the async runtime, bounded by `deadline`.
+///
+/// Both halves matter and neither is optional. The read is `spawn_blocking` because hashing or
+/// reading every allow-listed path is filesystem work that would otherwise hold a runtime worker;
+/// and it is bounded because that filesystem can genuinely stall — the caller is usually a split
+/// session's agent host fetching its guidance from the host that holds the codebase. Unbounded, a
+/// stalled read leaves the RPC waiting for exactly as long as the read does, with nothing for the
+/// caller to retry or report; bounded, it answers `DEADLINE_EXCEEDED`.
+///
+/// The refusal names `spawn_worker_request_timeout_secs` because the remedy is to raise that key,
+/// and this message is the only place an operator is told so.
+async fn read_within_deadline<T, Read>(
+    rpc_name: &str,
+    deadline: Duration,
+    read: Read,
+) -> Result<T, Status>
+where
+    Read: FnOnce() -> Result<T, Status> + Send + 'static,
+    T: Send + 'static,
+{
+    let join = tokio::task::spawn_blocking(read);
+    match tokio::time::timeout(deadline, join).await {
+        Ok(Ok(Ok(value))) => Ok(value),
+        Ok(Ok(Err(refusal))) => Err(refusal),
+        Ok(Err(join_error)) => Err(Status::internal(join_error.to_string())),
+        Err(_elapsed) => {
+            let secs = deadline.as_secs();
+            Err(Status::deadline_exceeded(format!(
+                "{rpc_name}: timed out after {secs}s (spawn_worker_request_timeout_secs)"
+            )))
+        }
+    }
+}
+
 #[async_trait]
 impl tddy_service::proto::session_files::SessionFilesService for SessionFilesServiceImpl {
     async fn list_session_workflow_files(
@@ -253,11 +297,14 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
                 .context_scopes
                 .scope_for(&req.session_token, &req.session_id, &req.agent)?;
         let max_bytes = self.ports.max_attachment_bytes;
-        let entries = tokio::task::spawn_blocking(move || {
-            crate::context_files::context_manifest(&scope.worktree_root, scope.globs, max_bytes)
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))??;
+        let entries = read_within_deadline(
+            "StreamContextManifest",
+            self.ports.context_read_deadline,
+            move || {
+                crate::context_files::context_manifest(&scope.worktree_root, scope.globs, max_bytes)
+            },
+        )
+        .await?;
         Ok(streamed(entries))
     }
 
@@ -274,16 +321,19 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
                 .scope_for(&req.session_token, &req.session_id, &req.agent)?;
         let max_bytes = self.ports.max_attachment_bytes;
         let rel_path = req.rel_path;
-        let bytes = tokio::task::spawn_blocking(move || {
-            crate::context_files::read_context_file_bytes(
-                &scope.worktree_root,
-                &rel_path,
-                scope.globs,
-                max_bytes,
-            )
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))??;
+        let bytes = read_within_deadline(
+            "StreamReadContextFile",
+            self.ports.context_read_deadline,
+            move || {
+                crate::context_files::read_context_file_bytes(
+                    &scope.worktree_root,
+                    &rel_path,
+                    scope.globs,
+                    max_bytes,
+                )
+            },
+        )
+        .await?;
         Ok(streamed(crate::context_files::context_file_frames(&bytes)))
     }
 
@@ -305,16 +355,19 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
                 .scope_for(&req.session_token, &req.session_id, &req.agent)?;
         let max_bytes = self.ports.max_attachment_bytes;
         let rel_paths = req.rel_paths;
-        let files = tokio::task::spawn_blocking(move || {
-            crate::context_files::read_context_files_bytes(
-                &scope.worktree_root,
-                &rel_paths,
-                scope.globs,
-                max_bytes,
-            )
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))??;
+        let files = read_within_deadline(
+            "StreamReadContextFileBatch",
+            self.ports.context_read_deadline,
+            move || {
+                crate::context_files::read_context_files_bytes(
+                    &scope.worktree_root,
+                    &rel_paths,
+                    scope.globs,
+                    max_bytes,
+                )
+            },
+        )
+        .await?;
         Ok(streamed(crate::context_files::context_file_batch_frames(
             &files,
         )))
