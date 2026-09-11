@@ -16,7 +16,11 @@ use tokio::sync::{broadcast, mpsc, watch, RwLock};
 
 /// Reserved terminal id for a session's original (agent) terminal. It is not managed here — it is
 /// torn down via Delete/Signal on the daemon — so stopping it via `StopTerminalSession` is rejected.
-pub const MAIN_TERMINAL_ID: &str = "main";
+///
+/// Re-exported from `tddy-terminal-rpc` rather than declared again: the reserved id is part of the
+/// terminal wire contract both this process and the daemon answer on, and two declarations of it
+/// are two things to keep equal.
+pub use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
 
 /// Handle to a running shell in a PTY.
 ///
@@ -291,6 +295,50 @@ fn passwd_login_shell() -> Option<String> {
     } else {
         Some(shell)
     }
+}
+
+/// The OS user this coder process runs as, from the passwd database (`getpwuid_r(geteuid())`),
+/// falling back to `$USER`.
+///
+/// The coder already runs as the target user — it never impersonates — so this is the whole of its
+/// answer to "which OS user does this session's terminal belong to". It exists because
+/// `terminal_session.TerminalSessionService` resolves the login shell *from a named user*, and
+/// naming the current one there makes that lookup the same passwd entry
+/// [`resolve_login_shell`] reads.
+#[cfg(unix)]
+#[must_use]
+pub fn current_os_user() -> Option<String> {
+    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
+    let mut buf = vec![0u8; 16384];
+    let mut result = std::ptr::null_mut();
+    let uid = unsafe { libc::geteuid() };
+    let ret = unsafe {
+        libc::getpwuid_r(
+            uid,
+            passwd.as_mut_ptr(),
+            buf.as_mut_ptr() as *mut libc::c_char,
+            buf.len(),
+            &mut result,
+        )
+    };
+    if ret == 0 && !result.is_null() {
+        let passwd = unsafe { &*result };
+        if !passwd.pw_name.is_null() {
+            let name = unsafe { std::ffi::CStr::from_ptr(passwd.pw_name) }
+                .to_string_lossy()
+                .into_owned();
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+    }
+    std::env::var("USER").ok().filter(|name| !name.is_empty())
+}
+
+#[cfg(not(unix))]
+#[must_use]
+pub fn current_os_user() -> Option<String> {
+    std::env::var("USER").ok().filter(|name| !name.is_empty())
 }
 
 /// Strip an OSC resize sequence (`\x1b]resize;{cols};{rows}\x07`) from `data`.
