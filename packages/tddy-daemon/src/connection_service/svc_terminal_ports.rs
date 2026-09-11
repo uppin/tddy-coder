@@ -95,12 +95,12 @@ impl ConnectionServiceImpl {
 ///
 /// The lease is the manager's rather than this adapter's because a session's *deletion* clears it,
 /// and deletion runs nowhere near an RPC handler.
-pub struct CliManagerTerminalControl {
+struct CliManagerTerminalControl {
     manager: Arc<CliSessionManager>,
 }
 
 impl CliManagerTerminalControl {
-    pub fn new(manager: Arc<CliSessionManager>) -> Self {
+    fn new(manager: Arc<CliSessionManager>) -> Self {
         CliManagerTerminalControl { manager }
     }
 }
@@ -130,12 +130,12 @@ impl TerminalControl for CliManagerTerminalControl {
 }
 
 /// The terminals of a session, spawned as tasks by [`CliSessionManager`].
-pub struct CliManagerTerminalRoster {
+struct CliManagerTerminalRoster {
     manager: Arc<CliSessionManager>,
 }
 
 impl CliManagerTerminalRoster {
-    pub fn new(manager: Arc<CliSessionManager>) -> Self {
+    fn new(manager: Arc<CliSessionManager>) -> Self {
         CliManagerTerminalRoster { manager }
     }
 }

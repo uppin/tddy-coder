@@ -92,17 +92,12 @@ pub fn split_pairing(meta: &tddy_core::SessionMetadata) -> Option<(&str, &str)> 
     ))
 }
 
-/// The mirror of [`split_pairing`], read on the `workspace` half — now `tddy_core`'s, beside the
-/// [`tddy_core::SessionMetadata`] fields it reads.
-///
-/// It moved because `crate::context_files` needs it too, and that module is bound for
-/// `tddy-session-files` while this one stays here: a session-file reader calling back into
-/// `split_session` made the two mutually dependent, and neither could be extracted. Being a pure
-/// accessor over two optional metadata fields, it had no reason to live in the split-placement
-/// module in the first place.
-///
-/// Re-exported so every caller's path is unchanged, and so there stays exactly one definition.
-pub use tddy_core::paired_agent;
+// The mirror of `split_pairing`, read on the `workspace` half, lives in `tddy_core` beside the
+// `tddy_core::SessionMetadata` fields it reads — `tddy_core::paired_agent`, which both callers
+// (`connection_service::agent_roster`, `tddy_session_files::context_files`) name directly. It
+// moved because a session-file reader calling back into `split_session` made the two mutually
+// dependent; there is deliberately no re-export here, because a facade nothing goes through is a
+// second path to one definition rather than a shorter one.
 
 /// Where a split session's context directory lives: inside the session directory, so it is removed
 /// with the session and needs no separate lifetime.

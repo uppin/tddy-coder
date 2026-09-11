@@ -33,7 +33,6 @@ use tddy_service::proto::session_files::{
     StagedAttachmentEntry, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
     UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse, WorkflowFileEntry,
 };
-use tddy_service::SessionFilesServiceServer;
 use tddy_worktree_service::stream::MpscResultStream;
 
 use crate::HostDocumentScope;
@@ -550,21 +549,5 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
             );
         });
         Ok(Response::new(MpscResultStream::from(rx)))
-    }
-}
-
-/// The `session_files.SessionFilesService` entry the daemon's wiring layer registers.
-///
-/// `#unbundle` node 6 moved these four families out of `connection.ConnectionService` and into the
-/// crate that now owns all ten of their modules. The ports stay injected because each one is
-/// *wiring*: which OS user a token maps to, where this host keeps its data and its staging area,
-/// what it caps an attachment at, and which checkout a session's guidance is read from are the
-/// daemon's answers, not this subsystem's behaviour.
-#[must_use]
-pub fn build_session_files_entry(ports: SessionFilesPorts) -> tddy_rpc::ServiceEntry {
-    let server = SessionFilesServiceServer::new(SessionFilesServiceImpl::new(ports));
-    tddy_rpc::ServiceEntry {
-        name: tddy_service::SESSION_FILES_SERVICE,
-        service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
     }
 }

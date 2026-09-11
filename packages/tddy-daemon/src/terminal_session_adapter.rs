@@ -87,12 +87,12 @@ impl tddy_terminal_rpc::session::TerminalSession for DaemonTerminalSession {
 ///   (`tddy-sandbox-app`'s `daemon_client`), and has no way to claim one, so
 ///   [`Self::requires_control`] answers `false` — as the old sandbox path did by forwarding to
 ///   `stdin_tx` and returning before the lease was ever consulted.
-pub struct SandboxTerminalSession {
+pub(crate) struct SandboxTerminalSession {
     state: Arc<SandboxSessionState>,
 }
 
 impl SandboxTerminalSession {
-    pub fn new(state: Arc<SandboxSessionState>) -> Self {
+    fn new(state: Arc<SandboxSessionState>) -> Self {
         SandboxTerminalSession { state }
     }
 }

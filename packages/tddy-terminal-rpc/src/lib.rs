@@ -49,12 +49,11 @@ pub mod service;
 pub mod session;
 
 pub use bridge::{
-    history_into_tonic_stream, into_tonic_stream, serve_get_terminal_history,
-    serve_get_terminal_history_with, serve_send_terminal_input, serve_send_terminal_input_to,
-    serve_stream_session_terminal_io_with, serve_stream_terminal_output,
-    serve_stream_terminal_output_with,
+    serve_get_terminal_history, serve_get_terminal_history_with, serve_send_terminal_input,
+    serve_send_terminal_input_to, serve_stream_session_terminal_io_with,
+    serve_stream_terminal_output, serve_stream_terminal_output_with,
 };
-pub use login_shell::{login_shell_for, login_shell_for_os_user};
+pub use login_shell::login_shell_for;
 pub use proto::terminal_session::{GetTerminalHistoryRequest, TerminalHistoryChunk};
 pub use service::{
     build_terminal_session_entry, ControlChange, ControlClaim, TerminalControl, TerminalDescriptor,

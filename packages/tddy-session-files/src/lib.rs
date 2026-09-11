@@ -56,7 +56,7 @@ pub use context_sync::{ContextSource, ContextSyncer, LocalWorktreeSource, Prefet
 /// hand-written mirror silently drops — stays representable and therefore refusable.
 pub use tddy_service::proto::types::HostDocumentScope;
 
-pub use service::{build_session_files_entry, SessionFilesPorts, SessionFilesServiceImpl};
+pub use service::{SessionFilesPorts, SessionFilesServiceImpl};
 
 /// The two halves of the path gate every host-document read passes through.
 ///
@@ -76,10 +76,11 @@ mod tests {
     use std::sync::Arc;
 
     use prost::Message as _;
-    use tddy_rpc::{Code, RpcMessage, RpcResult, Status};
+    use tddy_rpc::{Code, RpcMessage, RpcResult, RpcService as _, Status};
     use tddy_service::proto::session_files::{
         ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
     };
+    use tddy_service::SessionFilesServiceServer;
 
     use crate::service::{SessionContextScope, SessionContextScopes, SessionFilesPorts};
 
@@ -88,7 +89,11 @@ mod tests {
     const TOKEN: &str = "a-valid-session-token";
     const SERVICE: &str = tddy_service::SESSION_FILES_SERVICE;
 
-    /// A host with a data dir and a staging area on disk, and the entry that serves it.
+    /// The generated server over this crate's implementation — the thing that actually answers at
+    /// a coordinate, and whose `NAME` comes from `session_files.proto` rather than from a caller.
+    type ServedCoordinate = SessionFilesServiceServer<SessionFilesServiceImpl>;
+
+    /// A host with a data dir and a staging area on disk, and the served implementation over it.
     struct AHost {
         _root: tempfile::TempDir,
         tddy_data_dir: PathBuf,
@@ -151,8 +156,15 @@ mod tests {
             }
         }
 
-        fn entry(&self) -> tddy_rpc::ServiceEntry {
-            build_session_files_entry(self.ports())
+        /// The served implementation itself, behind the generated server that dispatches to it.
+        ///
+        /// Deliberately *not* an assembled `ServiceEntry`: the daemon builds its entry around
+        /// `PeerRoutedSessionFiles`, so an entry re-assembled here would be a lookalike, and a
+        /// test reading it as proof of production registration would be reading the wrong thing.
+        /// Registration and routing are pinned where they happen —
+        /// `tddy-daemon/tests/session_files_service_acceptance.rs`, against the real wrapper.
+        fn served(&self) -> ServedCoordinate {
+            SessionFilesServiceServer::new(SessionFilesServiceImpl::new(self.ports()))
         }
     }
 
@@ -168,10 +180,10 @@ mod tests {
         }
     }
 
-    /// The unary answer to one method of the entry, decoded.
-    async fn unary_answer(entry: &tddy_rpc::ServiceEntry, method: &str, request: &[u8]) -> Vec<u8> {
+    /// The unary answer to one method of the served implementation, decoded.
+    async fn unary_answer(served: &ServedCoordinate, method: &str, request: &[u8]) -> Vec<u8> {
         let message = RpcMessage::new(request.to_vec(), Default::default());
-        match entry.service.handle_rpc(SERVICE, method, &message).await {
+        match served.handle_rpc(SERVICE, method, &message).await {
             RpcResult::Unary(Ok(bytes)) => bytes,
             RpcResult::Unary(Err(status)) => panic!("{method} was refused: {status:?}"),
             RpcResult::ServerStream(_) => panic!("{method} answered with a stream"),
@@ -180,50 +192,50 @@ mod tests {
 
     #[test]
     fn names_the_service_families_i_j_r_and_s_move_to() {
-        // Given
-        let host = a_host();
-
         // When
-        let entry = host.entry();
+        let coordinate = ServedCoordinate::NAME;
 
         // Then
-        assert_eq!(entry.name, "session_files.SessionFilesService");
+        assert_eq!(coordinate, "session_files.SessionFilesService");
     }
 
     /// The name this crate serves under and the name a cross-host forward is addressed at have to
     /// be one value: a mismatch is not a type error but a runtime "unknown service" on the peer,
     /// which is how a forwarded session-file call already reached a host that did not serve it
-    /// once. Both ends read `tddy_service::SESSION_FILES_SERVICE` — the served entry here, and
-    /// `tddy-daemon-livekit`'s five session-file forwarders — so this pins the serving end to it.
+    /// once. Both ends read `tddy_service::SESSION_FILES_SERVICE` — the server generated from
+    /// `session_files.proto` and dispatched to here, and `tddy-daemon-livekit`'s five session-file
+    /// forwarders — so this pins the serving end to it. The served name is the generated `NAME`,
+    /// which the server checks every `handle_rpc` against, rather than a string this test chose.
     #[test]
     fn serves_at_the_coordinate_a_cross_host_forward_is_addressed_at() {
-        // Given
-        let host = a_host();
-
         // When
-        let entry = host.entry();
+        let coordinate = ServedCoordinate::NAME;
 
         // Then
-        assert_eq!(entry.name, tddy_service::SESSION_FILES_SERVICE);
+        assert_eq!(coordinate, tddy_service::SESSION_FILES_SERVICE);
     }
 
-    /// The name alone would be satisfied by an entry with nothing behind it, so this dispatches a
-    /// real method at the registered service and reads the answer back off the wire.
+    /// The name alone would be satisfied by a server with nothing behind it, so this dispatches a
+    /// real method at that coordinate and reads the answer back off the wire.
     #[tokio::test]
     async fn answers_a_method_dispatched_at_the_registered_service() {
         // Given
         let host = a_host();
         host.with_workflow_file("PRD.md", "# the plan")
             .with_workflow_file("TODO.md", "- [ ] the work");
-        let entry = host.entry();
+        let served = host.served();
         let request = ListSessionWorkflowFilesRequest {
             session_token: TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
         };
 
         // When
-        let answer =
-            unary_answer(&entry, "ListSessionWorkflowFiles", &request.encode_to_vec()).await;
+        let answer = unary_answer(
+            &served,
+            "ListSessionWorkflowFiles",
+            &request.encode_to_vec(),
+        )
+        .await;
 
         // Then
         let response =
@@ -245,7 +257,7 @@ mod tests {
         // Given
         let host = a_host();
         host.with_workflow_file("PRD.md", "# the plan");
-        let entry = host.entry();
+        let served = host.served();
         let request = ListSessionWorkflowFilesRequest {
             session_token: "a-token-from-another-host".to_string(),
             session_id: SESSION_ID.to_string(),
@@ -253,8 +265,7 @@ mod tests {
         let message = RpcMessage::new(request.encode_to_vec(), Default::default());
 
         // When
-        let outcome = entry
-            .service
+        let outcome = served
             .handle_rpc(SERVICE, "ListSessionWorkflowFiles", &message)
             .await;
 

@@ -1,5 +1,4 @@
 use tddy_daemon_kernel::trim_to_option;
-use tddy_task::TerminalCapture;
 
 use std::path::Path;
 
@@ -114,49 +113,6 @@ pub(crate) async fn push_new_branch_to_origin_if_requested(
         },
     )
     .await
-}
-
-/// Maximum size of a single terminal-output frame published to a client on attach. Chosen to stay
-/// well under the LiveKit/WebRTC data-channel and gRPC-web message size limits while keeping the
-/// number of replay frames for a long-lived session reasonable.
-///
-/// Retained for the `sandbox_replay_tests` unit tests below, like the two helpers it bounds: since
-/// `#unbundle` node 6 the sandbox path replays through `tddy_terminal_rpc`'s bridge, which is
-/// bounded by that crate's own `DEFAULT_INITIAL_FRAME_BYTES`.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) const TERMINAL_OUTPUT_FRAME_MAX_BYTES: usize = 32 * 1024;
-
-/// Split a terminal capture buffer into ordered frames of at most `max_frame_bytes` each so a long
-/// session history is replayed as several bounded frames instead of one oversized frame that could
-/// exceed the transport's per-message limit and never reach the client.
-///
-/// An empty input yields no frames. Any non-empty input yields `ceil(len / max_frame_bytes)`
-/// frames; concatenating them in order reproduces the input exactly.
-///
-/// Retained for the `sandbox_replay_tests` unit tests (the production sandbox path now uses
-/// `TerminalCapture::replay_from` directly with offset-tagged frames).
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn chunk_terminal_output(data: &[u8], max_frame_bytes: usize) -> Vec<bytes::Bytes> {
-    data.chunks(max_frame_bytes)
-        .map(bytes::Bytes::copy_from_slice)
-        .collect()
-}
-
-/// Frames a newly attached sandbox-session subscriber receives before the live broadcast: the
-/// mouse-tracking modes still in effect, then the retained output.
-///
-/// Without the prologue a browser attaching to a long-running sandbox session never learns the
-/// application enabled mouse reporting, because the DECSET that enabled it was evicted from the
-/// capture ring long ago and nothing re-emits it.
-///
-/// Retained for the `sandbox_replay_tests` unit tests (the production sandbox path now uses
-/// `TerminalCapture::replay_from` directly with offset-tagged frames).
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn sandbox_replay_frames(
-    capture: &TerminalCapture,
-    max_frame_bytes: usize,
-) -> Vec<bytes::Bytes> {
-    chunk_terminal_output(&capture.replay(), max_frame_bytes)
 }
 
 /// Derives the agent and recipe to relaunch a resumed session with, from its persisted

@@ -12,16 +12,21 @@
 //! `--no-default-features` in-jail build, which carries none today.
 
 /// The shell a login terminal for `os_user` runs: their passwd `pw_shell`, else the serving
-/// process's `$SHELL`, else `/bin/bash`.
+/// process's `$SHELL`, else [`DEFAULT_LOGIN_SHELL`].
 ///
 /// The passwd entry is preferred over `$SHELL` because a daemon started by systemd or nix has a
 /// `$SHELL` of its own that is not the target user's interactive shell — a terminal opened with it
 /// would come up in the wrong shell with none of the user's rc files.
+/// The shell used when neither the passwd entry nor `$SHELL` names one. Named rather than inlined
+/// because it is an absolute path this crate *assumes* exists: a host without it (a minimal Nix
+/// closure, Alpine's busybox-only base) fails the spawn, and the failure should point here.
+pub const DEFAULT_LOGIN_SHELL: &str = "/bin/bash";
+
 #[must_use]
 pub fn login_shell_for(os_user: &str) -> String {
     login_shell_for_os_user(os_user)
         .or_else(|| std::env::var("SHELL").ok())
-        .unwrap_or_else(|| "/bin/bash".to_string())
+        .unwrap_or_else(|| DEFAULT_LOGIN_SHELL.to_string())
 }
 
 /// The login shell (`pw_shell`) of `os_user` from the passwd database, or `None` when the entry is

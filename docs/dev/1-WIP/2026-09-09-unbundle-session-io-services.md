@@ -912,3 +912,54 @@ created by this node's own red-phase commit (`d6aa2969`) and the `## Dependencie
 1 with it is stale — corrected under *The shared types file arrived here* above; `pty_relay.rs` is a
 seven-line coordinate re-point that `## Affected Packages` explicitly schedules; and
 `pty_registry.rs`'s deletion is the recorded decision not to relocate a six-line re-export.
+
+### Production-readiness pass: the dead surface this node introduced, removed
+
+A readiness pass over this node's own diff found seven items with no production consumer. All were
+removed; each removal was preceded by a workspace grep and, where the item had test-only callers, by
+a check that the behaviour is pinned somewhere a production path actually runs.
+
+| Removed | Where it was | Why it was dead |
+|---|---|---|
+| `TERMINAL_OUTPUT_FRAME_MAX_BYTES`, `chunk_terminal_output`, `sandbox_replay_frames` | `tddy-daemon/src/connection_service/service_util.rs` | the sandbox path replays through `tddy_terminal_rpc`'s bridge since this node; the three were kept compiling by `#[cfg_attr(not(test), allow(dead_code))]` and referenced only by the two unit suites written for them |
+| `sandbox_replay_tests`, `terminal_output_chunking_tests` | same module | existed only to test the three above; their subject is now `tests/sandbox_terminal_parity_acceptance.rs`, which compares the served frames against the deleted loop as an oracle |
+| `build_session_files_entry` (+ its crate-root re-export) | `tddy-session-files/src/service.rs` | the daemon builds its entry around `PeerRoutedSessionFiles` (`svc_session_files_ports.rs`), never around `SessionFilesServiceImpl`; the only caller was the crate's own test helper, which therefore proved registration of an unrouted lookalike |
+| `login_shell_for_os_user` from the crate root `pub use` | `tddy-terminal-rpc/src/lib.rs` | only `login_shell_for`, in the same module, calls it; still reachable as `login_shell::login_shell_for_os_user` |
+| `pub use tddy_core::paired_agent;` | `tddy-daemon/src/split_session.rs` | claimed to keep every caller's path unchanged, but both callers name `tddy_core::paired_agent` directly |
+| `into_tonic_stream`, `history_into_tonic_stream` | `tddy-terminal-rpc/src/bridge.rs` | no caller before or after this node; their last plausible consumer (`connection_tonic_adapter.rs`) was deleted here |
+| `pub` on `CliManagerTerminalControl` / `CliManagerTerminalRoster` / `CoderTerminalControl` / `SandboxTerminalSession` | `svc_terminal_ports.rs`, `terminal_session_service.rs`, `terminal_session_adapter.rs` | each is constructed only by the ports/store factory beside it; narrowed to private or `pub(crate)`. `sandbox_sessions()` and `terminal_session_service()` stay `pub` — their doc comments argue for acceptance-test reachability, and that argument holds |
+
+Kept, deliberately: `tddy-session-files`'s crate-root `pub use host_documents::{contained_in_scope_root,
+validate_relative_path}`. `host_documents` is itself a `pub mod`, so both names are public either
+way and removing the alias reduces the public surface by nothing; what the alias buys is that the
+crate root's advertised gate *is* the served one, which is the failure recorded above under the
+lenient-duplicate fix.
+
+Two correctness/clarity items in the same pass: the last-resort login shell is now
+`tddy_terminal_rpc::login_shell::DEFAULT_LOGIN_SHELL` rather than an inline `"/bin/bash"` (a host
+without it — a minimal Nix closure, Alpine — fails the spawn, and the failure should name the
+assumption), and `session_files.proto`'s header no longer says `connection.proto` "keeps its own
+copy" of `HostDocumentScope`: it imports `types.proto` and uses `types.HostDocumentScope`, with no
+local enum left.
+
+#### One assertion the deletion in row 1 does not carry forward
+
+`terminal_output_chunking_tests::the_default_frame_limit_is_small_enough_to_chunk_a_megabyte_capture`
+was a `const` assert that `0 < TERMINAL_OUTPUT_FRAME_MAX_BYTES < 1 MiB`, guarding the constant
+against being set so large that a long history replays as one frame the transport refuses. The
+constant is gone, and its production successor —
+`tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES` (8 KiB), which is what
+`svc_terminal_ports.rs` and `tddy-coder` actually pass — **has no equivalent guard**. The parity
+suite covers everything else the two suites did (empty/one-frame/split/ordering/reassembly, and the
+mouse-mode prologue leading the replay), but it drives the bridge at its own `FRAME_BUDGET_BYTES = 4`
+rather than at the production default, so nothing pins that default's magnitude. Adding such a guard
+belongs beside the constant in `tddy-terminal-rpc`, and is left to the owner's call rather than
+smuggled in with a deletion.
+
+#### Two package docs now name deleted helpers
+
+`packages/tddy-daemon/docs/connection-service.md` (§ terminal mode replay) and
+`packages/tddy-task/docs/terminal-capture.md` still describe the sandbox attach path as replaying
+through `sandbox_replay_frames` / `chunk_terminal_output`. Both are now false. They are not edited
+here because `packages/*/docs/` changes go through this changeset rather than direct edits; the
+wrap-up should repoint both at `tddy_terminal_rpc::bridge`'s replay/offset arm.

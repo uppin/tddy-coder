@@ -15,9 +15,9 @@ import "types.proto";
 // reviewer benefit.
 //
 // Imports `types.proto` for `HostDocumentScope`, the one type that genuinely crosses to a service
-// that stays. `connection.proto` keeps its own copy until the green phase removes the moved methods
-// and repoints it here — two definitions in two packages is legal, and repointing it now would put a
-// change to a staying family in a red-phase commit.
+// that stays. `connection.proto` imports it from there too and declares no copy of its own, so the
+// enum has exactly one definition and `StartSession`'s `HostDocumentRef` and `ReadHostDocument`
+// name the same values.
 
 service SessionFilesService {
   rpc ListSessionWorkflowFiles(ListSessionWorkflowFilesRequest) returns (ListSessionWorkflowFilesResponse);

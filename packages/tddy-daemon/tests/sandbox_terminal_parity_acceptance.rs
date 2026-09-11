@@ -19,10 +19,11 @@
 //! untouched is the one option that quietly stops meaning anything.
 //!
 //! They run against the real [`SandboxSessionState`] and the real
-//! [`SandboxTerminalSession`](tddy_daemon::terminal_session_adapter::SandboxTerminalSession), not a
+//! `SandboxTerminalSession` behind `DaemonTerminalSessionStore` (crate-private: a jail's PTY is
+//! reached through the store, and this suite reaches it the way the handlers do), not a
 //! mirror of them, because what is being checked is precisely the mapping between a jail's three
 //! channels and everything the bridge asks a terminal for — including the four absences
-//! [`SandboxTerminalSession`] synthesises an answer for.
+//! `SandboxTerminalSession` synthesises an answer for.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

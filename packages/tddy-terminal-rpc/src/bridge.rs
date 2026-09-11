@@ -21,7 +21,6 @@ use bytes::Bytes;
 use tddy_rpc::Status;
 use tddy_task::CaptureChunk;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::Stream;
 
 use crate::proto::terminal_session::{
@@ -548,19 +547,4 @@ pub fn serve_send_terminal_input_to(
         session.send_input(Bytes::from(req.data), req.input_offset);
     }
     crate::proto::terminal_session::SendTerminalInputResponse {}
-}
-
-/// Drain a `serve_stream_terminal_output` receiver into a `tonic`-compatible `ReceiverStream` of
-/// `Result<SessionTerminalOutput, Status>`.
-pub fn into_tonic_stream(
-    rx: mpsc::Receiver<Result<SessionTerminalOutput, Status>>,
-) -> ReceiverStream<Result<SessionTerminalOutput, Status>> {
-    ReceiverStream::new(rx)
-}
-
-/// Drain a `serve_get_terminal_history` receiver into a `tonic`-compatible `ReceiverStream`.
-pub fn history_into_tonic_stream(
-    rx: mpsc::Receiver<Result<TerminalHistoryChunk, Status>>,
-) -> ReceiverStream<Result<TerminalHistoryChunk, Status>> {
-    ReceiverStream::new(rx)
 }

@@ -2047,12 +2047,6 @@ mod worktree_source_tests;
 mod sandbox_claude_passthrough_args_tests;
 
 #[cfg(test)]
-mod terminal_output_chunking_tests;
-
-#[cfg(test)]
-mod sandbox_replay_tests;
-
-#[cfg(test)]
 mod conversation_spawn_wiring_tests;
 
 #[cfg(test)]

@@ -160,7 +160,7 @@ impl RpcService for CoderTerminalSessionRpc {
 /// process is not it. [`SessionConnectionService::claim_terminal_control`] is the single source of
 /// the grant, so the token a caller is handed is the same one on either of this participant's
 /// coordinates.
-pub struct CoderTerminalControl {
+pub(crate) struct CoderTerminalControl {
     svc: Arc<SessionConnectionService>,
     /// Nothing is ever sent on this: the coder's lease never changes hands. Held so `subscribe`
     /// hands out a live receiver rather than a closed one.
@@ -169,7 +169,7 @@ pub struct CoderTerminalControl {
 
 impl CoderTerminalControl {
     #[must_use]
-    pub fn new(svc: Arc<SessionConnectionService>) -> Self {
+    pub(crate) fn new(svc: Arc<SessionConnectionService>) -> Self {
         let (changes, _) = broadcast::channel(1);
         CoderTerminalControl { svc, changes }
     }
