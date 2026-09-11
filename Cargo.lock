@@ -12705,6 +12705,7 @@ dependencies = [
  "tddy-session-tool-client",
  "tddy-stdio",
  "tddy-task",
+ "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-tool-engine",
  "tempfile",

@@ -221,6 +221,14 @@ struct LocalSocketTransport {
     worktree_adapter: crate::worktree_tonic_adapter::WorktreeServiceTonicAdapter<
         tddy_worktree_service::WorktreeServiceImpl,
     >,
+    /// The terminal family `#unbundle` node 6 split out, served on the **same** socket. The in-jail
+    /// `tddy-sandbox-app` bridges its PTY over the bidi `StreamSessionTerminalIO` here, so leaving
+    /// this coordinate off the socket takes the terminal away from every sandboxed session.
+    /// Generated, not hand-written: all nine delegations come from `tddy-codegen`.
+    terminal_adapter:
+        tddy_terminal_rpc::proto::terminal_session::TerminalSessionServiceTonicAdapter<
+            tddy_terminal_rpc::TerminalSessionServiceImpl,
+        >,
 }
 
 /// This daemon's session rooms, as the closer `tddy-worktree-service` asks for before a removal.
@@ -305,6 +313,7 @@ impl RuntimeTasks {
                     local_socket.adapter,
                     local_socket.host_adapter,
                     local_socket.worktree_adapter,
+                    local_socket.terminal_adapter,
                     shutdown,
                 )
                 .await
@@ -869,6 +878,14 @@ pub async fn build(
                 worktree_adapter: crate::worktree_tonic_adapter::WorktreeServiceTonicAdapter::new(
                     Arc::clone(&worktree_service_impl),
                 ),
+                // Built from `connection_arc` — the same `CliSessionManager` and sandbox registry
+                // the `terminal_session_entry` below serves, so the socket and every other
+                // transport address one set of PTYs and one control lease. The ports themselves
+                // hold no state: they are clones of those managers' `Arc`s.
+                terminal_adapter:
+                    tddy_terminal_rpc::proto::terminal_session::TerminalSessionServiceTonicAdapter::new(
+                        Arc::new(connection_arc.terminal_session_service()),
+                    ),
             });
         }
 

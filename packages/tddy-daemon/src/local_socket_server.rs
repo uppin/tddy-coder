@@ -6,11 +6,14 @@
 //! the same service instances (via `Arc`) so work started over the socket is visible over every
 //! other transport.
 //!
-//! **Three services, one socket.** `#unbundle` node 1 split hosts and worktrees out of
-//! `connection.ConnectionService`, and a caller that reached them over this socket must go on
-//! reaching them over it. One `Server::builder()` with three `add_service` calls is what keeps that
-//! true — a second socket would be a second address to configure, and a service left off this
-//! builder would answer on every transport except the local one.
+//! **Four services, one socket.** `#unbundle` node 1 split hosts and worktrees out of
+//! `connection.ConnectionService` and node 6 split the terminal family out after them; a caller
+//! that reached any of them over this socket must go on reaching it over this socket. One
+//! `Server::builder()` with four `add_service` calls is what keeps that true — a second socket
+//! would be a second address to configure, and a service left off this builder would answer on
+//! every transport except the local one. The in-jail `tddy-sandbox-app` is the caller that proves
+//! it for `terminal_session.TerminalSessionService`: its whole terminal bridge is the bidi
+//! `StreamSessionTerminalIO`, dialled here and nowhere else.
 
 use std::future::Future;
 use std::os::unix::io::{FromRawFd, RawFd};
@@ -26,6 +29,10 @@ use tddy_service::proto::worktree::WorktreeService as RpcWorktreeService;
 use tddy_service::tonic_connection::connection_service_server::ConnectionServiceServer;
 use tddy_service::tonic_host::host_service_server::HostServiceServer;
 use tddy_service::tonic_worktree::worktree_service_server::WorktreeServiceServer;
+use tddy_terminal_rpc::proto::terminal_session::{
+    TerminalSessionService as RpcTerminalSessionService, TerminalSessionServiceTonicAdapter,
+};
+use tddy_terminal_rpc::proto::tonic_terminal_session::terminal_session_service_server::TerminalSessionServiceServer;
 
 use crate::connection_tonic_adapter::ConnectionServiceTonicAdapter;
 use crate::host_tonic_adapter::HostServiceTonicAdapter;
@@ -72,18 +79,19 @@ pub fn resolve_socket_source(
     SocketSource::Activated(SD_LISTEN_FDS_START)
 }
 
-/// Bind `socket_path` and serve the three local-socket services until `shutdown` resolves.
+/// Bind `socket_path` and serve the four local-socket services until `shutdown` resolves.
 ///
 /// When launched via systemd socket activation (`LISTEN_PID`/`LISTEN_FDS` addressed to this
 /// process), the inherited listener is adopted instead — systemd owns the socket node and its
 /// permissions, so no directory is created, no stale file is unlinked, and no chmod is applied.
 /// Otherwise a stale socket left by a previous run is unlinked first so the bind does not fail
 /// with `EADDRINUSE`, and the parent directory is created if missing.
-pub async fn serve_connection_uds<C, H, W>(
+pub async fn serve_connection_uds<C, H, W, T>(
     socket_path: &Path,
     adapter: ConnectionServiceTonicAdapter<C>,
     host_adapter: HostServiceTonicAdapter<H>,
     worktree_adapter: WorktreeServiceTonicAdapter<W>,
+    terminal_adapter: TerminalSessionServiceTonicAdapter<T>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()>
 where
@@ -94,6 +102,11 @@ where
     W: RpcWorktreeService,
     W::StreamWorktreeStatsStream: 'static,
     W::StreamReadWorktreeFileStream: 'static,
+    T: RpcTerminalSessionService,
+    T::StreamSessionTerminalIoStream: 'static,
+    T::StreamTerminalOutputStream: 'static,
+    T::GetTerminalHistoryStream: 'static,
+    T::WatchTerminalControlStream: 'static,
 {
     let listen_pid = std::env::var("LISTEN_PID").ok();
     let listen_fds = std::env::var("LISTEN_FDS").ok();
@@ -148,6 +161,7 @@ where
         .add_service(ConnectionServiceServer::new(adapter))
         .add_service(HostServiceServer::new(host_adapter))
         .add_service(WorktreeServiceServer::new(worktree_adapter))
+        .add_service(TerminalSessionServiceServer::new(terminal_adapter))
         .serve_with_incoming_shutdown(UnixListenerStream::new(listener), shutdown)
         .await
         .context("serve the local-socket services")?;
