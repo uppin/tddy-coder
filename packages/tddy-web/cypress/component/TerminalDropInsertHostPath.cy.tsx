@@ -8,7 +8,7 @@
 
 import React from "react";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { TerminalFileDropZone } from "../../src/components/connection/TerminalFileDropZone";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -23,7 +23,7 @@ const HOST_PATH = "/srv/host/sessions/drop-insert-session-1/uploads/upload-aaaa/
 /** A backend that would record any upload chunk — used to prove none is sent for an internal drag. */
 function anUploadBackend(): InMemoryRpcBackend {
   return anInMemoryRpcBackend().onUnary(
-    ConnectionService.method.uploadSessionFileChunk,
+    SessionFilesService.method.uploadSessionFileChunk,
     (req) => ({ hostPath: req.last ? `/srv/host/uploads/${req.fileName}` : "" }),
   );
 }
@@ -75,7 +75,7 @@ describe("Terminal drop — insert an already-uploaded host path without re-uplo
 
     // ... and no upload chunk was sent (the file is already on the host)
     cy.wrap(null).should(() => {
-      expect(backend.callsTo(ConnectionService.method.uploadSessionFileChunk)).to.have.length(0);
+      expect(backend.callsTo(SessionFilesService.method.uploadSessionFileChunk)).to.have.length(0);
     });
   });
 });

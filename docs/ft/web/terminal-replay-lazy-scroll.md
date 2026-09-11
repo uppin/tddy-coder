@@ -166,7 +166,7 @@ user sees a single seamless terminal surface rather than a split pane.
 - A **scroll-down-at-bottom gesture** on the page pane swaps back to live. Both wheel listeners
   are attached in the **capture phase** so they fire before ghostty-web's own wheel handler
   (which may stop propagation).
-- `GrpcSessionTerminal` builds the `historyFetcher` from its `Client<ConnectionService>` +
+- `GrpcSessionTerminal` builds the `historyFetcher` from its `Client<TerminalSessionService>` +
   session ids and passes it (plus the full `SessionTerminalOutput` frames carrying the offset
   metadata) into the `TerminalFeed` the component reads. There is no `onRegisterLoadOlderHistory` prop.
 - **Reconnect resume by offset (`StreamReplayMode`):** `StreamTerminalOutputRequest` (and the bidi
@@ -176,7 +176,7 @@ user sees a single seamless terminal surface rather than a split pane.
   `FROM_OFFSET` (reconnect) sends the mode prologue + chunked catch-up via `replay_from(from_offset,
   tip, …)` until `at_end`, then live output — no tail chunk, no PTY resize/drain — so a terminal
   that already holds state up to `from_offset` receives only the bytes it missed, with no duplicate
-  replay. `GrpcSessionTerminal.client` widens to `ConnectionClient | null`: a **null client** (a
+  replay. `GrpcSessionTerminal.client` widens to `TerminalClient | null`: a **null client** (a
   transient transport blip) **pauses** the terminal — it stays mounted (its scrollback and the
   ghostty instance survive), input is queued — and resumes with `FROM_OFFSET` when a non-null client
   returns. Only a stream-end with a **valid** client (a real `pty_done`) evicts the runtime. The
@@ -414,7 +414,7 @@ Consumed from the unification changeset (forward-chunk shape):
   policy is a no-op on the live terminal because `scrollback: 0` means the viewport can never be
   scrolled up away from the tip.)
 - **A history-fetcher callback over `Client` injection** — keeps `GhosttyTerminalSession` decoupled
-  from `ConnectionService` and unit-testable with a plain function double.
+  from `TerminalSessionService` and unit-testable with a plain function double.
 - **Capture-phase wheel listeners** — ghostty-web's own wheel handler may stop propagation; a
   bubble-phase React `onWheel` would never see the event. The capture-phase listeners fire first
   and reliably detect the scroll-up-on-live / scroll-down-on-page intent on each pane.

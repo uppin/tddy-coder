@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Client } from "@connectrpc/connect";
-import { ConnectionService } from "../../gen/connection_pb";
+import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { getScreenId } from "../../lib/screenId";
 import {
   type TerminalControlState,
@@ -12,11 +12,11 @@ import {
 // Session vs ConnectedSession
 // ---------------------------------------------------------------------------
 
-type ControlClient = Client<typeof ConnectionService>;
+type ControlClient = Client<typeof TerminalSessionService>;
 
 /**
  * A reference to a session addressed via the daemon's LiveKit-RPC participant (`daemon-{instanceId}`).
- * Carries the daemon `ConnectionService` client used for the daemon-served terminal **output** stream
+ * Carries the daemon `TerminalSessionService` client used for the daemon-served terminal **output** stream
  * (`streamTerminalOutput`, no token) and as the auto-claim target. You cannot send terminal input on
  * a bare `Session` — input requires a {@link ConnectedSession} (the claim's lease).
  */
@@ -117,7 +117,7 @@ export function useTerminalControl(
    *  selected-daemon client) so a cross-host session's lease is acquired on the host that owns it. */
   session: Session | null,
   sessionToken: string,
-  /** Optional lazy builder for a session-scoped `ConnectionService` client (targets the coder
+  /** Optional lazy builder for a session-scoped `TerminalSessionService` client (targets the coder
    *  participant `daemon-{instanceId}-{sessionId}`). When provided, the explicit `claim()` (the
    *  "Claim terminal" button, steal=true) routes through it. The auto-claim-on-attach (steal=false)
    *  always uses the daemon `Session.client` so control is acquired automatically when no one else

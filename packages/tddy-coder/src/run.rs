@@ -2183,7 +2183,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             // ACP mirror `AcpService`) + reflection are mounted by `session_view_adapter_surface` so
             // this LiveKit surface can never diverge from the other transports on which services the
             // PR-Stack Chat Screen can reach (the exact bug that left `AcpService` unregistered here).
-            let livekit_base = vec![
+            let mut livekit_base = vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
                     service: std::sync::Arc::new(tddy_service::TerminalServiceServer::new(
@@ -2198,25 +2198,27 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         tddy_service::LoopbackTunnelServiceImpl,
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
-                crate::session_participant::session_connection_service_entry(
-                    session_connection_svc,
-                ),
-                // BSP-shaped build server for this session's worktree. Session-scoped like the
-                // connection service; reads the same `<session_dir>/catalog.db` and repo root the
-                // catalog populate above uses. Reflection over this surface picks it up automatically
-                // (`session_view_adapter_surface` derives names from these entries).
-                tddy_rpc::ServiceEntry {
-                    name: tddy_service::BspServiceServer::<tddy_bsp::BspServiceImpl>::NAME,
-                    service: std::sync::Arc::new(tddy_service::BspServiceServer::new(
-                        tddy_bsp::BspServiceImpl::new(
-                            session_artifact_dir.clone(),
-                            std::env::current_dir()
-                                .unwrap_or_else(|_| std::path::PathBuf::from(".")),
-                            tddy_data_dir.clone(),
-                        ),
-                    )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
-                },
             ];
+            // The session's two coordinates — `connection.ConnectionService` and
+            // `terminal_session.TerminalSessionService` — over one service object, so a terminal
+            // started on either is the same terminal.
+            livekit_base.extend(crate::session_participant::session_service_entries(
+                session_connection_svc,
+            ));
+            // BSP-shaped build server for this session's worktree. Session-scoped like the
+            // connection service; reads the same `<session_dir>/catalog.db` and repo root the
+            // catalog populate above uses. Reflection over this surface picks it up automatically
+            // (`session_view_adapter_surface` derives names from these entries).
+            livekit_base.push(tddy_rpc::ServiceEntry {
+                name: tddy_service::BspServiceServer::<tddy_bsp::BspServiceImpl>::NAME,
+                service: std::sync::Arc::new(tddy_service::BspServiceServer::new(
+                    tddy_bsp::BspServiceImpl::new(
+                        session_artifact_dir.clone(),
+                        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                        tddy_data_dir.clone(),
+                    ),
+                )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+            });
             let livekit_multi = tddy_service::session_view_adapter_surface(
                 livekit_base,
                 view_factory
@@ -3534,8 +3536,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 .unwrap_or_else(|| std::path::PathBuf::from(".")),
             presenter_events: Some(event_tx.clone()),
         };
-        let session_connection_entry =
-            crate::session_participant::session_connection_service_entry(session_connection_svc);
+        // The session's two coordinates — `connection.ConnectionService` and
+        // `terminal_session.TerminalSessionService` — over one service object, so a terminal
+        // started on either is the same terminal.
+        let session_entries =
+            crate::session_participant::session_service_entries(session_connection_svc);
         if has_key_secret {
             let token_generator = std::sync::Arc::new(tddy_livekit::TokenGenerator::new(
                 args.livekit_api_key.as_ref().unwrap().clone(),
@@ -3557,7 +3562,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             let tunnel_server = tddy_service::LoopbackTunnelServiceServer::new(
                 tddy_service::LoopbackTunnelServiceImpl,
             );
-            let multi_entries = vec![
+            let mut multi_entries = vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
                     service: std::sync::Arc::new(terminal_server)
@@ -3575,8 +3580,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     service: std::sync::Arc::new(tunnel_server)
                         as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
-                session_connection_entry,
             ];
+            multi_entries.extend(session_entries);
             // Mount the Presenter View-adapter (TddyRemote) onto the LiveKit surface too, not just
             // the local gRPC port — a browser View reaches the Presenter over LiveKit, and via
             // connect_view each opened stream replays the current state snapshot.
@@ -3604,7 +3609,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             });
         } else {
             let token = args.livekit_token.clone().unwrap();
-            let livekit_entries2 = vec![
+            let mut livekit_entries2 = vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
                     service: std::sync::Arc::new(tddy_service::TerminalServiceServer::new(
@@ -3619,8 +3624,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         tddy_service::LoopbackTunnelServiceImpl,
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
-                session_connection_entry,
             ];
+            livekit_entries2.extend(session_entries);
             // Mount the Presenter View-adapter (TddyRemote) onto the LiveKit surface too, not just
             // the local gRPC port — a browser View reaches the Presenter over LiveKit, and via
             // connect_view each opened stream replays the current state snapshot.

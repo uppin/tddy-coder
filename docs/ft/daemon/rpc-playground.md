@@ -31,6 +31,14 @@ Request flow (browser):
 
 The reflection implementation (`packages/tddy-service/src/reflection_service.rs`) decodes a combined `FileDescriptorSet` embedded at build time (`include_bytes!`, produced by a descriptor-only `prost_build` pass in `packages/tddy-service/build.rs`). It indexes files by name and by declared symbol for efficient lookup. `list_services` returns only the names registered in the host's `MultiRpcService` (not all compiled protos), so each participant exposes only what it actually serves.
 
+**The descriptor set covers `tddy-service`'s own protos only.** It is compiled in that crate, so a
+service whose `.proto` lives elsewhere is listed by `list_services` — the names come from the host's
+registry — but its `file_containing_symbol` lookup answers `not_found`, and the playground can see it
+without composing a request for it. `terminal_session.TerminalSessionService`
+(`packages/tddy-terminal-rpc/proto/`) is in that position: `tddy-terminal-rpc` depends on
+`tddy-service`, so `tddy-service` cannot compile its proto without a cycle. Tracked in
+[`docs/dev/todo/`](../../dev/todo/).
+
 ## Dynamic invocation
 
 Because `LiveKitTransport` derives `service`, `method`, and `methodKind` at runtime from a `DescMethod` (`.parent.typeName`, `.name`, `.methodKind`), a `DescMethod` synthesized from a runtime `createFileRegistry` is indistinguishable from a compiled one. The playground calls `transport.unary(method, …)` or `transport.stream(method, …)` directly — no `createClient` required. Request bytes come from `fromJson(method.input, parsedJson)` and responses decode via `fromJson`/`toJsonString`.

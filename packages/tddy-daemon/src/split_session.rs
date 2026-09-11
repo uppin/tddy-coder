@@ -92,26 +92,12 @@ pub fn split_pairing(meta: &tddy_core::SessionMetadata) -> Option<(&str, &str)> 
     ))
 }
 
-/// The agent daemon and the session on it whose agent works in *this* session's worktree, or `None`
-/// when no agent elsewhere does.
-///
-/// The mirror of [`split_pairing`], read on the `workspace` half, and subject to the same rule for
-/// the same reason: half a pairing names a host but nothing on it that works in the checkout, so it
-/// is read as none rather than acted on.
-///
-/// Only a split placement records it. A standalone workspace session and an agent clone's checkout
-/// both leave it absent — which is what lets the daemon tell "the codebase half of a split session"
-/// apart from "a `workspace` session" at all, a distinction tool withdrawal depends on
-/// (`crate::connection_service` § refuse_unenforceable_withdrawal).
-pub fn paired_agent(meta: &tddy_core::SessionMetadata) -> Option<(&str, &str)> {
-    fn non_blank(field: &Option<String>) -> Option<&str> {
-        field.as_deref().map(str::trim).filter(|s| !s.is_empty())
-    }
-    Some((
-        non_blank(&meta.agent_daemon_instance_id)?,
-        non_blank(&meta.agent_session_id)?,
-    ))
-}
+// The mirror of `split_pairing`, read on the `workspace` half, lives in `tddy_core` beside the
+// `tddy_core::SessionMetadata` fields it reads — `tddy_core::paired_agent`, which both callers
+// (`connection_service::agent_roster`, `tddy_session_files::context_files`) name directly. It
+// moved because a session-file reader calling back into `split_session` made the two mutually
+// dependent; there is deliberately no re-export here, because a facade nothing goes through is a
+// second path to one definition rather than a shorter one.
 
 /// Where a split session's context directory lives: inside the session directory, so it is removed
 /// with the session and needs no separate lifetime.

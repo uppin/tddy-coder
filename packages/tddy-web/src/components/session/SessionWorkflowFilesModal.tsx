@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { ConnectionService } from "../../gen/connection_pb";
+import { SessionFilesService } from "../../gen/session_files_pb";
 
 import { SessionFilesPanel, type WorkflowFileRow } from "./SessionFilesPanel";
 
@@ -10,12 +10,12 @@ export type SessionWorkflowFilesModalProps = {
   sessionId: string;
   sessionToken: string | null;
   /** `null` until a daemon is selected and the shared common-room connection is up (`useDaemonClient`). */
-  client: Client<typeof ConnectionService> | null;
+  client: Client<typeof SessionFilesService> | null;
 };
 
 /**
  * Lists allowlisted workflow files for a session and loads file content on demand when the user
- * selects a basename (ConnectionService RPCs).
+ * selects a basename (`session_files.SessionFilesService` RPCs).
  */
 export function SessionWorkflowFilesModal({
   open,

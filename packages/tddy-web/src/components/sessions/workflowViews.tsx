@@ -1,6 +1,7 @@
 import React from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
+import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import type { SessionAttachmentHint } from "../../rpc/connections/session";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
@@ -9,11 +10,17 @@ import { PrStackScreen } from "./prstack/PrStackScreen";
 import { WorkflowChatScreen } from "./WorkflowChatScreen";
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
 
 /** Extra context a custom workflow view may need beyond the selected session itself. */
 export interface WorkflowViewContext {
   client?: ConnectionClient;
+  /**
+   * The session-files service on the same host as `client`. Only the PR-Stack view uses it, to stage
+   * the attachments its Start-session dialog collects.
+   */
+  sessionFilesClient?: SessionFilesClient;
   /**
    * The worktree service on the same host as `client`. Only the PR-Stack view uses it, to browse
    * worktrees from its Start-session dialog's host-document picker.
@@ -87,6 +94,7 @@ export function resolveWorkflowView(
         key={session.sessionId}
         session={session}
         client={context.client}
+        sessionFilesClient={context.sessionFilesClient}
         worktreeClient={context.worktreeClient}
         sessionToken={context.sessionToken}
         sessions={context.sessions}

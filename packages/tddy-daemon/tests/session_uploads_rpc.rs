@@ -20,9 +20,9 @@ use tddy_daemon::session_file_upload::write_upload_chunk;
 use tddy_daemon::session_uploads::{delete_upload, list_uploads};
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionUploadRequest,
-    ListSessionUploadsRequest,
+use tddy_service::proto::session_files::{
+    DeleteSessionUploadRequest, ListSessionUploadsRequest,
+    SessionFilesService as SessionFilesServiceTrait,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -228,14 +228,19 @@ users:
     DaemonConfig::load(&path).unwrap()
 }
 
-fn test_service(sessions_base: PathBuf, os_user: &str) -> ConnectionServiceImpl {
+/// The daemon's `session_files.SessionFilesService`, over this test's own data dir — the
+/// coordinate the two upload-inspector methods declare since `#unbundle` node 6.
+fn test_service(
+    sessions_base: PathBuf,
+    os_user: &str,
+) -> tddy_daemon::connection_service::PeerRoutedSessionFiles {
     let config = test_config_for_os_user(os_user);
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
-    ConnectionServiceImpl::new(
+    Arc::new(ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -244,7 +249,8 @@ fn test_service(sessions_base: PathBuf, os_user: &str) -> ConnectionServiceImpl 
         None,
         None,
         Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
+    ))
+    .session_files_service()
 }
 
 #[tokio::test]

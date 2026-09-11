@@ -33,10 +33,14 @@ use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent,
-    ConnectionService as ConnectionServiceTrait, HostDocumentChunk, HostDocumentScope,
-    ReadHostDocumentRequest, SessionAttachment, StagedAttachmentRef, StartSessionEvent,
-    StartSessionRequest, UploadStagedAttachmentChunkRequest,
+    ConnectionService as ConnectionServiceTrait, SessionAttachment, StagedAttachmentRef,
+    StartSessionEvent, StartSessionRequest,
 };
+use tddy_service::proto::session_files::{
+    HostDocumentChunk, ReadHostDocumentRequest, SessionFilesService as SessionFilesServiceTrait,
+    UploadStagedAttachmentChunkRequest,
+};
+use tddy_service::proto::types::HostDocumentScope;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -104,7 +108,7 @@ fn register_project(projects_dir: &Path, repo_path: &Path) {
 /// A service whose staging base is an explicit temp root, so a test can assert *where* staged bytes
 /// land. Owns every `TempDir` the service depends on for the test's lifetime.
 struct Fixture {
-    service: ConnectionServiceImpl,
+    service: Arc<ConnectionServiceImpl>,
     /// The staging base the service was told to use (stands in for `std::env::temp_dir()`).
     staging_base: PathBuf,
     /// `tddy_data_dir` — staged files must **not** appear under here.
@@ -143,7 +147,7 @@ fn a_workspace_service_with_cap(max_attachment_bytes: u64) -> Fixture {
     .with_staging_base_dir(staging_tmp.path().to_path_buf());
 
     Fixture {
-        service,
+        service: Arc::new(service),
         staging_base: staging_tmp.path().to_path_buf(),
         data_dir: sessions_base,
         _repo: repo_dir,
@@ -160,13 +164,14 @@ fn a_workspace_service() -> Fixture {
 /// Uploads `data` as one chunk. `last` controls whether the batch is marked complete — an
 /// unfinished upload is exactly what the completeness gate must refuse.
 async fn stage_chunk(
-    service: &ConnectionServiceImpl,
+    service: &Arc<ConnectionServiceImpl>,
     staging_id: &str,
     file_name: &str,
     data: &[u8],
     last: bool,
 ) -> Result<(), Status> {
     service
+        .session_files_service()
         .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
             session_token: VALID_TOKEN.to_string(),
             daemon_instance_id: String::new(),
@@ -180,7 +185,7 @@ async fn stage_chunk(
 }
 
 async fn stage_complete_file(
-    service: &ConnectionServiceImpl,
+    service: &Arc<ConnectionServiceImpl>,
     staging_id: &str,
     file_name: &str,
     data: &[u8],
@@ -351,6 +356,7 @@ async fn a_completed_staged_file_is_readable_through_the_staged_attachment_scope
     // When — it is read through the STAGED_ATTACHMENT scope by "<staging_id>/<file_name>"
     let response = fixture
         .service
+        .session_files_service()
         .read_host_document(Request::new(staged_document_request(&format!(
             "{STAGING_ID_A}/notes.md"
         ))))
@@ -383,6 +389,7 @@ async fn the_staged_attachment_scope_refuses_a_file_whose_upload_never_completed
     // When — the incomplete file is read through the scope
     let err = fixture
         .service
+        .session_files_service()
         .read_host_document(Request::new(staged_document_request(&format!(
             "{STAGING_ID_A}/partial.md"
         ))))
@@ -409,6 +416,7 @@ async fn the_staged_attachment_scope_refuses_a_relative_path_that_is_not_two_seg
     // When — it is addressed with a single-segment path
     let err = fixture
         .service
+        .session_files_service()
         .read_host_document(Request::new(staged_document_request("notes.md")))
         .await
         .expect_err("a one-segment relative_path must be refused");
@@ -433,6 +441,7 @@ async fn the_staged_attachment_scope_refuses_a_relative_path_that_escapes_its_ba
     // When — a path traverses out of the batch
     let err = fixture
         .service
+        .session_files_service()
         .read_host_document(Request::new(staged_document_request(&format!(
             "{STAGING_ID_A}/../{STAGING_ID_A}/notes.md"
         ))))
@@ -461,6 +470,7 @@ async fn stream_read_host_document_delivers_a_document_larger_than_the_unary_cap
     // When — it is read over the streaming RPC
     let mut stream = fixture
         .service
+        .session_files_service()
         .stream_read_host_document(Request::new(staged_document_request(&format!(
             "{STAGING_ID_A}/big.bin"
         ))))
@@ -497,6 +507,7 @@ async fn stream_read_host_document_refuses_a_document_over_the_hosts_configured_
     // When — it is read over the streaming RPC
     let err = fixture
         .service
+        .session_files_service()
         .stream_read_host_document(Request::new(staged_document_request(&format!(
             "{STAGING_ID_A}/over.bin"
         ))))

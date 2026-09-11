@@ -292,8 +292,8 @@ The unary `ExecuteTool` returns `result_json` as one string. Over LiveKit any re
 index-keyed — a lost frame wedges the call permanently with no error. A `Read` of a large file or a
 broad `Grep` crosses that on day one.
 
-A server-streaming sibling carries the result in bounded frames, following the discipline already
-proven by `StreamReadHostDocument`:
+A server-streaming sibling carries the result in bounded frames, following the discipline
+`session_files.SessionFilesService`'s `StreamReadHostDocument` already proves:
 
 ```proto
 rpc StreamExecuteTool(ExecuteToolRequest) returns (stream ExecuteToolChunk);
@@ -506,8 +506,9 @@ the new `SessionEntry` fields rather than inferred from which daemon answered.
 
 ## Non-goals
 
-- **Web observability of the B side.** Long-lived streams (`StreamSessionActivity`,
-  `StreamAcpReplay`, `StreamTerminalOutput`) still do not cross daemons; the agent's own terminal
+- **Web observability of the B side.** Long-lived streams (`StreamSessionActivity` and
+  `StreamAcpReplay` on `connection.ConnectionService`, `StreamTerminalOutput` on
+  `terminal_session.TerminalSessionService`) do not cross daemons; the agent's own terminal
   and activity live on A and are unaffected. Watching B's worktree from the web is out of scope.
 - **Multi-hop.** A addresses B directly; no chains of intermediate daemons.
 - **Migrating the stdio or HTTP tool paths to `StreamExecuteTool`.** They keep the unary call.

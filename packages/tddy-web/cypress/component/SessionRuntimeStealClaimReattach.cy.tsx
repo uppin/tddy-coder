@@ -8,7 +8,7 @@
  * Feature: `docs/ft/web/session-drawer.md#fast-session-change`,
  *          `docs/ft/daemon/terminal-sessions.md` (control lease).
  *
- * This exercises `useTerminalControl` directly against an in-memory `ConnectionService` that mirrors
+ * This exercises `useTerminalControl` directly against an in-memory `TerminalSessionService` that mirrors
  * the daemon control mutex (`CliSessionManager::claim_control`) and the token-revalidating watch
  * relay (`relay_control_events`): the watch recomputes `youAreController` on every control change by
  * re-validating the token the subscription was opened with, and a steal that evicts a previous
@@ -22,8 +22,8 @@ import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   ClaimTerminalControlResponseSchema,
   TerminalControlEventSchema,
-  ConnectionService,
-} from "../../src/gen/connection_pb";
+  TerminalSessionService,
+} from "../../src/gen/terminal_session_pb";
 import { useTerminalControl, type Session } from "../../src/components/sessions/useTerminalControl";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
@@ -42,7 +42,7 @@ interface Lease {
 }
 
 /**
- * In-memory `ConnectionService` modelling the daemon terminal-control lease. A single lease per
+ * In-memory `TerminalSessionService` modelling the daemon terminal-control lease. A single lease per
  * session (`CliSessionManager::claim_control`): `steal:false` is denied when another screen holds
  * it; `steal:true` evicts the holder, mints a new token, and broadcasts a change to open watchers.
  * Each `watchTerminalControl` stream recomputes `youAreController` per change by re-validating the
@@ -60,7 +60,7 @@ function aStealClaimDaemon() {
   };
   const nextBroadcast = () => new Promise<void>((resolve) => wakeResolvers.push(resolve));
 
-  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+  const backend = anInMemoryRpcBackend().implement(TerminalSessionService, {
     claimTerminalControl: async (req: { screenId: string; steal: boolean }) => {
       const heldByOther = lease.holderScreenId !== req.screenId;
       if (heldByOther && !req.steal) {
@@ -110,7 +110,7 @@ function aStealClaimDaemon() {
 function StealClaimHarness({
   client,
 }: {
-  client: ReturnType<typeof createClient<typeof ConnectionService>>;
+  client: ReturnType<typeof createClient<typeof TerminalSessionService>>;
 }) {
   const session: Session = { sessionId: SESSION_ID, client };
   const { controlState, claim } = useTerminalControl(session, "fake-session-token");
@@ -127,7 +127,7 @@ function StealClaimHarness({
 
 function aStealClaimHarness() {
   const { backend } = aStealClaimDaemon();
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(TerminalSessionService, backend.transport());
   const isController = () => byTestId(TEST_IDS.controlIsControllerDisplay);
 
   return {

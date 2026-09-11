@@ -30,7 +30,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use livekit::prelude::RoomOptions;
 use serial_test::serial;
 use tddy_core::session_agent::SessionAgentRecord;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
@@ -41,9 +40,8 @@ use tddy_daemon::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_daemon::test_util::wait_until_peer_discovered;
+use tddy_daemon::test_util::{self, wait_until_peer_discovered};
 use tddy_github::{GitHubUser, SessionTokenSigner};
-use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
@@ -211,23 +209,23 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceI
     )
 }
 
-/// Serve a daemon's `connection.ConnectionService` on the common room under its production identity
-/// — the one `forward_to_peer` addresses. Without this the routed roster read reaches nobody.
+/// Serve a daemon on the common room under its production identity — the one `forward_to_peer`
+/// addresses. Without this the routed roster read reaches nobody.
+///
+/// Which coordinates it serves is [`test_util::serve_daemon_rpc_participant`]'s answer rather than
+/// this suite's: a resume forwards a `connection.ConnectionService` roster read *and* the
+/// `session_files.SessionFilesService` context reads the agent host prefetches from the codebase
+/// host, and a suite-local list is how one of them stops being served.
 async fn serve_on_the_common_room(
     livekit: &LiveKitTestkit,
     ws_url: &str,
     instance_id: &str,
-    service: ConnectionServiceImpl,
+    service: Arc<ConnectionServiceImpl>,
 ) -> tokio::task::JoinHandle<()> {
     let token = livekit
         .generate_token(COMMON_ROOM, &rpc_identity(instance_id))
         .expect("LiveKit token for a daemon's RPC participant");
-    let server = tddy_service::ConnectionServiceServer::new(service);
-    let participant =
-        LiveKitParticipant::connect(ws_url, &token, server, RoomOptions::default(), None, None)
-            .await
-            .expect("daemon joins the common room as its RPC participant");
-    tokio::spawn(async move { participant.run().await })
+    test_util::serve_daemon_rpc_participant(ws_url, &token, &service).await
 }
 
 /// `eventually_awaiting` rather than a hand-rolled poll: when the peer never shows up it panics with
@@ -426,7 +424,7 @@ async fn resume_a_split_session_whose_roster_holds(
     .unwrap();
     let (codebase_config_dir, codebase_config) =
         a_daemon_config(&ws_url, CODEBASE_INSTANCE_ID, &claude_stub);
-    let codebase_service = a_service(codebase_config, codebase_base);
+    let codebase_service = Arc::new(a_service(codebase_config, codebase_base));
 
     // The agent host: the stopped session, and no repository at all.
     let agent_sessions = tempfile::tempdir().unwrap();
@@ -436,7 +434,7 @@ async fn resume_a_split_session_whose_roster_holds(
     write_session_metadata(&agent_session_dir, &a_stopped_split_session()).unwrap();
     let (agent_config_dir, agent_config) =
         a_daemon_config(&ws_url, FACILITATING_INSTANCE_ID, &claude_stub);
-    let agent_service = a_service(agent_config, agent_base);
+    let agent_service = Arc::new(a_service(agent_config, agent_base));
 
     let codebase_rpc_run = serve_on_the_common_room(
         &livekit,

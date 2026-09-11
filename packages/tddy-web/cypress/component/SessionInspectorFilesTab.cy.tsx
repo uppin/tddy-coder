@@ -8,10 +8,12 @@
 
 import React from "react";
 import { createClient } from "@connectrpc/connect";
-import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ConnectionService, type SessionEntry } from "../../src/gen/connection_pb";
+import { type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { type SessionEntry } from "../../src/gen/connection_pb";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { SessionInspectorDrawer } from "../../src/components/sessions/SessionInspectorDrawer";
 import { mountWithRpc } from "../support/rpc/inMemory";
+import { aSessionFilesServiceBackend } from "../support/rpc/sessionFilesServiceBackend";
 import { sessionFilesTabPage as page } from "../support/pages/sessionFilesTabPage";
 
 const SESSION_ID = "inspector-files-session-1";
@@ -32,7 +34,7 @@ const SESSION = {
 
 /** A backend whose Files list holds one uploaded file. */
 function aBackendWithOneUpload(): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().onUnary(ConnectionService.method.listSessionUploads, () => ({
+  return aSessionFilesServiceBackend({
     uploads: [
       {
         uploadId: "upload-aaaa",
@@ -42,11 +44,11 @@ function aBackendWithOneUpload(): InMemoryRpcBackend {
         uploadedAtMs: 1_700_000_000_000n,
       },
     ],
-  }));
+  }).backend;
 }
 
 function mountDrawer(backend: InMemoryRpcBackend, onClose: Cypress.Agent<sinon.SinonStub>) {
-  const client = createClient(ConnectionService, backend.transport());
+  const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const noop = () => undefined;
   mountWithRpc(
     <SessionInspectorDrawer
@@ -61,7 +63,7 @@ function mountDrawer(backend: InMemoryRpcBackend, onClose: Cypress.Agent<sinon.S
       onResume={noop}
       onDelete={noop}
       onTerminate={noop}
-      client={client}
+      sessionFilesClient={sessionFilesClient}
       sessionToken={SESSION_TOKEN}
     />,
     backend,

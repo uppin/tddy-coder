@@ -19,7 +19,7 @@
  *
  * Layout ACs drive the full SessionsDrawerScreen over the recording LiveKit harness (mirrors
  * SessionInspectorAcceptance). The Claim-terminal ACs drive SessionMainPane directly with an
- * explicit runtime + a fake ConnectionService client (mirrors TerminalControlAcceptance /
+ * explicit runtime + a fake TerminalSessionService client (mirrors TerminalControlAcceptance /
  * SessionRuntimeStealClaimReattach), since they need a runtime that is still mounted for a session
  * that is / is not disconnected.
  */
@@ -28,12 +28,12 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { createClient, type Transport } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import type { SessionEntry } from "../../src/gen/connection_pb";
 import {
-  ConnectionService,
   ClaimTerminalControlResponseSchema,
   TerminalControlEventSchema,
-} from "../../src/gen/connection_pb";
-import type { SessionEntry } from "../../src/gen/connection_pb";
+  TerminalSessionService,
+} from "../../src/gen/terminal_session_pb";
 import type { SessionRuntimeState } from "../../src/components/sessions/sessionRuntimeRegistry";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
@@ -77,16 +77,16 @@ const DISCONNECTED_SESSION = {
 };
 
 // ---------------------------------------------------------------------------
-// Fake ConnectionService transport for the SessionMainPane-direct runtime tests
+// Fake TerminalSessionService transport for the SessionMainPane-direct runtime tests
 // ---------------------------------------------------------------------------
 
 const OTHER_SCREEN = "screen-held-by-another-9999";
 
-/** A ConnectionService whose control lease is held by another screen (so the focused runtime's
+/** A TerminalSessionService whose control lease is held by another screen (so the focused runtime's
  *  auto-claim is denied and the "Claim terminal" CTA WOULD show), with a never-ending terminal
  *  output stream so the runtime mounts and stays stable. */
 function aClaimDeniedTransport() {
-  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+  const backend = anInMemoryRpcBackend().implement(TerminalSessionService, {
     claimTerminalControl: async () =>
       create(ClaimTerminalControlResponseSchema, {
         granted: false,
@@ -247,7 +247,7 @@ describe("SessionInactiveInspectorOverlay — Claim terminal suppression", () =>
         selectedSession={DISCONNECTED_SESSION as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
         inspectorState="open"
-        client={createClient(ConnectionService, transport)}
+        terminalClient={createClient(TerminalSessionService, transport)}
         runtimes={[aHostServedRuntimeFor(DISCONNECTED_SESSION.sessionId, transport)]}
         focusedRuntimeId={DISCONNECTED_SESSION.sessionId}
       />,
@@ -279,7 +279,7 @@ describe("SessionInactiveInspectorOverlay — Claim terminal suppression", () =>
           } satisfies SessionAttachmentState
         }
         inspectorState="closed"
-        client={createClient(ConnectionService, transport)}
+        terminalClient={createClient(TerminalSessionService, transport)}
         runtimes={[aHostServedRuntimeFor(CONNECTED_SESSION.sessionId, transport)]}
         focusedRuntimeId={CONNECTED_SESSION.sessionId}
       />,

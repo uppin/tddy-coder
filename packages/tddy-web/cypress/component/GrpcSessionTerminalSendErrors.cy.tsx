@@ -30,11 +30,11 @@ import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
-  ConnectionService,
+  TerminalSessionService,
   ClaimTerminalControlResponseSchema,
   SessionTerminalInputSchema,
   SendTerminalInputResponseSchema,
-} from "../../src/gen/connection_pb";
+} from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import type { ConnectedSession } from "../../src/components/sessions/useTerminalControl";
@@ -54,7 +54,7 @@ const OK_SEND_INPUT = toArrayBuffer(
 
 /** Empty StreamTerminalOutput stream — no output data, stream ends immediately. */
 function interceptStreamTerminalOutput() {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/StreamTerminalOutput", (req) => {
+  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/StreamTerminalOutput", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: new ArrayBuffer(0) });
   }).as("streamTerminalOutput");
 }
@@ -62,7 +62,7 @@ function interceptStreamTerminalOutput() {
 /** ClaimTerminalControl → granted=true with a known token. */
 function interceptClaimTerminalControl(token = CONTROL_TOKEN) {
   interceptProtoRpc(
-    "connection.ConnectionService/ClaimTerminalControl",
+    "terminal_session.TerminalSessionService/ClaimTerminalControl",
     ClaimTerminalControlResponseSchema,
     create(ClaimTerminalControlResponseSchema, { granted: true, controlToken: token }),
     "claimTerminalControl",
@@ -84,7 +84,7 @@ function Harness({ connected }: { connected: ConnectedSession | null }) {
     () => createConnectTransport({ baseUrl: `${window.location.origin}/rpc`, useBinaryFormat: true }),
     [],
   );
-  const client = useMemo(() => createClient(ConnectionService, transport), [transport]);
+  const client = useMemo(() => createClient(TerminalSessionService, transport), [transport]);
 
   return (
     <div style={{ width: 800, height: 400, position: "relative" }}>
@@ -110,7 +110,7 @@ describe("GrpcSessionTerminal — SendTerminalInput error handling", () => {
     interceptStreamTerminalOutput();
 
     // Given — every SendTerminalInput call fails with the control-mutex error
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/SendTerminalInput", (req) => {
+    cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/SendTerminalInput", (req) => {
       req.reply({
         statusCode: 400,
         headers: { "Content-Type": "application/json" },
@@ -161,7 +161,7 @@ describe("GrpcSessionTerminal — SendTerminalInput error handling", () => {
 
     // Given — sendTerminalInput succeeds; capture every request body
     const capturedRequests: ReturnType<typeof fromBinary<typeof SessionTerminalInputSchema>>[] = [];
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/SendTerminalInput", (req) => {
+    cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/SendTerminalInput", (req) => {
       const decoded = fromBinary(SessionTerminalInputSchema, decodeProtoRequestBody(req.body));
       capturedRequests.push(decoded);
       req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: OK_SEND_INPUT });

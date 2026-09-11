@@ -11,7 +11,7 @@ upload).
 | Module | Role |
 |--------|------|
 | `hooks/useSessionAttachments.ts` | Owns the attachment state, the cap, rename/remove, `stageAttachments()` and the streamed-start consumer |
-| `hooks/useStagedAttachmentUpload.ts` | Per-file chunk loop against `UploadStagedAttachmentChunk`, one `staging_id` per submit |
+| `hooks/useStagedAttachmentUpload.ts` | Per-file chunk loop against `SessionFilesService.UploadStagedAttachmentChunk`, one `staging_id` per submit |
 | `components/sessions/attachments/AttachmentDropZone.tsx` | Drop target + drag-over overlay + the two pick affordances |
 | `components/sessions/attachments/SessionAttachmentList.tsx` | One row per attachment: source, editable basename, size, progress, remove |
 | `components/sessions/attachments/HostDocumentPicker.tsx` | Browses a host by `HostDocumentScope`, yields a `HostDocumentRef` |
@@ -65,7 +65,7 @@ host answers a bad path with `NOT_FOUND` late, at materialization:
 | Scope | Listed via | `relative_path` | Ref carries |
 |-------|-----------|-----------------|-------------|
 | `SESSION_ARTIFACT` | `SessionEntry.context_docs` | basename for a `MANIFEST` doc; **`attachments/<basename>`** for an `ATTACHMENT` doc | `session_id` |
-| `SESSION_UPLOAD` | `ListSessionUploads` | `<upload_id>/<file_name>` | `session_id` |
+| `SESSION_UPLOAD` | `SessionFilesService.ListSessionUploads` | `<upload_id>/<file_name>` | `session_id` |
 | `SESSION_WORKTREE` | `ListWorktreeDirectory` on `SessionEntry.repo_path` | path within the worktree | `session_id` |
 | `PROJECT_REPO` | `ListWorktreeDirectory` on `ProjectEntry.main_repo_path` | path within the repo | `project_id` |
 

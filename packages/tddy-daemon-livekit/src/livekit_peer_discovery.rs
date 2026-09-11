@@ -80,12 +80,15 @@ use prost::Message;
 use serde::Deserialize;
 use tddy_service::proto::connection::{
     AddProjectToHostRequest, AddProjectToHostResponse, DeleteSessionRequest, DeleteSessionResponse,
-    DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse, ExecuteToolChunk,
-    ExecuteToolRequest, HostDocumentChunk, ListProjectsRequest, ListProjectsResponse,
-    ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, ProjectEntry as ProtoProjectEntry,
-    ReadHostDocumentRequest, ReadHostDocumentResponse, SetProjectDefaultBranchRequest,
+    ExecuteToolChunk, ExecuteToolRequest, ListProjectsRequest, ListProjectsResponse,
+    ProjectEntry as ProtoProjectEntry, SetProjectDefaultBranchRequest,
     SetProjectDefaultBranchResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse,
-    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
+};
+use tddy_service::proto::session_files::{
+    DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse, HostDocumentChunk,
+    ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, ReadHostDocumentRequest,
+    ReadHostDocumentResponse, UploadStagedAttachmentChunkRequest,
+    UploadStagedAttachmentChunkResponse,
 };
 
 use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig};
@@ -1397,6 +1400,11 @@ pub async fn forward_set_project_default_branch_via_livekit(
 
 /// Forward **UploadStagedAttachmentChunk** to another daemon in the common room via LiveKit
 /// data-channel RPC.
+///
+/// This and the four session-file forwarders below address
+/// [`tddy_service::SESSION_FILES_SERVICE`] rather than spelling the coordinate out: the peer serves
+/// it under that same constant, and a forward addressed at a name the peer does not serve fails on
+/// the peer at runtime — see the constant's own documentation.
 pub async fn forward_upload_staged_attachment_chunk_via_livekit(
     room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
     peer_instance_id: &str,
@@ -1406,7 +1414,7 @@ pub async fn forward_upload_staged_attachment_chunk_via_livekit(
     let out = forward_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        tddy_service::SESSION_FILES_SERVICE,
         "UploadStagedAttachmentChunk",
         body,
     )
@@ -1427,7 +1435,7 @@ pub async fn forward_list_staged_attachments_via_livekit(
     let out = forward_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        tddy_service::SESSION_FILES_SERVICE,
         "ListStagedAttachments",
         body,
     )
@@ -1448,7 +1456,7 @@ pub async fn forward_delete_staged_attachment_via_livekit(
     let out = forward_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        tddy_service::SESSION_FILES_SERVICE,
         "DeleteStagedAttachment",
         body,
     )
@@ -1468,7 +1476,7 @@ pub async fn forward_read_host_document_via_livekit(
     let out = forward_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        tddy_service::SESSION_FILES_SERVICE,
         "ReadHostDocument",
         body,
     )
@@ -1494,7 +1502,7 @@ pub async fn forward_stream_read_host_document_via_livekit(
     forward_server_stream_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        tddy_service::SESSION_FILES_SERVICE,
         "StreamReadHostDocument",
         request.encode_to_vec(),
         |bytes| {

@@ -7,7 +7,7 @@
  * Feature: docs/ft/coder/session-attachments.md
  */
 
-import { HostDocumentScope } from "../../../gen/connection_pb";
+import { HostDocumentScope } from "../../../gen/types_pb";
 
 /** A document that already exists on a host, addressed the way `HostDocumentRef` addresses it. */
 export interface HostDocumentSelection {

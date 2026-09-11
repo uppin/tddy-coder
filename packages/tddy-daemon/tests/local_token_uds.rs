@@ -1,4 +1,4 @@
-//! The daemon's Unix-domain socket, and the three services mounted on it.
+//! The daemon's Unix-domain socket, and the four services mounted on it.
 //!
 //! Two things are only true over this transport. `MintLocalToken` is the first: the socket is the
 //! only place a caller's SO_PEERCRED uid is available, so minting is exercised end to end here — a
@@ -13,6 +13,12 @@
 //! error mapping, compiles and ships. Nothing but a call over the wire catches that, so each
 //! adapter is exercised here through a real client: one unary method, one server-streaming method,
 //! and the refusal a streaming method must propagate rather than swallow.
+//!
+//! The third is that `terminal_session.TerminalSessionService` is reachable here at all. The in-jail
+//! `tddy-sandbox-app` has no transport but this socket, and its whole terminal bridge is the bidi
+//! `StreamSessionTerminalIO`. A coordinate left off this builder still answers over LiveKit and
+//! HTTP — and nowhere a jail can reach, which is every sandboxed session's terminal lost in
+//! silence. So the mount is asserted through a call over the wire, not by reading the builder.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -25,7 +31,7 @@ use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_tonic_adapter::{ConnectionServiceTonicAdapter, UidToUsername};
 use tddy_daemon::host_tonic_adapter::HostServiceTonicAdapter;
 use tddy_daemon::local_socket_server::serve_connection_uds;
-use tddy_daemon::test_util::test_service;
+use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_daemon::user_sessions_path::username_for_uid;
 use tddy_daemon::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
@@ -38,6 +44,10 @@ use tddy_service::proto::worktree::{
 use tddy_service::tonic_connection::connection_service_client::ConnectionServiceClient;
 use tddy_service::tonic_host::host_service_client::HostServiceClient;
 use tddy_service::tonic_worktree::worktree_service_client::WorktreeServiceClient;
+use tddy_terminal_rpc::proto::terminal_session::{
+    ClaimTerminalControlRequest, SessionTerminalInput, TerminalSessionServiceTonicAdapter,
+};
+use tddy_terminal_rpc::proto::tonic_terminal_session::terminal_session_service_client::TerminalSessionServiceClient;
 use tddy_worktree_service::project_storage::{self, ProjectData};
 use tonic::transport::{Channel, Endpoint};
 
@@ -71,14 +81,20 @@ fn start_local_socket_server(
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
 
     let uid_to_username: UidToUsername = Arc::new(username_for_uid);
+    let connection = Arc::new(test_service(sessions_base));
     let adapter = ConnectionServiceTonicAdapter::new(
-        Arc::new(test_service(sessions_base)),
+        Arc::clone(&connection),
         Arc::new(config.clone()),
         signer,
         uid_to_username,
     );
-    // The same socket carries all three services (`#unbundle` node 1), each behind its own
-    // hand-written tonic adapter. Both are rooted at this tempdir, so a fixture written under it —
+    // The terminal coordinate is built from the *same* `ConnectionServiceImpl` the socket's
+    // `ConnectionService` is, so it addresses that instance's terminals and control lease — the
+    // wiring `runtime::build` does, rather than a second set of managers only this suite would see.
+    let terminal_adapter =
+        TerminalSessionServiceTonicAdapter::new(Arc::new(connection.terminal_session_service()));
+    // The same socket carries the host and worktree services (`#unbundle` node 1), each behind its
+    // own hand-written tonic adapter. Both are rooted at this tempdir, so a fixture written under it —
     // see `a_project_under` — is a project the served implementation actually finds.
     //
     // Their user resolvers are the moved crates' own `TEST_TOKEN` ones rather than the caller's
@@ -105,6 +121,7 @@ fn start_local_socket_server(
             adapter,
             host_adapter,
             worktree_adapter,
+            terminal_adapter,
             shutdown,
         )
         .await
@@ -475,4 +492,83 @@ fn names_the_worktree(rows: &[WorktreeRow], worktree_name: &str) -> bool {
 
 fn paths_of(rows: &[WorktreeRow]) -> Vec<&str> {
     rows.iter().map(|row| row.path.as_str()).collect()
+}
+
+// ---------------------------------------------------------------------------
+// terminal_session.TerminalSessionService, the coordinate the jail dials
+// ---------------------------------------------------------------------------
+
+async fn a_terminal_client(socket_path: &Path) -> TerminalSessionServiceClient<Channel> {
+    TerminalSessionServiceClient::new(connect_channel(socket_path).await)
+}
+
+/// The frame `tddy-sandbox-app`'s bridge opens its stream with: the token/session pair it
+/// authenticates on, plus the initial in-band OSC resize that sizes the jailed PTY. No control
+/// token, because an unclaimed session has no controlling screen to displace.
+fn an_opening_terminal_frame(session_id: &str) -> SessionTerminalInput {
+    SessionTerminalInput {
+        session_token: TEST_TOKEN.to_string(),
+        session_id: session_id.to_string(),
+        data: b"\x1b]resize;100;30\x07".to_vec(),
+        ..Default::default()
+    }
+}
+
+/// The bidi method the in-jail app dials — the only bidirectional one in the surface, and the only
+/// way a sandboxed session's terminal reaches its user. Naming a session this daemon is not running
+/// is refused NOT_FOUND *by the implementation*, which is the assertion: the coordinate answers on
+/// this socket. Without the mount the same call comes back UNIMPLEMENTED and every jail loses its
+/// terminal.
+#[tokio::test]
+async fn opens_the_bidi_terminal_stream_the_in_jail_bridge_dials_over_this_socket() {
+    // Given
+    let served = a_served_socket();
+    let mut client = a_terminal_client(&served.socket_path).await;
+
+    // When the bridge's opening frame names a session with no running terminal
+    let status = client
+        .stream_session_terminal_io(tokio_stream::iter(vec![an_opening_terminal_frame(
+            "no-such-session",
+        )]))
+        .await
+        .expect_err("a session with no running terminal cannot open a terminal stream");
+
+    // Then the terminal is what is missing — not the service
+    assert_eq!(
+        status.code(),
+        tonic::Code::NotFound,
+        "the terminal coordinate answered {:?} ({}) — UNIMPLEMENTED means it is not mounted on \
+         this socket at all",
+        status.code(),
+        status.message()
+    );
+}
+
+/// A unary terminal method, answered out of the daemon's own control lease rather than by a default
+/// the adapter could have built: claiming issues a token, and only the lease behind the mounted
+/// implementation can mint one.
+#[tokio::test]
+async fn grants_terminal_control_from_the_lease_behind_the_mounted_coordinate() {
+    // Given
+    let served = a_served_socket();
+    let mut client = a_terminal_client(&served.socket_path).await;
+
+    // When a screen claims control of an unheld session
+    let response = client
+        .claim_terminal_control(ClaimTerminalControlRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: "session-over-the-socket".to_string(),
+            screen_id: "screen-a".to_string(),
+            steal: false,
+        })
+        .await
+        .expect("ClaimTerminalControl over the socket")
+        .into_inner();
+
+    // Then it holds the lease, with a token to present on later control calls
+    assert!(response.granted, "an unheld lease must be granted");
+    assert!(
+        !response.control_token.is_empty(),
+        "a granted claim without a control token is not a lease this screen can use"
+    );
 }

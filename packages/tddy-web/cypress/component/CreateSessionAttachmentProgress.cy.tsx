@@ -24,6 +24,7 @@ import {
   StartSessionEventSchema,
   type StartSessionRequest,
 } from "../../src/gen/connection_pb";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
@@ -66,7 +67,7 @@ function aBaselineBackend(): InMemoryRpcBackend {
       branches: ["origin/main"],
       defaultRemote: "origin",
     }))
-    .onUnary(ConnectionService.method.uploadStagedAttachmentChunk, (req) => ({
+    .onUnary(SessionFilesService.method.uploadStagedAttachmentChunk, (req) => ({
       entry: req.last
         ? {
             daemonInstanceId: LOCAL_HOST,
@@ -124,11 +125,13 @@ function aBackendHoldingProgressAt(basename: string, percentDone: number): HeldS
 function mountCreatePane(backend: InMemoryRpcBackend) {
   const client = createClient(ConnectionService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
   cy.mount(
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
+        sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}
         sessionToken="fake-token"
         onCancel={cy.stub()}

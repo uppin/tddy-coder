@@ -4,171 +4,25 @@
 //! assert the wire behavior (frame ordering, offsets, ACK interleave, resize/drain, live bridge,
 //! history chunking) without a real PTY.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+mod support;
+
 use std::time::Duration;
 
-use async_trait::async_trait;
 use bytes::Bytes;
-use tddy_task::TerminalCapture;
 use tddy_terminal_rpc::proto::terminal_session::{
-    GetTerminalHistoryRequest, SessionTerminalInput, SessionTerminalOutput, StreamReplayMode,
-    StreamTerminalOutputRequest,
+    GetTerminalHistoryRequest, SessionTerminalInput, StreamReplayMode, StreamTerminalOutputRequest,
 };
-use tddy_terminal_rpc::session::{TerminalSession, TerminalSessionStore};
+use tddy_terminal_rpc::session::TerminalSession;
 use tddy_terminal_rpc::{
     serve_get_terminal_history_with, serve_send_terminal_input,
     serve_stream_session_terminal_io_with, serve_stream_terminal_output_with,
 };
-use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::timeout;
 
-const RECV_TIMEOUT: Duration = Duration::from_secs(2);
-
-/// A stub terminal backed by a real `TerminalCapture` ring plus broadcast/watch channels the
-/// bridge subscribes to. Records resizes, inputs, and redraws so tests can assert on them.
-struct StubTerminal {
-    capture: std::sync::Arc<Mutex<TerminalCapture>>,
-    stdout_tx: broadcast::Sender<Bytes>,
-    pty_done_tx: watch::Sender<bool>,
-    acked_tx: watch::Sender<u64>,
-    resizes: Mutex<Vec<(u16, u16)>>,
-    inputs: Mutex<Vec<(Bytes, u64)>>,
-    redraws: AtomicUsize,
-}
-
-impl StubTerminal {
-    fn new() -> Self {
-        let (stdout_tx, _) = broadcast::channel(64);
-        let (pty_done_tx, _) = watch::channel(false);
-        let (acked_tx, _) = watch::channel(0u64);
-        StubTerminal {
-            capture: std::sync::Arc::new(Mutex::new(TerminalCapture::new())),
-            stdout_tx,
-            pty_done_tx,
-            acked_tx,
-            resizes: Mutex::new(Vec::new()),
-            inputs: Mutex::new(Vec::new()),
-            redraws: AtomicUsize::new(0),
-        }
-    }
-
-    fn write(&self, bytes: &[u8]) {
-        self.capture.lock().unwrap().append(bytes);
-        let _ = self.stdout_tx.send(Bytes::copy_from_slice(bytes));
-    }
-
-    fn set_acked(&self, offset: u64) {
-        self.acked_tx.send_replace(offset);
-    }
-
-    fn end(&self) {
-        self.pty_done_tx.send_replace(true);
-    }
-}
-
-#[async_trait]
-impl TerminalSession for StubTerminal {
-    fn capture(&self) -> std::sync::Arc<Mutex<TerminalCapture>> {
-        std::sync::Arc::clone(&self.capture)
-    }
-    fn subscribe_stdout(&self) -> broadcast::Receiver<Bytes> {
-        self.stdout_tx.subscribe()
-    }
-    fn subscribe_pty_done(&self) -> watch::Receiver<bool> {
-        self.pty_done_tx.subscribe()
-    }
-    fn subscribe_acked_offset(&self) -> watch::Receiver<u64> {
-        self.acked_tx.subscribe()
-    }
-    async fn resize(&self, rows: u16, cols: u16) {
-        self.resizes.lock().unwrap().push((rows, cols));
-    }
-    fn send_input(&self, data: Bytes, input_offset: u64) {
-        self.inputs.lock().unwrap().push((data, input_offset));
-    }
-    fn trigger_redraw(&self) {
-        self.redraws.fetch_add(1, Ordering::SeqCst);
-    }
-}
-
-/// A stub store mapping `(session_id, terminal_id)` to a live terminal. Tests register the
-/// terminal they want to expose and keep the `Arc` handle to drive it.
-struct StubStore {
-    terminal: Option<std::sync::Arc<StubTerminal>>,
-}
-
-impl StubStore {
-    /// Wrap a terminal in the store, returning the store and a shared handle the test drives.
-    fn with(terminal: StubTerminal) -> (Self, std::sync::Arc<StubTerminal>) {
-        let arc = std::sync::Arc::new(terminal);
-        (
-            StubStore {
-                terminal: Some(arc.clone()),
-            },
-            arc,
-        )
-    }
-
-    /// An empty store that exposes no terminal.
-    fn empty() -> Self {
-        StubStore { terminal: None }
-    }
-}
-
-#[async_trait]
-impl TerminalSessionStore for StubStore {
-    async fn get_terminal(
-        &self,
-        _session_id: &str,
-        _terminal_id: &str,
-    ) -> Option<std::sync::Arc<dyn TerminalSession>> {
-        self.terminal
-            .clone()
-            .map(|t| t as std::sync::Arc<dyn TerminalSession>)
-    }
-}
-
-/// Collect every frame the bridge emits until the stream ends (child exit) or the timeout fires.
-async fn drain(
-    rx: mpsc::Receiver<Result<SessionTerminalOutput, tddy_rpc::Status>>,
-) -> Vec<SessionTerminalOutput> {
-    let mut rx = rx;
-    let mut out = Vec::new();
-    while let Ok(Some(frame)) = timeout(RECV_TIMEOUT, rx.recv()).await {
-        out.push(frame.unwrap());
-    }
-    out
-}
-
-fn req(session_id: &str, terminal_id: &str, cols: u32, rows: u32) -> StreamTerminalOutputRequest {
-    StreamTerminalOutputRequest {
-        session_token: String::new(),
-        session_id: session_id.into(),
-        terminal_id: terminal_id.into(),
-        initial_cols: cols,
-        initial_rows: rows,
-        mode: StreamReplayMode::Tail as i32,
-        from_offset: 0,
-    }
-}
-
-/// Build a `StreamTerminalOutputRequest` in `FROM_OFFSET` mode resuming from `from_offset`.
-fn req_from_offset(
-    session_id: &str,
-    terminal_id: &str,
-    from_offset: u64,
-) -> StreamTerminalOutputRequest {
-    StreamTerminalOutputRequest {
-        session_token: String::new(),
-        session_id: session_id.into(),
-        terminal_id: terminal_id.into(),
-        initial_cols: 0,
-        initial_rows: 0,
-        mode: StreamReplayMode::FromOffset as i32,
-        from_offset,
-    }
-}
+use support::{
+    always_allow_control, assert_all_frames_stamped, drain, input_stream, req, req_from_offset,
+    StubStore, StubTerminal, RECV_TIMEOUT,
+};
 
 // ---------------------------------------------------------------------------
 // StreamTerminalOutput: last-frame-first + offsets
@@ -645,21 +499,6 @@ async fn serve_stream_terminal_output_from_offset_skips_resize_and_drain_unlike_
 // StreamSessionTerminalIO (bidi): replay-once / resume-by-offset + input forward
 // ---------------------------------------------------------------------------
 
-/// An input stream for the bidi helper: a fixed sequence of `SessionTerminalInput` chunks drained by
-/// the bridge's spawned forwarder. `tokio_stream::iter` yields the items then ends, so the
-/// forwarder task exits after the last chunk.
-fn input_stream(
-    msgs: Vec<SessionTerminalInput>,
-) -> impl tokio_stream::Stream<Item = Result<SessionTerminalInput, tddy_rpc::Status>> + Send + Unpin
-{
-    tokio_stream::iter(msgs.into_iter().map(Ok))
-}
-
-/// A `verify_control` closure that always approves (tests do not exercise control-token theft).
-fn always_allow_control() -> impl Fn(&str, &str) -> std::future::Ready<bool> + Send + Sync {
-    move |_sid, _tok| std::future::ready(true)
-}
-
 #[tokio::test]
 async fn serve_stream_session_terminal_io_tail_emits_the_last_frame_then_forwards_input() {
     // Given a terminal that has produced 10 bytes
@@ -809,28 +648,6 @@ async fn serve_stream_session_terminal_io_from_offset_emits_only_the_catch_up_ga
 // ---------------------------------------------------------------------------
 // StreamTerminalOutput: per-frame terminal identity
 // ---------------------------------------------------------------------------
-
-/// Every frame of a stream, whatever its kind, must name the terminal it came from.
-fn assert_all_frames_stamped(
-    frames: &[SessionTerminalOutput],
-    session_id: &str,
-    terminal_id: &str,
-) {
-    for (index, frame) in frames.iter().enumerate() {
-        assert_eq!(
-            frame.session_id,
-            session_id,
-            "frame {index} (data={:?}) must name its session",
-            String::from_utf8_lossy(&frame.data)
-        );
-        assert_eq!(
-            frame.terminal_id,
-            terminal_id,
-            "frame {index} (data={:?}) must name its terminal",
-            String::from_utf8_lossy(&frame.data)
-        );
-    }
-}
 
 #[tokio::test]
 async fn serve_stream_terminal_output_stamps_the_replay_and_ack_frames_with_the_terminal_identity()

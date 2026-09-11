@@ -1,6 +1,6 @@
 /**
  * Terminal history forward loader — the client-side state machine for the progressive,
- * append-only forward fill of older terminal output via the `ConnectionService.getTerminalHistory`
+ * append-only forward fill of older terminal output via the `TerminalSessionService.getTerminalHistory`
  * RPC.
  *
  * docs/ft/web/terminal-replay-lazy-scroll.md
@@ -16,7 +16,7 @@
  */
 
 import type { Client } from "@connectrpc/connect";
-import type { ConnectionService } from "../gen/connection_pb";
+import type { TerminalSessionService } from "../gen/terminal_session_pb";
 
 export interface HistoryChunk {
   data: Uint8Array;
@@ -37,12 +37,12 @@ export type FetchHistoryChunk = (
 ) => Promise<HistoryChunk | null>;
 
 /**
- * Build a `FetchHistoryChunk` that issues one `ConnectionService.getTerminalHistory` RPC per call,
+ * Build a `FetchHistoryChunk` that issues one `TerminalSessionService.getTerminalHistory` RPC per call,
  * adapting the generated `TerminalHistoryChunk` to the loader's plain `HistoryChunk` shape. Returns
  * `null` when the stream yields no chunk.
  */
 export function createForwardHistoryFetcher(
-  client: Client<typeof ConnectionService>,
+  client: Client<typeof TerminalSessionService>,
   req: { sessionToken: string; sessionId: string; terminalId: string; maxBytes?: number },
 ): FetchHistoryChunk {
   return async (fromOffset: bigint, untilOffset: bigint): Promise<HistoryChunk | null> => {

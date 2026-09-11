@@ -2,6 +2,8 @@ import React from "react";
 import { ConnectError, type Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry, ProjectEntry } from "../../gen/connection_pb";
+import type { SessionFilesService } from "../../gen/session_files_pb";
+import type { TerminalSessionService } from "../../gen/terminal_session_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import { projectForUnscopedSession } from "../../utils/sessionProjectTable";
 import type { SessionAttachmentState } from "./useSessionAttachment";
@@ -33,6 +35,8 @@ import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type SessionFilesClient = Client<typeof SessionFilesService>;
+type TerminalClient = Client<typeof TerminalSessionService>;
 type WorktreeClient = Client<typeof WorktreeService>;
 
 interface SessionMainPaneProps {
@@ -59,6 +63,18 @@ interface SessionMainPaneProps {
    * reason `client` can be: no daemon is reachable yet.
    */
   worktreeClient?: WorktreeClient;
+  /**
+   * The terminal service on the same host as `client` — each runtime claims its control lease and
+   * carries its host-served terminal I/O over it. Absent for the same reason `client` can be: no
+   * daemon is reachable yet.
+   */
+  terminalClient?: TerminalClient;
+  /**
+   * The session-files service on the same host as `client` — the inspector's Files tab and the
+   * create form's attachment staging read and write through it. Absent for the same reason `client`
+   * can be: no daemon is reachable yet.
+   */
+  sessionFilesClient?: SessionFilesClient;
   /** The connection to the daemon that owns the selected session — a runtime attaches its spawned
    *  child conversations over it, and the inspector's media tabs are gated on it. `null` until a
    *  host is reachable.
@@ -131,6 +147,8 @@ export function SessionMainPane({
   isCreating = false,
   client,
   worktreeClient,
+  terminalClient,
+  sessionFilesClient,
   host,
   sessionToken = "",
   onCancelCreate,
@@ -277,6 +295,7 @@ export function SessionMainPane({
   const customView = !isCreating
     ? resolveWorkflowView(selectedSession, {
         client,
+        sessionFilesClient,
         worktreeClient,
         sessionToken,
         attachmentHint,
@@ -329,6 +348,7 @@ export function SessionMainPane({
           focused={!dormant && r.sessionId === focusedRuntimeId}
           sessionToken={sessionToken}
           client={client}
+          terminalClient={terminalClient}
           mobileShortcuts={mobileShortcuts}
           onSessionRegisterInsert={onSessionRegisterInsert}
           onSessionDisconnect={onSessionDisconnect}
@@ -399,9 +419,10 @@ export function SessionMainPane({
       data-testid="sessions-detail-pane"
       className="flex-1 min-w-0 flex flex-col h-full overflow-hidden relative"
     >
-      {isCreating && client && worktreeClient && (
+      {isCreating && client && sessionFilesClient && worktreeClient && (
         <CreateSessionPane
           client={client}
+          sessionFilesClient={sessionFilesClient}
           worktreeClient={worktreeClient}
           sessionToken={sessionToken}
           onCancel={onCancelCreate ?? (() => undefined)}
@@ -550,6 +571,7 @@ export function SessionMainPane({
                 onTerminate={onTerminate}
                 client={client}
                 worktreeClient={worktreeClient}
+                sessionFilesClient={sessionFilesClient}
                 sessionToken={sessionToken}
                 /* The media tabs are gated on the connection to the host that owns this session —
                    `host`, the same connection the screen already resolved for every other

@@ -21,7 +21,6 @@ use bytes::Bytes;
 use tddy_rpc::Status;
 use tddy_task::CaptureChunk;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::Stream;
 
 use crate::proto::terminal_session::{
@@ -33,6 +32,17 @@ use crate::session::{TerminalSession, TerminalSessionStore};
 /// Default size of the "current last frame" sent on reconnect — roughly a few screens of output,
 /// large enough to show the user what is on screen now without dumping the whole ring.
 pub const DEFAULT_INITIAL_FRAME_BYTES: usize = 8 * 1024;
+
+/// The default has to be a real budget, and it is the one every transport that does not pick its
+/// own opens with. Zero would make every open emit an empty anchor and replay nothing, so a
+/// reconnecting client would repaint from a blank screen; a megabyte or more would make the first
+/// frame of a long-lived terminal exceed a transport's per-message limit, which is the regression
+/// the per-frame chunking exists to prevent. Checked at compile time because a default nobody
+/// passes has no test that would notice.
+const _: () = assert!(
+    DEFAULT_INITIAL_FRAME_BYTES > 0 && DEFAULT_INITIAL_FRAME_BYTES < 1024 * 1024,
+    "the default initial frame budget must be a nonzero fraction of a transport message"
+);
 
 /// Capacity of the mpsc channel bridging broadcast output to the RPC stream.
 pub const TERMINAL_OUTPUT_CHANNEL_CAPACITY: usize = 64;
@@ -243,7 +253,12 @@ async fn open_replay_ack_live(
             // Resize the PTY to the client's dimensions before bridging live output so the shell
             // redraws at the browser's actual width. Drain any pre-resize broadcast so the bridge
             // only forwards the fresh post-resize frame.
-            if initial_cols > 0 && initial_rows > 0 {
+            //
+            // Both are skipped for a terminal with no PTY master to resize: there is no pre-resize
+            // output to discard there, so draining would only throw away live bytes the replay
+            // chunk above does not cover.
+            let resizing = initial_cols > 0 && initial_rows > 0 && session.resizable();
+            if resizing {
                 session
                     .resize(
                         req_initial_rows_as_u16(initial_rows),
@@ -253,7 +268,7 @@ async fn open_replay_ack_live(
                 session.trigger_redraw();
             }
             let mut stdout_rx = session.subscribe_stdout();
-            if initial_cols > 0 && initial_rows > 0 {
+            if resizing {
                 use tokio::sync::broadcast::error::TryRecvError;
                 loop {
                     match stdout_rx.try_recv() {
@@ -397,6 +412,10 @@ fn replay_mode_from_i32(mode: i32) -> StreamReplayMode {
 /// the control token on each chunk via `verify_control` and ending the forwarder when control is
 /// lost (matches the daemon's per-chunk control-token check).
 ///
+/// A session that reports itself not [`TerminalSession::requires_control`] is not re-checked at
+/// all: its input comes from the process that owns the PTY rather than from a competing screen, so
+/// there is no token to verify and a lease taken by some screen must not end the forwarder.
+///
 /// The caller remains responsible for auth (session-token resolution + OS-user mapping) and the
 /// FIRST message's control-token check; this function only verifies subsequent chunks.
 pub async fn serve_stream_session_terminal_io_with<S, F, Fut>(
@@ -438,6 +457,7 @@ where
 
     // Spawn a task to forward subsequent input chunks to stdin, verifying the control token on
     // each chunk. Ends when the client stream ends, a stream error occurs, or control is lost.
+    let control_gated = session.requires_control();
     let session_for_input = Arc::clone(&session);
     tokio::spawn(async move {
         use tokio_stream::StreamExt;
@@ -445,7 +465,7 @@ where
         while let Some(item) = in_stream.next().await {
             match item {
                 Ok(msg) => {
-                    if !verify_control(&session_id, &msg.control_token).await {
+                    if control_gated && !verify_control(&session_id, &msg.control_token).await {
                         break;
                     }
                     if !msg.data.is_empty() {
@@ -524,23 +544,18 @@ pub async fn serve_send_terminal_input(
         .get_terminal(&req.session_id, &terminal_id)
         .await
         .ok_or_else(|| Status::not_found("terminal not found or not running"))?;
+    Ok(serve_send_terminal_input_to(&session, req))
+}
+
+/// Same as [`serve_send_terminal_input`] for a caller that has already resolved the terminal —
+/// which the served surface has, because whether the call needs a control token at all is
+/// [`TerminalSession::requires_control`]'s answer and only the resolved terminal can give it.
+pub fn serve_send_terminal_input_to(
+    session: &Arc<dyn TerminalSession>,
+    req: crate::proto::terminal_session::SessionTerminalInput,
+) -> crate::proto::terminal_session::SendTerminalInputResponse {
     if !req.data.is_empty() {
         session.send_input(Bytes::from(req.data), req.input_offset);
     }
-    Ok(crate::proto::terminal_session::SendTerminalInputResponse {})
-}
-
-/// Drain a `serve_stream_terminal_output` receiver into a `tonic`-compatible `ReceiverStream` of
-/// `Result<SessionTerminalOutput, Status>`.
-pub fn into_tonic_stream(
-    rx: mpsc::Receiver<Result<SessionTerminalOutput, Status>>,
-) -> ReceiverStream<Result<SessionTerminalOutput, Status>> {
-    ReceiverStream::new(rx)
-}
-
-/// Drain a `serve_get_terminal_history` receiver into a `tonic`-compatible `ReceiverStream`.
-pub fn history_into_tonic_stream(
-    rx: mpsc::Receiver<Result<TerminalHistoryChunk, Status>>,
-) -> ReceiverStream<Result<TerminalHistoryChunk, Status>> {
-    ReceiverStream::new(rx)
+    crate::proto::terminal_session::SendTerminalInputResponse {}
 }

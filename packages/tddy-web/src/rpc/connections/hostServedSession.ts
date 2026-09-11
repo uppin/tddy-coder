@@ -15,7 +15,7 @@
 
 import type { Client, Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
-import { ConnectionService } from "../../gen/connection_pb";
+import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { capabilitiesForHint } from "./sessionAttachment";
 import type { SessionAttachmentHint, SessionConnection } from "./session";
 import type { TerminalFeed, TerminalOptions } from "./terminal";
@@ -80,13 +80,13 @@ export function openHostServedSession(
       live = false;
     },
     /**
-     * The terminal over this host's own `ConnectionService` — the wire this session's RPC already
+     * The terminal over this host's own `TerminalSessionService` — the wire this session's RPC already
      * travels, and the one holding its capture ring, so scrollback comes with it.
      */
     openTerminal(options: TerminalOptions): TerminalFeed {
       refuseIfClosed();
       return openDaemonTerminalFeed({
-        client: host.clientFor(ConnectionService),
+        client: host.clientFor(TerminalSessionService),
         sessionId: hint.sessionId,
         resume: resumePointFor(options.terminalId ?? ""),
         options,

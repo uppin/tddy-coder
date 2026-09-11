@@ -14,9 +14,12 @@
  *   for the `SESSION_*` scopes, a project for `PROJECT_REPO`. `relative_path` is relative to that root
  *   — including any directories above the file, which the tree scopes make possible.
  *
- * The host browsed is the one the form's client is connected to: `ListSessions`,
+ * The host browsed is the one the form's clients are connected to: `ListSessions`,
  * `ListSessionUploads` and `ListWorktreeDirectory` carry no `daemon_instance_id`, so a peer's
- * documents are not enumerable over this client (tracked in the changeset).
+ * documents are not enumerable over them (tracked in the changeset). The three now live on three
+ * services — `connection.ConnectionService`, `session_files.SessionFilesService` and
+ * `worktree.WorktreeService` — so the picker takes one client each rather than one client for all,
+ * and the invariant that binds them is `browsedDaemonInstanceId` below.
  *
  * Changeset: `2026-08-01-session-attach-ui`
  * Feature: docs/ft/coder/session-attachments.md § ReadHostDocument
@@ -24,12 +27,9 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import {
-  HostDocumentScope,
-  type ConnectionService,
-  type SessionEntry,
-  type SessionUploadEntry,
-} from "../../../gen/connection_pb";
+import type { ConnectionService, SessionEntry } from "../../../gen/connection_pb";
+import { HostDocumentScope } from "../../../gen/types_pb";
+import type { SessionFilesService, SessionUploadEntry } from "../../../gen/session_files_pb";
 import type { WorktreeService } from "../../../gen/worktree_pb";
 import { formatAttachmentBytes } from "../../../lib/attachmentBytes";
 import { WorktreeFileTree } from "../../session/WorktreeFileTree";
@@ -46,7 +46,17 @@ export interface HostDocumentPick {
 }
 
 export interface HostDocumentPickerProps {
+  /** Enumerates the host's sessions (`ListSessions`) — the root of every `SESSION_*` scope. */
   client: Client<typeof ConnectionService>;
+  /**
+   * The session-files service on the **same** host `client` enumerates from — the upload scope
+   * lists through it (`ListSessionUploads`).
+   *
+   * Required, with no default, for the same reason `worktreeClient` is: the only possible default
+   * is "no client", and a picker with no client lists an empty upload scope, which is
+   * indistinguishable from a session that really has no uploads.
+   */
+  sessionFilesClient: Client<typeof SessionFilesService>;
   /**
    * The worktree service on the **same** host `client` enumerates from — the tree scopes browse
    * through it (`ListWorktreeDirectory`, `ReadWorktreeFile`).
@@ -61,8 +71,9 @@ export interface HostDocumentPickerProps {
   /**
    * The host being browsed — stamped on every ref this picker yields.
    *
-   * **Invariant**: it must name the host `client` enumerates from. The listing RPCs
-   * (`ListSessions`, `ListSessionUploads`) carry no `daemon_instance_id`, so they always answer for
+   * **Invariant**: it must name the host `client`, `sessionFilesClient` and `worktreeClient` all
+   * enumerate from. The listing RPCs (`ListSessions`, `ListSessionUploads`) carry no
+   * `daemon_instance_id`, so they always answer for
    * whichever host the client is connected to; passing a different id here would list one host's
    * documents and stamp another's, producing refs to files that host does not have. The daemon then
    * reports the document as missing — a silent, late failure. Named for what it is rather than
@@ -177,6 +188,7 @@ function browsableTree(base: WorktreeFilesApi): BrowsableTree {
 
 export function HostDocumentPicker({
   client,
+  sessionFilesClient,
   worktreeClient,
   sessionToken,
   browsedDaemonInstanceId,
@@ -215,7 +227,7 @@ export function HostDocumentPicker({
       return;
     }
     let cancelled = false;
-    client
+    sessionFilesClient
       .listSessionUploads({ sessionToken, sessionId })
       .then((resp) => {
         if (!cancelled) setUploads(resp.uploads as SessionUploadEntry[]);
@@ -226,7 +238,7 @@ export function HostDocumentPicker({
     return () => {
       cancelled = true;
     };
-  }, [client, sessionToken, scope, sessionId]);
+  }, [sessionFilesClient, sessionToken, scope, sessionId]);
 
   const selectedSession = sessions.find((s) => s.sessionId === sessionId);
 

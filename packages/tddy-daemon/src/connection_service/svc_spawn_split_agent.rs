@@ -110,7 +110,7 @@ impl ConnectionServiceImpl {
                     rooms: &self.session_rooms,
                 }
                 .for_remote_worktree(session_id, &session_dir),
-                tddy_service::ConnectionServiceServer::new(self.clone()),
+                Arc::new(self.clone()).session_room_roster(),
                 remote_source,
             )
             .await?

@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import {
-  ConnectionService,
   SessionTerminalOutput,
   StreamReplayMode,
-} from "../../gen/connection_pb";
+  TerminalSessionService,
+} from "../../gen/terminal_session_pb";
 import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
 import type {
   TerminalFeed,
@@ -24,16 +24,16 @@ import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
 const dGrpc = tddyDebug("tddy:term:grpc");
 const dResize = tddyDebug("tddy:term:resize");
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type TerminalClient = Client<typeof TerminalSessionService>;
 
 interface GrpcSessionTerminalProps {
   sessionId: string;
   sessionToken: string;
-  /** The daemon ConnectionService client. `null` while the transport is in a transient blip — the
+  /** The daemon `TerminalSessionService` client. `null` while the transport is in a transient blip — the
    *  terminal stays mounted (its scrollback and the ghostty instance survive) and resumes with
    *  `FROM_OFFSET` when a non-null client returns. Only a stream-end with a *valid* client (real
    *  `pty_done`) evicts the runtime. */
-  client: ConnectionClient | null;
+  client: TerminalClient | null;
   /** The claimed session (lease token in hand), or `null` while the auto-claim is in flight / was
    *  denied. `sendTerminalInput` is gated on this: input sent before the claim resolves (typically
    *  the onReady resize OSC) is queued and flushed once the claim arrives, so it can never go out
@@ -72,7 +72,7 @@ export function GrpcSessionTerminal({
   // Latest daemon client — a ref so the stream effect (keyed on `client`) and the send() closure
   // read the current value. `null` during a transient transport blip; the terminal stays mounted
   // and resumes with `FROM_OFFSET` when a non-null client returns.
-  const clientRef = useRef<ConnectionClient | null>(client);
+  const clientRef = useRef<TerminalClient | null>(client);
   clientRef.current = client;
   const sessionTokenRef = useRef(sessionToken);
   sessionTokenRef.current = sessionToken;

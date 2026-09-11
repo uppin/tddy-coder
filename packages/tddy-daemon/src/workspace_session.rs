@@ -32,7 +32,7 @@ pub struct WorkspaceBranchIntent<'a> {
 ///
 /// Persisted with the session because it is what makes a tool withdrawal on this checkout
 /// enforceable: the tool is refused inside the jail the *agent* half runs, so a checkout no agent
-/// works in can enforce nothing (`crate::split_session::paired_agent`). `None` for a standalone
+/// works in can enforce nothing ([`tddy_core::paired_agent`]). `None` for a standalone
 /// workspace session and for an agent clone's mirror, neither of which has an agent anywhere.
 #[derive(Debug, Clone)]
 pub struct PairedAgentSession {

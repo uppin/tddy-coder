@@ -17,7 +17,7 @@
 
 import { useCallback } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { ConnectionService } from "../gen/connection_pb";
+import type { SessionFilesService } from "../gen/session_files_pb";
 import { chunkFile } from "../lib/fileUploadChunks";
 import { randomUuid } from "../lib/randomId";
 import { UPLOAD_CHUNK_TIMEOUT_MS } from "./useSessionFileUpload";
@@ -55,7 +55,7 @@ export interface StagedAttachmentUpload {
 }
 
 export function useStagedAttachmentUpload(
-  client: Client<typeof ConnectionService>,
+  client: Client<typeof SessionFilesService>,
   sessionToken: string,
   timeoutMs: number = UPLOAD_CHUNK_TIMEOUT_MS,
 ): StagedAttachmentUpload {

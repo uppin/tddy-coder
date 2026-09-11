@@ -13,10 +13,12 @@
  * previous `connectionRpcs.ts` intercept helpers cannot observe LiveKit-transport RPC at all.
  * Field defaults mirror the (still-used-elsewhere) `cy.intercept`-based factories in `./responses.ts`.
  *
- * The host and worktree RPCs are no longer this service's: they are `host.HostService` and
- * `worktree.WorktreeService`, and their fakes live in `./hostServiceBackend` and
- * `./worktreeServiceBackend`. This builder composes all three onto one backend so a screen that
- * spans them keeps one scenario object and one set of recorders.
+ * The host, worktree, terminal and session-file RPCs are no longer this service's: they are
+ * `host.HostService`, `worktree.WorktreeService`, `terminal_session.TerminalSessionService` and
+ * `session_files.SessionFilesService`, and their fakes live in `./hostServiceBackend`,
+ * `./worktreeServiceBackend`, `./terminalSessionServiceBackend` and `./sessionFilesServiceBackend`.
+ * This builder composes all five onto one backend so a screen that spans them keeps one scenario
+ * object and one set of recorders.
  */
 
 import { create } from "@bufbuild/protobuf";
@@ -33,16 +35,9 @@ import {
   SessionEntrySchema,
   StartSessionResponseSchema,
   ToolInfoSchema,
-  ClaimTerminalControlResponseSchema,
   ExecuteToolResponseSchema,
   ListExecToolsResponseSchema,
   ListSessionToolCallsResponseSchema,
-  ListTerminalSessionsResponseSchema,
-  SessionTerminalOutputSchema,
-  StartTerminalSessionResponseSchema,
-  StopTerminalSessionResponseSchema,
-  TerminalHistoryChunkSchema,
-  TerminalSessionInfoSchema,
   ToolDefSchema,
   type AgentInfo,
   type ConnectSessionResponse,
@@ -52,6 +47,8 @@ import {
   type StartSessionResponse,
 } from "../../../src/gen/connection_pb";
 import { HostService } from "../../../src/gen/host_pb";
+import { SessionFilesService } from "../../../src/gen/session_files_pb";
+import { TerminalSessionService } from "../../../src/gen/terminal_session_pb";
 import { WorktreeService } from "../../../src/gen/worktree_pb";
 import {
   aHostServiceFake,
@@ -61,6 +58,16 @@ import {
   type HostServiceControls,
   type HostServiceScenario,
 } from "./hostServiceBackend";
+import {
+  aSessionFilesServiceFake,
+  type SessionFilesServiceControls,
+  type SessionFilesServiceScenario,
+} from "./sessionFilesServiceBackend";
+import {
+  aTerminalSessionServiceFake,
+  type TerminalSessionServiceControls,
+  type TerminalSessionServiceScenario,
+} from "./terminalSessionServiceBackend";
 import {
   aWorktreeServiceFake,
   type WorktreeServiceControls,
@@ -127,7 +134,11 @@ function anAgentInfo(overrides: Partial<AgentInfo>): AgentInfo {
 // Scenario options
 // ---------------------------------------------------------------------------
 
-export interface ConnectionServiceScenario extends HostServiceScenario, WorktreeServiceScenario {
+export interface ConnectionServiceScenario
+  extends HostServiceScenario,
+    SessionFilesServiceScenario,
+    TerminalSessionServiceScenario,
+    WorktreeServiceScenario {
   /** Static ListSessions response. Ignored when `listSessionsFactory` is given. */
   sessions?: Partial<SessionEntry>[];
   /** Dynamic ListSessions response, re-evaluated on every call (poll-driven tests). */
@@ -154,25 +165,6 @@ export interface ConnectionServiceScenario extends HostServiceScenario, Worktree
     | ((req: { name: string; gitUrl: string }) => Partial<StartSessionResponse>);
   /** When set, SignalSession always fails with this Connect error instead of succeeding. */
   signalSessionError?: { code: Code; message: string };
-  /** Initial `ListTerminalSessions` result — the bash terminals already open on the session.
-   *  Defaults to none (only the reserved "main"/Agent terminal, which is not listed here). */
-  terminals?: Array<{ terminalId: string; kind?: string; pid?: number }>;
-  /** The `terminal_id` handed out by the Nth (0-based) `StartTerminalSession`. Default `bash-<n+1>`. */
-  newTerminalId?: (index: number) => string;
-  /** Absolute `endOffset` carried by the initial `StreamTerminalOutput` replay frame — the anchor
-   *  for lazy scroll-up history. When set (> 0n), the backend's `streamTerminalOutput` emits its
-   *  identifying frame tagged with this offset (and `atOldest`), mirroring the daemon's lazy
-   *  replay. Default: 0n (no offset metadata — legacy shape). */
-  terminalReplayEndOffset?: bigint;
-  /** How many `StreamTerminalOutput` subscriptions **end** after their first frame instead of
-   *  staying open — the daemon dropping a terminal feed (a closed data-channel stream, a `pty_done`).
-   *  The first `n` opened streams drop; every later one stays open, so a test can drop a feed once
-   *  and still observe what the screen does to recover. Default 0 (no stream ever ends). */
-  droppedTerminalStreams?: number;
-  /** Older history chunks returned by `GetTerminalHistory`, in the order they should be yielded
-   *  across successive calls (one chunk per call). Each chunk's `startOffset`/`endOffset`/`atOldest`
-   *  is used verbatim. The backend pops one chunk per `getTerminalHistory` call. */
-  terminalHistory?: Array<{ data: Uint8Array; startOffset: bigint; endOffset: bigint; atOldest: boolean }>;
   /** The session's recorded ACP transcript, served by `StreamAcpReplay` in both modes (and by
    *  `GetAcpToolCallDetail` for the tool bodies). Backs the Agent Activity overlay and the inactive
    *  session's Activities view. Default: unimplemented — omit it unless the spec reads a transcript. */
@@ -195,6 +187,8 @@ export interface ConnectionServiceBackend
   extends InMemoryRpcBackend,
     AgentConversationControls,
     HostServiceControls,
+    SessionFilesServiceControls,
+    TerminalSessionServiceControls,
     WorktreeServiceControls {
   /** Qualified `agent_id`s passed to `AttachSessionAgent`, in call order. Empty unless the scenario
    *  declared a `sessionAgents` roster. */
@@ -207,23 +201,9 @@ export interface ConnectionServiceBackend
   readonly signalCalls: { sessionId: string; signal: number }[];
   /** Every `sessionId` passed to `ExecuteTool`, in call order. */
   readonly executedToolSessionIds: string[];
-  /** Every `sessionId` passed to `ClaimTerminalControl`, in call order. */
-  readonly claimedControlSessionIds: string[];
   /** Every `sessionId` passed to `ConnectSession`, in call order — used by the fast-session-change
    *  regression test to assert re-selecting an already-attached session does NOT re-connect. */
   readonly connectedSessionIds: string[];
-  /** Every `sessionId` passed to `StartTerminalSession`, in call order. */
-  readonly startTerminalSessionIds: string[];
-  /** The `terminal_id` handed back by each `StartTerminalSession`, in call order. */
-  readonly startedTerminalIds: string[];
-  /** Every `{ sessionId, terminalId }` passed to `StopTerminalSession`, in call order. */
-  readonly stoppedTerminals: { sessionId: string; terminalId: string }[];
-  /** Every `{ sessionId, terminalId, data }` passed to `SendTerminalInput`, in call order. */
-  readonly sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[];
-  /** Every `{ sessionId, terminalId }` an output stream was opened for, in call order. */
-  readonly streamedTerminals: { sessionId: string; terminalId: string }[];
-  /** Every `{ sessionId, terminalId, beforeOffset }` passed to `GetTerminalHistory`, in call order. */
-  readonly getTerminalHistoryCalls: { sessionId: string; terminalId: string; beforeOffset: bigint }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -240,20 +220,7 @@ export function aConnectionServiceBackend(
   const deletedSessionIds: string[] = [];
   const signalCalls: { sessionId: string; signal: number }[] = [];
   const executedToolSessionIds: string[] = [];
-  const claimedControlSessionIds: string[] = [];
   const connectedSessionIds: string[] = [];
-  const startTerminalSessionIds: string[] = [];
-  const startedTerminalIds: string[] = [];
-  const stoppedTerminals: { sessionId: string; terminalId: string }[] = [];
-  const sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[] = [];
-  const streamedTerminals: { sessionId: string; terminalId: string }[] = [];
-  const getTerminalHistoryCalls: { sessionId: string; terminalId: string; beforeOffset: bigint }[] = [];
-
-  // Live bash-terminal list — mutated by Start/Stop so ListTerminalSessions stays consistent.
-  const liveTerminals: { terminalId: string; kind: string; pid: number }[] = (
-    scenario.terminals ?? []
-  ).map((t, i) => ({ terminalId: t.terminalId, kind: t.kind ?? "bash", pid: t.pid ?? 8000 + i }));
-  const nextTerminalId = scenario.newTerminalId ?? ((index: number) => `bash-${index + 1}`);
 
   const defaultDaemons: DaemonEntry[] = [{ instanceId: "local", label: "local (this daemon)", isLocal: true }];
   const daemons = scenario.daemons ?? defaultDaemons;
@@ -267,10 +234,14 @@ export function aConnectionServiceBackend(
   // Built once and kept, not inlined into the spread below: these fakes carry the call recorders a
   // spec asserts on, and building them twice would record into a copy nothing can read.
   const rosterFake = scenario.sessionAgents ? aSessionAgentRosterFake(scenario.sessionAgents) : null;
-  // The host and worktree halves of the scenario, each served by its own service. Built here for
-  // the same reason as the fakes above: they carry the recorders a spec asserts on.
+  // The host, worktree, terminal and session-file halves of the scenario, each served by its own
+  // service. Built here for the same reason as the fakes above: they carry the recorders a spec
+  // asserts on.
   const { handlers: hostHandlers, ...hostControls } = aHostServiceFake(scenario);
   const { handlers: worktreeHandlers, ...worktreeControls } = aWorktreeServiceFake(scenario);
+  const { handlers: terminalHandlers, ...terminalControls } = aTerminalSessionServiceFake(scenario);
+  const { handlers: sessionFilesHandlers, ...sessionFilesControls } =
+    aSessionFilesServiceFake(scenario);
   const conversationFake = scenario.agentConversations
     ? anAgentConversationFake(scenario.agentConversations)
     : null;
@@ -278,6 +249,8 @@ export function aConnectionServiceBackend(
   const backend = anInMemoryRpcBackend()
     .implement(HostService, hostHandlers)
     .implement(WorktreeService, worktreeHandlers)
+    .implement(TerminalSessionService, terminalHandlers)
+    .implement(SessionFilesService, sessionFilesHandlers)
     .implement(AuthService, {
       getAuthStatus: async () => ({ authenticated: true, user: aGitHubUser() }),
     })
@@ -393,91 +366,17 @@ export function aConnectionServiceBackend(
           errorMessage: "",
         });
       },
-      claimTerminalControl: async (req) => {
-        claimedControlSessionIds.push(req.sessionId);
-        return create(ClaimTerminalControlResponseSchema, { granted: true, controlToken: "ctrl-1" });
-      },
-      // Server-streaming control watch — yield nothing in tests.
-      watchTerminalControl: async function* () {
-        yield { $typeName: "connection.TerminalControlEvent", event: { case: "granted", value: "ctrl-1" } } as any;
-      },
-      // --- Multiple terminals per session ---
-      listTerminalSessions: async () =>
-        create(ListTerminalSessionsResponseSchema, {
-          terminals: liveTerminals.map((t) => create(TerminalSessionInfoSchema, t)),
-        }),
-      startTerminalSession: async (req) => {
-        const terminalId = nextTerminalId(startTerminalSessionIds.length);
-        startTerminalSessionIds.push(req.sessionId);
-        startedTerminalIds.push(terminalId);
-        liveTerminals.push({ terminalId, kind: "bash", pid: 8000 + liveTerminals.length });
-        return create(StartTerminalSessionResponseSchema, { terminalId });
-      },
-      stopTerminalSession: async (req) => {
-        stoppedTerminals.push({ sessionId: req.sessionId, terminalId: req.terminalId });
-        const at = liveTerminals.findIndex((t) => t.terminalId === req.terminalId);
-        if (at !== -1) liveTerminals.splice(at, 1);
-        return create(StopTerminalSessionResponseSchema, { ok: true, message: "" });
-      },
-      sendTerminalInput: async (req) => {
-        sentTerminalInput.push({
-          sessionId: req.sessionId,
-          terminalId: req.terminalId,
-          data: req.data,
-        });
-        return {};
-      },
-      // Server-streaming output — record the opened stream, emit one identifying frame, then stay
-      // open (a terminal stream that *completes* would signal disconnect and evict the runtime).
-      // When `scenario.terminalReplayEndOffset` is set, the frame is tagged with the absolute
-      // `endOffset` + `atOldest` so the lazy scroll-up loader can anchor older-history fetches.
-      // The frame carries the session and RESOLVED terminal id it came from, as the daemon stamps
-      // every frame — a pane drops frames that are not its own.
-      // `scenario.droppedTerminalStreams` makes the first n subscriptions *return* after that frame,
-      // which is how the daemon dropping the feed reaches the browser.
-      streamTerminalOutput: async function* (req) {
-        const openIndex = streamedTerminals.length;
-        streamedTerminals.push({ sessionId: req.sessionId, terminalId: req.terminalId });
-        const terminalId = req.terminalId || "main";
-        yield create(SessionTerminalOutputSchema, {
-          data: new TextEncoder().encode(`term:${terminalId}\r\n`),
-          endOffset: scenario.terminalReplayEndOffset ?? 0n,
-          atOldest: (scenario.terminalHistory ?? []).length === 0,
-          sessionId: req.sessionId,
-          terminalId,
-        });
-        if (openIndex < (scenario.droppedTerminalStreams ?? 0)) return;
-        await new Promise<never>(() => undefined);
-      },
-      // Lazy scroll-up history — yield one chunk per call from `scenario.terminalHistory` (popped
-      // in order), so a test can assert the loader chains anchors across successive calls.
-      getTerminalHistory: async function* (req) {
-        getTerminalHistoryCalls.push({
-          sessionId: req.sessionId,
-          terminalId: req.terminalId,
-          beforeOffset: req.beforeOffset,
-        });
-        const chunk = (scenario.terminalHistory ?? []).shift();
-        if (chunk) {
-          yield create(TerminalHistoryChunkSchema, chunk);
-        }
-      },
     });
 
   return Object.assign(backend, {
     deletedSessionIds,
     signalCalls,
     executedToolSessionIds,
-    claimedControlSessionIds,
     connectedSessionIds,
-    startTerminalSessionIds,
-    startedTerminalIds,
-    stoppedTerminals,
-    sentTerminalInput,
-    streamedTerminals,
-    getTerminalHistoryCalls,
     ...hostControls,
     ...worktreeControls,
+    ...terminalControls,
+    ...sessionFilesControls,
     // A scenario that declared no roster / no conversations still answers these, with nothing —
     // a spec asserting "never attached" must not have to know whether a fake was built.
     attachedAgentIds: () => (rosterFake ? rosterFake.attachedAgentIds() : []),

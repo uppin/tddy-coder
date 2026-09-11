@@ -1,0 +1,68 @@
+[package]
+name = "tddy-session-files"
+version = "0.1.0"
+edition = "2021"
+description = "Session file I/O — workflow files, agent context sync, uploads, staged attachments and host documents. Extracted from tddy-daemon"
+
+[lib]
+name = "tddy_session_files"
+path = "src/lib.rs"
+
+[dependencies]
+# `HOST_DOCUMENT_FRAME_BYTES` and `user_paths::sessions_base_for_user` — node 1's kernel.
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+# `Status` and `ServiceEntry`: every method here answers an RPC, so `Status` is the error type
+# rather than something converted to one at the edge.
+tddy-rpc = { path = "../tddy-rpc" }
+# `ContextManifest`, the shape both context-sync halves diff.
+tddy-sandbox = { path = "../tddy-sandbox" }
+# `proto::types::HostDocumentScope`, re-exported rather than mirrored in Rust.
+tddy-service = { path = "../tddy-service" }
+# `worktree_files::{validate_rel_path_shape, canonicalize_root, git_listed_files}` — the
+# filesystem-independent relative-path guard and the worktree readers' gates, reused rather than
+# restated; `project_storage::find_project` for the PROJECT_REPO scope; and
+# `stream::MpscResultStream`, the server-stream adapter its own service already hands back. Same
+# direction as `tddy-daemon`'s own edge to this crate.
+tddy-worktree-service = { path = "../tddy-worktree-service" }
+# `session_lifecycle::{unified_session_dir_path, validate_session_id_segment}` and
+# `read_session_metadata` — a session id is untrusted client input that becomes a path component,
+# and `HOST_DOCUMENT_SCOPE_SESSION_WORKTREE` resolves through the session's own metadata.
+tddy-core = { path = "../tddy-core" }
+# `session_artifacts_root`, `session_attachments_root`, `SESSION_ATTACHMENTS_SUBDIR` and
+# `artifact_paths::list_session_attachments` — where a session keeps the documents it was started
+# with (`session_attachments.rs`, `session_context_docs.rs`, `stack_doc_attachments.rs`).
+tddy-workflow = { path = "../tddy-workflow" }
+# The recipe manifests `session_context_docs.rs` projects into context docs, and the PR-stack
+# basenames `stack_doc_attachments.rs` offers a child: `pr_stack::{NODE_PRD_BASENAME, …}`,
+# `plan_pr_stack::PR_STACK_PLAN_MD_BASENAME`, `writer::EXPLORATION_BASENAME`.
+tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+# `async_trait` on the generated `SessionFilesService` trait the service implements.
+async-trait = "0.1"
+# `spawn_blocking` for the hashing and reading passes, the unbounded channels behind the four
+# server-streaming methods, and `time::timeout` — the bound a context read is refused past, since a
+# read of a stalled filesystem would otherwise hold the RPC open for as long as it stalls.
+tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
+# Every module here logs its refusals — a rejected path is the thing an operator needs in the log.
+log = "0.4"
+# `SyncState` — the record a context directory keeps of what it holds, read back on the next tick
+# (`context_sync.rs`), so it is `Serialize`/`Deserialize` and persisted as JSON.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# `chunking::MAX_CHUNK_FRAME_BYTES`: the frame size is pinned against the transport budget it has to
+# stay beneath rather than against a bare number (`context_file_frames_unit.rs`).
+tddy-livekit = { path = "../tddy-livekit" }
+# Readable diffs on the framing and manifest assertions.
+pretty_assertions = { workspace = true }
+# Table-driven cases in the moved framing and allow-list suites — each case named in the output
+# rather than hidden in a loop.
+rstest = { workspace = true }
+# The acceptance suites build real session and worktree trees on disk.
+tempfile = "3"
+# `#[tokio::test]` for the service entry's dispatch tests, and `rt` plus `time` to build the
+# one-blocking-thread runtime the context-read deadline suite holds the read on.
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+# `Message::{encode_to_vec, decode}`: the entry's dispatch test speaks the wire the transport does,
+# rather than calling the trait method behind it and proving nothing about the registration.
+prost = "0.13"

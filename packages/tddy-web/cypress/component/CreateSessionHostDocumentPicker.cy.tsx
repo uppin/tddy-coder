@@ -23,15 +23,17 @@ import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-t
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import {
   ConnectionService,
-  HostDocumentScope,
   SessionContextDocKind,
   StartSessionEventSchema,
   type StartSessionRequest,
 } from "../../src/gen/connection_pb";
+import { HostDocumentScope } from "../../src/gen/types_pb";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { createSessionPage } from "../support/pages/createSessionPage";
+import { aSessionFilesServiceFake } from "../support/rpc/sessionFilesServiceBackend";
 
 const LOCAL_HOST = "workstation-1";
 const OWNING_SESSION = "sess-owning-1";
@@ -117,17 +119,20 @@ function aHostWithDocuments(recorder: StartRecorder): InMemoryRpcBackend {
       branches: ["origin/main"],
       defaultRemote: "origin",
     }))
-    .onUnary(ConnectionService.method.listSessionUploads, () => ({
-      uploads: [
-        {
-          uploadId: "up-1",
-          fileName: "trace.log",
-          hostPath: `/srv/sessions/${OWNING_SESSION}/uploads/up-1/trace.log`,
-          sizeBytes: 4096n,
-          uploadedAtMs: 0n,
-        },
-      ],
-    }))
+    .implement(
+      SessionFilesService,
+      aSessionFilesServiceFake({
+        uploads: [
+          {
+            uploadId: "up-1",
+            fileName: "trace.log",
+            hostPath: `/srv/sessions/${OWNING_SESSION}/uploads/up-1/trace.log`,
+            sizeBytes: 4096n,
+            uploadedAtMs: 0n,
+          },
+        ],
+      }).handlers,
+    )
     .implement(ConnectionService, {
       async *streamStartSession(req: StartSessionRequest) {
         recorder.requests.push(req);
@@ -141,12 +146,14 @@ function aHostWithDocuments(recorder: StartRecorder): InMemoryRpcBackend {
 function mountCreatePane(backend: InMemoryRpcBackend) {
   const transport = backend.transport();
   const client = createClient(ConnectionService, transport);
-  // The same host over the same wire, under the service that now serves the worktree RPCs.
+  // The same host over the same wire, under the services that now serve the file and worktree RPCs.
+  const sessionFilesClient = createClient(SessionFilesService, transport);
   const worktreeClient = createClient(WorktreeService, transport);
   cy.mount(
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
+        sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}
         sessionToken="fake-token"
         onCancel={cy.stub()}
@@ -204,7 +211,7 @@ it("attaches a session artifact by reference without uploading anything", () => 
       relativePath: "PRD.md",
     });
     expect(
-      backend.callsTo(ConnectionService.method.uploadStagedAttachmentChunk),
+      backend.callsTo(SessionFilesService.method.uploadStagedAttachmentChunk),
       "a referenced document uploads nothing",
     ).to.have.length(0);
   });
@@ -321,7 +328,7 @@ it("attaches a project-repo file by reference, carrying the project id and no se
       relativePath: "README.md",
     });
     expect(
-      backend.callsTo(ConnectionService.method.uploadStagedAttachmentChunk),
+      backend.callsTo(SessionFilesService.method.uploadStagedAttachmentChunk),
       "a referenced document uploads nothing",
     ).to.have.length(0);
   });

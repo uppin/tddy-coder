@@ -32,8 +32,20 @@ pub mod cli_session_manager;
 pub use tddy_daemon_kernel::config;
 pub mod connection_service;
 pub mod connection_tonic_adapter;
-pub mod context_files;
-pub mod context_sync;
+/// The ten session-file-I/O modules, which now live in `tddy-session-files`.
+///
+/// Named one by one rather than globbed, for the reason the worktree, host and LiveKit facades
+/// above give: every module keeps its own name in the crate it moved to, so `crate::context_files::X`
+/// goes on resolving here and no caller in this crate changed.
+///
+/// The edge runs `tddy-daemon` → `tddy-session-files`, which is the direction the extraction needed:
+/// none of the ten names `connection_service`, while `connection_service` and eight of its
+/// submodules call *into* nine of them.
+pub use tddy_session_files::{
+    context_files, context_sync, host_documents, session_attachment_staging, session_attachments,
+    session_context_docs, session_file_upload, session_uploads, session_workflow_files,
+    stack_doc_attachments,
+};
 pub mod cursor_cli_spawn;
 pub mod daemon_config_service;
 pub mod daemon_settings;
@@ -43,15 +55,6 @@ pub mod daemon_settings;
 /// is `tddy-daemon` → `tddy-telegram`, the same direction as every other facade in this file.
 pub use tddy_telegram::elicitation;
 pub mod host_tonic_adapter;
-/// The nine host modules and the four host-key ones, which now live in `tddy-host-service`.
-///
-/// Named one by one for the reason above; see `tddy_worktree_service`'s facade.
-pub use tddy_host_service::{
-    host_desktop_targets, host_keypair, host_messages, host_private_key, host_prompt_stream,
-    host_prompts, host_registry, host_session_service, host_stats, host_tooling, multi_host,
-    remote_desktop_probe, ssh_agent, ssh_agent_add,
-};
-pub mod host_documents;
 /// The five LiveKit modules, which now live in `tddy-daemon-livekit`.
 ///
 /// Named one by one for the reason the worktree and host facades above give: every module keeps
@@ -61,9 +64,16 @@ pub use tddy_daemon_livekit::{
     common_room_supervisor, livekit_peer_discovery, livekit_rooms_stream, livekit_service,
     session_room,
 };
+/// The nine host modules and the four host-key ones, which now live in `tddy-host-service`.
+///
+/// Named one by one for the reason above; see `tddy_worktree_service`'s facade.
+pub use tddy_host_service::{
+    host_desktop_targets, host_keypair, host_messages, host_private_key, host_prompt_stream,
+    host_prompts, host_registry, host_session_service, host_stats, host_tooling, multi_host,
+    remote_desktop_probe, ssh_agent, ssh_agent_add,
+};
 pub mod local_socket_server;
 pub mod presenter_intent_client;
-pub mod pty_registry;
 pub mod pty_runtime;
 pub mod relay_idle;
 pub mod runtime;
@@ -73,20 +83,13 @@ pub mod session_agent_clone;
 pub mod session_agent_inference;
 pub mod session_agent_roster;
 pub mod session_agent_status;
-pub mod session_attachment_staging;
-pub mod session_attachments;
-pub mod session_context_docs;
 pub mod session_deletion;
-pub mod session_file_upload;
 pub mod session_list_enrichment;
 pub mod session_notification_subscribers;
 pub mod session_notifications;
 pub mod session_reader;
 pub mod session_toolcall;
-pub mod session_uploads;
-pub mod session_workflow_files;
 pub mod split_session;
-pub mod stack_doc_attachments;
 pub mod startup;
 pub mod task_service;
 pub mod tddy_user_config;

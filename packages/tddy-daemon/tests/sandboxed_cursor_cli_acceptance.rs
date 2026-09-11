@@ -13,7 +13,10 @@ use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
+};
+use tddy_terminal_rpc::proto::terminal_session::{
     StreamReplayMode, StreamTerminalOutputRequest,
+    TerminalSessionService as TerminalSessionServiceTrait,
 };
 use tddy_testing_commons::{a_stub_http_endpoint_answering_ok, process_is_alive};
 
@@ -310,6 +313,7 @@ async fn sandboxed_cursor_cli_terminal_io_round_trips() {
         .session_id;
 
     let stream_resp = service
+        .terminal_session_service()
         .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: session_id.clone(),
@@ -395,6 +399,7 @@ async fn sandboxed_cursor_cli_start_wires_specialized_agents_env_and_metadata() 
     assert_eq!(persisted_roster, vec!["fastcontext"]);
 
     let stream_resp = service
+        .terminal_session_service()
         .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: inner.session_id.clone(),

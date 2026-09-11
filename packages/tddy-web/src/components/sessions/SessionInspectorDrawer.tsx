@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
+import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import { VncService } from "../../gen/vnc_pb";
 import { ScreenSharingService } from "../../gen/screen_sharing_pb";
@@ -49,6 +50,11 @@ interface SessionInspectorDrawerProps {
    * diff summary and clear/delete/restore actions through.
    */
   worktreeClient?: Client<typeof WorktreeService>;
+  /**
+   * The session-files service on the same host as `client` — what the Files tab lists, inserts and
+   * deletes a session's uploads through.
+   */
+  sessionFilesClient?: Client<typeof SessionFilesService>;
   sessionToken?: string;
   /**
    * The connection to the host that owns this session, or `null` when nothing can reach it.
@@ -120,6 +126,7 @@ export function SessionInspectorDrawer({
   onTerminate,
   client,
   worktreeClient,
+  sessionFilesClient,
   sessionToken,
   hostConnection,
   room = null,
@@ -442,7 +449,7 @@ export function SessionInspectorDrawer({
         ) : tab === "files" ? (
           <ScrollArea className="flex-1 min-h-0">
             <SessionFilesTab
-              client={client ?? null}
+              client={sessionFilesClient ?? null}
               sessionToken={sessionToken ?? ""}
               sessionId={session.sessionId}
               onInsertPath={onInsertPathIntoTerminal ?? (() => undefined)}

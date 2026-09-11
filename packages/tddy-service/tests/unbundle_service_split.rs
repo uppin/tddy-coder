@@ -10,7 +10,7 @@
 //! what the daemon implements, but the `.proto` is what every other language's client is generated
 //! from, and a method left declared there is a coordinate somebody can still call.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn connection_proto() -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("proto/connection.proto");
@@ -136,8 +136,12 @@ fn connection_service_keeps_exactly_the_methods_node_one_leaves_behind() {
 
     // Then
     assert_eq!(
-        declared, 72,
-        "node 1 moved 17 of 90 and node 4 moves StreamLiveKitRooms; later nodes take it to 21"
+        declared, 50,
+        "of the original 90: node 1 moved 17, node 4 moved StreamLiveKitRooms, node 6 moved 22. \
+         Every node updates this number — a node that lands and leaves it alone turns this test red \
+         for the next one, who will read a passing assertion as a promise rather than as the \
+         arithmetic its own change owes. Recount, do not compute: restating the proto's own count \
+         back at it would pass for removing 21 or 23 just as happily"
     );
 }
 
@@ -171,5 +175,255 @@ fn connection_service_no_longer_declares_the_rooms_stream() {
             !block.contains(&format!("rpc {method}(")),
             "{method} moved to livekit.LiveKitService but is still on connection.ConnectionService"
         );
+    }
+}
+
+const SESSION_FILES_METHODS: [&str; 13] = [
+    "ListSessionWorkflowFiles",
+    "ReadSessionWorkflowFile",
+    "StreamContextManifest",
+    "StreamReadContextFile",
+    "StreamReadContextFileBatch",
+    "UploadSessionFileChunk",
+    "ListSessionUploads",
+    "DeleteSessionUpload",
+    "UploadStagedAttachmentChunk",
+    "ListStagedAttachments",
+    "DeleteStagedAttachment",
+    "ReadHostDocument",
+    "StreamReadHostDocument",
+];
+
+const TERMINAL_METHODS: [&str; 9] = [
+    "StreamSessionTerminalIO",
+    "StreamTerminalOutput",
+    "SendTerminalInput",
+    "GetTerminalHistory",
+    "StartTerminalSession",
+    "StopTerminalSession",
+    "ListTerminalSessions",
+    "ClaimTerminalControl",
+    "WatchTerminalControl",
+];
+
+#[test]
+fn session_files_service_declares_every_file_method() {
+    let block = service_block(&read("session_files.proto"), "SessionFilesService");
+    for method in SESSION_FILES_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "session_files.SessionFilesService is missing {method}"
+        );
+    }
+}
+
+/// The shared types file is created by node 6, **not** node 1 — and for exactly one enum.
+///
+/// The plan had node 1 introduce it on the strength of a planning-time list of ~25 cross-family
+/// shared messages. That list was wrong for node 1's families, node 4's, and node 6's terminal
+/// family: all three cuts were fully self-contained. `HostDocumentScope` is the first type that
+/// genuinely crosses, because `connection.ConnectionService`'s `StartSession` needs it too.
+#[test]
+fn the_shared_types_file_holds_only_what_two_served_services_both_need() {
+    // Given the shared file and the two served services said to both need it
+    let types = read("types.proto");
+    let connection = read("connection.proto");
+    let session_files = read("session_files.proto");
+
+    // Then it holds the one enum that crosses
+    assert!(
+        types.contains("enum HostDocumentScope"),
+        "types.proto exists for HostDocumentScope"
+    );
+
+    // Then both services really do reach it — otherwise "two served services both need it" is a
+    // claim about one, and the enum belongs in that one's own proto
+    assert!(
+        connection.contains("import \"types.proto\""),
+        "connection.ConnectionService reaches the shared scope through StartSession's \
+         HostDocumentRef, so connection.proto must import types.proto"
+    );
+    assert!(
+        session_files.contains("import \"types.proto\""),
+        "session_files.SessionFilesService reaches the shared scope through ReadHostDocument, so \
+         session_files.proto must import types.proto"
+    );
+
+    // Then nothing else has been parked there
+    let declared = types.matches("\nenum ").count() + types.matches("\nmessage ").count();
+    assert_eq!(
+        declared, 1,
+        "types.proto must hold only what genuinely crosses; anything added needs two really-served \
+         services reaching it"
+    );
+}
+
+#[test]
+fn the_session_files_proto_reaches_the_shared_scope_rather_than_copying_it() {
+    // Given
+    let proto = read("session_files.proto");
+
+    // Then
+    assert!(
+        proto.contains("import \"types.proto\""),
+        "session_files.proto imports the shared scope"
+    );
+    assert!(
+        !proto.contains("enum HostDocumentScope"),
+        "session_files.proto must reach the shared enum, not redeclare it"
+    );
+}
+
+/// **The terminal family already had a service, and it was served nowhere.**
+///
+/// `packages/tddy-terminal-rpc/proto/terminal_session.proto` declares 9 rpcs duplicating family K
+/// exactly, and `grep -rn 'TerminalSessionService'` outside that package returns zero hits. What was
+/// actually shared was the *bridge*, and its two call sites hand-converted between the two message
+/// sets. Node 6 serves the coordinate and deletes both converters.
+#[test]
+fn the_terminal_service_that_already_existed_declares_every_terminal_method() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tddy-terminal-rpc/proto/terminal_session.proto");
+    let proto = std::fs::read_to_string(path).expect("terminal_session.proto is readable");
+    let block = service_block(&proto, "TerminalSessionService");
+
+    for method in TERMINAL_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "terminal_session.TerminalSessionService is missing {method}"
+        );
+    }
+}
+
+#[test]
+fn connection_service_no_longer_declares_the_session_file_or_terminal_methods() {
+    let block = service_block(&connection_proto(), "ConnectionService");
+    let still_there: Vec<&str> = SESSION_FILES_METHODS
+        .into_iter()
+        .chain(TERMINAL_METHODS)
+        .filter(|method| block.contains(&format!("rpc {method}(")))
+        .collect();
+
+    assert!(
+        still_there.is_empty(),
+        "these moved to session_files.SessionFilesService / \
+         terminal_session.TerminalSessionService but are still on connection.ConnectionService: \
+         {still_there:?}"
+    );
+}
+
+const CONVERTED_MESSAGES: [&str; 2] = [
+    "connection::SessionTerminalInput",
+    "connection::SessionTerminalOutput",
+];
+
+/// The crate publishing the message set the converters were replaced by, named by both swept trees.
+///
+/// It is the positive control: a sweep that finds no mention of it swept somewhere that is not the
+/// terminal code, so its own absence finding means nothing.
+const TERMINAL_RPC_CRATE: &str = "tddy_terminal_rpc";
+
+/// Every hand-written converter goes. Keeping one would leave three message shapes for one stream —
+/// `connection.*`, `terminal_session.*`, and the converter between them — inside the service whose
+/// whole purpose is to be the single terminal surface.
+///
+/// **Both message names, across both crates that held a converter.** The narrow first version of
+/// this test looked for `connection::SessionTerminalInput` under `tddy-daemon/src` alone, which a
+/// deleted doc comment would have satisfied: it never saw `to_connection_output`, the daemon's
+/// second converter, nor the four inline ones in `tddy-coder`'s participant.
+///
+/// Scoped to Rust sources (see [`rust_sources_under`]), which is also what keeps `sandbox.proto`'s
+/// terminal frame out of it: that frame is the sandbox's own message now, and even while it was
+/// `connection.SessionTerminalOutput` the reference was a `.proto` field type rather than a Rust
+/// conversion — a needle a `.rs`-only walk cannot reach.
+#[test]
+fn no_source_converts_between_the_two_terminal_message_sets() {
+    // Given
+    let package = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let converter_free = ["../tddy-daemon/src", "../tddy-coder/src"]
+        .map(|crate_src| rust_sources_under(&package.join(crate_src)));
+    for sources in &converter_free {
+        sources.assert_reaches_the_terminal_code();
+    }
+
+    // When
+    let hits: Vec<String> = converter_free
+        .iter()
+        .flat_map(|sources| {
+            CONVERTED_MESSAGES
+                .iter()
+                .flat_map(|needle| sources.naming(needle))
+        })
+        .collect();
+
+    // Then
+    assert!(
+        hits.is_empty(),
+        "these still name a connection.* terminal message, which only a converter between it and \
+         terminal_session.* can be doing: {hits:?}"
+    );
+}
+
+/// Every `.rs` file under one crate's `src`, read once, with its text.
+///
+/// `.rs` only, deliberately: the names this looks for are also legitimate `.proto` field types, and
+/// a walk that read those would fail on a declaration rather than on a conversion.
+///
+/// Nothing about the reading is tolerated silently. A directory that is not there and a file that
+/// cannot be read both panic, because this backs an *absence* assertion: a sweep that quietly saw
+/// nothing reports zero converters exactly as loudly as a tree that has none, and one renamed crate
+/// directory would turn the completion criterion for this node into a test that passes by looking
+/// at nothing.
+struct RustSources {
+    root: PathBuf,
+    files: Vec<(PathBuf, String)>,
+}
+
+fn rust_sources_under(dir: &Path) -> RustSources {
+    let mut files = Vec::new();
+    collect_rust_sources(dir, &mut files);
+    RustSources {
+        root: dir.to_path_buf(),
+        files,
+    }
+}
+
+fn collect_rust_sources(dir: &Path, into: &mut Vec<(PathBuf, String)>) {
+    let entries = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{} is a readable directory: {e}", dir.display()));
+    for entry in entries {
+        let path = entry
+            .unwrap_or_else(|e| panic!("{} lists its entries: {e}", dir.display()))
+            .path();
+        if path.is_dir() {
+            collect_rust_sources(&path, into);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("{} is a readable Rust source: {e}", path.display()));
+            into.push((path, text));
+        }
+    }
+}
+
+impl RustSources {
+    /// The swept files whose text contains `needle`.
+    fn naming(&self, needle: &str) -> Vec<String> {
+        self.files
+            .iter()
+            .filter(|(_, text)| text.contains(needle))
+            .map(|(path, _)| path.display().to_string())
+            .collect()
+    }
+
+    fn assert_reaches_the_terminal_code(&self) -> &Self {
+        assert!(
+            !self.naming(TERMINAL_RPC_CRATE).is_empty(),
+            "swept {} .rs file(s) under {} and not one named {TERMINAL_RPC_CRATE}: this is not \
+             the terminal code, so an absence found in it is an absence of the sweep rather than \
+             of a converter",
+            self.files.len(),
+            self.root.display()
+        );
+        self
     }
 }

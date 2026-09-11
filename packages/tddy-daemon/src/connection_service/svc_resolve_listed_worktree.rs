@@ -422,7 +422,7 @@ impl ConnectionServiceImpl {
         self.session_rooms
             .ensure_open(
                 &hosting,
-                tddy_service::ConnectionServiceServer::new(self.clone()),
+                std::sync::Arc::new(self.clone()).session_room_roster(),
                 self,
             )
             .await

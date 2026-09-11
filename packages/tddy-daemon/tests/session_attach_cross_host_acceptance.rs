@@ -22,7 +22,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{Stream, StreamExt};
-use livekit::prelude::RoomOptions;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
@@ -31,16 +30,19 @@ use tddy_daemon::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_daemon::test_util::{wait_until_peer_discovered, TEST_TOKEN};
-use tddy_livekit::LiveKitParticipant;
+use tddy_daemon::test_util::{self, wait_until_peer_discovered, TEST_TOKEN};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent,
     AttachmentMaterializationProgress, ConnectionService as ConnectionServiceTrait,
-    HostDocumentChunk, HostDocumentScope, ReadHostDocumentRequest, SessionAttachment,
-    StagedAttachmentRef, StartSessionRequest, UploadStagedAttachmentChunkRequest,
+    SessionAttachment, StagedAttachmentRef, StartSessionRequest,
 };
+use tddy_service::proto::session_files::{
+    HostDocumentChunk, ReadHostDocumentRequest, SessionFilesService as SessionFilesServiceTrait,
+    UploadStagedAttachmentChunkRequest,
+};
+use tddy_service::proto::types::HostDocumentScope;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -132,7 +134,7 @@ fn create_test_repo_with_origin(dir: &Path) {
 /// same common room. The **RPC** participant on `daemon-{instance_id}` is joined separately by
 /// [`serve_rpc_participant`], because that needs the finished service.
 struct Daemon {
-    service: ConnectionServiceImpl,
+    service: Arc<ConnectionServiceImpl>,
     /// Sessions/data root — where a session started on this host puts its attachments.
     sessions_base: PathBuf,
     /// Staging base — where bytes staged *to this host* land.
@@ -182,7 +184,7 @@ async fn a_daemon(
     .with_staging_base_dir(staging.path().to_path_buf());
 
     Daemon {
-        service,
+        service: Arc::new(service),
         sessions_base: sessions.path().to_path_buf(),
         staging_base: staging.path().to_path_buf(),
         _sessions: sessions,
@@ -191,23 +193,23 @@ async fn a_daemon(
     }
 }
 
-/// Joins the common room as `daemon-{instance_id}` serving `ConnectionService` — the identity a
-/// caller must address, and the only one that answers.
+/// Joins the common room as `daemon-{instance_id}` — the identity a caller must address, and the
+/// only one that answers.
+///
+/// Which coordinates it serves is [`test_util::serve_daemon_rpc_participant`]'s answer rather than
+/// this suite's: `StartSession` is still `connection.ConnectionService`'s, while the staging and
+/// host-document RPCs a forward addresses became `session_files.SessionFilesService`'s with
+/// `#unbundle` node 6, and a suite-local list is how one of them stops being served.
 async fn serve_rpc_participant(
     livekit: &LiveKitTestkit,
     ws_url: &str,
     instance_id: &str,
-    service: ConnectionServiceImpl,
+    service: Arc<ConnectionServiceImpl>,
 ) -> tokio::task::JoinHandle<()> {
     let token = livekit
         .generate_token(ROOM, &rpc_identity(instance_id))
         .expect("LiveKit token for a daemon's RPC participant");
-    let server = tddy_service::ConnectionServiceServer::new(service);
-    let participant =
-        LiveKitParticipant::connect(ws_url, &token, server, RoomOptions::default(), None, None)
-            .await
-            .expect("daemon joins the common room as its RPC participant");
-    tokio::spawn(async move { participant.run().await })
+    test_util::serve_daemon_rpc_participant(ws_url, &token, &service).await
 }
 
 /// Blocks until `service` lists `peer_instance_id` as eligible, so a route to it classifies as a
@@ -232,7 +234,7 @@ async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id
 /// able to route to the other: A forwards a session start to B, and B fetches staged bytes back
 /// from A.
 struct TwoDaemons {
-    service_a: ConnectionServiceImpl,
+    service_a: Arc<ConnectionServiceImpl>,
     /// A's sessions/data root — where a session started on A puts its attachments.
     local_base: PathBuf,
     /// A's staging base — where bytes staged on the host the browser is connected to land.
@@ -303,8 +305,9 @@ async fn two_daemons() -> TwoDaemons {
 }
 
 /// Stages one complete file on the peer, by addressing the staging RPC at the peer's instance id.
-async fn stage_on_peer(service_a: &ConnectionServiceImpl, file_name: &str, data: &[u8]) {
+async fn stage_on_peer(service_a: &Arc<ConnectionServiceImpl>, file_name: &str, data: &[u8]) {
     service_a
+        .session_files_service()
         .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: PEER_INSTANCE_ID.to_string(),
@@ -322,6 +325,7 @@ async fn stage_on_peer(service_a: &ConnectionServiceImpl, file_name: &str, data:
 /// they landed, so a test can pin that a session on the peer really had to cross a host boundary.
 async fn stage_on_local(env: &TwoDaemons, file_name: &str, data: &[u8]) -> PathBuf {
     env.service_a
+        .session_files_service()
         .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: String::new(),
@@ -435,16 +439,16 @@ async fn a_forwarded_rpc_to_a_peer_that_stopped_answering_fails_within_its_deadl
     // comfortably longer than the deadline it is checking.
     let outcome = tokio::time::timeout(
         Duration::from_secs(60),
-        env.service_a.upload_staged_attachment_chunk(Request::new(
-            UploadStagedAttachmentChunkRequest {
+        env.service_a
+            .session_files_service()
+            .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
                 session_token: TEST_TOKEN.to_string(),
                 daemon_instance_id: PEER_INSTANCE_ID.to_string(),
                 staging_id: STAGING_ID.to_string(),
                 file_name: "unreachable.md".to_string(),
                 data: b"never arrives".to_vec(),
                 last: true,
-            },
-        )),
+            })),
     )
     .await
     .expect("the forward must return within its own deadline rather than hang");
@@ -521,6 +525,7 @@ async fn a_cross_host_staged_ref_whose_upload_never_completed_is_refused_and_wri
     // Given — a chunk staged on the peer that was never finalized
     let env = two_daemons().await;
     env.service_a
+        .session_files_service()
         .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: PEER_INSTANCE_ID.to_string(),
@@ -589,6 +594,7 @@ async fn stream_read_host_document_forwards_to_the_peer_that_owns_the_document()
     let mut stream = tokio::time::timeout(
         Duration::from_secs(30),
         env.service_a
+            .session_files_service()
             .stream_read_host_document(Request::new(peer_staged_document_request(&format!(
                 "{STAGING_ID}/big-remote.bin"
             )))),

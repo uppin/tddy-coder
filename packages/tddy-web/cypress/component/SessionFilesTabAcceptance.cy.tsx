@@ -9,15 +9,11 @@
 
 import React from "react";
 import { createClient } from "@connectrpc/connect";
-import { create } from "@bufbuild/protobuf";
-import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import {
-  ConnectionService,
-  ListSessionUploadsResponseSchema,
-  DeleteSessionUploadResponseSchema,
-} from "../../src/gen/connection_pb";
+import { type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { SessionFilesTab } from "../../src/components/sessions/SessionFilesTab";
 import { mountWithRpc } from "../support/rpc/inMemory";
+import { aSessionFilesServiceBackend } from "../support/rpc/sessionFilesServiceBackend";
 import { sessionFilesTabPage as page } from "../support/pages/sessionFilesTabPage";
 import { HOST_PATH_MIME } from "../support/util/fileDrop";
 
@@ -45,21 +41,12 @@ function anUpload(overrides: Partial<Upload> = {}): Upload {
 }
 
 /**
- * A stateful backend: `ListSessionUploads` returns the current set, `DeleteSessionUpload` removes
- * the matching entry — so a delete followed by a reload drops the row (a fake, not a mock).
+ * A stateful `session_files.SessionFilesService`: `ListSessionUploads` returns the current set,
+ * `DeleteSessionUpload` removes the matching entry — so a delete followed by a reload drops the row
+ * (a fake, not a mock). The statefulness is the shared fake's; this only names the starting set.
  */
 function anUploadsBackend(initial: Upload[]): InMemoryRpcBackend {
-  let uploads = [...initial];
-  return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listSessionUploads, () =>
-      create(ListSessionUploadsResponseSchema, { uploads }),
-    )
-    .onUnary(ConnectionService.method.deleteSessionUpload, (req) => {
-      uploads = uploads.filter(
-        (u) => !(u.uploadId === req.uploadId && u.fileName === req.fileName),
-      );
-      return create(DeleteSessionUploadResponseSchema, {});
-    });
+  return aSessionFilesServiceBackend({ uploads: initial }).backend;
 }
 
 function mountTab(
@@ -69,7 +56,7 @@ function mountTab(
     onCloseInspector: Cypress.Agent<sinon.SinonStub>;
   },
 ) {
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(SessionFilesService, backend.transport());
   mountWithRpc(
     <SessionFilesTab
       client={client}
@@ -160,7 +147,7 @@ describe("Session Inspector — Files tab", () => {
 
     // Then — nothing is deleted yet
     cy.wrap(null).should(() => {
-      expect(backend.callsTo(ConnectionService.method.deleteSessionUpload)).to.have.length(0);
+      expect(backend.callsTo(SessionFilesService.method.deleteSessionUpload)).to.have.length(0);
     });
 
     // When — the confirm step is pressed
@@ -168,7 +155,7 @@ describe("Session Inspector — Files tab", () => {
 
     // Then — exactly one delete for this file, addressed by upload id + name, and the row is gone
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.deleteSessionUpload);
+      const calls = backend.callsTo(SessionFilesService.method.deleteSessionUpload);
       expect(calls).to.have.length(1);
       expect(calls[0].uploadId).to.equal("upload-aaaa");
       expect(calls[0].fileName).to.equal("report.pdf");

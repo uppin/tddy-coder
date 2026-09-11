@@ -8,7 +8,7 @@
  *  A. Wire contract — every `SendTerminalInput` the terminal emits carries a cumulative byte
  *     offset: for consecutive calls `offset[i] == offset[i-1] + data[i].length`, and the first
  *     call's offset equals its own byte length. Exercised through the real `GrpcSessionTerminal`
- *     against an in-memory ConnectionService backend.
+ *     against an in-memory TerminalSessionService backend.
  *
  *  B. Overlay timing / collapse — through the real `useEnqueuedInput` hook: the overlay appears
  *     only after 500ms without an ACK, collapses from the front as prefix offsets are ACKed
@@ -21,9 +21,9 @@ import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
-  ConnectionService,
   SendTerminalInputResponseSchema,
-} from "../../src/gen/connection_pb";
+  TerminalSessionService,
+} from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { useEnqueuedInput } from "../../src/components/sessions/useEnqueuedInput";
 import { EnqueuedInputOverlay } from "../../src/components/connection/EnqueuedInputOverlay";
@@ -37,10 +37,10 @@ import { byTestId, TEST_IDS } from "../support/testIds";
 /** Backend that records SendTerminalInput and keeps the output stream open (no ACKs). */
 function aRecordingBackend() {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.sendTerminalInput, () =>
+    .onUnary(TerminalSessionService.method.sendTerminalInput, () =>
       create(SendTerminalInputResponseSchema, {}),
     )
-    .implement(ConnectionService, {
+    .implement(TerminalSessionService, {
       // Long-lived, silent output stream — Part A asserts only on what the client sends.
       // eslint-disable-next-line require-yield
       async *streamTerminalOutput() {
@@ -53,7 +53,7 @@ describe("Terminal input offset — wire contract", () => {
   it("sends a cumulative byte offset on each SendTerminalInput", () => {
     // Given — a connected terminal whose input flows over the in-memory backend
     const backend = aRecordingBackend();
-    const client = createClient(ConnectionService, backend.transport());
+    const client = createClient(TerminalSessionService, backend.transport());
 
     cy.mount(
       <UploadProgressProvider>
@@ -78,12 +78,12 @@ describe("Terminal input offset — wire contract", () => {
     // Then — offsets are the running byte total of everything sent (keystrokes + any resize OSC)
     cy.wrap(backend)
       .should((b) => {
-        const calls = b.callsTo(ConnectionService.method.sendTerminalInput);
+        const calls = b.callsTo(TerminalSessionService.method.sendTerminalInput);
         // wait until the three keystrokes have been recorded
         expect(calls.length).to.be.greaterThan(2);
       })
       .then((b: ReturnType<typeof aRecordingBackend>) => {
-        const calls = b.callsTo(ConnectionService.method.sendTerminalInput);
+        const calls = b.callsTo(TerminalSessionService.method.sendTerminalInput);
         expect(Number(calls[0].inputOffset)).to.equal(calls[0].data.length);
         for (let i = 1; i < calls.length; i++) {
           expect(Number(calls[i].inputOffset)).to.equal(
