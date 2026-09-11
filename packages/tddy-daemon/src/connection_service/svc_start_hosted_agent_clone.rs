@@ -198,18 +198,18 @@ impl ConnectionServiceImpl {
     pub(crate) async fn forward_open_agent_conversation(
         &self,
         req: &OpenAgentConversationRequest,
-        record: &tddy_core::SessionAgentRecord,
+        owner: &str,
         conversation_id: &str,
     ) -> Result<(), Status> {
         let slot = self.common_room_slot("OpenAgentConversation")?;
         let forwarded = OpenAgentConversationRequest {
             conversation_id: conversation_id.to_string(),
-            daemon_instance_id: record.daemon_instance_id.clone(),
+            daemon_instance_id: owner.to_string(),
             ..req.clone()
         };
         let answered = crate::livekit_peer_discovery::forward_to_peer(
             slot,
-            &record.daemon_instance_id,
+            owner,
             "connection.ConnectionService",
             "OpenAgentConversation",
             forwarded.encode_to_vec(),
@@ -219,9 +219,10 @@ impl ConnectionServiceImpl {
             .map_err(|e| Status::internal(format!("decode OpenAgentConversationResponse: {e}")))?;
         if opened.conversation_id != conversation_id {
             return Err(Status::internal(format!(
-                "daemon '{}' opened conversation {:?} instead of the requested {conversation_id:?}, \
-                 so a prompt to it could not be routed and a cancel could not name it",
-                record.daemon_instance_id, opened.conversation_id
+                "daemon '{owner}' opened conversation {:?} instead of the requested \
+                 {conversation_id:?}, so a prompt to it could not be routed and a cancel could not \
+                 name it",
+                opened.conversation_id
             )));
         }
         Ok(())
@@ -399,15 +400,9 @@ impl ConnectionServiceImpl {
 
     /// Record what a roster agent is doing, and push the roster that says so.
     ///
-    /// Recorded and republished together, never separately. A status change does not move `rev` —
-    /// the roster itself did not change, only what one of its agents is doing — so a subscriber that
-    /// heard about `rev` changes alone would show the state an agent was in when it was attached
-    /// until the next attach, which may never come. This is the same reason
-    /// [`crate::session_agent_roster::SessionAgentRosterStore::republish`] exists for clone reports.
-    ///
-    /// A conversation opened for a *peer's* session records nothing: the roster naming that agent is
-    /// on the daemon facilitating it, and a status recorded against a session this daemon only holds
-    /// a clone for is one nothing will ever read.
+    /// One rule, in `tddy-session-agents`: the nine family-B handlers set the same badges, and two
+    /// copies would let a status set on this path — the local agent's own tool dispatch, the only
+    /// place this daemon sees a loop *enter* a tool call — disagree with one set on theirs.
     pub(crate) fn note_agent_activity(
         &self,
         session_id: &str,
@@ -416,42 +411,14 @@ impl ConnectionServiceImpl {
         state: crate::session_agent_status::ManagedAgentState,
         summary: impl AsRef<str>,
     ) {
-        if self.hosted_clone_for(session_id).is_some() {
-            return;
-        }
-        self.session_agent_rosters
-            .activity()
-            .record(session_id, agent_id, state, summary);
-        self.republish_roster_quietly(session_id, session_dir, agent_id);
-    }
-
-    /// Push the roster after a status change, and never fail the call that caused it.
-    ///
-    /// Non-fatal on purpose: the status is a display signal, and failing the turn it decorates would
-    /// trade a stale badge for a broken conversation.
-    ///
-    /// `republish` alone, deliberately — not [`Self::publish_roster_change`], which also broadcasts
-    /// the snapshot into the session room. Both consumers that act on a status follow
-    /// `StreamSessionAgents`, which `republish` feeds: the roster pane and the in-jail registry. The
-    /// room broadcast exists for participants rebuilding a registry from whole snapshots, and a
-    /// status ticks on **every tool call** — putting a whole roster on the room for each one would
-    /// spend the room's bandwidth on a badge, and `rev` has not moved, so nothing those
-    /// participants act on has changed.
-    pub(crate) fn republish_roster_quietly(
-        &self,
-        session_id: &str,
-        session_dir: &Path,
-        agent_id: &str,
-    ) {
-        if let Err(e) = self
-            .session_agent_rosters
-            .republish(session_id, session_dir)
-        {
-            log::debug!(
-                "could not republish the roster of session {session_id} after '{agent_id}' changed \
-                 status ({})",
-                e.message()
-            );
-        }
+        tddy_session_agents::note_agent_activity(
+            &self.session_agent_rosters,
+            self.hosted_clone_for(session_id).is_some(),
+            session_id,
+            session_dir,
+            agent_id,
+            state,
+            summary,
+        );
     }
 }

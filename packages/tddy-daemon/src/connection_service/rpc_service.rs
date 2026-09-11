@@ -26,11 +26,7 @@ use tddy_service::proto::connection::{
     ProjectEntry as ProtoProjectEntry,
 };
 use tddy_service::proto::connection::{
-    AgentActivityRecord as ProtoAgentActivityRecord, StreamMode, StreamSessionNotificationsRequest,
-};
-use tddy_service::proto::connection::{
-    DeltaScope as ProtoDeltaScope, ExecuteToolChunk, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse,
+    AgentActivityRecord as ProtoAgentActivityRecord, StreamSessionNotificationsRequest,
 };
 use tddy_service::proto::connection::{
     DemoVmState, GetDemoVmStatusRequest, GetDemoVmStatusResponse, ReportAgentActivityRequest,
@@ -38,14 +34,24 @@ use tddy_service::proto::connection::{
     StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
     StreamSessionActivityRequest, ToolCallInfo as ProtoToolCallInfo,
 };
+use tddy_service::proto::connection::{
+    ExecuteToolChunk, ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse,
+};
 
 use crate::{
-    connection_service::{
-        activity_hub, agent_roster, hooks_and_urls, seed_codebase, seeded_clone_guard, service_util,
-    },
+    connection_service::{activity_hub, agent_roster, hooks_and_urls, service_util},
     project_storage, session_deletion, session_list_enrichment, session_reader,
 };
 use tddy_spawn::{spawn_worker, spawner};
+
+use tddy_service::proto::activity::ActivityService as _;
+use tddy_service::proto::session_agents_svc::SessionAgentService as _;
+
+use super::svc_old_coordinate_shim::{
+    activity_record_at_the_old_coordinate, relayed_onto_this_coordinate,
+    roster_at_the_old_coordinate,
+};
 
 use super::base_sync_unavailable;
 
@@ -57,22 +63,6 @@ use super::worktree_leg;
 
 use super::require_pr_stack_orchestrator;
 
-use super::seq_by_tool_call;
-
-use super::relay_acp_replay;
-
-use super::acp_replay_frame;
-
-use super::relay_acp_replay_count;
-
-use super::MpscAcpReplayStream;
-
-use super::relay_session_notifications;
-
-use super::MpscSessionNotificationStream;
-
-use super::MpscAgentActivityStream;
-
 use super::exec_tool_result_frames;
 
 use super::reject_exec_tool_path_traversal;
@@ -80,12 +70,6 @@ use super::reject_exec_tool_path_traversal;
 use tddy_service::proto::connection::ListProjectBranchesResponse;
 
 use tddy_service::proto::connection::ListProjectBranchesRequest;
-
-use super::activity_delta_frames;
-
-use tddy_daemon_livekit::session_room::DeltaLookupError;
-
-use tddy_daemon_livekit::session_room::DeltaScope;
 
 use tddy_service::proto::connection::DeleteSessionResponse;
 
@@ -154,8 +138,6 @@ use tddy_service::proto::connection::ListSessionsRequest;
 use tddy_service::proto::connection::CancelAgentConversationResponse;
 
 use tddy_service::proto::connection::CancelAgentConversationRequest;
-
-use super::agent_conversation_frames;
 
 use tddy_service::proto::connection::PromptAgentConversationRequest;
 
@@ -226,13 +208,6 @@ use tddy_service::proto::connection::ListToolsRequest;
 use tddy_rpc::Request;
 
 use super::ConnectionServiceImpl;
-
-/// The coordinate a peer forward from this service is addressed at.
-///
-/// Named rather than repeated because it is no longer the only one a handler here forwards to:
-/// `#unbundle` node 6 moved the session-file and terminal families off this service, so a forward
-/// must say which coordinate answers it (see [`ConnectionServiceImpl::stream_served_by_peer`]).
-const CONNECTION_SERVICE: &str = "connection.ConnectionService";
 
 #[async_trait::async_trait]
 impl ConnectionServiceTrait for ConnectionServiceImpl {
@@ -417,697 +392,198 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     /// written. Every step before the write is one that must not happen for a caller who turns out
     /// not to be allowed — resolving a remote id contacts a peer and provisions a checkout on it
     /// (PRD AC12).
+    /// Family B moved to `session_agents.SessionAgentService` in `#unbundle` node 7. This
+    /// coordinate keeps answering all nine by delegating to that surface — the routed one, so a
+    /// request naming another daemon is served there exactly as it was here.
+    ///
+    /// Every one of the nine below is this shape: re-address the request to the new coordinate,
+    /// hand it to [`ConnectionServiceImpl::session_agents_service`], and re-address the answer
+    /// back. The two messages are field-for-field identical, so the re-addressing is a relabelling
+    /// rather than a mapping; it exists only because the two coordinates are two generated types.
+    ///
+    /// TODO(session-agent-services): the whole block goes when this coordinate stops declaring
+    /// these nine rpcs, which is the next milestone. Nothing new should be added to it.
     async fn attach_session_agent(
         &self,
         request: Request<AttachSessionAgentRequest>,
     ) -> Result<Response<SessionAgentRoster>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        // Route BEFORE session lookup so a split session's roster is written where it is kept.
-        if let Some(roster) = self
-            .rpc_served_by_peer("AttachSessionAgent", &req.daemon_instance_id, &req)
+        let roster = self
+            .session_agents_surface()
+            .attach_session_agent(Request::new(
+                tddy_service::proto::session_agents_svc::AttachSessionAgentRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                    agent_id: req.agent_id,
+                },
+            ))
             .await?
-        {
-            return Ok(Response::new(roster));
-        }
-
-        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
-        let mut record = self.roster_record_for_agent_id(&req.agent_id).await?;
-        let codebase = seed_codebase::SeedCodebase::read(&req.session_id, &session_dir)?;
-        agent_roster::refuse_unenforceable_withdrawal(&req.session_id, &codebase, &record)?;
-        // An agent owned by a peer reads a checkout on that peer, so the entry has to name one
-        // before it is written. Claiming it is also what opens the session's room — and both happen
-        // before the roster is touched, so an attach that cannot be completed leaves the session
-        // looking exactly as it did (PRD § What attach does: "no roster entry, no half-built clone,
-        // no room membership").
-        let mut claimed = None;
-        if record.daemon_instance_id != local_instance_id_for_config(&self.config) {
-            let clone = self
-                .claim_agent_clone(
-                    &req.session_id,
-                    &codebase,
-                    &record.daemon_instance_id,
-                    &req.session_token,
-                )
-                .await?;
-            record.codebase_session_id = Some(clone.codebase_session_id.clone());
-            claimed = Some((record.daemon_instance_id.clone(), clone));
-        }
-        // A roster this daemon could not write is an attach that did not happen, and the clone
-        // claimed a moment ago is the half of it the peer has already been told to build: without
-        // this the caller would be handed an error while a checkout it can no longer name kept being
-        // cut on another host ("no roster entry, no half-built clone, no room membership").
-        let roster = match self
-            .session_agent_rosters
-            .attach(&req.session_id, &session_dir, record)
-        {
-            Ok(roster) => roster,
-            Err(e) => {
-                if let Some((daemon_instance_id, clone)) = claimed {
-                    self.unwind_agent_clone_claim(
-                        &req.session_id,
-                        &daemon_instance_id,
-                        &clone,
-                        &req.session_token,
-                    )
-                    .await;
-                }
-                return Err(e);
-            }
-        };
-        self.broadcast_roster(&req.session_id, &roster).await;
-        log::info!(
-            "AttachSessionAgent: session {} holds {} agent(s) at rev {}",
-            req.session_id,
-            roster.agents.len(),
-            roster.rev
-        );
-        Ok(Response::new(roster))
+            .into_inner();
+        Ok(Response::new(roster_at_the_old_coordinate(roster)))
     }
 
-    /// Detach one agent. An id the roster does not hold is `NOT_FOUND`, never a silent success.
-    ///
-    /// The entry is removed first and the checkout torn down after, in that order: a teardown that
-    /// ran first and then failed to remove the entry would leave the roster naming a checkout that
-    /// is gone, which is the state a prompt is served from.
     async fn detach_session_agent(
         &self,
         request: Request<DetachSessionAgentRequest>,
     ) -> Result<Response<SessionAgentRoster>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        // Route BEFORE session lookup: a detach served here leaves the entry standing on the daemon
-        // whose roster actually holds it.
-        if let Some(roster) = self
-            .rpc_served_by_peer("DetachSessionAgent", &req.daemon_instance_id, &req)
+        let roster = self
+            .session_agents_surface()
+            .detach_session_agent(Request::new(
+                tddy_service::proto::session_agents_svc::DetachSessionAgentRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                    agent_id: req.agent_id,
+                },
+            ))
             .await?
-        {
-            return Ok(Response::new(roster));
-        }
-
-        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
-        let detached =
-            self.session_agent_rosters
-                .entry(&req.session_id, &session_dir, &req.agent_id)?;
-        let roster =
-            self.session_agent_rosters
-                .detach(&req.session_id, &session_dir, &req.agent_id)?;
-        self.cancel_conversations_with(&req.session_token, &req.session_id, &req.agent_id)
-            .await;
-        self.forget_agent_activity(&req.session_id, &req.agent_id);
-
-        // The clone survives while another agent on that host still reads it — two agents on one
-        // host share one checkout, so the last one out is what removes it.
-        if let Some(record) = detached.filter(|r| r.codebase_session_id.is_some()) {
-            let still_used = !self
-                .session_agent_rosters
-                .agents_owned_by(&req.session_id, &session_dir, &record.daemon_instance_id)?
-                .is_empty();
-            if !still_used {
-                let codebase_session_id = record
-                    .codebase_session_id
-                    .clone()
-                    .expect("filtered to entries naming a clone");
-                // The entry is already gone and persisted by now, so the refusal says so: a message
-                // that read as "the agent was left attached, retry" would send an operator into a
-                // retry that answers NOT_FOUND while the checkout stays exactly where it is.
-                if let Err(e) = self
-                    .tear_down_agent_clone(
-                        &req.session_id,
-                        &record.daemon_instance_id,
-                        &codebase_session_id,
-                        &req.session_token,
-                    )
-                    .await
-                {
-                    self.broadcast_roster(&req.session_id, &roster).await;
-                    return Err(Status {
-                        code: e.code(),
-                        message: format!(
-                            "agent '{}' was detached from session '{}' (rev {}), but its clone \
-                             could not be removed: {}. Retrying the detach reports NOT_FOUND — the \
-                             checkout has to be deleted where it is.",
-                            req.agent_id,
-                            req.session_id,
-                            roster.rev,
-                            e.message()
-                        ),
-                    });
-                }
-            }
-        }
-
-        self.broadcast_roster(&req.session_id, &roster).await;
-        log::info!(
-            "DetachSessionAgent: session {} holds {} agent(s) at rev {}",
-            req.session_id,
-            roster.agents.len(),
-            roster.rev
-        );
-        Ok(Response::new(roster))
+            .into_inner();
+        Ok(Response::new(roster_at_the_old_coordinate(roster)))
     }
 
     async fn list_session_agents(
         &self,
         request: Request<ListSessionAgentsRequest>,
     ) -> Result<Response<SessionAgentRoster>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        // Route BEFORE session lookup: answered locally, a session that lives on another daemon reads
-        // as one with no agents — an answer about the wrong host, indistinguishable from the truth.
-        if let Some(roster) = self
-            .rpc_served_by_peer("ListSessionAgents", &req.daemon_instance_id, &req)
+        let roster = self
+            .session_agents_surface()
+            .list_session_agents(Request::new(
+                tddy_service::proto::session_agents_svc::ListSessionAgentsRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                },
+            ))
             .await?
-        {
-            return Ok(Response::new(roster));
-        }
-
-        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
-        Ok(Response::new(
-            self.session_agent_rosters
-                .snapshot(&req.session_id, &session_dir)?,
-        ))
+            .into_inner();
+        Ok(Response::new(roster_at_the_old_coordinate(roster)))
     }
 
     type StreamSessionAgentsStream = MpscResultStream<SessionAgentRoster>;
 
-    /// The roster, now and on every change.
-    ///
-    /// The first frame is the current snapshot, taken with the subscription under one lock, so a
-    /// late subscriber — the in-jail `tddy-tools` reconnecting, a browser tab opening — needs no
-    /// separate priming read and cannot miss a change published between the two.
     async fn stream_session_agents(
         &self,
         request: Request<StreamSessionAgentsRequest>,
     ) -> Result<Response<Self::StreamSessionAgentsStream>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        // Route BEFORE session lookup. This is the call a split session's in-jail `tddy-tools` makes
-        // first, and the daemon it addresses is not the one keeping the roster it subscribes to.
-        if let Some(rx) = self
-            .stream_served_by_peer(
-                CONNECTION_SERVICE,
-                "StreamSessionAgents",
-                &req.daemon_instance_id,
-                &req,
-            )
+        let frames = self
+            .session_agents_surface()
+            .stream_session_agents(Request::new(
+                tddy_service::proto::session_agents_svc::StreamSessionAgentsRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                },
+            ))
             .await?
-        {
-            return Ok(Response::new(MpscResultStream { rx }));
-        }
-
-        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
-        let (snapshot, mut published) = self
-            .session_agent_rosters
-            .subscribe(&req.session_id, &session_dir)?;
-
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        // The roster this subscription has last sent, re-sent whenever the keepalive cadence elapses
-        // with nothing published. See [`ROSTER_KEEPALIVE_INTERVAL`] for why a quiet roster still has
-        // to talk. It tracks the last frame *sent* rather than the opening snapshot, so a subscriber
-        // that reads only a keepalive is never told a superseded roster is the current one.
-        let mut last_sent = snapshot.clone();
-        if tx.send(Ok(snapshot)).is_err() {
-            return Err(Status::internal(
-                "StreamSessionAgents: the subscriber went away before its first frame",
-            ));
-        }
-        let session_id = req.session_id.clone();
-        let keepalive = self.roster_keepalive_interval;
-        tokio::spawn(async move {
-            loop {
-                match tokio::time::timeout(keepalive, published.recv()).await {
-                    Ok(Ok(roster)) => {
-                        last_sent = roster.clone();
-                        if tx.send(Ok(roster)).is_err() {
-                            break;
-                        }
-                    }
-                    // Every frame is a whole roster, so a subscriber that fell behind is brought
-                    // fully current by the next one — the dropped frames carried nothing the
-                    // survivor does not also carry.
-                    Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(missed))) => {
-                        log::debug!(
-                            "StreamSessionAgents: subscriber to session {session_id} fell {missed} \
-                             snapshot(s) behind; the next one supersedes them"
-                        );
-                    }
-                    Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => break,
-                    // Nothing changed for a whole cadence. Re-send, which also gives this task its
-                    // only chance to notice a subscriber that went away: without a frame to fail on,
-                    // it would park on a roster nobody changes for the life of the process.
-                    Err(_) => {
-                        if tx.send(Ok(last_sent.clone())).is_err() {
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-        Ok(Response::new(MpscResultStream { rx }))
+            .into_inner();
+        Ok(Response::new(relayed_onto_this_coordinate(
+            frames,
+            roster_at_the_old_coordinate,
+        )))
     }
 
-    /// Open a conversation with one roster agent.
-    ///
-    /// A local entry gets a turn loop in this process; a remote entry gets a routing record and the
-    /// same call forwarded to its owning daemon. The caller cannot tell which happened, which is the
-    /// property that makes remote agents usable at all (PRD AC28).
-    ///
-    /// A clone that is still being built refuses the open naming its state. Queuing it would make a
-    /// 90-second `git clone` look like a hung agent, and serving it would read an empty checkout and
-    /// report "not found" for a file that is simply not there yet (AC33).
     async fn open_agent_conversation(
         &self,
         request: Request<OpenAgentConversationRequest>,
     ) -> Result<Response<OpenAgentConversationResponse>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        // Route BEFORE session lookup: the conversation is opened against the roster, so it opens on
-        // the daemon holding it. Distinct from the forward further down, which follows the *agent's*
-        // owning daemon once the roster entry naming it has been read.
-        if let Some(opened) = self
-            .rpc_served_by_peer("OpenAgentConversation", &req.daemon_instance_id, &req)
+        let opened = self
+            .session_agents_surface()
+            .open_agent_conversation(Request::new(
+                tddy_service::proto::session_agents_svc::OpenAgentConversationRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                    agent_id: req.agent_id,
+                    conversation_id: req.conversation_id,
+                },
+            ))
             .await?
-        {
-            return Ok(Response::new(opened));
-        }
-
-        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
-        // Caller-chosen where offered, so an open that times out still leaves the caller able to
-        // name — and therefore cancel — whatever this daemon built.
-        let conversation_id = match req.conversation_id.trim().is_empty() {
-            true => Uuid::now_v7().to_string(),
-            false => req.conversation_id.trim().to_string(),
-        };
-
-        // This daemon *owns* the agent: the session is another daemon's, its roster is over there,
-        // and the def is here. Resolving it against a roster this daemon does not hold would report
-        // a session that legitimately is not here as the reason an agent it does own cannot answer.
-        let conversation = match self.hosted_clone_for(&req.session_id) {
-            Some(clone) => seed_codebase::AgentConversation::Local {
-                session_id: req.session_id.clone(),
-                agent_id: req.agent_id.clone(),
-                session: Arc::new(tokio::sync::Mutex::new(
-                    self.open_owned_agent_session(&req.agent_id, &clone).await?,
-                )),
-                closed: Arc::new(tokio::sync::Notify::new()),
-            },
-            None => {
-                let record = self
-                    .session_agent_rosters
-                    .entry(&req.session_id, &session_dir, &req.agent_id)?
-                    .ok_or_else(|| {
-                        Status::invalid_argument(format!(
-                            "agent '{}' is not attached to session '{}'",
-                            req.agent_id, req.session_id
-                        ))
-                    })?;
-                let local_instance_id = local_instance_id_for_config(&self.config);
-                match record.daemon_instance_id == local_instance_id {
-                    true => seed_codebase::AgentConversation::Local {
-                        session_id: req.session_id.clone(),
-                        agent_id: record.agent_id.clone(),
-                        session: Arc::new(tokio::sync::Mutex::new(
-                            self.open_local_agent_session(
-                                &req.session_id,
-                                &session_dir,
-                                &record,
-                                &req.session_token,
-                            )
-                            .await?,
-                        )),
-                        closed: Arc::new(tokio::sync::Notify::new()),
-                    },
-                    false => {
-                        self.refuse_unready_clone(&req.session_id, &record)?;
-                        self.refuse_departed_daemon(&record.daemon_instance_id)
-                            .await?;
-                        self.forward_open_agent_conversation(&req, &record, &conversation_id)
-                            .await?;
-                        seed_codebase::AgentConversation::Remote {
-                            session_id: req.session_id.clone(),
-                            agent_id: record.agent_id.clone(),
-                            daemon_instance_id: record.daemon_instance_id.clone(),
-                        }
-                    }
-                }
-            }
-        };
-        self.agent_conversations
-            .lock()
-            .await
-            .insert(conversation_id.clone(), conversation);
-        // Open, not running: the conversation exists and has been asked nothing. This is also the
-        // first moment an entry stops reporting UNSPECIFIED, which is what a reader needs to tell
-        // "attached and reachable" from "attached, and this daemon has never heard from it".
-        self.note_agent_activity(
-            &req.session_id,
-            &session_dir,
-            &req.agent_id,
-            crate::session_agent_status::ManagedAgentState::Open,
-            "conversation opened",
-        );
+            .into_inner();
         Ok(Response::new(OpenAgentConversationResponse {
-            conversation_id,
+            conversation_id: opened.conversation_id,
         }))
     }
 
     type PromptAgentConversationStream = MpscResultStream<AgentConversationChunk>;
 
-    /// Prompt an open conversation, streaming the agent's answer back.
-    ///
-    /// Both variants end with exactly one `last` frame carrying the stop reason, so a consumer never
-    /// has to distinguish "said nothing" from "nothing arrived", and a stream that ends without one
-    /// was truncated rather than completed.
     async fn prompt_agent_conversation(
         &self,
         request: Request<PromptAgentConversationRequest>,
     ) -> Result<Response<Self::PromptAgentConversationStream>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        // Route BEFORE session lookup, and before the conversation map: a conversation opened on the
-        // daemon holding the roster is not one this daemon can prompt, so served here it would report
-        // "not open" for a conversation that is.
-        if let Some(rx) = self
-            .stream_served_by_peer(
-                CONNECTION_SERVICE,
-                "PromptAgentConversation",
-                &req.daemon_instance_id,
-                &req,
-            )
+        let frames = self
+            .session_agents_surface()
+            .prompt_agent_conversation(Request::new(
+                tddy_service::proto::session_agents_svc::PromptAgentConversationRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                    conversation_id: req.conversation_id,
+                    prompt: req.prompt,
+                },
+            ))
             .await?
-        {
-            return Ok(Response::new(MpscResultStream { rx }));
-        }
-
-        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
-
-        // Everything the turn needs is taken out of the map here, under one lock, and the guard is
-        // dropped before anything is awaited on it. The agent id comes out with it: the request
-        // names a conversation, not an agent, and the status is recorded per agent.
-        let (routing, agent_id) = {
-            let open = self.agent_conversations.lock().await;
-            match open.get(&req.conversation_id) {
-                None => {
-                    return Err(Status::not_found(format!(
-                        "conversation '{}' is not open on session '{}'",
-                        req.conversation_id, req.session_id
-                    )))
+            .into_inner();
+        Ok(Response::new(relayed_onto_this_coordinate(
+            frames,
+            |chunk: tddy_service::proto::session_agents_svc::AgentConversationChunk| {
+                AgentConversationChunk {
+                    content_chunk: chunk.content_chunk,
+                    stop_reason: chunk.stop_reason,
+                    last: chunk.last,
                 }
-                Some(seed_codebase::AgentConversation::Local {
-                    session,
-                    closed,
-                    agent_id,
-                    ..
-                }) => (
-                    seeded_clone_guard::PromptRouting::Local {
-                        session: Arc::clone(session),
-                        closed: Arc::clone(closed),
-                    },
-                    agent_id.clone(),
-                ),
-                Some(seed_codebase::AgentConversation::Remote {
-                    daemon_instance_id,
-                    agent_id,
-                    ..
-                }) => (
-                    seeded_clone_guard::PromptRouting::Remote(daemon_instance_id.clone()),
-                    agent_id.clone(),
-                ),
-            }
-        };
-
-        // Stamped before either branch runs, so the badge changes when the turn starts rather than
-        // when it is first observed to have started.
-        self.note_agent_activity(
-            &req.session_id,
-            &session_dir,
-            &agent_id,
-            crate::session_agent_status::ManagedAgentState::Prompting,
-            format!("prompted: {}", req.prompt),
-        );
-
-        let (session, closed) = match routing {
-            seeded_clone_guard::PromptRouting::Local { session, closed } => (session, closed),
-            seeded_clone_guard::PromptRouting::Remote(daemon_instance_id) => {
-                let slot = self.common_room_slot("PromptAgentConversation")?;
-                self.refuse_departed_daemon(&daemon_instance_id).await?;
-                // Re-addressed to the agent's owning daemon, as the open was. Forwarded still naming
-                // the daemon holding the roster, the peer would route it back here on that axis and
-                // the two would hand the same turn to each other.
-                let forwarded = PromptAgentConversationRequest {
-                    daemon_instance_id: daemon_instance_id.clone(),
-                    ..req.clone()
-                };
-                let rx = crate::livekit_peer_discovery::forward_server_stream_to_peer(
-                    slot,
-                    &daemon_instance_id,
-                    "connection.ConnectionService",
-                    "PromptAgentConversation",
-                    forwarded.encode_to_vec(),
-                    |bytes| {
-                        AgentConversationChunk::decode(bytes.as_slice()).map_err(|e| {
-                            Status::internal(format!(
-                                "decode AgentConversationChunk from peer: {e}"
-                            ))
-                        })
-                    },
-                )
-                .await?;
-                // Relayed rather than handed straight back, for one reason: the roster this daemon
-                // holds is what reports the status, and the end of the peer's stream is the only
-                // moment this side learns the turn is over. Passed through unchanged — the caller
-                // sees the peer's frames in the peer's order, errors included.
-                return Ok(Response::new(MpscResultStream {
-                    rx: self.relay_watching_for_the_turn_to_end(
-                        rx,
-                        &req.session_id,
-                        &session_dir,
-                        &agent_id,
-                    ),
-                }));
-            }
-        };
-
-        // The turn loop runs here. Spawned rather than awaited so the stream's frames are produced
-        // while the caller reads them, and awaited on the *conversation's* lock alone: two prompts on
-        // one conversation are still serialized, but the map of open conversations is not held, so a
-        // cancel can land while this turn is in flight — which is the only moment a cancel matters.
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let conversation_id = req.conversation_id.clone();
-        let prompt = req.prompt.clone();
-        let turn_ended = self.turn_end_reporter(&req.session_id, &session_dir, &agent_id);
-        tokio::spawn(async move {
-            let outcome = tokio::select! {
-                // Biased so a conversation already closed is reported as closed rather than racing
-                // one more turn out of a model.
-                biased;
-                _ = closed.notified() => {
-                    let _ = tx.send(Err(Status::failed_precondition(format!(
-                        "conversation '{conversation_id}' was closed while its turn was in flight"
-                    ))));
-                    return;
-                }
-                outcome = async { session.lock().await.prompt(&prompt).await } => outcome,
-            };
-            match outcome {
-                // Framed rather than sent whole: over LiveKit anything past MAX_CHUNK_FRAME_BYTES is
-                // chunk-framed, and one lost chunk frame wedges the call with no error at all.
-                Ok(outcome) => {
-                    let content = outcome
-                        .content
-                        .iter()
-                        .map(|block| block.text.as_str())
-                        .collect::<Vec<_>>()
-                        .join("");
-                    // Reported after the frames are on the wire, not before: a badge that drops to
-                    // idle while the answer is still arriving is one a reader acts on too early.
-                    let answered = format!("answered ({} chars)", content.chars().count());
-                    for frame in agent_conversation_frames(
-                        &content,
-                        agent_roster::agent_stop_reason(outcome.stop_reason),
-                    ) {
-                        if tx.send(Ok(frame)).is_err() {
-                            // The caller hung up mid-answer. The turn is over either way, and a
-                            // badge left up would strand it.
-                            turn_ended(answered);
-                            return;
-                        }
-                    }
-                    turn_ended(answered);
-                }
-                Err(e) => {
-                    // Idle, not ERROR: the agent is still attached and still promptable, and it is
-                    // the *clone* that ERROR is reserved for. The summary is what says what happened.
-                    turn_ended(format!("turn failed: {e}"));
-                    let _ = tx.send(Err(Status::internal(format!(
-                        "agent conversation '{conversation_id}' failed: {e}"
-                    ))));
-                }
-            }
-        });
-        Ok(Response::new(MpscResultStream { rx }))
+            },
+        )))
     }
 
-    /// Cancel an open conversation. An id nothing holds is `NOT_FOUND`, never a silent success — a
-    /// caller told a turn was cancelled when it is still running would go on to read a stale answer.
     async fn cancel_agent_conversation(
         &self,
         request: Request<CancelAgentConversationRequest>,
     ) -> Result<Response<CancelAgentConversationResponse>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        // Route BEFORE session lookup, and before the conversation map: a cancel that does not reach
-        // the daemon the turn is running on cancels nothing while reporting that it did.
-        if let Some(cancelled) = self
-            .rpc_served_by_peer("CancelAgentConversation", &req.daemon_instance_id, &req)
-            .await?
-        {
-            return Ok(Response::new(cancelled));
-        }
-
-        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
-        let removed = self
-            .agent_conversations
-            .lock()
-            .await
-            .remove(&req.conversation_id);
-        if let Some(conversation) = removed.as_ref() {
-            // Back to "asked nothing", whichever daemon ran the loop: the conversation is gone, so
-            // an agent left reporting a turn in flight would be one nothing can ever finish.
-            self.note_agent_activity(
-                &req.session_id,
-                &session_dir,
-                conversation.agent_id(),
-                crate::session_agent_status::ManagedAgentState::NoConversation,
-                "conversation cancelled",
-            );
-        }
-        match removed {
-            None => Err(Status::not_found(format!(
-                "conversation '{}' is not open on session '{}'",
-                req.conversation_id, req.session_id
-            ))),
-            Some(seed_codebase::AgentConversation::Local { closed, .. }) => {
-                // A turn already in flight is interrupted rather than left to finish: the caller has
-                // been told the conversation is cancelled, and an answer arriving afterwards would
-                // be one it has no reason to expect.
-                closed.notify_one();
-                Ok(Response::new(CancelAgentConversationResponse {}))
-            }
-            Some(seed_codebase::AgentConversation::Remote {
-                daemon_instance_id, ..
-            }) => {
-                let slot = self.common_room_slot("CancelAgentConversation")?;
-                // Re-addressed to the agent's owning daemon, for the reason the prompt forward is: a
-                // request still naming the daemon holding the roster would be routed back here.
-                let forwarded = CancelAgentConversationRequest {
-                    daemon_instance_id: daemon_instance_id.clone(),
-                    ..req.clone()
-                };
-                crate::livekit_peer_discovery::forward_to_peer(
-                    slot,
-                    &daemon_instance_id,
-                    "connection.ConnectionService",
-                    "CancelAgentConversation",
-                    forwarded.encode_to_vec(),
-                )
-                .await?;
-                Ok(Response::new(CancelAgentConversationResponse {}))
-            }
-        }
+        self.session_agents_surface()
+            .cancel_agent_conversation(Request::new(
+                tddy_service::proto::session_agents_svc::CancelAgentConversationRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                    conversation_id: req.conversation_id,
+                },
+            ))
+            .await?;
+        Ok(Response::new(CancelAgentConversationResponse {}))
     }
 
-    /// The owning daemon telling this one how its clone is doing.
-    ///
-    /// Pushed rather than polled because only the daemon holding the checkout can say any of it, and
-    /// accepted only for a clone this daemon actually asked that daemon for — the report is what
-    /// authorizes an entry to start serving prompts.
-    ///
-    /// Authenticated first, and that is not ceremony: the (session, daemon, clone) triple the store
-    /// matches on is published in the session's `session.agents` broadcast, so on the triple alone
-    /// any participant that saw a roster frame could report a still-provisioning clone READY and
-    /// have the next prompt served from an empty checkout.
-    ///
-    /// TODO(session-agent-roster): also bind the report to the *reporting participant*. The verified
-    /// LiveKit participant identity is known at the transport but is not carried into
-    /// `RequestMetadata` — `sender_identity` there is taken from the request envelope, which the
-    /// sender writes itself, so checking `daemon_instance_id` against it would look like a check
-    /// while refusing nothing.
     async fn report_agent_clone_state(
         &self,
         request: Request<tddy_service::proto::connection::ReportAgentCloneStateRequest>,
     ) -> Result<Response<tddy_service::proto::connection::ReportAgentCloneStateResponse>, Status>
     {
-        self.record_rpc_activity();
         let req = request.into_inner();
-        self.roster_session_dir(&req.session_token, &req.session_id)?;
-        let state = tddy_service::proto::connection::AgentCloneState::try_from(req.clone_state)
-            .unwrap_or(tddy_service::proto::connection::AgentCloneState::Unspecified);
-        self.session_agent_clones
-            .record_report(&crate::session_agent_clone::AgentCloneReport {
-                session_id: req.session_id.clone(),
-                daemon_instance_id: req.daemon_instance_id.clone(),
-                codebase_session_id: req.codebase_session_id.clone(),
-                state,
-                error: req.clone_error.clone(),
-                worktree_path: Some(req.worktree_path.clone())
-                    .filter(|p| !p.is_empty())
-                    .map(PathBuf::from),
-                divergences: req.divergences.clone(),
-            })?;
-        log::info!(
-            "ReportAgentCloneState: daemon {} reports session {}'s clone {} as {state:?}{}",
-            req.daemon_instance_id,
-            req.session_id,
-            req.codebase_session_id,
-            match req.divergences.len() {
-                0 => String::new(),
-                n => format!(" with {n} divergence(s)"),
-            }
-        );
-        for divergence in &req.divergences {
-            log::error!(
-                "session {}'s clone on daemon {} diverged and was reconciled: {divergence}",
-                req.session_id,
-                req.daemon_instance_id
-            );
-        }
-        let session_dir = self.session_dir_for(&req.session_id)?;
-        self.publish_roster_change(&req.session_id, &session_dir)
-            .await;
+        self.session_agents_surface()
+            .report_agent_clone_state(Request::new(
+                tddy_service::proto::session_agents_svc::ReportAgentCloneStateRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                    codebase_session_id: req.codebase_session_id,
+                    clone_state: req.clone_state,
+                    clone_error: req.clone_error,
+                    worktree_path: req.worktree_path,
+                    divergences: req.divergences,
+                },
+            ))
+            .await?;
         Ok(Response::new(
             tddy_service::proto::connection::ReportAgentCloneStateResponse {},
         ))
     }
 
-    /// An agent whose turn loop runs in the jail, telling this daemon what that loop is doing.
-    ///
-    /// The daemon infers a status from the conversation RPCs for every agent whose loop it runs. An
-    /// agent the in-jail `tddy-tools` was *seeded* with runs its loop there instead, and this daemon
-    /// is never asked to open anything — so without this report the row would sit at UNSPECIFIED for
-    /// an agent that is demonstrably working.
-    ///
-    /// Three things are checked, and each is a way the roster could otherwise be made to lie:
-    ///
-    /// - **Routed first**, as the conversation RPCs are. The roster is on the facilitating daemon;
-    ///   a report served anywhere else records a status nothing publishes.
-    /// - **The agent must be attached.** An id the roster does not hold is `NOT_FOUND`, so an
-    ///   in-jail registry that has gone stale cannot put a row on a roster an operator emptied.
-    /// - **Only a conversation state is accepted.** `CONNECTING` and `ERROR` describe the checkout,
-    ///   which this daemon measures itself and which outranks the conversation at snapshot time; a
-    ///   reporter allowed to send them could hide a broken clone behind a cheerful conversation.
-    ///
-    /// Authenticated as `ReportAgentCloneState` is, and for the same reason: the (session, agent)
-    /// pair is published in the `session.agents` broadcast, so on the pair alone any participant
-    /// that saw a frame could park an agent at RUNNING for ever.
     async fn report_agent_conversation_state(
         &self,
         request: Request<tddy_service::proto::connection::ReportAgentConversationStateRequest>,
@@ -1115,48 +591,19 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Response<tddy_service::proto::connection::ReportAgentConversationStateResponse>,
         Status,
     > {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        if let Some(acknowledged) = self
-            .rpc_served_by_peer(
-                "ReportAgentConversationState",
-                &req.daemon_instance_id,
-                &req,
-            )
-            .await?
-        {
-            return Ok(Response::new(acknowledged));
-        }
-
-        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
-        if self
-            .session_agent_rosters
-            .entry(&req.session_id, &session_dir, &req.agent_id)?
-            .is_none()
-        {
-            return Err(Status::not_found(format!(
-                "agent '{}' is not attached to session '{}', so there is no row to report on",
-                req.agent_id, req.session_id
-            )));
-        }
-
-        let status = tddy_service::proto::connection::SessionAgentStatus::try_from(req.status)
-            .unwrap_or(tddy_service::proto::connection::SessionAgentStatus::Unspecified);
-        let state = crate::session_agent_status::reported_state(status).ok_or_else(|| {
-            Status::invalid_argument(format!(
-                "{status:?} is not a conversation state: CONNECTING and ERROR describe the \
-                 checkout, which this daemon measures itself, and UNSPECIFIED claims nothing"
+        self.session_agents_surface()
+            .report_agent_conversation_state(Request::new(
+                tddy_service::proto::session_agents_svc::ReportAgentConversationStateRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                    agent_id: req.agent_id,
+                    status: req.status,
+                    summary: req.summary,
+                },
             ))
-        })?;
-
-        self.note_agent_activity(
-            &req.session_id,
-            &session_dir,
-            &req.agent_id,
-            state,
-            &req.summary,
-        );
+            .await?;
         Ok(Response::new(
             tddy_service::proto::connection::ReportAgentConversationStateResponse {},
         ))
@@ -2218,83 +1665,43 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
     type StreamAgentActivityDeltaStream = MpscResultStream<AgentActivityDeltaChunk>;
 
-    /// The tick delta lookup — AC6-AC14 of `docs/ft/daemon/session-worktree-sync.md`.
+    /// Families M and N moved to `activity.ActivityService` in `#unbundle` node 7. This coordinate
+    /// keeps answering all eight by delegating to that surface — the routed one, so a request
+    /// naming another daemon is forwarded (or refused) there exactly as it was here.
     ///
-    /// The delta lives in the session room's store, which is why this is answered from the room
-    /// registry rather than from disk: a patch is a measurement of a live checkout, and the daemon
-    /// hosting that room is the only one that took it.
-    ///
-    /// Authorization comes **first**, before the store is even looked up, for the reason AC14
-    /// gives: an unauthenticated caller must not be able to learn which sessions this daemon hosts
-    /// by reading apart a `NOT_FOUND` from a `PERMISSION_DENIED`.
+    /// TODO(session-agent-services): the eight delegations go when this coordinate stops declaring
+    /// these rpcs, which is the next milestone. Nothing new should be added to them.
     async fn stream_agent_activity_delta(
         &self,
         request: Request<AgentActivityDeltaRequest>,
     ) -> Result<Response<Self::StreamAgentActivityDeltaStream>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-        self.resolve_os_user(&req.session_token)?;
-
-        let call_id = req.call_id.trim();
-        if call_id.is_empty() {
-            return Err(Status::invalid_argument(
-                "call_id is required; there is no whole-worktree delta",
-            ));
-        }
-
-        // A room this daemon does not host has no measurement of that checkout and never will, so
-        // this is an absence rather than a failure — named, so a client can tell "wrong daemon"
-        // from "unknown call".
-        let store = self
-            .session_rooms
-            .delta_store(&req.session_id)
-            .ok_or_else(|| {
-                Status::not_found(format!(
-                    "no session room is hosted here for session {}, so it has no deltas",
-                    req.session_id
-                ))
-            })?;
-
-        let scope = match ProtoDeltaScope::try_from(req.scope).unwrap_or(ProtoDeltaScope::Call) {
-            ProtoDeltaScope::Call => DeltaScope::Call,
-            ProtoDeltaScope::Residual => DeltaScope::Residual,
-            ProtoDeltaScope::Tick => DeltaScope::Tick,
-        };
-
-        let delta = {
-            let store = store
-                .lock()
-                .map_err(|_| Status::internal("session delta store is poisoned"))?;
-            store.delta_for_call(call_id, scope)
-        };
-
-        // Both variants are NOT_FOUND and both carry a distinct message, because the client's
-        // response differs: an unknown call is a defect to report, an aged-out delta is an ordinary
-        // reconcile from the WIP ref. One shared message would make a long mirror's routine
-        // recovery indistinguishable from a bug on one side or the other.
-        let delta = match delta {
-            Ok(delta) => delta,
-            Err(DeltaLookupError::UnknownCall { call_id }) => {
-                return Err(Status::not_found(format!(
-                    "unknown call {call_id}: this daemon has no record of it in session {}",
-                    req.session_id
-                )))
-            }
-            Err(DeltaLookupError::AgedOut { call_id, seq }) => {
-                return Err(Status::not_found(format!(
-                    "delta for call {call_id} (tick {seq}) has aged out of this session's ring; reconcile from the WIP ref"
-                )))
-            }
-        };
-
-        let (tx, rx) =
-            tokio::sync::mpsc::unbounded_channel::<Result<AgentActivityDeltaChunk, Status>>();
-        for frame in activity_delta_frames(&delta) {
-            if tx.send(Ok(frame)).is_err() {
-                break;
-            }
-        }
-        Ok(Response::new(MpscResultStream { rx }))
+        let frames = self
+            .activity_surface()
+            .stream_agent_activity_delta(Request::new(
+                tddy_service::proto::activity::AgentActivityDeltaRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                    call_id: req.call_id,
+                    scope: req.scope,
+                },
+            ))
+            .await?
+            .into_inner();
+        Ok(Response::new(relayed_onto_this_coordinate(
+            frames,
+            |chunk: tddy_service::proto::activity::AgentActivityDeltaChunk| {
+                AgentActivityDeltaChunk {
+                    patch: chunk.patch,
+                    seq: chunk.seq,
+                    prev_seq: chunk.prev_seq,
+                    base_commit: chunk.base_commit,
+                    total_byte_size: chunk.total_byte_size,
+                    scoped_paths: chunk.scoped_paths,
+                }
+            },
+        )))
     }
 
     async fn list_project_branches(
@@ -2637,79 +2044,19 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         request: Request<ReportSessionStatusRequest>,
     ) -> Result<Response<ReportSessionStatusResponse>, Status> {
         let req = request.into_inner();
-
-        // Validate session_id segment to prevent path traversal.
-        tddy_core::validate_session_id_segment(&req.session_id)
-            .map_err(|_| Status::invalid_argument("invalid session_id"))?;
-
-        // Validate status string before any IO.
-        tddy_core::SessionActivityStatus::from_wire(&req.status)
-            .ok_or_else(|| Status::invalid_argument(format!("unknown status: {}", req.status)))?;
-
-        // Resolve sessions_base from os_user (no web session token available for hooks).
-        let sessions_base = crate::user_sessions_path::sessions_base_for_user(
-            &req.os_user,
-            Some(&self.tddy_data_dir),
-        )
-        .ok_or_else(|| Status::not_found("unknown os_user or sessions_base not found"))?;
-
-        let session_dir = tddy_core::unified_session_dir_path(&sessions_base, &req.session_id);
-
-        // Read session metadata — not found if the directory/yaml doesn't exist.
-        let meta = tddy_core::read_session_metadata(&session_dir)
-            .map_err(|_| Status::not_found("session not found"))?;
-
-        // claude-cli and cursor-cli sessions support hook status reporting.
-        let session_type = meta.session_type.as_deref().unwrap_or("");
-        if session_type != "claude-cli" && session_type != "cursor-cli" {
-            return Err(Status::failed_precondition(
-                "session_type is not claude-cli or cursor-cli",
-            ));
-        }
-
-        // Validate hook_token (constant-time string comparison acceptable here — local process).
-        let stored_token = meta.hook_token.as_deref().unwrap_or("");
-        if stored_token != req.hook_token {
-            return Err(Status::permission_denied("invalid hook_token"));
-        }
-
-        // Persist the activity status.
-        tddy_core::update_activity_status(&session_dir, &req.status)
-            .map_err(|e| Status::internal(format!("failed to update activity status: {}", e)))?;
-
-        log::debug!(
-            target: "tddy_daemon::connection_service",
-            "report_session_status: session={} status={}",
-            req.session_id,
-            req.status
-        );
-
-        // One publish, every interested subscriber: Telegram renders the attention-worthy ones,
-        // and the notification stream carries all of them to the drawer's indicators. A subscriber
-        // that fails is logged by the bus and never fails this hook (PRD NFR3).
-        //
-        // The notification names `req.os_user` as its owner — the same user whose sessions
-        // directory the hook token was just checked against — so the stream can hand it to that
-        // operator's clients and to no one else's.
-        if let Some(ref bus) = self.session_notification_bus {
-            let label = crate::session_notifications::resolve_session_label(
-                &sessions_base,
-                &req.session_id,
-            );
-            if let Some(notification) =
-                crate::session_notifications::notification_for_activity_status(
-                    &req.session_id,
-                    &req.os_user,
-                    &label,
-                    &req.status,
-                    tddy_daemon_kernel::now_unix_ms(),
-                )
-            {
-                bus.publish(notification).await;
-            }
-        }
-
-        Ok(Response::new(ReportSessionStatusResponse { ok: true }))
+        let answer = self
+            .activity_surface()
+            .report_session_status(Request::new(
+                tddy_service::proto::activity::ReportSessionStatusRequest {
+                    session_id: req.session_id,
+                    hook_token: req.hook_token,
+                    os_user: req.os_user,
+                    status: req.status,
+                },
+            ))
+            .await?
+            .into_inner();
+        Ok(Response::new(ReportSessionStatusResponse { ok: answer.ok }))
     }
 
     async fn report_agent_activity(
@@ -2717,148 +2064,24 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         request: Request<ReportAgentActivityRequest>,
     ) -> Result<Response<ReportAgentActivityResponse>, Status> {
         let req = request.into_inner();
-
-        // Validate session_id segment to prevent path traversal.
-        tddy_core::validate_session_id_segment(&req.session_id)
-            .map_err(|_| Status::invalid_argument("invalid session_id"))?;
-
-        // Resolve sessions_base from os_user (no web session token available for hooks).
-        let sessions_base = crate::user_sessions_path::sessions_base_for_user(
-            &req.os_user,
-            Some(&self.tddy_data_dir),
-        )
-        .ok_or_else(|| Status::not_found("unknown os_user or sessions_base not found"))?;
-
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-
-        // Read session metadata — not found if the directory/yaml doesn't exist.
-        let meta = tddy_core::read_session_metadata(&session_dir)
-            .map_err(|_| Status::not_found("session not found"))?;
-
-        // Validate hook_token (local-process comparison; the token is a per-session secret).
-        let stored_token = meta.hook_token.as_deref().unwrap_or("");
-        if stored_token != req.hook_token {
-            return Err(Status::permission_denied("invalid hook_token"));
-        }
-
-        // AC1/AC2 of `docs/ft/daemon/session-worktree-sync.md`: the record names the commit it was
-        // made against and the paths it declared, so a consumer holding a patch can place it. The
-        // HEAD is read from the filesystem rather than by spawning `git rev-parse` — an agent makes
-        // a great many tool calls, and a subprocess on each would be paid on every one of them.
-        //
-        // A session with no checkout on this host stamps neither: `read_head_commit` returns an
-        // empty string when HEAD cannot be resolved, and a path has nothing to be relative to. That
-        // is the honest answer AC1 asks for, and the reason no sha is invented in its place.
-        let worktree_root = meta.repo_path.as_deref().map(PathBuf::from);
-        let head_commit = worktree_root
-            .as_deref()
-            .map(tddy_core::git_head::read_head_commit)
-            .unwrap_or_default();
-        let input = tddy_core::agent_activity::parse_activity_json(&req.input_json);
-        let changed_paths = worktree_root
-            .as_deref()
-            .map(|root| tddy_core::agent_activity::declared_paths(&req.tool_name, &input, root))
-            .unwrap_or_default();
-
-        let record = match req.event.as_str() {
-            "PreToolUse" => {
-                // A tool call started: mint a call_id, remember it so the paired PostToolUse can
-                // reuse it, and append the `running` row.
-                let call_id = Uuid::new_v4().to_string();
-                self.agent_activity_hub
-                    .push_pending(&req.session_id, &call_id);
-                tddy_core::agent_activity::AgentActivityRecord {
-                    call_id,
+        let answer = self
+            .activity_surface()
+            .report_agent_activity(Request::new(
+                tddy_service::proto::activity::ReportAgentActivityRequest {
+                    session_id: req.session_id,
+                    hook_token: req.hook_token,
+                    os_user: req.os_user,
+                    event: req.event,
                     tool_name: req.tool_name,
-                    input,
-                    status: tddy_core::agent_activity::STATUS_RUNNING.to_string(),
-                    result: serde_json::Value::Null,
-                    error_message: String::new(),
-                    started_unix_ms: tddy_daemon_kernel::now_unix_ms(),
-                    completed_unix_ms: 0,
-                    source: "claude-cli".to_string(),
-                    head_commit,
-                    // The tick that covers this call has not been measured yet; the poll loop
-                    // attributes it when it runs. `0` is the wire's "no tick has covered it yet".
-                    activity_seq: 0,
-                    changed_paths,
-                }
-            }
-            "PostToolUse" => {
-                // The tool call finished: pair with the most-recent pending call_id (fresh id when
-                // none is outstanding, e.g. a hook restart), and append the terminal row.
-                let call_id = self
-                    .agent_activity_hub
-                    .pop_pending(&req.session_id)
-                    .unwrap_or_else(|| Uuid::new_v4().to_string());
-                let status = if req.is_error {
-                    tddy_core::agent_activity::STATUS_ERROR
-                } else {
-                    tddy_core::agent_activity::STATUS_COMPLETED
-                };
-                tddy_core::agent_activity::AgentActivityRecord {
-                    call_id,
-                    tool_name: req.tool_name,
-                    input,
-                    status: status.to_string(),
-                    result: tddy_core::agent_activity::parse_activity_json(&req.result_json),
+                    input_json: req.input_json,
+                    result_json: req.result_json,
+                    is_error: req.is_error,
                     error_message: req.error_message,
-                    started_unix_ms: 0,
-                    completed_unix_ms: tddy_daemon_kernel::now_unix_ms(),
-                    source: "claude-cli".to_string(),
-                    head_commit,
-                    // As on the `running` row: the covering tick is the poll loop's to attribute.
-                    activity_seq: 0,
-                    changed_paths,
-                }
-            }
-            other => {
-                return Err(Status::invalid_argument(format!(
-                    "unknown event: {other} (expected PreToolUse or PostToolUse)"
-                )));
-            }
-        };
-
-        // The durable log is the source of truth; a write failure must not fail the hook call.
-        if let Err(e) = tddy_core::agent_activity::append_agent_activity(&session_dir, &record) {
-            log::warn!(
-                "agent_activity: failed to persist {} for session {}: {}",
-                req.event,
-                req.session_id,
-                e
-            );
-        }
-        // The agent's own tool loop is the other thing that means "this session is working", and
-        // the only one a cursor-cli or tool session reports at all. Owned by `req.os_user`, as at
-        // the activity-status site above: the notification stream relays it to that operator only.
-        if let Some(ref bus) = self.session_notification_bus {
-            let label = crate::session_notifications::resolve_session_label(
-                &sessions_base,
-                &req.session_id,
-            );
-            bus.publish(
-                crate::session_notifications::notification_for_agent_tool_call(
-                    &req.session_id,
-                    &req.os_user,
-                    &label,
-                    &record.tool_name,
-                    tddy_daemon_kernel::now_unix_ms(),
-                ),
-            )
-            .await;
-        }
-        self.agent_activity_hub.publish(&req.session_id, record);
-        // The record is **not** broadcast into the session room from here, deliberately.
-        //
-        // A record announced at this point names a tick nothing has measured yet: its
-        // `activity_seq` is still `0` and the delta covering its files is produced by the next poll
-        // tick, so a participant that reacted to it and asked for the call's delta would be told
-        // `UnknownCall` — an announcement that arrives before the thing it announces.
-        //
-        // The poll loop is the single broadcaster instead, tailing `agent-activity.jsonl`, which is
-        // also what makes cursor-cli and tool sessions visible: their agents never call this RPC at
-        // all, and a room fed only from here would carry claude-cli activity and nothing else.
-        Ok(Response::new(ReportAgentActivityResponse { ok: true }))
+                },
+            ))
+            .await?
+            .into_inner();
+        Ok(Response::new(ReportAgentActivityResponse { ok: answer.ok }))
     }
 
     async fn start_demo_vm(
@@ -3090,465 +2313,137 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
     // --- agent activity ---
 
-    type StreamSessionActivityStream = MpscAgentActivityStream;
+    type StreamSessionActivityStream = MpscResultStream<ProtoAgentActivityRecord>;
 
-    /// Stream a session's agent activity: replay the persisted `agent-activity.jsonl` snapshot,
-    /// then relay live records published to the hub for this session.
     async fn stream_session_activity(
         &self,
         request: Request<StreamSessionActivityRequest>,
     ) -> Result<Response<Self::StreamSessionActivityStream>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        // Route BEFORE session lookup so a relay can forward. A request addressed to a remote daemon
-        // is rejected rather than silently served from the local (wrong) log.
-        // TODO(agent-activity): forward StreamSessionActivity to a peer daemon over
-        // `forward_server_stream_to_peer`. The primitive exists and carries an idle deadline sized
-        // for a short-lived stream; this one is long-lived and open-ended, so migrating it needs a
-        // keepalive frame (or a per-call deadline) first — otherwise an idle session's activity
-        // stream would be terminated as a stalled peer.
-        let requested_daemon = req.daemon_instance_id.trim();
-        if !requested_daemon.is_empty() {
-            let local_id = local_instance_id_for_config(&self.config);
-            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
-            let eligible_ids: Vec<String> = eligible_rows
-                .iter()
-                .map(|e| e.instance_id.0.clone())
-                .collect();
-            match crate::livekit_peer_discovery::classify_peer_route(
-                &local_id,
-                requested_daemon,
-                &eligible_ids,
-            ) {
-                Err(msg) => {
-                    log::info!("StreamSessionActivity: rejected daemon routing: {}", msg);
-                    return Err(Status::invalid_argument(msg));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
-                    return Err(Status::unimplemented(format!(
-                        "StreamSessionActivity forwarding to remote daemon_instance_id={peer_instance_id} is not supported yet"
-                    )));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
-                    // Fall through to local execution below.
-                }
-            }
-        }
-
-        // Authenticate caller (same path as list_session_tool_calls).
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        validate_session_id_segment(&req.session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ProtoAgentActivityRecord>();
-
-        // Snapshot-then-live (the default and proto3 zero value) replays the coalesced on-disk
-        // records first, then relays everything subsequently published to the hub for this
-        // session. Live-only skips the snapshot entirely and carries only records published after
-        // subscribe.
-        let mode = StreamMode::try_from(req.mode).unwrap_or(StreamMode::SnapshotThenLive);
-        if mode == StreamMode::SnapshotThenLive {
-            let snapshot =
-                tddy_core::agent_activity::read_agent_activity(&session_dir).unwrap_or_default();
-            for record in snapshot {
-                if tx
-                    .send(tddy_service::agent_activity_to_proto(record))
-                    .is_err()
-                {
-                    // Receiver already gone — return an empty live stream that terminates immediately.
-                    return Ok(Response::new(MpscAgentActivityStream { rx }));
-                }
-            }
-        }
-
-        let broadcast_rx = self.agent_activity_hub.subscribe(&req.session_id);
-        tokio::spawn(activity_hub::relay_agent_activity(broadcast_rx, tx));
-
-        Ok(Response::new(MpscAgentActivityStream { rx }))
+        let frames = self
+            .activity_surface()
+            .stream_session_activity(Request::new(
+                tddy_service::proto::activity::StreamSessionActivityRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                    mode: req.mode,
+                },
+            ))
+            .await?
+            .into_inner();
+        Ok(Response::new(relayed_onto_this_coordinate(
+            frames,
+            activity_record_at_the_old_coordinate,
+        )))
     }
 
-    // --- session notifications ---
+    type StreamSessionNotificationsStream = MpscResultStream<ProtoSessionNotificationEvent>;
 
-    type StreamSessionNotificationsStream = MpscSessionNotificationStream;
-
-    /// Stream every session notification this daemon raises, for as long as the client stays
-    /// connected.
-    ///
-    /// Daemon-level by design (PRD NFR1): the request names no session, because one subscription
-    /// serves a drawer of any size. It does *not* name a user either — the caller's own token
-    /// does, and the relay carries only the sessions belonging to the OS user it maps to.
-    /// Live-only: each event carries the moment it happened, and a replayed backlog would raise
-    /// indicators for turns that finished while the tab was closed.
     async fn stream_session_notifications(
         &self,
         request: Request<StreamSessionNotificationsRequest>,
     ) -> Result<Response<Self::StreamSessionNotificationsStream>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        // Authenticate, then authorize exactly as `stream_session_activity` does: a token that
-        // maps to no OS user owns no sessions on this host, so there is nothing it may be shown.
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
-            .to_string();
-
-        let broadcast_rx = self
-            .session_notification_bus
-            .as_ref()
-            .and_then(|bus| bus.subscribe_clients())
-            .ok_or_else(|| {
-                Status::failed_precondition("this daemon publishes no session notifications")
-            })?;
-
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ProtoSessionNotificationEvent>();
-        tokio::spawn(relay_session_notifications(broadcast_rx, tx, os_user));
-
-        Ok(Response::new(MpscSessionNotificationStream { rx }))
+        let frames = self
+            .activity_surface()
+            .stream_session_notifications(Request::new(
+                tddy_service::proto::activity::StreamSessionNotificationsRequest {
+                    session_token: req.session_token,
+                },
+            ))
+            .await?
+            .into_inner();
+        Ok(Response::new(relayed_onto_this_coordinate(
+            frames,
+            |event: tddy_service::proto::activity::SessionNotificationEvent| {
+                ProtoSessionNotificationEvent {
+                    session_id: event.session_id,
+                    label: event.label,
+                    kind: event.kind,
+                    source: event.source,
+                    text: event.text,
+                    at_unix_ms: event.at_unix_ms,
+                }
+            },
+        )))
     }
 
-    // --- ACP transcript replay ---
+    type StreamAcpReplayStream = MpscResultStream<AcpReplayFrame>;
 
-    type StreamAcpReplayStream = MpscAcpReplayStream;
-
-    /// Stream a session's read-only ACP transcript: replay the session's resolved transcript
-    /// snapshot (`acp-transcript.jsonl` merged with the durable `agent-activity.jsonl` — see
-    /// [`tddy_service::acp_replay::read_session_transcript`]), then relay live agent-activity records
-    /// (mapped to ACP `tool_call` frames) published to the hub for this session. Mirrors
-    /// [`stream_session_activity`] — same routing, auth, and [`StreamMode`] semantics.
     async fn stream_acp_replay(
         &self,
         request: Request<StreamAcpReplayRequest>,
     ) -> Result<Response<Self::StreamAcpReplayStream>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        // Route BEFORE session lookup so a relay can forward. A request addressed to a remote daemon
-        // is rejected rather than silently served from the local (wrong) transcript.
-        // TODO(acp-replay): forward StreamAcpReplay to a peer daemon over
-        // `forward_server_stream_to_peer`, blocked on the same keepalive gap as
-        // `stream_session_activity` above — this stream stays open for a session's whole life, and
-        // the primitive's idle deadline is sized for a short-lived one.
-        let requested_daemon = req.daemon_instance_id.trim();
-        if !requested_daemon.is_empty() {
-            let local_id = local_instance_id_for_config(&self.config);
-            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
-            let eligible_ids: Vec<String> = eligible_rows
-                .iter()
-                .map(|e| e.instance_id.0.clone())
-                .collect();
-            match crate::livekit_peer_discovery::classify_peer_route(
-                &local_id,
-                requested_daemon,
-                &eligible_ids,
-            ) {
-                Err(msg) => {
-                    log::info!("StreamAcpReplay: rejected daemon routing: {}", msg);
-                    return Err(Status::invalid_argument(msg));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
-                    return Err(Status::unimplemented(format!(
-                        "StreamAcpReplay forwarding to remote daemon_instance_id={peer_instance_id} is not supported yet"
-                    )));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
-                    // Fall through to local execution below.
-                }
-            }
-        }
-
-        // Authenticate caller (same path as stream_session_activity).
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        validate_session_id_segment(&req.session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<AcpReplayFrame>();
-
-        // Snapshot-then-live (the default and proto3 zero value) replays the persisted transcript
-        // first, then relays everything subsequently published to the hub for this session.
-        // Live-only skips the snapshot entirely and carries only frames produced after subscribe.
-        let mode = StreamMode::try_from(req.mode).unwrap_or(StreamMode::SnapshotThenLive);
-
-        // Count-first mode emits only the running count of persisted transcript frames — one frame
-        // now with the current count, then a fresh count each time a record is published — with no
-        // transcript payload. It never replays the snapshot itself.
-        if mode == StreamMode::CountThenLive {
-            let snapshot =
-                tddy_service::acp_replay::read_session_transcript(&session_dir).unwrap_or_default();
-            let count = tddy_service::acp_replay::count_activity_entries(&snapshot);
-            let seen_ids = tddy_service::acp_replay::tool_call_ids(&snapshot);
-            if tx
-                .send(AcpReplayFrame {
-                    acp_agent_message: Vec::new(),
-                    activity_count: count,
-                    // A count frame carries no transcript payload, so it has no position.
-                    seq: 0,
-                })
-                .is_err()
-            {
-                // Receiver already gone — return an empty live stream that terminates immediately.
-                return Ok(Response::new(MpscAcpReplayStream { rx }));
-            }
-            let broadcast_rx = self.agent_activity_hub.subscribe(&req.session_id);
-            tokio::spawn(relay_acp_replay_count(broadcast_rx, tx, count, seen_ids));
-            return Ok(Response::new(MpscAcpReplayStream { rx }));
-        }
-
-        // The resolved transcript is what every position refers to: the replayed frames index into
-        // it, and the live tail continues its numbering from the end of it. Live-only replays none
-        // of it but still needs its length, so a live frame's `seq` means the same thing there.
-        let snapshot =
-            tddy_service::acp_replay::read_session_transcript(&session_dir).unwrap_or_default();
-
-        // Which slice of the transcript is replayed on subscribe, and where in the transcript that
-        // slice starts: all of it (snapshot-then-live, the proto3 default), its newest page only
-        // (tail-then-live), or none of it (live-only).
-        let (first_seq, replayed): (u64, &[tddy_service::proto::acp::AcpAgentMessage]) = match mode
-        {
-            StreamMode::SnapshotThenLive => (0, &snapshot),
-            StreamMode::TailThenLive => {
-                let page = tddy_service::acp_replay::tail_page(
-                    &snapshot,
-                    usize::try_from(req.page_size).unwrap_or(usize::MAX),
-                );
-                (page.first_seq, page.frames)
-            }
-            _ => (0, &[]),
-        };
-        for (offset, frame) in replayed.iter().enumerate() {
-            if tx
-                .send(acp_replay_frame(frame, first_seq + offset as u64))
-                .is_err()
-            {
-                // Receiver already gone — return an empty live stream that terminates immediately.
-                return Ok(Response::new(MpscAcpReplayStream { rx }));
-            }
-        }
-
-        let broadcast_rx = self.agent_activity_hub.subscribe(&req.session_id);
-        tokio::spawn(relay_acp_replay(
-            broadcast_rx,
-            tx,
-            snapshot.len() as u64,
-            seq_by_tool_call(&snapshot),
-        ));
-
-        Ok(Response::new(MpscAcpReplayStream { rx }))
+        let frames = self
+            .activity_surface()
+            .stream_acp_replay(Request::new(
+                tddy_service::proto::activity::StreamAcpReplayRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                    mode: req.mode,
+                    page_size: req.page_size,
+                },
+            ))
+            .await?
+            .into_inner();
+        Ok(Response::new(relayed_onto_this_coordinate(
+            frames,
+            |frame: tddy_service::proto::activity::AcpReplayFrame| AcpReplayFrame {
+                acp_agent_message: frame.acp_agent_message,
+                activity_count: frame.activity_count,
+                seq: frame.seq,
+            },
+        )))
     }
 
-    /// Return one tool call's full `raw_input`/`raw_output` from the session's coalesced transcript
-    /// (the bodies `stream_acp_replay` strips out). Mirrors `stream_acp_replay`'s routing/auth and
-    /// maps an unknown `tool_call_id` to `NOT_FOUND`.
     async fn get_acp_tool_call_detail(
         &self,
         request: Request<GetAcpToolCallDetailRequest>,
     ) -> Result<Response<GetAcpToolCallDetailResponse>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
-        let requested_daemon = req.daemon_instance_id.trim();
-        if !requested_daemon.is_empty() {
-            let local_id = local_instance_id_for_config(&self.config);
-            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
-            let eligible_ids: Vec<String> = eligible_rows
-                .iter()
-                .map(|e| e.instance_id.0.clone())
-                .collect();
-            match crate::livekit_peer_discovery::classify_peer_route(
-                &local_id,
-                requested_daemon,
-                &eligible_ids,
-            ) {
-                Err(msg) => {
-                    log::info!("GetAcpToolCallDetail: rejected daemon routing: {}", msg);
-                    return Err(Status::invalid_argument(msg));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
-                    log::info!(
-                        "GetAcpToolCallDetail: forwarding RPC to remote daemon_instance_id={}",
-                        peer_instance_id
-                    );
-                    let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
-                        Status::failed_precondition(
-                            "cannot forward GetAcpToolCallDetail: this process has no LiveKit common-room connection",
-                        )
-                    })?;
-                    let body = req.encode_to_vec();
-                    let out = crate::livekit_peer_discovery::forward_to_peer(
-                        slot,
-                        &peer_instance_id,
-                        "connection.ConnectionService",
-                        "GetAcpToolCallDetail",
-                        body,
-                    )
-                    .await?;
-                    let inner =
-                        GetAcpToolCallDetailResponse::decode(out.as_slice()).map_err(|e| {
-                            Status::internal(format!("decode GetAcpToolCallDetailResponse: {e}"))
-                        })?;
-                    return Ok(Response::new(inner));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
-                    // Fall through to local execution below.
-                }
-            }
-        }
-
-        // Authenticate caller.
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        // Validate session ID.
-        validate_session_id_segment(&req.session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-
-        // Resolve the session dir.
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-
-        let detail = tddy_service::acp_replay::tool_call_detail(&session_dir, &req.tool_call_id)
-            .map_err(|e| Status::internal(format!("read transcript: {e}")))?;
-        match detail {
-            None => Err(Status::not_found(format!(
-                "no tool call with id {} in session {}",
-                req.tool_call_id, req.session_id
-            ))),
-            Some(detail) => Ok(Response::new(GetAcpToolCallDetailResponse {
-                raw_input: detail.raw_input,
-                raw_output: detail.raw_output,
-            })),
-        }
+        let answer = self
+            .activity_surface()
+            .get_acp_tool_call_detail(Request::new(
+                tddy_service::proto::activity::GetAcpToolCallDetailRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                    tool_call_id: req.tool_call_id,
+                },
+            ))
+            .await?
+            .into_inner();
+        Ok(Response::new(GetAcpToolCallDetailResponse {
+            raw_input: answer.raw_input,
+            raw_output: answer.raw_output,
+        }))
     }
 
-    /// Return one page of transcript frames strictly older than `before_seq` — the reverse cursor a
-    /// tail-first replay pages backwards with. Mirrors [`get_acp_tool_call_detail`]'s routing (it
-    /// peer-forwards, unlike the streaming modes) and `stream_acp_replay`'s auth, and applies the
-    /// same `strip_tool_body` seam the replay stream does: a paged frame is not a back door to the
-    /// bodies.
     async fn get_acp_replay_page(
         &self,
         request: Request<GetAcpReplayPageRequest>,
     ) -> Result<Response<GetAcpReplayPageResponse>, Status> {
-        self.record_rpc_activity();
         let req = request.into_inner();
-
-        // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
-        let requested_daemon = req.daemon_instance_id.trim();
-        if !requested_daemon.is_empty() {
-            let local_id = local_instance_id_for_config(&self.config);
-            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
-            let eligible_ids: Vec<String> = eligible_rows
-                .iter()
-                .map(|e| e.instance_id.0.clone())
-                .collect();
-            match crate::livekit_peer_discovery::classify_peer_route(
-                &local_id,
-                requested_daemon,
-                &eligible_ids,
-            ) {
-                Err(msg) => {
-                    log::info!("GetAcpReplayPage: rejected daemon routing: {}", msg);
-                    return Err(Status::invalid_argument(msg));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
-                    log::info!(
-                        "GetAcpReplayPage: forwarding RPC to remote daemon_instance_id={}",
-                        peer_instance_id
-                    );
-                    let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
-                        Status::failed_precondition(
-                            "cannot forward GetAcpReplayPage: this process has no LiveKit common-room connection",
-                        )
-                    })?;
-                    let body = req.encode_to_vec();
-                    let out = crate::livekit_peer_discovery::forward_to_peer(
-                        slot,
-                        &peer_instance_id,
-                        "connection.ConnectionService",
-                        "GetAcpReplayPage",
-                        body,
-                    )
-                    .await?;
-                    let inner = GetAcpReplayPageResponse::decode(out.as_slice()).map_err(|e| {
-                        Status::internal(format!("decode GetAcpReplayPageResponse: {e}"))
-                    })?;
-                    return Ok(Response::new(inner));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
-                    // Fall through to local execution below.
-                }
-            }
-        }
-
-        // Authenticate caller.
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        // Validate session ID.
-        validate_session_id_segment(&req.session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-
-        // Resolve the session dir.
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-
-        // A transcript that cannot be read is an error, never an empty page: an empty page means
-        // "you have reached the head", and a reader told that stops paging for good.
-        let transcript = tddy_service::acp_replay::read_session_transcript(&session_dir)
-            .map_err(|e| Status::internal(format!("read transcript: {e}")))?;
-        let page = tddy_service::acp_replay::page_before(
-            &transcript,
-            req.before_seq,
-            usize::try_from(req.page_size).unwrap_or(usize::MAX),
-        );
-
+        let answer = self
+            .activity_surface()
+            .get_acp_replay_page(Request::new(
+                tddy_service::proto::activity::GetAcpReplayPageRequest {
+                    session_token: req.session_token,
+                    session_id: req.session_id,
+                    daemon_instance_id: req.daemon_instance_id,
+                    before_seq: req.before_seq,
+                    page_size: req.page_size,
+                },
+            ))
+            .await?
+            .into_inner();
         Ok(Response::new(GetAcpReplayPageResponse {
-            frames: page
-                .frames
-                .iter()
-                .map(|frame| tddy_service::acp_replay::strip_tool_body(frame).encode_to_vec())
-                .collect(),
-            first_seq: page.first_seq,
-            at_oldest: page.at_oldest,
+            frames: answer.frames,
+            first_seq: answer.first_seq,
+            at_oldest: answer.at_oldest,
         }))
     }
 

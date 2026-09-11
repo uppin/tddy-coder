@@ -81,13 +81,17 @@ impl ConnectionServiceImpl {
     ///
     /// A session room is reached by the agents inside it, and what they may ask for is whatever
     /// this daemon declares. `#unbundle` node 6 moved the session-file and terminal families onto
-    /// their own services, so a room serving `connection.ConnectionService` alone would have
-    /// quietly stopped answering a question it had always answered — an in-room agent's
-    /// `ReadHostDocument` would come back "unknown service" rather than with the document.
+    /// their own services and node 7 the roster, conversation and activity ones, so a room serving
+    /// `connection.ConnectionService` alone would have quietly stopped answering a question it had
+    /// always answered — an in-room agent's `ReadHostDocument` would come back "unknown service"
+    /// rather than with the document, and an in-jail `StreamSessionAgents` addressed at the new
+    /// coordinate would find no roster at all.
     #[must_use]
     pub(crate) fn session_room_roster(self: &Arc<Self>) -> tddy_rpc::MultiRpcService {
         tddy_rpc::MultiRpcService::new(vec![
             self.session_files_entry(),
+            self.session_agents_entry(),
+            self.activity_entry(),
             self.terminal_session_entry(),
             tddy_rpc::ServiceEntry {
                 name: "connection.ConnectionService",

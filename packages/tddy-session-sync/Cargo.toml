@@ -15,6 +15,10 @@ path = "src/main.rs"
 [dependencies]
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-service = { path = "../tddy-service" }
+# `NO_TICK` — the wire's "no poll tick has covered this call yet". Read from the crate that numbers
+# the ticks rather than spelled as a literal here, so the producer and this consumer cannot drift
+# about which value means absence.
+tddy-session-activity = { path = "../tddy-session-activity" }
 clap = { version = "4", features = ["derive", "env"] }
 env_logger = "0.11"
 log = "0.4"

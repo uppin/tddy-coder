@@ -260,19 +260,6 @@ pub(crate) fn dispatch_envelope(response: ExecuteToolResponse) -> String {
     }
 }
 
-/// The wire spelling of a turn's stop reason.
-///
-/// ACP's spelling, matched character for character, because that is what the main agent's
-/// `subagent_prompt` hands back and a consumer comparing against `"EndTurn"` has no way to learn
-/// this daemon chose another.
-pub(crate) fn agent_stop_reason(reason: tddy_discovery::subagent::StopReason) -> &'static str {
-    match reason {
-        tddy_discovery::subagent::StopReason::EndTurn => "EndTurn",
-        tddy_discovery::subagent::StopReason::MaxTurnRequests => "MaxTurnRequests",
-        tddy_discovery::subagent::StopReason::Cancelled => "Cancelled",
-    }
-}
-
 /// Refuse an attach whose withdrawal the session could not enforce.
 ///
 /// In a managed-codebase session the main agent's file tools **are** `mcp__tddy-tools__*` — the

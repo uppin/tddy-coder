@@ -22,14 +22,25 @@
 //! identical; only the service name each tuple carries changes. Hiding a security change inside a
 //! mechanical one is exactly what a stack like this makes easy and must not do.
 
-use std::sync::Arc;
-
-use tddy_discovery::roster::LiveAgentRoster;
-
+pub mod agent_conversations;
+pub mod ports;
+pub mod service;
 pub mod session_agent_clone;
 pub mod session_agent_inference;
 pub mod session_agent_roster;
 pub mod session_agent_status;
+pub mod status_reporting;
+
+pub use agent_conversations::{AgentConversation, OpenAgentConversations, PromptRouting};
+pub use ports::{
+    AdmittedAgent, AgentAdmission, AgentCatalog, AgentConversationPeers, AgentSessions,
+    RosterBroadcast, SessionAgentPorts, SessionDirResolver,
+};
+pub use service::{
+    agent_conversation_frames, agent_stop_reason, build_session_agents_entry,
+    roster_at_the_new_coordinate, SessionAgentServiceImpl,
+};
+pub use status_reporting::{note_agent_activity, republish_quietly};
 
 /// Why a roster or conversation operation could not be completed.
 #[derive(Debug, thiserror::Error)]
@@ -40,50 +51,6 @@ pub enum SessionAgentError {
     RosterStale { session_id: String },
     #[error("no agent is addressable for {session_id}")]
     NoAddressableAgent { session_id: String },
-}
-
-/// The `session_agents.SessionAgentService` entry the daemon's wiring layer registers.
-///
-/// # Not yet constructible, and not from a `LiveAgentRoster` at all
-///
-/// [`LiveAgentRoster`] is the roster as a **client** process sees it — seeded from
-/// `TDDY_SUBAGENTS_JSON` at spawn and replaced by every frame the daemon publishes. It is what
-/// in-jail `tddy-tools` and `tddy-sandbox-app` read, and it is a *subscriber* to this service, not
-/// its state. The authoritative store this service answers from is
-/// [`session_agent_roster::SessionAgentRosterStore`], beside
-/// [`session_agent_clone::SessionAgentCloneStore`] and
-/// [`session_agent_status::SessionAgentActivityStore`] — all three in this crate. Handing the
-/// service the client's mirror would have it answer `AttachSessionAgent` by writing into a copy
-/// nobody persists.
-///
-/// The nine handlers in `tddy-daemon`'s `connection_service::rpc_service` read a good deal more of
-/// the host than any roster is. All nine resolve a session directory from the caller's token; seven
-/// classify a peer route before they look a session up, and three of those forward over this
-/// daemon's common-room handle; two read the daemon's own instance id out of its config to tell a
-/// local agent from an owned one; `StreamSessionAgents` paces a quiet roster from a configured
-/// keepalive; `OpenAgentConversation` and `PromptAgentConversation` spawn and drive node 5's
-/// conversation runtime and hold the open conversations in a shared map; `PromptAgentConversation`
-/// additionally reports a turn's end; `AttachSessionAgent` resolves a remote agent id against the
-/// agent catalog and claims — and on failure unwinds — a checkout on a peer.
-///
-/// So this constructor takes the wrong argument, not merely too few: what it wants is a ports
-/// struct, the shape `tddy_session_files::build_session_files_entry` already takes for the same
-/// reason. Panicking is deliberate until it has one. A service mounted on the daemon's local Unix
-/// socket answering `unimplemented` to all nine would be a silent capability removal on a
-/// privileged interface — and five of the nine are what the sandbox relay allowlist below permits
-/// an in-jail agent to reach, so the removal would land inside a jail — whereas a panic at the
-/// wiring site cannot be mistaken for a working mount.
-///
-/// TODO(session-agent-services): take `SessionAgentPorts` (session-token-to-session-directory
-/// resolver, the peer-route classifier and this daemon's common-room slot, the local instance id,
-/// the roster keepalive, the agent catalog, the three stores above, node 5's conversation runtime
-/// and the open-conversation map, the turn-end reporter and the clone-claim pair) and move the nine
-/// handlers out of `tddy-daemon`'s `connection_service::rpc_service` behind it, leaving the
-/// daemon's routing preamble in the daemon as node 6 left its own.
-pub fn build_session_agents_entry(_roster: Arc<LiveAgentRoster>) -> tddy_rpc::ServiceEntry {
-    unimplemented!(
-        "build_session_agents_entry needs the ports the nine handlers read the host through"
-    )
 }
 
 /// The `(service, method)` pairs an in-jail agent may relay to its host, for family B.
@@ -116,41 +83,214 @@ pub const IN_JAIL_RELAYABLE: [(&str, &str); 5] = [
 mod tests {
     use super::*;
 
-    use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+    use std::time::Duration;
 
-    /// The seed a jail is spawned with — one def, as `TDDY_SUBAGENTS_JSON` carries it.
-    fn a_seed_def(name: &str) -> SpecializedAgentDef {
-        SpecializedAgentDef {
-            name: name.to_string(),
-            label: None,
-            model: "qwen2.5-coder:7b".to_string(),
-            base_url: "http://localhost:11434".to_string(),
-            api_key: None,
-            system_prompt: None,
-            system_prompt_path: None,
-            tools: vec![SubagentTool::Read, SubagentTool::Glob, SubagentTool::Grep],
-            max_turns: 10,
-            replaces: Vec::new(),
+    use async_trait::async_trait;
+    use tddy_core::SessionAgentRecord;
+    use tddy_discovery::subagent::SubagentSession;
+    use tddy_rpc::Status;
+    use tddy_service::proto::connection::SessionAgentRoster;
+    use tddy_service::proto::session_agents_svc::{
+        AgentConversationChunk, OpenAgentConversationRequest, PromptAgentConversationRequest,
+    };
+
+    use crate::session_agent_clone::SessionAgentCloneStore;
+    use crate::session_agent_roster::SessionAgentRosterStore;
+    use crate::session_agent_status::SessionAgentActivityStore;
+
+    /// The one operator this host is configured for, and the one session of theirs it facilitates.
+    /// A token it did not mint reaches nothing, which is the refusal every handler starts from.
+    fn sessions_of(os_user: &'static str) -> SessionDirResolver {
+        Arc::new(
+            move |session_token: &str, session_id: &str| match session_token {
+                "web-token-for-ada" => Ok(PathBuf::from(format!(
+                    "/var/lib/tddy/users/{os_user}/sessions/{session_id}"
+                ))),
+                _ => Err(Status::unauthenticated("invalid or expired session")),
+            },
+        )
+    }
+
+    /// A host with no `<tddyhome>/agents` defs and no registry assistants, so no id resolves on it.
+    struct NoAgentDefsOnThisHost;
+
+    #[async_trait]
+    impl AgentCatalog for NoAgentDefsOnThisHost {
+        async fn record_for(&self, agent_id: &str) -> Result<SessionAgentRecord, Status> {
+            Err(Status::invalid_argument(format!(
+                "agent '{agent_id}' resolves to no def on this daemon"
+            )))
         }
     }
 
-    /// A roster holding the one agent a session was seeded with, addressed under the daemon that
-    /// resolved its def.
-    fn a_roster_holding_one_seeded_agent() -> Arc<LiveAgentRoster> {
-        Arc::new(LiveAgentRoster::seeded_from(
-            "1780828020298-roster",
-            vec![a_seed_def("explorer")],
-            "ws-01",
-        ))
+    /// A single-daemon deployment: every agent it can resolve is its own, so an admission claims no
+    /// checkout anywhere and there is nothing to hand back.
+    struct EveryAgentIsLocalHere;
+
+    #[async_trait]
+    impl AgentAdmission for EveryAgentIsLocalHere {
+        async fn admit(
+            &self,
+            _session_id: &str,
+            _session_dir: &Path,
+            record: &SessionAgentRecord,
+            _session_token: &str,
+        ) -> Result<AdmittedAgent, Status> {
+            Ok(AdmittedAgent {
+                daemon_instance_id: record.daemon_instance_id.clone(),
+                codebase_session_id: None,
+                commissioned: false,
+            })
+        }
+
+        async fn withdraw(
+            &self,
+            _session_id: &str,
+            _admitted: &AdmittedAgent,
+            _session_token: &str,
+        ) {
+        }
+
+        async fn tear_down(
+            &self,
+            _session_id: &str,
+            daemon_instance_id: &str,
+            codebase_session_id: &str,
+            _session_token: &str,
+        ) -> Result<(), Status> {
+            Err(Status::failed_precondition(format!(
+                "this daemon commissioned no checkout {codebase_session_id} on {daemon_instance_id}"
+            )))
+        }
+    }
+
+    /// A host with no LiveKit configuration: it hosts no session rooms, so a snapshot reaches its
+    /// `StreamSessionAgents` subscribers and nothing else.
+    struct NoSessionRoomToBroadcastInto;
+
+    #[async_trait]
+    impl RosterBroadcast for NoSessionRoomToBroadcastInto {
+        async fn broadcast(&self, _session_id: &str, _roster: &SessionAgentRoster) {}
+    }
+
+    /// A host that facilitates its own sessions and holds no peer's clone, so every conversation it
+    /// opens is decided by the roster and no owner has departed.
+    struct FacilitatesItsOwnSessionsOnly;
+
+    #[async_trait]
+    impl AgentSessions for FacilitatesItsOwnSessionsOnly {
+        fn hosts_a_clone_for(&self, _session_id: &str) -> bool {
+            false
+        }
+
+        async fn open_owned(
+            &self,
+            _session_id: &str,
+            _agent_id: &str,
+        ) -> Result<Option<Box<dyn SubagentSession>>, Status> {
+            Ok(None)
+        }
+
+        async fn open_local(
+            &self,
+            _session_id: &str,
+            _session_dir: &Path,
+            record: &SessionAgentRecord,
+            _session_token: &str,
+        ) -> Result<Box<dyn SubagentSession>, Status> {
+            Err(Status::invalid_argument(format!(
+                "agent '{}' resolves to no def on this daemon any more",
+                record.agent_id
+            )))
+        }
+
+        fn refuse_unready_clone(
+            &self,
+            _session_id: &str,
+            _record: &SessionAgentRecord,
+        ) -> Result<(), Status> {
+            Ok(())
+        }
+
+        async fn refuse_departed_owner(&self, _daemon_instance_id: &str) -> Result<(), Status> {
+            Ok(())
+        }
+    }
+
+    /// A host alone in its common room: there is no peer a conversation could be forwarded to.
+    struct NoPeersInTheCommonRoom;
+
+    #[async_trait]
+    impl AgentConversationPeers for NoPeersInTheCommonRoom {
+        async fn open(
+            &self,
+            _request: &OpenAgentConversationRequest,
+            owner: &str,
+            _conversation_id: &str,
+        ) -> Result<(), Status> {
+            Err(Status::unavailable(format!(
+                "daemon '{owner}' is not in this daemon's common room"
+            )))
+        }
+
+        async fn prompt(
+            &self,
+            _request: &PromptAgentConversationRequest,
+            owner: &str,
+        ) -> Result<
+            tokio::sync::mpsc::UnboundedReceiver<Result<AgentConversationChunk, Status>>,
+            Status,
+        > {
+            Err(Status::unavailable(format!(
+                "daemon '{owner}' is not in this daemon's common room"
+            )))
+        }
+
+        async fn cancel(
+            &self,
+            _session_token: &str,
+            _session_id: &str,
+            owner: &str,
+            _conversation_id: &str,
+        ) -> Result<(), Status> {
+            Err(Status::unavailable(format!(
+                "daemon '{owner}' is not in this daemon's common room"
+            )))
+        }
+    }
+
+    /// What a single-daemon host facilitating one operator's sessions hands this crate: its token
+    /// mapping, its own instance id, its keepalive cadence, the three stores it shares with
+    /// `ListSessions`, and the five capabilities only it has.
+    fn ports_of_a_host_facilitating_one_operator() -> SessionAgentPorts {
+        let clones = Arc::new(SessionAgentCloneStore::new());
+        SessionAgentPorts {
+            session_dirs: sessions_of("ada"),
+            local_instance_id: "ws-01".to_string(),
+            roster_keepalive: Duration::from_secs(20),
+            rosters: Arc::new(SessionAgentRosterStore::new(
+                Arc::clone(&clones),
+                Arc::new(SessionAgentActivityStore::new()),
+            )),
+            clones,
+            conversations: Arc::new(OpenAgentConversations::new()),
+            admission: Arc::new(EveryAgentIsLocalHere),
+            catalog: Arc::new(NoAgentDefsOnThisHost),
+            broadcast: Arc::new(NoSessionRoomToBroadcastInto),
+            sessions: Arc::new(FacilitatesItsOwnSessionsOnly),
+            peers: Arc::new(NoPeersInTheCommonRoom),
+        }
     }
 
     #[test]
     fn names_the_service_family_b_moves_to() {
         // Given
-        let roster = a_roster_holding_one_seeded_agent();
+        let ports = ports_of_a_host_facilitating_one_operator();
 
         // When
-        let entry = build_session_agents_entry(roster);
+        let entry = build_session_agents_entry(ports);
 
         // Then
         assert_eq!(entry.name, "session_agents.SessionAgentService");

@@ -15,12 +15,15 @@
 //! `tddy-session-sync` — the only consumer — migrates in the same PR. This is the last cheap moment
 //! to make that change.
 
-use std::sync::Arc;
-
-use tddy_daemon_kernel::AgentActivityHub;
-
+pub mod service;
 pub mod session_notification_subscribers;
 pub mod session_notifications;
+pub mod streams;
+
+pub use service::{
+    build_activity_entry, ActivityPorts, ActivityServiceImpl, DeltaLookup, DeltaScope,
+    MeasuredDelta, OsUserResolver, SessionDeltaStores, SessionLabels,
+};
 
 /// The wire's "no tick yet" value.
 pub const NO_TICK: u64 = 0;
@@ -37,32 +40,6 @@ pub enum ActivityError {
     NoSuchSession { session_id: String },
     #[error("the replay for {session_id} ended without a final frame, so it is incomplete")]
     TruncatedReplay { session_id: String },
-}
-
-/// The `activity.ActivityService` entry the daemon's wiring layer registers.
-///
-/// # Not yet constructible from a hub alone
-///
-/// The eight methods this coordinate serves need more of the host than the hub is: seven of them
-/// read a session directory resolved from the caller's token, four route to a peer daemon before
-/// they look a session up, `ReportSessionStatus` and `ReportAgentActivity` publish onto the
-/// notification bus, and `StreamAgentActivityDelta` answers from the session room's delta store.
-/// The hub carries none of that — it is a per-session broadcast of live activity records and a
-/// stack of in-flight `call_id`s, and nothing else.
-///
-/// So this constructor takes the wrong argument, not merely too few: what it wants is a ports
-/// struct, the shape `tddy_session_files::build_session_files_entry` already takes for the same
-/// reason. Panicking is deliberate until it has one. A service mounted on the daemon's local Unix
-/// socket answering `unimplemented` to all eight would be a silent capability removal on a
-/// privileged interface — the failure mode this node's changeset exists to prevent — whereas a
-/// panic at the wiring site cannot be mistaken for a working mount.
-///
-/// TODO(session-agent-services): take `ActivityPorts` (session-token-to-OS-user resolver, data
-/// dir, `Arc<SessionNotificationBus>`, the session-room delta store, the peer-route classifier and
-/// this hub) and move the eight handlers out of `tddy-daemon`'s `connection_service::rpc_service`
-/// behind it, leaving the daemon's routing preamble in the daemon as node 6 left its own.
-pub fn build_activity_entry(_hub: Arc<AgentActivityHub>) -> tddy_rpc::ServiceEntry {
-    unimplemented!("build_activity_entry needs the ports the eight handlers read the host through")
 }
 
 /// The tick to stamp a session's next delta with, given the last one stamped.
@@ -87,13 +64,68 @@ pub fn next_tick(last: Option<u64>) -> u64 {
 mod tests {
     use super::*;
 
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use tddy_daemon_kernel::AgentActivityHub;
+    use tddy_rpc::Status;
+
+    use crate::session_notifications::SessionNotificationBus;
+
+    /// The one operator this host is configured for. A token it minted resolves to their OS user;
+    /// anything else is the `UNAUTHENTICATED` a caller re-authenticates after.
+    fn tokens_minted_for(os_user: &'static str) -> OsUserResolver {
+        Arc::new(move |session_token: &str| match session_token {
+            "web-token-for-ada" => Ok(os_user.to_string()),
+            _ => Err(Status::unauthenticated("invalid or expired session")),
+        })
+    }
+
+    /// A host that names every session by its short id — what the daemon's own resolver falls back
+    /// to for a session whose directory records no repository and no workflow goal.
+    struct SessionsNamedByTheirId;
+
+    impl SessionLabels for SessionsNamedByTheirId {
+        fn label_for(&self, _sessions_base: &Path, session_id: &str) -> String {
+            session_id.to_string()
+        }
+    }
+
+    /// A host hosting no session rooms: it measured no checkout, so it holds no delta for any call.
+    struct NoSessionRoomsHere;
+
+    impl SessionDeltaStores for NoSessionRoomsHere {
+        fn delta_for_call(
+            &self,
+            _session_id: &str,
+            _call_id: &str,
+            _scope: DeltaScope,
+        ) -> Result<DeltaLookup, Status> {
+            Ok(DeltaLookup::NoRoomHere)
+        }
+    }
+
+    /// What a daemon serving one operator's sessions out of `/var/lib/tddy` hands this crate: its
+    /// token mapping, its data dir, the hub its sandboxes publish into, the bus it raises
+    /// notifications on, and the two answers only it has.
+    fn ports_of_a_host_serving_one_operator() -> ActivityPorts {
+        ActivityPorts {
+            os_users: tokens_minted_for("ada"),
+            tddy_data_dir: PathBuf::from("/var/lib/tddy"),
+            activity: Arc::new(AgentActivityHub::default()),
+            notifications: Some(Arc::new(SessionNotificationBus::new())),
+            session_labels: Arc::new(SessionsNamedByTheirId),
+            deltas: Arc::new(NoSessionRoomsHere),
+        }
+    }
+
     #[test]
     fn names_the_service_families_m_and_n_move_to() {
         // Given
-        let hub = Arc::new(AgentActivityHub::default());
+        let ports = ports_of_a_host_serving_one_operator();
 
         // When
-        let entry = build_activity_entry(hub);
+        let entry = build_activity_entry(ports);
 
         // Then
         assert_eq!(entry.name, "activity.ActivityService");

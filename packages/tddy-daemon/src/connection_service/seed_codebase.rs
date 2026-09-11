@@ -8,34 +8,6 @@ use std::path::Path;
 
 use std::path::PathBuf;
 
-use std::sync::Arc;
-
-/// One open conversation with a roster agent.
-///
-/// The two variants are what the main agent must not be able to tell apart: both answer
-/// `{stopReason, content}`, and only the daemon deciding where the turn loop runs sees the
-/// difference.
-pub(crate) enum AgentConversation {
-    /// The turn loop runs here, in this process.
-    Local {
-        session_id: String,
-        agent_id: String,
-        /// Shared rather than owned by the map, so a turn can be awaited on this lock alone with the
-        /// map's lock released — a turn that pinned the map would block every cancel for its whole
-        /// duration, including the cancel meant to interrupt it.
-        session: Arc<tokio::sync::Mutex<Box<dyn tddy_discovery::subagent::SubagentSession>>>,
-        /// Signalled when the conversation is closed. `notify_one` rather than `notify_waiters`, so
-        /// a cancel that lands between the turn being spawned and its first await is still seen.
-        closed: Arc<tokio::sync::Notify>,
-    },
-    /// The turn loop runs on `daemon_instance_id`; this daemon forwards to it.
-    Remote {
-        session_id: String,
-        agent_id: String,
-        daemon_instance_id: String,
-    },
-}
-
 /// The clone an attach claimed for a remote agent.
 ///
 /// `commissioned` is what makes a failed attach unwindable without taking a checkout away from an

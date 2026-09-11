@@ -17,8 +17,13 @@ tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # `ServiceEntry` and `Status`: this crate answers RPCs, so `Status` is its error type at the edge.
 tddy-rpc = { path = "../tddy-rpc" }
-# `gen::ServerMessage` and its `Event` — the presenter events a notification is classified from.
+# `gen::ServerMessage` and its `Event` — the presenter events a notification is classified from,
+# plus `activity.proto`'s generated messages, `acp_replay` and `agent_activity_to_activity_proto`.
 tddy-service = { path = "../tddy-service" }
+# `stream::MpscResultStream` — the one server-stream adapter node 6 established for a
+# `Result`-carrying stream. Re-declaring a fifth copy of it here would be a fifth thing to keep
+# equal to the four already in the workspace.
+tddy-worktree-service = { path = "../tddy-worktree-service" }
 # `elicitation::mode_changed_requires_telegram_elicitation` classifies which presenter `ModeChanged`
 # holds a gate the operator has to answer, which is what makes a presenter event attention-worthy.
 # The classifier lives there because Telegram was its first consumer; the notification bus is its
@@ -29,11 +34,19 @@ async-trait = "0.1"
 # A subscriber's delivery failure is reported as an `anyhow::Error` and logged by the bus, never
 # propagated to the RPC that published (PRD NFR3).
 anyhow = "1"
-# The broadcast channel the notification stream fans out on, one per daemon.
-tokio = { version = "1", features = ["sync"] }
+# The broadcast channel the notification stream fans out on, one per daemon, and the `rt` handle the
+# three relay tasks are spawned onto.
+tokio = { version = "1", features = ["rt", "sync"] }
 # A swallowed subscriber failure is only visible in the log, so the log line is the report.
 log = "0.4"
 thiserror = "2"
+# An ACP replay frame carries its `AcpAgentMessage` as encoded bytes — `Message::encode_to_vec`.
+prost = "0.13"
+# A tool call's `input` and `result` are the JSON the hook reported, carried through unparsed on a
+# `running` row (`Value::Null` — the wire's "unset") and parsed on the terminal one.
+serde_json = "1"
+# `ReportAgentActivity` mints the `call_id` a PreToolUse row is paired to its PostToolUse row by.
+uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
 rstest = { workspace = true }

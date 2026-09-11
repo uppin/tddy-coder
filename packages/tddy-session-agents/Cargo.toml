@@ -37,6 +37,11 @@ tddy-session-sync = { path = "../tddy-session-sync" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }
 # `livekit::Room`, held for a hosted clone's life: dropping it leaves the session room.
 livekit = "0.7"
+# `async_trait` on the generated `SessionAgentService` trait and on the five host ports — three of
+# them forward over a network, so they are async by necessity rather than by style.
+async-trait = "0.1"
+# `OpenAgentConversation` mints the conversation id a caller cancels by when it chose none.
+uuid = { version = "1", features = ["v4", "v7"] }
 # A swallowed clone-report failure is only visible in the log, so the log line is the report.
 log = "0.4"
 # The clone mirror frames its peer calls itself — `Message::encode_to_vec` / `decode`.

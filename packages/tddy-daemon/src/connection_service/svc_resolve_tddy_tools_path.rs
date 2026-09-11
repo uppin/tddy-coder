@@ -134,9 +134,7 @@ impl ConnectionServiceImpl {
             session_admissions: Arc::new(
                 crate::session_admission_service::SessionAdmissionRegistry::new(),
             ),
-            agent_conversations: Arc::new(
-                tokio::sync::Mutex::new(std::collections::HashMap::new()),
-            ),
+            agent_conversations: Arc::new(tddy_session_agents::OpenAgentConversations::new()),
             session_notification_bus,
             self_handle: Arc::new(std::sync::OnceLock::new()),
         }

@@ -248,7 +248,11 @@ impl std::fmt::Display for IgnoreReason {
 /// of date, and a tool missing from it is a change that reaches the mirror never. What decides is
 /// the tick — if the mirror has not applied it, it needs it, whatever ran.
 pub fn decide_record(record: &AgentActivityRecord, last_seq: u64) -> RecordDecision {
-    if record.activity_seq == 0 {
+    // `NO_TICK`, not the literal 0, and the two are now genuinely different facts: `#unbundle`
+    // node 7 numbers a session's deltas from `FIRST_TICK` (1), so this arm means "no tick has
+    // covered this call yet" and nothing else. On the coordinate before it, a first delta was also
+    // numbered 0 and this arm silently discarded it.
+    if record.activity_seq == tddy_session_activity::NO_TICK {
         return RecordDecision::Ignore(IgnoreReason::NoTickYet);
     }
     if record.activity_seq <= last_seq {

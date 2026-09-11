@@ -111,43 +111,6 @@ impl Drop for SeededCloneGuard {
     }
 }
 
-/// What one open conversation hands a prompt, taken out of the map so the map's lock can be
-/// released before the turn is awaited.
-pub(crate) enum PromptRouting {
-    Local {
-        session: Arc<tokio::sync::Mutex<Box<dyn tddy_discovery::subagent::SubagentSession>>>,
-        closed: Arc<tokio::sync::Notify>,
-    },
-    Remote(String),
-}
-
-impl seed_codebase::AgentConversation {
-    /// The roster agent this conversation is with, whichever daemon runs its loop.
-    pub(crate) fn agent_id(&self) -> &str {
-        match self {
-            seed_codebase::AgentConversation::Local { agent_id, .. }
-            | seed_codebase::AgentConversation::Remote { agent_id, .. } => agent_id,
-        }
-    }
-
-    /// Whether this conversation is with `agent_id` on `session_id`, whichever daemon runs its loop.
-    pub(crate) fn is_with(&self, session_id: &str, agent_id: &str) -> bool {
-        let (open_session, open_agent) = match self {
-            seed_codebase::AgentConversation::Local {
-                session_id,
-                agent_id,
-                ..
-            } => (session_id, agent_id),
-            seed_codebase::AgentConversation::Remote {
-                session_id,
-                agent_id,
-                ..
-            } => (session_id, agent_id),
-        };
-        open_session == session_id && open_agent == agent_id
-    }
-}
-
 /// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
 /// read/dispatch loop running; dropping it (on session teardown) ends the loop.
 pub(crate) struct SessionStdioEndpoint {

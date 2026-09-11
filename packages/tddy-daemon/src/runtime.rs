@@ -903,6 +903,20 @@ pub async fn build(
         // forward over the common room, which is this layer's to make (`session_files_entry`).
         rpc_entries.push(connection_arc.session_files_entry());
 
+        // SessionAgentService — the nine roster and conversation methods, served by
+        // `tddy-session-agents` on top of the four modules it already owned. `#unbundle` node 7
+        // mounted this coordinate; `connection.ConnectionService` still declares the same nine and
+        // delegates to it, so both answer one implementation until the old coordinate is cut. The
+        // entry is wrapped here rather than in the crate because seven of the nine route by
+        // `daemon_instance_id` — a split session's roster lives on the daemon holding the codebase,
+        // and reaching it is a forward over the common room, which is this layer's to make.
+        rpc_entries.push(connection_arc.session_agents_entry());
+
+        // ActivityService — the eight activity, status, notification and ACP-replay methods,
+        // served by `tddy-session-activity` on top of the two notification modules it already
+        // owned. Mounted and delegated to on the same terms as the nine above.
+        rpc_entries.push(connection_arc.activity_entry());
+
         let connection_server = tddy_service::ConnectionServiceServer::from_arc(connection_arc);
         rpc_entries.push(tddy_rpc::ServiceEntry {
             name: "connection.ConnectionService",

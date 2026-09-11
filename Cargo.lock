@@ -12197,6 +12197,7 @@ dependencies = [
  "tddy-livekit-testkit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-session-activity",
  "tddy-testing-commons",
  "tddy-workflow",
  "tddy-worktree-service",
@@ -12933,20 +12934,25 @@ dependencies = [
  "async-trait",
  "log",
  "pretty_assertions",
+ "prost 0.13.5",
  "rstest 0.24.0",
+ "serde_json",
  "tddy-core",
  "tddy-daemon-kernel",
  "tddy-rpc",
  "tddy-service",
  "tddy-telegram",
+ "tddy-worktree-service",
  "thiserror 2.0.18",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
 name = "tddy-session-agents"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "livekit",
  "log",
  "pretty_assertions",
@@ -12965,6 +12971,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -13006,6 +13013,7 @@ dependencies = [
  "serde_json",
  "tddy-livekit",
  "tddy-service",
+ "tddy-session-activity",
  "tempfile",
  "tokio",
 ]

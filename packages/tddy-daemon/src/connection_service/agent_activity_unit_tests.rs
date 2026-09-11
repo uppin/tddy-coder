@@ -416,7 +416,9 @@ async fn report_agent_activity_stores_a_non_json_input_string_as_a_string_scalar
 
 /// Await the next stream item with a bounded timeout so a missing record fails loudly instead
 /// of hanging the test.
-async fn next_record(stream: &mut super::MpscAgentActivityStream) -> ProtoAgentActivityRecord {
+async fn next_record(
+    stream: &mut super::MpscResultStream<tddy_service::proto::connection::AgentActivityRecord>,
+) -> tddy_service::proto::connection::AgentActivityRecord {
     tokio::time::timeout(Duration::from_secs(1), stream.next())
         .await
         .expect("no agent-activity record arrived within the timeout")
@@ -426,7 +428,7 @@ async fn next_record(stream: &mut super::MpscAgentActivityStream) -> ProtoAgentA
 
 /// Await the next replay frame with a bounded timeout, decoding its inner ACP `AcpAgentMessage`.
 async fn next_replay_frame(
-    stream: &mut super::MpscAcpReplayStream,
+    stream: &mut super::MpscResultStream<tddy_service::proto::connection::AcpReplayFrame>,
 ) -> tddy_service::proto::acp::AcpAgentMessage {
     let envelope = tokio::time::timeout(Duration::from_secs(1), stream.next())
         .await
@@ -556,7 +558,7 @@ async fn stream_acp_replay_delivers_a_live_frame_after_the_snapshot() {
 /// Pull one raw `AcpReplayFrame` envelope (the count-carrying wrapper), with a timeout so a
 /// count-mode subscription that never broadcasts a count fails fast instead of hanging.
 async fn next_replay_envelope(
-    stream: &mut super::MpscAcpReplayStream,
+    stream: &mut super::MpscResultStream<tddy_service::proto::connection::AcpReplayFrame>,
 ) -> tddy_service::proto::connection::AcpReplayFrame {
     tokio::time::timeout(Duration::from_secs(1), stream.next())
         .await

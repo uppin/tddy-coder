@@ -282,6 +282,33 @@ pub fn agent_activity_to_proto(
     }
 }
 
+/// Map a durable [`tddy_core::agent_activity::AgentActivityRecord`] onto
+/// [`proto::activity::AgentActivityRecord`] — the same record at the coordinate `#unbundle` node 7
+/// moved `StreamSessionActivity` to.
+///
+/// A second function rather than a conversion from the `connection` form, because the two are
+/// distinct generated types carrying identical fields: going through `connection` would make every
+/// record on the new coordinate pay for a form it never uses, and would tie the new schema's shape
+/// to the old one's at exactly the moment the old one is being retired.
+pub fn agent_activity_to_activity_proto(
+    record: tddy_core::agent_activity::AgentActivityRecord,
+) -> proto::activity::AgentActivityRecord {
+    proto::activity::AgentActivityRecord {
+        call_id: record.call_id,
+        tool_name: record.tool_name,
+        input: json_to_proto_value(&record.input),
+        status: record.status,
+        result: json_to_proto_value(&record.result),
+        error_message: record.error_message,
+        started_unix_ms: record.started_unix_ms,
+        completed_unix_ms: record.completed_unix_ms,
+        source: record.source,
+        head_commit: record.head_commit,
+        activity_seq: record.activity_seq,
+        changed_paths: record.changed_paths,
+    }
+}
+
 /// Combined `FileDescriptorSet` (serialized) for all service protos, used by the
 /// gRPC `ServerReflection` service to serve descriptors at runtime.
 pub static SERVICE_DESCRIPTOR_BYTES: &[u8] =
