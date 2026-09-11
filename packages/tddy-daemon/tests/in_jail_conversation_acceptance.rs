@@ -2,7 +2,8 @@
 //! allowlist, on the coordinate `#unbundle` node 7 moved family B to.
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md (§ Prompting an agent), and
-//! docs/dev/1-WIP/2026-09-09-unbundle-session-agent-services.md § Testing Plan.
+//! docs/dev/changesets/2026-09-09-unbundle-session-agent-services.md § Five of family B's nine are a
+//! security boundary.
 //!
 //! `packages/tddy-sandbox-runner/src/runner.rs` holds the `(service, method)` allowlist of what an
 //! in-jail agent may relay to its host, and five of its entries are family B. When node 7 moved

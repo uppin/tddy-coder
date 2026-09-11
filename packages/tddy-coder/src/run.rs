@@ -2199,9 +2199,10 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
             ];
-            // The session's two coordinates — `connection.ConnectionService` and
-            // `terminal_session.TerminalSessionService` — over one service object, so a terminal
-            // started on either is the same terminal.
+            // The session's three coordinates — `connection.ConnectionService`,
+            // `terminal_session.TerminalSessionService` and `activity.ActivityService` — over one
+            // service object, so a terminal started on either is the same terminal, and the activity
+            // this session reports is the activity it replays.
             livekit_base.extend(crate::session_participant::session_service_entries(
                 session_connection_svc,
             ));
@@ -3536,9 +3537,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 .unwrap_or_else(|| std::path::PathBuf::from(".")),
             presenter_events: Some(event_tx.clone()),
         };
-        // The session's two coordinates — `connection.ConnectionService` and
-        // `terminal_session.TerminalSessionService` — over one service object, so a terminal
-        // started on either is the same terminal.
+        // The session's three coordinates — `connection.ConnectionService`,
+        // `terminal_session.TerminalSessionService` and `activity.ActivityService` — over one
+        // service object, so a terminal started on either is the same terminal, and the activity
+        // this session reports is the activity it replays.
         let session_entries =
             crate::session_participant::session_service_entries(session_connection_svc);
         if has_key_secret {

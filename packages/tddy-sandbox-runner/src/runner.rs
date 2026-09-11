@@ -3419,7 +3419,7 @@ mod tests {
     // ─── The relay allowlist's refusal half ─────────────────────────────────────
     //
     // Feature: docs/ft/daemon/session-agent-roster.md (§ Prompting an agent)
-    // Changeset: docs/dev/1-WIP/2026-09-09-unbundle-session-agent-services.md
+    // Changeset: docs/dev/changesets/2026-09-09-unbundle-session-agent-services.md
     //
     // `tddy_service::session_agents::IN_JAIL_RELAYABLE` is the list of operations an in-jail agent
     // may perform against its host, and `tddy-session-agents` already pins what is *on* it. What

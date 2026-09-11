@@ -18,3 +18,25 @@
   the peer forward `stream_acp_replay` currently refuses (`connection_service.rs:13492` returns
   `UNIMPLEMENTED`) — a remote roster agent runs on another host, so without it the transcript would
   only ever work for local agents.
+
+## Re-read at `#unbundle` node 7's wrap (2026-09-12)
+
+Still open, unchanged in substance. Every coordinate in it moved, so the fix shape is now spread
+across two crates rather than one file:
+
+- `StreamAcpReplay` is `activity.ActivityService`'s, served by
+  `packages/tddy-session-activity/src/service.rs`. It still resolves only
+  `unified_session_dir_path(sessions_base, session_id)`.
+- `StreamAcpReplayRequest` is declared in `packages/tddy-service/proto/activity.proto`, not
+  `connection.proto`. It still has no `agent_id` field.
+- The peer forward it refuses is now `tddy-daemon`'s
+  `connection_service/svc_activity_ports.rs::stream_acp_replay`, which calls
+  `refuse_if_addressed_at_a_peer` — so "implement the forward" means implementing it in
+  `PeerRoutedActivity`, not in the serving crate, which deliberately cannot reach a peer.
+- `PromptAgentConversation`'s one-shot `mpsc` is now in
+  `packages/tddy-session-agents/src/service.rs`, and the 120-character `last_activity.summary` rule
+  in `packages/tddy-session-agents/src/session_agent_status.rs`.
+- The fix is therefore **no longer "all daemon-side"**: appending the per-agent frame is
+  `tddy-session-agents`' (it is where the turn's text exists), reading it back is
+  `tddy-session-activity`'s, and the peer forward is `tddy-daemon`'s. That is three owners where the
+  entry assumed one — worth knowing before it is scheduled.

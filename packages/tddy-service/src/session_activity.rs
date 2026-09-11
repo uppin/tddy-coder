@@ -36,8 +36,8 @@ pub const NO_TICK: u64 = 0;
 ///
 /// 1, not 0, so that [`NO_TICK`] means only what it says.
 ///
-/// `docs/dev/todo/2026-08-29-a-session-s-first-delta-is-numbered-0-which-is-also-the-wire-s-no-tick.md`
-/// records the defect this fixes: a session's first activity delta used to be numbered 0 — which is
+/// `docs/dev/changesets/2026-09-09-unbundle-session-agent-services.md` records the defect this
+/// fixes, closing the `docs/dev/todo/` entry that raised it: a session's first activity delta used to be numbered 0 — which is
 /// also the wire's "no tick" value — so a consumer could not tell *the first delta* from *no delta
 /// yet*. `StreamAgentActivityDelta` moved to a new proto with `#unbundle` node 7, and carrying that
 /// ambiguity into a fresh schema would have made it permanent.

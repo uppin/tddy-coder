@@ -6,8 +6,8 @@
 //!
 //! # The delta tick numbering changed with this move, deliberately
 //!
-//! `docs/dev/todo/2026-08-29-a-session-s-first-delta-is-numbered-0-which-is-also-the-wire-s-no-tick.md`
-//! records that a session's first activity delta was numbered 0 — which is also the wire's "no tick"
+//! `docs/dev/changesets/2026-09-09-unbundle-session-agent-services.md` records the fix, closing the
+//! `docs/dev/todo/` entry that raised it: a session's first activity delta used to be numbered 0 — which is also the wire's "no tick"
 //! value, so a consumer could not tell *the first delta* from *no delta yet*.
 //!
 //! `StreamAgentActivityDelta` moved to a **new proto** in this node, and carrying that ambiguity

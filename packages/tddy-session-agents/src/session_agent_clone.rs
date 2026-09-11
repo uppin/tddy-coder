@@ -2,7 +2,7 @@
 //! owning daemon)**.
 //!
 //! Product contract: `docs/ft/daemon/session-agent-roster.md` § Clones.
-//! Module docs: `packages/tddy-daemon/docs/session-agent-roster.md`.
+//! Module docs: `packages/tddy-session-agents/docs/session-agent-roster.md`.
 //!
 //! Two daemons appear here and they hold different halves:
 //!

@@ -14,7 +14,7 @@ The tab reads nothing new. It correlates two feeds the app already holds:
 
 | Feed | Gives | Held by |
 |---|---|---|
-| `StreamSessionAgents` | The roster of one session — whole snapshots, never diffs | `useSessionAgentRoster`, one instance per rendered session node |
+| `SessionAgentService.StreamSessionAgents` (`session_agents.proto`) | The roster of one session — whole snapshots, never diffs | `useSessionAgentRoster`, one instance per rendered session node |
 | `ListSessions` | Every session the browser can see, each with `orchestrator_session_id` | The drawer, threaded down as the `sessions` prop |
 
 A **managed** roster agent reports `SessionAgentEntry.status`; a **non-managed** subagent session

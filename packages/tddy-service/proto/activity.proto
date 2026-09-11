@@ -70,9 +70,10 @@ service ActivityService {
   rpc GetAcpReplayPage(GetAcpReplayPageRequest) returns (GetAcpReplayPageResponse);
 }
 
-// One replay frame: a connection-local wrapper carrying an ACP `tddy.acp.v1.AcpAgentMessage`
+// One replay frame: a service-local wrapper carrying an ACP `tddy.acp.v1.AcpAgentMessage`
 // (session_update / error variant) as its protobuf-encoded bytes. Bytes (rather than a direct
-// cross-package field) keep connection.proto self-contained — no import, no cross-package codegen —
+// cross-package field) keep this file self-contained — no import, no cross-package codegen — which
+// is why the message travelled unchanged when `#unbundle` node 7 moved it out of connection.proto,
 // while preserving the exact ACP data model: the web decodes the bytes with the AcpAgentMessage
 // schema and reuses the same session/update switch as the live ACP stream.
 message AcpReplayFrame {

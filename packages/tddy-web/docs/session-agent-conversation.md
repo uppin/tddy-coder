@@ -25,7 +25,7 @@ to read.
 |---|---|---|
 | Tab list + attach | `src/components/sessions/SessionMainPane.tsx` | which conversations exist, per session, and which is focused |
 | Tab strip + pane stack | `src/components/sessions/SessionRuntime.tsx`, `SessionTerminalTabs.tsx` | rendering a tab and a body per conversation |
-| The conversation | `src/components/sessions/useAgentConversation.ts`, `SessionAgentConversationPane.tsx` | `Open` / `Prompt` / `Cancel` for exactly one conversation |
+| The conversation | `src/components/sessions/useAgentConversation.ts`, `SessionAgentConversationPane.tsx` | `Open` / `Prompt` / `Cancel` on `session_agents.SessionAgentService`, for exactly one conversation |
 
 Two pure modules carry the logic worth testing without a DOM:
 `agentConversationTranscript.ts` (chunks → turns) and `agentConversationTabs.ts` (the tab list).

@@ -392,8 +392,9 @@ transport entirely and fail on the missing worktree.
 **Resume reads the roster from the codebase daemon.** A split session's own `.session.yaml` never
 holds a roster — its agents are recorded beside the codebase, on the workspace session the pairing
 names — so the tools a resumed agent may call cannot be derived locally. Resume therefore issues a
-routed `ListSessionAgents` against `codebase_daemon_instance_id` and builds the spawn's
-`--allowedTools` / `--disallowedTools` from what comes back. Claude's flags are fixed for the life
+routed `ListSessionAgents` (`session_agents.SessionAgentService`) against
+`codebase_daemon_instance_id` and builds the spawn's `--allowedTools` / `--disallowedTools` from
+what comes back. Claude's flags are fixed for the life
 of the process, so this is the only moment a withdrawal can be imposed
 (session-agent-roster.md AC25).
 
@@ -448,10 +449,10 @@ GitHub user must map to an OS user on **both** daemons; B runs the tools as its 
 
 **The agent process holds the caller's session token.** `TDDY_REMOTE_SESSION_TOKEN` is the user's own
 session token, because that is what B authenticates against to resolve the worktree as the right OS
-user. It is not scoped to `ExecuteTool` or to this session: it authenticates every
-`ConnectionService` RPC on **both** daemons — `DeleteSession` against any of the user's sessions,
-`StartSession`, project mutations. No co-located path hands an agent this credential today (the
-sandbox uses `SandboxIpc` with an empty token).
+user. It is not scoped to `ExecuteTool` or to this session: it authenticates every RPC taking a
+session token on **both** daemons, whichever service now declares it — `DeleteSession` against any
+of the user's sessions, `StartSession`, project mutations. No co-located path hands an agent this
+credential today (the sandbox uses `SandboxIpc` with an empty token).
 
 This is a deliberate v1 property, not an oversight: the alternative is a session-scoped tool token
 (audience = this session id, exec-tool methods only), which is recorded in `docs/dev/TODO.md`. Weigh
@@ -507,7 +508,7 @@ the new `SessionEntry` fields rather than inferred from which daemon answered.
 ## Non-goals
 
 - **Web observability of the B side.** Long-lived streams (`StreamSessionActivity` and
-  `StreamAcpReplay` on `connection.ConnectionService`, `StreamTerminalOutput` on
+  `StreamAcpReplay` on `activity.ActivityService`, `StreamTerminalOutput` on
   `terminal_session.TerminalSessionService`) do not cross daemons; the agent's own terminal
   and activity live on A and are unaffected. Watching B's worktree from the web is out of scope.
 - **Multi-hop.** A addresses B directly; no chains of intermediate daemons.

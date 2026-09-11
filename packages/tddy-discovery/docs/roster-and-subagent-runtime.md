@@ -5,14 +5,18 @@
 Two public modules serve everything a session does with its specialized agents. **`roster`** is the
 in-jail registry that follows the session's live agent roster over `StreamSessionAgents`: which
 agent a call may address, which exec tools an attached agent has taken over, and the conversation
-RPCs that reach an agent this process holds no def for. **`subagent_runtime`** is the table of open
-conversations, the turns running on them, and what each has spent.
+RPCs that reach an agent this process holds no def for. All of those are addressed at
+`session_agents.SessionAgentService` — the coordinate `#unbundle` node 7 moved family B to, served
+by `tddy-session-agents` in front of the runtime here — read from
+`tddy_service::session_agents::SESSION_AGENT_SERVICE` so this client and that server cannot disagree
+about the name. **`subagent_runtime`** is the table of open conversations, the turns running on
+them, and what each has spent.
 
 This crate owns them because it already owns every type they manipulate — `subagent`'s session
 traits, `agent_def::SpecializedAgentDef`, `openai::TokenUsage` — plus the two dependencies neither
-`tddy-core` nor `tddy-service` can carry: `tddy-service`'s roster protos (which `tddy-service` is
-*below*, so it cannot hold `registry`) and `tddy-session-tool-client` (how a jail reaches its
-facilitating daemon).
+`tddy-core` nor `tddy-service` can carry: `tddy-service`'s `session_agents.proto` types (which
+`tddy-service` is *below*, so it cannot hold `registry`) and `tddy-session-tool-client` (how a jail
+reaches its facilitating daemon).
 
 ## What is here and what is not
 

@@ -13,3 +13,11 @@
 - A fix wants a child count on the parent — `SessionEntry.subagent_count`, stamped by the daemon that
   owns the parent — so a node can say "3 subagents, 1 not listed here" instead of quietly rendering
   two. That is a proto and daemon change, which is why it is not in the web-only changeset.
+
+## Re-read at `#unbundle` node 7's wrap (2026-09-12)
+
+Unaffected and unchanged. Everything it names is family C, which stays on
+`connection.ConnectionService`: `ListSessions`, `SessionEntry` and the proposed
+`SessionEntry.subagent_count`. `SessionEntry` did gain two indirections — `SessionAgentStatus` and
+`SessionAgentActivity` now come from `types.proto` rather than being declared in `connection.proto` —
+but they keep their field numbers and neither is what this entry is about.

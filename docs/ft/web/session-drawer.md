@@ -225,13 +225,18 @@ joined room plus a token-refresh timer alive for the life of the page.
 ### Session-participant RPC routing
 
 An attached session's service clients come from its own connection
-(`connection.clientFor(ConnectionService)`, `connection.clientFor(TerminalSessionService)`),
+(`connection.clientFor(ConnectionService)`, `connection.clientFor(TerminalSessionService)`,
+`connection.clientFor(ActivityService)` — a session has **three** coordinates on its participant),
 memoised per service so an unchanged route yields one stable client identity. Over a room that
 reaches the session's own participant (`daemon-{instanceId}-{sessionId}`); where the host serves the
 session itself they are the host's own clients. Session-scoped RPCs route through them:
 
 - `ConnectionService`: `ListExecTools`, `ListSessionToolCalls`, `ExecuteTool`
 - `TerminalSessionService`: `ClaimTerminalControl`, `WatchTerminalControl`
+- `activity.ActivityService`: `StreamSessionActivity`, `StreamAcpReplay`, `GetAcpToolCallDetail`,
+  `GetAcpReplayPage` — the methods that read *this* session. The service's other four are the
+  daemon's (hook reports, the daemon-wide notification feed, the worktree delta) and the session
+  participant refuses them rather than answering about state it does not hold.
 - VNC and screen-sharing RPCs
 
 **Daemon-direct** RPCs stay on the daemon participant (`daemon-{instanceId}`), not the session
@@ -763,8 +768,9 @@ question "who is working for this agent?" is answered, and it answers it with th
 - `SessionsDrawerScreen.onChildSessionStarted` — the optimistic drawer overlay, so a child spawned
   from the PR-Stack screen appears without waiting for the next poll.
 - `AttachSessionAgent` / `OpenAgentConversation` / `PromptAgentConversation` /
-  `CancelAgentConversation` — the roster and conversation RPCs behind **Add agent**, all of which
-  already existed and were already reachable with a `session_token`.
+  `CancelAgentConversation` (`session_agents.SessionAgentService`) — the roster and conversation
+  RPCs behind **Add agent**, all of which already existed and were already reachable with a
+  `session_token`.
 
 No proto or daemon changes; no new external dependencies. Both halves are tddy-web-only.
 
