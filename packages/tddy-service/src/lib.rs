@@ -16,6 +16,7 @@ pub mod presenter_intent_service;
 pub mod reflection_service;
 pub mod service;
 pub mod service_acp;
+pub mod service_coordinates;
 pub mod session_activity;
 pub mod session_agents;
 pub mod terminal_service;
@@ -55,6 +56,7 @@ pub use proto::worktree::WorktreeServiceServer;
 pub use reflection_service::{reflection_entry_from, ServerReflectionImpl};
 pub use service::{session_view_adapter_surface, TddyRemoteService};
 pub use service_acp::TddyAcpService;
+pub use service_coordinates::SESSION_FILES_SERVICE;
 pub use tddy_rpc::Status;
 pub use terminal_service::{
     start_virtual_tui_session, TerminalServiceVirtualTui, VirtualTuiSession,

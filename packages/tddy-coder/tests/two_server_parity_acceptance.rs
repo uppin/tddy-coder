@@ -59,8 +59,8 @@ use tddy_terminal_rpc::{
 };
 use tokio::sync::broadcast;
 
-/// The coordinate both wirings are dispatched at.
-const TERMINAL_SERVICE: &str = "terminal_session.TerminalSessionService";
+/// The coordinate both wirings are dispatched at, as the crate that serves it publishes it.
+const TERMINAL_SERVICE: &str = tddy_terminal_rpc::TERMINAL_SESSION_SERVICE;
 /// The coordinate the session's tools stay on.
 const CONNECTION_SERVICE: &str = "connection.ConnectionService";
 

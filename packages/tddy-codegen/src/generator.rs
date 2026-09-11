@@ -45,7 +45,7 @@ impl ServiceGenerator for TddyServiceGenerator {
                     import_once(buf, &format!("use {trait_module};"));
                     generate_tonic_adapter(&service, buf, rpc);
                 }
-                None => generate_tonic_adapter_struct(&service, buf),
+                None => generate_tonic_adapter_without_trait_impl(&service, buf),
             }
         }
     }
@@ -885,7 +885,11 @@ const TONIC_STATUS_PATH: &str = "tddy_service";
 
 /// Emit the adapter wrapper struct alone: a `.proto` with no tonic-build pass has no server trait
 /// to implement, so there is nothing to delegate to.
-fn generate_tonic_adapter_struct(service: &Service, buf: &mut String) {
+///
+/// The *other* branch of the choice [`TddyServiceGenerator::tonic_trait_path`] makes, not a step of
+/// it — [`generate_tonic_adapter`] emits the same wrapper plus the trait impl. What the two share is
+/// [`write_tonic_adapter_wrapper`].
+fn generate_tonic_adapter_without_trait_impl(service: &Service, buf: &mut String) {
     write_tonic_adapter_wrapper(service, buf, false);
 }
 
@@ -998,24 +1002,11 @@ fn write_tonic_adapter_wrapper(service: &Service, buf: &mut String, has_trait_im
 /// it names it.
 fn generate_tonic_adapter_method(service: &Service, method: &Method, buf: &mut String, rpc: &str) {
     let tonic_method = &method.name;
-    let rpc_method = to_snake_case(&method.name);
     let stream_assoc = format!("{}Stream", method_proto_name(method));
     let input = &method.input_type;
     let output = &method.output_type;
-    let svc = &service.name;
 
-    if method.server_streaming {
-        writeln!(
-            buf,
-            "    type {} = std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<{}, tonic::Status>> + Send>>;",
-            stream_assoc, output
-        )
-        .unwrap();
-        writeln!(buf).unwrap();
-        // A tonic `Status` is large enough to trip `result_large_err`, and the size is tonic's
-        // choice, not this signature's: the trait being implemented dictates the return type.
-        writeln!(buf, "    #[allow(clippy::result_large_err)]").unwrap();
-    }
+    write_stream_assoc_type(method, &stream_assoc, output, buf);
 
     let request_type = if method.client_streaming {
         format!("tonic::Streaming<{}>", input)
@@ -1037,6 +1028,44 @@ fn generate_tonic_adapter_method(service: &Service, method: &Method, buf: &mut S
         response_type
     )
     .unwrap();
+
+    write_delegation(service, method, buf, rpc);
+    write_response(method, buf);
+
+    writeln!(buf, "    }}").unwrap();
+}
+
+/// Emit what a **server-streaming** rpc needs above its signature, and nothing for the other three
+/// shapes: the associated stream type the tonic trait declares beside the method, and the lint
+/// waiver the method's return type needs.
+///
+/// A tonic `Status` is large enough to trip `result_large_err`, and the size is tonic's choice, not
+/// this signature's: the trait being implemented dictates the return type.
+fn write_stream_assoc_type(method: &Method, stream_assoc: &str, output: &str, buf: &mut String) {
+    if !method.server_streaming {
+        return;
+    }
+    writeln!(
+        buf,
+        "    type {} = std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<{}, tonic::Status>> + Send>>;",
+        stream_assoc, output
+    )
+    .unwrap();
+    writeln!(buf).unwrap();
+    writeln!(buf, "    #[allow(clippy::result_large_err)]").unwrap();
+}
+
+/// Emit the body's call into the wrapped tddy-rpc implementation, up to and including the `?` on
+/// its refusal.
+///
+/// A **client-streaming** rpc arrives as a `tonic::Streaming`, so the inbound half is re-wrapped as
+/// a tddy-rpc `Streaming` (its per-item failures converted inward) before the call; every other
+/// shape hands the decoded message straight through. Either way the refusal is converted outward
+/// through the one shared pair, so a given refusal cannot reach two transports as two different
+/// gRPC codes.
+fn write_delegation(service: &Service, method: &Method, buf: &mut String, rpc: &str) {
+    let svc = &service.name;
+    let rpc_method = to_snake_case(&method.name);
 
     if method.client_streaming {
         writeln!(
@@ -1066,7 +1095,13 @@ fn generate_tonic_adapter_method(service: &Service, method: &Method, buf: &mut S
     }
     writeln!(buf, "            .await").unwrap();
     writeln!(buf, "            .map_err(to_tonic_status)?;").unwrap();
+}
 
+/// Emit the body's last statement: the answer, in the shape the tonic trait declared.
+///
+/// A **server-streaming** rpc's frames are converted and boxed into the associated type
+/// [`write_stream_assoc_type`] declared; every other shape returns the message as it came back.
+fn write_response(method: &Method, buf: &mut String) {
     if method.server_streaming {
         writeln!(
             buf,
@@ -1077,7 +1112,6 @@ fn generate_tonic_adapter_method(service: &Service, method: &Method, buf: &mut S
     } else {
         writeln!(buf, "        Ok(tonic::Response::new(resp.into_inner()))").unwrap();
     }
-    writeln!(buf, "    }}").unwrap();
 }
 
 #[cfg(test)]

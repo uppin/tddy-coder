@@ -40,8 +40,10 @@ use super::ConnectionServiceImpl;
 use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
 
 /// The coordinate a forward is addressed at on the peer. A forwarded call has to land on the same
-/// method of the same service there, which is where the peer declares these eight.
-const SESSION_FILES_SERVICE: &str = "session_files.SessionFilesService";
+/// method of the same service there, which is where the peer declares these eight — so the name is
+/// the one `tddy-service` publishes, the same value `tddy-session-files` serves under and
+/// `tddy-daemon-livekit`'s forwarders address.
+const SESSION_FILES_SERVICE: &str = tddy_service::SESSION_FILES_SERVICE;
 
 /// The label the daemon's exec-tool authorization logs name a context read by.
 ///

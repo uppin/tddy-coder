@@ -125,6 +125,31 @@ fn the_staged_file(staging_base: &std::path::Path, file_name: &str) -> PathBuf {
         .join(file_name)
 }
 
+/// The routing wrapper this daemon registers is named with the same constant its forwarders
+/// address, so a request it decides to forward lands on a coordinate the peer serves.
+///
+/// This is the mismatch that cannot be caught by a compiler: both ends are `&str`, and a peer
+/// asked for a service name it does not serve answers "unknown service" at the method, not at the
+/// spelling — which is how a forwarded session-file call already reached a host that did not serve
+/// it once during this stack. `tddy-daemon-livekit`'s five session-file forwarders and the entry
+/// below now read one constant; this pins the entry's end of that to it.
+#[test]
+fn registers_the_coordinate_its_own_forwarders_address() {
+    // Given a daemon that can see a peer, and so may route a request away from itself
+    let sessions = tempfile::tempdir().expect("a temp sessions base");
+    let staging = tempfile::tempdir().expect("a temp staging base");
+    let daemon = a_daemon_that_can_see_a_peer_but_cannot_reach_it(
+        sessions.path().to_path_buf(),
+        staging.path().to_path_buf(),
+    );
+
+    // When reading the coordinate it registers its session-file entry at
+    let registered = Arc::new(daemon).session_files_entry().name;
+
+    // Then it is the coordinate a forward is addressed at on the peer
+    assert_eq!(registered, tddy_service::SESSION_FILES_SERVICE);
+}
+
 /// A request this host owns is served by `tddy-session-files`, against this host's own data dir.
 #[tokio::test]
 async fn serves_a_request_this_daemon_owns_from_its_own_sessions() {

@@ -394,8 +394,9 @@ pub struct TerminalServiceHost {
     pub roster: std::sync::Arc<InMemoryRoster>,
 }
 
-/// The service name every dispatch below addresses.
-pub const SERVICE: &str = "terminal_session.TerminalSessionService";
+/// The service name every dispatch below addresses: the coordinate the crate publishes, so a
+/// dispatch here reaches the same address a real caller puts on the wire.
+pub const SERVICE: &str = tddy_terminal_rpc::TERMINAL_SESSION_SERVICE;
 
 /// Whether the host has an OS user for the identity its token authenticates.
 ///

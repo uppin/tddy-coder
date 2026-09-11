@@ -564,7 +564,7 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
 pub fn build_session_files_entry(ports: SessionFilesPorts) -> tddy_rpc::ServiceEntry {
     let server = SessionFilesServiceServer::new(SessionFilesServiceImpl::new(ports));
     tddy_rpc::ServiceEntry {
-        name: "session_files.SessionFilesService",
+        name: tddy_service::SESSION_FILES_SERVICE,
         service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
     }
 }

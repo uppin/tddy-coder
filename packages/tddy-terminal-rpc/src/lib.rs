@@ -58,6 +58,6 @@ pub use login_shell::{login_shell_for, login_shell_for_os_user};
 pub use proto::terminal_session::{GetTerminalHistoryRequest, TerminalHistoryChunk};
 pub use service::{
     build_terminal_session_entry, ControlChange, ControlClaim, TerminalControl, TerminalDescriptor,
-    TerminalRoster, TerminalSessionPorts, TerminalSessionServiceImpl,
+    TerminalRoster, TerminalSessionPorts, TerminalSessionServiceImpl, TERMINAL_SESSION_SERVICE,
 };
 pub use session::{TerminalSession, TerminalSessionStore};

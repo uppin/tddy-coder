@@ -9,6 +9,15 @@
 //! bridge. These tests are the evidence for that swap: [`hand_rolled_sandbox_replay`] below is the
 //! deleted loop, kept here as the oracle, and every assertion compares the served frames against it.
 //!
+//! **The oracle is a copy of deleted production code and will drift silently.** Nothing
+//! recompiles it against `tddy_terminal_rpc::bridge`, so the first change to the bridge's
+//! replay/offset arm — its prologue, its clamping, its frame budget, its end-of-replay rule —
+//! leaves these tests comparing new behaviour against a transcription of the old, and whether they
+//! pass then says nothing about parity. A maintainer changing that arm must, in the same change,
+//! either update [`hand_rolled_sandbox_replay`] to the new intent (keeping it an oracle) or retire
+//! this suite in favour of assertions written against the bridge directly. Leaving the oracle
+//! untouched is the one option that quietly stops meaning anything.
+//!
 //! They run against the real [`SandboxSessionState`] and the real
 //! [`SandboxTerminalSession`](tddy_daemon::terminal_session_adapter::SandboxTerminalSession), not a
 //! mirror of them, because what is being checked is precisely the mapping between a jail's three

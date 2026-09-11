@@ -590,7 +590,7 @@ async fn run_grpc_terminal(
     let mut resp = connectrpc_post_streaming(
         &http_client,
         daemon_url,
-        "terminal_session.TerminalSessionService",
+        crate::TERMINAL_SESSION_SERVICE,
         "StreamTerminalOutput",
         stream_req.encode_to_vec(),
     )
@@ -622,7 +622,7 @@ async fn run_grpc_terminal(
             let _ = connectrpc_post(
                 &input_client,
                 &input_daemon_url,
-                "terminal_session.TerminalSessionService",
+                crate::TERMINAL_SESSION_SERVICE,
                 "SendTerminalInput",
                 req.encode_to_vec(),
             )
@@ -647,7 +647,7 @@ async fn run_grpc_terminal(
             let _ = connectrpc_post(
                 &input_client,
                 &input_daemon_url,
-                "terminal_session.TerminalSessionService",
+                crate::TERMINAL_SESSION_SERVICE,
                 "SendTerminalInput",
                 req.encode_to_vec(),
             )

@@ -86,7 +86,7 @@ mod tests {
     const OS_USER: &str = "tddy-test-user";
     const SESSION_ID: &str = "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa";
     const TOKEN: &str = "a-valid-session-token";
-    const SERVICE: &str = "session_files.SessionFilesService";
+    const SERVICE: &str = tddy_service::SESSION_FILES_SERVICE;
 
     /// A host with a data dir and a staging area on disk, and the entry that serves it.
     struct AHost {
@@ -188,6 +188,23 @@ mod tests {
 
         // Then
         assert_eq!(entry.name, "session_files.SessionFilesService");
+    }
+
+    /// The name this crate serves under and the name a cross-host forward is addressed at have to
+    /// be one value: a mismatch is not a type error but a runtime "unknown service" on the peer,
+    /// which is how a forwarded session-file call already reached a host that did not serve it
+    /// once. Both ends read `tddy_service::SESSION_FILES_SERVICE` — the served entry here, and
+    /// `tddy-daemon-livekit`'s five session-file forwarders — so this pins the serving end to it.
+    #[test]
+    fn serves_at_the_coordinate_a_cross_host_forward_is_addressed_at() {
+        // Given
+        let host = a_host();
+
+        // When
+        let entry = host.entry();
+
+        // Then
+        assert_eq!(entry.name, tddy_service::SESSION_FILES_SERVICE);
     }
 
     /// The name alone would be satisfied by an entry with nothing behind it, so this dispatches a

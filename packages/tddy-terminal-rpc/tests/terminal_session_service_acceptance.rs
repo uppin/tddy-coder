@@ -32,6 +32,50 @@ fn names_the_service_the_wiring_layer_registers() {
     );
 }
 
+/// The name a host registers and the name a caller dials have to be one value: a mismatch is not a
+/// type error but a runtime "unknown service" on the serving side. This pins the served entry to
+/// the constant every caller addresses — `pty_relay`'s three Connect-HTTP dials, the coder's
+/// wrapper, and both test harnesses — so a rename that reaches only one end fails here.
+#[test]
+fn registers_at_the_coordinate_every_caller_addresses() {
+    // Given the entry a host's wiring layer builds
+    let host = TerminalServiceHost::serving_main_terminal(b"");
+
+    // When reading the coordinate it is registered at
+    // Then it is the constant this crate publishes for its callers
+    assert_eq!(
+        host.service_name(),
+        tddy_terminal_rpc::TERMINAL_SESSION_SERVICE
+    );
+}
+
+/// And that constant is what the schema declares, which is what clients in other languages are
+/// generated against — the one part of the coordinate the shared constant cannot keep honest.
+#[test]
+fn publishes_the_coordinate_its_schema_declares() {
+    // Given the schema the nine methods are generated from
+    let proto = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("proto/terminal_session.proto"),
+    )
+    .expect("terminal_session.proto is readable");
+
+    // When reading the package and service it declares
+    let package = proto
+        .lines()
+        .find_map(|line| line.strip_prefix("package ")?.strip_suffix(';'))
+        .expect("the proto declares a package");
+    let service = proto
+        .lines()
+        .find_map(|line| line.strip_prefix("service ")?.strip_suffix(" {"))
+        .expect("the proto declares a service");
+
+    // Then together they are the coordinate this crate publishes
+    assert_eq!(
+        format!("{package}.{service}"),
+        tddy_terminal_rpc::TERMINAL_SESSION_SERVICE
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The four streaming / input methods
 // ---------------------------------------------------------------------------
