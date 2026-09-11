@@ -15,6 +15,7 @@ import React from "react";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { daemonRpcIdentity, type DaemonHost } from "../../src/lib/participantRole";
@@ -101,6 +102,7 @@ function mountForm(
     withSelectedDaemon(
       <CreateSessionPane
         client={createClient(ConnectionService, hostA.transport())}
+        sessionFilesClient={createClient(SessionFilesService, hostA.transport())}
         worktreeClient={createClient(WorktreeService, hostA.transport())}
         sessionToken="tok"
         onCancel={cy.stub()}
@@ -133,6 +135,7 @@ function mountFormForHost(
     withSelectedDaemon(
       <CreateSessionPane
         client={createClient(ConnectionService, hostA.transport())}
+        sessionFilesClient={createClient(SessionFilesService, hostA.transport())}
         worktreeClient={createClient(WorktreeService, hostA.transport())}
         sessionToken="tok"
         onCancel={cy.stub()}

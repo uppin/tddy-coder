@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { ConnectionService } from "../../gen/connection_pb";
+import type { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { tddyDebug } from "../../lib/debugMask";
 
 const dTerm = tddyDebug("tddy:term:tabs");
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type TerminalClient = Client<typeof TerminalSessionService>;
 
 /** The reserved main terminal id — the coding Agent tab. Never handed out by StartTerminalSession. */
 export const AGENT_TERMINAL_ID = "main";
@@ -30,7 +30,7 @@ export interface UseSessionTerminalsParams {
   sessionToken: string;
   /** Client used for the terminal RPCs (the daemon client for gRPC sessions, the session-scoped
    *  client for LiveKit sessions). `null` until it is available; listing waits for it. */
-  client: ConnectionClient | null;
+  client: TerminalClient | null;
   /** Current terminal-control lease token, forwarded to Start/Stop when a controller is active. */
   controlToken?: string;
 }

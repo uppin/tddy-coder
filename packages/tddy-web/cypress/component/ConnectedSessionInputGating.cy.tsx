@@ -18,9 +18,10 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   ClaimTerminalControlResponseSchema,
-  ConnectionService,
   SendTerminalInputResponseSchema,
-} from "../../src/gen/connection_pb";
+  TerminalControlEventSchema,
+  TerminalSessionService,
+} from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { useTerminalControl, type Session } from "../../src/components/sessions/useTerminalControl";
 
@@ -32,10 +33,10 @@ const SESSION_ID = "gating-session-aaaa-0000-0000-0000-000000000001";
 const SESSION_TOKEN = "gating-session-token";
 const CLAIM_TOKEN = "granted-lease-token-xyz";
 
-type ConnectionClient = ReturnType<typeof createClient<typeof ConnectionService>>;
+type TerminalClient = ReturnType<typeof createClient<typeof TerminalSessionService>>;
 
 /**
- * In-memory `ConnectionService` backend whose `claimTerminalControl` is held pending until the test
+ * In-memory `TerminalSessionService` backend whose `claimTerminalControl` is held pending until the test
  * resolves it, so the `connected === null` window (between attach and grant) is observable and
  * deterministic. `sendTerminalInput` records every call so the test can assert input never reaches
  * the daemon before the lease exists, and that the flushed input carries the token.
@@ -48,7 +49,7 @@ function aDeferredClaimBackend() {
   const sendInputCalls: { sessionId: string; controlToken: string }[] = [];
   const state = { streamOpened: false };
 
-  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+  const backend = anInMemoryRpcBackend().implement(TerminalSessionService, {
     claimTerminalControl: async () => {
       await claimPending;
       return create(ClaimTerminalControlResponseSchema, { granted: true, controlToken: CLAIM_TOKEN });
@@ -56,10 +57,7 @@ function aDeferredClaimBackend() {
     // Server-streaming control watch — yield one event then end; the lease token comes from the
     // claim response and the hook only needs the stream to not error.
     watchTerminalControl: async function* () {
-      yield {
-        $typeName: "connection.TerminalControlEvent",
-        event: { case: "granted", value: CLAIM_TOKEN },
-      } as any;
+      yield create(TerminalControlEventSchema, {});
     },
     // Server-streaming output — record that it opened, yield no data, and end. The terminal's
     // mount-time resize still fires a `send` independently of output data.
@@ -82,7 +80,7 @@ function aDeferredClaimBackend() {
 /** Mounts `useTerminalControl` + `GrpcSessionTerminal` together: the hook converts the `Session`
  *  into a `ConnectedSession` once the (deferred) claim resolves, and the terminal gates input on
  *  that `connected` value — exactly the production wiring in `SessionRuntime`. */
-function InputGatingHarness({ client }: { client: ConnectionClient }) {
+function InputGatingHarness({ client }: { client: TerminalClient }) {
   const session: Session = { sessionId: SESSION_ID, client };
   const { connected } = useTerminalControl(session, SESSION_TOKEN);
   return (
@@ -105,7 +103,7 @@ it("queues input sent before the claim resolves and flushes it once ConnectedSes
   // Given — a backend whose claim is deferred until the test releases it, so `connected` stays
   // null after mount.
   const { backend, sendInputCalls, state, resolveClaim } = aDeferredClaimBackend();
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(TerminalSessionService, backend.transport());
 
   // When — the terminal mounts (auto-claim fires but is held pending)
   cy.mount(<InputGatingHarness client={client} />);

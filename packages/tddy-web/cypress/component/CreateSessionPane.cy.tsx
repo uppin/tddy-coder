@@ -14,6 +14,7 @@ import {
   StartSessionRequestSchema,
   StartSessionResponseSchema,
 } from "../../src/gen/connection_pb";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import {
@@ -57,6 +58,10 @@ function createTestWorktreeClient() {
   return createClient(WorktreeService, testTransport());
 }
 
+function createTestSessionFilesClient() {
+  return createClient(SessionFilesService, testTransport());
+}
+
 // ---------------------------------------------------------------------------
 // RPC intercept helpers (baseline — one project, one agent, one tool)
 // ---------------------------------------------------------------------------
@@ -96,12 +101,14 @@ function mountCreateSessionPane(overrides: {
   onCreated?: (id: string) => void;
 } = {}) {
   const client = createTestClient();
+  const sessionFilesClient = createTestSessionFilesClient();
   const worktreeClient = createTestWorktreeClient();
   const onCancel = overrides.onCancel ?? cy.stub().as("onCancel");
   const onCreated = overrides.onCreated ?? cy.stub().as("onCreated");
   cy.mount(
     <CreateSessionPane
       client={client}
+      sessionFilesClient={sessionFilesClient}
       worktreeClient={worktreeClient}
       sessionToken="fake-token"
       onCancel={onCancel}

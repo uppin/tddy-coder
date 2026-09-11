@@ -1,5 +1,5 @@
 /**
- * Unit tests for the terminal feed a daemon-served session offers over `ConnectionService`.
+ * Unit tests for the terminal feed a daemon-served session offers over `TerminalSessionService`.
  *
  * This is `GrpcSessionTerminal`'s stream construction, moved onto the connection, and these pin the
  * four decisions that moved with it — each of which was a bug the component had already paid for:
@@ -21,11 +21,11 @@ import { describe, expect, it } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import {
-  type ConnectionService,
   SessionTerminalOutputSchema,
   StreamReplayMode,
   TerminalHistoryChunkSchema,
-} from "../../gen/connection_pb";
+  type TerminalSessionService,
+} from "../../gen/terminal_session_pb";
 import { MAIN_TERMINAL_ID } from "../../lib/terminalFrameIdentity";
 import type { HistoryChunk } from "../../lib/terminalHistoryLoader";
 import type { TerminalFeed, TerminalHistoryFetcher, TerminalOptions } from "./terminal";
@@ -187,7 +187,7 @@ function aDaemonReplaying(frames: OutputFrame[]) {
       });
     },
   };
-  return { client: client as unknown as Client<typeof ConnectionService>, opens, sends, historyRequests };
+  return { client: client as unknown as Client<typeof TerminalSessionService>, opens, sends, historyRequests };
 }
 
 describe("a terminal resume point", () => {

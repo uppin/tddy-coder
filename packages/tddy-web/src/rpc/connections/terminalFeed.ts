@@ -1,5 +1,5 @@
 /**
- * The terminal feed a daemon-served session offers, over `ConnectionService`.
+ * The terminal feed a daemon-served session offers, over `TerminalSessionService`.
  *
  * This is `GrpcSessionTerminal`'s stream construction, moved off the component and onto the
  * connection. Nothing about the wire changes: the same `StreamTerminalOutput` open, the same
@@ -12,7 +12,7 @@
  */
 
 import type { Client } from "@connectrpc/connect";
-import { ConnectionService, StreamReplayMode } from "../../gen/connection_pb";
+import { StreamReplayMode, TerminalSessionService } from "../../gen/terminal_session_pb";
 import { tddyDebug } from "../../lib/debugMask";
 import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
@@ -50,7 +50,7 @@ export class TerminalResumePoint {
 
 export interface DaemonTerminalFeedDeps {
   /** The daemon that owns the session — the host's own client, not a session participant's. */
-  readonly client: Client<typeof ConnectionService>;
+  readonly client: Client<typeof TerminalSessionService>;
   readonly sessionId: string;
 
   /** Where a previous open of this same terminal got to. Advanced as frames arrive. */
@@ -60,7 +60,7 @@ export interface DaemonTerminalFeedDeps {
 }
 
 /**
- * Open `sessionId`'s terminal on a daemon that serves `ConnectionService`.
+ * Open `sessionId`'s terminal on a daemon that serves `TerminalSessionService`.
  *
  * The output stream starts immediately — a caller that had to await it could not register an
  * `onMessage` listener before the first frame, which is the ordering `GrpcSessionTerminal` already

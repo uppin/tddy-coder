@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../../gen/connection_pb";
+import type { SessionFilesService } from "../../../gen/session_files_pb";
 import type { WorktreeService } from "../../../gen/worktree_pb";
 import type { SessionAttachmentHint } from "../../../rpc/connections/session";
 import { Button } from "../../ui/button";
@@ -27,6 +28,7 @@ import { remoteTrackingName } from "../../../lib/branchNames";
 import type { SessionMetadata } from "../../../lib/sessionParticipantMetadata";
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
 
 /**
@@ -81,6 +83,9 @@ export interface PrStackScreenProps {
    * picker browses worktrees through it. Absent for the same reason `client` can be: no daemon is
    * reachable yet, and the dialog is not offered at all without both.
    */
+  /** The session-files service on the same host as `client` — the Start-session dialog stages
+   *  its attachments through it. */
+  sessionFilesClient?: SessionFilesClient;
   worktreeClient?: WorktreeClient;
   sessionToken?: string;
   /**
@@ -149,6 +154,7 @@ export interface PrStackScreenProps {
 export function PrStackScreen({
   session,
   client,
+  sessionFilesClient,
   worktreeClient,
   sessionToken = "",
   sessions = [],
@@ -654,10 +660,11 @@ export function PrStackScreen({
         onCommitAndPull={handleCommitDirtyWorktreeAndPull}
         onCancel={() => setDirtyWorktreePrompt(null)}
       />
-      {client && worktreeClient && (
+      {client && sessionFilesClient && worktreeClient && (
         <CreateSessionDialog
           open={startSessionNode !== null}
           client={client}
+          sessionFilesClient={sessionFilesClient}
           worktreeClient={worktreeClient}
           sessionToken={sessionToken}
           initialValues={startSessionInitialValues}

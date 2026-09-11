@@ -18,8 +18,9 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   ClaimTerminalControlResponseSchema,
-  ConnectionService,
-} from "../../src/gen/connection_pb";
+  TerminalControlEventSchema,
+  TerminalSessionService,
+} from "../../src/gen/terminal_session_pb";
 import { useTerminalControl, type Session } from "../../src/components/sessions/useTerminalControl";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
@@ -31,7 +32,7 @@ const SESSION_A = "session-aaaaaaaa-0000-0000-0000-000000000001";
 const SESSION_B = "session-bbbbbbbb-0000-0000-0000-000000000002";
 
 /**
- * In-memory `ConnectionService` backend that grants a DISTINCT control token per session. Session
+ * In-memory `TerminalSessionService` backend that grants a DISTINCT control token per session. Session
  * B's claim is held pending until the test resolves it, so the drop-to-null window (between the
  * switch and B's grant) is observable. A real RPC is slow enough that this window is naturally
  * visible in production.
@@ -42,7 +43,7 @@ function aControlBackendGrantingDistinctTokens() {
     resolveBClaim = resolve;
   });
 
-  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+  const backend = anInMemoryRpcBackend().implement(TerminalSessionService, {
     claimTerminalControl: async (req: { sessionId: string }) => {
       if (req.sessionId === SESSION_B) {
         await bClaimPending;
@@ -55,10 +56,7 @@ function aControlBackendGrantingDistinctTokens() {
     // Server-streaming control watch — yield nothing; the token comes from the claim response and
     // the hook only needs the stream to not error.
     watchTerminalControl: async function* () {
-      yield {
-        $typeName: "connection.TerminalControlEvent",
-        event: { case: "granted", value: "" },
-      } as any;
+      yield create(TerminalControlEventSchema, {});
     },
   });
 
@@ -70,7 +68,7 @@ function aControlBackendGrantingDistinctTokens() {
 // ---------------------------------------------------------------------------
 
 interface ConnectedLeaseHarnessProps {
-  client: ReturnType<typeof createClient<typeof ConnectionService>>;
+  client: ReturnType<typeof createClient<typeof TerminalSessionService>>;
   initialSessionId: string;
   nextSessionId: string;
   onConnectedValue: (value: string) => void;
@@ -108,7 +106,7 @@ function ConnectedLeaseHarness({
  */
 function aConnectedLeaseHarness() {
   const { backend, resolveBClaim } = aControlBackendGrantingDistinctTokens();
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(TerminalSessionService, backend.transport());
   const onConnectedValue = cy.stub().as("onConnectedValue");
   const leaseDisplay = () => byTestId(TEST_IDS.controlTokenDisplay);
   const switchButton = () => byTestId(TEST_IDS.switchSession);

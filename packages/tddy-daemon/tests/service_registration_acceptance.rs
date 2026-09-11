@@ -115,6 +115,24 @@ async fn registers_the_screen_sharing_service_that_tddy_screen_sharing_now_owns(
     );
 }
 
+/// `#unbundle` node 6 gave the thirteen session-file methods their own coordinate, served by
+/// `tddy-session-files`. The crate can build the entry on its own, but only the daemon's wiring
+/// layer can *mount* it — and until it did, the service existed and nothing reached it.
+#[tokio::test]
+async fn registers_the_session_files_service_that_tddy_session_files_now_owns() {
+    // Given / When
+    let services = the_services_an_assembled_daemon_registers().await;
+
+    // Then
+    assert!(
+        services
+            .iter()
+            .any(|name| name == "session_files.SessionFilesService"),
+        "the daemon must register session_files.SessionFilesService, or nothing serves the \
+         thirteen session-file methods; it hosts {services:?}"
+    );
+}
+
 #[tokio::test]
 async fn no_longer_registers_the_deleted_vnc_service() {
     // Given / When

@@ -22,6 +22,7 @@ import type {
   StartSessionRequestSchema,
   StartSessionResponse,
 } from "../gen/connection_pb";
+import type { SessionFilesService } from "../gen/session_files_pb";
 import {
   duplicateBasenames,
   validateAttachmentBasename,
@@ -48,7 +49,14 @@ export type StartSessionRequestInit = MessageInitShape<typeof StartSessionReques
 export type SessionAttachmentInit = MessageInitShape<typeof SessionAttachmentSchema>;
 
 export interface UseSessionAttachmentsArgs {
+  /** Starts the session (`StreamStartSession`) once its attachments are staged. */
   client: Client<typeof ConnectionService>;
+  /**
+   * Stages the form's local files on the host `client` is connected to
+   * (`UploadStagedAttachmentChunk`). A second client rather than a second use of `client` because
+   * the file RPCs left `connection.ConnectionService` for `session_files.SessionFilesService`.
+   */
+  sessionFilesClient: Client<typeof SessionFilesService>;
   sessionToken: string;
   /**
    * Host that will run the session. One half of the effective size cap: the session host re-checks an
@@ -196,13 +204,14 @@ function percentDone(bytesDone: number, bytesTotal: number): number {
 
 export function useSessionAttachments({
   client,
+  sessionFilesClient,
   sessionToken,
   sessionDaemonInstanceId,
   initialAttachments = [],
 }: UseSessionAttachmentsArgs): SessionAttachments {
   const daemons = useDaemons();
   const { selectedInstanceId } = useSelectedDaemon();
-  const { stageFiles } = useStagedAttachmentUpload(client, sessionToken);
+  const { stageFiles } = useStagedAttachmentUpload(sessionFilesClient, sessionToken);
 
   // Documents to materialize into the session before its agent starts. Nothing is uploaded until
   // Create is pressed, so an abandoned form leaves no staged bytes behind.
