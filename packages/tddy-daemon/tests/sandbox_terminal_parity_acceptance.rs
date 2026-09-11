@@ -35,7 +35,7 @@ use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon_sandbox::sandbox_session::{
     SandboxSessionManager, SandboxSessionState, SandboxSessionStateInit,
 };
-use tddy_rpc::Request;
+use tddy_rpc::{Request, Status};
 use tddy_task::TerminalCapture;
 use tddy_terminal_rpc::proto::terminal_session::{
     ClaimTerminalControlRequest, GetTerminalHistoryRequest, SessionTerminalInput,
@@ -194,24 +194,13 @@ impl SandboxedSession {
         let _ = self.stdout_tx.send(Bytes::copy_from_slice(output));
     }
 
-    /// The frames the served coordinate emits for this open, up to `count`.
-    async fn served_frames(
-        &self,
-        request: StreamTerminalOutputRequest,
-        count: usize,
-    ) -> Vec<SessionTerminalOutput> {
-        let mut rx = serve_stream_terminal_output_with(&self.store, request, FRAME_BUDGET_BYTES)
-            .await
-            .expect("the store resolved the jail's terminal");
-        let mut frames = Vec::new();
-        while frames.len() < count {
-            match timeout(FRAME_TIMEOUT, rx.recv()).await {
-                Ok(Some(Ok(frame))) => frames.push(frame),
-                Ok(Some(Err(status))) => panic!("the stream errored: {status:?}"),
-                Ok(None) | Err(_) => break,
-            }
+    /// One open `StreamTerminalOutput` on the jail's terminal, read the way a transport reads it.
+    async fn opened(&self, request: StreamTerminalOutputRequest) -> ServedStream {
+        ServedStream {
+            frames: serve_stream_terminal_output_with(&self.store, request, FRAME_BUDGET_BYTES)
+                .await
+                .expect("the store resolved the jail's terminal"),
         }
-        frames
     }
 
     /// What the deleted loop would have emitted for the same open.
@@ -221,6 +210,41 @@ impl SandboxedSession {
         from_offset: u64,
     ) -> Vec<SessionTerminalOutput> {
         hand_rolled_sandbox_replay(&self.capture, mode, from_offset)
+    }
+}
+
+/// One open `StreamTerminalOutput`, read frame by frame.
+///
+/// The replay frames are read as a group and the frame *after* them one at a time, because the
+/// oracle only says how many frames the open should produce: a served stream that emitted those
+/// and then a duplicate — a repeated replay frame, a stray ACK — would match as a prefix of
+/// whatever count the oracle happened to have.
+struct ServedStream {
+    frames: mpsc::Receiver<Result<SessionTerminalOutput, Status>>,
+}
+
+impl ServedStream {
+    /// The next `count` frames, or fewer if the stream stalls or closes first — which a comparison
+    /// against the oracle's frames then reports as the difference it is.
+    async fn frames(&mut self, count: usize) -> Vec<SessionTerminalOutput> {
+        let mut frames = Vec::new();
+        while frames.len() < count {
+            match timeout(FRAME_TIMEOUT, self.frames.recv()).await {
+                Ok(Some(Ok(frame))) => frames.push(frame),
+                Ok(Some(Err(status))) => panic!("the stream errored: {status:?}"),
+                Ok(None) | Err(_) => break,
+            }
+        }
+        frames
+    }
+
+    /// The single next frame, which must arrive.
+    async fn next_frame(&mut self) -> SessionTerminalOutput {
+        timeout(FRAME_TIMEOUT, self.frames.recv())
+            .await
+            .expect("the next frame arrives")
+            .expect("the stream is still open")
+            .expect("the frame is not an error")
     }
 }
 
@@ -263,12 +287,10 @@ async fn resumes_a_jails_terminal_at_the_clients_offset_with_the_frames_the_dele
     let expected = session.hand_rolled_frames(StreamReplayMode::FromOffset, 6);
 
     // When the client reopens the stream through the unified store
-    let served = session
-        .served_frames(
-            an_output_request(StreamReplayMode::FromOffset, 6),
-            expected.len(),
-        )
+    let mut stream = session
+        .opened(an_output_request(StreamReplayMode::FromOffset, 6))
         .await;
+    let served = stream.frames(expected.len()).await;
 
     // Then it is handed the same frames at the same offsets the deleted loop handed it
     assert_eq!(served, expected);
@@ -276,6 +298,11 @@ async fn resumes_a_jails_terminal_at_the_clients_offset_with_the_frames_the_dele
         served,
         vec![an_anchored_frame(b"6789".to_vec(), 6, 10, false)]
     );
+
+    // Then nothing else follows the replay: the very next frame is the jail's next live byte, so a
+    // duplicated replay frame cannot hide behind the oracle's frame count
+    session.produces(b"$ ");
+    assert_eq!(stream.next_frame().await, a_data_frame(b"$ ".to_vec()));
 }
 
 #[tokio::test]
@@ -285,12 +312,10 @@ async fn fills_a_jails_terminal_forward_in_bounded_frames_as_the_deleted_loop_di
     let expected = session.hand_rolled_frames(StreamReplayMode::FromOffset, 0);
 
     // When the client fills forward from the oldest retained byte
-    let served = session
-        .served_frames(
-            an_output_request(StreamReplayMode::FromOffset, 0),
-            expected.len(),
-        )
+    let mut stream = session
+        .opened(an_output_request(StreamReplayMode::FromOffset, 0))
         .await;
+    let served = stream.frames(expected.len()).await;
 
     // Then the retained buffer arrives as the same ordered, offset-tagged frames — not as one
     // oversized frame the transport would refuse
@@ -303,6 +328,11 @@ async fn fills_a_jails_terminal_forward_in_bounded_frames_as_the_deleted_loop_di
             an_anchored_frame(b"89".to_vec(), 8, 10, false),
         ]
     );
+
+    // Then the fill ends there: the next frame is the jail's next live byte, not a fourth chunk
+    // repeating bytes the client already holds
+    session.produces(b"$ ");
+    assert_eq!(stream.next_frame().await, a_data_frame(b"$ ".to_vec()));
 }
 
 #[tokio::test]
@@ -312,17 +342,20 @@ async fn clamps_a_drifted_client_offset_back_to_the_jails_tip_as_the_deleted_loo
     let expected = session.hand_rolled_frames(StreamReplayMode::FromOffset, 99);
 
     // When it reopens the stream at that impossible offset
-    let served = session
-        .served_frames(
-            an_output_request(StreamReplayMode::FromOffset, 99),
-            expected.len(),
-        )
+    let mut stream = session
+        .opened(an_output_request(StreamReplayMode::FromOffset, 99))
         .await;
+    let served = stream.frames(expected.len()).await;
 
     // Then it is re-anchored to the tip rather than handed its own offset back — otherwise it would
     // keep asking for bytes the capture will never hold
     assert_eq!(served, expected);
     assert_eq!(served, vec![an_anchored_frame(Vec::new(), 10, 10, false)]);
+
+    // Then that one anchor is the whole re-anchoring: the next frame is the jail's next live byte,
+    // not a second anchor at another offset
+    session.produces(b"$ ");
+    assert_eq!(stream.next_frame().await, a_data_frame(b"$ ".to_vec()));
 }
 
 #[tokio::test]
@@ -332,12 +365,10 @@ async fn re_issues_a_jails_mouse_modes_before_the_anchored_frame_as_the_deleted_
     let expected = session.hand_rolled_frames(StreamReplayMode::FromOffset, 0);
 
     // When a client opens the stream
-    let served = session
-        .served_frames(
-            an_output_request(StreamReplayMode::FromOffset, 0),
-            expected.len(),
-        )
+    let mut stream = session
+        .opened(an_output_request(StreamReplayMode::FromOffset, 0))
         .await;
+    let served = stream.frames(expected.len()).await;
 
     // Then the prologue leads, so the client's VT reports clicks even though the DECSET that
     // enabled them may have been evicted from the ring
@@ -347,6 +378,11 @@ async fn re_issues_a_jails_mouse_modes_before_the_anchored_frame_as_the_deleted_
         Some(&a_data_frame(b"\x1b[?1002h".to_vec())),
         "the mode prologue is the first frame of the stream"
     );
+
+    // Then it is re-issued once: the next frame is the jail's next live byte, not a second
+    // prologue the client's VT would apply twice
+    session.produces(b"$ ");
+    assert_eq!(stream.next_frame().await, a_data_frame(b"$ ".to_vec()));
 }
 
 // ---------------------------------------------------------------------------

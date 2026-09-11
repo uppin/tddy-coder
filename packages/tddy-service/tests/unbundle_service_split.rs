@@ -225,15 +225,31 @@ fn session_files_service_declares_every_file_method() {
 /// genuinely crosses, because `connection.ConnectionService`'s `StartSession` needs it too.
 #[test]
 fn the_shared_types_file_holds_only_what_two_served_services_both_need() {
-    // Given
+    // Given the shared file and the two served services said to both need it
     let types = read("types.proto");
+    let connection = read("connection.proto");
+    let session_files = read("session_files.proto");
 
-    // Then
+    // Then it holds the one enum that crosses
     assert!(
         types.contains("enum HostDocumentScope"),
         "types.proto exists for HostDocumentScope"
     );
 
+    // Then both services really do reach it — otherwise "two served services both need it" is a
+    // claim about one, and the enum belongs in that one's own proto
+    assert!(
+        connection.contains("import \"types.proto\""),
+        "connection.ConnectionService reaches the shared scope through StartSession's \
+         HostDocumentRef, so connection.proto must import types.proto"
+    );
+    assert!(
+        session_files.contains("import \"types.proto\""),
+        "session_files.SessionFilesService reaches the shared scope through ReadHostDocument, so \
+         session_files.proto must import types.proto"
+    );
+
+    // Then nothing else has been parked there
     let declared = types.matches("\nenum ").count() + types.matches("\nmessage ").count();
     assert_eq!(
         declared, 1,

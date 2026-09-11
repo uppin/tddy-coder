@@ -19,18 +19,46 @@
 //!   [`TerminalManager`] and store, with a lease that really arbitrates between screens in front
 //!   of it.
 //!
-//! # Known gap: this is one server, wired twice — not two servers
+//! # Known gap: this is one server, wired twice — and one of its six ports is the only difference
 //!
-//! Both sides are this process's code, so what this suite proves is bounded: a change to the
-//! coder's ports, its method filter, its store adapter or its control lease that skewed replay,
-//! resume offsets, history chunking, keystroke forwarding or the claim outcome fails here, because
-//! only one side carries it. A change *inside* `tddy-terminal-rpc` moves both sides together and
-//! is invisible here by construction — so is anything specific to the daemon's own ports
-//! (`CliSessionManager`'s roster, store and control registry), which cannot be reached from this
-//! crate without depending on `tddy-daemon`: the crate `#unbundle` is splitting, and far too heavy
-//! a test dependency to take on for it. The daemon's half of the guard is
-//! `packages/tddy-daemon/tests/terminal_session_acceptance.rs`, against its own server; the shared
-//! handlers are covered in `tddy-terminal-rpc` itself. Nothing in this repo compares the two
+//! Both sides are this process's code, and most of what they are handed is the *same port over the
+//! same session*: [`daemon_constructor_terminal_entry`] passes `CoderTerminalSessionStore::new`,
+//! `CoderTerminalRoster::new` and `DEFAULT_INITIAL_FRAME_BYTES`, which are exactly what
+//! [`coder_terminal_session_entry`](tddy_coder::session_participant::coder_terminal_session_entry)
+//! passes. The two identity ports are different closures, but both answer, so neither side's
+//! refusal gate fires and nothing downstream can tell them apart. That leaves two real differences:
+//! the control lease ([`ArbitratedControl`] here against `CoderTerminalControl` there) and the
+//! method filter, which only the coder's entry has.
+//!
+//! So the comparisons below divide into three, and it is worth being exact about which is which:
+//!
+//! * **Genuinely two sided.** [`both_wirings_grant_an_unheld_terminal_control_claim_to_the_same_screen`]
+//!   — two `TerminalControl` implementations, so the two answers are computed by different code and
+//!   the equality can fail on its own.
+//! * **Same code, rescued by a literal.** [`both_wirings_refuse_to_stop_the_sessions_main_terminal`]
+//!   reaches one shared handler through both entries; the `Code::InvalidArgument` it ends with is
+//!   what pins the refusal. [`keystrokes_through_either_wiring_reach_the_one_pty`] likewise: both
+//!   wirings resolve the one PTY through the one store, and what carries the test is the PTY's own
+//!   echo of both wirings' bytes.
+//! * **`f(x) == f(x)`.** [`both_wirings_open_one_terminal_with_the_same_tail_replay`],
+//!   [`both_wirings_resume_one_terminal_from_the_same_offset`] and
+//!   [`both_wirings_fill_one_terminals_history_at_the_same_offsets`] ask one store, through one
+//!   bridge, twice. **A one-sided change to replay, resume offsets or history chunking cannot fail
+//!   their equality assertion** — nothing is one-sided about those ports. The equality is a
+//!   determinism check; the literal frames each of them also asserts are what pin the answer, and
+//!   are the reason they are kept rather than deleted. None of the three stops at the count it
+//!   expects, either: the two opens read the frame *after* the replay (the terminal's next live
+//!   byte) and the history fill reads until the stream closes, so an extra frame is part of the
+//!   answer rather than left unread behind a count.
+//!
+//! Making the trio genuinely two-sided is not something this crate can do cheaply: the second
+//! implementation of the store and the roster is `tddy-daemon`'s (`DaemonTerminalSessionStore`,
+//! `CliSessionManager`'s registry), and reaching it means a dev-dependency on the crate `#unbundle`
+//! is splitting. So a change *inside* `tddy-terminal-rpc` moves both sides together and is
+//! invisible here by construction; the daemon's half of the guard is
+//! `packages/tddy-daemon/tests/terminal_session_acceptance.rs` and
+//! `packages/tddy-daemon/tests/sandbox_terminal_parity_acceptance.rs`, against its own store; the
+//! shared handlers are covered in `tddy-terminal-rpc` itself. Nothing in this repo compares the two
 //! running servers end to end.
 //!
 //! Run: `cargo test -p tddy-coder --test two_server_parity_acceptance`
@@ -168,6 +196,61 @@ impl SessionUnderBothWirings {
         }
     }
 
+    /// Fresh output from this session's terminal: appended to the capture ring and broadcast, as
+    /// the PTY's reader does. What an open stream's next frame carries.
+    fn produces(&self, output: &[u8]) {
+        self.terminal
+            .capture
+            .lock()
+            .expect("the capture ring")
+            .append(output);
+        let _ = self
+            .terminal
+            .stdout_tx
+            .send(tddy_pty::Bytes::copy_from_slice(output));
+    }
+
+    /// A transcript of everything this session's one PTY echoes from now on.
+    fn pty_transcript(&self) -> PtyTranscript {
+        PtyTranscript {
+            stdout: self.terminal.stdout_tx.subscribe(),
+            echoed: Vec::new(),
+            read_up_to: 0,
+        }
+    }
+
+    /// The offset-anchored frame an open emits before any live byte, as this session's terminal.
+    fn a_replay_frame(
+        &self,
+        data: &[u8],
+        start_offset: u64,
+        end_offset: u64,
+        at_oldest: bool,
+    ) -> SessionTerminalOutput {
+        SessionTerminalOutput {
+            data: data.to_vec(),
+            acked_input_offset: 0,
+            start_offset,
+            end_offset,
+            at_oldest,
+            session_id: SESSION_ID.to_string(),
+            terminal_id: self.terminal_id.clone(),
+        }
+    }
+
+    /// A live output frame, carrying no offsets because it is contiguous with the stream.
+    fn a_live_frame(&self, data: &[u8]) -> SessionTerminalOutput {
+        SessionTerminalOutput {
+            data: data.to_vec(),
+            acked_input_offset: 0,
+            start_offset: 0,
+            end_offset: 0,
+            at_oldest: false,
+            session_id: SESSION_ID.to_string(),
+            terminal_id: self.terminal_id.clone(),
+        }
+    }
+
     /// Keystrokes typed into this session's terminal, reaching cumulative `input_offset`.
     fn typing(&self, data: &[u8], input_offset: u64) -> SessionTerminalInput {
         SessionTerminalInput {
@@ -222,32 +305,16 @@ impl Wiring {
         }
     }
 
-    /// The first `count` frames of a server-streaming method, or fewer if it closes sooner.
-    ///
-    /// Bounded because an output stream stays open for the life of the terminal: draining one to
-    /// the end would only ever be a timeout.
-    async fn frames<Req: Message, Item: Message + Default>(
-        &self,
-        method: &str,
-        request: Req,
-        count: usize,
-    ) -> Vec<Item> {
-        let mut rx = match self.dispatch(TERMINAL_SERVICE, method, request).await {
-            RpcResult::ServerStream(Ok(rx)) => rx,
+    /// A server-streaming method opened at this wiring's registered coordinate.
+    async fn open<Req: Message>(&self, method: &str, request: Req) -> ServedStream {
+        match self.dispatch(TERMINAL_SERVICE, method, request).await {
+            RpcResult::ServerStream(Ok(rx)) => ServedStream {
+                method: method.to_string(),
+                frames: rx,
+            },
             RpcResult::ServerStream(Err(status)) => panic!("{method} was refused: {status:?}"),
             RpcResult::Unary(_) => panic!("{method} answered without a stream"),
-        };
-        let mut frames = Vec::new();
-        while frames.len() < count {
-            match tokio::time::timeout(FRAME_TIMEOUT, rx.recv()).await {
-                Ok(Some(Ok(bytes))) => {
-                    frames.push(Item::decode(&bytes[..]).expect("a decodable frame"))
-                }
-                Ok(Some(Err(status))) => panic!("{method} errored mid-stream: {status:?}"),
-                Ok(None) | Err(_) => break,
-            }
         }
-        frames
     }
 
     async fn dispatch<Req: Message>(&self, service: &str, method: &str, request: Req) -> RpcResult {
@@ -257,6 +324,122 @@ impl Wiring {
             .handle_rpc(service, method, &message)
             .await
     }
+}
+
+/// One open server-streaming answer, read frame by frame.
+///
+/// Frames are read in the groups a method is expected to emit and the frame *after* them one at a
+/// time, because a count alone only ever proves a prefix: a stream that emitted the expected
+/// frames and then a duplicate — a repeated replay frame, a stray ACK — is indistinguishable from
+/// a correct one to a caller that stopped reading at the count it guessed.
+struct ServedStream {
+    method: String,
+    frames: tokio::sync::mpsc::Receiver<Result<Vec<u8>, Status>>,
+}
+
+impl ServedStream {
+    /// The next `count` frames, or fewer if the stream stalls or closes first — which the
+    /// comparison against the expected frames then reports as the difference it is.
+    async fn frames<Item: Message + Default>(&mut self, count: usize) -> Vec<Item> {
+        let mut frames = Vec::new();
+        while frames.len() < count {
+            match tokio::time::timeout(FRAME_TIMEOUT, self.frames.recv()).await {
+                Ok(Some(Ok(bytes))) => {
+                    frames.push(Item::decode(&bytes[..]).expect("a decodable frame"))
+                }
+                Ok(Some(Err(status))) => panic!("{} errored mid-stream: {status:?}", self.method),
+                Ok(None) | Err(_) => break,
+            }
+        }
+        frames
+    }
+
+    /// Every frame the method emits, read until it closes its stream.
+    ///
+    /// For a method that ends of its own accord — `GetTerminalHistory` sends its chunks and hangs
+    /// up — so the answer is bounded by the close rather than by a count a test chose, and an
+    /// extra chunk after the last expected one lands in the vector instead of going unread.
+    async fn frames_until_close<Item: Message + Default>(&mut self) -> Vec<Item> {
+        let mut frames = Vec::new();
+        loop {
+            match tokio::time::timeout(FRAME_TIMEOUT, self.frames.recv()).await {
+                Ok(Some(Ok(bytes))) => {
+                    frames.push(Item::decode(&bytes[..]).expect("a decodable frame"))
+                }
+                Ok(Some(Err(status))) => panic!("{} errored mid-stream: {status:?}", self.method),
+                Ok(None) => return frames,
+                Err(_) => panic!(
+                    "{} left its stream open after {} frames instead of closing it",
+                    self.method,
+                    frames.len()
+                ),
+            }
+        }
+    }
+
+    /// The single next frame, which must arrive.
+    async fn next_frame<Item: Message + Default>(&mut self) -> Item {
+        match tokio::time::timeout(FRAME_TIMEOUT, self.frames.recv()).await {
+            Ok(Some(Ok(bytes))) => Item::decode(&bytes[..]).expect("a decodable frame"),
+            Ok(Some(Err(status))) => panic!("{} errored mid-stream: {status:?}", self.method),
+            Ok(None) => panic!(
+                "{} closed its stream instead of sending a frame",
+                self.method
+            ),
+            Err(_) => panic!("{} sent no further frame", self.method),
+        }
+    }
+}
+
+/// Everything the one PTY has echoed since this transcript was opened.
+///
+/// The session's child is `/bin/cat` under a PTY, so every byte written to the terminal comes back
+/// out of it: the line discipline echoes the keystrokes (turning the typed `\n` into `\r\n`) and
+/// `cat` copies the line it then reads. That round trip is how a test outside the process that owns
+/// the PTY's stdin observes what was actually written — a wiring that forwarded a request's
+/// `input_offset` and dropped its `data` leaves nothing here.
+struct PtyTranscript {
+    stdout: broadcast::Receiver<tddy_pty::Bytes>,
+    echoed: Vec<u8>,
+    /// How far into [`Self::echoed`] the keystrokes matched so far reach, so the next one is looked
+    /// for *after* them and the order of two keystrokes is part of what is asserted.
+    read_up_to: usize,
+}
+
+impl PtyTranscript {
+    /// Wait until the PTY has echoed each of `keystrokes`, in the order given.
+    ///
+    /// Reads the terminal's own output rather than sleeping: each read is bounded by
+    /// [`FRAME_TIMEOUT`], and a keystroke that never comes back fails with the transcript so far.
+    async fn awaits_echo_of_in_order(&mut self, keystrokes: &[&str]) {
+        for keystroke in keystrokes {
+            while position_of(&self.echoed[self.read_up_to..], keystroke.as_bytes()).is_none() {
+                match tokio::time::timeout(FRAME_TIMEOUT, self.stdout.recv()).await {
+                    Ok(Ok(bytes)) => self.echoed.extend_from_slice(&bytes),
+                    Ok(Err(error)) => panic!(
+                        "the terminal's output ended before it echoed {keystroke:?}: {error} \
+                         (echoed so far: {:?})",
+                        String::from_utf8_lossy(&self.echoed)
+                    ),
+                    Err(_) => panic!(
+                        "the terminal never echoed {keystroke:?} within {FRAME_TIMEOUT:?} \
+                         (echoed so far: {:?})",
+                        String::from_utf8_lossy(&self.echoed)
+                    ),
+                }
+            }
+            self.read_up_to += position_of(&self.echoed[self.read_up_to..], keystroke.as_bytes())
+                .expect("the keystroke was just found")
+                + keystroke.len();
+        }
+    }
+}
+
+/// Where `needle` starts in `haystack`, if it is there at all.
+fn position_of(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 // ---------------------------------------------------------------------------
@@ -380,8 +563,9 @@ impl ToolExecutor for UnusedExecutor {
 //
 // Each of these asks one live PTY the same question twice: once through the coder's production
 // wiring of the coordinate, once through the constructor `tddy-daemon` calls. That is what the
-// names below claim, and all they claim — see the module doc's known gap for what a comparison of
-// the two *running* servers would additionally catch.
+// names below claim, and all they claim — see the module doc for which of the two answers are
+// computed by different code, which are one handler reached twice, and what carries each test as a
+// result.
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -390,19 +574,40 @@ async fn both_wirings_open_one_terminal_with_the_same_tail_replay() {
     let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
 
     // When — each wiring is asked to open the terminal on first connect
-    let over_coder: Vec<SessionTerminalOutput> = session
+    let mut over_coder = session
         .coder_participant
-        .frames("StreamTerminalOutput", session.a_tail_open(), 2)
+        .open("StreamTerminalOutput", session.a_tail_open())
         .await;
-    let over_daemon: Vec<SessionTerminalOutput> = session
+    let mut over_daemon = session
         .daemon_constructor
-        .frames("StreamTerminalOutput", session.a_tail_open(), 2)
+        .open("StreamTerminalOutput", session.a_tail_open())
         .await;
+    let coder_replay: Vec<SessionTerminalOutput> = over_coder.frames(1).await;
+    let daemon_replay: Vec<SessionTerminalOutput> = over_daemon.frames(1).await;
 
-    // Then — the same prologue and the same tail chunk, at the same offsets
+    // Then — the same tail chunk, at the same offsets
     assert_eq!(
-        over_coder, over_daemon,
+        coder_replay, daemon_replay,
         "a tail open must replay identically through both wirings of the coordinate"
+    );
+
+    // Then — and it is the retained ring anchored at its own offsets. The equality above is two
+    // calls into one bridge (see the module doc), so this literal is what pins what either answers
+    assert_eq!(
+        coder_replay,
+        vec![session.a_replay_frame(RETAINED_OUTPUT, 0, RETAINED_OUTPUT.len() as u64, true)]
+    );
+
+    // Then — neither stream follows the replay with anything but the terminal's next live byte, so
+    // a second replay frame or a stray ACK cannot hide behind the count read above
+    session.produces(b"$ ");
+    assert_eq!(
+        over_coder.next_frame::<SessionTerminalOutput>().await,
+        session.a_live_frame(b"$ ")
+    );
+    assert_eq!(
+        over_daemon.next_frame::<SessionTerminalOutput>().await,
+        session.a_live_frame(b"$ ")
     );
 }
 
@@ -413,27 +618,50 @@ async fn both_wirings_resume_one_terminal_from_the_same_offset() {
     let already_painted = 10;
 
     // When — each wiring is asked to resume from the byte a client already holds
-    let over_coder: Vec<SessionTerminalOutput> = session
+    let mut over_coder = session
         .coder_participant
-        .frames(
+        .open(
             "StreamTerminalOutput",
             session.a_resume_open(already_painted),
-            2,
         )
         .await;
-    let over_daemon: Vec<SessionTerminalOutput> = session
+    let mut over_daemon = session
         .daemon_constructor
-        .frames(
+        .open(
             "StreamTerminalOutput",
             session.a_resume_open(already_painted),
-            2,
         )
         .await;
+    let coder_catch_up: Vec<SessionTerminalOutput> = over_coder.frames(1).await;
+    let daemon_catch_up: Vec<SessionTerminalOutput> = over_daemon.frames(1).await;
 
     // Then — the same catch-up, so a client that reconnects the other way is not re-painted
     assert_eq!(
-        over_coder, over_daemon,
+        coder_catch_up, daemon_catch_up,
         "a resume must send the same missed bytes through both wirings of the coordinate"
+    );
+
+    // Then — and it is only the bytes past that offset, re-anchored to the tip
+    assert_eq!(
+        coder_catch_up,
+        vec![session.a_replay_frame(
+            &RETAINED_OUTPUT[already_painted as usize..],
+            already_painted,
+            RETAINED_OUTPUT.len() as u64,
+            false
+        )]
+    );
+
+    // Then — and the catch-up is that one frame: the next each stream sends is the terminal's next
+    // live byte, not a repeat of bytes the client already holds
+    session.produces(b"$ ");
+    assert_eq!(
+        over_coder.next_frame::<SessionTerminalOutput>().await,
+        session.a_live_frame(b"$ ")
+    );
+    assert_eq!(
+        over_daemon.next_frame::<SessionTerminalOutput>().await,
+        session.a_live_frame(b"$ ")
     );
 }
 
@@ -442,20 +670,37 @@ async fn both_wirings_fill_one_terminals_history_at_the_same_offsets() {
     // Given — a session whose terminal holds retained output, registered under both wirings
     let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
 
-    // When — each wiring is asked for the scroll-up fill
+    // When — each wiring is asked for the scroll-up fill, read until it hangs up rather than to a
+    // count, so an extra chunk is in the answer rather than beyond it
     let over_coder: Vec<TerminalHistoryChunk> = session
         .coder_participant
-        .frames("GetTerminalHistory", session.a_history_fill(), 8)
+        .open("GetTerminalHistory", session.a_history_fill())
+        .await
+        .frames_until_close()
         .await;
     let over_daemon: Vec<TerminalHistoryChunk> = session
         .daemon_constructor
-        .frames("GetTerminalHistory", session.a_history_fill(), 8)
+        .open("GetTerminalHistory", session.a_history_fill())
+        .await
+        .frames_until_close()
         .await;
 
     // Then — the same chunks, bounded by the same offsets and the same end-of-history marker
     assert_eq!(
         over_coder, over_daemon,
         "history must fill at identical offsets through both wirings of the coordinate"
+    );
+
+    // Then — and it is the whole retained ring in one chunk, marked as reaching both ends
+    assert_eq!(
+        over_coder,
+        vec![TerminalHistoryChunk {
+            data: RETAINED_OUTPUT.to_vec(),
+            start_offset: 0,
+            end_offset: RETAINED_OUTPUT.len() as u64,
+            at_oldest: true,
+            at_end: true,
+        }]
     );
 }
 
@@ -526,8 +771,10 @@ async fn both_wirings_refuse_to_stop_the_sessions_main_terminal() {
 
 #[tokio::test]
 async fn keystrokes_through_either_wiring_reach_the_one_pty() {
-    // Given — a session registered under both wirings, with a client that has typed nothing yet
+    // Given — a session registered under both wirings, and a transcript of what its one PTY echoes
+    // from here on
     let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
+    let mut transcript = session.pty_transcript();
 
     // When — keystrokes are sent through each wiring in turn
     let _: SendTerminalInputResponse = session
@@ -539,7 +786,14 @@ async fn keystrokes_through_either_wiring_reach_the_one_pty() {
         .answer("SendTerminalInput", session.typing(b"echo two\n", 18))
         .await;
 
-    // Then — both reached the one PTY, which acknowledges the later cumulative offset
+    // Then — the one PTY received both wirings' bytes, in the order they were sent. The offsets
+    // above are the client's own declared counters, so nothing about them says a byte was written;
+    // this is the terminal itself reporting what it was given
+    transcript
+        .awaits_echo_of_in_order(&["echo one\r\n", "echo two\r\n"])
+        .await;
+
+    // Then — and the terminal's acknowledged offset is the later of the two cumulative counters
     assert_eq!(
         *session.terminal.subscribe_acked_offset().borrow(),
         18,

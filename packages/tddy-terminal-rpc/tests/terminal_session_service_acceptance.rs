@@ -16,8 +16,13 @@ use tddy_terminal_rpc::proto::terminal_session::{
     ClaimTerminalControlRequest, ClaimTerminalControlResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, SendTerminalInputResponse, SessionTerminalOutput,
     StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    TerminalControlEvent, TerminalHistoryChunk,
+    TerminalControlEvent, TerminalHistoryChunk, TerminalSessionServiceServer,
 };
+use tddy_terminal_rpc::TerminalSessionServiceImpl;
+
+/// The generated server the host's entry wraps — the thing that actually answers at a coordinate,
+/// and whose `NAME` comes from `terminal_session.proto` rather than from a caller.
+type ServedCoordinate = TerminalSessionServiceServer<TerminalSessionServiceImpl>;
 
 #[test]
 fn names_the_service_the_wiring_layer_registers() {
@@ -32,21 +37,20 @@ fn names_the_service_the_wiring_layer_registers() {
     );
 }
 
-/// The name a host registers and the name a caller dials have to be one value: a mismatch is not a
-/// type error but a runtime "unknown service" on the serving side. This pins the served entry to
-/// the constant every caller addresses — `pty_relay`'s three Connect-HTTP dials, the coder's
-/// wrapper, and both test harnesses — so a rename that reaches only one end fails here.
+/// The name a host registers the entry under and the name the server *inside* it answers to have
+/// to be one value: a mismatch is not a type error but a runtime "unknown service", because the
+/// generated `handle_rpc` compares `service` against its own [`ServedCoordinate::NAME`] and
+/// refuses anything else. Registering the entry under a hand-written constant — which is what
+/// [`tddy_terminal_rpc::TERMINAL_SESSION_SERVICE`] is, and what every caller addresses — is
+/// therefore only correct while that constant still spells what the schema generated.
 #[test]
-fn registers_at_the_coordinate_every_caller_addresses() {
+fn registers_at_the_coordinate_its_generated_server_answers_to() {
     // Given the entry a host's wiring layer builds
     let host = TerminalServiceHost::serving_main_terminal(b"");
 
     // When reading the coordinate it is registered at
-    // Then it is the constant this crate publishes for its callers
-    assert_eq!(
-        host.service_name(),
-        tddy_terminal_rpc::TERMINAL_SESSION_SERVICE
-    );
+    // Then it is the name generated from `terminal_session.proto`, not merely a valid string
+    assert_eq!(host.service_name(), ServedCoordinate::NAME);
 }
 
 /// And that constant is what the schema declares, which is what clients in other languages are

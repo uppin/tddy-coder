@@ -33,6 +33,17 @@ use crate::session::{TerminalSession, TerminalSessionStore};
 /// large enough to show the user what is on screen now without dumping the whole ring.
 pub const DEFAULT_INITIAL_FRAME_BYTES: usize = 8 * 1024;
 
+/// The default has to be a real budget, and it is the one every transport that does not pick its
+/// own opens with. Zero would make every open emit an empty anchor and replay nothing, so a
+/// reconnecting client would repaint from a blank screen; a megabyte or more would make the first
+/// frame of a long-lived terminal exceed a transport's per-message limit, which is the regression
+/// the per-frame chunking exists to prevent. Checked at compile time because a default nobody
+/// passes has no test that would notice.
+const _: () = assert!(
+    DEFAULT_INITIAL_FRAME_BYTES > 0 && DEFAULT_INITIAL_FRAME_BYTES < 1024 * 1024,
+    "the default initial frame budget must be a nonzero fraction of a transport message"
+);
+
 /// Capacity of the mpsc channel bridging broadcast output to the RPC stream.
 pub const TERMINAL_OUTPUT_CHANNEL_CAPACITY: usize = 64;
 

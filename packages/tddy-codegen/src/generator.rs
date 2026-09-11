@@ -1243,6 +1243,39 @@ mod tonic_adapter_tests {
         );
     }
 
+    /// **The fourth shape, which no rpc in the surface has yet** — which is why it is the branch
+    /// that would be wrong. A client-streaming rpc that answers with a single message takes
+    /// `tonic::Streaming<In>` like the bidi one but returns a plain message like the unary one, so
+    /// neither of the three tests above constrains it: the bidi test would pass on a body that
+    /// boxed a stream into the answer, and the unary test on a body that took a decoded request.
+    #[test]
+    fn generates_a_streaming_request_with_a_unary_answer_for_a_client_streaming_method() {
+        // Given
+        let generated = generated_for(vec![a_method(
+            "UploadSessionFileChunk",
+            "upload_session_file_chunk",
+            true,
+            false,
+        )]);
+
+        // Then
+        assert!(
+            generated.contains(
+                "request: tonic::Request<tonic::Streaming<UploadSessionFileChunkRequest>>"
+            ),
+            "a client-streaming rpc's request is a Streaming of its input type:\n{generated}"
+        );
+        assert!(
+            generated.contains("        Ok(tonic::Response::new(resp.into_inner()))"),
+            "but its answer is the one message it came back with, not a boxed stream:\n{generated}"
+        );
+        assert!(
+            !generated.contains("type UploadSessionFileChunkStream"),
+            "and it declares no associated stream type, which the tonic trait does not have for \
+             this shape:\n{generated}"
+        );
+    }
+
     /// prost raw-escapes an rpc whose snake_case name is a Rust keyword, and tonic-build declares the
     /// trait method with that exact string: `async fn r#type`. An adapter that re-derived the name
     /// from the proto name instead would emit `async fn type(`, which is not a legal signature — and

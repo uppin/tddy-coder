@@ -169,8 +169,9 @@ async fn ends_the_output_half_when_the_child_exits() {
     // When the child process exits
     host.terminal().end();
 
-    // Then the output half closes rather than hanging open on a dead terminal
-    assert_eq!(session.frames(1).await, Vec::new());
+    // Then the output half closes rather than hanging open on a dead terminal — the end of the
+    // stream itself, not the absence of a frame, which a stream left open would also produce
+    assert_eq!(session.next_frame_or_close().await, None);
 }
 
 #[tokio::test]

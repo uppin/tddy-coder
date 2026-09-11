@@ -133,6 +133,26 @@ async fn registers_the_session_files_service_that_tddy_session_files_now_owns() 
     );
 }
 
+/// The same node gave the nine terminal methods their own coordinate, served by
+/// `tddy-terminal-rpc`, and removed them from `connection.ConnectionService` — so this roster is
+/// the only place a LiveKit- or HTTP-reached terminal is answered from. Dropping the one line that
+/// pushes it would leave every such terminal unserved: the UDS builder takes its terminal adapter
+/// as a separate argument, so `local_token_uds.rs` would still pass.
+#[tokio::test]
+async fn registers_the_terminal_session_service_that_tddy_terminal_rpc_now_owns() {
+    // Given / When
+    let services = the_services_an_assembled_daemon_registers().await;
+
+    // Then
+    assert!(
+        services
+            .iter()
+            .any(|name| name == "terminal_session.TerminalSessionService"),
+        "the daemon must register terminal_session.TerminalSessionService, or nothing serves the \
+         nine terminal methods; it hosts {services:?}"
+    );
+}
+
 #[tokio::test]
 async fn no_longer_registers_the_deleted_vnc_service() {
     // Given / When

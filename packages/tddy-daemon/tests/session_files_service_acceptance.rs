@@ -18,15 +18,21 @@ use std::sync::Arc;
 
 use prost::Message as _;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::{ConnectionServiceImpl, PeerRoutedSessionFiles};
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::{Code, RpcMessage, RpcResult, RpcService, Status};
 use tddy_service::proto::session_files::{
-    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
+    DeleteStagedAttachmentRequest, ListSessionWorkflowFilesRequest,
+    ListSessionWorkflowFilesResponse, ListStagedAttachmentsRequest, ListStagedAttachmentsResponse,
     UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
 };
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
+
+/// The generated server the daemon's entry wraps around its routing surface — the thing that
+/// actually answers at a coordinate, and whose `NAME` comes from `session_files.proto` rather than
+/// from a caller.
+type ServedCoordinate = tddy_service::SessionFilesServiceServer<PeerRoutedSessionFiles>;
 
 /// A peer this daemon can see in the common room, and therefore route to.
 const A_PEER_DAEMON: &str = "the-other-host";
@@ -125,16 +131,57 @@ fn the_staged_file(staging_base: &std::path::Path, file_name: &str) -> PathBuf {
         .join(file_name)
 }
 
-/// The routing wrapper this daemon registers is named with the same constant its forwarders
-/// address, so a request it decides to forward lands on a coordinate the peer serves.
+/// A document already staged on this host, put there through the coordinate under test.
 ///
-/// This is the mismatch that cannot be caught by a compiler: both ends are `&str`, and a peer
-/// asked for a service name it does not serve answers "unknown service" at the method, not at the
-/// spelling — which is how a forwarded session-file call already reached a host that did not serve
-/// it once during this stack. `tddy-daemon-livekit`'s five session-file forwarders and the entry
-/// below now read one constant; this pins the entry's end of that to it.
+/// Staged over the wire rather than written to [`the_staged_file`] directly, so a listing or a
+/// delete is asked about a batch this host's own writer produced — layout, mtime and all.
+async fn a_staged_attachment(service: &Arc<dyn RpcService>, file_name: &str, bytes: &[u8]) {
+    calling(
+        service,
+        "UploadStagedAttachmentChunk",
+        &UploadStagedAttachmentChunkRequest {
+            session_token: TEST_TOKEN.to_string(),
+            daemon_instance_id: String::new(),
+            staging_id: STAGING_ID.to_string(),
+            file_name: file_name.to_string(),
+            data: bytes.to_vec(),
+            last: true,
+        },
+    )
+    .await
+    .expect("the fixture's own staged document must upload");
+}
+
+/// A listing of one batch of this host's staged attachments, as a client browsing the batch asks.
+fn a_listing_of_the_staged_batch(daemon_instance_id: &str) -> ListStagedAttachmentsRequest {
+    ListStagedAttachmentsRequest {
+        session_token: TEST_TOKEN.to_string(),
+        daemon_instance_id: daemon_instance_id.to_string(),
+        staging_id: STAGING_ID.to_string(),
+    }
+}
+
+/// A delete of one staged attachment, as a client removing it from the start-session form does.
+fn a_delete_of_the_staged(
+    daemon_instance_id: &str,
+    file_name: &str,
+) -> DeleteStagedAttachmentRequest {
+    DeleteStagedAttachmentRequest {
+        session_token: TEST_TOKEN.to_string(),
+        daemon_instance_id: daemon_instance_id.to_string(),
+        staging_id: STAGING_ID.to_string(),
+        file_name: file_name.to_string(),
+    }
+}
+
+/// The name the entry is registered under and the name the server *inside* it answers to have to
+/// be one value: the generated `handle_rpc` compares `service` against its own
+/// [`ServedCoordinate::NAME`] and refuses anything else, so an entry mounted under a different
+/// constant is reachable by nobody — a mismatch no compiler sees, because both ends are `&str`.
+/// That is how a forwarded session-file call already reached a host that did not serve it once
+/// during this stack.
 #[test]
-fn registers_the_coordinate_its_own_forwarders_address() {
+fn registers_the_coordinate_its_own_generated_server_answers_to() {
     // Given a daemon that can see a peer, and so may route a request away from itself
     let sessions = tempfile::tempdir().expect("a temp sessions base");
     let staging = tempfile::tempdir().expect("a temp staging base");
@@ -146,8 +193,9 @@ fn registers_the_coordinate_its_own_forwarders_address() {
     // When reading the coordinate it registers its session-file entry at
     let registered = Arc::new(daemon).session_files_entry().name;
 
-    // Then it is the coordinate a forward is addressed at on the peer
-    assert_eq!(registered, tddy_service::SESSION_FILES_SERVICE);
+    // Then it is the name generated from `session_files.proto` — which is also where a forward is
+    // addressed on the peer, since the peer serves the same generated server
+    assert_eq!(registered, ServedCoordinate::NAME);
 }
 
 /// A request this host owns is served by `tddy-session-files`, against this host's own data dir.
@@ -293,5 +341,165 @@ async fn forwards_a_staged_upload_addressed_to_another_daemon_instead_of_staging
     assert!(
         !staged.exists(),
         "a request addressed to another daemon must not be staged here, but {staged:?} was written"
+    );
+}
+
+/// A listing naming no daemon is this host's, and it names this host's own staged bytes.
+#[tokio::test]
+async fn lists_this_daemons_own_staged_attachments_when_no_daemon_is_named() {
+    // Given
+    let sessions = tempfile::tempdir().expect("a temp sessions base");
+    let staging = tempfile::tempdir().expect("a temp staging base");
+    let service =
+        the_registered_session_files_service(a_daemon_that_can_see_a_peer_but_cannot_reach_it(
+            sessions.path().to_path_buf(),
+            staging.path().to_path_buf(),
+        ));
+    a_staged_attachment(&service, "notes.md", b"staged here").await;
+
+    // When — an empty `daemon_instance_id` is the protocol's spelling for "the daemon called"
+    let answer = calling(
+        &service,
+        "ListStagedAttachments",
+        &a_listing_of_the_staged_batch(""),
+    )
+    .await
+    .expect("an unaddressed listing must be served locally");
+
+    // Then — canonicalised because this host's writer resolves symlinks (on macOS `/tmp` is one),
+    // so the question is whether the entry names the same file, not the same spelling
+    let listed: Vec<(String, u64, Option<PathBuf>)> =
+        ListStagedAttachmentsResponse::decode(answer.as_slice())
+            .expect("the answer must be a ListStagedAttachmentsResponse")
+            .attachments
+            .into_iter()
+            .map(|attachment| {
+                (
+                    attachment.file_name,
+                    attachment.size_bytes,
+                    std::fs::canonicalize(&attachment.host_path).ok(),
+                )
+            })
+            .collect();
+    assert_eq!(
+        listed,
+        vec![(
+            "notes.md".to_string(),
+            "staged here".len() as u64,
+            std::fs::canonicalize(the_staged_file(staging.path(), "notes.md")).ok()
+        )],
+        "the listing must be this host's staging root, read from disk"
+    );
+}
+
+/// A listing naming another daemon is forwarded to it — never answered from this host's batch.
+///
+/// The regression this guards is the one `HostDocumentPicker` shows the user: a coordinate that
+/// quietly listed locally would answer a browse of the peer's staging area with *this* host's
+/// documents, which a client cannot tell from the peer's own.
+#[tokio::test]
+async fn forwards_a_staged_listing_addressed_to_another_daemon_instead_of_listing_its_own() {
+    // Given
+    let sessions = tempfile::tempdir().expect("a temp sessions base");
+    let staging = tempfile::tempdir().expect("a temp staging base");
+    let service =
+        the_registered_session_files_service(a_daemon_that_can_see_a_peer_but_cannot_reach_it(
+            sessions.path().to_path_buf(),
+            staging.path().to_path_buf(),
+        ));
+    a_staged_attachment(&service, "staged-on-this-host.md", b"belongs to this host").await;
+
+    // When
+    let refusal = calling(
+        &service,
+        "ListStagedAttachments",
+        &a_listing_of_the_staged_batch(A_PEER_DAEMON),
+    )
+    .await
+    .expect_err("a listing addressed to an unreachable peer cannot be answered");
+
+    // Then — the call left for the peer and failed there, rather than being answered from here
+    assert_eq!(
+        (refusal.code, refusal.message.contains("forward")),
+        (Code::FailedPrecondition, true),
+        "a forward with no common-room connection must be refused as a precondition naming the \
+         forward, not served from this host's own staging root; got {:?}: {}",
+        refusal.code,
+        refusal.message
+    );
+}
+
+/// A delete naming no daemon is this host's, and it removes this host's staged bytes.
+#[tokio::test]
+async fn deletes_a_staged_attachment_this_daemon_holds_when_no_daemon_is_named() {
+    // Given
+    let sessions = tempfile::tempdir().expect("a temp sessions base");
+    let staging = tempfile::tempdir().expect("a temp staging base");
+    let service =
+        the_registered_session_files_service(a_daemon_that_can_see_a_peer_but_cannot_reach_it(
+            sessions.path().to_path_buf(),
+            staging.path().to_path_buf(),
+        ));
+    a_staged_attachment(&service, "notes.md", b"staged here").await;
+
+    // When
+    calling(
+        &service,
+        "DeleteStagedAttachment",
+        &a_delete_of_the_staged("", "notes.md"),
+    )
+    .await
+    .expect("an unaddressed delete must be served locally");
+
+    // Then
+    let staged = the_staged_file(staging.path(), "notes.md");
+    assert!(
+        !staged.exists(),
+        "the delete must remove the file from this host's staging root, but {staged:?} is still there"
+    );
+}
+
+/// A delete naming another daemon is forwarded to it — never applied to this host's batch.
+///
+/// The regression this guards destroys data: were the wrapper missing, removing a document from
+/// the peer's staging area would delete the same-named one here and answer `Ok`, with nothing in
+/// the response to say which host lost a file.
+#[tokio::test]
+async fn forwards_a_staged_delete_addressed_to_another_daemon_instead_of_deleting_here() {
+    // Given
+    let sessions = tempfile::tempdir().expect("a temp sessions base");
+    let staging = tempfile::tempdir().expect("a temp staging base");
+    let service =
+        the_registered_session_files_service(a_daemon_that_can_see_a_peer_but_cannot_reach_it(
+            sessions.path().to_path_buf(),
+            staging.path().to_path_buf(),
+        ));
+    a_staged_attachment(&service, "notes.md", b"staged here").await;
+
+    // When
+    let refusal = calling(
+        &service,
+        "DeleteStagedAttachment",
+        &a_delete_of_the_staged(A_PEER_DAEMON, "notes.md"),
+    )
+    .await
+    .expect_err("a delete addressed to an unreachable peer cannot be answered");
+
+    // Then — the call left for the peer and failed there
+    assert_eq!(
+        (refusal.code, refusal.message.contains("forward")),
+        (Code::FailedPrecondition, true),
+        "a forward with no common-room connection must be refused as a precondition naming the \
+         forward, not applied here; got {:?}: {}",
+        refusal.code,
+        refusal.message
+    );
+
+    // Then — and this host's own copy of that name is untouched
+    let staged = the_staged_file(staging.path(), "notes.md");
+    assert_eq!(
+        std::fs::read(&staged).ok(),
+        Some(b"staged here".to_vec()),
+        "a delete addressed to another daemon must leave {staged:?} alone"
     );
 }

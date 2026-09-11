@@ -640,6 +640,24 @@ impl BidiSession {
         self.output
     }
 
+    /// The next output frame, or `None` once the output half has closed.
+    ///
+    /// Distinct from [`Self::frames`], which stops on a closed stream *and* on a stall and so
+    /// cannot tell an ended stream from a silent one: a test that asserts closure reads it here,
+    /// where a stall is a failure rather than an end.
+    pub async fn next_frame_or_close(&mut self) -> Option<SessionTerminalOutput> {
+        match timeout(RECV_TIMEOUT, self.output.recv()).await {
+            Ok(Some(Ok(bytes))) => {
+                Some(SessionTerminalOutput::decode(&bytes[..]).expect("a decodable output frame"))
+            }
+            Ok(Some(Err(status))) => panic!("the bidi stream errored: {status:?}"),
+            Ok(None) => None,
+            Err(_) => panic!(
+                "the bidi stream neither produced a frame nor closed within {RECV_TIMEOUT:?}"
+            ),
+        }
+    }
+
     /// The next `count` output frames, or fewer if the stream closes first.
     pub async fn frames(&mut self, count: usize) -> Vec<SessionTerminalOutput> {
         let mut frames = Vec::new();
