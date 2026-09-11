@@ -88,9 +88,6 @@ pub async fn serve_connection_uds<C, H, W>(
 ) -> anyhow::Result<()>
 where
     C: RpcConnectionService,
-    C::StreamSessionTerminalIoStream: 'static,
-    C::StreamTerminalOutputStream: 'static,
-    C::WatchTerminalControlStream: 'static,
     H: RpcHostService,
     H::StreamHostPromptsStream: 'static,
     H::StreamHostStatsStream: 'static,

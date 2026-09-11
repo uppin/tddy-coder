@@ -26,8 +26,11 @@ use pretty_assertions::assert_eq;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ContextManifestRequest,
-    ReadContextFileBatchRequest, ReadContextFileRequest, SplitAgentPlacement, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, SplitAgentPlacement, StartSessionRequest,
+};
+use tddy_service::proto::session_files::{
+    ContextManifestRequest, ReadContextFileBatchRequest, ReadContextFileRequest,
+    SessionFilesService as SessionFilesServiceTrait,
 };
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a40";
@@ -79,7 +82,9 @@ fn register_project(sessions_base: &Path, repo_path: &Path) {
 
 /// A session on a real checkout, plus the service that serves it.
 struct ASession {
-    service: tddy_daemon::connection_service::ConnectionServiceImpl,
+    /// The three context reads left `connection.ConnectionService` with `#unbundle` node 6; this is
+    /// the coordinate that declares them, built from the daemon that started the session.
+    service: tddy_session_files::SessionFilesServiceImpl,
     session_id: String,
     session_dir: PathBuf,
     worktree: PathBuf,
@@ -107,7 +112,7 @@ async fn a_session_paired_with(split_agent: Option<SplitAgentPlacement>) -> ASes
     let repo = a_git_repo_with_origin();
     let sessions = tempfile::tempdir().expect("sessions tempdir");
     register_project(sessions.path(), repo.path());
-    let service = test_service(sessions.path().to_path_buf());
+    let service = std::sync::Arc::new(test_service(sessions.path().to_path_buf()));
 
     let started = service
         .start_session(Request::new(StartSessionRequest {
@@ -133,7 +138,7 @@ async fn a_session_paired_with(split_agent: Option<SplitAgentPlacement>) -> ASes
     );
 
     ASession {
-        service,
+        service: service.session_files_service(),
         session_id: started.session_id,
         session_dir,
         worktree,

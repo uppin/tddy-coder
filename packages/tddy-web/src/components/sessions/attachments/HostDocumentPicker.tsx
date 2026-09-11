@@ -27,11 +27,8 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import {
-  HostDocumentScope,
-  type ConnectionService,
-  type SessionEntry,
-} from "../../../gen/connection_pb";
+import type { ConnectionService, SessionEntry } from "../../../gen/connection_pb";
+import { HostDocumentScope } from "../../../gen/types_pb";
 import type { SessionFilesService, SessionUploadEntry } from "../../../gen/session_files_pb";
 import type { WorktreeService } from "../../../gen/worktree_pb";
 import { formatAttachmentBytes } from "../../../lib/attachmentBytes";

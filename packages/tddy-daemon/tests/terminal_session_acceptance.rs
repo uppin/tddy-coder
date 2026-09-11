@@ -19,10 +19,10 @@ use tddy_rpc::{Code, Request};
 
 mod common;
 use common::{a_capture_showing, PTY_STUB_OUTPUT};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListTerminalSessionsRequest, SessionTerminalInput,
-    StartTerminalSessionRequest, StopTerminalSessionRequest, StreamReplayMode,
-    StreamTerminalOutputRequest,
+use tddy_terminal_rpc::proto::terminal_session::{
+    ListTerminalSessionsRequest, SessionTerminalInput, StartTerminalSessionRequest,
+    StopTerminalSessionRequest, StreamReplayMode, StreamTerminalOutputRequest,
+    TerminalSessionService as TerminalSessionServiceTrait,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -69,13 +69,23 @@ fn minimal_service_with_manager(
     )
 }
 
-/// Build a service wired to `manager`, returning temp-dir guards that must stay alive.
+/// The terminal coordinate this daemon serves, wired to `manager`, with the temp-dir guards that
+/// must stay alive around it.
+///
+/// `terminal_session.TerminalSessionService` rather than `connection.ConnectionService`: the nine
+/// terminal methods left that service with `#unbundle` node 6, and this is the daemon's own served
+/// implementation of them — the same one `runtime::build` registers, over the same managers.
 fn make_service(
     manager: Arc<ClaudeCliSessionManager>,
-) -> (ConnectionServiceImpl, tempfile::TempDir, tempfile::TempDir) {
+) -> (
+    tddy_terminal_rpc::TerminalSessionServiceImpl,
+    tempfile::TempDir,
+    tempfile::TempDir,
+) {
     let (cfg_dir, config) = test_config();
     let sessions = tempfile::tempdir().unwrap();
-    let service = minimal_service_with_manager(config, sessions.path().to_path_buf(), manager);
+    let service = minimal_service_with_manager(config, sessions.path().to_path_buf(), manager)
+        .terminal_session_service();
     (service, cfg_dir, sessions)
 }
 
@@ -517,7 +527,6 @@ async fn stream_terminal_output_routes_by_terminal_id() {
         .terminal_id;
 
     // When / Then — unknown terminal id is NotFound.
-    // (`.err()` avoids requiring `Debug` on the streaming Ok type.)
     let err = service
         .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -529,8 +538,7 @@ async fn stream_terminal_output_routes_by_terminal_id() {
             from_offset: 0,
         }))
         .await
-        .err()
-        .expect("streaming an unknown terminal must be an error");
+        .expect_err("streaming an unknown terminal must be an error");
     assert_eq!(
         err.code,
         Code::NotFound,

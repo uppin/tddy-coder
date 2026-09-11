@@ -17,8 +17,7 @@ use tddy_service::proto::connection::{
 };
 use tddy_service::proto::connection::{
     AgentConversationChunk, ListAgentModelsResponse, ModelInfo, ProjectEntry as ProtoProjectEntry,
-    SessionTerminalInput, SessionTerminalOutput, SplitAgentPlacement, StartSessionResponse,
-    TerminalControlEvent,
+    SplitAgentPlacement, StartSessionResponse,
 };
 use uuid::Uuid;
 
@@ -72,74 +71,8 @@ use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 mod service_util;
 pub(crate) use service_util::*;
 
-/// Stream adapter backed by an mpsc channel — used for `StreamTerminalOutput` (browser-compatible
-/// server-streaming RPC).
-///
-/// Registers the waker via `poll_recv` so the stream is woken as soon as data arrives, which the
-/// broadcast-backed adapter it replaced could not. A background task bridges the
-/// broadcast channel into the mpsc sender so no messages can be lost between `try_recv()` and
-/// waker registration.
-pub struct MpscTerminalOutputStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<SessionTerminalOutput>,
-}
-
-impl Stream for MpscTerminalOutputStream {
-    type Item = Result<SessionTerminalOutput, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(msg)) => std::task::Poll::Ready(Some(Ok(msg))),
-            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-/// Convert a daemon `connection::SessionTerminalInput` (tonic ConnectionService proto) into the
-/// bridge's `terminal_session::SessionTerminalInput` so the bidi handler can route through the
-/// shared bridge helper. The two protos carry identical fields; this is a structural copy.
-fn to_bridge_terminal_input(
-    msg: &SessionTerminalInput,
-) -> tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput {
-    tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput {
-        session_token: msg.session_token.clone(),
-        session_id: msg.session_id.clone(),
-        data: msg.data.clone(),
-        terminal_id: msg.terminal_id.clone(),
-        control_token: msg.control_token.clone(),
-        input_offset: msg.input_offset,
-        mode: msg.mode,
-        from_offset: msg.from_offset,
-        initial_cols: msg.initial_cols,
-        initial_rows: msg.initial_rows,
-    }
-}
-
-/// Convert a bridge `terminal_session::SessionTerminalOutput` (carrying offset metadata) into the
-/// daemon's `connection::SessionTerminalOutput` for the tonic/RpcService stream.
-fn to_connection_output(
-    out: tddy_terminal_rpc::proto::terminal_session::SessionTerminalOutput,
-) -> SessionTerminalOutput {
-    SessionTerminalOutput {
-        data: out.data,
-        acked_input_offset: out.acked_input_offset,
-        start_offset: out.start_offset,
-        end_offset: out.end_offset,
-        at_oldest: out.at_oldest,
-        // The bridge stamped the frame with the session and resolved terminal it came from; carry
-        // that identity through so the client can drop output that is not its own.
-        session_id: out.session_id,
-        terminal_id: out.terminal_id,
-    }
-}
-
-impl Unpin for MpscTerminalOutputStream {}
-
 /// Stream adapter backed by an unbounded mpsc channel carrying `Result<T, Status>` items — used for
-/// server-streaming RPCs (e.g. `GetTerminalHistory`) whose frames may carry a mid-stream status.
+/// server-streaming RPCs (e.g. `StreamExecuteTool`) whose frames may carry a mid-stream status.
 pub struct MpscResultStream<T> {
     rx: tokio::sync::mpsc::UnboundedReceiver<Result<T, Status>>,
 }
@@ -162,60 +95,6 @@ impl<T> Unpin for MpscResultStream<T> {}
 impl<T> std::fmt::Debug for MpscResultStream<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("MpscResultStream")
-    }
-}
-
-/// Stream adapter backed by an mpsc channel for [`TerminalControlEvent`] server-streaming.
-pub struct MpscControlEventStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<TerminalControlEvent>,
-}
-
-impl Stream for MpscControlEventStream {
-    type Item = Result<TerminalControlEvent, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
-            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-impl Unpin for MpscControlEventStream {}
-
-/// Relay task for `WatchTerminalControl`: forwards `ControlChangeEvent` broadcasts scoped to
-/// `session_id` as `TerminalControlEvent` messages into `tx`, computing `you_are_controller`
-/// by re-validating the watcher's stored `control_token` on each change.
-async fn relay_control_events(
-    session_id: String,
-    control_token: String,
-    manager: Arc<crate::cli_session_manager::CliSessionManager>,
-    mut broadcast_rx: tokio::sync::broadcast::Receiver<
-        crate::cli_session_manager::ControlChangeEvent,
-    >,
-    tx: tokio::sync::mpsc::UnboundedSender<TerminalControlEvent>,
-) {
-    use tokio::sync::broadcast::error::RecvError;
-    loop {
-        match broadcast_rx.recv().await {
-            Ok(change) if change.session_id == session_id => {
-                let you = manager.verify_control(&session_id, &control_token).await;
-                let event = TerminalControlEvent {
-                    holder_screen_id: change.holder_screen_id,
-                    you_are_controller: you,
-                };
-                if tx.send(event).is_err() {
-                    break;
-                }
-            }
-            Ok(_) => {}
-            Err(RecvError::Lagged(_)) => {}
-            Err(RecvError::Closed) => break,
-        }
     }
 }
 
@@ -1258,15 +1137,6 @@ pub fn roster_replacement_pairs(
             )
         })
         .collect()
-}
-
-fn file_mtime_ms(path: &Path) -> i64 {
-    std::fs::metadata(path)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 fn cleanup_materialized_attachments(session_dir: &Path, written: &[SessionAttachment]) {

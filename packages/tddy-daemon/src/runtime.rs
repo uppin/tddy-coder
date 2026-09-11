@@ -873,18 +873,17 @@ pub async fn build(
         }
 
         // TerminalSessionService — the nine terminal methods, served by `tddy-terminal-rpc` on top
-        // of the streaming bridge it already owned. `#unbundle` node 6 mounted this coordinate;
-        // `connection.ConnectionService` still declares the same nine while every client is
-        // repointed at it, and both are backed by the same managers (`terminal_session_entry`).
+        // of the streaming bridge it already owned. `#unbundle` node 6 mounted this coordinate and
+        // then removed the same nine from `connection.ConnectionService`, so this is the only
+        // place they answer (`terminal_session_entry`).
         rpc_entries.push(connection_arc.terminal_session_entry());
 
         // SessionFilesService — the thirteen session-file methods, served by `tddy-session-files`
-        // on top of the ten modules it already owned. `#unbundle` node 6 mounted this coordinate;
-        // `connection.ConnectionService` still declares the same thirteen while every client is
-        // repointed at it, and both are backed by the same staging base, data dir and OS-user
-        // mapping. The entry is wrapped here rather than in the crate because eight of the
-        // thirteen route by `daemon_instance_id` — browsing another host's documents is a forward
-        // over the common room, which is this layer's to make (`session_files_entry`).
+        // on top of the ten modules it already owned. `#unbundle` node 6 mounted this coordinate
+        // and then removed the same thirteen from `connection.ConnectionService`, so this is the
+        // only place they answer. The entry is wrapped here rather than in the crate because eight
+        // of the thirteen route by `daemon_instance_id` — browsing another host's documents is a
+        // forward over the common room, which is this layer's to make (`session_files_entry`).
         rpc_entries.push(connection_arc.session_files_entry());
 
         let connection_server = tddy_service::ConnectionServiceServer::from_arc(connection_arc);

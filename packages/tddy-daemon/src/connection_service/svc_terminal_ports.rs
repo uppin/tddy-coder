@@ -39,13 +39,29 @@ impl ConnectionServiceImpl {
 
     /// The `terminal_session.TerminalSessionService` entry this daemon registers.
     ///
-    /// Built from the *same* managers `connection.ConnectionService` serves its terminal RPCs from,
-    /// so the two coordinates address one set of PTYs and one control lease while both are
-    /// mounted — a second `CliSessionManager` here would mean a terminal started on one coordinate
-    /// was invisible on the other.
+    /// Built from the *same* managers every other part of this daemon reaches a PTY through, so the
+    /// coordinate and a session's own lifecycle address one set of terminals and one control
+    /// lease — a second `CliSessionManager` here would mean a terminal started through the
+    /// coordinate was invisible to the session that owns it.
     pub(crate) fn terminal_session_entry(&self) -> tddy_rpc::ServiceEntry {
+        tddy_terminal_rpc::build_terminal_session_entry(self.terminal_session_ports())
+    }
+
+    /// The served implementation itself, without the transport entry around it.
+    ///
+    /// Public because it is the only way to ask *this daemon's* terminal coordinate a typed
+    /// question: an acceptance test that re-assembled the ports would be asserting about a
+    /// lookalike, and the four answers below are exactly what a terminal RPC's behaviour turns on.
+    #[must_use]
+    pub fn terminal_session_service(&self) -> tddy_terminal_rpc::TerminalSessionServiceImpl {
+        tddy_terminal_rpc::TerminalSessionServiceImpl::new(self.terminal_session_ports())
+    }
+
+    /// The four answers only a daemon has: which identity a token belongs to, which OS user that
+    /// maps to, where the terminals and the control lease live, and what this host frames at.
+    fn terminal_session_ports(&self) -> TerminalSessionPorts {
         let config = self.config.clone();
-        tddy_terminal_rpc::build_terminal_session_entry(TerminalSessionPorts {
+        TerminalSessionPorts {
             github_users: self.user_resolver.clone(),
             os_users: Arc::new(move |github_user: &str| {
                 config.os_user_for_github(github_user).map(str::to_owned)
@@ -58,7 +74,7 @@ impl ConnectionServiceImpl {
                 &self.claude_cli_manager,
             ))),
             initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
-        })
+        }
     }
 }
 

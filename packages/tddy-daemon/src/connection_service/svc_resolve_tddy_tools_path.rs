@@ -1,5 +1,3 @@
-use tddy_rpc::Status;
-
 use crate::connection_service::agent_roster;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
 use tddy_spawn::spawn_worker;
@@ -384,20 +382,6 @@ impl ConnectionServiceImpl {
         if let Some(ref tracker) = self.idle_tracker {
             tracker.record_activity();
         }
-    }
-
-    /// Resolves the caller's per-user sessions base from a `session_token`, rejecting an invalid
-    /// token before any filesystem access. Shared by the session-uploads RPCs (list/delete), which
-    /// address files under `{sessions_base}/sessions/{session_id}/uploads/`.
-    pub(crate) fn uploads_sessions_base(&self, session_token: &str) -> Result<PathBuf, Status> {
-        let github_user = (self.user_resolver)(session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))
     }
 
     /// Start the presenter observer for a freshly spawned workflow session: Telegram's surface when

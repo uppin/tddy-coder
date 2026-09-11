@@ -19,11 +19,12 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { createClient, type Transport } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { ConnectionService } from "../../src/gen/connection_pb";
 import {
-  ConnectionService,
   ClaimTerminalControlResponseSchema,
   TerminalControlEventSchema,
-} from "../../src/gen/connection_pb";
+  TerminalSessionService,
+} from "../../src/gen/terminal_session_pb";
 import type { SessionEntry } from "../../src/gen/connection_pb";
 import type { SessionRuntimeState } from "../../src/components/sessions/sessionRuntimeRegistry";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
@@ -144,28 +145,32 @@ const OTHER_SCREEN = "screen-held-by-another-9999";
 /** A client serving the transcript AND a terminal whose control lease is held elsewhere, so a
  *  mounted runtime would show its "Claim terminal" CTA if it were rendered in the foreground. */
 function aReplayTransportWithHeldTerminal() {
-  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
-    ...acpReplayHandlers(RECORDED_TRANSCRIPT),
-    claimTerminalControl: async () =>
-      create(ClaimTerminalControlResponseSchema, {
-        granted: false,
-        currentHolderScreenId: OTHER_SCREEN,
-      }),
-    watchTerminalControl: async function* (_req: unknown, context: { signal: AbortSignal }) {
-      yield create(TerminalControlEventSchema, {
-        holderScreenId: OTHER_SCREEN,
-        youAreController: false,
-      });
-      await new Promise<void>((resolve) =>
-        context.signal.addEventListener("abort", () => resolve(), { once: true }),
-      );
-    },
-    streamTerminalOutput: async function* (_req: unknown, context: { signal: AbortSignal }) {
-      await new Promise<void>((resolve) =>
-        context.signal.addEventListener("abort", () => resolve(), { once: true }),
-      );
-    },
-  });
+  // Two services, because the terminal family lives at its own coordinate: the transcript is
+  // `connection.ConnectionService`'s, the lease and the output stream are
+  // `terminal_session.TerminalSessionService`'s.
+  const backend = anInMemoryRpcBackend()
+    .implement(ConnectionService, acpReplayHandlers(RECORDED_TRANSCRIPT))
+    .implement(TerminalSessionService, {
+      claimTerminalControl: async () =>
+        create(ClaimTerminalControlResponseSchema, {
+          granted: false,
+          currentHolderScreenId: OTHER_SCREEN,
+        }),
+      watchTerminalControl: async function* (_req: unknown, context: { signal: AbortSignal }) {
+        yield create(TerminalControlEventSchema, {
+          holderScreenId: OTHER_SCREEN,
+          youAreController: false,
+        });
+        await new Promise<void>((resolve) =>
+          context.signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      },
+      streamTerminalOutput: async function* (_req: unknown, context: { signal: AbortSignal }) {
+        await new Promise<void>((resolve) =>
+          context.signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      },
+    });
   return backend.transport();
 }
 

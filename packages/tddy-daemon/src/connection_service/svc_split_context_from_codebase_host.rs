@@ -1,21 +1,23 @@
-use futures_util::StreamExt;
-// A `ConnectionService` trait method is called on `self` here, so the trait must be in scope.
 use std::time::Duration;
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 
-use tddy_service::proto::connection::{
-    ContextManifestRequest, ReadContextFileBatchRequest, ResumeSessionResponse,
+use tddy_service::proto::connection::ResumeSessionResponse;
+use tddy_service::proto::session_files::{
+    ContextFileBatchChunk, ContextManifestEntry, ContextManifestRequest,
+    ReadContextFileBatchRequest,
 };
 
 use tddy_rpc::Response;
 
 use std::path::PathBuf;
 
-use tddy_rpc::Request;
-
 use tddy_rpc::Status;
 
 use super::ConnectionServiceImpl;
+
+/// The coordinate the two context reads below are served at — this daemon's own when the codebase
+/// lives here, a peer's otherwise. Named because a forward has to be addressed at the service that
+/// *declares* the method, and `connection.ConnectionService` has not since `#unbundle` node 6.
+const SESSION_FILES_SERVICE: &str = "session_files.SessionFilesService";
 
 impl ConnectionServiceImpl {
     /// The project's own guidance, fetched from the daemon that holds the codebase.
@@ -36,6 +38,84 @@ impl ConnectionServiceImpl {
     /// guidance re-fetches for the same reason a start does (the repository moved on while the
     /// session was stopped), and an operator reading "cannot start" about a session that was already
     /// running is being told to look in the wrong place.
+    /// Every allow-listed path in the addressed host's checkout, with the hash that says whether
+    /// it moved.
+    ///
+    /// Routed before anything is read, exactly as the served coordinate routes it: this daemon is
+    /// usually the *agent* host asking the one that holds the codebase, and answered locally it
+    /// would report an empty session directory as the project's guidance. When the codebase is
+    /// here, the read is gated by [`ConnectionServiceImpl::session_context_scope`] — the same
+    /// resolution `session_files.SessionFilesService` serves a wire caller through.
+    ///
+    /// Collected rather than streamed because the caller bounds the whole set against this host's
+    /// attachment cap before spending a read on any of it.
+    async fn context_manifest_of(
+        &self,
+        req: ContextManifestRequest,
+    ) -> Result<Vec<ContextManifestEntry>, Status> {
+        if let Some(mut frames) = self
+            .stream_served_by_peer::<_, ContextManifestEntry>(
+                SESSION_FILES_SERVICE,
+                "StreamContextManifest",
+                &req.daemon_instance_id,
+                &req,
+            )
+            .await?
+        {
+            let mut entries = Vec::new();
+            while let Some(frame) = frames.recv().await {
+                entries.push(frame?);
+            }
+            return Ok(entries);
+        }
+
+        let scope = self.session_context_scope(&req.session_token, &req.session_id, &req.agent)?;
+        let max_bytes = self.config.max_attachment_bytes;
+        tokio::task::spawn_blocking(move || {
+            crate::context_files::context_manifest(&scope.worktree_root, scope.globs, max_bytes)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+    }
+
+    /// The bytes of every path in one request, from the same host and under the same gate as
+    /// [`Self::context_manifest_of`].
+    async fn context_file_batch_of(
+        &self,
+        req: ReadContextFileBatchRequest,
+    ) -> Result<Vec<ContextFileBatchChunk>, Status> {
+        if let Some(mut frames) = self
+            .stream_served_by_peer::<_, ContextFileBatchChunk>(
+                SESSION_FILES_SERVICE,
+                "StreamReadContextFileBatch",
+                &req.daemon_instance_id,
+                &req,
+            )
+            .await?
+        {
+            let mut chunks = Vec::new();
+            while let Some(frame) = frames.recv().await {
+                chunks.push(frame?);
+            }
+            return Ok(chunks);
+        }
+
+        let scope = self.session_context_scope(&req.session_token, &req.session_id, &req.agent)?;
+        let max_bytes = self.config.max_attachment_bytes;
+        let rel_paths = req.rel_paths;
+        let files = tokio::task::spawn_blocking(move || {
+            crate::context_files::read_context_files_bytes(
+                &scope.worktree_root,
+                &rel_paths,
+                scope.globs,
+                max_bytes,
+            )
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))??;
+        Ok(crate::context_files::context_file_batch_frames(&files))
+    }
+
     pub(crate) async fn split_context_from_codebase_host(
         &self,
         session_token: &str,
@@ -53,26 +133,24 @@ impl ConnectionServiceImpl {
             ),
         };
 
-        let mut manifest = self
-            .stream_context_manifest(Request::new(ContextManifestRequest {
+        let manifest = self
+            .context_manifest_of(ContextManifestRequest {
                 session_token: session_token.to_string(),
                 session_id: codebase_session.to_string(),
                 daemon_instance_id: codebase_daemon.to_string(),
                 agent: agent.to_string(),
-            }))
+            })
             .await
-            .map_err(|status| refusal("reading the context manifest", status))?
-            .into_inner();
+            .map_err(|status| refusal("reading the context manifest", status))?;
 
-        let mut entries: Vec<tddy_sandbox::ContextEntry> = Vec::new();
-        while let Some(entry) = manifest.next().await {
-            let entry = entry.map_err(|status| refusal("reading the context manifest", status))?;
-            entries.push(tddy_sandbox::ContextEntry {
+        let entries: Vec<tddy_sandbox::ContextEntry> = manifest
+            .into_iter()
+            .map(|entry| tddy_sandbox::ContextEntry {
                 rel_path: entry.rel_path,
                 sha256: entry.sha256,
                 size_bytes: entry.size_bytes,
-            });
-        }
+            })
+            .collect();
 
         // Every number below is the *peer's*, and the whole set is about to be held in memory at
         // once. `size_bytes` rides the manifest precisely so a client can refuse before spending a
@@ -118,17 +196,16 @@ impl ConnectionServiceImpl {
         // 120-file `.claude/skills/` tree read one file at a time is 121 sequential peer calls,
         // ~18s on a 150 ms link, and 121 separate chances to trip `PEER_FORWARD_TIMEOUT`. Batched,
         // a split start costs two peer calls whatever the tree's size.
-        let mut frames = self
-            .stream_read_context_file_batch(Request::new(ReadContextFileBatchRequest {
+        let frames = self
+            .context_file_batch_of(ReadContextFileBatchRequest {
                 session_token: session_token.to_string(),
                 session_id: codebase_session.to_string(),
                 daemon_instance_id: codebase_daemon.to_string(),
                 agent: agent.to_string(),
                 rel_paths: entries.iter().map(|e| e.rel_path.clone()).collect(),
-            }))
+            })
             .await
-            .map_err(|status| refusal("reading the context files", status))?
-            .into_inner();
+            .map_err(|status| refusal("reading the context files", status))?;
 
         let advertised: std::collections::BTreeMap<&str, u64> = entries
             .iter()
@@ -138,8 +215,7 @@ impl ConnectionServiceImpl {
             std::collections::BTreeMap::new();
         let mut complete: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         let mut received_bytes: u64 = 0;
-        while let Some(frame) = frames.next().await {
-            let frame = frame.map_err(|status| refusal("reading the context files", status))?;
+        for frame in frames {
             // The peer names the file each frame belongs to, and a name that was never asked for is
             // a path this host is about to create in the agent's working directory. Refused here
             // rather than filtered, for the reason `context_sync::refuse_unlisted_paths` gives: a

@@ -1,4 +1,4 @@
-//! `ConnectionService.UploadSessionFileChunk` — the host side of the terminal drag-to-upload
+//! `SessionFilesService.UploadSessionFileChunk` — the host side of the terminal drag-to-upload
 //! feature. Files dropped on the web terminal stream to the host in ordered chunks and land under
 //! `{session_dir}/uploads/{upload_id}/{file_name}`; the daemon returns each file's absolute host
 //! path on its final chunk so the web can type that path into the terminal.
@@ -16,8 +16,8 @@ use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::session_file_upload::write_upload_chunk;
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, UploadSessionFileChunkRequest,
+use tddy_service::proto::session_files::{
+    SessionFilesService as SessionFilesServiceTrait, UploadSessionFileChunkRequest,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -227,14 +227,21 @@ users:
     DaemonConfig::load(&path).unwrap()
 }
 
-fn test_service(sessions_base: PathBuf, os_user: &str) -> ConnectionServiceImpl {
+/// The daemon's `session_files.SessionFilesService`, over this test's own data dir.
+///
+/// `#unbundle` node 6 moved the thirteen session-file methods off `connection.ConnectionService`;
+/// this is the served implementation the host registers, built from the same daemon.
+fn test_service(
+    sessions_base: PathBuf,
+    os_user: &str,
+) -> tddy_session_files::SessionFilesServiceImpl {
     let config = test_config_for_os_user(os_user);
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
-    ConnectionServiceImpl::new(
+    Arc::new(ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -243,7 +250,8 @@ fn test_service(sessions_base: PathBuf, os_user: &str) -> ConnectionServiceImpl 
         None,
         None,
         Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
+    ))
+    .session_files_service()
 }
 
 /// Acceptance: an invalid session token is rejected before any filesystem access.

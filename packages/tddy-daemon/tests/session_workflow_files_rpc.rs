@@ -1,15 +1,16 @@
-//! Acceptance tests for `ListSessionWorkflowFiles` and `ReadSessionWorkflowFile` RPCs.
+//! Acceptance tests for `SessionFilesService.ListSessionWorkflowFiles` and
+//! `SessionFilesService.ReadSessionWorkflowFile`.
 //!
-//! These assert allowlisted listing, safe rejection of traversal basenames, and exact
-//! UTF-8 reads for workflow files. Handlers are not fully implemented yet (Red).
+//! These assert allowlisted listing, safe rejection of traversal basenames, and exact UTF-8 reads
+//! for workflow files, against the coordinate this daemon registers.
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Code;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListSessionWorkflowFilesRequest,
-    ReadSessionWorkflowFileRequest,
+use tddy_service::proto::session_files::{
+    ListSessionWorkflowFilesRequest, ReadSessionWorkflowFileRequest,
+    SessionFilesService as SessionFilesServiceTrait,
 };
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
@@ -45,7 +46,7 @@ async fn list_session_workflow_files_returns_allowlisted_basenames() {
     std::fs::write(session_dir.join("PRD.md"), "# Plan\n").unwrap();
     std::fs::write(session_dir.join("TODO.md"), "- [ ] item\n").unwrap();
     std::fs::write(session_dir.join(".env"), "SECRET=must-not-appear-in-list\n").unwrap();
-    let service = test_service(sessions_base);
+    let service = std::sync::Arc::new(test_service(sessions_base)).session_files_service();
 
     // When
     let response = service
@@ -97,7 +98,7 @@ async fn read_session_workflow_file_rejects_path_outside_session_dir() {
         .build();
     write_session_yaml(&session_dir, &metadata);
     std::fs::write(session_dir.join("changeset.yaml"), "safe: true\n").unwrap();
-    let service = test_service(sessions_base);
+    let service = std::sync::Arc::new(test_service(sessions_base)).session_files_service();
 
     // When / Then
     for malicious in [
@@ -149,7 +150,7 @@ async fn read_session_workflow_file_returns_utf8_content_for_yaml() {
         .build();
     write_session_yaml(&session_dir, &metadata);
     std::fs::write(session_dir.join("changeset.yaml"), golden).unwrap();
-    let service = test_service(sessions_base);
+    let service = std::sync::Arc::new(test_service(sessions_base)).session_files_service();
 
     // When
     let response = service

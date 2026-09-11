@@ -45,9 +45,10 @@ const UNSERVED_METHODS: [&str; 2] = ["StreamSessionTerminalIO", "WatchTerminalCo
 /// The `terminal_session.TerminalSessionService` entry the coder's participant registers.
 ///
 /// Built from the same [`SessionConnectionService`] the `connection.ConnectionService` entry is, so
-/// the two coordinates address one [`TerminalManager`](super::terminal_manager::TerminalManager)
-/// and one control lease — a second manager here would mean a terminal started on one coordinate
-/// was invisible on the other.
+/// the session's tools and its terminals reach one
+/// [`TerminalManager`](super::terminal_manager::TerminalManager) and one control lease — a second
+/// manager here would mean a terminal started through this coordinate was invisible to the session
+/// that owns it.
 #[must_use]
 pub fn coder_terminal_session_entry(svc: Arc<SessionConnectionService>) -> ServiceEntry {
     let served = build_terminal_session_entry(TerminalSessionPorts {

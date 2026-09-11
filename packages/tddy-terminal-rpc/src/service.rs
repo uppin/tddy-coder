@@ -494,7 +494,8 @@ async fn relay_control_changes(
 /// `#unbundle` node 6 made this crate *serve* the proto it already owned: the nine methods had been
 /// extracted here as [`crate::bridge`] functions but were only ever reachable through
 /// `connection.ConnectionService`'s duplicate copy of the same schema, with hand-written converters
-/// between the two. Registering this entry is the coordinate that copy is retired in favour of.
+/// between the two. Both the copy and the converters are gone; this entry is where the nine
+/// answer.
 ///
 /// Takes the whole [`TerminalSessionPorts`] because every field is wiring rather than behaviour:
 /// which identity a token belongs to, which OS user it maps to, where the live terminals and the

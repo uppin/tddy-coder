@@ -19,9 +19,9 @@ use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID}
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::{Request, Status};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, SessionTerminalInput, SessionTerminalOutput,
-    StreamReplayMode, StreamTerminalOutputRequest,
+use tddy_terminal_rpc::proto::terminal_session::{
+    SessionTerminalInput, SessionTerminalOutput, StreamReplayMode, StreamTerminalOutputRequest,
+    TerminalSessionService as TerminalSessionServiceTrait,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -42,7 +42,11 @@ fn test_config() -> (tempfile::TempDir, DaemonConfig) {
 
 fn make_service(
     manager: Arc<ClaudeCliSessionManager>,
-) -> (ConnectionServiceImpl, tempfile::TempDir, tempfile::TempDir) {
+) -> (
+    tddy_terminal_rpc::TerminalSessionServiceImpl,
+    tempfile::TempDir,
+    tempfile::TempDir,
+) {
     let (cfg_dir, config) = test_config();
     let sessions = tempfile::tempdir().unwrap();
     let sessions_base = sessions.path().to_path_buf();
@@ -61,7 +65,7 @@ fn make_service(
         None,
         manager,
     );
-    (service, cfg_dir, sessions)
+    (service.terminal_session_service(), cfg_dir, sessions)
 }
 
 fn write_main_stub(dir: &std::path::Path) -> std::path::PathBuf {

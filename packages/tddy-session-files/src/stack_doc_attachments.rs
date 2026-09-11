@@ -14,8 +14,9 @@
 use std::path::Path;
 
 use tddy_service::proto::connection::{
-    session_attachment::Source, HostDocumentRef, HostDocumentScope, SessionAttachment,
+    session_attachment::Source, HostDocumentRef, SessionAttachment,
 };
+use tddy_service::proto::types::HostDocumentScope;
 use tddy_workflow::{session_artifacts_root, SESSION_ATTACHMENTS_SUBDIR};
 use tddy_workflow_recipes::plan_pr_stack::PR_STACK_PLAN_MD_BASENAME;
 use tddy_workflow_recipes::pr_stack::{
@@ -128,8 +129,9 @@ mod tests {
     use super::*;
     use std::fs;
     use tddy_service::proto::connection::{
-        session_attachment::Source, HostDocumentRef, HostDocumentScope, StagedAttachmentRef,
+        session_attachment::Source, HostDocumentRef, StagedAttachmentRef,
     };
+    use tddy_service::proto::types::HostDocumentScope;
 
     const ORCHESTRATOR_ID: &str = "018f1111-aaaa-7000-1111-000000000001";
     const ORCHESTRATOR_HOST: &str = "daemon-alpha";

@@ -36,46 +36,30 @@ use tddy_service::proto::connection::{
     AcpReplayFrame, AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest,
     AddProjectToHostResponse, AgentActivityDeltaChunk, AgentActivityDeltaRequest,
     AgentActivityRecord, AgentConversationChunk, AttachSessionAgentRequest,
-    CancelAgentConversationRequest, CancelAgentConversationResponse, ClaimTerminalControlRequest,
-    ClaimTerminalControlResponse, ConnectSessionRequest, ConnectSessionResponse,
-    ContextFileBatchChunk, ContextFileChunk, ContextManifestEntry, ContextManifestRequest,
-    CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
-    DetachSessionAgentRequest, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
-    GetAcpReplayPageRequest, GetAcpReplayPageResponse, GetAcpToolCallDetailRequest,
-    GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
-    GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest, GetWorktreeSnapshotRequest,
+    CancelAgentConversationRequest, CancelAgentConversationResponse, ConnectSessionRequest,
+    ConnectSessionResponse, CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest,
+    DeleteSessionResponse, DetachSessionAgentRequest, ExecuteToolChunk, ExecuteToolRequest,
+    ExecuteToolResponse, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
+    GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetDemoVmStatusRequest,
+    GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse, GetWorktreeSnapshotRequest,
     GetWorktreeSnapshotResponse, LinkStackNodeRequest, LinkStackNodeResponse,
     ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
     ListExecToolsRequest, ListExecToolsResponse, ListProjectBranchesRequest,
     ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
     ListSessionAgentsRequest, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
-    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
-    ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse, MintLocalTokenRequest,
-    MintLocalTokenResponse, OpenAgentConversationRequest, OpenAgentConversationResponse,
-    PromptAgentConversationRequest, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    QueryBranchRequest, QueryBranchResponse, ReadContextFileBatchRequest, ReadContextFileRequest,
-    ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse, ReorderPlannedPrRequest,
-    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ReportAgentActivityRequest, ReportAgentActivityResponse, ReportSessionStatusRequest,
-    ReportSessionStatusResponse, ResolveStackBaseRequest, ResolveStackBaseResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster,
-    SessionNotificationEvent, SessionTerminalInput, SessionTerminalOutput,
-    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, SignalSessionRequest,
-    SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse, StartSessionRequest,
-    StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
-    StopDemoVmRequest, StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamAcpReplayRequest, StreamSessionActivityRequest, StreamSessionAgentsRequest,
-    StreamSessionNotificationsRequest, StreamTerminalOutputRequest, TerminalControlEvent,
-    TerminalHistoryChunk, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
-    WatchTerminalControlRequest,
-};
-use tddy_service::proto::connection::{
-    DeleteSessionUploadRequest, DeleteSessionUploadResponse, DeleteStagedAttachmentRequest,
-    DeleteStagedAttachmentResponse, HostDocumentChunk, ListSessionUploadsRequest,
-    ListSessionUploadsResponse, ListStagedAttachmentsRequest, ListStagedAttachmentsResponse,
-    ReadHostDocumentRequest, ReadHostDocumentResponse, StartSessionEvent,
-    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
+    ListSessionsRequest, ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse,
+    ListToolsRequest, ListToolsResponse, MintLocalTokenRequest, MintLocalTokenResponse,
+    OpenAgentConversationRequest, OpenAgentConversationResponse, PromptAgentConversationRequest,
+    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
+    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
+    RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
+    ReportSessionStatusRequest, ReportSessionStatusResponse, ResolveStackBaseRequest,
+    ResolveStackBaseResponse, ResumeSessionRequest, ResumeSessionResponse, SessionAgentRoster,
+    SessionNotificationEvent, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
+    SignalSessionRequest, SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse,
+    StartSessionEvent, StartSessionRequest, StartSessionResponse, StopDemoVmRequest,
+    StopDemoVmResponse, StreamAcpReplayRequest, StreamSessionActivityRequest,
+    StreamSessionAgentsRequest, StreamSessionNotificationsRequest,
 };
 use tddy_service::tonic_connection::connection_service_server::ConnectionService as TonicConnectionService;
 
@@ -126,10 +110,6 @@ impl<T> ConnectionServiceTonicAdapter<T> {
 impl<T> TonicConnectionService for ConnectionServiceTonicAdapter<T>
 where
     T: RpcConnectionService,
-    T::StreamSessionTerminalIoStream: 'static,
-    T::StreamTerminalOutputStream: 'static,
-    T::GetTerminalHistoryStream: 'static,
-    T::WatchTerminalControlStream: 'static,
     T::StreamSessionActivityStream: 'static,
     T::StreamSessionNotificationsStream: 'static,
     T::StreamAcpReplayStream: 'static,
@@ -233,7 +213,8 @@ where
     type StreamSessionAgentsStream =
         Pin<Box<dyn Stream<Item = Result<SessionAgentRoster, tonic::Status>> + Send>>;
 
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    // `result_large_err`: the outbound stream's `Err` is `tonic::Status`, mandated by the
+    // generated tonic trait — it cannot be boxed, so the lint's suggested fix does not apply.
     #[allow(clippy::result_large_err)]
     async fn stream_session_agents(
         &self,
@@ -266,7 +247,7 @@ where
     type PromptAgentConversationStream =
         Pin<Box<dyn Stream<Item = Result<AgentConversationChunk, tonic::Status>> + Send>>;
 
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    // `result_large_err`: see `stream_session_agents` — `tonic::Status` is fixed by the trait.
     #[allow(clippy::result_large_err)]
     async fn prompt_agent_conversation(
         &self,
@@ -446,145 +427,6 @@ where
         Ok(tonic::Response::new(resp.into_inner()))
     }
 
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
-    async fn list_session_workflow_files(
-        &self,
-        request: tonic::Request<ListSessionWorkflowFilesRequest>,
-    ) -> Result<tonic::Response<ListSessionWorkflowFilesResponse>, tonic::Status> {
-        let resp = RpcConnectionService::list_session_workflow_files(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn read_session_workflow_file(
-        &self,
-        request: tonic::Request<ReadSessionWorkflowFileRequest>,
-    ) -> Result<tonic::Response<ReadSessionWorkflowFileResponse>, tonic::Status> {
-        let resp = RpcConnectionService::read_session_workflow_file(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    /// Bidirectional streaming: convert the inbound tonic stream into a tddy-rpc `Streaming`
-    /// (mapping transport errors), delegate, and box the outbound stream mapping errors back.
-    type StreamSessionTerminalIOStream =
-        Pin<Box<dyn Stream<Item = Result<SessionTerminalOutput, tonic::Status>> + Send>>;
-
-    // `result_large_err`: the outbound stream's `Err` is `tonic::Status`, mandated by the
-    // generated tonic trait — it cannot be boxed, so the lint's suggested fix does not apply.
-    #[allow(clippy::result_large_err)]
-    async fn stream_session_terminal_io(
-        &self,
-        request: tonic::Request<tonic::Streaming<SessionTerminalInput>>,
-    ) -> Result<tonic::Response<Self::StreamSessionTerminalIOStream>, tonic::Status> {
-        let inbound = request.into_inner().map(|item| item.map_err(to_rpc_status));
-        let rpc_request = tddy_rpc::Request::new(tddy_rpc::Streaming::new(inbound));
-        let resp = RpcConnectionService::stream_session_terminal_io(&*self.inner, rpc_request)
-            .await
-            .map_err(to_tonic_status)?;
-        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
-        Ok(tonic::Response::new(Box::pin(outbound)))
-    }
-
-    /// Server streaming: browser-compatible output half.
-    type StreamTerminalOutputStream =
-        Pin<Box<dyn Stream<Item = Result<SessionTerminalOutput, tonic::Status>> + Send>>;
-
-    /// Server streaming: lazy scroll-up history chunks.
-    type GetTerminalHistoryStream =
-        Pin<Box<dyn Stream<Item = Result<TerminalHistoryChunk, tonic::Status>> + Send>>;
-
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
-    #[allow(clippy::result_large_err)]
-    async fn stream_terminal_output(
-        &self,
-        request: tonic::Request<StreamTerminalOutputRequest>,
-    ) -> Result<tonic::Response<Self::StreamTerminalOutputStream>, tonic::Status> {
-        let resp = RpcConnectionService::stream_terminal_output(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
-        Ok(tonic::Response::new(Box::pin(outbound)))
-    }
-
-    async fn send_terminal_input(
-        &self,
-        request: tonic::Request<SessionTerminalInput>,
-    ) -> Result<tonic::Response<SendTerminalInputResponse>, tonic::Status> {
-        let resp = RpcConnectionService::send_terminal_input(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    #[allow(clippy::result_large_err)]
-    async fn get_terminal_history(
-        &self,
-        request: tonic::Request<GetTerminalHistoryRequest>,
-    ) -> Result<tonic::Response<Self::GetTerminalHistoryStream>, tonic::Status> {
-        let resp = RpcConnectionService::get_terminal_history(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
-        Ok(tonic::Response::new(Box::pin(outbound)))
-    }
-
-    async fn start_terminal_session(
-        &self,
-        request: tonic::Request<StartTerminalSessionRequest>,
-    ) -> Result<tonic::Response<StartTerminalSessionResponse>, tonic::Status> {
-        let resp = RpcConnectionService::start_terminal_session(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn stop_terminal_session(
-        &self,
-        request: tonic::Request<StopTerminalSessionRequest>,
-    ) -> Result<tonic::Response<StopTerminalSessionResponse>, tonic::Status> {
-        let resp = RpcConnectionService::stop_terminal_session(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn list_terminal_sessions(
-        &self,
-        request: tonic::Request<ListTerminalSessionsRequest>,
-    ) -> Result<tonic::Response<ListTerminalSessionsResponse>, tonic::Status> {
-        let resp = RpcConnectionService::list_terminal_sessions(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
     async fn list_project_branches(
         &self,
         request: tonic::Request<ListProjectBranchesRequest>,
@@ -628,7 +470,7 @@ where
     type StreamExecuteToolStream =
         Pin<Box<dyn Stream<Item = Result<ExecuteToolChunk, tonic::Status>> + Send>>;
 
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    // `result_large_err`: see `stream_session_agents` — `tonic::Status` is fixed by the trait.
     #[allow(clippy::result_large_err)]
     async fn stream_execute_tool(
         &self,
@@ -704,7 +546,7 @@ where
     type StreamAgentActivityDeltaStream =
         Pin<Box<dyn Stream<Item = Result<AgentActivityDeltaChunk, tonic::Status>> + Send>>;
 
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    // `result_large_err`: see `stream_session_agents` — `tonic::Status` is fixed by the trait.
     #[allow(clippy::result_large_err)]
     async fn stream_agent_activity_delta(
         &self,
@@ -720,70 +562,8 @@ where
         Ok(tonic::Response::new(Box::pin(outbound)))
     }
 
-    /// Server streaming: the agent context allow-list (docs/ft/daemon/agent-context-sync.md).
-    type StreamContextManifestStream =
-        Pin<Box<dyn Stream<Item = Result<ContextManifestEntry, tonic::Status>> + Send>>;
-
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
-    #[allow(clippy::result_large_err)]
-    async fn stream_context_manifest(
-        &self,
-        request: tonic::Request<ContextManifestRequest>,
-    ) -> Result<tonic::Response<Self::StreamContextManifestStream>, tonic::Status> {
-        let resp = RpcConnectionService::stream_context_manifest(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
-        Ok(tonic::Response::new(Box::pin(outbound)))
-    }
-
-    /// Server streaming: one allow-listed context file (docs/ft/daemon/agent-context-sync.md).
-    type StreamReadContextFileStream =
-        Pin<Box<dyn Stream<Item = Result<ContextFileChunk, tonic::Status>> + Send>>;
-
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
-    #[allow(clippy::result_large_err)]
-    async fn stream_read_context_file(
-        &self,
-        request: tonic::Request<ReadContextFileRequest>,
-    ) -> Result<tonic::Response<Self::StreamReadContextFileStream>, tonic::Status> {
-        let resp = RpcConnectionService::stream_read_context_file(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
-        Ok(tonic::Response::new(Box::pin(outbound)))
-    }
-
-    /// Server streaming: several allow-listed context files in one call
-    /// (docs/ft/daemon/agent-context-sync.md) — the setup sync's prefetch, which would otherwise
-    /// cost one peer round trip per file before the agent process exists.
-    type StreamReadContextFileBatchStream =
-        Pin<Box<dyn Stream<Item = Result<ContextFileBatchChunk, tonic::Status>> + Send>>;
-
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
-    #[allow(clippy::result_large_err)]
-    async fn stream_read_context_file_batch(
-        &self,
-        request: tonic::Request<ReadContextFileBatchRequest>,
-    ) -> Result<tonic::Response<Self::StreamReadContextFileBatchStream>, tonic::Status> {
-        let resp = RpcConnectionService::stream_read_context_file_batch(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
-        Ok(tonic::Response::new(Box::pin(outbound)))
-    }
-
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    // `result_large_err`: see `stream_session_agents` — `tonic::Status` is fixed by the trait.
+    // `result_large_err`: see `stream_session_agents` — `tonic::Status` is fixed by the trait.
     #[allow(clippy::result_large_err)]
     async fn stream_session_activity(
         &self,
@@ -804,7 +584,7 @@ where
     type StreamSessionNotificationsStream =
         Pin<Box<dyn Stream<Item = Result<SessionNotificationEvent, tonic::Status>> + Send>>;
 
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    // `result_large_err`: see `stream_session_agents` — `tonic::Status` is fixed by the trait.
     #[allow(clippy::result_large_err)]
     async fn stream_session_notifications(
         &self,
@@ -824,7 +604,7 @@ where
     type StreamAcpReplayStream =
         Pin<Box<dyn Stream<Item = Result<AcpReplayFrame, tonic::Status>> + Send>>;
 
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    // `result_large_err`: see `stream_session_agents` — `tonic::Status` is fixed by the trait.
     #[allow(clippy::result_large_err)]
     async fn stream_acp_replay(
         &self,
@@ -903,39 +683,6 @@ where
         .await
         .map_err(to_tonic_status)?;
         Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn claim_terminal_control(
-        &self,
-        request: tonic::Request<ClaimTerminalControlRequest>,
-    ) -> Result<tonic::Response<ClaimTerminalControlResponse>, tonic::Status> {
-        let resp = RpcConnectionService::claim_terminal_control(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    /// Server streaming: terminal-control ownership change events.
-    type WatchTerminalControlStream =
-        Pin<Box<dyn Stream<Item = Result<TerminalControlEvent, tonic::Status>> + Send>>;
-
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
-    #[allow(clippy::result_large_err)]
-    async fn watch_terminal_control(
-        &self,
-        request: tonic::Request<WatchTerminalControlRequest>,
-    ) -> Result<tonic::Response<Self::WatchTerminalControlStream>, tonic::Status> {
-        let resp = RpcConnectionService::watch_terminal_control(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
-        Ok(tonic::Response::new(Box::pin(outbound)))
     }
 
     async fn add_planned_pr(
@@ -1101,122 +848,9 @@ where
         }))
     }
 
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
-    async fn upload_session_file_chunk(
-        &self,
-        request: tonic::Request<UploadSessionFileChunkRequest>,
-    ) -> Result<tonic::Response<UploadSessionFileChunkResponse>, tonic::Status> {
-        let resp = RpcConnectionService::upload_session_file_chunk(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn list_session_uploads(
-        &self,
-        request: tonic::Request<ListSessionUploadsRequest>,
-    ) -> Result<tonic::Response<ListSessionUploadsResponse>, tonic::Status> {
-        let resp = RpcConnectionService::list_session_uploads(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn delete_session_upload(
-        &self,
-        request: tonic::Request<DeleteSessionUploadRequest>,
-    ) -> Result<tonic::Response<DeleteSessionUploadResponse>, tonic::Status> {
-        let resp = RpcConnectionService::delete_session_upload(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn upload_staged_attachment_chunk(
-        &self,
-        request: tonic::Request<UploadStagedAttachmentChunkRequest>,
-    ) -> Result<tonic::Response<UploadStagedAttachmentChunkResponse>, tonic::Status> {
-        let resp = RpcConnectionService::upload_staged_attachment_chunk(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn list_staged_attachments(
-        &self,
-        request: tonic::Request<ListStagedAttachmentsRequest>,
-    ) -> Result<tonic::Response<ListStagedAttachmentsResponse>, tonic::Status> {
-        let resp = RpcConnectionService::list_staged_attachments(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn delete_staged_attachment(
-        &self,
-        request: tonic::Request<DeleteStagedAttachmentRequest>,
-    ) -> Result<tonic::Response<DeleteStagedAttachmentResponse>, tonic::Status> {
-        let resp = RpcConnectionService::delete_staged_attachment(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn read_host_document(
-        &self,
-        request: tonic::Request<ReadHostDocumentRequest>,
-    ) -> Result<tonic::Response<ReadHostDocumentResponse>, tonic::Status> {
-        let resp = RpcConnectionService::read_host_document(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    /// Server streaming: a host document past the unary message-size ceiling.
-    type StreamReadHostDocumentStream =
-        Pin<Box<dyn Stream<Item = Result<HostDocumentChunk, tonic::Status>> + Send>>;
-
     /// Server streaming: attachment-materialization progress, then one terminal result.
     type StreamStartSessionStream =
         Pin<Box<dyn Stream<Item = Result<StartSessionEvent, tonic::Status>> + Send>>;
-
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
-    #[allow(clippy::result_large_err)]
-    async fn stream_read_host_document(
-        &self,
-        request: tonic::Request<ReadHostDocumentRequest>,
-    ) -> Result<tonic::Response<Self::StreamReadHostDocumentStream>, tonic::Status> {
-        let resp = RpcConnectionService::stream_read_host_document(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
-        Ok(tonic::Response::new(Box::pin(outbound)))
-    }
 
     #[allow(clippy::result_large_err)]
     async fn stream_start_session(

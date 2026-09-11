@@ -11,7 +11,7 @@
 //! | Mode | Selected by | Reaches the terminal via |
 //! |---|---|---|
 //! | Local PTY | none of the below, `cmd` non-empty | [`crate::local_pty_relay`] in this process |
-//! | gRPC connect-only | `session_id` | `connection.ConnectionService` on an existing session |
+//! | gRPC connect-only | `session_id` | `terminal_session.TerminalSessionService` on an existing session |
 //! | gRPC start-and-connect | `project_id` | `StartSession`, then the same terminal RPCs |
 //! | LiveKit session | `server_identity` or `daemon_identity` | a LiveKit room (`livekit` feature) |
 //!
@@ -567,11 +567,11 @@ async fn run_grpc_terminal(
     session_id: &str,
     session_token: &str,
 ) -> anyhow::Result<()> {
-    use prost::Message as _;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use tddy_service::proto::connection::{
+    use crate::proto::terminal_session::{
         SessionTerminalInput, SessionTerminalOutput, StreamReplayMode, StreamTerminalOutputRequest,
     };
+    use prost::Message as _;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     let http_client = reqwest::Client::new();
 
@@ -590,7 +590,7 @@ async fn run_grpc_terminal(
     let mut resp = connectrpc_post_streaming(
         &http_client,
         daemon_url,
-        "connection.ConnectionService",
+        "terminal_session.TerminalSessionService",
         "StreamTerminalOutput",
         stream_req.encode_to_vec(),
     )
@@ -622,7 +622,7 @@ async fn run_grpc_terminal(
             let _ = connectrpc_post(
                 &input_client,
                 &input_daemon_url,
-                "connection.ConnectionService",
+                "terminal_session.TerminalSessionService",
                 "SendTerminalInput",
                 req.encode_to_vec(),
             )
@@ -647,7 +647,7 @@ async fn run_grpc_terminal(
             let _ = connectrpc_post(
                 &input_client,
                 &input_daemon_url,
-                "connection.ConnectionService",
+                "terminal_session.TerminalSessionService",
                 "SendTerminalInput",
                 req.encode_to_vec(),
             )

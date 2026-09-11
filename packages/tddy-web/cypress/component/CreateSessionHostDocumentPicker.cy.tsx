@@ -23,11 +23,11 @@ import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-t
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import {
   ConnectionService,
-  HostDocumentScope,
   SessionContextDocKind,
   StartSessionEventSchema,
   type StartSessionRequest,
 } from "../../src/gen/connection_pb";
+import { HostDocumentScope } from "../../src/gen/types_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";

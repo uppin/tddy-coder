@@ -80,12 +80,15 @@ use prost::Message;
 use serde::Deserialize;
 use tddy_service::proto::connection::{
     AddProjectToHostRequest, AddProjectToHostResponse, DeleteSessionRequest, DeleteSessionResponse,
-    DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse, ExecuteToolChunk,
-    ExecuteToolRequest, HostDocumentChunk, ListProjectsRequest, ListProjectsResponse,
-    ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, ProjectEntry as ProtoProjectEntry,
-    ReadHostDocumentRequest, ReadHostDocumentResponse, SetProjectDefaultBranchRequest,
+    ExecuteToolChunk, ExecuteToolRequest, ListProjectsRequest, ListProjectsResponse,
+    ProjectEntry as ProtoProjectEntry, SetProjectDefaultBranchRequest,
     SetProjectDefaultBranchResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse,
-    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
+};
+use tddy_service::proto::session_files::{
+    DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse, HostDocumentChunk,
+    ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, ReadHostDocumentRequest,
+    ReadHostDocumentResponse, UploadStagedAttachmentChunkRequest,
+    UploadStagedAttachmentChunkResponse,
 };
 
 use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig};
@@ -1406,7 +1409,7 @@ pub async fn forward_upload_staged_attachment_chunk_via_livekit(
     let out = forward_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        "session_files.SessionFilesService",
         "UploadStagedAttachmentChunk",
         body,
     )
@@ -1427,7 +1430,7 @@ pub async fn forward_list_staged_attachments_via_livekit(
     let out = forward_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        "session_files.SessionFilesService",
         "ListStagedAttachments",
         body,
     )
@@ -1448,7 +1451,7 @@ pub async fn forward_delete_staged_attachment_via_livekit(
     let out = forward_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        "session_files.SessionFilesService",
         "DeleteStagedAttachment",
         body,
     )
@@ -1468,7 +1471,7 @@ pub async fn forward_read_host_document_via_livekit(
     let out = forward_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        "session_files.SessionFilesService",
         "ReadHostDocument",
         body,
     )
@@ -1494,7 +1497,7 @@ pub async fn forward_stream_read_host_document_via_livekit(
     forward_server_stream_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        "session_files.SessionFilesService",
         "StreamReadHostDocument",
         request.encode_to_vec(),
         |bytes| {

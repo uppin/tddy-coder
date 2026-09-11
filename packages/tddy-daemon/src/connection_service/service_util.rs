@@ -1,8 +1,6 @@
 use tddy_daemon_kernel::trim_to_option;
 use tddy_task::TerminalCapture;
 
-use crate::cli_session_manager::MAIN_TERMINAL_ID;
-
 use std::path::Path;
 
 use tddy_core::BranchWorktreeIntent;
@@ -116,17 +114,6 @@ pub(crate) async fn push_new_branch_to_origin_if_requested(
         },
     )
     .await
-}
-
-/// Resolve a request's `terminal_id`, defaulting an empty value to the reserved main terminal so
-/// existing single-terminal clients keep working.
-pub(crate) fn resolved_terminal_id(raw: &str) -> &str {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        MAIN_TERMINAL_ID
-    } else {
-        trimmed
-    }
 }
 
 /// Maximum size of a single terminal-output frame published to a client on attach. Chosen to stay

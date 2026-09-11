@@ -10,9 +10,9 @@
 //! not here. That decision needs the eligible-daemon roster, the common room slot and the LiveKit
 //! forwarding clients, none of which `tddy-session-files` may reach for — its module header says so
 //! — which is why [`PeerRoutedSessionFiles`] wraps the crate's entry rather than the crate growing a
-//! transport. Every decision below is made by the *same* [`ConnectionServiceImpl`] method the
-//! matching `connection.ConnectionService` handler calls, so the two coordinates cannot disagree
-//! about which host holds a file.
+//! transport. Every decision below is made by a [`ConnectionServiceImpl`] method rather than
+//! re-derived here, so a request that arrives on the wire and one this daemon makes for itself
+//! cannot disagree about which host holds a file.
 
 use std::sync::Arc;
 
@@ -20,11 +20,12 @@ use async_trait::async_trait;
 use livekit::prelude::Room;
 use prost::Message as _;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, Status};
-use tddy_service::proto::connection::{
+use tddy_service::proto::connection::ExecuteToolRequest;
+use tddy_service::proto::session_files::{
     ContextFileBatchChunk, ContextFileChunk, ContextManifestEntry, ContextManifestRequest,
-    DeleteStagedAttachmentRequest, ExecuteToolRequest, HostDocumentChunk,
-    ListStagedAttachmentsRequest, ReadContextFileBatchRequest, ReadContextFileRequest,
-    ReadHostDocumentRequest, UploadStagedAttachmentChunkRequest,
+    DeleteStagedAttachmentRequest, HostDocumentChunk, ListStagedAttachmentsRequest,
+    ReadContextFileBatchRequest, ReadContextFileRequest, ReadHostDocumentRequest,
+    UploadStagedAttachmentChunkRequest,
 };
 use tddy_session_files::service::{SessionContextScope, SessionContextScopes};
 use tddy_session_files::SessionFilesPorts;
@@ -51,11 +52,10 @@ type CommonRoomSlot = Arc<tokio::sync::RwLock<Option<Arc<Room>>>>;
 impl ConnectionServiceImpl {
     /// The `session_files.SessionFilesService` entry this daemon registers.
     ///
-    /// Built from the *same* config, resolvers and staging base `connection.ConnectionService`
-    /// serves its session-file RPCs from, so both coordinates address one staging directory, one
-    /// OS-user mapping and one set of sessions while both are mounted — a second staging base here
-    /// would mean a batch uploaded on one coordinate was invisible to the start addressed through
-    /// the other.
+    /// Built from the *same* config, resolvers and staging base this daemon's `StartSession`
+    /// materializes attachments from, so a batch staged over this coordinate is the batch a start
+    /// addressed to `connection.ConnectionService` consumes — a second staging base here would mean
+    /// an upload was invisible to the session it was staged for.
     ///
     /// Public because it is wiring: the host that assembles the roster registers it
     /// (`runtime::build`), and an acceptance test that asks what this coordinate does with a
@@ -70,6 +70,38 @@ impl ConnectionServiceImpl {
                 local: entry.service,
             }) as Arc<dyn RpcService>,
         }
+    }
+
+    /// Every coordinate a **session room** serves.
+    ///
+    /// A session room is reached by the agents inside it, and what they may ask for is whatever
+    /// this daemon declares. `#unbundle` node 6 moved the session-file and terminal families onto
+    /// their own services, so a room serving `connection.ConnectionService` alone would have
+    /// quietly stopped answering a question it had always answered — an in-room agent's
+    /// `ReadHostDocument` would come back "unknown service" rather than with the document.
+    #[must_use]
+    pub(crate) fn session_room_roster(self: &Arc<Self>) -> tddy_rpc::MultiRpcService {
+        tddy_rpc::MultiRpcService::new(vec![
+            self.session_files_entry(),
+            self.terminal_session_entry(),
+            tddy_rpc::ServiceEntry {
+                name: "connection.ConnectionService",
+                service: Arc::new(tddy_service::ConnectionServiceServer::from_arc(Arc::clone(
+                    self,
+                ))) as Arc<dyn RpcService>,
+            },
+        ])
+    }
+
+    /// The served implementation itself, without the routing wrapper or transport entry around it.
+    ///
+    /// Public for the reason [`Self::session_files_entry`] is: an acceptance test asking what this
+    /// daemon's session-file coordinate does with a request it *owns* must address the same six
+    /// ports the host mounts, and a re-assembled lookalike would be asserting about its own wiring.
+    /// A test about the routing fork addresses the entry instead, which is where routing lives.
+    #[must_use]
+    pub fn session_files_service(self: &Arc<Self>) -> tddy_session_files::SessionFilesServiceImpl {
+        tddy_session_files::SessionFilesServiceImpl::new(self.session_files_ports())
     }
 
     /// The six host answers the thirteen handlers need, each read off this daemon.
@@ -112,16 +144,34 @@ impl SessionContextScopes for SessionsOfThisDaemon {
         session_id: &str,
         requested_agent: &str,
     ) -> Result<SessionContextScope, Status> {
+        self.connection
+            .session_context_scope(session_token, session_id, requested_agent)
+    }
+}
+
+impl ConnectionServiceImpl {
+    /// The checkout and allow-list one context read is served under, resolved once.
+    ///
+    /// Inherent rather than only behind [`SessionContextScopes`] because this daemon reads its own
+    /// context too: a split start fetches the codebase host's guidance, and when that host is this
+    /// one the read must be gated by the same two calls a wire caller's is
+    /// (`svc_split_context_from_codebase_host`). A second derivation would be a second answer to
+    /// "may this caller read this file".
+    pub(crate) fn session_context_scope(
+        &self,
+        session_token: &str,
+        session_id: &str,
+        requested_agent: &str,
+    ) -> Result<SessionContextScope, Status> {
         let (sessions_base, worktree_root) =
-            self.connection
-                .resolve_exec_tool_worktree(&ExecuteToolRequest {
-                    session_token: session_token.to_string(),
-                    session_id: session_id.to_string(),
-                    tool_name: CONTEXT_SCOPE_CALLER.to_string(),
-                    args_json: String::new(),
-                    daemon_instance_id: String::new(),
-                })?;
-        let globs = self.connection.context_globs_for_session(
+            self.resolve_exec_tool_worktree(&ExecuteToolRequest {
+                session_token: session_token.to_string(),
+                session_id: session_id.to_string(),
+                tool_name: CONTEXT_SCOPE_CALLER.to_string(),
+                args_json: String::new(),
+                daemon_instance_id: String::new(),
+            })?;
+        let globs = self.context_globs_for_session(
             CONTEXT_SCOPE_CALLER,
             &sessions_base,
             session_id,
@@ -150,14 +200,12 @@ impl PeerRoutedSessionFiles {
     /// The peer a request names, with the request decoded and the room to forward it over.
     ///
     /// `Ok(None)` means the call is this daemon's own to serve. The decision is
-    /// [`ConnectionServiceImpl::classify_daemon_route`] — the one the five staging and
-    /// host-document handlers on `connection.ConnectionService` make, refusals and all.
+    /// [`ConnectionServiceImpl::classify_daemon_route`], refusals and all — the same one every
+    /// other routed RPC on this daemon makes.
     ///
-    /// `Req` is the `connection` proto twin of the `session_files` message the caller sent. The two
-    /// are the same wire shape (node 6 copied them field for field), the forward is addressed to
-    /// the peer's `connection.ConnectionService`, and so the bytes are decoded once as the type
-    /// that coordinate will decode them as — nothing is converted between two spellings of one
-    /// message.
+    /// `Req` is the `session_files` message the caller sent, and the forward is addressed at
+    /// [`SESSION_FILES_SERVICE`], so the bytes are decoded once as the type that coordinate will
+    /// decode them as — nothing is converted between two spellings of one message.
     fn peer_forward<Req>(
         &self,
         rpc_name: &str,
@@ -182,9 +230,9 @@ impl PeerRoutedSessionFiles {
     /// A context RPC the daemon addressed by the request should answer.
     ///
     /// `None` means this daemon serves it. [`ConnectionServiceImpl::stream_served_by_peer`] is the
-    /// whole decision *and* the forward — the same call the three context handlers on
-    /// `connection.ConnectionService` make, including its `InvalidArgument` for a daemon id no peer
-    /// answers to.
+    /// whole decision *and* the forward, addressed at [`SESSION_FILES_SERVICE`] because that is
+    /// where the peer declares these three — including its `InvalidArgument` for a daemon id no
+    /// peer answers to.
     async fn context_served_by_peer<Req, Frame>(
         &self,
         rpc_name: &str,
@@ -205,7 +253,12 @@ impl PeerRoutedSessionFiles {
         };
         match self
             .connection
-            .stream_served_by_peer::<Req, Frame>(rpc_name, daemon_instance_id(&request), &request)
+            .stream_served_by_peer::<Req, Frame>(
+                SESSION_FILES_SERVICE,
+                rpc_name,
+                daemon_instance_id(&request),
+                &request,
+            )
             .await
         {
             Ok(None) => None,

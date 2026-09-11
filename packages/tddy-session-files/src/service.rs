@@ -12,8 +12,8 @@
 //! that holds the bytes needs the common room slot, the peer registry and the per-method
 //! `forward_*_via_livekit` clients, all of which are the daemon's transport layer — a session-file
 //! reader that reached for them would be back inside the module this crate was extracted from.
-//! `connection.ConnectionService` still declares and serves these methods with their routing while
-//! that layer is repointed at this entry.
+//! The daemon wraps this entry in its own routing layer
+//! (`tddy-daemon`'s `PeerRoutedSessionFiles`), which is where forwarding lives.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

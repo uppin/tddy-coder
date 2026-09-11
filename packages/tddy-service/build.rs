@@ -178,7 +178,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // its closure of 12 messages overlaps nothing that stayed, so it imports nothing.
         "proto/livekit.proto",
         // `#unbundle` node 6 — families I, J, R and S. The first cut that needed a shared types
-        // file: `HostDocumentScope` is reached by `StartSession`, which stays.
+        // file: `HostDocumentScope` is reached by `StartSession`, which stays, so `connection.proto`
+        // and `session_files.proto` both import `types.proto` and neither declares the enum.
         "proto/session_files.proto",
     ] {
         prost_build::Config::new()
@@ -352,10 +353,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_client(true)
         .out_dir(&tonic_sandbox_dir)
         .extern_path(
-            ".connection.SessionTerminalOutput",
-            "crate::proto::connection::SessionTerminalOutput",
-        )
-        .extern_path(
             ".connection.ExecuteToolRequest",
             "crate::proto::connection::ExecuteToolRequest",
         )
@@ -378,6 +375,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .extern_path(
             ".sandbox.SandboxInput",
             "crate::proto::sandbox::SandboxInput",
+        )
+        .extern_path(
+            ".sandbox.SandboxTerminalOutput",
+            "crate::proto::sandbox::SandboxTerminalOutput",
         )
         .extern_path(".sandbox.EchoRequest", "crate::proto::sandbox::EchoRequest")
         .extern_path(

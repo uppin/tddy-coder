@@ -8,12 +8,12 @@
 import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import type { Transport } from "@connectrpc/connect";
+import { ConnectionService, ListSessionsRequestSchema } from "../gen/connection_pb";
 import {
-  ConnectionService,
-  ListSessionsRequestSchema,
   SessionTerminalInputSchema,
   StreamTerminalOutputRequestSchema,
-} from "../gen/connection_pb";
+  TerminalSessionService,
+} from "../gen/terminal_session_pb";
 import { wrapTransportWithAuthGate } from "./authGatedTransport";
 
 function aRecordingTransport(): Transport & {
@@ -44,7 +44,7 @@ function aRecordingTransport(): Transport & {
       return {
         stream: true as const,
         service: ConnectionService,
-        method: ConnectionService.method.streamTerminalOutput,
+        method: TerminalSessionService.method.streamTerminalOutput,
         message: (async function* () {})(),
         header: new Headers(),
         trailer: new Headers(),
@@ -61,7 +61,7 @@ describe("wrapTransportWithAuthGate", () => {
 
     // When — SendTerminalInput is sent with a stale token
     await gated.unary(
-      ConnectionService.method.sendTerminalInput,
+      TerminalSessionService.method.sendTerminalInput,
       undefined,
       undefined,
       undefined,
@@ -90,7 +90,7 @@ describe("wrapTransportWithAuthGate", () => {
 
     // When — the terminal output stream is opened
     await gated.stream(
-      ConnectionService.method.streamTerminalOutput,
+      TerminalSessionService.method.streamTerminalOutput,
       undefined,
       undefined,
       undefined,

@@ -15,9 +15,9 @@ use tddy_daemon::claude_cli_session::{ClaimOutcome, ClaudeCliSessionManager};
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ClaimTerminalControlRequest, ConnectionService as ConnectionServiceTrait, SessionTerminalInput,
-    StreamReplayMode, WatchTerminalControlRequest,
+use tddy_terminal_rpc::proto::terminal_session::{
+    ClaimTerminalControlRequest, SessionTerminalInput, StreamReplayMode,
+    TerminalSessionService as TerminalSessionServiceTrait, WatchTerminalControlRequest,
 };
 
 const VALID_TOKEN: &str = "valid-token";
@@ -43,9 +43,16 @@ fn test_config() -> (tempfile::TempDir, DaemonConfig) {
     (dir, config)
 }
 
+/// The terminal coordinate this daemon serves, wired to `manager`. The control lease these tests
+/// are about is the manager's, and `terminal_session.TerminalSessionService` is where the two RPCs
+/// that read and take it live since `#unbundle` node 6.
 fn make_service(
     manager: Arc<ClaudeCliSessionManager>,
-) -> (ConnectionServiceImpl, tempfile::TempDir, tempfile::TempDir) {
+) -> (
+    tddy_terminal_rpc::TerminalSessionServiceImpl,
+    tempfile::TempDir,
+    tempfile::TempDir,
+) {
     let (cfg_dir, config) = test_config();
     let sessions = tempfile::tempdir().unwrap();
     // `tddy_data_dir` is the daemon's resolved tddy home (config-only source of truth). The test
@@ -71,7 +78,7 @@ fn make_service(
         manager,
     );
     let sessions = tempfile::tempdir().unwrap();
-    (service, cfg_dir, sessions)
+    (service.terminal_session_service(), cfg_dir, sessions)
 }
 
 async fn start_main_terminal(manager: &ClaudeCliSessionManager) -> tempfile::TempDir {

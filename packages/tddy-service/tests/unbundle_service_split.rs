@@ -136,8 +136,12 @@ fn connection_service_keeps_exactly_the_methods_node_one_leaves_behind() {
 
     // Then
     assert_eq!(
-        declared, 72,
-        "node 1 moved 17 of 90 and node 4 moves StreamLiveKitRooms; later nodes take it to 21"
+        declared, 50,
+        "of the original 90: node 1 moved 17, node 4 moved StreamLiveKitRooms, node 6 moved 22. \
+         Every node updates this number — a node that lands and leaves it alone turns this test red \
+         for the next one, who will read a passing assertion as a promise rather than as the \
+         arithmetic its own change owes. Recount, do not compute: restating the proto's own count \
+         back at it would pass for removing 21 or 23 just as happily"
     );
 }
 
@@ -292,19 +296,53 @@ fn connection_service_no_longer_declares_the_session_file_or_terminal_methods() 
     );
 }
 
-/// Both hand-written converters go. Keeping them would leave three message shapes for one stream —
+/// Every hand-written converter goes. Keeping one would leave three message shapes for one stream —
 /// `connection.*`, `terminal_session.*`, and the converter between them — inside the service whose
 /// whole purpose is to be the single terminal surface.
+///
+/// **Both message names, across both crates that held a converter.** The narrow first version of
+/// this test looked for `connection::SessionTerminalInput` under `tddy-daemon/src` alone, which a
+/// deleted doc comment would have satisfied: it never saw `to_connection_output`, the daemon's
+/// second converter, nor the four inline ones in `tddy-coder`'s participant.
+///
+/// Scoped to Rust sources (see [`walk_for`]), which is also what keeps `sandbox.proto`'s terminal
+/// frame out of it: that frame is the sandbox's own message now, and even while it was
+/// `connection.SessionTerminalOutput` the reference was a `.proto` field type rather than a Rust
+/// conversion — a needle a `.rs`-only walk cannot reach.
 #[test]
 fn no_source_converts_between_the_two_terminal_message_sets() {
-    let daemon = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tddy-daemon/src");
-    let hits = walk_for(&daemon, "connection::SessionTerminalInput");
+    // Given
+    let package = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let converter_free = [
+        package.join("../tddy-daemon/src"),
+        package.join("../tddy-coder/src"),
+    ];
+
+    // When
+    let hits: Vec<String> = converter_free
+        .iter()
+        .flat_map(|dir| {
+            [
+                "connection::SessionTerminalInput",
+                "connection::SessionTerminalOutput",
+            ]
+            .into_iter()
+            .flat_map(move |needle| walk_for(dir, needle))
+        })
+        .collect();
+
+    // Then
     assert!(
         hits.is_empty(),
-        "these still convert between connection.* and terminal_session.* terminal messages: {hits:?}"
+        "these still name a connection.* terminal message, which only a converter between it and \
+         terminal_session.* can be doing: {hits:?}"
     );
 }
 
+/// Every `.rs` file under `dir` whose text contains `needle`.
+///
+/// `.rs` only, deliberately: the names this looks for are also legitimate `.proto` field types, and
+/// a walk that read those would fail on a declaration rather than on a conversion.
 fn walk_for(dir: &Path, needle: &str) -> Vec<String> {
     let mut found = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else {

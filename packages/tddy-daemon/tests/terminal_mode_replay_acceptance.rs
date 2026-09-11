@@ -18,8 +18,9 @@ use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, PtyHandle};
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StreamReplayMode, StreamTerminalOutputRequest,
+use tddy_terminal_rpc::proto::terminal_session::{
+    StreamReplayMode, StreamTerminalOutputRequest,
+    TerminalSessionService as TerminalSessionServiceTrait,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -56,7 +57,11 @@ fn test_config() -> (tempfile::TempDir, DaemonConfig) {
 /// Build a service wired to `manager`, returning temp-dir guards that must stay alive.
 fn make_service(
     manager: Arc<ClaudeCliSessionManager>,
-) -> (ConnectionServiceImpl, tempfile::TempDir, tempfile::TempDir) {
+) -> (
+    tddy_terminal_rpc::TerminalSessionServiceImpl,
+    tempfile::TempDir,
+    tempfile::TempDir,
+) {
     let (cfg_dir, config) = test_config();
     let sessions = tempfile::tempdir().unwrap();
     let sessions_base = sessions.path().to_path_buf();
@@ -80,7 +85,7 @@ fn make_service(
         None,
         manager,
     );
-    (service, cfg_dir, sessions)
+    (service.terminal_session_service(), cfg_dir, sessions)
 }
 
 /// A stub agent CLI that behaves like a mouse-driven TUI: enable SGR mouse tracking, emit far
@@ -160,7 +165,9 @@ async fn wait_until_the_ring_has_trimmed_past_the_modes(handle: &Arc<PtyHandle>,
 }
 
 /// Attach as a browser does — supplying measured dimensions — and take the first frame.
-async fn first_frame_seen_by_a_browser_client(service: &ConnectionServiceImpl) -> Vec<u8> {
+async fn first_frame_seen_by_a_browser_client(
+    service: &tddy_terminal_rpc::TerminalSessionServiceImpl,
+) -> Vec<u8> {
     let response = service
         .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
             session_token: VALID_TOKEN.to_string(),
