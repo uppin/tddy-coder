@@ -14,9 +14,9 @@
 //!   answer.
 //! - **A checkout that cannot serve a prompt outranks whatever the conversation says.** An agent
 //!   whose clone is still provisioning *refuses* prompts (`refuse_unready_clone` in
-//!   [`crate::connection_service`]). Reporting it `IDLE` because no turn is in flight would offer
-//!   the operator an agent that cannot answer, so `CONNECTING` and `ERROR` are read off the clone
-//!   before the conversation is consulted at all.
+//!   `tddy_daemon`'s `connection_service`). Reporting it `IDLE` because no turn is in flight would
+//!   offer the operator an agent that cannot answer, so `CONNECTING` and `ERROR` are read off the
+//!   clone before the conversation is consulted at all.
 
 use std::collections::HashMap;
 use std::sync::Mutex;

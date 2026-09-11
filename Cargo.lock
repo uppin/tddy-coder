@@ -12099,6 +12099,7 @@ dependencies = [
  "tddy-semantic-index",
  "tddy-service",
  "tddy-session-activity",
+ "tddy-session-agents",
  "tddy-session-files",
  "tddy-session-sync",
  "tddy-session-tool-client",
@@ -12946,13 +12947,24 @@ dependencies = [
 name = "tddy-session-agents"
 version = "0.1.0"
 dependencies = [
+ "livekit",
+ "log",
  "pretty_assertions",
+ "prost 0.13.5",
  "rstest 0.24.0",
+ "serde_json",
  "tddy-core",
  "tddy-daemon-kernel",
+ "tddy-daemon-livekit",
  "tddy-discovery",
+ "tddy-livekit",
  "tddy-rpc",
+ "tddy-service",
+ "tddy-session-sync",
+ "tddy-worktree-service",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

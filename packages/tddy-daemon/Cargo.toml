@@ -125,6 +125,10 @@ tddy-session-files = { path = "../tddy-session-files" }
 # `#unbundle` node 7. The daemon keeps the label resolution built on `session_list_enrichment`
 # and its Telegram subscriber, and re-exports the rest through the same two module paths.
 tddy-session-activity = { path = "../tddy-session-activity" }
+# The session-agent roster, the agent-status mapping, its inference from ACP frames, and the clone
+# store and mirror — `#unbundle` node 7. The daemon keeps `clone_worktree_path`, which resolves a
+# checkout through `workspace_session`, and re-exports the rest through the same four module paths.
+tddy-session-agents = { path = "../tddy-session-agents" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

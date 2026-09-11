@@ -26,6 +26,11 @@ use std::sync::Arc;
 
 use tddy_discovery::roster::LiveAgentRoster;
 
+pub mod session_agent_clone;
+pub mod session_agent_inference;
+pub mod session_agent_roster;
+pub mod session_agent_status;
+
 /// Why a roster or conversation operation could not be completed.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionAgentError {
@@ -38,9 +43,47 @@ pub enum SessionAgentError {
 }
 
 /// The `session_agents.SessionAgentService` entry the daemon's wiring layer registers.
+///
+/// # Not yet constructible, and not from a `LiveAgentRoster` at all
+///
+/// [`LiveAgentRoster`] is the roster as a **client** process sees it — seeded from
+/// `TDDY_SUBAGENTS_JSON` at spawn and replaced by every frame the daemon publishes. It is what
+/// in-jail `tddy-tools` and `tddy-sandbox-app` read, and it is a *subscriber* to this service, not
+/// its state. The authoritative store this service answers from is
+/// [`session_agent_roster::SessionAgentRosterStore`], beside
+/// [`session_agent_clone::SessionAgentCloneStore`] and
+/// [`session_agent_status::SessionAgentActivityStore`] — all three in this crate. Handing the
+/// service the client's mirror would have it answer `AttachSessionAgent` by writing into a copy
+/// nobody persists.
+///
+/// The nine handlers in `tddy-daemon`'s `connection_service::rpc_service` read a good deal more of
+/// the host than any roster is. All nine resolve a session directory from the caller's token; seven
+/// classify a peer route before they look a session up, and three of those forward over this
+/// daemon's common-room handle; two read the daemon's own instance id out of its config to tell a
+/// local agent from an owned one; `StreamSessionAgents` paces a quiet roster from a configured
+/// keepalive; `OpenAgentConversation` and `PromptAgentConversation` spawn and drive node 5's
+/// conversation runtime and hold the open conversations in a shared map; `PromptAgentConversation`
+/// additionally reports a turn's end; `AttachSessionAgent` resolves a remote agent id against the
+/// agent catalog and claims — and on failure unwinds — a checkout on a peer.
+///
+/// So this constructor takes the wrong argument, not merely too few: what it wants is a ports
+/// struct, the shape `tddy_session_files::build_session_files_entry` already takes for the same
+/// reason. Panicking is deliberate until it has one. A service mounted on the daemon's local Unix
+/// socket answering `unimplemented` to all nine would be a silent capability removal on a
+/// privileged interface — and five of the nine are what the sandbox relay allowlist below permits
+/// an in-jail agent to reach, so the removal would land inside a jail — whereas a panic at the
+/// wiring site cannot be mistaken for a working mount.
+///
+/// TODO(session-agent-services): take `SessionAgentPorts` (session-token-to-session-directory
+/// resolver, the peer-route classifier and this daemon's common-room slot, the local instance id,
+/// the roster keepalive, the agent catalog, the three stores above, node 5's conversation runtime
+/// and the open-conversation map, the turn-end reporter and the clone-claim pair) and move the nine
+/// handlers out of `tddy-daemon`'s `connection_service::rpc_service` behind it, leaving the
+/// daemon's routing preamble in the daemon as node 6 left its own.
 pub fn build_session_agents_entry(_roster: Arc<LiveAgentRoster>) -> tddy_rpc::ServiceEntry {
-    // TODO(session-agent-services): implement
-    unimplemented!("build_session_agents_entry")
+    unimplemented!(
+        "build_session_agents_entry needs the ports the nine handlers read the host through"
+    )
 }
 
 /// The `(service, method)` pairs an in-jail agent may relay to its host, for family B.
@@ -73,10 +116,38 @@ pub const IN_JAIL_RELAYABLE: [(&str, &str); 5] = [
 mod tests {
     use super::*;
 
+    use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
+
+    /// The seed a jail is spawned with — one def, as `TDDY_SUBAGENTS_JSON` carries it.
+    fn a_seed_def(name: &str) -> SpecializedAgentDef {
+        SpecializedAgentDef {
+            name: name.to_string(),
+            label: None,
+            model: "qwen2.5-coder:7b".to_string(),
+            base_url: "http://localhost:11434".to_string(),
+            api_key: None,
+            system_prompt: None,
+            system_prompt_path: None,
+            tools: vec![SubagentTool::Read, SubagentTool::Glob, SubagentTool::Grep],
+            max_turns: 10,
+            replaces: Vec::new(),
+        }
+    }
+
+    /// A roster holding the one agent a session was seeded with, addressed under the daemon that
+    /// resolved its def.
+    fn a_roster_holding_one_seeded_agent() -> Arc<LiveAgentRoster> {
+        Arc::new(LiveAgentRoster::seeded_from(
+            "1780828020298-roster",
+            vec![a_seed_def("explorer")],
+            "ws-01",
+        ))
+    }
+
     #[test]
     fn names_the_service_family_b_moves_to() {
         // Given
-        let roster = Arc::new(LiveAgentRoster::default());
+        let roster = a_roster_holding_one_seeded_agent();
 
         // When
         let entry = build_session_agents_entry(roster);

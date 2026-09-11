@@ -9,12 +9,47 @@ name = "tddy_session_agents"
 path = "src/lib.rs"
 
 [dependencies]
+# `SessionAgentRecord` and `session_metadata`, which `session_agent_roster` persists a roster
+# through, and `session_activity::SessionActivityStatus`, which the status mapping reads.
 tddy-core = { path = "../tddy-core" }
+# `AgentActivityHub` and `now_unix_ms`, node 1's. Consumed unchanged: `session_agent_inference`
+# subscribes to the hub, and `session_agent_status` stamps its observations from the same clock.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+# `livekit_peer_discovery::{daemon_rpc_identity, forward_to_peer}` — the clone mirror names the
+# facilitating daemon inside the session room and runs the re-admit handshake over the common one,
+# and `session_room::session_room_name` names the room it joins.
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+# `LiveAgentRoster`, node 5's — the roster as a *client* process sees it.
 tddy-discovery = { path = "../tddy-discovery" }
+# The session room the clone mirror joins: `RpcClient` for the calls it makes back to the
+# facilitating daemon, `BroadcastChannel` for the activity it watches, `TokenGenerator` for the
+# self-mint fallback.
+tddy-livekit = { path = "../tddy-livekit" }
+# `ServiceEntry` and `Status`: this crate answers RPCs, so `Status` is its error type at the edge.
 tddy-rpc = { path = "../tddy-rpc" }
+# The `connection` protos the roster, the clone reports and the activity records are carried in,
+# plus `acp_replay` and the ACP protos `session_agent_inference` reads a turn's state out of.
+tddy-service = { path = "../tddy-service" }
+# `Mirror`, `MirrorMarker` and the record/reassembly rules the clone checkout is kept equal by.
+tddy-session-sync = { path = "../tddy-session-sync" }
+# `project_provision::resolve_remote_git_repo_path` — the `GIT_SSH_COMMAND` shim a clone
+# provisioned from the facilitating daemon fetches through.
+tddy-worktree-service = { path = "../tddy-worktree-service" }
+# `livekit::Room`, held for a hosted clone's life: dropping it leaves the session room.
+livekit = "0.7"
+# A swallowed clone-report failure is only visible in the log, so the log line is the report.
+log = "0.4"
+# The clone mirror frames its peer calls itself — `Message::encode_to_vec` / `decode`.
+prost = "0.13"
+# The mirror marker is written as JSON, and a tool call's summary is read out of its JSON args.
+serde_json = "1"
 thiserror = "2"
+# The roster broadcast every `StreamSessionAgents` subscriber reads, the mutexes the stores lock,
+# and the deadlines the clone mirror's streams are bounded by.
+tokio = { version = "1", features = ["sync", "time", "process"] }
 
 [dev-dependencies]
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
+# `session_agent_roster`'s tests persist a roster into a real session directory.
+tempfile = "3"
