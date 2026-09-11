@@ -257,7 +257,8 @@ fn the_shared_types_file_holds_only_what_two_served_services_both_need() {
         "types.proto holds the two types ListSessions and the session-agent roster both reach"
     );
     assert!(
-        connection.contains("types.SessionAgentStatus") && connection.contains("types.SessionAgentActivity"),
+        connection.contains("types.SessionAgentStatus")
+            && connection.contains("types.SessionAgentActivity"),
         "connection.ConnectionService keeps ListSessions, whose SessionEntry carries both, so \
          connection.proto must reach them rather than redeclaring them"
     );

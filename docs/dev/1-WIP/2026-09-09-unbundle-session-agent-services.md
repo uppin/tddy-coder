@@ -320,8 +320,11 @@ Three further proofs:
 
 ### tddy-daemon (the local socket)
 - [ ] **Integration**: both `session_agents.SessionAgentService` and `activity.ActivityService` answer
-      over the **local Unix socket**, not only over Connect-HTTP (`local_socket_reachability_acceptance.rs`)
-- [ ] **Unit**: no hand-written `*_tonic_adapter.rs` is added by this node — both adapters are generated (`local_socket_reachability_acceptance.rs`)
+      over the **local Unix socket**, not only over Connect-HTTP — through a real client on the real
+      socket, since a mount left off answers `unimplemented` there and nowhere else (`local_token_uds.rs`)
+- [ ] **Unit**: no hand-written `*_tonic_adapter.rs` is added by this node — both adapters are
+      generated. Asserted by the adapters that exist, not by a test: a test reading source text or
+      absent filenames passes in exactly the state it is meant to catch
 
 ### tddy-session-activity
 - [ ] **Integration**: all 8 methods of families M and N answer (`activity_service_acceptance.rs`)

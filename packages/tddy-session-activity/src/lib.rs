@@ -33,15 +33,6 @@ pub const NO_TICK: u64 = 0;
 /// 1, not 0, so that [`NO_TICK`] means only what it says. See the module docs.
 pub const FIRST_TICK: u64 = 1;
 
-/// Why an activity or replay operation could not be completed.
-#[derive(Debug, thiserror::Error)]
-pub enum ActivityError {
-    #[error("no session {session_id} on this host")]
-    NoSuchSession { session_id: String },
-    #[error("the replay for {session_id} ended without a final frame, so it is incomplete")]
-    TruncatedReplay { session_id: String },
-}
-
 /// The tick to stamp a session's next delta with, given the last one stamped.
 ///
 /// `None` — no delta has been stamped for this session yet — is [`FIRST_TICK`], not [`NO_TICK`].
@@ -157,15 +148,5 @@ mod tests {
 
         // Then
         assert_eq!(second, first + 1);
-    }
-
-    /// A replay that ended without its final frame is incomplete, and answering with what arrived
-    /// would make a partial transcript look like the whole conversation.
-    #[test]
-    fn refuses_a_replay_that_ended_without_a_final_frame() {
-        let truncated = ActivityError::TruncatedReplay {
-            session_id: "session-a".to_string(),
-        };
-        assert!(truncated.to_string().contains("incomplete"));
     }
 }

@@ -39,7 +39,6 @@ anyhow = "1"
 tokio = { version = "1", features = ["rt", "sync"] }
 # A swallowed subscriber failure is only visible in the log, so the log line is the report.
 log = "0.4"
-thiserror = "2"
 # An ACP replay frame carries its `AcpAgentMessage` as encoded bytes — `Message::encode_to_vec`.
 prost = "0.13"
 # A tool call's `input` and `result` are the JSON the hook reported, carried through unparsed on a

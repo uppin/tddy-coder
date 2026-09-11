@@ -1532,6 +1532,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         if let PeerRoute::Forward { peer_instance_id } =
             self.classify_addressed_daemon_route("StreamExecuteTool", &req.daemon_instance_id)?
         {
+            log::info!(
+                "StreamExecuteTool: forwarding stream to remote daemon_instance_id={peer_instance_id}"
+            );
             let slot = self.common_room_slot("StreamExecuteTool")?;
             // A forwarded stream that stalls terminates as an *error*, so a truncated tool result
             // can never reach the caller looking complete.

@@ -13,7 +13,8 @@
 //! Nothing but a call over the wire catches that, so each adapter is exercised here through a real
 //! client: one unary method, one server-streaming method, and the refusal a streaming method must
 //! propagate rather than swallow. The later families' adapters — the terminal one from node 6 and
-//! node 7's session-agent and activity pair — are generated, and carry no such hazard.
+//! node 7's session-agent and activity pair — are generated, so a mis-wired delegation is not the
+//! hazard there; what is, is the mount, and that is asserted the same way (see the last section).
 //!
 //! The third is that `terminal_session.TerminalSessionService` is reachable here at all. The in-jail
 //! `tddy-sandbox-app` has no transport but this socket, and its whole terminal bridge is the bidi
@@ -37,10 +38,14 @@ use tddy_daemon::user_sessions_path::username_for_uid;
 use tddy_daemon::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_github::{SessionTokenSigner, TokenKind};
-use tddy_service::proto::activity::ActivityServiceTonicAdapter;
+use tddy_service::proto::activity::{ActivityServiceTonicAdapter, ReportSessionStatusRequest};
 use tddy_service::proto::connection::MintLocalTokenRequest;
 use tddy_service::proto::host::{ListEligibleDaemonsRequest, StreamHostStatsRequest};
-use tddy_service::proto::session_agents_svc::SessionAgentServiceTonicAdapter;
+use tddy_service::proto::session_agents_svc::{
+    ListSessionAgentsRequest, SessionAgentServiceTonicAdapter,
+};
+use tddy_service::proto::tonic_activity::activity_service_client::ActivityServiceClient;
+use tddy_service::proto::tonic_session_agents::session_agent_service_client::SessionAgentServiceClient;
 use tddy_service::proto::worktree::{
     ListWorktreesForProjectRequest, StreamWorktreeStatsRequest, WorktreeRow,
 };
@@ -72,6 +77,12 @@ fn a_daemon_config_mapping(os_user: &str, github_login: &str) -> DaemonConfig {
     serde_yaml::from_str(&yaml).expect("parse daemon config")
 }
 
+/// The sessions base every implementation served on this socket is rooted at, inside the socket's
+/// own tempdir. Named once so a fixture written for a served service lands where it looks.
+fn sessions_base_under(data_dir: &Path) -> PathBuf {
+    data_dir.join("sessions")
+}
+
 /// Start the UDS `ConnectionService` on a fresh tempdir socket. Returns the socket path plus the
 /// tempdir guard (kept alive by the caller) and the shutdown sender (drop to stop the server).
 fn start_local_socket_server(
@@ -80,7 +91,7 @@ fn start_local_socket_server(
 ) -> (PathBuf, tempfile::TempDir, tokio::sync::oneshot::Sender<()>) {
     let dir = tempfile::tempdir().expect("create socket tempdir");
     let socket_path = dir.path().join("tddy-daemon.sock");
-    let sessions_base = dir.path().join("sessions");
+    let sessions_base = sessions_base_under(dir.path());
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
 
     let uid_to_username: UidToUsername = Arc::new(username_for_uid);
@@ -585,5 +596,104 @@ async fn grants_terminal_control_from_the_lease_behind_the_mounted_coordinate() 
     assert!(
         !response.control_token.is_empty(),
         "a granted claim without a control token is not a lease this screen can use"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// session_agents.SessionAgentService and activity.ActivityService — the two
+// coordinates `#unbundle` node 7 moved off `connection.ConnectionService`
+//
+// Both are mounted on this socket by `start_local_socket_server` above, for the reason the
+// policy gives: `connection.ConnectionService` carried all 90 methods here, so dropping a family
+// is a silent capability removal on a privileged interface — and for family B it is the jail's
+// only transport, since five of `tddy-sandbox-runner`'s relay allowlist entries are its methods.
+//
+// Asserted through a call over the wire rather than by reading the builder: a coordinate left off
+// it still answers over LiveKit and HTTP, and nowhere a jail can reach. An unmounted service
+// comes back UNIMPLEMENTED, which is what distinguishes "mounted" from "declared".
+// ---------------------------------------------------------------------------
+
+/// A session directory under the served socket's sessions base, carrying the `.session.yaml` every
+/// roster call resolves before it answers.
+fn a_session_under(data_dir: &Path, session_id: &str) {
+    let session_dir = tddy_core::session_lifecycle::unified_session_dir_path(
+        &sessions_base_under(data_dir),
+        session_id,
+    );
+    std::fs::create_dir_all(&session_dir).expect("create the session dir");
+    tddy_core::write_initial_tool_session_metadata(
+        &session_dir,
+        tddy_core::InitialToolSessionMetadataOpts {
+            project_id: "project-over-the-socket".to_string(),
+            ..Default::default()
+        },
+    )
+    .expect("write the session metadata");
+}
+
+/// A family-B unary method, answered by the roster store behind the generated adapter. The roster
+/// echoes the session id it was asked about, so the request body had to reach the implementation
+/// intact for this to hold — an adapter answering from a default would not know the name.
+#[tokio::test]
+async fn answers_a_unary_session_agent_call_from_the_implementation_behind_the_adapter() {
+    // Given a session this daemon holds, so the roster has a directory to answer from
+    let served = a_served_socket();
+    a_session_under(served.dir.path(), "roster-over-the-socket");
+    let mut client = SessionAgentServiceClient::new(connect_channel(&served.socket_path).await);
+
+    // When an authenticated caller lists a session with no agents attached
+    let roster = client
+        .list_session_agents(ListSessionAgentsRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: "roster-over-the-socket".to_string(),
+            daemon_instance_id: String::new(),
+        })
+        .await
+        .expect("ListSessionAgents over the socket")
+        .into_inner();
+
+    // Then the roster is this session's, and empty rather than absent
+    assert_eq!(roster.session_id, "roster-over-the-socket");
+    assert!(
+        roster.agents.is_empty(),
+        "a session nothing attached to came back carrying {:?}",
+        roster.agents
+    );
+}
+
+/// The activity coordinate, reached with the method `tddy-tools`' `session-hook` posts on every
+/// Claude Code hook. An unknown status is refused by `ActivityServiceImpl` itself, before it
+/// resolves any path, and the refusal quotes the status string the request carried — so this says
+/// both that the coordinate is mounted here and that the body reached the handler.
+#[tokio::test]
+async fn carries_an_activity_refusal_out_of_the_handler_behind_the_adapter() {
+    // Given
+    let served = a_served_socket();
+    let mut client = ActivityServiceClient::new(connect_channel(&served.socket_path).await);
+
+    // When a hook reports a status no session type raises
+    let status = client
+        .report_session_status(ReportSessionStatusRequest {
+            session_id: "status-over-the-socket".to_string(),
+            hook_token: "tok-over-the-socket".to_string(),
+            os_user: current_username(),
+            status: "NotAStatusAnyHookRaises".to_string(),
+        })
+        .await
+        .expect_err("an unknown activity status must be refused");
+
+    // Then the implementation's own refusal came back, naming what it was sent
+    assert_eq!(
+        status.code(),
+        tonic::Code::InvalidArgument,
+        "the activity coordinate answered {:?} ({}) — UNIMPLEMENTED means it is not mounted on \
+         this socket at all",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        status.message().contains("NotAStatusAnyHookRaises"),
+        "the refusal did not quote the status the request carried: {}",
+        status.message()
     );
 }

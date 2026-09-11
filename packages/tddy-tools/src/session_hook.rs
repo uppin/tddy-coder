@@ -19,6 +19,17 @@ use std::io::Read;
 use tddy_core::{activity_status_from_hook, parse_hook_event};
 use tddy_service::proto::activity::{ReportAgentActivityRequest, ReportSessionStatusRequest};
 
+/// The coordinate both reports are served at, read from `tddy-service` so this hook and the daemon
+/// serving it cannot disagree about the name.
+///
+/// `#unbundle` node 7 moved `ReportSessionStatus` and `ReportAgentActivity` off
+/// `connection.ConnectionService`, which no longer declares either. A name spelled out here would
+/// go on posting to the vacated coordinate, and the fail-quiet contract above would swallow every
+/// refusal: session status, the attention alerts read off it and every agent-activity row would
+/// stop with nothing said. Hence the constant rather than a literal — the same reason
+/// `tddy-session-sync`'s delta subscriber reads it.
+const ACTIVITY_SERVICE: &str = tddy_service::session_activity::ACTIVITY_SERVICE;
+
 #[derive(Args)]
 pub struct SessionHookArgs {
     /// Daemon session id (baked in at worktree-prep time).
@@ -125,11 +136,11 @@ async fn report_agent_activity(
     post_proto(&args.daemon, "ReportAgentActivity", req.encode_to_vec()).await
 }
 
-/// POST an encoded protobuf request to a daemon `ConnectionService` method via the Connect
+/// POST an encoded protobuf request to a daemon [`ACTIVITY_SERVICE`] method via the Connect
 /// protocol (async reqwest with a 2-second timeout).
 async fn post_proto(daemon: &str, method: &str, body: Vec<u8>) -> anyhow::Result<()> {
     let url = format!(
-        "{}/rpc/connection.ConnectionService/{method}",
+        "{}/rpc/{ACTIVITY_SERVICE}/{method}",
         daemon.trim_end_matches('/')
     );
     let client = reqwest::Client::builder()

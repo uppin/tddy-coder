@@ -482,6 +482,46 @@ mod tests {
         ProtoAgentActivityRecord::decode(&frame[..]).expect("decode AgentActivityRecord")
     }
 
+    /// The session this participant runs, in the shape [`super::session_service_entries`] takes it:
+    /// by value, since that is the seam a transport registers through.
+    fn a_service_at(dir: &std::path::Path) -> SessionConnectionService {
+        SessionConnectionService {
+            session_id: "sess-1".to_string(),
+            session_token: "session-token".to_string(),
+            tool_calls_path: dir.join("tool-calls.jsonl"),
+            tools: Vec::new(),
+            executor: Arc::new(UnusedExecutor),
+            worktree: dir.to_path_buf(),
+            terminal_manager: Arc::new(terminal_manager::TerminalManager::new()),
+            agent_activity_dir: dir.to_path_buf(),
+            presenter_events: None,
+        }
+    }
+
+    /// The participant must **register** this coordinate, not merely be able to answer at it.
+    ///
+    /// Every other test in this module reaches [`CoderActivityRpc`] directly, so deleting
+    /// [`coder_activity_entry`] from [`super::session_service_entries`] would take the coder's
+    /// replay and activity families dark — over LiveKit and over its own HTTP surface alike — with
+    /// all of them still green. The terminal family has the same guard for the same reason; see
+    /// `connection_service_participant/tests.rs`.
+    #[test]
+    fn registers_the_activity_coordinate_among_the_participants_entries() {
+        // Given
+        let dir = tempfile::tempdir().expect("a session dir");
+
+        // When
+        let entries = crate::session_participant::session_service_entries(a_service_at(dir.path()));
+
+        // Then
+        let registered: Vec<&str> = entries.iter().map(|entry| entry.name).collect();
+        assert!(
+            registered.contains(&ACTIVITY_SERVICE),
+            "the participant registers {registered:?}, which does not include \
+             {ACTIVITY_SERVICE} — families M and N would answer nowhere on this process"
+        );
+    }
+
     #[tokio::test]
     async fn stream_session_activity_replays_the_persisted_snapshot_then_the_live_broadcast() {
         // Given — a session dir with one persisted (coalesced) call, and a presenter broadcast

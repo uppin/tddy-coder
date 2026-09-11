@@ -61,10 +61,16 @@ impl ConnectionServiceImpl {
     /// This daemon's activity surface: the crate's eight handlers, with the routed ones answered by
     /// the daemon that holds the transcript.
     ///
-    /// Public because it *is* the surface — the entry above is this served over a transport, and
-    /// `connection.ConnectionService` delegates its own eight to this so a caller that has not
-    /// moved coordinate yet gets byte-identical behaviour rather than a second implementation of
-    /// it.
+    /// Public because it *is* the surface, served over more than one transport from this one
+    /// instance: [`Self::activity_entry`] is it over `tddy-rpc`, and `runtime::build` wraps the
+    /// same value in the generated tonic adapter for the local Unix socket.
+    ///
+    /// **There is no compatibility shim.** All eight methods were deleted from
+    /// `connection.ConnectionService` — from `connection.proto` (down to 33 rpcs) and from
+    /// `connection_tonic_adapter.rs` alike — so a caller still addressing the old coordinate is
+    /// answered `unimplemented` rather than delegated here. Every consumer moved in the same PR;
+    /// the constants this module and its callers read exist so the next one cannot be missed
+    /// silently.
     #[must_use]
     pub fn activity_service(&self) -> PeerRoutedActivity {
         PeerRoutedActivity {

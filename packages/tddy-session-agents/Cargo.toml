@@ -48,7 +48,6 @@ log = "0.4"
 prost = "0.13"
 # The mirror marker is written as JSON, and a tool call's summary is read out of its JSON args.
 serde_json = "1"
-thiserror = "2"
 # The roster broadcast every `StreamSessionAgents` subscriber reads, the mutexes the stores lock,
 # and the deadlines the clone mirror's streams are bounded by.
 tokio = { version = "1", features = ["sync", "time", "process"] }

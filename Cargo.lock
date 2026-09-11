@@ -12943,7 +12943,6 @@ dependencies = [
  "tddy-service",
  "tddy-telegram",
  "tddy-worktree-service",
- "thiserror 2.0.18",
  "tokio",
  "uuid",
 ]
@@ -12969,7 +12968,6 @@ dependencies = [
  "tddy-session-sync",
  "tddy-worktree-service",
  "tempfile",
- "thiserror 2.0.18",
  "tokio",
  "uuid",
 ]
@@ -13215,6 +13213,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "async-trait",
+ "axum 0.8.9",
  "bytes",
  "clap",
  "env_logger",
@@ -13233,6 +13232,7 @@ dependencies = [
  "tddy-bsp",
  "tddy-code-analysis",
  "tddy-code-restructuring",
+ "tddy-connectrpc",
  "tddy-core",
  "tddy-discovery",
  "tddy-lsp-executor",

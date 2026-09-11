@@ -99,11 +99,11 @@ impl ConnectionServiceImpl {
             log::info!("{rpc_name}: rejected daemon routing: {msg}");
             Status::invalid_argument(msg)
         })?;
-        if let PeerRoute::Forward { peer_instance_id } = &route {
-            log::info!(
-                "{rpc_name}: forwarding RPC to remote daemon_instance_id={peer_instance_id}"
-            );
-        }
+        // A `Forward` classification is **not** a forward. One caller refuses instead of
+        // forwarding — `refuse_if_addressed_at_a_peer`, which answers the two long-lived activity
+        // streams `unimplemented` — so a line logged here would report a forward the daemon never
+        // makes, and would double up wherever the caller logs its own. Each caller that actually
+        // forwards logs it at the point it does.
         Ok(route)
     }
 
@@ -365,6 +365,7 @@ impl ConnectionServiceImpl {
         else {
             return Ok(None);
         };
+        log::info!("{rpc_name}: forwarding RPC to remote daemon_instance_id={peer_instance_id}");
         let slot = self.common_room_slot(rpc_name)?;
         let answered = crate::livekit_peer_discovery::forward_to_peer(
             slot,
@@ -403,6 +404,7 @@ impl ConnectionServiceImpl {
         else {
             return Ok(None);
         };
+        log::info!("{rpc_name}: forwarding stream to remote daemon_instance_id={peer_instance_id}");
         let slot = self.common_room_slot(rpc_name)?;
         let decoding = rpc_name.to_string();
         crate::livekit_peer_discovery::forward_server_stream_to_peer(

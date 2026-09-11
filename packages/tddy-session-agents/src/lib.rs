@@ -42,17 +42,6 @@ pub use service::{
 };
 pub use status_reporting::{note_agent_activity, republish_quietly};
 
-/// Why a roster or conversation operation could not be completed.
-#[derive(Debug, thiserror::Error)]
-pub enum SessionAgentError {
-    #[error("no session {session_id} on this host")]
-    NoSuchSession { session_id: String },
-    #[error("the roster for {session_id} is stale, so it cannot be answered from")]
-    RosterStale { session_id: String },
-    #[error("no agent is addressable for {session_id}")]
-    NoAddressableAgent { session_id: String },
-}
-
 /// The coordinate this crate serves, and the `(service, method)` pairs an in-jail agent may relay
 /// to its host.
 ///
@@ -307,20 +296,5 @@ mod tests {
                 "{method} is still allowed under the old coordinate"
             );
         }
-    }
-
-    /// A stale roster is not an empty one. Answering "no agents" from a roster whose stream dropped
-    /// is how a picker offers nothing while an agent is attached.
-    #[test]
-    fn tells_a_stale_roster_apart_from_one_with_no_agents() {
-        let stale = SessionAgentError::RosterStale {
-            session_id: "session-a".to_string(),
-        };
-        let none = SessionAgentError::NoAddressableAgent {
-            session_id: "session-a".to_string(),
-        };
-
-        assert!(stale.to_string().contains("stale"));
-        assert!(none.to_string().contains("no agent is addressable"));
     }
 }
