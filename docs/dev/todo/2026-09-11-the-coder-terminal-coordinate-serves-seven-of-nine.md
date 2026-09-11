@@ -3,7 +3,7 @@
 **Category:** Future enhancement
 **Source:** `#unbundle` node 6, milestone 5 — moving `tddy-coder`'s session participant onto
 `terminal_session.TerminalSessionService` (changeset
-[`2026-09-09-unbundle-session-io-services`](../changesets/2026-09-09-unbundle-session-io-services.md))
+[`2026-09-11-unbundle-session-io-services`](../changesets/2026-09-11-unbundle-session-io-services.md))
 
 `tddy-terminal-rpc` serves nine methods. `tddy-coder`'s session participant registers the coordinate
 but answers **seven** of them; `packages/tddy-coder/src/session_participant/terminal_session_service.rs`
@@ -40,12 +40,14 @@ Neither is a relocation, which is why both were left:
   participant should serve. Adding it alongside `terminal.TerminalService/StreamTerminalIO` would
   leave two, which is the duplication node 6 is removing elsewhere; replacing it is a web change.
 
-## Also still standing
+## Resolved while this entry was open
 
-The five *unary* terminal methods (`ClaimTerminalControl`, `StartTerminalSession`,
-`StopTerminalSession`, `ListTerminalSessions`, `SendTerminalInput`) are answered on the coder's
-`connection.ConnectionService` **as well as** on the terminal coordinate, because `tddy-web`
-addresses them at this participant on the old coordinate (`useSessionTerminals`,
-`useTerminalControl`'s steal-claim). Both paths reach one `TerminalManager` and one
-`SessionConnectionService::claim_terminal_control`, so they cannot answer differently — but they go
-when the web moves, in the milestone that removes family K from `connection.proto`.
+An earlier draft of this entry recorded that the five *unary* terminal methods
+(`ClaimTerminalControl`, `StartTerminalSession`, `StopTerminalSession`, `ListTerminalSessions`,
+`SendTerminalInput`) were still answered on the coder's `connection.ConnectionService` as well as on
+the terminal coordinate, because `tddy-web` addressed them at this participant on the old one.
+
+That is no longer true, and the entry is corrected rather than left to mislead: the web moved to
+`terminal_session.TerminalSessionService`, the five arms were removed, `connection.proto` no longer
+declares them, and `SessionConnectionServiceRpc` answers no terminal method at all. The seven-of-nine
+gap above is the only part of this entry still standing.

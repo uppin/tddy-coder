@@ -3,10 +3,12 @@
 **Category:** Future enhancement
 **Source:** terminal-replay-viewport changeset, 2026-07-28
 
-- **LiveKit transport does not carry offset metadata.** `GhosttyTerminalGrpc` now owns the
-  overlay double-buffer scroll-up paging via `GetTerminalHistory`, but `GhosttyTerminalLiveKit`
-  still receives raw bytes only. Carry `end_offset`/`at_oldest` on the LiveKit terminal frames (or
-  a side channel) so the LiveKit-backed terminal can use the same overlay paging flow.
+- ~~**LiveKit transport does not carry offset metadata.**~~ **Settled by the side channel.** A
+  room-carried session's feed (`packages/tddy-web/src/rpc/connections/livekit/roomTerminalFeed.ts`)
+  keeps its bytes on the bidi `terminal.TerminalService/StreamTerminalIO` and gets its history from
+  the owning daemon's `terminal_session.TerminalSessionService/GetTerminalHistory`, so a
+  LiveKit-backed terminal pages exactly like an HTTP-backed one without a single output byte leaving
+  the room.
 - **Paged forward-fill.** The page terminal is filled with the entire retained capture
   (`0 → anchor`), which transfers all bytes even though the terminal retains only the last
   `scrollback` lines. Page the forward-fill to fill the scrollback budget only (skipping bytes
@@ -19,3 +21,18 @@
   prepend API that does not require a live-terminal reset.
 - **Persisted scroll position across reconnects** is out of scope; the forward fill populates the
   page terminal from offset `0` toward the anchor.
+
+## What is settled at the RPC layer, and what is not
+
+The **server-side** terminal surface is one surface:
+`terminal_session.TerminalSessionService`, served by
+[`tddy-terminal-rpc`](../../../packages/tddy-terminal-rpc/docs/terminal-session-service.md) for every
+host. One terminal message set, one implementation of the replay and offset contract, no converters,
+and a sandboxed session's PTY reached through the same `TerminalSessionStore` as every other — so
+`GetTerminalHistory` and the anchored replay work for a jailed terminal too. That removes every
+*protocol* reason a terminal could page differently depending on how it was reached.
+
+**The remaining items in this entry are all browser-side and none of them is addressed:** paged
+forward-fill, the unified single-terminal surface (which is blocked on ghostty-web having no
+"insert at top of scrollback" API, not on the wire), and persisted scroll position across reconnects.
+This entry stays open for those.

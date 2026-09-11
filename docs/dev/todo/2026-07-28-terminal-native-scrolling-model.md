@@ -5,8 +5,7 @@
 
 Adopts the native ghostty desktop scrolling model in the web (live `scrollback > 0`, native
 `Scrollbar {total, offset, len}` on the page terminal, native scroll-to-bottom policy,
-mouse-tracking gating) — see `docs/dev/1-WIP/2026-07-28-terminal-native-scrolling.md`. Future
-enhancements beyond that changeset:
+mouse-tracking gating). Future enhancements beyond that changeset:
 
 - **Persisted scroll position across reconnects** — the live terminal lands at the live tip on
   reconnect and the page terminal fills from offset `0`; a future option can persist and restore
@@ -21,3 +20,13 @@ enhancements beyond that changeset:
   (`0 → anchor`), which transfers all bytes even though the terminal retains only the last
   `scrollback` lines. Page the forward-fill to fill the scrollback budget only (skipping bytes
   that would be discarded). (Already noted above; kept as the native-scrolling-scoped reference.)
+
+## Not addressed by the terminal-service unification
+
+The wire side is settled — one coordinate,
+`terminal_session.TerminalSessionService`, one replay and offset implementation for every host and
+for sandboxed sessions too
+([terminal-session-service.md](../../../packages/tddy-terminal-rpc/docs/terminal-session-service.md)).
+Every item above is a **browser** concern and none of them changed: the overlay double-buffer is
+still two ghostty-web instances, the page terminal is still filled from offset `0`, and there is
+still no daemon-side PageList emulator. This entry stays open in full.

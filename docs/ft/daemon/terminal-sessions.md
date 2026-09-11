@@ -51,9 +51,13 @@ session and manage them over RPC, so I can run a shell in the session's worktree
    started Bash tools. *(Updated: 2026-06-25 — kind `"shell"` → `"bash"`.)*
 
 ### Start / Stop
-3. `StartTerminalSession(session_id)` starts a **Bash tool**: it spawns the user's login shell
-   (`$SHELL`, fallback `/bin/bash`) in the session's worktree, with **no inputs**, and returns the
-   new `terminal_id`. *(Updated: 2026-06-25 — the started tool is the defined Bash tool.)*
+3. `StartTerminalSession(session_id)` starts a **Bash tool**: it spawns the OS user's login shell in
+   the session's worktree, with **no inputs**, and returns the new `terminal_id`. The shell is the
+   user's passwd `pw_shell`, else the serving process's `$SHELL`, else `/bin/bash` — the passwd entry
+   first because a daemon started by systemd or nix has a `$SHELL` of its own that is not the target
+   user's interactive shell, and a terminal opened with it comes up in the wrong shell with none of
+   the user's rc files. A `pw_shell` that refuses logins (`/usr/sbin/nologin`, `/bin/false`) is
+   skipped. *(Updated: 2026-06-25 — the started tool is the defined Bash tool.)*
 4. The Bash tool uses the same PTY mechanic as the main tool: stdin is writable, output is
    broadcast and captured for replay.
 5. `StopTerminalSession(session_id, terminal_id)` terminates the tool's process and removes it from
@@ -146,11 +150,18 @@ without** an attached session participant:
 
 ### Session-scoped surface delegated
 
-`ListExecTools`, `ListSessionToolCalls`, `ExecuteTool`, `ClaimTerminalControl`,
-`WatchTerminalControl`, VNC, and screen-sharing for a LiveKit-backed session are served by
-the coder's participant (`daemon-{instanceId}-{sessionId}`), not the daemon. The daemon still
-serves these for **non-LiveKit** (claude-cli / cursor-cli / workspace) sessions where no coder
-participant exists — that `ConnectionService` path is unchanged.
+For a LiveKit-backed session the coder's participant (`daemon-{instanceId}-{sessionId}`) serves
+`ListExecTools`, `ListSessionToolCalls`, `ExecuteTool`, VNC and screen-sharing on
+`connection.ConnectionService`, and the terminal family on
+`terminal_session.TerminalSessionService`. The daemon serves all of it for **non-LiveKit**
+(claude-cli / cursor-cli / workspace) sessions, where no coder participant exists.
+
+The coder answers **seven** of the nine terminal methods and refuses `StreamSessionTerminalIO` and
+`WatchTerminalControl` with `Unimplemented` — its control lease is a permanent self-grant, so a
+watch event from it would tell every screen it is the controller, and its bidi terminal bytes already
+travel on `terminal.TerminalService`. Nothing in the web reaches either at this participant. For the
+seven both serve, one session answers identically whichever server a client reaches, asserted at the
+wire by `packages/tddy-coder/tests/two_server_parity_acceptance.rs`.
 
 ### `DeleteSession` / `SignalSession` — daemon-direct
 
@@ -179,8 +190,7 @@ these when no per-session live runtime exists (see
   from disk for inactive and directory-listed sessions.
 - Auth model is unchanged: `session_token` → GitHub user → OS user → session ownership,
   validated at the daemon for every `DeleteSession` / `SignalSession` (always daemon-direct).
-- claude-cli / cursor-cli / workspace sessions keep their existing daemon-served
-  `ConnectionService` path.
+- claude-cli / cursor-cli / workspace sessions are served by the daemon on every coordinate.
 
 ---
 
@@ -268,17 +278,21 @@ page terminal in the background, swaps it to the foreground on `at_end`, and swa
 no-duplicate-pane fix; the page terminal carries `scrollback > 0`. The
 `onRegisterLoadOlderHistory` indirection is removed.)
 
-### Unified PTY-over-RPC bridge
+### One PTY-over-RPC surface
 
-The streaming/replay/ACK/resize/input-forwarding logic previously duplicated between `tddy-daemon`
-(`connection_service.rs`) and `tddy-coder` (`session_participant`) now lives in the shared
-`tddy-terminal-rpc` crate (`bridge` module), behind the `TerminalSession` / `TerminalSessionStore`
-async traits. The daemon (`DaemonTerminalSessionStore`) and coder (`CoderTerminalSessionStore`)
-adapt their respective `PtyHandle`s to the traits and delegate `StreamTerminalOutput` /
-`GetTerminalHistory` / `SendTerminalInput` to the unified bridge. The proto additions are
-**additive and backward-compatible**: the terminal RPCs remain on `ConnectionService` (no service
-split), so existing clients keep working; the new offset fields default to `0` and the new RPC is
-opt-in.
+`terminal_session.TerminalSessionService` is the terminal surface, and `tddy-terminal-rpc` owns all
+of it: the proto, the nine handlers, and the `bridge` module carrying the
+streaming, replay, ACK, resize and input-forwarding logic behind the `TerminalSession` /
+`TerminalSessionStore` async traits. There is exactly one terminal message set and one implementation
+of the offset contract.
+
+Two processes serve the coordinate. `tddy-daemon`'s `DaemonTerminalSessionStore` resolves a
+claude-cli `PtyHandle` or a jailed session's PTY — a composite, so a sandboxed terminal is an ordinary
+terminal to the bridge rather than a branch inside it. `tddy-coder`'s `CoderTerminalSessionStore`
+resolves its own bash tabs. Neither writes a handler.
+
+Implementation reference:
+[terminal-session-service.md](../../../packages/tddy-terminal-rpc/docs/terminal-session-service.md).
 
 The **client** half is in the same crate: `pty_relay::{PtyRelayConfig, run_pty_relay}` is the relay
 that attaches a local terminal to a session — spawning a command in a local PTY, or starting and
@@ -300,8 +314,9 @@ declaring one each.
 > The PTY plumbing that both the daemon and the coder use now lives in the shared `tddy-pty` crate.
 - Tools that take inputs. The API leaves room for them, but the only tool added now is Bash, which
   takes no inputs. *(Added: 2026-06-25.)*
-- Configurable Bash binary — the Bash tool is built-in (`$SHELL`, fallback `/bin/bash`); no config
-  entry is required. *(Added: 2026-06-25.)*
+- Configurable Bash binary — the Bash tool is built-in (the OS user's login shell, falling back to
+  `tddy_terminal_rpc::login_shell::DEFAULT_LOGIN_SHELL`); no config entry is required.
+  *(Added: 2026-06-25.)*
 
 ## Architecture
 
@@ -315,16 +330,21 @@ exit-monitor removes the tool by `(session_id, terminal_id)`.
 ### Tools & spawn
 `spawn_in_pty` is generalized to accept a prebuilt `argv` plus `terminal_id`/`kind`, so both the
 `claude` tool (`build_claude_argv`) and the Bash tool (`[shell_path]`) share the same I/O
-threading, capture, and cleanup. The Bash tool resolves `$SHELL` (fallback `/bin/bash`) at the RPC
-layer; the manager takes a resolved `shell_path` argument (no test-only branches) and labels the
-instance kind `"bash"`. Bash takes no per-start inputs.
+threading, capture, and cleanup. The Bash tool's shell is resolved by
+`tddy_terminal_rpc::login_shell::login_shell_for` at the RPC layer; the manager takes a resolved
+`shell_path` argument (no test-only branches) and labels the instance kind `"bash"`. Bash takes no per-start inputs.
 
 ### Lifecycle
 `StopTerminalSession` signals the tool's pid (reusing the SIGTERM/SIGKILL helper used by session
 deletion) and removes the registry entry; this is idempotent with the exit-monitor's own removal.
 
-### RPC surface (`ConnectionService`)
-New methods `StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions` (terminal-named
-for continuity; each operates on a tool instance); existing terminal I/O messages gain an optional
-`terminal_id`. No new service — `ConnectionService` is already registered and wired in
-`tddy-daemon`.
+### RPC surface (`terminal_session.TerminalSessionService`)
+All nine terminal methods answer at this coordinate: the three lifecycle methods
+`StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions` (terminal-named for
+continuity; each operates on a tool instance), the four I/O methods, and the two control methods.
+Every I/O message carries an optional `terminal_id`, empty resolving to `"main"`.
+
+A client reaches it at the same endpoints as every other service the daemon registers — `/rpc` over
+Connect-HTTP, the LiveKit common room, and the local UDS socket — because it is a `ServiceEntry`
+registered beside them rather than a second endpoint. The generated tonic adapter is what the socket
+mounts, which is how `tddy-sandbox-app` inside a jail opens its bidirectional terminal stream.

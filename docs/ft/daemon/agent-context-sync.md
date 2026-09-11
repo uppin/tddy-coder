@@ -123,13 +123,23 @@ closed before this reader was safe:
 The general rule the two share: an allow-list gate is only as strong as the weakest thing permitted
 to name a path — the request, the filesystem, or the peer.
 
+Three RPCs on `session_files.SessionFilesService`
+(`packages/tddy-service/proto/session_files.proto`):
+
 ```proto
 // Every allow-listed path in the worktree, with the hash that says whether it moved.
 rpc StreamContextManifest(ContextManifestRequest) returns (stream ContextManifestEntry);
 
 // The bytes of one allow-listed path. Raw, byte-exact, refused over cap before the first frame.
 rpc StreamReadContextFile(ReadContextFileRequest) returns (stream ContextFileChunk);
+
+// Several allow-listed paths in one call, so a split start costs 2 peer round trips, not 1 + N.
+rpc StreamReadContextFileBatch(ReadContextFileBatchRequest) returns (stream ContextFileBatchChunk);
 ```
+
+A request carrying a `daemon_instance_id` other than the serving host's is forwarded to the host that
+holds the checkout. Implementation reference:
+[agent-context-sync.md](../../../packages/tddy-session-files/docs/agent-context-sync.md).
 
 `ContextManifestEntry` is `{ rel_path, sha256, size_bytes }`. It **streams** rather than returning a
 repeated field so a large manifest never has to be chunked. `ContextFileChunk` mirrors
@@ -324,7 +334,7 @@ built from the target repo at start and at resume and is not updated again for t
 session — `ContextSyncer::tick` exists and is tested, but nothing calls it on a `worktree.activity`
 broadcast, so AC25–AC30 are proven at the `tick` level and production-unreachable. The two blockers
 are design decisions rather than wiring, and both are recorded in
-[docs/dev/TODO.md](../../dev/TODO.md) § Future Enhancements.
+[`docs/dev/todo/`](../../dev/todo/).
 
 Read "continuously synced" in this document as the intended contract, not as shipped behaviour.
 
@@ -344,3 +354,4 @@ Read "continuously synced" in this document as the intended contract, not as shi
 - [Session worktree sync](session-worktree-sync.md) — the broadcast and streaming precedents reused
 - [Session rooms](session-room.md) — the poll loop that produces the trigger
 - [Managed codebase workflow](../coder/managed-codebase-workflow.md)
+- Implementation: [tddy-session-files § Agent context files](../../../packages/tddy-session-files/docs/agent-context-sync.md)

@@ -13,9 +13,9 @@ Product spec: [web-terminal.md § File drop upload](../../../docs/ft/web/web-ter
 | `rpc/uploadProgress.tsx` | Shared progress store rendered by `UploadProgressIndicator` in the footer |
 
 The web drives chunking, so progress is known client-side and one **unary**
-`ConnectionService.UploadSessionFileChunk` works over both grpc-web and the LiveKit data channel — no
-client-streaming RPC is needed. The daemon appends chunks in arrival order and returns the absolute
-host path on the final chunk only, so `uploadFiles` never types an empty path.
+`session_files.SessionFilesService.UploadSessionFileChunk` works over both grpc-web and the LiveKit
+data channel — no client-streaming RPC is needed. The daemon appends chunks in arrival order and
+returns the absolute host path on the final chunk only, so `uploadFiles` never types an empty path.
 
 ## Three invariants worth not breaking
 
@@ -52,10 +52,11 @@ The cost is that a drop is round-trip bound: a verified 2 MB drop over the LiveK
 is the 64-px aggregate bar in the Host Stats Footer, users read a large drop as a failure until the
 path finally appears — both bug reports against this feature after the fixes above were exactly that.
 
-Two tracked follow-ups, neither implemented: an explicit `offset` on `UploadSessionFileChunk`
-(write-at instead of append) would make arrival order irrelevant and allow several chunks in flight,
-turning the transfer bandwidth-bound; and progress feedback belongs on the terminal itself (overlay,
-or a placeholder replaced by the path on completion), not only in the screen footer.
+Two tracked follow-ups, neither implemented: an explicit `offset` on
+`SessionFilesService.UploadSessionFileChunk` (write-at instead of append) would make arrival order
+irrelevant and allow several chunks in flight, turning the transfer bandwidth-bound; and progress
+feedback belongs on the terminal itself (overlay, or a placeholder replaced by the path on
+completion), not only in the screen footer.
 
 ## Re-dropping an already-uploaded file (Files tab → terminal)
 
@@ -72,10 +73,10 @@ route (Files-tab **Insert** button) reaches the focused terminal through the run
 ## Shared with start-session attachments
 
 The pre-session staging upload for start-session attachments is deliberately the **same** shape as
-this flow — `UploadStagedAttachmentChunk` is `UploadSessionFileChunk` with `session_id` replaced by
-`daemon_instance_id` and `upload_id` by `staging_id` — so `chunkFile()` / `UPLOAD_CHUNK_SIZE` and the
-per-file chunk loop are reused as-is and only the request builder differs. That reuse is why the
-48 KiB ceiling above is load-bearing for two features, not one.
+this flow — `UploadStagedAttachmentChunk` is the same service's `UploadSessionFileChunk` with
+`session_id` replaced by `daemon_instance_id` and `upload_id` by `staging_id` — so `chunkFile()` /
+`UPLOAD_CHUNK_SIZE` and the per-file chunk loop are reused as-is and only the request builder
+differs. That reuse is why the 48 KiB ceiling above is load-bearing for two features, not one.
 
 The attach UI is implemented: see [session-attach-ui.md](session-attach-ui.md). Note that its
 behaviour has since diverged in one respect worth knowing if you read the two side by side — a staged
