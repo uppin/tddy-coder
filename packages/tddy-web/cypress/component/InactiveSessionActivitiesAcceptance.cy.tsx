@@ -640,6 +640,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
         inspectorState="closed"
         client={createClient(ConnectionService, transport)}
+        terminalClient={createClient(TerminalSessionService, transport)}
         runtimes={[aHostServedRuntimeFor(DORMANT.sessionId, transport)]}
         focusedRuntimeId={DORMANT.sessionId}
       />,

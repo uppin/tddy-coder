@@ -24,7 +24,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
 use crate::bridge::{
-    resolved_terminal_id, serve_get_terminal_history_with, serve_send_terminal_input,
+    resolved_terminal_id, serve_get_terminal_history_with, serve_send_terminal_input_to,
     serve_stream_session_terminal_io_with, serve_stream_terminal_output_with, MAIN_TERMINAL_ID,
 };
 use crate::proto::terminal_session::{
@@ -36,7 +36,7 @@ use crate::proto::terminal_session::{
     WatchTerminalControlRequest,
 };
 use crate::proto::terminal_session::{TerminalSessionService, TerminalSessionServiceServer};
-use crate::session::TerminalSessionStore;
+use crate::session::{TerminalSession, TerminalSessionStore};
 
 /// How many control events are buffered for a `WatchTerminalControl` subscriber before the relay
 /// waits on it.
@@ -189,6 +189,34 @@ impl TerminalSessionServiceImpl {
         }
     }
 
+    /// The live terminal a driving call addresses, once the caller is allowed to drive it.
+    ///
+    /// The terminal is resolved *before* the lease is checked because whether the lease applies is
+    /// the terminal's own answer: one that reports itself not
+    /// [`TerminalSession::requires_control`] is driven by the process that owns its PTY, which
+    /// carries no control token, so demanding one would let any screen's claim sever the owner's
+    /// own input. A terminal that resolves to nothing is still asked the lease question first, so a
+    /// displaced screen is told it lost control rather than that the terminal is missing.
+    async fn controlled_terminal(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        control_token: &str,
+    ) -> Result<Arc<dyn TerminalSession>, Status> {
+        let resolved = self
+            .ports
+            .terminals
+            .get_terminal(session_id, terminal_id)
+            .await;
+        if resolved
+            .as_ref()
+            .is_none_or(|session| session.requires_control())
+        {
+            self.require_control(session_id, control_token).await?;
+        }
+        resolved.ok_or_else(|| Status::not_found("terminal not found or not running"))
+    }
+
     /// A `verify_control` closure for the bidi bridge, which re-checks every subsequent input chunk
     /// so a screen that loses the lease mid-stream stops being able to type.
     fn control_verifier(&self) -> impl Fn(&str, &str) -> ControlVerification + Send + Sync + use<> {
@@ -221,7 +249,8 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
 
     /// Bidi terminal I/O. The first message carries the identity, the control token and the replay
     /// selection, so authentication and the control check happen on it before the stream opens —
-    /// the bridge then re-checks control on every subsequent chunk.
+    /// the bridge then re-checks control on every subsequent chunk, unless the terminal is one
+    /// [`Self::controlled_terminal`] exempts.
     async fn stream_session_terminal_io(
         &self,
         request: Request<tddy_rpc::Streaming<SessionTerminalInput>>,
@@ -235,15 +264,9 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         self.os_user(&first.session_token)?;
         let session_id = keyed_session_id(&first.session_id);
         let terminal_id = resolved_terminal_id(&first.terminal_id).to_string();
-        self.require_control(&session_id, &first.control_token)
-            .await?;
-
         let session = self
-            .ports
-            .terminals
-            .get_terminal(&session_id, &terminal_id)
-            .await
-            .ok_or_else(|| Status::not_found("terminal not found or not running"))?;
+            .controlled_terminal(&session_id, &terminal_id, &first.control_token)
+            .await?;
 
         let rx = serve_stream_session_terminal_io_with(
             session,
@@ -278,8 +301,8 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    /// The browser-compatible input half. Control is checked before the terminal is resolved, so a
-    /// displaced screen is told it lost the lease rather than that the terminal is missing.
+    /// The browser-compatible input half, gated by [`Self::controlled_terminal`]: a displaced
+    /// screen is told it lost the lease rather than that the terminal is missing.
     async fn send_terminal_input(
         &self,
         request: Request<SessionTerminalInput>,
@@ -287,11 +310,12 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         let mut req = request.into_inner();
         self.os_user(&req.session_token)?;
         req.session_id = keyed_session_id(&req.session_id);
-        self.require_control(&req.session_id, &req.control_token)
+        let terminal_id = resolved_terminal_id(&req.terminal_id).to_string();
+        let session = self
+            .controlled_terminal(&req.session_id, &terminal_id, &req.control_token)
             .await?;
 
-        let response = serve_send_terminal_input(&*self.ports.terminals, req).await?;
-        Ok(Response::new(response))
+        Ok(Response::new(serve_send_terminal_input_to(&session, req)))
     }
 
     type GetTerminalHistoryStream = ReceiverStream<Result<TerminalHistoryChunk, Status>>;

@@ -1,19 +1,37 @@
-//! Acceptance: one session's terminal, reached through **two servers**, answers identically.
+//! Acceptance: one session's terminal answers identically through **both wirings** of the
+//! `terminal_session.TerminalSessionService` coordinate.
 //!
 //! `tddy-coder` is the second server of the terminal family. A session reached over LiveKit is
 //! answered by the coder participant; the same session reached over HTTP is answered by the daemon
 //! that owns it. The repo has already paid for those two disagreeing — changeset
 //! `2026-08-02-activities-tail-first-autoscroll` records a session that "would have opened
-//! tail-first when reached over HTTP and head-first when reached over LiveKit". This suite is the
-//! standing guard against a second one.
+//! tail-first when reached over HTTP and head-first when reached over LiveKit" — and serving one
+//! implementation on both is this node's answer to it.
 //!
-//! **The two servers here are two wirings of the coordinate, over one live terminal.** The coder's
-//! is exactly what `session_service_entries` registers on its participant. The daemon's is
-//! `tddy_terminal_rpc::build_terminal_session_entry`, the constructor
-//! `tddy-daemon`'s `svc_terminal_ports.rs` calls, over the same store and roster with a real
-//! control lease in front of it. Both are dispatched the way a transport dispatches — encoded
-//! request bytes at the registered service name, decoded answers off the wire — because what must
-//! agree is the *coordinate*, not a handler someone remembered to call the same way twice.
+//! Both wirings are dispatched the way a transport dispatches — encoded request bytes at the
+//! registered service name, decoded answers off the wire — because what must agree is the
+//! *coordinate*, not a handler someone remembered to call the same way twice:
+//!
+//! * [`coder_participant_terminal_entry`] is exactly what `session_service_entries` registers on
+//!   the coder's participant: the coder's ports, behind its method filter.
+//! * [`daemon_constructor_terminal_entry`] is [`build_terminal_session_entry`] called bare — the
+//!   same constructor `tddy-daemon`'s `svc_terminal_ports.rs` calls — over the same
+//!   [`TerminalManager`] and store, with a lease that really arbitrates between screens in front
+//!   of it.
+//!
+//! # Known gap: this is one server, wired twice — not two servers
+//!
+//! Both sides are this process's code, so what this suite proves is bounded: a change to the
+//! coder's ports, its method filter, its store adapter or its control lease that skewed replay,
+//! resume offsets, history chunking, keystroke forwarding or the claim outcome fails here, because
+//! only one side carries it. A change *inside* `tddy-terminal-rpc` moves both sides together and
+//! is invisible here by construction — so is anything specific to the daemon's own ports
+//! (`CliSessionManager`'s roster, store and control registry), which cannot be reached from this
+//! crate without depending on `tddy-daemon`: the crate `#unbundle` is splitting, and far too heavy
+//! a test dependency to take on for it. The daemon's half of the guard is
+//! `packages/tddy-daemon/tests/terminal_session_acceptance.rs`, against its own server; the shared
+//! handlers are covered in `tddy-terminal-rpc` itself. Nothing in this repo compares the two
+//! running servers end to end.
 //!
 //! Run: `cargo test -p tddy-coder --test two_server_parity_acceptance`
 
@@ -41,7 +59,7 @@ use tddy_terminal_rpc::{
 };
 use tokio::sync::broadcast;
 
-/// The coordinate both servers are dispatched at.
+/// The coordinate both wirings are dispatched at.
 const TERMINAL_SERVICE: &str = "terminal_session.TerminalSessionService";
 /// The coordinate the session's tools stay on.
 const CONNECTION_SERVICE: &str = "connection.ConnectionService";
@@ -61,26 +79,28 @@ const RETAINED_OUTPUT: &[u8] = b"$ cargo test -p tddy-coder\nrunning 215 tests\n
 const FRAME_TIMEOUT: Duration = Duration::from_secs(2);
 
 // ---------------------------------------------------------------------------
-// The session, under both servers
+// The session, under both wirings
 // ---------------------------------------------------------------------------
 
-/// One session's terminal, registered on both servers.
+/// One session's terminal, registered under both wirings of the coordinate.
 ///
-/// The terminal is a real PTY from the coder's own [`TerminalManager`] — the store both servers
+/// The terminal is a real PTY from the coder's own [`TerminalManager`] — the store both wirings
 /// resolve through — running `/bin/cat`, which produces no output of its own. That silence is what
 /// makes the comparison meaningful: the capture ring holds exactly the bytes this fixture put
-/// there, so a difference between the two answers is a difference between the two servers rather
+/// there, so a difference between the two answers is a difference between the two wirings rather
 /// than a shell that happened to print a prompt between them.
-struct SessionUnderTwoServers {
-    coder: Server,
-    daemon: Server,
+struct SessionUnderBothWirings {
+    /// The coder participant's registration, as `run.rs` makes it.
+    coder_participant: Wiring,
+    /// The shared constructor called bare, as `tddy-daemon` calls it.
+    daemon_constructor: Wiring,
     terminal_id: String,
     terminal: Arc<PtyHandle>,
     /// Kept alive: the terminal's working directory is deleted when this drops.
     _worktree: tempfile::TempDir,
 }
 
-impl SessionUnderTwoServers {
+impl SessionUnderBothWirings {
     /// A session whose terminal has already produced `output`.
     async fn with_retained_output(output: &[u8]) -> Self {
         let worktree = tempfile::tempdir().expect("a worktree for the session's terminal");
@@ -100,11 +120,14 @@ impl SessionUnderTwoServers {
             .expect("the capture ring")
             .append(output);
 
-        let coder = Server::new(coder_participant_terminal_entry(Arc::clone(&svc)));
-        let daemon = Server::new(daemon_shaped_terminal_entry(&manager, Arc::clone(&svc)));
-        SessionUnderTwoServers {
-            coder,
-            daemon,
+        let coder_participant = Wiring::new(coder_participant_terminal_entry(Arc::clone(&svc)));
+        let daemon_constructor = Wiring::new(daemon_constructor_terminal_entry(
+            &manager,
+            Arc::clone(&svc),
+        ));
+        SessionUnderBothWirings {
+            coder_participant,
+            daemon_constructor,
             terminal_id: terminal.terminal_id.clone(),
             terminal,
             _worktree: worktree,
@@ -162,17 +185,17 @@ impl SessionUnderTwoServers {
     }
 }
 
-/// One registered coordinate, dispatched the way a transport dispatches it.
-struct Server {
+/// One wiring of the coordinate, dispatched the way a transport dispatches it.
+struct Wiring {
     entry: ServiceEntry,
 }
 
-impl Server {
+impl Wiring {
     fn new(entry: ServiceEntry) -> Self {
-        Server { entry }
+        Wiring { entry }
     }
 
-    /// The decoded answer of a unary method at this server's registered coordinate.
+    /// The decoded answer of a unary method at this wiring's registered coordinate.
     async fn answer<Req: Message, Resp: Message + Default>(
         &self,
         method: &str,
@@ -185,7 +208,7 @@ impl Server {
         }
     }
 
-    /// Why a method at this server's registered coordinate refused.
+    /// Why a method at this wiring's registered coordinate refused.
     async fn refusal<Req: Message>(&self, method: &str, request: Req) -> Status {
         self.refusal_at(TERMINAL_SERVICE, method, request).await
     }
@@ -245,13 +268,15 @@ fn coder_participant_terminal_entry(svc: Arc<SessionConnectionService>) -> Servi
     tddy_coder::session_participant::coder_terminal_session_entry(svc)
 }
 
-/// The daemon's terminal coordinate, over the *same* session.
+/// The shared constructor `tddy-daemon` calls, over the *same* session.
 ///
-/// `build_terminal_session_entry` is the constructor `tddy-daemon` calls; the store and roster are
-/// the same ones the coder's entry resolves through, because this is the same session reached a
-/// second way rather than a second session. What differs is the control lease: the daemon
-/// arbitrates between screens, which is the port whose answer this suite asks both servers for.
-fn daemon_shaped_terminal_entry(
+/// This is not the daemon's running server — see the module doc's known gap. It is
+/// `build_terminal_session_entry` with no method filter in front of it; the store and roster are
+/// the same ones the coder's entry resolves through, because this is one session reached a second
+/// way rather than a second session. What differs is the control lease: this one arbitrates
+/// between screens the way the daemon's registry does, which is the port whose answer this suite
+/// asks for on both sides.
+fn daemon_constructor_terminal_entry(
     manager: &Arc<TerminalManager>,
     svc: Arc<SessionConnectionService>,
 ) -> ServiceEntry {
@@ -351,40 +376,45 @@ impl ToolExecutor for UnusedExecutor {
 }
 
 // ---------------------------------------------------------------------------
-// Parity across the seven methods both servers serve
+// Parity across the seven methods both wirings serve.
+//
+// Each of these asks one live PTY the same question twice: once through the coder's production
+// wiring of the coordinate, once through the constructor `tddy-daemon` calls. That is what the
+// names below claim, and all they claim — see the module doc's known gap for what a comparison of
+// the two *running* servers would additionally catch.
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn both_servers_open_one_terminal_with_the_same_tail_replay() {
-    // Given — a session whose terminal holds retained output, served by both
-    let session = SessionUnderTwoServers::with_retained_output(RETAINED_OUTPUT).await;
+async fn both_wirings_open_one_terminal_with_the_same_tail_replay() {
+    // Given — a session whose terminal holds retained output, registered under both wirings
+    let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
 
-    // When — each server is asked to open the terminal on first connect
+    // When — each wiring is asked to open the terminal on first connect
     let over_coder: Vec<SessionTerminalOutput> = session
-        .coder
+        .coder_participant
         .frames("StreamTerminalOutput", session.a_tail_open(), 2)
         .await;
     let over_daemon: Vec<SessionTerminalOutput> = session
-        .daemon
+        .daemon_constructor
         .frames("StreamTerminalOutput", session.a_tail_open(), 2)
         .await;
 
     // Then — the same prologue and the same tail chunk, at the same offsets
     assert_eq!(
         over_coder, over_daemon,
-        "a tail open must replay identically on both servers"
+        "a tail open must replay identically through both wirings of the coordinate"
     );
 }
 
 #[tokio::test]
-async fn both_servers_resume_one_terminal_from_the_same_offset() {
-    // Given — a session whose terminal holds retained output, served by both
-    let session = SessionUnderTwoServers::with_retained_output(RETAINED_OUTPUT).await;
+async fn both_wirings_resume_one_terminal_from_the_same_offset() {
+    // Given — a session whose terminal holds retained output, registered under both wirings
+    let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
     let already_painted = 10;
 
-    // When — each server is asked to resume from the byte a client already holds
+    // When — each wiring is asked to resume from the byte a client already holds
     let over_coder: Vec<SessionTerminalOutput> = session
-        .coder
+        .coder_participant
         .frames(
             "StreamTerminalOutput",
             session.a_resume_open(already_painted),
@@ -392,7 +422,7 @@ async fn both_servers_resume_one_terminal_from_the_same_offset() {
         )
         .await;
     let over_daemon: Vec<SessionTerminalOutput> = session
-        .daemon
+        .daemon_constructor
         .frames(
             "StreamTerminalOutput",
             session.a_resume_open(already_painted),
@@ -403,36 +433,36 @@ async fn both_servers_resume_one_terminal_from_the_same_offset() {
     // Then — the same catch-up, so a client that reconnects the other way is not re-painted
     assert_eq!(
         over_coder, over_daemon,
-        "a resume must send the same missed bytes on both servers"
+        "a resume must send the same missed bytes through both wirings of the coordinate"
     );
 }
 
 #[tokio::test]
-async fn both_servers_fill_one_terminals_history_at_the_same_offsets() {
-    // Given — a session whose terminal holds retained output, served by both
-    let session = SessionUnderTwoServers::with_retained_output(RETAINED_OUTPUT).await;
+async fn both_wirings_fill_one_terminals_history_at_the_same_offsets() {
+    // Given — a session whose terminal holds retained output, registered under both wirings
+    let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
 
-    // When — each server is asked for the scroll-up fill
+    // When — each wiring is asked for the scroll-up fill
     let over_coder: Vec<TerminalHistoryChunk> = session
-        .coder
+        .coder_participant
         .frames("GetTerminalHistory", session.a_history_fill(), 8)
         .await;
     let over_daemon: Vec<TerminalHistoryChunk> = session
-        .daemon
+        .daemon_constructor
         .frames("GetTerminalHistory", session.a_history_fill(), 8)
         .await;
 
     // Then — the same chunks, bounded by the same offsets and the same end-of-history marker
     assert_eq!(
         over_coder, over_daemon,
-        "history must fill at identical offsets on both servers"
+        "history must fill at identical offsets through both wirings of the coordinate"
     );
 }
 
 #[tokio::test]
-async fn both_servers_grant_an_unheld_terminal_control_claim_to_the_same_screen() {
-    // Given — a session nobody is driving, served by both
-    let session = SessionUnderTwoServers::with_retained_output(RETAINED_OUTPUT).await;
+async fn both_wirings_grant_an_unheld_terminal_control_claim_to_the_same_screen() {
+    // Given — a session nobody is driving, registered under both wirings
+    let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
     let claim = ClaimTerminalControlRequest {
         session_token: SESSION_TOKEN.to_string(),
         session_id: SESSION_ID.to_string(),
@@ -440,21 +470,23 @@ async fn both_servers_grant_an_unheld_terminal_control_claim_to_the_same_screen(
         steal: false,
     };
 
-    // When — a screen claims control on each
+    // When — a screen claims control through each
     let over_coder: ClaimTerminalControlResponse = session
-        .coder
+        .coder_participant
         .answer("ClaimTerminalControl", claim.clone())
         .await;
-    let over_daemon: ClaimTerminalControlResponse =
-        session.daemon.answer("ClaimTerminalControl", claim).await;
+    let over_daemon: ClaimTerminalControlResponse = session
+        .daemon_constructor
+        .answer("ClaimTerminalControl", claim)
+        .await;
 
     // Then — both grant it, and neither names a rival holder. The tokens themselves are each
-    // server's own opaque handle and are deliberately not compared; what a screen acts on is
+    // lease's own opaque handle and are deliberately not compared; what a screen acts on is
     // whether it was granted and who it was told is driving.
     assert_eq!(
         (over_coder.granted, over_coder.current_holder_screen_id),
         (over_daemon.granted, over_daemon.current_holder_screen_id),
-        "an unheld claim must have the same outcome on both servers"
+        "an unheld claim must have the same outcome through both wirings of the coordinate"
     );
     assert!(
         over_coder.granted,
@@ -463,9 +495,9 @@ async fn both_servers_grant_an_unheld_terminal_control_claim_to_the_same_screen(
 }
 
 #[tokio::test]
-async fn both_servers_refuse_to_stop_the_sessions_main_terminal() {
-    // Given — a session served by both
-    let session = SessionUnderTwoServers::with_retained_output(RETAINED_OUTPUT).await;
+async fn both_wirings_refuse_to_stop_the_sessions_main_terminal() {
+    // Given — a session registered under both wirings
+    let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
     let stop_main = StopTerminalSessionRequest {
         session_token: SESSION_TOKEN.to_string(),
         session_id: SESSION_ID.to_string(),
@@ -473,13 +505,13 @@ async fn both_servers_refuse_to_stop_the_sessions_main_terminal() {
         control_token: String::new(),
     };
 
-    // When — each server is asked to stop the agent's own terminal
+    // When — each wiring is asked to stop the agent's own terminal
     let over_coder = session
-        .coder
+        .coder_participant
         .refusal("StopTerminalSession", stop_main.clone())
         .await;
     let over_daemon = session
-        .daemon
+        .daemon_constructor
         .refusal("StopTerminalSession", stop_main)
         .await;
 
@@ -487,23 +519,23 @@ async fn both_servers_refuse_to_stop_the_sessions_main_terminal() {
     assert_eq!(
         (over_coder.code(), over_coder.message()),
         (over_daemon.code(), over_daemon.message()),
-        "stopping the main terminal must be refused identically on both servers"
+        "stopping the main terminal must be refused identically through both wirings"
     );
     assert_eq!(over_coder.code(), Code::InvalidArgument);
 }
 
 #[tokio::test]
-async fn both_servers_write_a_clients_keystrokes_to_the_same_pty() {
-    // Given — a session served by both, with a client that has already typed nothing
-    let session = SessionUnderTwoServers::with_retained_output(RETAINED_OUTPUT).await;
+async fn keystrokes_through_either_wiring_reach_the_one_pty() {
+    // Given — a session registered under both wirings, with a client that has typed nothing yet
+    let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
 
-    // When — the same keystrokes are sent through each server in turn
+    // When — keystrokes are sent through each wiring in turn
     let _: SendTerminalInputResponse = session
-        .coder
+        .coder_participant
         .answer("SendTerminalInput", session.typing(b"echo one\n", 9))
         .await;
     let _: SendTerminalInputResponse = session
-        .daemon
+        .daemon_constructor
         .answer("SendTerminalInput", session.typing(b"echo two\n", 18))
         .await;
 
@@ -511,7 +543,7 @@ async fn both_servers_write_a_clients_keystrokes_to_the_same_pty() {
     assert_eq!(
         *session.terminal.subscribe_acked_offset().borrow(),
         18,
-        "input sent through either server advances the same terminal's acknowledged offset"
+        "input sent through either wiring advances the same terminal's acknowledged offset"
     );
 }
 
@@ -522,11 +554,11 @@ async fn both_servers_write_a_clients_keystrokes_to_the_same_pty() {
 #[tokio::test]
 async fn the_terminal_coordinate_does_not_answer_a_connection_service_method() {
     // Given — a session served by the coder participant
-    let session = SessionUnderTwoServers::with_retained_output(RETAINED_OUTPUT).await;
+    let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
 
     // When — a caller asks the terminal coordinate for one of the session's tool methods
     let refusal = session
-        .coder
+        .coder_participant
         .refusal_at(
             TERMINAL_SERVICE,
             "ListExecTools",
@@ -546,11 +578,11 @@ async fn the_terminal_coordinate_does_not_answer_a_connection_service_method() {
 #[tokio::test]
 async fn the_terminal_coordinate_does_not_answer_under_the_connection_service_name() {
     // Given — a session served by the coder participant
-    let session = SessionUnderTwoServers::with_retained_output(RETAINED_OUTPUT).await;
+    let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
 
     // When — a caller addresses a terminal method at the *connection* coordinate on it
     let refusal = session
-        .coder
+        .coder_participant
         .refusal_at(
             CONNECTION_SERVICE,
             "StreamTerminalOutput",
@@ -573,7 +605,7 @@ async fn the_connection_coordinate_no_longer_streams_a_terminal() {
     // Given — a session participant's connection coordinate
     let worktree = tempfile::tempdir().expect("a worktree for the session");
     let manager = Arc::new(TerminalManager::new());
-    let connection = Server::new(a_registered_entry(
+    let connection = Wiring::new(a_registered_entry(
         session_service_entries(a_session_service(&manager, worktree.path())),
         CONNECTION_SERVICE,
     ));
@@ -617,11 +649,11 @@ fn a_terminal_open_request() -> StreamTerminalOutputRequest {
 #[tokio::test]
 async fn the_terminal_coordinate_refuses_the_bidi_stream_the_coder_does_not_serve() {
     // Given — a session served by the coder participant
-    let session = SessionUnderTwoServers::with_retained_output(RETAINED_OUTPUT).await;
+    let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
 
     // When — a client opens the bidi terminal stream on it
     let refusal = session
-        .coder
+        .coder_participant
         .refusal("StreamSessionTerminalIO", session.typing(b"", 0))
         .await;
 
@@ -635,7 +667,7 @@ async fn the_terminal_coordinate_refuses_the_bidi_stream_the_coder_does_not_serv
 #[tokio::test]
 async fn the_terminal_coordinate_refuses_to_report_a_control_lease_it_does_not_arbitrate() {
     // Given — a session served by the coder participant
-    let session = SessionUnderTwoServers::with_retained_output(RETAINED_OUTPUT).await;
+    let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
     let watch = WatchTerminalControlRequest {
         session_token: SESSION_TOKEN.to_string(),
         session_id: SESSION_ID.to_string(),
@@ -643,7 +675,10 @@ async fn the_terminal_coordinate_refuses_to_report_a_control_lease_it_does_not_a
     };
 
     // When — a screen asks who is driving the session's terminals
-    let refusal = session.coder.refusal("WatchTerminalControl", watch).await;
+    let refusal = session
+        .coder_participant
+        .refusal("WatchTerminalControl", watch)
+        .await;
 
     // Then — it is refused rather than answered. The coder's lease is a permanent grant, so it
     // would tell every watching screen that it is the controller — including one the daemon's real
@@ -656,7 +691,7 @@ async fn the_connection_coordinate_still_answers_the_sessions_tool_catalog() {
     // Given — a session participant's registered coordinates
     let worktree = tempfile::tempdir().expect("a worktree for the session");
     let manager = Arc::new(TerminalManager::new());
-    let connection = Server::new(a_registered_entry(
+    let connection = Wiring::new(a_registered_entry(
         session_service_entries(a_session_service(&manager, worktree.path())),
         CONNECTION_SERVICE,
     ));

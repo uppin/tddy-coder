@@ -983,12 +983,21 @@ fn write_tonic_adapter_wrapper(service: &Service, buf: &mut String, has_trait_im
 /// Emit one tonic trait method — and, for a server-streaming rpc, the associated stream type the
 /// tonic trait declares alongside it.
 ///
-/// The method's own name and associated type come from the *proto* name, because that is what
-/// tonic-build derives its trait from: `StreamSessionTerminalIO` yields
-/// `stream_session_terminal_io` and `StreamSessionTerminalIOStream`. The delegation target is named
-/// the tddy-rpc way instead, matching the trait emitted above it.
+/// Both names come from what tonic-build itself uses, which is *not* the same field twice:
+///
+/// * the method name is prost's [`Method::name`] verbatim — tonic-build declares its trait method
+///   as `format_ident!("{}", method.name())`, so prost's `sanitize_identifier(to_snake_case(..))`
+///   is already applied: `StreamSessionTerminalIO` arrives as `stream_session_terminal_io`, and an
+///   rpc named `Type` arrives as `r#type`, which is what the trait declares and therefore what the
+///   impl must spell. Re-deriving it here would have to reproduce both halves of that rule, and a
+///   derivation that got the keyword half wrong would emit `async fn type(` — uncompilable.
+/// * the associated stream type comes from the *proto* name, because tonic-build builds it from
+///   `method.identifier()`: `StreamSessionTerminalIOStream`.
+///
+/// The delegation target is the tddy-rpc trait's method, named the same way the trait emitted above
+/// it names it.
 fn generate_tonic_adapter_method(service: &Service, method: &Method, buf: &mut String, rpc: &str) {
-    let tonic_method = tonic_method_name(method);
+    let tonic_method = &method.name;
     let rpc_method = to_snake_case(&method.name);
     let stream_assoc = format!("{}Stream", method_proto_name(method));
     let input = &method.input_type;
@@ -1071,52 +1080,32 @@ fn generate_tonic_adapter_method(service: &Service, method: &Method, buf: &mut S
     writeln!(buf, "    }}").unwrap();
 }
 
-/// The method name tonic-build gives an rpc: prost's snake_case of the proto name, which collapses
-/// an acronym run instead of splitting it (`StreamSessionTerminalIO` -> `stream_session_terminal_io`,
-/// not `stream_session_terminal_i_o`).
-fn tonic_method_name(method: &Method) -> String {
-    to_prost_snake_case(&method_proto_name(method))
-}
-
-/// prost-build's own PascalCase-to-snake_case rule: an underscore goes before an uppercase letter
-/// that starts a word, which is either one following a lowercase letter or digit, or the last of an
-/// acronym run (the one followed by a lowercase letter).
-fn to_prost_snake_case(s: &str) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let mut result = String::new();
-    for (i, &ch) in chars.iter().enumerate() {
-        if ch == '_' {
-            result.push('_');
-            continue;
-        }
-        if ch.is_uppercase() && i > 0 {
-            let prev = chars[i - 1];
-            let starts_word = prev.is_lowercase()
-                || prev.is_numeric()
-                || chars.get(i + 1).is_some_and(|next| next.is_lowercase());
-            if starts_word && prev != '_' {
-                result.push('_');
-            }
-        }
-        result.extend(ch.to_lowercase());
-    }
-    result
-}
-
 #[cfg(test)]
 mod tonic_adapter_tests {
     use super::*;
 
-    /// A method as `prost-build` hands it to a generator.
-    fn a_method(name: &str, client_streaming: bool, server_streaming: bool) -> Method {
+    /// A method as `prost-build` hands it to a generator: the name the rpc was declared with in the
+    /// `.proto`, and the Rust name prost derived from it.
+    ///
+    /// Both are spelled out at every call site, because keeping them apart is the generator's job and
+    /// a fixture that derived the second from the first would derive it *its* way rather than prost's.
+    /// prost's way is `sanitize_identifier(heck::to_snake_case(..))`: it collapses an acronym run
+    /// (`StreamSessionTerminalIO` -> `stream_session_terminal_io`, never `..._i_o`) and raw-escapes a
+    /// keyword (`Type` -> `r#type`).
+    fn a_method(
+        proto_name: &str,
+        prost_name: &str,
+        client_streaming: bool,
+        server_streaming: bool,
+    ) -> Method {
         Method {
-            name: to_snake_case(name),
-            proto_name: name.to_string(),
+            name: prost_name.to_string(),
+            proto_name: proto_name.to_string(),
             comments: Default::default(),
-            input_type: format!("{name}Request"),
-            output_type: format!("{name}Response"),
-            input_proto_type: format!(".session_files.{name}Request"),
-            output_proto_type: format!(".session_files.{name}Response"),
+            input_type: format!("{proto_name}Request"),
+            output_type: format!("{proto_name}Response"),
+            input_proto_type: format!(".session_files.{proto_name}Request"),
+            output_proto_type: format!(".session_files.{proto_name}Response"),
             options: Default::default(),
             client_streaming,
             server_streaming,
@@ -1147,7 +1136,12 @@ mod tonic_adapter_tests {
     #[test]
     fn generates_a_delegating_body_for_a_unary_method() {
         // Given
-        let generated = generated_for(vec![a_method("ReadHostDocument", false, false)]);
+        let generated = generated_for(vec![a_method(
+            "ReadHostDocument",
+            "read_host_document",
+            false,
+            false,
+        )]);
 
         // Then
         assert!(
@@ -1165,7 +1159,12 @@ mod tonic_adapter_tests {
     #[test]
     fn generates_the_associated_stream_type_for_a_server_streaming_method() {
         // Given
-        let generated = generated_for(vec![a_method("StreamReadHostDocument", false, true)]);
+        let generated = generated_for(vec![a_method(
+            "StreamReadHostDocument",
+            "stream_read_host_document",
+            false,
+            true,
+        )]);
 
         // Then
         assert!(
@@ -1187,7 +1186,12 @@ mod tonic_adapter_tests {
     #[test]
     fn generates_both_halves_of_a_bidirectional_method() {
         // Given
-        let generated = generated_for(vec![a_method("StreamSessionTerminalIO", true, true)]);
+        let generated = generated_for(vec![a_method(
+            "StreamSessionTerminalIO",
+            "stream_session_terminal_io",
+            true,
+            true,
+        )]);
 
         // Then
         assert!(
@@ -1198,6 +1202,35 @@ mod tonic_adapter_tests {
             generated.contains("type StreamSessionTerminalIOStream"),
             "and its response is still a stream:\n{generated}"
         );
+        assert!(
+            generated.contains("SessionFilesService::stream_session_terminal_io(&*self.inner"),
+            "and it must delegate to the trait method under the name prost gave it — the delegation \
+             target is the half no assertion used to cover:\n{generated}"
+        );
+    }
+
+    /// prost raw-escapes an rpc whose snake_case name is a Rust keyword, and tonic-build declares the
+    /// trait method with that exact string: `async fn r#type`. An adapter that re-derived the name
+    /// from the proto name instead would emit `async fn type(`, which is not a legal signature — and
+    /// nothing in the 90-method surface would catch it, because no rpc there is keyword-named yet.
+    #[test]
+    fn spells_a_keyword_named_rpc_the_way_prost_escaped_it() {
+        // Given
+        let generated = generated_for(vec![a_method("Type", "r#type", false, false)]);
+
+        // Then
+        assert!(
+            generated.contains("async fn r#type("),
+            "the impl must declare the escaped name tonic-build's trait declares:\n{generated}"
+        );
+        assert!(
+            !generated.contains("async fn type("),
+            "a bare keyword cannot name a fn, so this adapter would not compile:\n{generated}"
+        );
+        assert!(
+            generated.contains("SessionFilesService::r#type(&*self.inner"),
+            "and it must delegate through the same escaped name:\n{generated}"
+        );
     }
 
     /// Three hand-written adapters already share `to_tonic_status` so they cannot drift on how a
@@ -1206,7 +1239,12 @@ mod tonic_adapter_tests {
     #[test]
     fn delegates_status_conversion_rather_than_constructing_its_own() {
         // Given
-        let generated = generated_for(vec![a_method("ReadHostDocument", false, false)]);
+        let generated = generated_for(vec![a_method(
+            "ReadHostDocument",
+            "read_host_document",
+            false,
+            false,
+        )]);
 
         // Then
         assert!(
@@ -1226,9 +1264,19 @@ mod tonic_adapter_tests {
     fn generates_one_impl_carrying_every_method_shape() {
         // Given
         let generated = generated_for(vec![
-            a_method("SendTerminalInput", false, false),
-            a_method("StreamTerminalOutput", false, true),
-            a_method("StreamSessionTerminalIO", true, true),
+            a_method("SendTerminalInput", "send_terminal_input", false, false),
+            a_method(
+                "StreamTerminalOutput",
+                "stream_terminal_output",
+                false,
+                true,
+            ),
+            a_method(
+                "StreamSessionTerminalIO",
+                "stream_session_terminal_io",
+                true,
+                true,
+            ),
         ]);
 
         // Then

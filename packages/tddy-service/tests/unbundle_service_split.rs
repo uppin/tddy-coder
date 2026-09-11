@@ -10,7 +10,7 @@
 //! what the daemon implements, but the `.proto` is what every other language's client is generated
 //! from, and a method left declared there is a coordinate somebody can still call.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn connection_proto() -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("proto/connection.proto");
@@ -296,6 +296,17 @@ fn connection_service_no_longer_declares_the_session_file_or_terminal_methods() 
     );
 }
 
+const CONVERTED_MESSAGES: [&str; 2] = [
+    "connection::SessionTerminalInput",
+    "connection::SessionTerminalOutput",
+];
+
+/// The crate publishing the message set the converters were replaced by, named by both swept trees.
+///
+/// It is the positive control: a sweep that finds no mention of it swept somewhere that is not the
+/// terminal code, so its own absence finding means nothing.
+const TERMINAL_RPC_CRATE: &str = "tddy_terminal_rpc";
+
 /// Every hand-written converter goes. Keeping one would leave three message shapes for one stream —
 /// `connection.*`, `terminal_session.*`, and the converter between them — inside the service whose
 /// whole purpose is to be the single terminal surface.
@@ -305,29 +316,27 @@ fn connection_service_no_longer_declares_the_session_file_or_terminal_methods() 
 /// deleted doc comment would have satisfied: it never saw `to_connection_output`, the daemon's
 /// second converter, nor the four inline ones in `tddy-coder`'s participant.
 ///
-/// Scoped to Rust sources (see [`walk_for`]), which is also what keeps `sandbox.proto`'s terminal
-/// frame out of it: that frame is the sandbox's own message now, and even while it was
+/// Scoped to Rust sources (see [`rust_sources_under`]), which is also what keeps `sandbox.proto`'s
+/// terminal frame out of it: that frame is the sandbox's own message now, and even while it was
 /// `connection.SessionTerminalOutput` the reference was a `.proto` field type rather than a Rust
 /// conversion — a needle a `.rs`-only walk cannot reach.
 #[test]
 fn no_source_converts_between_the_two_terminal_message_sets() {
     // Given
     let package = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let converter_free = [
-        package.join("../tddy-daemon/src"),
-        package.join("../tddy-coder/src"),
-    ];
+    let converter_free = ["../tddy-daemon/src", "../tddy-coder/src"]
+        .map(|crate_src| rust_sources_under(&package.join(crate_src)));
+    for sources in &converter_free {
+        sources.assert_reaches_the_terminal_code();
+    }
 
     // When
     let hits: Vec<String> = converter_free
         .iter()
-        .flat_map(|dir| {
-            [
-                "connection::SessionTerminalInput",
-                "connection::SessionTerminalOutput",
-            ]
-            .into_iter()
-            .flat_map(move |needle| walk_for(dir, needle))
+        .flat_map(|sources| {
+            CONVERTED_MESSAGES
+                .iter()
+                .flat_map(|needle| sources.naming(needle))
         })
         .collect();
 
@@ -339,24 +348,66 @@ fn no_source_converts_between_the_two_terminal_message_sets() {
     );
 }
 
-/// Every `.rs` file under `dir` whose text contains `needle`.
+/// Every `.rs` file under one crate's `src`, read once, with its text.
 ///
 /// `.rs` only, deliberately: the names this looks for are also legitimate `.proto` field types, and
 /// a walk that read those would fail on a declaration rather than on a conversion.
-fn walk_for(dir: &Path, needle: &str) -> Vec<String> {
-    let mut found = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return found;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
+///
+/// Nothing about the reading is tolerated silently. A directory that is not there and a file that
+/// cannot be read both panic, because this backs an *absence* assertion: a sweep that quietly saw
+/// nothing reports zero converters exactly as loudly as a tree that has none, and one renamed crate
+/// directory would turn the completion criterion for this node into a test that passes by looking
+/// at nothing.
+struct RustSources {
+    root: PathBuf,
+    files: Vec<(PathBuf, String)>,
+}
+
+fn rust_sources_under(dir: &Path) -> RustSources {
+    let mut files = Vec::new();
+    collect_rust_sources(dir, &mut files);
+    RustSources {
+        root: dir.to_path_buf(),
+        files,
+    }
+}
+
+fn collect_rust_sources(dir: &Path, into: &mut Vec<(PathBuf, String)>) {
+    let entries = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{} is a readable directory: {e}", dir.display()));
+    for entry in entries {
+        let path = entry
+            .unwrap_or_else(|e| panic!("{} lists its entries: {e}", dir.display()))
+            .path();
         if path.is_dir() {
-            found.extend(walk_for(&path, needle));
-        } else if path.extension().is_some_and(|e| e == "rs")
-            && std::fs::read_to_string(&path).is_ok_and(|text| text.contains(needle))
-        {
-            found.push(path.display().to_string());
+            collect_rust_sources(&path, into);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("{} is a readable Rust source: {e}", path.display()));
+            into.push((path, text));
         }
     }
-    found
+}
+
+impl RustSources {
+    /// The swept files whose text contains `needle`.
+    fn naming(&self, needle: &str) -> Vec<String> {
+        self.files
+            .iter()
+            .filter(|(_, text)| text.contains(needle))
+            .map(|(path, _)| path.display().to_string())
+            .collect()
+    }
+
+    fn assert_reaches_the_terminal_code(&self) -> &Self {
+        assert!(
+            !self.naming(TERMINAL_RPC_CRATE).is_empty(),
+            "swept {} .rs file(s) under {} and not one named {TERMINAL_RPC_CRATE}: this is not \
+             the terminal code, so an absence found in it is an absence of the sweep rather than \
+             of a converter",
+            self.files.len(),
+            self.root.display()
+        );
+        self
+    }
 }

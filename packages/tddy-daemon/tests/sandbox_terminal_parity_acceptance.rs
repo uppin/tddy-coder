@@ -12,7 +12,8 @@
 //! They run against the real [`SandboxSessionState`] and the real
 //! [`SandboxTerminalSession`](tddy_daemon::terminal_session_adapter::SandboxTerminalSession), not a
 //! mirror of them, because what is being checked is precisely the mapping between a jail's three
-//! channels and the six things the bridge asks a terminal for.
+//! channels and everything the bridge asks a terminal for — including the four absences
+//! [`SandboxTerminalSession`] synthesises an answer for.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -20,13 +21,16 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::terminal_session_adapter::DaemonTerminalSessionStore;
+use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon_sandbox::sandbox_session::{
     SandboxSessionManager, SandboxSessionState, SandboxSessionStateInit,
 };
+use tddy_rpc::Request;
 use tddy_task::TerminalCapture;
 use tddy_terminal_rpc::proto::terminal_session::{
-    GetTerminalHistoryRequest, SessionTerminalInput, SessionTerminalOutput, StreamReplayMode,
-    StreamTerminalOutputRequest, TerminalHistoryChunk,
+    ClaimTerminalControlRequest, GetTerminalHistoryRequest, SessionTerminalInput,
+    SessionTerminalOutput, StreamReplayMode, StreamTerminalOutputRequest, TerminalHistoryChunk,
+    TerminalSessionService as TerminalSessionServiceTrait,
 };
 use tddy_terminal_rpc::session::TerminalSessionStore;
 use tddy_terminal_rpc::{
@@ -34,6 +38,7 @@ use tddy_terminal_rpc::{
 };
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{timeout, Duration};
+use tokio_stream::StreamExt;
 
 /// The session id every request below addresses.
 const SESSION_ID: &str = "sandboxed-session";
@@ -335,7 +340,7 @@ async fn re_issues_a_jails_mouse_modes_before_the_anchored_frame_as_the_deleted_
 }
 
 // ---------------------------------------------------------------------------
-// The three capabilities a jail's terminal does not have
+// Three of the four absences: the capabilities a jail's terminal does not have
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -510,4 +515,181 @@ async fn refuses_a_terminal_of_a_jail_that_only_has_the_main_one() {
 
     // Then nothing resolves, so the caller answers `not_found` — a started shell never reaches a jail
     assert!(resolved.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// The fourth absence: the control lease a jail's terminal is not behind
+// ---------------------------------------------------------------------------
+//
+// These drive `terminal_session.TerminalSessionService` rather than the bridge helpers above,
+// because the lease is checked at the service and nowhere else: the helpers take a resolved
+// terminal and an already-verified caller, so nine tests through them cannot see a jail that has
+// been put behind a check it cannot answer. Before the unification the sandbox branch of both input
+// RPCs forwarded to `stdin_tx` and returned *without* consulting `verify_control` at all.
+
+/// The screen a human clicks "Claim terminal" on. Any browser screen will do — what matters is that
+/// it is not the in-jail bridge.
+const A_BROWSER_SCREEN: &str = "browser-screen-a";
+
+/// One daemon serving one jailed session at the coordinate both a browser and the in-jail bridge
+/// reach it through.
+///
+/// Built from [`tddy_daemon::test_util::test_service`] and the daemon's own
+/// [`ConnectionServiceImpl::sandbox_sessions`] registry, so the store, the lease and the handlers
+/// are the ones production wires — the point of these tests is what *this daemon's* coordinate does
+/// with a jail's terminal, which a re-assembled set of ports could not answer.
+struct ADaemonServingAJailedSession {
+    _data_dir: tempfile::TempDir,
+    /// The daemon itself, held so the jail stays registered in the registry the coordinate below
+    /// resolves terminals out of.
+    _daemon: tddy_daemon::connection_service::ConnectionServiceImpl,
+    terminals: tddy_terminal_rpc::TerminalSessionServiceImpl,
+    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+}
+
+impl ADaemonServingAJailedSession {
+    async fn running_a_jail() -> Self {
+        let data_dir = tempfile::tempdir().expect("a data dir");
+        let (stdout_tx, _) = broadcast::channel(64);
+        let (stdin_tx, stdin_rx) = mpsc::unbounded_channel();
+
+        let daemon = tddy_daemon::test_util::test_service(data_dir.path().to_path_buf());
+        daemon
+            .sandbox_sessions()
+            .insert(
+                SESSION_ID.to_string(),
+                Arc::new(SandboxSessionState::new(SandboxSessionStateInit {
+                    pid: 4242,
+                    worktree_path: PathBuf::from("/unused-by-the-terminal-surface"),
+                    stdout_tx,
+                    capture: Arc::new(Mutex::new(TerminalCapture::new())),
+                    stdin_tx,
+                    ready_marker: PathBuf::from("/unused-by-the-terminal-surface"),
+                    handle: an_exited_sandbox_process(),
+                    managed_workflow: None,
+                })),
+            )
+            .await;
+
+        ADaemonServingAJailedSession {
+            _data_dir: data_dir,
+            terminals: daemon.terminal_session_service(),
+            _daemon: daemon,
+            stdin_rx,
+        }
+    }
+
+    /// A browser screen takes the session's terminal control, as clicking "Claim terminal" does.
+    async fn a_browser_screen_claims_control(&self) {
+        let granted = self
+            .terminals
+            .claim_terminal_control(Request::new(ClaimTerminalControlRequest {
+                session_token: TEST_TOKEN.to_string(),
+                session_id: SESSION_ID.to_string(),
+                screen_id: A_BROWSER_SCREEN.to_string(),
+                steal: false,
+            }))
+            .await
+            .expect("a screen may claim an uncontrolled session")
+            .into_inner();
+        assert!(
+            granted.granted,
+            "the lease these tests are about was never taken"
+        );
+    }
+
+    /// The in-jail bridge's `SendTerminalInput`. It carries no control token, because
+    /// `tddy-sandbox-app` has none to send and no RPC to claim one with.
+    async fn the_jail_sends(&self, keystrokes: &[u8]) {
+        self.terminals
+            .send_terminal_input(Request::new(a_jails_input(keystrokes)))
+            .await
+            .expect("the in-jail bridge's input reaches its own PTY");
+    }
+
+    /// The in-jail bridge's open `StreamSessionTerminalIO`, and the handle it types on.
+    ///
+    /// The returned sender is the client half of that stream: dropping it ends the bidi call, which
+    /// is why the caller holds it for the test's duration.
+    async fn the_jails_open_terminal_stream(&self) -> mpsc::UnboundedSender<SessionTerminalInput> {
+        let (types, chunks) = mpsc::unbounded_channel();
+        types
+            .send(a_jails_input(b"\x1b]resize;120;40\x07"))
+            .expect("the stream's first frame");
+        self.terminals
+            .stream_session_terminal_io(Request::new(tddy_rpc::Streaming::new(
+                tokio_stream::wrappers::UnboundedReceiverStream::new(chunks).map(Ok),
+            )))
+            .await
+            .expect("the in-jail bridge may open its own terminal stream");
+        types
+    }
+
+    /// The next bytes handed to the jail's stdin.
+    async fn input_reaching_the_jails_pty(&mut self) -> Bytes {
+        timeout(FRAME_TIMEOUT, self.stdin_rx.recv())
+            .await
+            .expect("input reaches the jail's PTY")
+            .expect("the jail's stdin is still open")
+    }
+}
+
+/// A frame from the in-jail bridge: authenticated, addressed at the session's one terminal, and
+/// carrying **no** `control_token` — the absence these tests are about.
+fn a_jails_input(data: &[u8]) -> SessionTerminalInput {
+    SessionTerminalInput {
+        session_token: TEST_TOKEN.to_string(),
+        session_id: SESSION_ID.to_string(),
+        data: data.to_vec(),
+        terminal_id: String::new(),
+        control_token: String::new(),
+        input_offset: 0,
+        mode: StreamReplayMode::Tail as i32,
+        from_offset: 0,
+        initial_cols: 0,
+        initial_rows: 0,
+    }
+}
+
+#[tokio::test]
+async fn forwards_a_jails_input_to_its_pty_while_a_browser_screen_holds_the_lease() {
+    // Given a jail whose session's terminal control a browser screen holds
+    let mut daemon = ADaemonServingAJailedSession::running_a_jail().await;
+    daemon.a_browser_screen_claims_control().await;
+
+    // When the in-jail bridge sends a keystroke
+    daemon.the_jail_sends(b"whoami\r").await;
+
+    // Then it reaches the PTY: the lease arbitrates between browser screens, and the bridge is not
+    // one — it is the process that owns this PTY, so a screen's claim must not sever its input
+    assert_eq!(
+        daemon.input_reaching_the_jails_pty().await,
+        Bytes::from_static(b"whoami\r")
+    );
+}
+
+#[tokio::test]
+async fn keeps_forwarding_a_jails_open_stream_when_a_browser_screen_claims_the_lease_mid_stream() {
+    // Given a jail whose in-jail bridge already has its bidi stream open and forwarding
+    let mut daemon = ADaemonServingAJailedSession::running_a_jail().await;
+    let jail_types = daemon.the_jails_open_terminal_stream().await;
+    assert_eq!(
+        daemon.input_reaching_the_jails_pty().await,
+        Bytes::from_static(b"\x1b]resize;120;40\x07"),
+        "the stream's first frame reached the PTY"
+    );
+
+    // When a browser screen claims control while that stream is open, and the jail types on
+    daemon.a_browser_screen_claims_control().await;
+    jail_types
+        .send(a_jails_input(b"whoami\r"))
+        .expect("the stream is still open");
+
+    // Then the keystroke still reaches the PTY. The per-chunk re-check ends a *screen's* input
+    // forwarder when it loses the lease; ending the jail's would stop the user's typing with no
+    // error frame and no visible cause, while output kept flowing
+    assert_eq!(
+        daemon.input_reaching_the_jails_pty().await,
+        Bytes::from_static(b"whoami\r")
+    );
 }

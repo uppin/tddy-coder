@@ -49,6 +49,17 @@ const UNSERVED_METHODS: [&str; 2] = ["StreamSessionTerminalIO", "WatchTerminalCo
 /// [`TerminalManager`](super::terminal_manager::TerminalManager) and one control lease — a second
 /// manager here would mean a terminal started through this coordinate was invisible to the session
 /// that owns it.
+///
+/// # A process that cannot name its own OS user serves no terminal
+///
+/// [`current_os_user`](super::terminal_manager::current_os_user) reads the passwd entry of this
+/// process's effective uid and falls back to `$USER`. If both come up empty, all seven served
+/// methods answer `PERMISSION_DENIED`, where the pre-move `connection.ConnectionService` handlers
+/// had no such gate. That is deliberate and not softened here: every one of those methods reaches
+/// a PTY, `StartTerminalSession` resolves the login shell *from the named user*, and a terminal
+/// whose owning OS user this process cannot name is one nothing downstream can attribute. Naming
+/// some other user instead — a literal, a uid, "root" — would spawn a shell under an identity
+/// nobody asked for, which is worse than a refusal a caller can read.
 #[must_use]
 pub fn coder_terminal_session_entry(svc: Arc<SessionConnectionService>) -> ServiceEntry {
     let served = build_terminal_session_entry(TerminalSessionPorts {
@@ -166,10 +177,23 @@ impl CoderTerminalControl {
 
 #[async_trait]
 impl TerminalControl for CoderTerminalControl {
+    /// The lease's own `granted` flag decides the answer, rather than every outcome being reported
+    /// as a grant. [`SessionConnectionService::claim_terminal_control`] grants unconditionally
+    /// today, so this is one arm in practice — but mapping a refusal to a grant is how a screen
+    /// would be handed a token the lease just declined to give it, and the flag the pre-move
+    /// handler propagated is the only thing that says which happened. A refusal names no rival
+    /// holder because this process arbitrates between none: `holder_screen_id` answers `None` for
+    /// the same reason.
     async fn claim(&self, _session_id: &str, screen_id: &str, steal: bool) -> ControlClaim {
         let claim = self.svc.claim_terminal_control(screen_id, steal);
-        ControlClaim::Granted {
-            control_token: claim.control_token,
+        if claim.granted {
+            ControlClaim::Granted {
+                control_token: claim.control_token,
+            }
+        } else {
+            ControlClaim::Denied {
+                holder_screen_id: String::new(),
+            }
         }
     }
 
@@ -191,8 +215,11 @@ impl TerminalControl for CoderTerminalControl {
 /// The bash "tabs" this coder runs, backed by its
 /// [`TerminalManager`](super::terminal_manager::TerminalManager).
 ///
-/// The manager is single-session, so `session_id` addresses nothing here — every terminal it holds
-/// belongs to the one session this process is running.
+/// The manager is single-session, so `session_id` *selects* nothing here — every terminal it holds
+/// belongs to the one session this process is running, and `stop` and `list` resolve by
+/// `terminal_id` alone (as does [`CoderTerminalSessionStore`]).
+/// [`start`](CoderTerminalRoster::start) is the one method that would *record* the id it is given,
+/// which is why it is the one that checks it against the session this participant serves.
 pub struct CoderTerminalRoster {
     svc: Arc<SessionConnectionService>,
 }
@@ -208,10 +235,33 @@ impl CoderTerminalRoster {
 impl TerminalRoster for CoderTerminalRoster {
     /// Started shells run in the session's worktree — the coder's own agent working directory —
     /// and as the coder's own OS user, because this process already *is* that user.
+    ///
+    /// # The id the PTY is registered under is this participant's, never the request's
+    ///
+    /// A started terminal is recorded in the PTY and task registries under a session id
+    /// ([`tddy_pty::PtySpawnSpec::session_id`], which becomes `TaskHandle::session_id` — the field
+    /// auth scoping keys on), so the id that reaches
+    /// [`TerminalManager::start_terminal`](super::terminal_manager::TerminalManager::start_terminal)
+    /// is `self.svc.session_id`: the one session this process runs. Taking the request's would let
+    /// a caller choose the name its terminal is filed under.
+    ///
+    /// A request naming a *different* session is **refused** rather than quietly served as this
+    /// one. The daemon's roster cannot serve a session it does not hold either — it looks the
+    /// session up and answers `FAILED_PRECONDITION` when it is absent — so refusing (with that
+    /// same code) is what keeps the two servers answering a misaddressed start the same way, which
+    /// is the point of serving one implementation on both. Quietly substituting would have this
+    /// server succeed where the other fails, and tell the caller a terminal now exists in a
+    /// session it does not.
     async fn start(&self, session_id: &str, shell_path: &str) -> Result<String, Status> {
+        let served = self.svc.session_id.trim();
+        if session_id != served {
+            return Err(Status::failed_precondition(format!(
+                "this session participant runs session {served}, not {session_id}"
+            )));
+        }
         self.svc
             .terminal_manager
-            .start_terminal(session_id, self.svc.worktree.clone(), shell_path)
+            .start_terminal(served, self.svc.worktree.clone(), shell_path)
             .await
             .map(|handle| handle.terminal_id.clone())
             .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))

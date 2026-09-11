@@ -43,7 +43,7 @@ function aRecordingTransport(): Transport & {
       }
       return {
         stream: true as const,
-        service: ConnectionService,
+        service: TerminalSessionService,
         method: TerminalSessionService.method.streamTerminalOutput,
         message: (async function* () {})(),
         header: new Headers(),

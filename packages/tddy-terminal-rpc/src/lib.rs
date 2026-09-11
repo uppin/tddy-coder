@@ -50,7 +50,7 @@ pub mod session;
 
 pub use bridge::{
     history_into_tonic_stream, into_tonic_stream, serve_get_terminal_history,
-    serve_get_terminal_history_with, serve_send_terminal_input,
+    serve_get_terminal_history_with, serve_send_terminal_input, serve_send_terminal_input_to,
     serve_stream_session_terminal_io_with, serve_stream_terminal_output,
     serve_stream_terminal_output_with,
 };

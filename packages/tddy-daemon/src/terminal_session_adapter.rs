@@ -69,9 +69,9 @@ impl tddy_terminal_rpc::session::TerminalSession for DaemonTerminalSession {
 
 /// The PTY of a sandboxed session exposed to the unified bridge.
 ///
-/// A sandboxed session's terminal has three of the six things the trait asks for and none of the
-/// other three, and this adapter answers each of the three absences with what the surface did
-/// *before* it went through the bridge rather than by inventing the capability:
+/// A sandboxed session's terminal lacks four of the things the trait asks for, and this adapter
+/// answers each of the four absences with what the surface did *before* it went through the bridge
+/// rather than by inventing the capability:
 ///
 /// - **Input offsets are not acknowledged.** `stdin_tx` is a plain channel into the jail with no
 ///   applied-byte counter behind it, so [`Self::subscribe_acked_offset`] hands out a watch that
@@ -83,6 +83,10 @@ impl tddy_terminal_rpc::session::TerminalSession for DaemonTerminalSession {
 ///   closing when the jail died, so [`Self::subscribe_pty_done`] derives the watch from exactly
 ///   that: a probe task fires it once the broadcast closes, and stands down when the stream that
 ///   asked for it is gone.
+/// - **There is no control token.** The in-jail bridge that drives this PTY sends none
+///   (`tddy-sandbox-app`'s `daemon_client`), and has no way to claim one, so
+///   [`Self::requires_control`] answers `false` — as the old sandbox path did by forwarding to
+///   `stdin_tx` and returning before the lease was ever consulted.
 pub struct SandboxTerminalSession {
     state: Arc<SandboxSessionState>,
 }
@@ -135,6 +139,16 @@ impl tddy_terminal_rpc::session::TerminalSession for SandboxTerminalSession {
     /// does not frame), then stops polling for changes.
     fn subscribe_acked_offset(&self) -> watch::Receiver<u64> {
         watch::channel(0u64).1
+    }
+
+    /// The lease arbitrates between browser *screens*; the caller here is the in-jail bridge that
+    /// owns this PTY and sends no control token at all.
+    ///
+    /// Gating it on the lease means a screen claiming control severs the jail's own I/O: the open
+    /// is refused `FAILED_PRECONDITION`, or an open stream's input forwarder ends while output
+    /// keeps flowing, so the user's typing stops with no error frame and no visible cause.
+    fn requires_control(&self) -> bool {
+        false
     }
 
     /// Nothing here holds the jail's PTY master, so there is no SIGWINCH to send.

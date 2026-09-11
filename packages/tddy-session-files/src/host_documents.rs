@@ -38,14 +38,29 @@ pub struct HostDocumentBytes {
     pub byte_size: u64,
 }
 
-fn validate_relative_path(relative_path: &str) -> Result<(), Status> {
+/// The one refusal for the proto3 zero value, shared by the path gate and the root resolver so
+/// there is a single sentence for it.
+const UNSPECIFIED_SCOPE_ERR: &str = "host document scope must be specified";
+
+/// The shape rules every scope shares: a non-empty, relative path with no `.` or `..` segment.
+///
+/// Private because a shape check alone is not the gate — [`validate_relative_path`] is, and it adds
+/// the per-scope rules. Exporting this half on its own is how a caller ends up holding the lenient
+/// spelling.
+fn validate_path_shape(relative_path: &str) -> Result<(), Status> {
     if relative_path.is_empty() {
         return Err(Status::invalid_argument("relative_path must not be empty"));
     }
     if relative_path.starts_with('/') || relative_path.starts_with('\\') {
         return Err(Status::invalid_argument("relative_path must be relative"));
     }
-    for comp in Path::new(relative_path).components() {
+    // The walk reads the path with backslashes already taken as separators, the way every lookup
+    // below reads it (`relative_path.replace('\\', "/")`). On Unix `..\secret` is one legal
+    // filename rather than a traversal, so checking the raw form here and the slashed form at the
+    // join is how a request gets refused for one reason while being looked up as something else
+    // entirely — the rule `validate_rel_path_shape` states for the worktree reads.
+    let slashed = relative_path.replace('\\', "/");
+    for comp in Path::new(&slashed).components() {
         match comp {
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
                 return Err(Status::invalid_argument("relative_path must not traverse"));
@@ -59,6 +74,115 @@ fn validate_relative_path(relative_path: &str) -> Result<(), Status> {
         }
     }
     Ok(())
+}
+
+/// Refuse a relative path that could escape its scope's root, and a scope that names no root.
+///
+/// This is the **filesystem-independent** half of the check — the half [`resolve_host_document`]
+/// applies before anything is read — and it is deliberately separate from containment: a refusal
+/// must not depend on whether a file happens to exist, so the syntactic guard runs on its own and
+/// canonicalize-and-contain ([`contained_in_scope_root`]) runs afterwards, against the resolved
+/// scope root. Two spellings of "is this inside the root" is how one of them ends up being the
+/// lenient one, and this particular check decides whether a caller can read an arbitrary file as
+/// the session's OS user — so this is the only spelling, and the served path calls it.
+///
+/// An unspecified scope is refused rather than defaulted. It is proto3's zero value, so an
+/// uninitialised or forward-incompatible request arrives carrying it, and every scope resolves to a
+/// *different* root — picking one would read a file from the wrong place and answer as if that were
+/// what was asked for.
+///
+/// The per-scope rules, each stated once:
+///
+/// * `SESSION_UPLOAD` and `STAGED_ATTACHMENT` address a file as exactly `<id>/<file_name>`, both
+///   segments pure basenames — [`validate_two_segment_relative_path`], because both segments are
+///   untrusted client input that become path components.
+/// * `SESSION_ARTIFACT` and `PROJECT_REPO` may name a nested path, but its last segment is a file
+///   name rather than something [`validate_segment`] would refuse.
+/// * `SESSION_WORKTREE` has one more gate — the path must be surfaced by the repo's git listing —
+///   and it needs the resolved root, so it belongs to the filesystem-dependent half and lives in
+///   [`resolve_host_document`] beside the root it reads.
+pub fn validate_relative_path(scope: HostDocumentScope, relative_path: &str) -> Result<(), Status> {
+    if scope == HostDocumentScope::Unspecified {
+        return Err(Status::invalid_argument(UNSPECIFIED_SCOPE_ERR));
+    }
+    validate_path_shape(relative_path)?;
+    match scope {
+        HostDocumentScope::SessionUpload => {
+            validate_two_segment_relative_path(relative_path, "session upload", "upload_id")
+        }
+        HostDocumentScope::StagedAttachment => {
+            validate_staged_attachment_relative_path(relative_path)
+        }
+        HostDocumentScope::SessionWorktree => Ok(()),
+        HostDocumentScope::SessionArtifact | HostDocumentScope::ProjectRepo => {
+            let basename = Path::new(relative_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| Status::invalid_argument("relative_path must be a basename"))?;
+            validate_segment(basename)?;
+            Ok(())
+        }
+        // Refused above; listed rather than folded into a catch-all so a scope added to the proto
+        // has to name its own rule here instead of inheriting one.
+        HostDocumentScope::Unspecified => Err(Status::invalid_argument(UNSPECIFIED_SCOPE_ERR)),
+    }
+}
+
+/// Refuse a path that leaves `scope_root` once every symlink on it has been followed, and resolve
+/// it to the canonical file the read will open.
+///
+/// The filesystem-dependent half of the gate [`validate_relative_path`] opens, applied *after* it
+/// and only by way of it. It reuses [`contained_canonical_dir`] — the guard the upload writer, the
+/// upload delete, the staging writer and the staged delete all share — rather than spelling
+/// containment a fifth time: `.claude/creds -> ../../.env` canonicalizes to a path outside the root
+/// while passing every syntactic check there is.
+///
+/// The *file name* is canonicalized too, not just its parent: [`std::fs::read`] follows symlinks,
+/// so a lexical containment check on the (already-canonical) parent is not enough — the last
+/// segment may itself be a link out of the root.
+///
+/// Nothing is created or written here; a path whose parent or file is absent is `NOT_FOUND`.
+pub fn contained_in_scope_root(scope_root: &Path, relative_path: &str) -> Result<PathBuf, Status> {
+    if !scope_root.exists() {
+        return Err(Status::not_found("host document not found"));
+    }
+    let joined = scope_root.join(relative_path.replace('\\', "/"));
+    let canonical_root = scope_root.canonicalize().map_err(|e| {
+        log::error!(
+            "contained_in_scope_root: canonicalize scope root {:?} failed: {e}",
+            scope_root
+        );
+        Status::internal(format!("failed to resolve scope root: {e}"))
+    })?;
+    let parent = joined
+        .parent()
+        .ok_or_else(|| Status::invalid_argument("relative_path must name a file"))?;
+    if !parent.exists() {
+        return Err(Status::not_found("host document not found"));
+    }
+    let canonical_parent = contained_canonical_dir(scope_root, parent)?;
+    if !canonical_parent.starts_with(&canonical_root) {
+        return Err(Status::invalid_argument("relative_path escapes scope root"));
+    }
+
+    let file_name = joined
+        .file_name()
+        .ok_or_else(|| Status::invalid_argument("relative_path must name a file"))?;
+    let target = canonical_parent.join(file_name);
+    if !target.is_file() {
+        return Err(Status::not_found("host document not found"));
+    }
+    let canonical_file = target.canonicalize().map_err(|e| {
+        log::error!(
+            "contained_in_scope_root: canonicalize {:?} failed: {e}",
+            target
+        );
+        Status::internal(format!("failed to resolve host document: {e}"))
+    })?;
+    if !canonical_file.starts_with(&canonical_root) {
+        return Err(Status::invalid_argument("relative_path escapes scope root"));
+    }
+    Ok(canonical_file)
 }
 
 /// The two-basename address shape both `HOST_DOCUMENT_SCOPE_SESSION_UPLOAD` and
@@ -78,7 +202,7 @@ pub fn validate_two_segment_relative_path(
     addressed: &str,
     id_field: &str,
 ) -> Result<(), Status> {
-    validate_relative_path(relative_path)?;
+    validate_path_shape(relative_path)?;
     let parts: Vec<&str> = relative_path.split('/').collect();
     if parts.len() != 2 {
         return Err(Status::invalid_argument(format!(
@@ -147,9 +271,7 @@ fn resolve_scope_root(
         HostDocumentScope::StagedAttachment => Ok(
             crate::session_attachment_staging::staging_root_for(os_user, staging_base_dir),
         ),
-        HostDocumentScope::Unspecified => Err(Status::invalid_argument(
-            "host document scope must be specified",
-        )),
+        HostDocumentScope::Unspecified => Err(Status::invalid_argument(UNSPECIFIED_SCOPE_ERR)),
     }
 }
 
@@ -166,6 +288,11 @@ pub struct ResolvedHostDocument {
 /// `relative_path` is POSIX-separated, no `.`/`..`, not absolute, and canonicalize-and-contained
 /// under the resolved scope root. The owning daemon performs the resolution under its own
 /// `os_user` mapping; the referencing client's host grants no access.
+///
+/// Both halves of the gate are the crate's exported ones — [`validate_relative_path`] and
+/// [`contained_in_scope_root`] — rather than a second copy inlined here, so a caller reaching for
+/// the crate's path gate gets the check this path runs. The one rule that cannot live in either is
+/// `SESSION_WORKTREE`'s git listing, which needs the root the resolver just resolved.
 pub fn resolve_host_document(
     os_user: &str,
     tddy_data_dir: &Path,
@@ -184,12 +311,9 @@ pub fn resolve_host_document(
         project_id,
     )?;
 
-    if scope == HostDocumentScope::SessionUpload {
-        validate_two_segment_relative_path(relative_path, "session upload", "upload_id")?;
-    } else if scope == HostDocumentScope::StagedAttachment {
-        validate_staged_attachment_relative_path(relative_path)?;
-    } else if scope == HostDocumentScope::SessionWorktree {
-        validate_relative_path(relative_path)?;
+    validate_relative_path(scope, relative_path)?;
+
+    if scope == HostDocumentScope::SessionWorktree {
         let rel_slashed = relative_path.replace('\\', "/");
         let files = git_listed_files(&scope_root)?;
         if !files.iter().any(|f| f == &rel_slashed) {
@@ -201,70 +325,24 @@ pub fn resolve_host_document(
                 "file is not a listed worktree file",
             ));
         }
-    } else {
-        validate_relative_path(relative_path)?;
-        let basename = Path::new(relative_path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| Status::invalid_argument("relative_path must be a basename"))?;
-        validate_segment(basename)?;
     }
 
-    if !scope_root.exists() {
-        return Err(Status::not_found("host document not found"));
-    }
-
-    let joined = scope_root.join(relative_path.replace('\\', "/"));
-    let canonical_root = scope_root.canonicalize().map_err(|e| {
-        log::error!(
-            "resolve_host_document: canonicalize scope root {:?} failed: {e}",
-            scope_root
-        );
-        Status::internal(format!("failed to resolve scope root: {e}"))
-    })?;
-    let parent = joined
-        .parent()
-        .ok_or_else(|| Status::invalid_argument("relative_path must name a file"))?;
-    std::fs::create_dir_all(parent).ok();
-    let canonical_parent = if parent.exists() {
-        contained_canonical_dir(&scope_root, parent)?
-    } else {
-        return Err(Status::not_found("host document not found"));
-    };
-    if !canonical_parent.starts_with(&canonical_root) {
-        return Err(Status::invalid_argument("relative_path escapes scope root"));
-    }
-
-    let file_name = joined
-        .file_name()
-        .ok_or_else(|| Status::invalid_argument("relative_path must name a file"))?;
-    let target = canonical_parent.join(file_name);
-    if !target.is_file() {
-        return Err(Status::not_found("host document not found"));
-    }
-    // Canonicalize the full file path so a symlinked file inside the scope root cannot
-    // escape: `std::fs::read` follows symlinks, so a lexical containment check on the
-    // (already-canonical) parent is not enough — the file name itself may be a link.
-    let canonical_file = target.canonicalize().map_err(|e| {
-        log::error!(
-            "resolve_host_document: canonicalize {:?} failed: {e}",
-            target
-        );
-        Status::internal(format!("failed to resolve host document: {e}"))
-    })?;
-    if !canonical_file.starts_with(&canonical_root) {
-        return Err(Status::invalid_argument("relative_path escapes scope root"));
-    }
+    let canonical_file = contained_in_scope_root(&scope_root, relative_path)?;
 
     // A staged file is only whole once its uploader wrote the final chunk and dropped the
     // completeness marker beside it. Refuse an in-progress or aborted upload here — the owning
     // host is the only party that can tell truncated bytes from a short document, so a fetch
-    // must not be able to hand a caller half a file that reads as a whole one.
+    // must not be able to hand a caller half a file that reads as a whole one. The marker is
+    // looked for beside the file the read will actually open, which is what the resolution above
+    // returns.
     if scope == HostDocumentScope::StagedAttachment {
-        let file_name_str = file_name.to_string_lossy();
+        let (dir, file_name) = canonical_file
+            .parent()
+            .zip(canonical_file.file_name())
+            .ok_or_else(|| Status::invalid_argument("relative_path must name a file"))?;
         let marker = crate::session_attachment_staging::staged_complete_marker(
-            &canonical_parent,
-            &file_name_str,
+            dir,
+            &file_name.to_string_lossy(),
         );
         if !marker.exists() {
             return Err(Status::failed_precondition(
@@ -566,6 +644,39 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.code, Code::InvalidArgument);
+    }
+
+    /// The resolver applies the *per-scope* half of the gate too, not only the shape rules every
+    /// scope shares: `SESSION_UPLOAD` addresses a file as exactly `<upload_id>/<file_name>`, so a
+    /// bare basename names no drop to read it out of. Asserted here, through the served read,
+    /// because the rule holding in [`validate_relative_path`] says nothing about this path calling
+    /// it with the scope in hand.
+    #[test]
+    fn read_host_document_refuses_a_session_upload_path_that_names_no_drop() {
+        // Given — a session holding uploads/u1/notes.txt
+        let (data, _session_dir) =
+            a_session_with_artifacts(None, Some(("u1", "notes.txt", b"notes")));
+
+        // When — the file is addressed without its drop
+        let err = read_host_document_bytes(
+            &caller(),
+            data.path(),
+            unused_staging_base(),
+            HostDocumentScope::SessionUpload,
+            SESSION_ID,
+            "",
+            "notes.txt",
+        )
+        .unwrap_err();
+
+        // Then
+        assert_eq!(
+            (err.code, err.message.as_str()),
+            (
+                Code::InvalidArgument,
+                "session upload relative_path must be <upload_id>/<file_name>"
+            )
+        );
     }
 
     /// AC(hd-5) — an absolute `relative_path` is refused.

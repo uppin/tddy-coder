@@ -78,14 +78,14 @@ function unpushedPullReason(baseBranch: string, branch: string, pushError: strin
 export interface PrStackScreenProps {
   session: SessionEntry;
   client?: ConnectionClient;
+  /** The session-files service on the same host as `client` — the Start-session dialog stages
+   *  its attachments through it. */
+  sessionFilesClient?: SessionFilesClient;
   /**
    * The worktree service on the same host as `client` — the Start-session dialog's host-document
    * picker browses worktrees through it. Absent for the same reason `client` can be: no daemon is
    * reachable yet, and the dialog is not offered at all without both.
    */
-  /** The session-files service on the same host as `client` — the Start-session dialog stages
-   *  its attachments through it. */
-  sessionFilesClient?: SessionFilesClient;
   worktreeClient?: WorktreeClient;
   sessionToken?: string;
   /**

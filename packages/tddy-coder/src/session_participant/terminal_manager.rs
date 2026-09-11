@@ -309,9 +309,13 @@ fn passwd_login_shell() -> Option<String> {
 #[must_use]
 pub fn current_os_user() -> Option<String> {
     let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
+    // Generous, because a user in a large directory service can have a long entry; getpwuid_r
+    // reports ERANGE rather than truncating, so a too-small buffer would just be a lookup failure.
     let mut buf = vec![0u8; 16384];
     let mut result = std::ptr::null_mut();
+    // SAFETY: geteuid reads this process's own credentials and takes no arguments.
     let uid = unsafe { libc::geteuid() };
+    // SAFETY: every pointer is to a live local, and `buf.len()` describes `buf` exactly.
     let ret = unsafe {
         libc::getpwuid_r(
             uid,
@@ -322,8 +326,11 @@ pub fn current_os_user() -> Option<String> {
         )
     };
     if ret == 0 && !result.is_null() {
+        // SAFETY: `result` is non-null, so getpwuid_r filled `passwd` and pointed `result` at it.
         let passwd = unsafe { &*result };
         if !passwd.pw_name.is_null() {
+            // SAFETY: `pw_name` was just checked non-null; it points at a NUL-terminated name
+            // inside `buf`, which outlives the copy this makes.
             let name = unsafe { std::ffi::CStr::from_ptr(passwd.pw_name) }
                 .to_string_lossy()
                 .into_owned();

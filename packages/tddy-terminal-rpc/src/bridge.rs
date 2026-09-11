@@ -402,6 +402,10 @@ fn replay_mode_from_i32(mode: i32) -> StreamReplayMode {
 /// the control token on each chunk via `verify_control` and ending the forwarder when control is
 /// lost (matches the daemon's per-chunk control-token check).
 ///
+/// A session that reports itself not [`TerminalSession::requires_control`] is not re-checked at
+/// all: its input comes from the process that owns the PTY rather than from a competing screen, so
+/// there is no token to verify and a lease taken by some screen must not end the forwarder.
+///
 /// The caller remains responsible for auth (session-token resolution + OS-user mapping) and the
 /// FIRST message's control-token check; this function only verifies subsequent chunks.
 pub async fn serve_stream_session_terminal_io_with<S, F, Fut>(
@@ -443,6 +447,7 @@ where
 
     // Spawn a task to forward subsequent input chunks to stdin, verifying the control token on
     // each chunk. Ends when the client stream ends, a stream error occurs, or control is lost.
+    let control_gated = session.requires_control();
     let session_for_input = Arc::clone(&session);
     tokio::spawn(async move {
         use tokio_stream::StreamExt;
@@ -450,7 +455,7 @@ where
         while let Some(item) = in_stream.next().await {
             match item {
                 Ok(msg) => {
-                    if !verify_control(&session_id, &msg.control_token).await {
+                    if control_gated && !verify_control(&session_id, &msg.control_token).await {
                         break;
                     }
                     if !msg.data.is_empty() {
@@ -529,10 +534,20 @@ pub async fn serve_send_terminal_input(
         .get_terminal(&req.session_id, &terminal_id)
         .await
         .ok_or_else(|| Status::not_found("terminal not found or not running"))?;
+    Ok(serve_send_terminal_input_to(&session, req))
+}
+
+/// Same as [`serve_send_terminal_input`] for a caller that has already resolved the terminal —
+/// which the served surface has, because whether the call needs a control token at all is
+/// [`TerminalSession::requires_control`]'s answer and only the resolved terminal can give it.
+pub fn serve_send_terminal_input_to(
+    session: &Arc<dyn TerminalSession>,
+    req: crate::proto::terminal_session::SessionTerminalInput,
+) -> crate::proto::terminal_session::SendTerminalInputResponse {
     if !req.data.is_empty() {
         session.send_input(Bytes::from(req.data), req.input_offset);
     }
-    Ok(crate::proto::terminal_session::SendTerminalInputResponse {})
+    crate::proto::terminal_session::SendTerminalInputResponse {}
 }
 
 /// Drain a `serve_stream_terminal_output` receiver into a `tonic`-compatible `ReceiverStream` of

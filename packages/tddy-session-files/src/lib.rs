@@ -38,9 +38,6 @@ pub mod session_uploads;
 pub mod session_workflow_files;
 pub mod stack_doc_attachments;
 
-use tddy_rpc::Status;
-use tddy_worktree_service::worktree_files::validate_rel_path_shape;
-
 /// Where the agent's guidance is read from, for one session — the agent-context-sync trait, which
 /// arrived with the module that owns it.
 ///
@@ -61,76 +58,16 @@ pub use tddy_service::proto::types::HostDocumentScope;
 
 pub use service::{build_session_files_entry, SessionFilesPorts, SessionFilesServiceImpl};
 
-/// Refuse a relative path that could escape its scope's root, and a scope that names no root.
+/// The two halves of the path gate every host-document read passes through.
 ///
-/// This is the **filesystem-independent** half of the check, and it is deliberately separate from
-/// containment for the reason [`validate_rel_path_shape`] gives: a refusal must not depend on
-/// whether a file happens to exist, so the syntactic guard runs on its own and canonicalize-and-
-/// contain runs afterwards, against the resolved scope root.
-///
-/// It delegates the shape rules — absolute paths, leading separators, `..` traversal, and a
-/// backslash read as a separator the same way the lookup will read it — to that one function rather
-/// than restating them. Two spellings of "is this inside the root" is how one of them ends up being
-/// the lenient one, and this particular check decides whether a caller can read an arbitrary file as
-/// the session's OS user.
-///
-/// An unspecified scope is refused rather than defaulted. It is proto3's zero value, so an
-/// uninitialised or forward-incompatible request arrives carrying it, and every scope resolves to a
-/// *different* root — picking one would read a file from the wrong place and answer as if that were
-/// what was asked for.
-///
-/// `SESSION_UPLOAD` and `STAGED_ATTACHMENT` address a file as exactly `<id>/<file_name>`, both
-/// segments pure basenames — the rule [`session_file_upload::validate_segment`] states, applied
-/// here through [`host_documents::validate_two_segment_relative_path`] rather than restated, because
-/// both segments are untrusted client input that become path components.
-pub fn validate_relative_path(scope: HostDocumentScope, relative_path: &str) -> Result<(), Status> {
-    if scope == HostDocumentScope::Unspecified {
-        return Err(Status::invalid_argument(
-            "host document scope must be specified",
-        ));
-    }
-    if relative_path.is_empty() {
-        return Err(Status::invalid_argument("relative_path must not be empty"));
-    }
-    validate_rel_path_shape(relative_path)?;
-    match scope {
-        HostDocumentScope::SessionUpload => host_documents::validate_two_segment_relative_path(
-            relative_path,
-            "session upload",
-            "upload_id",
-        ),
-        HostDocumentScope::StagedAttachment => host_documents::validate_two_segment_relative_path(
-            relative_path,
-            "staged attachment",
-            "staging_id",
-        ),
-        _ => Ok(()),
-    }
-}
-
-/// Refuse a path that leaves `scope_root` once every symlink on it has been followed.
-///
-/// The filesystem-dependent half of the gate [`validate_relative_path`] opens, kept separate for
-/// the reason that function gives and applied *after* it. It reuses
-/// [`session_file_upload::contained_canonical_dir`] — the guard the upload writer, the upload
-/// delete, the staging writer and the staged delete all share — rather than spelling containment a
-/// fifth time: `.claude/creds -> ../../.env` canonicalizes to a path outside the root while passing
-/// every syntactic check there is, and a second spelling of this check is how one of them ends up
-/// being the lenient one.
-pub fn contained_in_scope_root(
-    scope_root: &std::path::Path,
-    relative_path: &str,
-) -> Result<std::path::PathBuf, Status> {
-    let joined = scope_root.join(relative_path.replace('\\', "/"));
-    let parent = joined
-        .parent()
-        .ok_or_else(|| Status::invalid_argument("relative_path must name a file"))?;
-    let canonical_parent = session_file_upload::contained_canonical_dir(scope_root, parent)?;
-    let file_name = joined
-        .file_name()
-        .ok_or_else(|| Status::invalid_argument("relative_path must name a file"))?;
-    Ok(canonical_parent.join(file_name))
-}
+/// Re-exported from [`host_documents`] rather than declared here, because this crate had both for
+/// one release of this branch and the two disagreed: the exported pair enforced neither
+/// `SESSION_WORKTREE`'s git listing nor the basename rule the served path applies, so a caller
+/// reaching for the crate's advertised gate got the weaker check. Two spellings of "is this inside
+/// the root" is how one of them ends up being the lenient one — so there is one spelling, it lives
+/// beside the resolver that runs it, and [`host_documents::resolve_host_document`] calls both of
+/// these and nothing else.
+pub use host_documents::{contained_in_scope_root, validate_relative_path};
 
 #[cfg(all(test, unix))]
 mod tests {
@@ -139,7 +76,7 @@ mod tests {
     use std::sync::Arc;
 
     use prost::Message as _;
-    use tddy_rpc::{Code, RpcMessage, RpcResult};
+    use tddy_rpc::{Code, RpcMessage, RpcResult, Status};
     use tddy_service::proto::session_files::{
         ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
     };
@@ -310,6 +247,16 @@ mod tests {
         };
         assert_eq!(status.code(), Code::Unauthenticated);
     }
+
+    // -----------------------------------------------------------------------
+    // The path gate, as this crate exports it.
+    //
+    // `validate_relative_path` and `contained_in_scope_root` are re-exports of the two halves
+    // `host_documents::resolve_host_document` runs, so these exercise the served gate rather than
+    // a second copy of it — and they stop compiling if the re-export is dropped. The rules holding
+    // here and the resolver *calling* them are separate claims: the second is pinned beside the
+    // resolver (`host_documents.rs`, the `read_host_document_*` tests).
+    // -----------------------------------------------------------------------
 
     /// A `..` that escapes the scope would read an arbitrary file as the session's OS user, so the
     /// path is checked rather than trusted.

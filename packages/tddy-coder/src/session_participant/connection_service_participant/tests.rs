@@ -170,6 +170,8 @@ use tddy_terminal_rpc::proto::terminal_session as pb;
 
 const TERM_SID: &str = "sess-aaaaaaaa-0000-4000-8000-000000000001";
 const TERM_TOKEN: &str = "caller-token";
+/// A session this participant does not run — the id a misaddressed (or hostile) request names.
+const ANOTHER_SID: &str = "sess-bbbbbbbb-0000-4000-8000-000000000002";
 
 /// The participant's terminal coordinate, over a session whose worktree is `tool_calls_path`.
 fn a_terminal_entry(tool_calls_path: &std::path::Path) -> tddy_rpc::ServiceEntry {
@@ -225,6 +227,64 @@ async fn start_terminal_session_returns_a_fresh_non_main_terminal_id() {
     assert_ne!(
         resp.terminal_id, "main",
         "a started terminal must not reuse the reserved main id"
+    );
+}
+
+/// The session id a started terminal is *filed under* is this participant's, never one the caller
+/// chose: it becomes the `session_id` of the PTY's registered task, the field auth scoping keys
+/// on. So a request naming another session is refused rather than quietly served as this one —
+/// which is also the answer the daemon's roster gives for a session it does not hold, and these
+/// two servers exist to answer alike.
+#[tokio::test]
+async fn start_terminal_session_refuses_a_request_naming_another_session() {
+    // Given a participant serving one session
+    let dir = tempfile::tempdir().unwrap();
+    let entry = a_terminal_entry(dir.path());
+
+    // When a caller asks it to start a terminal for a different session
+    let req = pb::StartTerminalSessionRequest {
+        session_token: TERM_TOKEN.to_string(),
+        session_id: ANOTHER_SID.to_string(),
+        control_token: String::new(),
+    };
+    let result = call(&entry, "StartTerminalSession", req.encode_to_vec()).await;
+
+    // Then it is refused, naming the session this participant does run
+    let RpcResult::Unary(Err(status)) = result else {
+        panic!("starting a terminal for another session must be refused");
+    };
+    assert_eq!(
+        (status.code(), status.message()),
+        (
+            Code::FailedPrecondition,
+            format!("this session participant runs session {TERM_SID}, not {ANOTHER_SID}").as_str()
+        )
+    );
+
+    // And nothing was started under either name
+    let listed = pb::ListTerminalSessionsResponse::decode(
+        &unary_ok(
+            call(
+                &entry,
+                "ListTerminalSessions",
+                pb::ListTerminalSessionsRequest {
+                    session_token: TERM_TOKEN.to_string(),
+                    session_id: TERM_SID.to_string(),
+                }
+                .encode_to_vec(),
+            )
+            .await,
+        )[..],
+    )
+    .expect("decode ListTerminalSessionsResponse");
+    assert_eq!(
+        listed
+            .terminals
+            .iter()
+            .map(|t| t.terminal_id.as_str())
+            .collect::<Vec<_>>(),
+        Vec::<&str>::new(),
+        "a refused start must leave the session with no terminals"
     );
 }
 

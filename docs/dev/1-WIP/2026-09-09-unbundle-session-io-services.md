@@ -875,3 +875,40 @@ belongs to the syncer and no handler goes through it; nor does a FIFO, since bot
 - The cross-host suites start two daemons against one LiveKit container and are genuinely
   load-sensitive: one run of `session_attach_cross_host` failed 1/8 with two tests exceeding 60s and
   passed 8/8 on re-run. Run them individually and re-run a failure in isolation before believing it.
+
+### One boundary stretch, declared rather than passed off as clean
+
+`## Dependencies` says of node 5: *"This PR does NOT move `pty_relay` again, or change the bridge's
+trait shapes."* This node **added a method to that trait** — `TerminalSession::resizable() -> bool`
+in `tddy-terminal-rpc/src/session.rs` — and consumes it in `bridge.rs` to gate the post-resize
+drain. That is a change to the bridge's trait shape, so it is recorded here instead of being filed
+under "boundaries respected".
+
+Why it was taken anyway:
+
+- **It prevents a bug this node's own work would otherwise introduce.** The sandbox unification makes
+  the bridge serve terminals that have no PTY master. The drain exists to discard output produced
+  *before* a resize took effect; with no resize to take effect it instead discards live bytes no
+  replay chunk covers, leaving the client a silent gap. Without the gate, unifying the sandbox path
+  would have traded a duplicated offset loop for a data-loss bug.
+- **It is additive and defaulted**, so no implementor outside the crate changed — which is precisely
+  why `tddy-coder` needed no edit for it, and why node 5's own PR diff is undisturbed.
+- **Node 6 is the trait's first real server.** Node 5 put the bridge in the crate; nothing served
+  `terminal_session.TerminalSessionService` until this node did, so this is the first time the trait
+  met a terminal that cannot resize.
+
+The alternative — leaving the trait alone and special-casing the sandbox inside the bridge — would
+have put a sandbox-shaped branch back into the surface whose whole purpose is to have none, which is
+the duplication this node exists to remove.
+
+What the `## Dependencies` prohibition was protecting against is a predecessor's contract being
+redesigned underneath it mid-flight. An additive defaulted method that no existing implementor
+notices is a different thing, but the row does not say that, so a reviewer of node 5 should know the
+trait grew a method from above. **If that is judged too loose, the fix is to move `resizable()` down
+into node 5's PR**, not to drop the gate.
+
+Three other parent-owned paths appear in this diff and are **not** stretches: `types.proto` was
+created by this node's own red-phase commit (`d6aa2969`) and the `## Dependencies` row crediting node
+1 with it is stale — corrected under *The shared types file arrived here* above; `pty_relay.rs` is a
+seven-line coordinate re-point that `## Affected Packages` explicitly schedules; and
+`pty_registry.rs`'s deletion is the recorded decision not to relocate a six-line re-export.

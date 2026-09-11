@@ -37,6 +37,19 @@ impl ConnectionServiceImpl {
         )
     }
 
+    /// The jailed sessions this daemon runs, as the terminal surface resolves them.
+    ///
+    /// Public for the same reason [`Self::terminal_session_service`] is: a jail's PTY is reached
+    /// through this registry and nowhere else, so asking what the coordinate does with one means
+    /// registering it *here*. A suite that assembled its own registry would be asserting about a
+    /// lookalike whose terminals this daemon's handlers never resolve.
+    #[must_use]
+    pub fn sandbox_sessions(
+        &self,
+    ) -> Arc<tddy_daemon_sandbox::sandbox_session::SandboxSessionManager> {
+        Arc::clone(&self.sandbox_manager)
+    }
+
     /// The `terminal_session.TerminalSessionService` entry this daemon registers.
     ///
     /// Built from the *same* managers every other part of this daemon reaches a PTY through, so the

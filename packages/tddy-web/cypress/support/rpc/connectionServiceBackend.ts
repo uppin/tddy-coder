@@ -13,11 +13,12 @@
  * previous `connectionRpcs.ts` intercept helpers cannot observe LiveKit-transport RPC at all.
  * Field defaults mirror the (still-used-elsewhere) `cy.intercept`-based factories in `./responses.ts`.
  *
- * The host, worktree and terminal RPCs are no longer this service's: they are `host.HostService`,
- * `worktree.WorktreeService` and `terminal_session.TerminalSessionService`, and their fakes live in
- * `./hostServiceBackend`, `./worktreeServiceBackend` and `./terminalSessionServiceBackend`. This
- * builder composes all four onto one backend so a screen that spans them keeps one scenario object
- * and one set of recorders.
+ * The host, worktree, terminal and session-file RPCs are no longer this service's: they are
+ * `host.HostService`, `worktree.WorktreeService`, `terminal_session.TerminalSessionService` and
+ * `session_files.SessionFilesService`, and their fakes live in `./hostServiceBackend`,
+ * `./worktreeServiceBackend`, `./terminalSessionServiceBackend` and `./sessionFilesServiceBackend`.
+ * This builder composes all five onto one backend so a screen that spans them keeps one scenario
+ * object and one set of recorders.
  */
 
 import { create } from "@bufbuild/protobuf";
@@ -46,6 +47,7 @@ import {
   type StartSessionResponse,
 } from "../../../src/gen/connection_pb";
 import { HostService } from "../../../src/gen/host_pb";
+import { SessionFilesService } from "../../../src/gen/session_files_pb";
 import { TerminalSessionService } from "../../../src/gen/terminal_session_pb";
 import { WorktreeService } from "../../../src/gen/worktree_pb";
 import {
@@ -56,6 +58,11 @@ import {
   type HostServiceControls,
   type HostServiceScenario,
 } from "./hostServiceBackend";
+import {
+  aSessionFilesServiceFake,
+  type SessionFilesServiceControls,
+  type SessionFilesServiceScenario,
+} from "./sessionFilesServiceBackend";
 import {
   aTerminalSessionServiceFake,
   type TerminalSessionServiceControls,
@@ -129,6 +136,7 @@ function anAgentInfo(overrides: Partial<AgentInfo>): AgentInfo {
 
 export interface ConnectionServiceScenario
   extends HostServiceScenario,
+    SessionFilesServiceScenario,
     TerminalSessionServiceScenario,
     WorktreeServiceScenario {
   /** Static ListSessions response. Ignored when `listSessionsFactory` is given. */
@@ -179,6 +187,7 @@ export interface ConnectionServiceBackend
   extends InMemoryRpcBackend,
     AgentConversationControls,
     HostServiceControls,
+    SessionFilesServiceControls,
     TerminalSessionServiceControls,
     WorktreeServiceControls {
   /** Qualified `agent_id`s passed to `AttachSessionAgent`, in call order. Empty unless the scenario
@@ -225,11 +234,14 @@ export function aConnectionServiceBackend(
   // Built once and kept, not inlined into the spread below: these fakes carry the call recorders a
   // spec asserts on, and building them twice would record into a copy nothing can read.
   const rosterFake = scenario.sessionAgents ? aSessionAgentRosterFake(scenario.sessionAgents) : null;
-  // The host, worktree and terminal halves of the scenario, each served by its own service. Built
-  // here for the same reason as the fakes above: they carry the recorders a spec asserts on.
+  // The host, worktree, terminal and session-file halves of the scenario, each served by its own
+  // service. Built here for the same reason as the fakes above: they carry the recorders a spec
+  // asserts on.
   const { handlers: hostHandlers, ...hostControls } = aHostServiceFake(scenario);
   const { handlers: worktreeHandlers, ...worktreeControls } = aWorktreeServiceFake(scenario);
   const { handlers: terminalHandlers, ...terminalControls } = aTerminalSessionServiceFake(scenario);
+  const { handlers: sessionFilesHandlers, ...sessionFilesControls } =
+    aSessionFilesServiceFake(scenario);
   const conversationFake = scenario.agentConversations
     ? anAgentConversationFake(scenario.agentConversations)
     : null;
@@ -238,6 +250,7 @@ export function aConnectionServiceBackend(
     .implement(HostService, hostHandlers)
     .implement(WorktreeService, worktreeHandlers)
     .implement(TerminalSessionService, terminalHandlers)
+    .implement(SessionFilesService, sessionFilesHandlers)
     .implement(AuthService, {
       getAuthStatus: async () => ({ authenticated: true, user: aGitHubUser() }),
     })
@@ -363,6 +376,7 @@ export function aConnectionServiceBackend(
     ...hostControls,
     ...worktreeControls,
     ...terminalControls,
+    ...sessionFilesControls,
     // A scenario that declared no roster / no conversations still answers these, with nothing —
     // a spec asserting "never attached" must not have to know whether a fake was built.
     attachedAgentIds: () => (rosterFake ? rosterFake.attachedAgentIds() : []),
