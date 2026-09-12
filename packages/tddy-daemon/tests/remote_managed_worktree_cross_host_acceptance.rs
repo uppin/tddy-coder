@@ -36,21 +36,20 @@ use tddy_daemon::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_daemon::test_util::{self, wait_until_peer_discovered};
+use tddy_daemon::test_util::{self, wait_until_peer_discovered, TestDaemon};
 use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
 use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
-use tddy_service::proto::exec_tools::{
-    ExecToolService, ExecuteToolRequest, ListExecToolsRequest,
-};
 use tddy_sandbox::SandboxError;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest as ConnExecuteToolRequest,
-    ExecuteToolResponse as ConnExecuteToolResponse, ListSessionsRequest, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest,
+    ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse,
+    ListSessionsRequest, StartSessionRequest,
 };
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ListExecToolsRequest};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -291,8 +290,8 @@ async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id
 /// Daemon A (agent) and daemon B (codebase), each serving on its production RPC identity and each
 /// able to route to the other.
 struct SplitHosts {
-    agent: Arc<ConnectionServiceImpl>,
-    codebase: Arc<ConnectionServiceImpl>,
+    agent: TestDaemon,
+    codebase: TestDaemon,
     agent_sessions_base: PathBuf,
     codebase_sessions_base: PathBuf,
     _agent_rpc_run: tokio::task::JoinHandle<()>,
@@ -370,12 +369,12 @@ async fn split_hosts_with_codebase_provisioner_and_agent_binary(
     let agent_rpc_run =
         serve_rpc_participant(&livekit, &ws_url, AGENT_INSTANCE_ID, agent.service.clone()).await;
 
-    wait_until_discovered(&agent.service, CODEBASE_INSTANCE_ID).await;
-    wait_until_discovered(&codebase.service, AGENT_INSTANCE_ID).await;
+    wait_until_discovered(agent.service.as_ref(), CODEBASE_INSTANCE_ID).await;
+    wait_until_discovered(codebase.service.as_ref(), AGENT_INSTANCE_ID).await;
 
     SplitHosts {
-        agent: agent.service.clone(),
-        codebase: codebase.service.clone(),
+        agent: TestDaemon::from_arc(agent.service.clone()),
+        codebase: TestDaemon::from_arc(codebase.service.clone()),
         agent_sessions_base: agent.sessions_base.clone(),
         codebase_sessions_base: codebase.sessions_base.clone(),
         _agent_rpc_run: agent_rpc_run,
@@ -553,7 +552,9 @@ impl WorkspaceSandboxProvisioner for RecordingProvisioner {
 }
 
 /// The `marker` a jailed result carries, or `None` when the result did not come from the jail.
-fn jail_marker_of(response: &tddy_service::proto::exec_tools::ExecuteToolResponse) -> Option<String> {
+fn jail_marker_of(
+    response: &tddy_service::proto::exec_tools::ExecuteToolResponse,
+) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(&response.result_json)
         .ok()?
         .get("marker")?

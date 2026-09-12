@@ -19,6 +19,8 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { ConnectionService, type ProjectEntry, type SessionEntry } from "../../src/gen/connection_pb";
+import { PrStackService } from "../../src/gen/pr_stack_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -130,9 +132,9 @@ function aPrStackBackend(queryBranch: QueryBranchHandler) {
   return aSessionsDrawerBackend([
     anOrchestratorSession(aStackPlanJson(1, aStackWithAMergedMiddleNode())),
   ])
-    .onUnary(ConnectionService.method.queryBranch, queryBranch)
+    .onUnary(PrStackService.method.queryBranch, queryBranch)
     .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
-    .onUnary(ConnectionService.method.listTools, () => ({ tools: [] }));
+    .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 }
 
 function openPrStackScreen(backend: ReturnType<typeof aPrStackBackend>) {
@@ -195,7 +197,7 @@ it("keeps a completed pull's result when the poll it overtook finally answers", 
     withheld: { [CHILD_BRANCH]: CHILD_BEHIND_ITS_BASE, [ROOT_BRANCH]: ROOT_WITH_AN_OPEN_PR },
   });
   openPrStackScreen(
-    aPrStackBackend(polls.handler).onUnary(ConnectionService.method.pullBaseIntoBranch, () =>
+    aPrStackBackend(polls.handler).onUnary(PrStackService.method.pullBaseIntoBranch, () =>
       aBranchResolutionResponse(CHILD_IN_SYNC_AFTER_THE_PULL),
     ),
   );
@@ -237,7 +239,7 @@ it("stops offering a pull against the base a repoint just moved the node off", (
   openPrStackScreen(
     aPrStackBackend(
       aQueryBranchAnsweringOnly({ [`${CHILD_BRANCH} ${ROOT_BRANCH}`]: CHILD_BEHIND_ITS_BASE }),
-    ).onUnary(ConnectionService.method.repointPlannedPr, () => ({
+    ).onUnary(PrStackService.method.repointPlannedPr, () => ({
       stackPlanJson: aStackPlanJson(2, aStackWithN3Repointed()),
     })),
   );

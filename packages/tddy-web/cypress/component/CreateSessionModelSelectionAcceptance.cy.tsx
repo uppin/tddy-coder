@@ -14,6 +14,7 @@ import { createClient, ConnectError, Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import { TEST_IDS, byTestId } from "../support/testIds";
@@ -44,21 +45,21 @@ const CLAUDE_CLI_MODELS = [
 function aBackendWithModels({ cursorFails = false }: { cursorFails?: boolean } = {}) {
   return anInMemoryRpcBackend()
     .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
-    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }))
+    .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
     .onUnary(ConnectionService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(ConnectionService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => ({
       agents: [
         { id: "claude", label: "Claude" },
         { id: "cursor", label: "Cursor" },
       ],
     }))
-    .onUnary(ConnectionService.method.listTools, () => ({
+    .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
     .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "model-sess-1" }))
-    .onUnary(ConnectionService.method.listAgentModels, (req) => {
+    .onUnary(CatalogService.method.listAgentModels, (req) => {
       if (req.agent === "cursor") {
         if (cursorFails) {
           throw new ConnectError("cursor: not logged in", Code.FailedPrecondition);
@@ -172,7 +173,7 @@ describe("CreateSessionPane — tool-session model selection", () => {
     // Then — ListAgentModels was asked for both the initial (claude) and the cursor agent
     cy.wrap(null).should(() => {
       const agents = backend
-        .callsTo(ConnectionService.method.listAgentModels)
+        .callsTo(CatalogService.method.listAgentModels)
         .map((c) => c.agent);
       expect(agents).to.include("claude");
       expect(agents).to.include("cursor");

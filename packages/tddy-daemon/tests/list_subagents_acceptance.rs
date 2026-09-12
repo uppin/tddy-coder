@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::test_util::TestDaemon;
 use tddy_rpc::Request;
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 
@@ -24,7 +25,7 @@ fn write_config(yaml: &str) -> (tempfile::TempDir, PathBuf) {
 
 /// `tddy_data_dir` doubles as `<tddyhome>` for `ListSubagents` — mirrors
 /// `list_agents_allowlist_acceptance.rs::service_with_config`.
-fn service_with_config(config: DaemonConfig, tddy_data_dir: PathBuf) -> ConnectionServiceImpl {
+fn service_with_config(config: DaemonConfig, tddy_data_dir: PathBuf) -> TestDaemon {
     let sessions_base = tddy_data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -35,7 +36,7 @@ fn service_with_config(config: DaemonConfig, tddy_data_dir: PathBuf) -> Connecti
             None
         }
     });
-    ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -44,7 +45,7 @@ fn service_with_config(config: DaemonConfig, tddy_data_dir: PathBuf) -> Connecti
         None,
         None,
         Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
+    )))
 }
 
 fn minimal_daemon_config() -> DaemonConfig {

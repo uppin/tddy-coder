@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { BranchResolution, ConnectionService } from "../../../gen/connection_pb";
+import { PrStackService, type BranchResolution } from "../../../gen/pr_stack_pb";
 import type { BranchQuery } from "./branchQueries";
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type PrStackClient = Client<typeof PrStackService>;
 
 /** Interval (ms) at which the PR-Stack view re-polls `QueryBranch` for each rendered branch. */
 export const POLL_INTERVAL_MS = 5000;
@@ -48,7 +48,7 @@ export interface QueryBranchState {
  * resolution). The poll set follows `queries`, so only currently-rendered nodes are queried.
  */
 export function useQueryBranch(
-  client: ConnectionClient | undefined,
+  client: PrStackClient | undefined,
   sessionToken: string,
   orchestratorSessionId: string,
   queries: BranchQuery[],

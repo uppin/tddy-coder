@@ -14,7 +14,8 @@ use prost::Message;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, ServiceEntry, Status};
 use tddy_service::proto::exec_tools::{
     ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ToolCallInfo, ToolDef as ProtoToolDef,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ToolCallInfo,
+    ToolDef as ProtoToolDef,
 };
 
 use super::connection_service_participant::SessionConnectionService;

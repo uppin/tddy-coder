@@ -33,24 +33,16 @@ use tonic::transport::server::UdsConnectInfo;
 use crate::config::DaemonConfig;
 use tddy_service::proto::connection::ConnectionService as RpcConnectionService;
 use tddy_service::proto::connection::{
-    AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
-    ConnectSessionRequest, ConnectSessionResponse, CreateProjectRequest, CreateProjectResponse,
-    DeleteSessionRequest, DeleteSessionResponse, ExecuteToolChunk, ExecuteToolRequest,
-    ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse, GetPrStatusRequest,
-    GetPrStatusResponse, GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse,
-    LinkStackNodeRequest, LinkStackNodeResponse, ListAgentModelsRequest, ListAgentModelsResponse,
-    ListAgentsRequest, ListAgentsResponse, ListExecToolsRequest, ListExecToolsResponse,
-    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
-    ListSessionsRequest, ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse,
-    ListToolsRequest, ListToolsResponse, MintLocalTokenRequest, MintLocalTokenResponse,
-    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
-    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
-    RepointPlannedPrResponse, ResolveStackBaseRequest, ResolveStackBaseResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse, SignalSessionRequest, SignalSessionResponse,
-    StartDemoVmRequest, StartDemoVmResponse, StartSessionEvent, StartSessionRequest,
-    StartSessionResponse, StopDemoVmRequest, StopDemoVmResponse,
+    AddProjectToHostRequest, AddProjectToHostResponse, ConnectSessionRequest,
+    ConnectSessionResponse, CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest,
+    DeleteSessionResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
+    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListProjectBranchesRequest,
+    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse, ListSessionsRequest,
+    ListSessionsResponse, MintLocalTokenRequest, MintLocalTokenResponse, ResumeSessionRequest,
+    ResumeSessionResponse, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
+    SignalSessionRequest, SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse,
+    StartSessionEvent, StartSessionRequest, StartSessionResponse, StopDemoVmRequest,
+    StopDemoVmResponse,
 };
 use tddy_service::tonic_connection::connection_service_server::ConnectionService as TonicConnectionService;
 
@@ -102,10 +94,6 @@ impl<T> TonicConnectionService for ConnectionServiceTonicAdapter<T>
 where
     T: RpcConnectionService,
 {
-
-
-
-
     // `result_large_err`: the `Err` is `tonic::Status`, mandated by the generated tonic trait — it
     // cannot be boxed, so the lint's suggested fix does not apply. Every other `#[allow]` of this
     // lint in this file is for the same reason.
@@ -253,14 +241,6 @@ where
         Ok(tonic::Response::new(resp.into_inner()))
     }
 
-
-    /// Server streaming: a tool result past the unary message-size ceiling.
-
-    // `result_large_err`: see `list_sessions`.
-    #[allow(clippy::result_large_err)]
-
-
-
     // `result_large_err`: see `list_sessions`.
     #[allow(clippy::result_large_err)]
     async fn start_demo_vm(
@@ -302,11 +282,6 @@ where
         Ok(tonic::Response::new(resp.into_inner()))
     }
 
-
-
-
-
-
     async fn get_worktree_snapshot(
         &self,
         request: tonic::Request<GetWorktreeSnapshotRequest>,
@@ -319,9 +294,6 @@ where
         .map_err(to_tonic_status)?;
         Ok(tonic::Response::new(resp.into_inner()))
     }
-
-
-
 
     /// Peer-trust minting, handled at the tonic layer rather than delegated: the peer credential is
     /// only present on the local Unix-domain-socket transport. Deny when there is no peer-cred

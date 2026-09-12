@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::test_util::TestDaemon;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::catalog::{CatalogService, ListAgentsRequest, ListToolsRequest};
 use tddy_service::proto::connection::{
@@ -23,7 +24,7 @@ fn write_config(yaml: &str) -> (tempfile::TempDir, PathBuf) {
     (dir, path)
 }
 
-fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> TestDaemon {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -34,7 +35,7 @@ fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> Connecti
             None
         }
     });
-    ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -43,7 +44,7 @@ fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> Connecti
         None,
         None,
         Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
+    )))
 }
 
 /// **daemon_config_allowed_agents_deserializes**: YAML `allowed_agents` yields expected ids/labels;

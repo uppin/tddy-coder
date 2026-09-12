@@ -31,7 +31,7 @@ const HOOK_TOKEN: &str = "hook-token-for-stamping";
 
 /// A session reporting agent activity, and the checkout its records are stamped against.
 struct ReportingSession {
-    service: ConnectionServiceImpl,
+    service: tddy_daemon::test_util::TestDaemon,
     session_id: String,
     session_dir: PathBuf,
     _sessions: tempfile::TempDir,

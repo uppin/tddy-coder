@@ -2,30 +2,39 @@
 
 use std::sync::Arc;
 
-use tddy_rpc::RpcService;
-use tddy_service::proto::catalog::CatalogServiceServer;
-use tddy_service::proto::exec_tools::ExecToolServiceServer;
-use tddy_service::proto::pr_stack::PrStackServiceServer;
-
 use super::ConnectionServiceImpl;
+use crate::pr_stack_rpc::{build_pr_stack_entry, PrStackServiceImpl};
+use tddy_discovery::CatalogServiceImpl;
+use tddy_tool_engine::ExecToolServiceImpl;
 
 impl ConnectionServiceImpl {
     #[must_use]
+    pub fn catalog_rpc_service(self: &Arc<Self>) -> CatalogServiceImpl<ConnectionServiceImpl> {
+        CatalogServiceImpl::new(Arc::clone(self))
+    }
+
+    #[must_use]
+    pub fn exec_tool_rpc_service(self: &Arc<Self>) -> ExecToolServiceImpl<ConnectionServiceImpl> {
+        ExecToolServiceImpl::new(Arc::clone(self))
+    }
+
+    #[must_use]
+    pub fn pr_stack_rpc_service(self: &Arc<Self>) -> PrStackServiceImpl<ConnectionServiceImpl> {
+        PrStackServiceImpl::new(Arc::clone(self))
+    }
+
+    #[must_use]
     pub fn catalog_entry(self: &Arc<Self>) -> tddy_rpc::ServiceEntry {
-        tddy_discovery::build_catalog_entry(self.as_ref().clone())
+        tddy_discovery::build_catalog_entry(self.catalog_rpc_service())
     }
 
     #[must_use]
     pub fn exec_tool_entry(self: &Arc<Self>) -> tddy_rpc::ServiceEntry {
-        tddy_tool_engine::build_exec_tool_entry(self.as_ref().clone())
+        tddy_tool_engine::build_exec_tool_entry(self.exec_tool_rpc_service())
     }
 
     #[must_use]
     pub fn pr_stack_entry(self: &Arc<Self>) -> tddy_rpc::ServiceEntry {
-        tddy_rpc::ServiceEntry {
-            name: tddy_workflow_recipes::PR_STACK_SERVICE,
-            service: Arc::new(PrStackServiceServer::new(self.as_ref().clone()))
-                as Arc<dyn RpcService>,
-        }
+        build_pr_stack_entry(self.pr_stack_rpc_service())
     }
 }

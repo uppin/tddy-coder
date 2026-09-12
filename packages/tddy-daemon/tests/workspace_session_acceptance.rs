@@ -10,12 +10,13 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::read_session_metadata;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::test_util::TestDaemon;
 use tddy_rpc::Request;
-use tddy_service::proto::exec_tools::{
-    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
-};
 use tddy_service::proto::connection::{
     ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
+};
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -37,7 +38,7 @@ users:
     (dir, config)
 }
 
-fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> TestDaemon {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -48,7 +49,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionSe
             None
         }
     });
-    ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -57,7 +58,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionSe
         None,
         None,
         Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
+    )))
 }
 
 /// Create a bare git repo that can serve as an origin for worktree creation.

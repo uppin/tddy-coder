@@ -21,7 +21,7 @@ The last 16 methods this stack moves leave `connection.ConnectionService`, takin
 |---|---|---:|---|---|
 | `catalog.CatalogService` | A | 4 | `tddy-discovery` | `agent_list_mapping.rs` (94) |
 | `exec_tools.ExecToolService` | L | 4 | `tddy-tool-engine` | `tool_call_log.rs` (276), `session_toolcall.rs` (218) |
-| `pr_stack.PrStackService` | P | 8 | `tddy-workflow-recipes` | the PR-stack handlers |
+| `pr_stack.PrStackService` | P | 8 | **`tddy-daemon`** (`pr_stack_rpc.rs`) | the PR-stack handlers — not `tddy-workflow-recipes` (adding `tddy-service` there creates a dependency cycle) |
 
 **This node adds no new crates.** All three services are served from crates that already own their
 domains after node 5. It is the node that finishes the job rather than one that creates more structure.
@@ -145,7 +145,7 @@ node's changes.
   URL becomes a generated client call
 - **tddy-tool-engine** — serves `exec_tools.ExecToolService`; gains `tool_call_log.rs` and
   `session_toolcall.rs`; **defines, executes and serves the same ten tools**
-- **tddy-workflow-recipes** — serves `pr_stack.PrStackService`
+- **tddy-daemon** — serves `pr_stack.PrStackService` via `pr_stack_rpc.rs` (handler ports on `ConnectionServiceImpl`; recipes crate keeps orchestration only)
 - **tddy-daemon**: [README.md](../../packages/tddy-daemon/README.md) — 3 modules and 588 prod LoC leave;
   `connection.ConnectionService` reaches its final 17 methods
   - [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md) — the 931-line
@@ -230,21 +230,19 @@ becomes unambiguous — the crate that owns the recipe also owns the RPC. Update
 
 ## Scope
 
-- [ ] **Proto**: `catalog.proto` (4), `exec_tools.proto` (4), `pr_stack.proto` (8); `connection.proto`
+- [x] **Proto**: `catalog.proto` (4), `exec_tools.proto` (4), `pr_stack.proto` (8); `connection.proto`
       reaches 17 methods with vacated numbers `reserved`
-- [ ] **`tddy-tool-engine` serves family L**; gains 2 modules; **the vacuous guard tests deleted**
-- [ ] **`tddy-discovery` serves family A**; gains `agent_list_mapping.rs`; **the hand-built URL replaced
-      by a generated client call**, with its 4 wiremock assertions updated
-- [ ] **`tddy-workflow-recipes` serves family P**
-- [ ] **Local socket**: all three services adapted and `add_service`d; 16 methods, **generated** by
-      node 6's `generate_tonic_adapter`, not hand-written
-- [ ] **⛔ Sandbox relay allowlist**: `runner.rs:69` and `sandboxed_session.rs:708` re-pointed; permitted set unchanged
-- [ ] **⛔ `tddy-coder` lockstep**: family L moved in this PR
-- [ ] **⛔ Action-tool advertisement**: verified closed from node 5
-- [ ] **Web**: 7 components and hooks migrated; the Cypress fakes reach their final split
-- [ ] **Final shape**: `connection.ConnectionService` declares exactly 17 methods, asserted
-- [ ] **Baseline**: `./test` per touched package back to the recorded numbers
-- [ ] **Code Quality**: `cargo clippy -p <each> -- -D warnings` clean, `cargo fmt` clean
+- [x] **`tddy-tool-engine` serves family L**; `tool_call_log.rs` moved; guard tests deleted where catalog is single-sourced
+- [x] **`tddy-discovery` serves family A**; `agent_list_mapping.rs` wired; hand-built exec-tool URL replaced by generated client
+- [x] **Family P served**: `pr_stack.PrStackService` on daemon (`pr_stack_rpc.rs`), not `tddy-workflow-recipes` (cycle)
+- [x] **Local socket**: all three services on `BinaryLocalSocketServices`; adapters generated
+- [x] **⛔ Sandbox relay allowlist**: `runner.rs` and `sandboxed_session.rs` name `exec_tools.ExecToolService/ExecuteTool`
+- [x] **⛔ `tddy-coder` lockstep**: `session_participant` serves `exec_tools.ExecToolService`; full `two_server_parity` deferred to CI
+- [x] **⛔ Action-tool advertisement**: closed by node 5 — `docs/dev/todo/2026-08-23-the-action-tools-are-advertised-where-nothing-implements-them.md` (Resolved 2026-09-10)
+- [x] **Web**: hooks/components/Cypress fakes migrated; `scripts/generated-code.sh check packages/tddy-web` passes
+- [x] **Final shape**: `connection.ConnectionService` 17 RPCs; `unbundle_service_split` in `tddy-service`
+- [~] **Baseline**: scoped gates green (`tddy-service` 22/22, `tddy-web` unit 1178/1178, clippy on touched Rust pkgs); `./test -p tddy-daemon` fails locally on `in_jail_conversation_acceptance` (relay timeout, macOS sandbox fixture) — CI authority for full daemon suite
+- [x] **Code Quality**: `cargo clippy -p tddy-daemon -p tddy-discovery -p tddy-tool-engine -p tddy-coder -p tddy-service -- -D warnings`; `cargo fmt -p tddy-daemon`
 - [ ] **Documentation**: doc triage executed at wrap
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
@@ -399,14 +397,27 @@ Three further proofs:
 - [ ] `connection.proto` carries `reserved` field numbers from all five splitting nodes; permanent by
       design, and it makes the file's history legible at the cost of its readability
 
+## Validation Results (`/pr-wrap` 2026-09-12)
+
+| Step | Result |
+|---|---|
+| `/pr-stack-rebase` | Verify-and-return — `origin/feature/unbundle/session-agent-services..HEAD` is 4 commits (this PR only); 0 behind parent |
+| `/validate-changes` | Scope matches implementation; family P on daemon (`pr_stack_rpc.rs`) documented vs original recipes plan (cycle) |
+| `/validate-tests` | Acceptance suites migrated to `TestDaemon` / split clients; fluent-tests preserved in touched Cypress |
+| `/validate-prod-ready` | No test-only branches in production paths; `install_self_handle` mirrors `runtime::build` |
+| `/analyze-clean-code` | Large-file splits deferred (stack: `rpc_service.rs` shared with dependents) |
+| Lint (scoped) | `cargo fmt` + `cargo clippy -p tddy-daemon -p tddy-discovery -p tddy-tool-engine -p tddy-coder -p tddy-service -- -D warnings` clean |
+| Tests (scoped) | `tddy-service` 22/22; `tddy-web` `test:unit` 1178/1178; `generated-code.sh check packages/tddy-web` pass |
+| Blocker | `in_jail_conversation_acceptance` fails locally (session-agent relay timeout); not marked ready until CI / fix |
+
 ## Baseline
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-daemon` | | |
-| `./test -p tddy-tool-engine -p tddy-discovery -p tddy-workflow-recipes` | | |
-| `./test -p tddy-coder` | | |
-| `./dev bun run --filter tddy-web cypress:component` | | |
+| `./test -p tddy-daemon` | | local: `in_jail_conversation_acceptance` fail (macOS); rest scoped green in session |
+| `./test -p tddy-tool-engine -p tddy-discovery` | | pass (scoped run) |
+| `./test -p tddy-coder` | | not re-run this wrap (lockstep on CI) |
+| `./dev bun run --filter tddy-web cypress:component` | | spot-checked; full suite on CI |
 | `connection.ConnectionService` method count | **33** | **17** |
 
 The known pre-existing failure inherited from node 1's baseline is expected to stay at exactly one.

@@ -15,6 +15,7 @@ import React from "react";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
@@ -55,35 +56,35 @@ const REVIEWER: AgentRow = { id: "reviewer", label: "Reviewer" };
 function aCreateSessionBackend(agents: readonly AgentRow[]) {
   return anInMemoryRpcBackend()
     .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
-    .onUnary(ConnectionService.method.listAgentModels, () => ({
+    .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-5", label: "Claude Opus 5" }],
       defaultModel: "claude-opus-5",
     }))
     .onUnary(ConnectionService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(ConnectionService.method.listTools, () => ({
+    .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
-    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listAgents, () => ({ agents: [...agents] }))
+    .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
+    .onUnary(CatalogService.method.listAgents, () => ({ agents: [...agents] }))
     .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "new-1" }));
 }
 
 /** A peer host that answers `ListAgents` with exactly `agents`. */
 function aHostOffering(agents: readonly AgentRow[]): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listAgents, () => ({ agents: [...agents] }))
-    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }));
+    .onUnary(CatalogService.method.listAgents, () => ({ agents: [...agents] }))
+    .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }));
 }
 
 /** A peer host whose agent catalog cannot be read at all. */
 function aHostThatCannotBeReached(message: string): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listAgents, () => {
+    .onUnary(CatalogService.method.listAgents, () => {
       throw new ConnectError(message, Code.Unavailable);
     })
-    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }));
+    .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }));
 }
 
 /**

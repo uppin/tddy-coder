@@ -35,6 +35,7 @@ use tddy_core::changeset::{Changeset, Stack, StackNode};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::test_util::TestDaemon;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::pr_stack::{
@@ -235,7 +236,7 @@ impl Orchestrator {
 
     /// A service rooted at this fixture's data directory, holding no GitHub token store — so the PR
     /// leg of any resolution is unavailable and nothing ever reaches the network.
-    fn service(&self) -> ConnectionServiceImpl {
+    fn service(&self) -> TestDaemon {
         let config_dir = tempfile::tempdir().unwrap();
         let config_path = config_dir.path().join("config.yaml");
         fs::write(
@@ -251,7 +252,7 @@ impl Orchestrator {
             Arc::new(move |_| Some(resolved.clone()));
         let user_resolver: SessionUserResolver =
             Arc::new(|token| (token == TOKEN).then(|| "u".to_string()));
-        ConnectionServiceImpl::new(
+        TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
             config,
             sessions_base_resolver,
             sessions_base,
@@ -260,7 +261,7 @@ impl Orchestrator {
             None,
             None,
             Arc::new(CliSessionManager::new()),
-        )
+        )))
     }
 
     // --- reading the result back ---
@@ -296,7 +297,7 @@ fn a_planned_node(node_id: &str, display_order: u32) -> StackNode {
 // --- calling the RPCs -------------------------------------------------------
 
 async fn reorder(
-    service: &ConnectionServiceImpl,
+    service: &TestDaemon,
     session_id: &str,
     node_id: &str,
     direction: &str,
@@ -315,7 +316,7 @@ async fn reorder(
 /// Merge `base_branch` into `node_id`'s branch, refusing if the worktree is dirty — the defaults an
 /// operator's one click sends.
 async fn pull(
-    service: &ConnectionServiceImpl,
+    service: &TestDaemon,
     session_id: &str,
     node_id: &str,
     base_branch: &str,

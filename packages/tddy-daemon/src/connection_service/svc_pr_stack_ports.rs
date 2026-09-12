@@ -1,546 +1,31 @@
-//! Families A, L and P — served at `catalog`, `exec_tools` and `pr_stack` coordinates.
-//!
-//! Method bodies were split out of [`rpc_service`] when `#unbundle` node 8 removed them from
-//! `connection.ConnectionService`. The daemon still owns routing and session resolution; the
-//! owning crates publish the coordinates via [`tddy_discovery::build_catalog_entry`], etc.
+//! Family P PR-stack RPCs — host side of [`crate::pr_stack_rpc::PrStackHandler`].
 
-use prost::Message as _;
+use super::family_proto_bridge::{wire_same, wire_same_anyhow};
+use super::{
+    base_sync_unavailable, base_sync_view, owner_repo_from_repo_root,
+    require_pr_stack_orchestrator, worktree_leg, ConnectionServiceImpl,
+};
+use crate::connection_service::hooks_and_urls;
+use crate::connection_service::service_util;
+use crate::project_storage;
+use crate::session_list_enrichment;
+use crate::user_sessions_path::projects_path_for_user;
+use async_trait::async_trait;
+use std::path::PathBuf;
+use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::{Request, Response, Status};
-use tddy_service::proto::catalog::{
-    AgentInfo as CatalogAgentInfo, CatalogService, ListAgentModelsRequest, ListAgentModelsResponse,
-    ListAgentsRequest, ListAgentsResponse, ListSubagentsRequest, ListSubagentsResponse,
-    ListToolsRequest, ListToolsResponse, SubagentInfo as CatalogSubagentInfo, ToolInfo as CatalogToolInfo,
-};
-use tddy_service::proto::exec_tools::{
-    ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse, ExecToolService,
-    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse, ToolCallInfo as ExecToolCallInfo, ToolDef as ExecToolDef,
-};
 use tddy_service::proto::pr_stack::{
     AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
-    LinkStackNodeRequest, LinkStackNodeResponse, PrStackService, PullBaseIntoBranchRequest,
+    LinkStackNodeRequest, LinkStackNodeResponse, PullBaseIntoBranchRequest,
     PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
     ResolveStackBaseRequest, ResolveStackBaseResponse,
 };
 use tddy_service::proto::types::BranchSession;
 
-use super::{
-    agent_models_cache, exec_tool_result_frames, list_models_probe_args, parse_agent_models_json,
-    reject_exec_tool_path_traversal, require_pr_stack_orchestrator, AGENT_MODELS_CACHE_TTL,
-    base_sync_unavailable, base_sync_view, ConnectionServiceImpl, MpscResultStream,
-};
-use crate::agent_list_mapping::agent_allowlist_rows;
-use crate::connection_service::{activity_hub, agent_roster, service_util};
-use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
-use crate::tool_engine;
-use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
-use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_spawn::spawner;
-
-use crate::project_storage;
-use crate::session_list_enrichment;
-use crate::user_sessions_path::projects_path_for_user;
-use crate::connection_service::hooks_and_urls;
-use super::owner_repo_from_repo_root;
-use super::worktree_leg;
-use std::path::PathBuf;
-
-use super::family_proto_bridge::{wire_same, wire_same_anyhow};
-use tddy_service::proto::connection::{
-    ExecuteToolChunk as ConnExecuteToolChunk, ExecuteToolRequest as ConnExecuteToolRequest,
-    ExecuteToolResponse as ConnExecuteToolResponse, ListAgentModelsResponse as ConnListAgentModelsResponse,
-    ListExecToolsResponse as ConnListExecToolsResponse, ListSessionToolCallsResponse as ConnListSessionToolCallsResponse,
-    ToolCallInfo as ConnToolCallInfo, ToolDef as ConnToolDef,
-};
-
-const CATALOG_SERVICE: &str = tddy_discovery::CATALOG_SERVICE;
-const EXEC_TOOL_SERVICE: &str = "exec_tools.ExecToolService";
-const PR_STACK_SERVICE: &str = "pr_stack.PrStackService";
-
-
-#[async_trait::async_trait]
-impl CatalogService for ConnectionServiceImpl {
-async fn list_tools(
-        &self,
-        _request: Request<ListToolsRequest>,
-    ) -> Result<Response<ListToolsResponse>, Status> {
-        self.record_rpc_activity();
-        let tools: Vec<CatalogToolInfo> = self
-            .config
-            .allowed_tools()
-            .iter()
-            .map(|t| {
-                let label = t
-                    .label
-                    .as_deref()
-                    .and_then(tddy_daemon_kernel::trim_to_option)
-                    .unwrap_or_else(|| t.path.clone());
-                CatalogToolInfo {
-                    path: t.path.clone(),
-                    label,
-                }
-            })
-            .collect();
-        Ok(Response::new(ListToolsResponse { tools }))
-    }
-
-    async fn list_agents(
-        &self,
-        _request: Request<ListAgentsRequest>,
-    ) -> Result<Response<ListAgentsResponse>, Status> {
-        log::debug!("list_agents RPC: mapping config allowlist to AgentInfo");
-        // A registry this daemon has but cannot read is an error, not "there are no assistants" —
-        // a session started against a missing agent id fails much later and much less clearly.
-        let assistants = match &self.model_registry {
-            Some(registry) => registry
-                .list_assistants()
-                .await
-                .map_err(tddy_rpc::Status::from)?,
-            None => Vec::new(),
-        };
-        let agents: Vec<CatalogAgentInfo> = agent_allowlist_rows(&self.config, &assistants)
-            .into_iter()
-            .map(|row| CatalogAgentInfo {
-                id: row.id,
-                label: row.display_label,
-            })
-            .collect();
-        log::info!("list_agents RPC: returning {} agent(s)", agents.len());
-        Ok(Response::new(ListAgentsResponse { agents }))
-    }
-
-    /// Enumerate the models an agent supports by shelling out to `tddy-tools list-models` as the
-    /// caller's OS user. Results are cached per (agent, daemon) for a short TTL. A failed probe is
-    /// surfaced as an RPC error — never masked with a fallback catalog.
-    ///
-    /// Runs the probe on the local daemon; `daemon_instance_id` participates only in the cache key
-    /// (cross-daemon forwarding is not wired here — the web fetches models from the daemon it is
-    /// already connected to).
-    async fn list_agent_models(
-        &self,
-        request: Request<ListAgentModelsRequest>,
-    ) -> Result<Response<ListAgentModelsResponse>, Status> {
-        let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
-            .to_string();
-
-        let agent = req.agent.trim().to_string();
-        if agent.is_empty() {
-            return Err(Status::invalid_argument("agent is required"));
-        }
-
-        // Key by OS user: cursor / ACP catalogs (and the "current, default" model) are
-        // account-specific, so one user's list must never be served to another from the cache.
-        let cache_key = format!(
-            "{}\u{1f}{}\u{1f}{}",
-            os_user,
-            req.daemon_instance_id.trim(),
-            agent
-        );
-        if let Ok(cache) = agent_models_cache().lock() {
-            if let Some((cached_at, resp)) = cache.get(&cache_key) {
-                if cached_at.elapsed() < AGENT_MODELS_CACHE_TTL {
-                    return Ok(Response::new(
-                        wire_same::<ConnListAgentModelsResponse, ListAgentModelsResponse>(&resp)?,
-                    ));
-                }
-            }
-        }
-
-        let tools_path = self.resolve_tddy_tools_path();
-        // Cursor's model probe must hand tddy-tools the resolved absolute `agent` path (as the PTY
-        // spawn does), so the impersonated child execs a fully-qualified binary instead of doing a
-        // PATH lookup that lacks the install dir. Only forward an absolute path — a bare-name
-        // resolution keeps the existing behavior (no `--cursor-cli-path`).
-        let cursor_cli_path = (agent == "cursor")
-            .then(|| crate::config::resolve_cursor_binary_path(&self.config))
-            .filter(|p| std::path::Path::new(p).is_absolute())
-            .map(std::path::PathBuf::from);
-        let probe_args = list_models_probe_args(&agent, cursor_cli_path.as_deref());
-        let probe = tokio::task::spawn_blocking(move || {
-            spawner::run_capture_as_user(&os_user, &tools_path, &probe_args)
-        })
-        .await
-        .map_err(|e| Status::internal(format!("model probe join error: {e}")))?
-        .map_err(|e| Status::failed_precondition(format!("model probe failed: {e}")))?;
-
-        let resp = parse_agent_models_json(&probe)?;
-
-        if let Ok(mut cache) = agent_models_cache().lock() {
-            cache.insert(cache_key, (std::time::Instant::now(), resp.clone()));
-        }
-        Ok(Response::new(
-            wire_same::<ConnListAgentModelsResponse, ListAgentModelsResponse>(&resp)?,
-        ))
-    }
-
-    /// Resolved specialized-agent defs available to wire into a managed-codebase session — every
-    /// source a name can resolve against here, so `<tddyhome>/agents/*.yaml` (see
-    /// docs/ft/coder/specialized-subagents.md) *and* this daemon's registry assistants.
-    ///
-    /// Answered from [`Self::resolvable_agent_defs`], which is also what an attach resolves the id
-    /// it is handed against: what a picker is offered and what it can then attach are one list, not
-    /// two that can drift. Advertising less than that is what made an assistant created in Models &
-    /// Agents invisible to the roster while being perfectly attachable by name.
-    ///
-    /// Every row is stamped with this daemon's instance id and the qualified `agent_id` it is
-    /// attached by. A picker fans this call out across every common-room daemon, and two of them
-    /// routinely answer with a def called `explorer`: without the stamp the merged list cannot say
-    /// which host offers which row, and the id the picker sends would be a guess rather than the
-    /// one the serving daemon minted.
-    ///
-    /// A def whose own name contains `@` is dropped with a warning: its qualified id would parse
-    /// back as a different pair, so advertising it would hand a picker an id that routes elsewhere.
-    async fn list_subagents(
-        &self,
-        _request: Request<ListSubagentsRequest>,
-    ) -> Result<Response<ListSubagentsResponse>, Status> {
-        log::debug!("list_subagents RPC: resolving agent defs");
-        let daemon_instance_id = local_instance_id_for_config(&self.config);
-        let defs = self.resolvable_agent_defs().await?;
-        let resolved = defs.len();
-        let subagents: Vec<CatalogSubagentInfo> = defs
-            .into_iter()
-            .filter_map(
-                |def| match agent_roster::subagent_info(&def, &daemon_instance_id) {
-                    Ok(info) => wire_same(&info).ok(),
-                    Err(e) => {
-                        log::warn!("list_subagents RPC: not advertising a def — {e}");
-                        None
-                    }
-                },
-            )
-            .collect();
-        // An empty answer has three very different causes — this daemon has no defs, its registry
-        // was never wired in, or a def was dropped on the way out — and "returning 0" told them
-        // apart in none of them. Naming the sources is what makes an empty picker diagnosable from
-        // the log alone, on a host whose filesystem is not to hand.
-        log::info!(
-            "list_subagents RPC: returning {} subagent(s) of {} resolved def(s) [agents dir {}, \
-             model registry {}]: {:?}",
-            subagents.len(),
-            resolved,
-            self.tddy_data_dir.join("agents").display(),
-            if self.model_registry.is_some() {
-                "attached"
-            } else {
-                "absent"
-            },
-            subagents.iter().map(|s| &s.agent_id).collect::<Vec<_>>()
-        );
-        Ok(Response::new(ListSubagentsResponse { subagents }))
-    }
-
-    // ── Session agent roster (docs/ft/daemon/session-agent-roster.md) ─────────────────────────
-}
-
-#[async_trait::async_trait]
-impl ExecToolService for ConnectionServiceImpl {
-async fn execute_tool(
-        &self,
-        request: Request<ExecuteToolRequest>,
-    ) -> Result<Response<ExecuteToolResponse>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-        let req_conn = wire_same::<ExecuteToolRequest, ConnExecuteToolRequest>(&req)?;
-
-        // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
-        if let Some(answered) = self
-            .rpc_served_by_peer(
-                EXEC_TOOL_SERVICE,
-                "ExecuteTool",
-                &req.daemon_instance_id,
-                &req,
-            )
-            .await?
-        {
-            return Ok(Response::new(answered));
-        }
-
-        // Auth before *any* worktree is chosen, because the hosted-clone branch below chooses one
-        // that is not this daemon's and proxies its mutations under the clone's own credential.
-        self.authorize_exec_tool_caller(&req_conn)?;
-
-        // A session this daemon holds an *agent clone* for lives on another daemon, so the ordinary
-        // "resolve the worktree from my own sessions base" would find nothing. Checked before that
-        // resolution rather than after it, so the read/write split is what answers rather than a
-        // not-found for a session that legitimately is not here.
-        if let Some(clone) = self.hosted_clone_for(&req.session_id) {
-            reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
-            let answered = self.run_hosted_clone_tool(&req_conn, &clone).await;
-            return Ok(Response::new(
-                wire_same::<ConnExecuteToolResponse, ExecuteToolResponse>(&answered)?,
-            ));
-        }
-
-        let (sessions_base, worktree_root) = self.resolve_exec_tool_worktree(&req_conn)?;
-        reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
-        let response = self
-            .run_exec_tool_locally(&req_conn, &sessions_base, &worktree_root)
-            .await;
-        Ok(Response::new(
-            wire_same::<ConnExecuteToolResponse, ExecuteToolResponse>(&response)?,
-        ))
-    }
-
-    /// Associated output stream type for [`stream_execute_tool`].
-    type StreamExecuteToolStream = MpscResultStream<ExecuteToolChunk>;
-
-    /// Server-streaming sibling of [`Self::execute_tool`], carrying the same result in bounded
-    /// frames.
-    ///
-    /// The unary call returns `result_json` as one string; over LiveKit anything past
-    /// `MAX_CHUNK_FRAME_BYTES` is chunk-framed, and one lost chunk frame wedges the call with no
-    /// error at all (`docs/ft/coder/rpc-multi-transport.md`). A `Read` of a large file crosses that
-    /// on day one of a split session, so the split path streams instead — routing, auth and worktree
-    /// resolution are shared with the unary handler so the two cannot drift.
-    async fn stream_execute_tool(
-        &self,
-        request: Request<ExecuteToolRequest>,
-    ) -> Result<Response<Self::StreamExecuteToolStream>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-        let req_conn = wire_same::<ExecuteToolRequest, ConnExecuteToolRequest>(&req)?;
-
-        if let PeerRoute::Forward { peer_instance_id } =
-            self.classify_addressed_daemon_route("StreamExecuteTool", &req.daemon_instance_id)?
-        {
-            log::info!(
-                "StreamExecuteTool: forwarding stream to remote daemon_instance_id={peer_instance_id}"
-            );
-            let slot = self.common_room_slot("StreamExecuteTool")?;
-            // A forwarded stream that stalls terminates as an *error*, so a truncated tool result
-            // can never reach the caller looking complete.
-            let mut conn_rx =
-                tddy_daemon_livekit::livekit_peer_discovery::forward_stream_execute_tool_via_livekit(
-                    slot,
-                    &peer_instance_id,
-                    &req_conn,
-                )
-                .await?;
-            let (tx, rx) =
-                tokio::sync::mpsc::unbounded_channel::<Result<ExecuteToolChunk, Status>>();
-            tokio::spawn(async move {
-                while let Some(frame) = conn_rx.recv().await {
-                    let out = frame.and_then(|chunk| {
-                        wire_same::<ConnExecuteToolChunk, ExecuteToolChunk>(&chunk)
-                    });
-                    if tx.send(out).is_err() {
-                        break;
-                    }
-                }
-            });
-            return Ok(Response::new(MpscResultStream { rx }));
-        }
-
-        // See the unary handler: auth first, because the hosted-clone branch resolves no worktree of
-        // this daemon's and would otherwise be reachable with no credential at all.
-        self.authorize_exec_tool_caller(&req_conn)?;
-
-        // A session this daemon holds an agent clone for is served by the read/write split, from a
-        // checkout that is not in this daemon's own sessions base.
-        let response = match self.hosted_clone_for(&req.session_id) {
-            Some(clone) => {
-                reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
-                self.run_hosted_clone_tool(&req_conn, &clone).await
-            }
-            None => {
-                let (sessions_base, worktree_root) = self.resolve_exec_tool_worktree(&req_conn)?;
-                reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
-                self.run_exec_tool_locally(&req_conn, &sessions_base, &worktree_root)
-                    .await
-            }
-        };
-
-        // The result is already complete in memory, so every frame can be queued now: the stream
-        // exists to bound each frame's size, not to interleave with the tool's execution.
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<ExecuteToolChunk, Status>>();
-        for frame in exec_tool_result_frames(response) {
-            if tx.send(Ok(wire_same::<ConnExecuteToolChunk, ExecuteToolChunk>(&frame)?)).is_err() {
-                break;
-            }
-        }
-        Ok(Response::new(MpscResultStream { rx }))
-    }
-
-    async fn list_exec_tools(
-        &self,
-        request: Request<ListExecToolsRequest>,
-    ) -> Result<Response<ListExecToolsResponse>, Status> {
-        let req = request.into_inner();
-
-        // Route BEFORE auth so a relay (which has no local user table) can forward.
-        let requested_daemon = req.daemon_instance_id.trim();
-        if !requested_daemon.is_empty() {
-            let local_id = local_instance_id_for_config(&self.config);
-            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
-            let eligible_ids: Vec<String> = eligible_rows
-                .iter()
-                .map(|e| e.instance_id.0.clone())
-                .collect();
-            match crate::livekit_peer_discovery::classify_peer_route(
-                &local_id,
-                requested_daemon,
-                &eligible_ids,
-            ) {
-                Err(msg) => {
-                    log::info!("ListExecTools: rejected daemon routing: {}", msg);
-                    return Err(Status::invalid_argument(msg));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
-                    log::info!(
-                        "ListExecTools: forwarding RPC to remote daemon_instance_id={}",
-                        peer_instance_id
-                    );
-                    let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
-                        Status::failed_precondition(
-                            "cannot forward ListExecTools: this process has no LiveKit common-room connection",
-                        )
-                    })?;
-                    let body = req.encode_to_vec();
-                    let out = crate::livekit_peer_discovery::forward_to_peer(
-                        slot,
-                        &peer_instance_id,
-                        "exec_tools.ExecToolService",
-                        "ListExecTools",
-                        body,
-                    )
-                    .await?;
-                    let inner = ConnListExecToolsResponse::decode(out.as_slice()).map_err(|e| {
-                        Status::internal(format!("decode ListExecToolsResponse: {e}"))
-                    })?;
-                    return Ok(Response::new(wire_same(&inner)?));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
-                    // Fall through to local execution below.
-                }
-            }
-        }
-
-        // Minimal auth — verify caller is a known user.
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let _os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        Ok(Response::new(ListExecToolsResponse {
-            tools: tool_engine::tool_catalog()
-                .into_iter()
-                .map(|t| ExecToolDef {
-                    name: t.name,
-                    description: t.description,
-                    input_schema_json: t.input_schema_json,
-                })
-                .collect(),
-        }))
-    }
-
-    async fn list_session_tool_calls(
-        &self,
-        request: Request<ListSessionToolCallsRequest>,
-    ) -> Result<Response<ListSessionToolCallsResponse>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-
-        // Route BEFORE session lookup so a relay can forward.
-        let requested_daemon = req.daemon_instance_id.trim();
-        if !requested_daemon.is_empty() {
-            let local_id = local_instance_id_for_config(&self.config);
-            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
-            let eligible_ids: Vec<String> = eligible_rows
-                .iter()
-                .map(|e| e.instance_id.0.clone())
-                .collect();
-            match crate::livekit_peer_discovery::classify_peer_route(
-                &local_id,
-                requested_daemon,
-                &eligible_ids,
-            ) {
-                Err(msg) => {
-                    log::info!("ListSessionToolCalls: rejected daemon routing: {}", msg);
-                    return Err(Status::invalid_argument(msg));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
-                    log::info!(
-                        "ListSessionToolCalls: forwarding RPC to remote daemon_instance_id={}",
-                        peer_instance_id
-                    );
-                    let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
-                        Status::failed_precondition(
-                            "cannot forward ListSessionToolCalls: this process has no LiveKit common-room connection",
-                        )
-                    })?;
-                    let body = req.encode_to_vec();
-                    let out = crate::livekit_peer_discovery::forward_to_peer(
-                        slot,
-                        &peer_instance_id,
-                        "exec_tools.ExecToolService",
-                        "ListSessionToolCalls",
-                        body,
-                    )
-                    .await?;
-                    let inner =
-                        ConnListSessionToolCallsResponse::decode(out.as_slice()).map_err(|e| {
-                            Status::internal(format!("decode ListSessionToolCallsResponse: {e}"))
-                        })?;
-                    return Ok(Response::new(wire_same(&inner)?));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
-                    // Fall through to local execution below.
-                }
-            }
-        }
-
-        // Authenticate caller.
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        // Validate session ID segment to prevent path traversal.
-        validate_session_id_segment(&req.session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-
-        // Resolve the sessions base path.
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-
-        let records = crate::tool_call_log::read_tool_calls(&session_dir).unwrap_or_default();
-
-        let tool_calls: Vec<ExecToolCallInfo> = records
-            .into_iter()
-            .map(|r| ExecToolCallInfo {
-                task_id: r.task_id,
-                tool_name: r.tool_name,
-                args_json: r.args_json,
-                result_json: r.result_json,
-                is_error: r.is_error,
-                error_message: r.error_message,
-                job_running: r.job_running,
-                created_unix_ms: r.created_unix_ms,
-            })
-            .collect();
-
-        Ok(Response::new(ListSessionToolCallsResponse { tool_calls }))
-    }
-}
-
-#[async_trait::async_trait]
-impl PrStackService for ConnectionServiceImpl {
-async fn add_planned_pr(
+#[async_trait]
+impl crate::pr_stack_rpc::PrStackHandler for ConnectionServiceImpl {
+    async fn add_planned_pr(
         &self,
         request: Request<AddPlannedPrRequest>,
     ) -> Result<Response<AddPlannedPrResponse>, Status> {
@@ -710,9 +195,10 @@ async fn add_planned_pr(
             self.config.spawn_worker_request_timeout(),
             "QueryBranch: read the branch's worktree",
             move || {
-                wire_same_anyhow(
-                    &worktree_leg(worktree_repo_root.as_deref(), &branch_for_worktree),
-                )
+                wire_same_anyhow(&worktree_leg(
+                    worktree_repo_root.as_deref(),
+                    &branch_for_worktree,
+                ))
             },
         )
         .await
@@ -807,7 +293,7 @@ async fn add_planned_pr(
 
         if let Some(answered) = self
             .rpc_served_by_peer(
-                EXEC_TOOL_SERVICE,
+                tddy_workflow_recipes::PR_STACK_SERVICE,
                 "ResolveStackBase",
                 &req.daemon_instance_id,
                 &req,
@@ -886,7 +372,7 @@ async fn add_planned_pr(
 
         if let Some(answered) = self
             .rpc_served_by_peer(
-                EXEC_TOOL_SERVICE,
+                tddy_workflow_recipes::PR_STACK_SERVICE,
                 "LinkStackNode",
                 &req.daemon_instance_id,
                 &req,
@@ -1214,9 +700,10 @@ async fn add_planned_pr(
                     },
                     None => BranchSession::default(),
                 };
-                let worktree = wire_same_anyhow(
-                    &worktree_leg(Some(&resolution_repo_root), &resolution_branch),
-                )?;
+                let worktree = wire_same_anyhow(&worktree_leg(
+                    Some(&resolution_repo_root),
+                    &resolution_branch,
+                ))?;
                 let remote = match tddy_core::worktree::remote_branch_ref_sha(
                     &resolution_repo_root,
                     &resolution_branch,
@@ -1234,9 +721,10 @@ async fn add_planned_pr(
                         &resolution_base_branch,
                     ) {
                         Ok(sync) => wire_same_anyhow(&base_sync_view(sync))?,
-                        Err(reason) => {
-                            wire_same_anyhow(&base_sync_unavailable(&resolution_base_branch, &reason))?
-                        }
+                        Err(reason) => wire_same_anyhow(&base_sync_unavailable(
+                            &resolution_base_branch,
+                            &reason,
+                        ))?,
                     },
                 );
                 Ok((session, worktree, remote, base_sync))

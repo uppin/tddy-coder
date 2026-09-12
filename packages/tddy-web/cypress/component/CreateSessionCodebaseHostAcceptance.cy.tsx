@@ -19,6 +19,7 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
@@ -73,20 +74,20 @@ function aCreateSessionBackendOfferingAnAgent(): InMemoryRpcBackend {
 function aCreateSessionBackend(offeredAgents: OfferedAgent[] = []): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
     .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
-    .onUnary(ConnectionService.method.listAgentModels, () => ({
+    .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",
     }))
     .onUnary(ConnectionService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(ConnectionService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => ({
       agents: [{ id: "claude", label: "Claude" }],
     }))
-    .onUnary(ConnectionService.method.listTools, () => ({
+    .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
-    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: offeredAgents }))
+    .onUnary(CatalogService.method.listSubagents, () => ({ subagents: offeredAgents }))
     .onUnary(ConnectionService.method.listProjectBranches, () => ({
       branches: ["origin/main"],
       defaultRemote: "origin",
@@ -96,6 +97,7 @@ function aCreateSessionBackend(offeredAgents: OfferedAgent[] = []): InMemoryRpcB
 
 function mountCreatePane(backend: InMemoryRpcBackend) {
   const client = createClient(ConnectionService, backend.transport());
+  const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
@@ -103,6 +105,7 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={AGENT_HOST}>
       <CreateSessionPane
         client={client}
+      catalogClient={catalogClient}
         sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}
         sessionToken="fake-token"

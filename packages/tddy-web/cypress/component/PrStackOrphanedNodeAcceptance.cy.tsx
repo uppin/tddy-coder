@@ -13,6 +13,8 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { ConnectionService, type ProjectEntry, type SessionEntry } from "../../src/gen/connection_pb";
+import { PrStackService } from "../../src/gen/pr_stack_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -88,17 +90,17 @@ function openPrStackScreen(opts: MountOptions) {
   const backend = aSessionsDrawerBackend([
     anOrchestratorSession(aStackPlanJson(1, opts.nodes ?? [aSpawnedNode()])),
   ])
-    .onUnary(ConnectionService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(opts.resolutionByBranch[req.branch] ?? { branch: req.branch }),
     )
     .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
-    .onUnary(ConnectionService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
-    .onUnary(ConnectionService.method.listAgentModels, () => ({
+    .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
+    .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "opus", label: "Claude Opus (latest)" }],
       defaultModel: "opus",
     }))
-    .onUnary(ConnectionService.method.listTools, () => ({ tools: [] }))
-    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }))
+    .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
+    .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
     .onUnary(ConnectionService.method.listProjectBranches, () => ({
       branches: opts.remoteBranches ?? [],
     }));
@@ -112,7 +114,7 @@ function openPrStackScreenWithUnansweredResolution() {
   const backend = aSessionsDrawerBackend([
     anOrchestratorSession(aStackPlanJson(1, [aSpawnedNode()])),
   ]).onUnary(
-    ConnectionService.method.queryBranch,
+    PrStackService.method.queryBranch,
     () => new Promise<never>(() => undefined),
   );
 

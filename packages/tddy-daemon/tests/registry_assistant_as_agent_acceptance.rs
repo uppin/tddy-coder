@@ -12,11 +12,14 @@ use std::sync::Arc;
 
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::test_util::TestDaemon;
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_model_registry::{ModelRegistryStore, NewAssistant, NewProvider};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest, SubagentInfo};
-use tddy_service::proto::connection::{ConnectionService as ConnectionServiceTrait, StartSessionRequest};
+use tddy_service::proto::connection::{
+    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
+};
 use tddy_service::proto::models::ProviderKind;
 
 // ---------------------------------------------------------------------------
@@ -55,7 +58,7 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 struct Harness {
     _dir: tempfile::TempDir,
     agents_dir: PathBuf,
-    service: ConnectionServiceImpl,
+    service: TestDaemon,
     store: Arc<ModelRegistryStore>,
 }
 
@@ -180,17 +183,19 @@ async fn a_daemon_with_a_registry() -> Harness {
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
-    let service = ConnectionServiceImpl::new(
-        config,
-        sessions_base_resolver,
-        tddy_data_dir,
-        user_resolver,
-        None,
-        None,
-        None,
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
-    .with_model_registry(Arc::clone(&store));
+    let service = TestDaemon::from_arc(Arc::new(
+        ConnectionServiceImpl::new(
+            config,
+            sessions_base_resolver,
+            tddy_data_dir,
+            user_resolver,
+            None,
+            None,
+            None,
+            Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
+        )
+        .with_model_registry(Arc::clone(&store)),
+    ));
 
     Harness {
         _dir: dir,

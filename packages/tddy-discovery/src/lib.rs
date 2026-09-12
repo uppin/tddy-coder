@@ -2,7 +2,10 @@
 //! subagents built on it, and the session-scoped runtime that keeps track of both.
 
 pub mod agent_def;
+pub mod agent_list_mapping;
 pub mod backend;
+pub mod catalog_entry;
+pub mod catalog_service;
 pub mod discovery;
 pub mod openai;
 /// The live roster of agents attached to a session: what the daemon says is attached, what those
@@ -11,11 +14,11 @@ pub mod roster;
 pub mod subagent;
 /// Every conversation a session has open with a subagent, and what each has spent.
 pub mod subagent_runtime;
-pub mod catalog_entry;
 pub mod tools;
 pub mod warmup;
 
 pub use catalog_entry::{build_catalog_entry, CATALOG_SERVICE};
+pub use catalog_service::{CatalogHandler, CatalogServiceImpl};
 
 #[cfg(test)]
 mod unbundle_catalog_entry_tests {
@@ -68,9 +71,7 @@ mod unbundle_catalog_entry_tests {
                 tddy_rpc::Status,
             > {
                 Ok(tddy_rpc::Response::new(
-                    tddy_service::proto::catalog::ListSubagentsResponse {
-                        subagents: vec![],
-                    },
+                    tddy_service::proto::catalog::ListSubagentsResponse { subagents: vec![] },
                 ))
             }
         }
@@ -80,4 +81,3 @@ mod unbundle_catalog_entry_tests {
         );
     }
 }
-

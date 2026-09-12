@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
-import type { BranchConflict, ConnectionService, ProjectEntry, SessionEntry, ToolInfo } from "../../gen/connection_pb";
+import type { BranchConflict, ConnectionService, ProjectEntry, SessionEntry } from "../../gen/connection_pb";
+import { CatalogService, type ToolInfo } from "../../gen/catalog_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import { localBranchName } from "../../lib/branchNames";
@@ -58,6 +59,7 @@ const WORKFLOW_RECIPES = [
 // ---------------------------------------------------------------------------
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type CatalogClient = Client<typeof CatalogService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
 
@@ -125,6 +127,8 @@ export type CreateSessionInitialValues = Partial<{
 
 export interface CreateSessionPaneProps {
   client: ConnectionClient;
+  /** `catalog.CatalogService` on the same host as `client` — tools, agents and model probes. */
+  catalogClient: CatalogClient;
   /**
    * The session-files service on the same host as `client` — the form stages its local attachments
    * and lists the upload scope through it. Required for the reason `worktreeClient` is: without one
@@ -149,6 +153,7 @@ export interface CreateSessionPaneProps {
 
 export function CreateSessionPane({
   client,
+  catalogClient,
   sessionFilesClient,
   worktreeClient,
   sessionToken,
@@ -295,7 +300,7 @@ export function CreateSessionPane({
   // Every common-room daemon's agents — the thing a tool session is started *as*. `ListAgents`
   // answers for the responding daemon only, so without this fan-out an assistant created on another
   // host is absent from the form rather than merely hard to find.
-  const selectableAgents = useSelectableAgents(client, connectedInstanceId);
+  const selectableAgents = useSelectableAgents(catalogClient, connectedInstanceId);
 
   // Whether there is a host to name at all. The same condition the Host select is rendered on: with
   // no common room there is one host, so nothing to disambiguate and nothing to caption.
@@ -336,7 +341,7 @@ export function CreateSessionPane({
       : sessionType === "cursor-cli"
         ? CURSOR_CLI_AGENT
         : selectedAgentId;
-  const agentModels = useAgentModels(client, sessionToken, modelAgentKey, daemonInstanceId);
+  const agentModels = useAgentModels(catalogClient, sessionToken, modelAgentKey, daemonInstanceId);
 
   // Reset the model selection to the backend's advertised default whenever the catalog changes
   // (agent switch, session-type switch). Empty while loading or on a failed probe.
@@ -347,7 +352,7 @@ export function CreateSessionPane({
   // Every common-room daemon's specialized agents, each labelled with the host that offers it. A
   // host that cannot answer costs one error row rather than the whole picker — see
   // docs/ft/daemon/session-agent-roster.md § Web UI.
-  const availableAgents = useAvailableAgents(client, connectedInstanceId);
+  const availableAgents = useAvailableAgents(catalogClient, connectedInstanceId);
 
   const toggleAgent = (agentId: string) => {
     setSelectedAgentIds((prev) =>
@@ -373,7 +378,7 @@ export function CreateSessionPane({
 
     // Agents are not read here: they are fanned out across every host by `useSelectableAgents`,
     // since one daemon's answer speaks only for itself.
-    Promise.all([client.listProjects({ sessionToken }), client.listTools({})])
+    Promise.all([client.listProjects({ sessionToken }), catalogClient.listTools({})])
       .then(([projectsResp, toolsResp]) => {
         if (cancelled) return;
 
@@ -402,7 +407,7 @@ export function CreateSessionPane({
     return () => {
       cancelled = true;
     };
-  }, [client, sessionToken]);
+  }, [client, catalogClient, sessionToken]);
 
   // Load branches when projectId changes and intent is work_on_selected_branch
   useEffect(() => {

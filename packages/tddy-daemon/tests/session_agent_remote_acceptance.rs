@@ -25,16 +25,16 @@ use tddy_core::SessionMetadata;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::remote_git_service::{ProjectsDirResolver, RemoteGitServiceImpl};
-use tddy_daemon::test_util::TEST_TOKEN;
+use tddy_daemon::test_util::{TestDaemon, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, MultiRpcService, Request, RpcBridge, RpcService, ServiceEntry};
-use tddy_service::proto::exec_tools::{
-    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
-};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ListSessionsRequest,
     StartSessionRequest,
+};
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
 };
 use tddy_service::proto::session_agents_svc::{
     AttachSessionAgentRequest, CancelAgentConversationRequest, DetachSessionAgentRequest,
@@ -66,7 +66,7 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// A facilitating daemon A with a live session, plus zero or more peer daemons in the same room.
 struct Fleet {
-    a: ConnectionServiceImpl,
+    a: TestDaemon,
     session_id: String,
     peers: Vec<PeerDaemon>,
     _livekit: LiveKitTestkit,
@@ -99,7 +99,7 @@ struct PeerDaemon {
     sessions: tempfile::TempDir,
     /// The peer's own service, so a test can address its RPC surface directly — which is what any
     /// common-room participant able to reach that daemon can do.
-    service: ConnectionServiceImpl,
+    service: TestDaemon,
     run: tokio::task::JoinHandle<()>,
 }
 
@@ -286,17 +286,15 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         // a forward to the new one with `Unknown service`. Served through
         // `test_util::serve_daemon_rpc_participant` so this list lives in one place — which is the
         // whole reason that helper exists.
-        let run = tddy_daemon::test_util::serve_daemon_rpc_participant(
-            &ws_url,
-            &token,
-            &Arc::new(service.clone()),
-        )
-        .await;
+        let service_arc = Arc::new(service);
+        let run =
+            tddy_daemon::test_util::serve_daemon_rpc_participant(&ws_url, &token, &service_arc)
+                .await;
 
         running_peers.push(PeerDaemon {
             instance_id: instance_id.to_string(),
             sessions,
-            service,
+            service: TestDaemon::from_arc(service_arc),
             run,
         });
     }
@@ -453,7 +451,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     .expect("write session metadata");
 
     let fleet = Fleet {
-        a: service_a,
+        a: TestDaemon::from_arc(Arc::new(service_a)),
         session_id,
         peers: running_peers,
         _livekit: livekit,

@@ -17,6 +17,8 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { ConnectionService, type ProjectEntry, type SessionEntry } from "../../src/gen/connection_pb";
+import { PrStackService } from "../../src/gen/pr_stack_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -113,11 +115,11 @@ function aPrStackBackend() {
   return aSessionsDrawerBackend([
     anOrchestratorSession(aStackPlanJson(1, aStackWithAMergedMiddleNode())),
   ])
-    .onUnary(ConnectionService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(RESOLUTION_BY_BRANCH[req.branch] ?? { branch: req.branch }),
     )
     .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
-    .onUnary(ConnectionService.method.listTools, () => ({ tools: [] }));
+    .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 }
 
 function openPrStackScreen(backend: ReturnType<typeof aPrStackBackend>) {
@@ -143,7 +145,7 @@ beforeEach(() => {
 it("disables the repoint control while a pull into the same branch is in flight", () => {
   // Given — the pull is merging the base into exactly the branch a repoint would rebase
   openPrStackScreen(
-    aPrStackBackend().onUnary(ConnectionService.method.pullBaseIntoBranch, neverAnswers),
+    aPrStackBackend().onUnary(PrStackService.method.pullBaseIntoBranch, neverAnswers),
   );
   prStackScreenPage.expandRow("n3");
 
@@ -157,7 +159,7 @@ it("disables the repoint control while a pull into the same branch is in flight"
 it("disables both pull controls while a repoint of the same branch is in flight", () => {
   // Given — the repoint is rebasing and force-pushing exactly the branch a pull would merge into
   openPrStackScreen(
-    aPrStackBackend().onUnary(ConnectionService.method.repointPlannedPr, neverAnswers),
+    aPrStackBackend().onUnary(PrStackService.method.repointPlannedPr, neverAnswers),
   );
   prStackScreenPage.expandRow("n3");
 
@@ -172,7 +174,7 @@ it("disables both pull controls while a repoint of the same branch is in flight"
 it("leaves another node's pull controls enabled while one node's branch is being mutated", () => {
   // Given — mutations of different nodes touch different branches and may legitimately overlap
   openPrStackScreen(
-    aPrStackBackend().onUnary(ConnectionService.method.repointPlannedPr, neverAnswers),
+    aPrStackBackend().onUnary(PrStackService.method.repointPlannedPr, neverAnswers),
   );
   prStackScreenPage.expandRow("n3");
   prStackScreenPage.expandRow("n1");

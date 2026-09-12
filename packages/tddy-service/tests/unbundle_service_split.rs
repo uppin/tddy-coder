@@ -689,4 +689,3 @@ fn the_shared_types_file_holds_only_the_four_types_that_genuinely_cross() {
         );
     }
 }
-

@@ -3,49 +3,24 @@
 // entries are pruned below by the compiler's own spans.
 // `encode_to_vec` is a `prost::Message` method; the trait is imported anonymously because
 // only its methods are used.
-use crate::tool_engine;
-use prost::Message as _;
-use tddy_sandbox_runner::ExecuteToolResponse;
 use tddy_service::proto::connection::start_session_event::Event as StartSessionEventKind;
 use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 use tddy_service::proto::connection::SessionEntry as ProtoSessionEntry;
 use tddy_service::proto::connection::{
-    AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
-    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, LinkStackNodeRequest,
-    LinkStackNodeResponse, MintLocalTokenRequest, MintLocalTokenResponse,
-    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
-    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
-    RepointPlannedPrResponse, ResolveStackBaseRequest, ResolveStackBaseResponse, StartSessionEvent,
-};
-use tddy_service::proto::connection::{
     DemoVmState, GetDemoVmStatusRequest, GetDemoVmStatusResponse, StartDemoVmRequest,
-    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, ToolCallInfo as ProtoToolCallInfo,
-};
-use tddy_service::proto::connection::{
-    ExecuteToolChunk, ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse,
+    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
 };
 use tddy_service::proto::connection::{ExecuteToolRequest, ProjectEntry as ProtoProjectEntry};
+use tddy_service::proto::connection::{
+    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, MintLocalTokenRequest,
+    MintLocalTokenResponse, StartSessionEvent,
+};
 
 use crate::{
-    connection_service::{activity_hub, agent_roster, hooks_and_urls, service_util},
+    connection_service::{activity_hub, hooks_and_urls, service_util},
     project_storage, session_deletion, session_list_enrichment, session_reader,
 };
 use tddy_spawn::{spawn_worker, spawner};
-
-use super::base_sync_unavailable;
-
-use super::base_sync_view;
-
-use super::owner_repo_from_repo_root;
-
-use super::worktree_leg;
-
-use super::require_pr_stack_orchestrator;
-
-use super::exec_tool_result_frames;
-
-use super::reject_exec_tool_path_traversal;
 
 use tddy_service::proto::connection::ListProjectBranchesResponse;
 
@@ -121,47 +96,15 @@ use uuid::Uuid;
 
 use super::MpscResultStream;
 
-use tddy_service::proto::connection::SubagentInfo;
-
 use crate::livekit_peer_discovery::local_instance_id_for_config;
-
-use tddy_service::proto::connection::ListSubagentsResponse;
-
-use tddy_service::proto::connection::ListSubagentsRequest;
-
-use super::parse_agent_models_json;
-
-use super::list_models_probe_args;
 
 use std::path::PathBuf;
 
 use std::path::Path;
 
-use super::AGENT_MODELS_CACHE_TTL;
-
-use super::agent_models_cache;
-
-use tddy_service::proto::connection::ListAgentModelsResponse;
-
-use tddy_service::proto::connection::ListAgentModelsRequest;
-
-use crate::agent_list_mapping::agent_allowlist_rows;
-
-use tddy_service::proto::connection::AgentInfo;
-
-use tddy_service::proto::connection::ListAgentsResponse;
-
-use tddy_service::proto::connection::ListAgentsRequest;
-
-use tddy_service::proto::connection::ToolInfo;
-
 use tddy_rpc::Status;
 
-use tddy_service::proto::connection::ListToolsResponse;
-
 use tddy_rpc::Response;
-
-use tddy_service::proto::connection::ListToolsRequest;
 
 use tddy_rpc::Request;
 
@@ -1294,7 +1237,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }))
     }
 
-
     async fn start_demo_vm(
         &self,
         request: Request<StartDemoVmRequest>,
@@ -1522,14 +1464,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(resp))
     }
 
-    // --- agent activity ---
-
-    // --- PR-Stack Chat Screen: manually adding a planned PR ---
-
-    /// Append a manually-created planned PR to a "pr-stack" orchestrator session's stack,
-    /// choosing its ancestors from the already-planned nodes. See
-    /// `tddy_workflow_recipes::pr_stack::add_planned_pr_node`.
-
     async fn get_worktree_snapshot(
         &self,
         request: Request<GetWorktreeSnapshotRequest>,
@@ -1590,7 +1524,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             attachments,
         }))
     }
-
 
     /// Local peer-trust minting is not available on this transport. Peer credentials
     /// (SO_PEERCRED) exist only on the daemon's local Unix-domain socket; over ConnectRPC-HTTP or

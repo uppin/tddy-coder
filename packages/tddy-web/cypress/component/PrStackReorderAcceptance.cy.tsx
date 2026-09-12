@@ -12,6 +12,8 @@ import React from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { ConnectionService, type SessionEntry } from "../../src/gen/connection_pb";
+import { PrStackService } from "../../src/gen/pr_stack_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -60,7 +62,7 @@ interface MountOptions {
 function aPrStackBackend(opts: MountOptions) {
   return aSessionsDrawerBackend([
     anOrchestratorSession(aStackPlanJson(1, anOrderedStack(opts.order))),
-  ]).onUnary(ConnectionService.method.listTools, () => ({ tools: [] }));
+  ]).onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 }
 
 function mountAndOpen(backend: ReturnType<typeof aPrStackBackend>) {
@@ -72,7 +74,7 @@ function mountAndOpen(backend: ReturnType<typeof aPrStackBackend>) {
 /** Open the screen with a `ReorderPlannedPr` that succeeds and returns the reordered plan. */
 function openPrStackScreen(opts: MountOptions) {
   return mountAndOpen(
-    aPrStackBackend(opts).onUnary(ConnectionService.method.reorderPlannedPr, () => ({
+    aPrStackBackend(opts).onUnary(PrStackService.method.reorderPlannedPr, () => ({
       stackPlanJson: aStackPlanJson(1, anOrderedStack(opts.reorderedTo ?? opts.order)),
     })),
   );
@@ -81,7 +83,7 @@ function openPrStackScreen(opts: MountOptions) {
 /** Open the screen with a `ReorderPlannedPr` the daemon refuses, carrying `message` as its reason. */
 function openPrStackScreenWithRefusedReorder(message: string, opts: MountOptions) {
   return mountAndOpen(
-    aPrStackBackend(opts).onUnary(ConnectionService.method.reorderPlannedPr, () => {
+    aPrStackBackend(opts).onUnary(PrStackService.method.reorderPlannedPr, () => {
       throw new ConnectError(message, Code.InvalidArgument);
     }),
   );
@@ -136,7 +138,7 @@ it("names the row and the direction it is being moved", () => {
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.reorderPlannedPr);
+    const calls = b.callsTo(PrStackService.method.reorderPlannedPr);
     expect(calls).to.have.length(1);
     expect(calls[0].sessionId).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].nodeId).to.equal("n2");

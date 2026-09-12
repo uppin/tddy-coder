@@ -17,13 +17,13 @@ use tddy_daemon::livekit_peer_discovery::{
     classify_peer_route, LiveKitDiscoveryHandles, PeerRoute,
 };
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
+use tddy_daemon::test_util::TestDaemon;
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_rpc::Request;
+use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 use tddy_service::proto::exec_tools::{
     ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
 };
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -77,10 +77,7 @@ fn user_resolver_valid() -> UserResolver {
     })
 }
 
-fn service_with_known_remote_peer(
-    config: DaemonConfig,
-    sessions_base: PathBuf,
-) -> ConnectionServiceImpl {
+fn service_with_known_remote_peer(config: DaemonConfig, sessions_base: PathBuf) -> TestDaemon {
     let room_slot = Arc::new(tokio::sync::RwLock::new(None)); // no LiveKit room
     let discovery = LiveKitDiscoveryHandles {
         eligible_daemon_source: Arc::new(MockEligibleDaemonSource {
@@ -88,7 +85,7 @@ fn service_with_known_remote_peer(
         }) as Arc<dyn EligibleDaemonSource>,
         common_room_livekit_room: room_slot,
     };
-    ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
         config,
         sessions_resolver(sessions_base.clone()),
         sessions_base,
@@ -97,7 +94,7 @@ fn service_with_known_remote_peer(
         Some(discovery),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
-    )
+    )))
 }
 
 // ── classify_peer_route unit tests (new generic name — compile error until renamed) ──────────────
@@ -208,7 +205,7 @@ async fn execute_tool_with_known_remote_instance_id_returns_failed_precondition_
 async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument() {
     // Given — service has no eligible daemon source (only local is reachable)
     let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = ConnectionServiceImpl::new(
+    let service = TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
         test_config(),
         sessions_resolver(sessions_tmp.path().to_path_buf()),
         sessions_tmp.path().to_path_buf(),
@@ -217,7 +214,7 @@ async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument()
         None, // no livekit discovery
         None,
         Arc::new(ClaudeCliSessionManager::new()),
-    );
+    )));
 
     // When
     let status = service
@@ -283,7 +280,7 @@ async fn list_exec_tools_with_known_remote_instance_id_returns_failed_preconditi
 async fn list_exec_tools_with_unknown_instance_id_returns_invalid_argument() {
     // Given — service has no eligible daemon source
     let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = ConnectionServiceImpl::new(
+    let service = TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
         test_config(),
         sessions_resolver(sessions_tmp.path().to_path_buf()),
         sessions_tmp.path().to_path_buf(),
@@ -292,7 +289,7 @@ async fn list_exec_tools_with_unknown_instance_id_returns_invalid_argument() {
         None, // no livekit discovery
         None,
         Arc::new(ClaudeCliSessionManager::new()),
-    );
+    )));
 
     // When
     let status = service

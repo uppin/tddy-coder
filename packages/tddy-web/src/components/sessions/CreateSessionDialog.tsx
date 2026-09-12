@@ -1,18 +1,21 @@
 import React from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService } from "../../gen/connection_pb";
+import type { CatalogService } from "../../gen/catalog_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import { Button } from "../ui/button";
 import { CreateSessionPane, type CreateSessionInitialValues } from "./CreateSessionPane";
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type CatalogClient = Client<typeof CatalogService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
 
 export interface CreateSessionDialogProps {
   open: boolean;
   client: ConnectionClient;
+  catalogClient: CatalogClient;
   /**
    * The session-files service on the same host as `client` — the form stages its local attachments
    * through it. Required for the reason `worktreeClient` is: without one a staged upload silently
@@ -40,6 +43,7 @@ export interface CreateSessionDialogProps {
 export function CreateSessionDialog({
   open,
   client,
+  catalogClient,
   sessionFilesClient,
   worktreeClient,
   sessionToken,
@@ -76,6 +80,7 @@ export function CreateSessionDialog({
         <div className="min-h-0 flex-1 overflow-auto">
           <CreateSessionPane
             client={client}
+            catalogClient={catalogClient}
             sessionFilesClient={sessionFilesClient}
             worktreeClient={worktreeClient}
             sessionToken={sessionToken}

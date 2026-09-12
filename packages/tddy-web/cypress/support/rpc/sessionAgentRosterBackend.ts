@@ -15,7 +15,7 @@
 import { Code, ConnectError, type ServiceImpl } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ConnectionService, ListSubagentsResponseSchema } from "../../../src/gen/connection_pb";
+import { CatalogService, ListSubagentsResponseSchema } from "../../../src/gen/catalog_pb";
 import { SessionAgentService } from "../../../src/gen/session_agents_pb";
 import { AgentCloneState, SessionAgentRosterSchema, type SessionAgentEntry } from "../../../src/gen/session_agents_pb";
 import { SessionAgentStatus, type SessionAgentActivity } from "../../../src/gen/types_pb";
@@ -171,12 +171,11 @@ export interface SessionAgentRosterFake extends RosterControls {
    */
   handlers: Partial<ServiceImpl<typeof SessionAgentService>>;
   /**
-   * `ListSubagents`, which is the *picker's* fan-out and stayed on
-   * `connection.ConnectionService` when `#unbundle` node 7 moved the roster. Two bags rather than
-   * one because a bag is spread per service: the roster and the catalogue of what could be attached
-   * to it are now two coordinates, and a scenario still describes both.
+   * `ListSubagents`, which is the *picker's* fan-out on `catalog.CatalogService` since `#unbundle`
+   * node 8. Two bags rather than one because a bag is spread per service: the roster and the
+   * catalogue of what could be attached to it are two coordinates, and a scenario still describes both.
    */
-  connectionHandlers: Partial<ServiceImpl<typeof ConnectionService>>;
+  catalogHandlers: Partial<ServiceImpl<typeof CatalogService>>;
 }
 
 export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentRosterFake {
@@ -186,7 +185,7 @@ export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentR
   const rosterReads: RosterAddress[] = [];
   const attaches: RosterAddress[] = [];
 
-  const connectionHandlers: Partial<ServiceImpl<typeof ConnectionService>> = {
+  const catalogHandlers: Partial<ServiceImpl<typeof CatalogService>> = {
     async listSubagents() {
       if (scenario.offersUnavailable !== undefined) {
         throw new ConnectError(scenario.offersUnavailable, Code.Unavailable);
@@ -257,7 +256,7 @@ export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentR
 
   return {
     handlers,
-    connectionHandlers,
+    catalogHandlers,
     pushRoster: (agents, rev) => tail.push(agents, rev),
     detachedAgentIds: () => [...detached],
     attachedAgentIds: () => [...attached],
@@ -268,11 +267,11 @@ export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentR
 
 /** The roster fake on a backend of its own — all a spec mounting the pane alone needs. */
 export function aSessionAgentRosterBackend(scenario: RosterScenario): RosterBackend {
-  const { handlers, connectionHandlers, ...controls } = aSessionAgentRosterFake(scenario);
+  const { handlers, catalogHandlers, ...controls } = aSessionAgentRosterFake(scenario);
   return {
     backend: anInMemoryRpcBackend()
       .implement(SessionAgentService, handlers)
-      .implement(ConnectionService, connectionHandlers),
+      .implement(CatalogService, catalogHandlers),
     ...controls,
   };
 }
@@ -340,7 +339,7 @@ function aRosterTail() {
 export function aDaemonOfferingAgents(
   agents: ReturnType<typeof anAvailableAgent>[],
 ): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().onUnary(ConnectionService.method.listSubagents, () => ({
+  return anInMemoryRpcBackend().onUnary(CatalogService.method.listSubagents, () => ({
     subagents: agents,
   }));
 }
@@ -348,7 +347,7 @@ export function aDaemonOfferingAgents(
 /** A daemon that cannot answer the picker's fan-out. */
 export function aDaemonThatCannotBeReached(message: string): InMemoryRpcBackend {
   return anInMemoryRpcBackend().failWith(
-    ConnectionService.method.listSubagents,
+    CatalogService.method.listSubagents,
     Code.Unavailable,
     message,
   );

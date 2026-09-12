@@ -20,7 +20,7 @@ use prost::Message as _;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::connection_service::{ConnectionServiceImpl, PeerRoutedSessionFiles};
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
-use tddy_daemon::test_util::{test_service, TEST_TOKEN};
+use tddy_daemon::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_rpc::{Code, RpcMessage, RpcResult, RpcService, Status};
 use tddy_service::proto::session_files::{
     DeleteStagedAttachmentRequest, ListSessionWorkflowFilesRequest,
@@ -65,7 +65,7 @@ impl EligibleDaemonSource for ACommonRoomHolding {
 /// `test_service` maps [`TEST_TOKEN`] to [`THE_OS_USER`] and points `tddy_data_dir` at
 /// `sessions_base`, which is what makes an assertion about *which* directory the coordinate read
 /// or wrote meaningful.
-fn a_daemon_rooted_at(sessions_base: PathBuf, staging_base: PathBuf) -> ConnectionServiceImpl {
+fn a_daemon_rooted_at(sessions_base: PathBuf, staging_base: PathBuf) -> TestDaemon {
     test_service(sessions_base).with_staging_base_dir(staging_base)
 }
 
@@ -77,7 +77,7 @@ fn a_daemon_rooted_at(sessions_base: PathBuf, staging_base: PathBuf) -> Connecti
 fn a_daemon_that_can_see_a_peer_but_cannot_reach_it(
     sessions_base: PathBuf,
     staging_base: PathBuf,
-) -> ConnectionServiceImpl {
+) -> TestDaemon {
     test_service(sessions_base)
         .with_eligible_daemon_source(Arc::new(ACommonRoomHolding {
             peer_instance_id: A_PEER_DAEMON,
@@ -86,8 +86,8 @@ fn a_daemon_that_can_see_a_peer_but_cannot_reach_it(
 }
 
 /// The `session_files.SessionFilesService` this daemon registers, as the host mounts it.
-fn the_registered_session_files_service(daemon: ConnectionServiceImpl) -> Arc<dyn RpcService> {
-    let entry = Arc::new(daemon).session_files_entry();
+fn the_registered_session_files_service(daemon: TestDaemon) -> Arc<dyn RpcService> {
+    let entry = daemon.as_arc().session_files_entry();
     assert_eq!(
         entry.name, "session_files.SessionFilesService",
         "the entry under test must be the session-files coordinate"
@@ -191,7 +191,7 @@ fn registers_the_coordinate_its_own_generated_server_answers_to() {
     );
 
     // When reading the coordinate it registers its session-file entry at
-    let registered = Arc::new(daemon).session_files_entry().name;
+    let registered = daemon.as_arc().session_files_entry().name;
 
     // Then it is the name generated from `session_files.proto` — which is also where a forward is
     // addressed on the peer, since the peer serves the same generated server

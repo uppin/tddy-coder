@@ -42,8 +42,8 @@ use tddy_service::proto::activity::{ActivityServiceTonicAdapter, ReportSessionSt
 use tddy_service::proto::catalog::CatalogServiceTonicAdapter;
 use tddy_service::proto::connection::MintLocalTokenRequest;
 use tddy_service::proto::exec_tools::ExecToolServiceTonicAdapter;
-use tddy_service::proto::pr_stack::PrStackServiceTonicAdapter;
 use tddy_service::proto::host::{ListEligibleDaemonsRequest, StreamHostStatsRequest};
+use tddy_service::proto::pr_stack::PrStackServiceTonicAdapter;
 use tddy_service::proto::session_agents_svc::{
     ListSessionAgentsRequest, SessionAgentServiceTonicAdapter,
 };
@@ -98,7 +98,7 @@ fn start_local_socket_server(
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
 
     let uid_to_username: UidToUsername = Arc::new(username_for_uid);
-    let connection = Arc::new(test_service(sessions_base));
+    let connection = test_service(sessions_base).as_arc();
     let adapter = ConnectionServiceTonicAdapter::new(
         Arc::clone(&connection),
         Arc::new(config.clone()),
@@ -134,9 +134,12 @@ fn start_local_socket_server(
         SessionAgentServiceTonicAdapter::new(Arc::new(connection.session_agents_service()));
     let activity_adapter =
         ActivityServiceTonicAdapter::new(Arc::new(connection.activity_service()));
-    let catalog_adapter = CatalogServiceTonicAdapter::new(Arc::clone(&connection));
-    let exec_tool_adapter = ExecToolServiceTonicAdapter::new(Arc::clone(&connection));
-    let pr_stack_adapter = PrStackServiceTonicAdapter::new(Arc::clone(&connection));
+    let catalog_adapter =
+        CatalogServiceTonicAdapter::new(Arc::new(connection.catalog_rpc_service()));
+    let exec_tool_adapter =
+        ExecToolServiceTonicAdapter::new(Arc::new(connection.exec_tool_rpc_service()));
+    let pr_stack_adapter =
+        PrStackServiceTonicAdapter::new(Arc::new(connection.pr_stack_rpc_service()));
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let serve_path = socket_path.clone();

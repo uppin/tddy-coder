@@ -2,7 +2,7 @@
 //!
 //! `ToolExecutor` has two modes:
 //! - `Local`: executes against the local filesystem (std::fs, glob, regex).
-//! - `Remote`: POSTs to `{daemon_url}/connection.ConnectionService/ExecuteTool` with the
+//! - `Remote`: POSTs to `{daemon_url}/exec_tools.ExecToolService/ExecuteTool` with the
 //!   `ExecuteToolRequest` envelope built from a `RemoteToolEnv`, mapping the `result_json`
 //!   shapes: Read→`{"content":...}`, Grep→`{"matches":[...]}`, Glob→`{"paths":[...]}`.
 //!   `is_error: true` responses are surfaced as errors (no silent fallback).
@@ -138,7 +138,7 @@ impl ToolExecutor {
         args: serde_json::Value,
     ) -> Result<ToolOutput, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!(
-            "{}/connection.ConnectionService/ExecuteTool",
+            "{}/exec_tools.ExecToolService/ExecuteTool",
             env.daemon_url.trim_end_matches('/')
         );
         let body = serde_json::json!({
@@ -331,7 +331,7 @@ mod tests {
         // Given — a mock ExecuteTool endpoint
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/connection.ConnectionService/ExecuteTool"))
+            .and(path("/exec_tools.ExecToolService/ExecuteTool"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "result_json": "{\"content\": \"file contents here\"}",
                 "is_error": false,
@@ -389,7 +389,7 @@ mod tests {
         // Given
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/connection.ConnectionService/ExecuteTool"))
+            .and(path("/exec_tools.ExecToolService/ExecuteTool"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "result_json": "{\"matches\": [{\"type\": \"match\", \"data\": {\"path\": {\"text\": \"src/lib.rs\"}, \"line_number\": 10}}]}",
                 "is_error": false,
@@ -421,7 +421,7 @@ mod tests {
         // Given
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/connection.ConnectionService/ExecuteTool"))
+            .and(path("/exec_tools.ExecToolService/ExecuteTool"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "result_json": "{\"paths\": [\"src/lib.rs\", \"src/main.rs\"]}",
                 "is_error": false,
@@ -458,7 +458,7 @@ mod tests {
         // Given — mock returns is_error: true
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/connection.ConnectionService/ExecuteTool"))
+            .and(path("/exec_tools.ExecToolService/ExecuteTool"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "result_json": null,
                 "is_error": true,

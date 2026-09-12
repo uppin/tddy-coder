@@ -11,28 +11,31 @@ use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::relay_idle::IdleTimeoutTracker;
+use tddy_daemon::test_util::TestDaemon;
 use tddy_rpc::Request;
 use tddy_service::proto::catalog::{CatalogService, ListToolsRequest};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> ConnectionServiceImpl {
+fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> TestDaemon {
     let sessions_base: SessionsBaseResolver =
         Arc::new(|_| Some(std::env::temp_dir().join("test-sessions")));
     let user_resolver: UserResolver = Arc::new(|_| None);
 
-    ConnectionServiceImpl::new(
-        DaemonConfig::default(),
-        sessions_base,
-        std::env::temp_dir().join("tddy-idle-test"),
-        user_resolver,
-        None,
-        None,
-        None,
-        Arc::new(ClaudeCliSessionManager::new()),
-    )
-    .with_idle_tracker(tracker)
+    TestDaemon::from_arc(Arc::new(
+        ConnectionServiceImpl::new(
+            DaemonConfig::default(),
+            sessions_base,
+            std::env::temp_dir().join("tddy-idle-test"),
+            user_resolver,
+            None,
+            None,
+            None,
+            Arc::new(ClaudeCliSessionManager::new()),
+        )
+        .with_idle_tracker(tracker),
+    ))
 }
 
 /// Phase 3 AC: after calling any RPC on a service with an injected idle tracker,

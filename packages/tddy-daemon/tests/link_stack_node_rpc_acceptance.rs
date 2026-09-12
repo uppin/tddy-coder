@@ -29,6 +29,7 @@ use tddy_core::changeset::{Changeset, Stack, StackNode};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::test_util::TestDaemon;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::pr_stack::{LinkStackNodeRequest, PrStackService};
@@ -38,7 +39,7 @@ const CHILD: &str = "dddddddd-0000-4000-8000-000000000004";
 const TOKEN: &str = "valid-session-token";
 const BRANCH: &str = "feature/attach-docs/attach-store";
 
-fn a_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn a_service(sessions_base: PathBuf) -> TestDaemon {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(
@@ -51,7 +52,7 @@ fn a_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     let user_resolver: SessionUserResolver =
         Arc::new(|token| (token == TOKEN).then(|| "u".to_string()));
-    ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
         sessions_base,
@@ -60,7 +61,7 @@ fn a_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
         None,
         None,
         Arc::new(CliSessionManager::new()),
-    )
+    )))
 }
 
 fn write_changeset(sessions_base: &Path, session_id: &str, changeset: &Changeset) {

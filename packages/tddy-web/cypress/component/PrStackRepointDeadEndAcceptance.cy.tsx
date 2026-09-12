@@ -25,6 +25,7 @@
  */
 
 import React from "react";
+import { PrStackService } from "../../src/gen/pr_stack_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import {
@@ -143,7 +144,7 @@ function aPrStackBackend(options: PrStackScreenOptions) {
     .onUnary(ConnectionService.method.listProjects, () => ({
       projects: [aProject(options.mainBranchRef ?? DEFAULT_BRANCH)],
     }))
-    .onUnary(ConnectionService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(options.resolutionByBranch[req.branch] ?? { branch: req.branch }),
     );
 }
@@ -157,7 +158,7 @@ function mountAndOpenPrStackSession(backend: ReturnType<typeof aPrStackBackend>)
 /** Open the screen with a `RepointPlannedPr` that succeeds and returns the repointed plan. */
 function openPrStackScreen(options: PrStackScreenOptions) {
   return mountAndOpenPrStackSession(
-    aPrStackBackend(options).onUnary(ConnectionService.method.repointPlannedPr, () => ({
+    aPrStackBackend(options).onUnary(PrStackService.method.repointPlannedPr, () => ({
       stackPlanJson: aStackPlanJson(1, options.repointedNodes ?? options.nodes),
     })),
   );
@@ -166,7 +167,7 @@ function openPrStackScreen(options: PrStackScreenOptions) {
 /** Open the screen with a `RepointPlannedPr` the daemon refuses, carrying `message` as its reason. */
 function openPrStackScreenWithRefusedRepoint(message: string, options: PrStackScreenOptions) {
   return mountAndOpenPrStackSession(
-    aPrStackBackend(options).onUnary(ConnectionService.method.repointPlannedPr, () => {
+    aPrStackBackend(options).onUnary(PrStackService.method.repointPlannedPr, () => {
       throw new ConnectError(message, Code.InvalidArgument);
     }),
   );
@@ -208,7 +209,7 @@ it("sends the named target branch when Repoint is clicked", () => {
 
   // Then — the daemon is asked for exactly what the label promised
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.repointPlannedPr);
+    const calls = b.callsTo(PrStackService.method.repointPlannedPr);
     expect(calls).to.have.length(1);
     expect(calls[0].sessionId).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].nodeId).to.equal("n2");

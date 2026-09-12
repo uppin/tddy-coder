@@ -13192,17 +13192,20 @@ dependencies = [
 name = "tddy-tool-engine"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "bytes",
  "futures-util",
  "glob",
  "log",
  "pretty_assertions",
+ "serde",
  "serde_json",
  "tddy-core",
  "tddy-rpc",
  "tddy-service",
  "tddy-task",
+ "tddy-worktree-service",
  "tempfile",
  "tokio",
 ]

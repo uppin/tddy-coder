@@ -782,7 +782,10 @@ pub mod dynamic_proxy {
 /// catalog they compare a value to itself — and a test whose failure is impossible reads as coverage
 /// without being any.
 pub mod exec_tool_entry;
+pub mod exec_tool_service;
+pub mod tool_call_log;
 pub use exec_tool_entry::{build_exec_tool_entry, EXEC_TOOL_SERVICE};
+pub use exec_tool_service::{ExecToolHandler, ExecToolServiceImpl};
 
 #[cfg(test)]
 mod unbundle_exec_tool_entry_tests {
@@ -791,8 +794,9 @@ mod unbundle_exec_tool_entry_tests {
         struct EmptyExec;
         #[async_trait::async_trait]
         impl tddy_service::proto::exec_tools::ExecToolService for EmptyExec {
-            type StreamExecuteToolStream =
-                futures_util::stream::Empty<Result<tddy_service::proto::exec_tools::ExecuteToolChunk, tddy_rpc::Status>>;
+            type StreamExecuteToolStream = futures_util::stream::Empty<
+                Result<tddy_service::proto::exec_tools::ExecuteToolChunk, tddy_rpc::Status>,
+            >;
             async fn execute_tool(
                 &self,
                 _request: tddy_rpc::Request<tddy_service::proto::exec_tools::ExecuteToolRequest>,
@@ -805,10 +809,8 @@ mod unbundle_exec_tool_entry_tests {
             async fn stream_execute_tool(
                 &self,
                 _request: tddy_rpc::Request<tddy_service::proto::exec_tools::ExecuteToolRequest>,
-            ) -> Result<
-                tddy_rpc::Response<Self::StreamExecuteToolStream>,
-                tddy_rpc::Status,
-            > {
+            ) -> Result<tddy_rpc::Response<Self::StreamExecuteToolStream>, tddy_rpc::Status>
+            {
                 Err(tddy_rpc::Status::unimplemented("stub"))
             }
             async fn list_exec_tools(

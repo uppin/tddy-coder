@@ -29,6 +29,7 @@ use tddy_core::changeset::Changeset;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::test_util::TestDaemon;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
 use tddy_service::proto::pr_stack::{
@@ -142,14 +143,14 @@ fn a_config(stub_github: bool) -> (tddy_daemon::config::DaemonConfig, tempfile::
 
 /// A service rooted at `sessions_base`, holding **no** GitHub token store — the deployment state
 /// this feature is about: a real login whose credential the daemon never retained.
-fn a_service(sessions_base: PathBuf, stub_github: bool) -> ConnectionServiceImpl {
+fn a_service(sessions_base: PathBuf, stub_github: bool) -> TestDaemon {
     let (config, _config_dir) = a_config(stub_github);
     // The config file's own temp dir may drop here; `DaemonConfig` is fully parsed by now.
     let base = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     let user_resolver: SessionUserResolver =
         Arc::new(|token| (token == TOKEN).then(|| "u".to_string()));
-    ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
         sessions_base,
@@ -158,7 +159,7 @@ fn a_service(sessions_base: PathBuf, stub_github: bool) -> ConnectionServiceImpl
         None,
         None,
         Arc::new(CliSessionManager::new()),
-    )
+    )))
 }
 
 fn write_changeset(sessions_base: &Path, session_id: &str, changeset: &Changeset) {
@@ -197,16 +198,12 @@ fn a_pr_stack_orchestrator_with_a_child_on(sessions_base: &Path, repo_root: &Pat
 
 /// Resolve `branch` without asking for any base comparison — what a caller that has no base to name
 /// sends.
-async fn query(service: &ConnectionServiceImpl, branch: &str) -> BranchResolution {
+async fn query(service: &TestDaemon, branch: &str) -> BranchResolution {
     query_against(service, branch, "").await
 }
 
 /// Resolve `branch`, comparing it against `base_branch`.
-async fn query_against(
-    service: &ConnectionServiceImpl,
-    branch: &str,
-    base_branch: &str,
-) -> BranchResolution {
+async fn query_against(service: &TestDaemon, branch: &str, base_branch: &str) -> BranchResolution {
     service
         .query_branch(Request::new(QueryBranchRequest {
             session_token: TOKEN.to_string(),

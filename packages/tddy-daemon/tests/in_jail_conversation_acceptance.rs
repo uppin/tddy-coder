@@ -35,7 +35,7 @@ use prost::Message as _;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::test_util::{test_service, TEST_TOKEN};
+use tddy_daemon::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_daemon_sandbox::sandbox_session::{
     build_sandbox_runner_env, dial_and_bridge, pick_free_loopback_port, spawn_sandbox_runner,
     SandboxRunnerSpawn,
@@ -521,21 +521,23 @@ async fn a_daemon_with_one_agent_attached(model_base_url: &str) -> DaemonServing
     tddy_core::write_session_metadata(&session_dir, &a_sandboxed_session(&session_id))
         .expect("write session metadata");
 
-    let service = Arc::new(test_service(data_dir.path().to_path_buf()));
+    let service = test_service(data_dir.path().to_path_buf()).as_arc();
     service.set_self_handle(Arc::downgrade(&service));
 
     // Read the agent id the way a client reads it: a hand-spelled "explorer@some-host" would pass
     // while the daemon stamped something else entirely.
-    let agent_id = service
-        .list_subagents(Request::new(ListSubagentsRequest {}))
-        .await
-        .expect("listing subagents must succeed")
-        .into_inner()
-        .subagents
-        .into_iter()
-        .find(|s| s.name == "explorer")
-        .expect("the fixture must advertise a def named 'explorer'")
-        .agent_id;
+    let agent_id = CatalogService::list_subagents(
+        &TestDaemon::from_arc(Arc::clone(&service)),
+        Request::new(ListSubagentsRequest {}),
+    )
+    .await
+    .expect("listing subagents must succeed")
+    .into_inner()
+    .subagents
+    .into_iter()
+    .find(|s| s.name == "explorer")
+    .expect("the fixture must advertise a def named 'explorer'")
+    .agent_id;
     service
         .session_agents_service()
         .attach_session_agent(Request::new(AttachSessionAgentRequest {
