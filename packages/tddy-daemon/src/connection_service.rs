@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use futures_util::stream::Stream;
 use livekit::prelude::Room;
-use prost::Message as _;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::validate_session_id_segment;
 use tddy_core::Changeset;
@@ -16,8 +15,8 @@ use tddy_service::proto::connection::{
     SessionAttachment, StartSessionEvent,
 };
 use tddy_service::proto::connection::{
-    AgentConversationChunk, ListAgentModelsResponse, ModelInfo, ProjectEntry as ProtoProjectEntry,
-    SplitAgentPlacement, StartSessionResponse,
+    ListAgentModelsResponse, ModelInfo, ProjectEntry as ProtoProjectEntry, SplitAgentPlacement,
+    StartSessionResponse,
 };
 use uuid::Uuid;
 
@@ -33,13 +32,8 @@ use crate::user_sessions_path::projects_path_for_user;
 use crate::workspace_session;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
 use tddy_daemon_livekit::session_room::ActivityDelta;
-use tddy_service::proto::connection::{
-    AcpReplayFrame, AgentActivityDeltaChunk, AgentActivityRecord as ProtoAgentActivityRecord,
-    ExecuteToolChunk, ExecuteToolResponse,
-    SessionNotificationEvent as ProtoSessionNotificationEvent,
-    SessionNotificationKind as ProtoSessionNotificationKind,
-    SessionNotificationSource as ProtoSessionNotificationSource,
-};
+use tddy_service::proto::activity::AgentActivityDeltaChunk;
+use tddy_service::proto::connection::{ExecuteToolChunk, ExecuteToolResponse};
 use tddy_spawn::spawn_worker;
 use tddy_spawn::spawner::{self};
 use tddy_task::TaskRegistry;
@@ -61,9 +55,8 @@ use tddy_rpc::Request;
 use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 #[cfg(test)]
 use tddy_service::proto::connection::{
-    AddPlannedPrRequest, ExecuteToolRequest, GetAcpToolCallDetailRequest, ListProjectsRequest,
-    ReportAgentActivityRequest, Signal, SignalSessionRequest, StartSessionRequest,
-    StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
+    AddPlannedPrRequest, ExecuteToolRequest, ListProjectsRequest, Signal, SignalSessionRequest,
+    StartSessionRequest,
 };
 
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
@@ -95,271 +88,6 @@ impl<T> Unpin for MpscResultStream<T> {}
 impl<T> std::fmt::Debug for MpscResultStream<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("MpscResultStream")
-    }
-}
-
-/// Stream adapter backed by an mpsc channel for [`ProtoAgentActivityRecord`] server-streaming.
-pub struct MpscAgentActivityStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<ProtoAgentActivityRecord>,
-}
-
-impl Stream for MpscAgentActivityStream {
-    type Item = Result<ProtoAgentActivityRecord, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
-            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-impl Unpin for MpscAgentActivityStream {}
-
-/// Stream adapter backed by an mpsc channel for [`ProtoSessionNotificationEvent`] server-streaming.
-pub struct MpscSessionNotificationStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<ProtoSessionNotificationEvent>,
-}
-
-impl Stream for MpscSessionNotificationStream {
-    type Item = Result<ProtoSessionNotificationEvent, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
-            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-impl Unpin for MpscSessionNotificationStream {}
-
-/// One session notification on the wire.
-///
-/// [`SessionNotification::os_user`] is dropped here rather than carried: it is what decides
-/// *whether* a client is shown the event at all (see [`relay_session_notifications`]), and the
-/// drawer has no use for it. Putting an authorization fact on the wire would only tell a browser
-/// something about the host's other operators that it has no reason to know.
-fn session_notification_event(
-    notification: crate::session_notifications::SessionNotification,
-) -> ProtoSessionNotificationEvent {
-    use crate::session_notifications::{SessionNotificationKind, SessionNotificationSource};
-    ProtoSessionNotificationEvent {
-        session_id: notification.session_id,
-        label: notification.label,
-        kind: match notification.kind {
-            SessionNotificationKind::Activity => ProtoSessionNotificationKind::Activity,
-            SessionNotificationKind::AttentionRequired => {
-                ProtoSessionNotificationKind::AttentionRequired
-            }
-        } as i32,
-        source: match notification.source {
-            SessionNotificationSource::ActivityStatus => {
-                ProtoSessionNotificationSource::ActivityStatus
-            }
-            SessionNotificationSource::AgentToolCall => {
-                ProtoSessionNotificationSource::AgentToolCall
-            }
-            SessionNotificationSource::Presenter => ProtoSessionNotificationSource::Presenter,
-        } as i32,
-        text: notification.text,
-        at_unix_ms: notification.at_unix_ms,
-    }
-}
-
-/// Relay task for `StreamSessionNotifications`: forwards `os_user`'s session notifications to one
-/// client until it disconnects. A client that falls behind the channel's capacity loses its oldest
-/// events (`Lagged`) and keeps its stream: the newest notification is the one an indicator is
-/// derived from, so dropping the stream over a stale one would cost more than the gap.
-///
-/// The bus is daemon-wide — one channel carries every session on the host, which is what lets a
-/// drawer of any size pay for a single subscription (PRD NFR1). Scoping to one operator is
-/// therefore this relay's job: without it, a daemon serving several users would hand each of them
-/// the others' session ids, repository names and operator-facing text.
-async fn relay_session_notifications(
-    mut broadcast_rx: tokio::sync::broadcast::Receiver<
-        crate::session_notifications::SessionNotification,
-    >,
-    tx: tokio::sync::mpsc::UnboundedSender<ProtoSessionNotificationEvent>,
-    os_user: String,
-) {
-    use tokio::sync::broadcast::error::RecvError;
-    loop {
-        match broadcast_rx.recv().await {
-            Ok(notification) => {
-                // Delivered only on a positive match of a named owner. A notification that names
-                // no owner is not a notification for everybody — it is one whose owner could not
-                // be established, and the safe answer to that is to deliver it to no one.
-                if notification.os_user.is_empty() || notification.os_user != os_user {
-                    continue;
-                }
-                if tx.send(session_notification_event(notification)).is_err() {
-                    break;
-                }
-            }
-            Err(RecvError::Lagged(missed)) => {
-                log::debug!(
-                    target: "tddy_daemon::session_notifications",
-                    "a notification stream client fell behind and missed {missed} event(s)"
-                );
-            }
-            Err(RecvError::Closed) => break,
-        }
-    }
-}
-
-/// Stream adapter backed by an mpsc channel for [`AcpReplayFrame`] server-streaming.
-pub struct MpscAcpReplayStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<AcpReplayFrame>,
-}
-
-impl Stream for MpscAcpReplayStream {
-    type Item = Result<AcpReplayFrame, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
-            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-impl Unpin for MpscAcpReplayStream {}
-
-/// Wrap one ACP frame in the connection-local [`AcpReplayFrame`] envelope, encoding the inner
-/// `AcpAgentMessage` to its protobuf bytes and stamping its absolute transcript position.
-///
-/// `seq` is the frame's 0-based index in the session's *resolved* transcript
-/// ([`tddy_service::acp_replay::read_session_transcript`]) — the same list
-/// [`tddy_service::acp_replay::page_before`] indexes, so the reverse cursor a client reads off a
-/// frame addresses the same position the pager does.
-fn acp_replay_frame(frame: &tddy_service::proto::acp::AcpAgentMessage, seq: u64) -> AcpReplayFrame {
-    AcpReplayFrame {
-        acp_agent_message: tddy_service::acp_replay::strip_tool_body(frame).encode_to_vec(),
-        // A transcript frame carries no count; the count-first mode sets this instead.
-        activity_count: 0,
-        seq,
-    }
-}
-
-/// Relay task for `StreamAcpReplay`: forwards live agent-activity records for one session (the
-/// broadcast is already session-scoped) as enriched ACP `tool_call` replay frames into `tx` until
-/// the client disconnects.
-///
-/// `next_seq` is the resolved transcript's length at subscribe time, so the live tail continues the
-/// snapshot's numbering and a frame delivered live carries the position a later re-read would give
-/// it.
-///
-/// A tool call broadcasts twice — its `running` record then its terminal one — but the two coalesce
-/// into a *single* resolved transcript entry, so the refinement must land on the position its first
-/// record was given instead of consuming one of its own. `seq_by_tool_call` remembers that mapping
-/// and is pre-seeded from the snapshot ([`seq_by_tool_call`]), so a call straddling the subscribe
-/// boundary refines the entry the snapshot already placed.
-async fn relay_acp_replay(
-    mut broadcast_rx: tokio::sync::broadcast::Receiver<
-        tddy_core::agent_activity::AgentActivityRecord,
-    >,
-    tx: tokio::sync::mpsc::UnboundedSender<AcpReplayFrame>,
-    mut next_seq: u64,
-    mut seq_by_tool_call: std::collections::HashMap<String, u64>,
-) {
-    use tokio::sync::broadcast::error::RecvError;
-    loop {
-        match broadcast_rx.recv().await {
-            Ok(record) => {
-                let frame = tddy_service::acp_replay::frame_for_agent_activity(&record);
-                let seq = match tddy_service::acp_replay::tool_call_id_of(&frame) {
-                    Some(id) => *seq_by_tool_call.entry(id.to_string()).or_insert_with(|| {
-                        let seq = next_seq;
-                        next_seq += 1;
-                        seq
-                    }),
-                    None => {
-                        let seq = next_seq;
-                        next_seq += 1;
-                        seq
-                    }
-                };
-                if tx.send(acp_replay_frame(&frame, seq)).is_err() {
-                    break;
-                }
-            }
-            Err(RecvError::Lagged(_)) => {}
-            Err(RecvError::Closed) => break,
-        }
-    }
-}
-
-/// The absolute 0-based position of every tool call in a resolved transcript, keyed by
-/// `tool_call_id`.
-///
-/// Seeds [`relay_acp_replay`]'s live numbering: when a call whose `running` record is already in the
-/// snapshot reports its terminal record, that record refines the snapshot entry and so must carry
-/// the snapshot's position for it — not a fresh position at the tail.
-fn seq_by_tool_call(
-    frames: &[tddy_service::proto::acp::AcpAgentMessage],
-) -> std::collections::HashMap<String, u64> {
-    frames
-        .iter()
-        .enumerate()
-        .filter_map(|(index, frame)| {
-            tddy_service::acp_replay::tool_call_id_of(frame)
-                .map(|id| (id.to_string(), index as u64))
-        })
-        .collect()
-}
-
-/// Count-only relay task for `StreamAcpReplay`'s `CountThenLive` mode: each **newly-seen** tool call
-/// published to the session hub bumps `count` by one and emits a fresh count-only `AcpReplayFrame`
-/// (no transcript payload) into `tx`, until the client disconnects. A call's `running` and terminal
-/// records share a `call_id` and so count once (matching the coalesced rows the pane renders);
-/// `seen_ids` is pre-seeded with the snapshot's ids so a call straddling the subscribe boundary is
-/// not double-counted. This is the cheap feed that drives the overlay's activity badge before the
-/// full pane is opened.
-async fn relay_acp_replay_count(
-    mut broadcast_rx: tokio::sync::broadcast::Receiver<
-        tddy_core::agent_activity::AgentActivityRecord,
-    >,
-    tx: tokio::sync::mpsc::UnboundedSender<AcpReplayFrame>,
-    mut count: u64,
-    mut seen_ids: std::collections::HashSet<String>,
-) {
-    use tokio::sync::broadcast::error::RecvError;
-    loop {
-        match broadcast_rx.recv().await {
-            Ok(record) => {
-                if !seen_ids.insert(record.call_id) {
-                    // A record for a call already counted (its terminal row, or a snapshot straddler).
-                    continue;
-                }
-                count += 1;
-                if tx
-                    .send(AcpReplayFrame {
-                        acp_agent_message: Vec::new(),
-                        activity_count: count,
-                        // A count frame carries no transcript payload, so it has no position.
-                        seq: 0,
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Err(RecvError::Lagged(_)) => {}
-            Err(RecvError::Closed) => break,
-        }
     }
 }
 
@@ -488,9 +216,7 @@ pub struct ConnectionServiceImpl {
     /// Open conversations with roster agents, keyed by conversation id. Local entries hold a live
     /// turn loop here; remote entries hold only the routing, because the loop runs on the owning
     /// daemon.
-    agent_conversations: Arc<
-        tokio::sync::Mutex<std::collections::HashMap<String, seed_codebase::AgentConversation>>,
-    >,
+    agent_conversations: Arc<tddy_session_agents::OpenAgentConversations>,
     /// Where this daemon publishes its session notifications
     /// (`docs/ft/daemon/session-notifications.md`). `None` means
     /// nothing is listening: publishing is skipped, and `StreamSessionNotifications` has no feed to
@@ -1432,7 +1158,22 @@ mod svc_start_session_core;
 mod svc_terminal_ports;
 
 mod svc_session_files_ports;
+
+/// The daemon's half of `activity.ActivityService` — the six host answers families M and N read,
+/// and the routing the daemon keeps. `#unbundle` node 7.
+mod svc_activity_ports;
+
+/// The daemon's half of `session_agents.SessionAgentService` — the host capabilities family B
+/// reads, and the routing the daemon keeps. `#unbundle` node 7.
+mod svc_session_agent_ports;
+
 pub use svc_session_files_ports::PeerRoutedSessionFiles;
+
+/// Node 7's two served surfaces, named because the local Unix socket mounts them: the bundle
+/// `local_socket_server` takes is generic over the implementation each generated adapter wraps, so
+/// the host that assembles it has to be able to write these two types down.
+pub use svc_activity_ports::PeerRoutedActivity;
+pub use svc_session_agent_ports::PeerRoutedSessionAgents;
 
 /// Merge local `ListProjects` rows with [`EligibleDaemonSource::peer_project_entries`].
 async fn merge_listed_projects_with_peers(
@@ -1533,40 +1274,6 @@ fn exec_tool_result_frames(response: ExecuteToolResponse) -> Vec<ExecuteToolChun
     last.error_message = response.error_message;
     last.job_id = response.job_id;
     last.job_running = response.job_running;
-    last.last = true;
-    frames
-}
-
-/// Split one agent turn's answer into ordered [`HOST_DOCUMENT_FRAME_BYTES`] frames.
-///
-/// The stop reason rides the **final** frame, and an empty answer still yields exactly one frame, so
-/// a consumer never has to tell "said nothing" from "nothing arrived" and a stream that ends without
-/// a `last` frame is unambiguously a truncation. Framed rather than sent whole for the reason
-/// `StreamExecuteTool` frames its results: over LiveKit anything past `MAX_CHUNK_FRAME_BYTES` is
-/// chunk-framed, and one lost chunk frame wedges the call with no error at all
-/// (`docs/ft/coder/rpc-multi-transport.md`).
-fn agent_conversation_frames(content: &str, stop_reason: &str) -> Vec<AgentConversationChunk> {
-    let mut frames: Vec<AgentConversationChunk> = Vec::new();
-    let mut rest = content;
-    while !rest.is_empty() {
-        // Split on a char boundary at or below the budget: a frame cut mid-codepoint would not be a
-        // `String` at all, and the two halves would each decode as replacement characters.
-        let mut take = rest.len().min(HOST_DOCUMENT_FRAME_BYTES);
-        while take > 0 && !rest.is_char_boundary(take) {
-            take -= 1;
-        }
-        let (head, tail) = rest.split_at(take);
-        frames.push(AgentConversationChunk {
-            content_chunk: head.to_string(),
-            ..Default::default()
-        });
-        rest = tail;
-    }
-    if frames.is_empty() {
-        frames.push(AgentConversationChunk::default());
-    }
-    let last = frames.last_mut().expect("at least one frame");
-    last.stop_reason = stop_reason.to_string();
     last.last = true;
     frames
 }

@@ -23,15 +23,18 @@ use std::sync::Arc;
 use crate::openai::TokenUsage;
 use crate::subagent::{ContentBlock, PromptOutcome, StopReason, SubagentError, SubagentSession};
 use prost::Message;
-use tddy_service::proto::connection::{
+use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, CancelAgentConversationRequest, OpenAgentConversationRequest,
     OpenAgentConversationResponse, PromptAgentConversationRequest,
-    ReportAgentConversationStateRequest, SessionAgentStatus,
+    ReportAgentConversationStateRequest,
 };
+use tddy_service::proto::types::SessionAgentStatus;
 
 use tddy_session_tool_client::SessionToolEnvelope;
 
-const CONNECTION_SERVICE: &str = "connection.ConnectionService";
+/// The coordinate the four conversation RPCs are served at, read from `tddy-service` so this
+/// client and the daemon serving it cannot disagree about the name.
+const SESSION_AGENT_SERVICE: &str = tddy_service::session_agents::SESSION_AGENT_SERVICE;
 
 /// A connection to the session's facilitating daemon, plus the identity it authenticates.
 ///
@@ -75,7 +78,7 @@ impl AgentConversationLink {
         let bytes = self
             .client
             .call_unary(
-                CONNECTION_SERVICE,
+                SESSION_AGENT_SERVICE,
                 "OpenAgentConversation",
                 request.encode_to_vec(),
             )
@@ -102,7 +105,7 @@ impl AgentConversationLink {
         let mut frames = self
             .client
             .call_server_stream(
-                CONNECTION_SERVICE,
+                SESSION_AGENT_SERVICE,
                 "PromptAgentConversation",
                 request.encode_to_vec(),
             )
@@ -152,7 +155,7 @@ impl AgentConversationLink {
         };
         self.client
             .call_unary(
-                CONNECTION_SERVICE,
+                SESSION_AGENT_SERVICE,
                 "CancelAgentConversation",
                 request.encode_to_vec(),
             )
@@ -188,7 +191,7 @@ impl AgentConversationLink {
         };
         self.client
             .call_unary(
-                CONNECTION_SERVICE,
+                SESSION_AGENT_SERVICE,
                 "ReportAgentConversationState",
                 request.encode_to_vec(),
             )

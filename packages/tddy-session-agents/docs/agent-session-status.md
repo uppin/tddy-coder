@@ -1,4 +1,4 @@
-# Agent session status inference (`tddy_daemon::session_agent_inference`)
+# Agent session status inference (`tddy_session_agents::session_agent_inference`)
 
 ## Role
 
@@ -9,7 +9,7 @@ already writes, and populates `SessionEntry.agent_status` / `SessionEntry.last_a
 feature and its acceptance criteria.
 
 It is **not** the agent roster. A roster agent is a model loop the daemon serves inside one session
-([session-agent-roster.md](session-agent-roster.md)); this is the agent that *is* the session. The
+([session-agent-roster.md](./session-agent-roster.md)); this is the agent that *is* the session. The
 two share the status vocabulary (`SessionAgentStatus`, `SessionAgentActivity`,
 `ManagedAgentState`) and nothing else, so one badge renders both.
 
@@ -55,7 +55,7 @@ and only then reads the transcript. `seed_from_transcript` writes only when noth
 observed, so a record that lands during the file read is already the newer fact and is not
 overwritten by what was on disk before it. Reversing the two would lose exactly that record.
 
-**Nothing is persisted**, for the reason [`session_agent_status`](session-agent-roster.md) already
+**Nothing is persisted**, for the reason [`session_agent_status`](./session-agent-roster.md) already
 gives: a status read back from disk claims a tool call is in flight in a process that never started
 one. A restarted daemon reports `UNSPECIFIED` until it has re-read a transcript.
 
@@ -79,7 +79,17 @@ something unnameable just now.
 
 ## Wiring
 
-`ListSessions` (`connection_service.rs`) holds the store beside the hub it subscribes to. Inside the
+This module moved to `tddy-session-agents` with `#unbundle` node 7, but its **only consumer stayed
+behind**: `ListSessions` is family C and remains on `connection.ConnectionService`. So the store is
+constructed and held by `tddy-daemon`'s `connection_service`, which reaches it as
+`crate::session_agent_inference::…` through the re-export in `tddy-daemon`'s `lib.rs` — the module
+keeps its name in the crate it moved to, and no call site in the daemon changed.
+
+Nothing on `session_agents.SessionAgentService` calls it. It travels with `session_agent_status`,
+whose `tool_call_summary` truncation rule it shares, rather than with the service it feeds.
+
+`ListSessions` (`connection_service/rpc_service.rs`) holds the store beside the hub it subscribes
+to. Inside the
 existing `spawn_blocking_with_timeout` closure — the seed is a real file read, and that closure
 exists to keep disk work off the reactor — each listed session whose `session_type` is `claude-cli`
 or `cursor-cli` is tailed, then its two fields are populated. The gate is the one
@@ -87,7 +97,8 @@ or `cursor-cli` is tailed, then its two fields are populated. The gate is the on
 conversation. A `workspace` session would spend a subscription and a file read to conclude
 `UNSPECIFIED`.
 
-`DeleteSession` calls `forget`, which drops the signal and the tailing mark; the consumer task
+`DeleteSession` — also family C, also still the daemon's — calls `forget`, which drops the signal
+and the tailing mark; the consumer task
 re-checks the mark on its next record and exits rather than holding a subscription for the daemon's
 life.
 
@@ -103,3 +114,16 @@ life.
   inferred.
 - **`WAITING_FOR_INPUT` comes only from the hook word.** Nothing in a transcript is read as blocking
   on a human, so a cursor session with no hooks wired never reports it.
+
+## Tests
+
+`packages/tddy-daemon/tests/agent_session_status_inference_unit.rs` and
+`…_acceptance.rs` stayed in `tddy-daemon` and drive the store through the daemon's re-export, which
+is also the path production takes. Nothing exercises this module from inside `tddy-session-agents`.
+
+## Related
+
+- [session-agent-roster.md](./session-agent-roster.md) — the other meaning of "agent status"
+- [session-agent-service.md](./session-agent-service.md) — the nine RPCs this crate serves, none of
+  which reads this module
+- [docs/ft/daemon/agent-session-status.md](../../../docs/ft/daemon/agent-session-status.md) — the feature

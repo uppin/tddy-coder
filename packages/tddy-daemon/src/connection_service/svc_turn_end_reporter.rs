@@ -1,154 +1,22 @@
 // `encode_to_vec` is a `prost::Message` method; the trait is imported anonymously because
 // only its methods are used.
 use prost::Message as _;
-use std::path::Path;
 
 use tddy_service::proto::connection::ListSubagentsResponse;
 
 use tddy_service::proto::connection::ListSubagentsRequest;
 
 use crate::{
-    connection_service::{agent_roster, seed_codebase},
-    livekit_peer_discovery::local_instance_id_for_config,
+    connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
 };
 
-use tddy_service::proto::connection::CancelAgentConversationRequest;
+use tddy_service::proto::session_agents_svc::CancelAgentConversationRequest;
 
 use tddy_rpc::Status;
-
-use tddy_service::proto::connection::AgentConversationChunk;
 
 use super::ConnectionServiceImpl;
 
 impl ConnectionServiceImpl {
-    /// A callback that puts one agent back to IDLE, for the two places a turn can end.
-    ///
-    /// A callback rather than a second `note_agent_activity` call at each site, because both sites
-    /// end a turn from inside a spawned task that outlives the handler: whatever reports the end has
-    /// to own everything it names.
-    pub(crate) fn turn_end_reporter(
-        &self,
-        session_id: &str,
-        session_dir: &Path,
-        agent_id: &str,
-    ) -> impl Fn(String) + Send + 'static {
-        let service = self.clone();
-        let session_id = session_id.to_string();
-        let session_dir = session_dir.to_path_buf();
-        let agent_id = agent_id.to_string();
-        move |summary| {
-            if service.hosted_clone_for(&session_id).is_some() {
-                return;
-            }
-            // Guarded rather than written outright: by the time a turn is observed to have ended, a
-            // cancel or a detach may already have moved this agent on, and an unconditional write
-            // would resurrect a conversation that is gone.
-            if service.session_agent_rosters.activity().record_turn_end(
-                &session_id,
-                &agent_id,
-                summary,
-            ) {
-                service.republish_roster_quietly(&session_id, &session_dir, &agent_id);
-            }
-        }
-    }
-
-    /// Pass a peer's answer through unchanged, noting when it ends.
-    ///
-    /// The turn loop of a remote agent runs on its owning daemon, but the roster that reports its
-    /// status is held *here* — so without this relay a forwarded turn would raise the badge to
-    /// RUNNING and never lower it. Frames and errors are forwarded verbatim and in order: the
-    /// caller must not be able to tell a relayed stream from a direct one, which is the same
-    /// property [`AgentConversation`]'s two variants exist to hold.
-    pub(crate) fn relay_watching_for_the_turn_to_end(
-        &self,
-        mut peer: tokio::sync::mpsc::UnboundedReceiver<Result<AgentConversationChunk, Status>>,
-        session_id: &str,
-        session_dir: &Path,
-        agent_id: &str,
-    ) -> tokio::sync::mpsc::UnboundedReceiver<Result<AgentConversationChunk, Status>> {
-        let turn_ended = self.turn_end_reporter(session_id, session_dir, agent_id);
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        tokio::spawn(async move {
-            while let Some(frame) = peer.recv().await {
-                if tx.send(frame).is_err() {
-                    // The caller hung up. The turn is no longer being read, so it is over as far as
-                    // anything here can tell — and leaving the badge up would strand it.
-                    break;
-                }
-            }
-            turn_ended("answered".to_string());
-        });
-        rx
-    }
-
-    /// Forget an agent's activity — what a detach does.
-    ///
-    /// Forgotten rather than set to "no conversation": the agent is off the roster, and a record
-    /// left behind would have a re-attach show the previous attachment's last activity as this
-    /// one's.
-    pub(crate) fn forget_agent_activity(&self, session_id: &str, agent_id: &str) {
-        self.session_agent_rosters
-            .activity()
-            .forget(session_id, agent_id);
-    }
-
-    /// Close every open conversation with `agent_id`.
-    ///
-    /// An in-flight `prompt` returns an error naming the closure rather than hanging or returning a
-    /// partial answer as if complete: the caller is the main agent, and a truncated answer accepted
-    /// as whole is the failure that reaches the operator as a wrong review (PRD § What detach does,
-    /// step 2).
-    ///
-    /// A conversation whose loop runs on another daemon is cancelled *there* as well as forgotten
-    /// here. Dropping the routing record alone would leave the owning daemon's turn loop running
-    /// against a clone this detach is about to delete, with nothing left on this side able to name
-    /// it.
-    pub(crate) async fn cancel_conversations_with(
-        &self,
-        session_token: &str,
-        session_id: &str,
-        agent_id: &str,
-    ) {
-        let mut cancelled_remotely: Vec<(String, String)> = Vec::new();
-        {
-            let mut open = self.agent_conversations.lock().await;
-            open.retain(|conversation_id, conversation| {
-                if !conversation.is_with(session_id, agent_id) {
-                    return true;
-                }
-                match conversation {
-                    seed_codebase::AgentConversation::Local { closed, .. } => closed.notify_one(),
-                    seed_codebase::AgentConversation::Remote {
-                        daemon_instance_id, ..
-                    } => cancelled_remotely
-                        .push((daemon_instance_id.clone(), conversation_id.clone())),
-                }
-                false
-            });
-        }
-
-        for (daemon_instance_id, conversation_id) in cancelled_remotely {
-            if let Err(e) = self
-                .forward_cancel_agent_conversation(
-                    session_token,
-                    session_id,
-                    &daemon_instance_id,
-                    &conversation_id,
-                )
-                .await
-            {
-                // Loud and non-fatal: the entry is already gone here, so failing the detach would
-                // leave the roster and this map disagreeing about an agent that is no longer on it.
-                log::error!(
-                    "could not cancel conversation {conversation_id} with '{agent_id}' on daemon \
-                     {daemon_instance_id} ({}); its turn loop may still be running there",
-                    e.message()
-                );
-            }
-        }
-    }
-
     /// Ask `daemon_instance_id` to cancel a conversation its own turn loop is running.
     pub(crate) async fn forward_cancel_agent_conversation(
         &self,
@@ -161,7 +29,7 @@ impl ConnectionServiceImpl {
         crate::livekit_peer_discovery::forward_to_peer(
             slot,
             daemon_instance_id,
-            "connection.ConnectionService",
+            tddy_session_agents::SERVICE_NAME,
             "CancelAgentConversation",
             CancelAgentConversationRequest {
                 // The detaching caller's own token: the peer authenticates a cancel exactly as it

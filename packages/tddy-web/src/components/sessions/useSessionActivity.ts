@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { AgentActivityRecord, ConnectionService } from "../../gen/connection_pb";
-import { StreamMode } from "../../gen/connection_pb";
+import type { ActivityService, AgentActivityRecord } from "../../gen/activity_pb";
+import { StreamMode } from "../../gen/activity_pb";
 
 export interface UseSessionActivityResult {
   /** All known tool-call records, coalesced by `callId`, in first-seen order. */
@@ -15,7 +15,7 @@ export interface UseSessionActivityResult {
 }
 
 /**
- * Subscribes to `ConnectionService.StreamSessionActivity` for one session and exposes the agent's
+ * Subscribes to `ActivityService.StreamSessionActivity` for one session and exposes the agent's
  * own tool calls to the Agent Activity pane. The server replays a coalesced snapshot then streams
  * live deltas; this hook additionally coalesces by `callId` so a later record (e.g. the terminal
  * row) supersedes the earlier `running` row for the same call while preserving first-seen order.
@@ -34,7 +34,7 @@ export interface UseSessionActivityResult {
 export function useSessionActivity(args: {
   sessionId: string;
   sessionToken: string;
-  client: Client<typeof ConnectionService>;
+  client: Client<typeof ActivityService>;
   mode?: StreamMode;
 }): UseSessionActivityResult {
   const { sessionId, sessionToken, client, mode = StreamMode.SNAPSHOT_THEN_LIVE } = args;

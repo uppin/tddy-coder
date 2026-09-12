@@ -1,4 +1,3 @@
-use super::DaemonRpcHandler;
 use std::sync::Mutex as StdMutex;
 
 use tddy_task::TerminalCapture;
@@ -426,9 +425,7 @@ impl ConnectionServiceImpl {
             Arc::new(session_env),
             session_dir.clone(),
             self.agent_activity_hub(),
-            Arc::new(DaemonRpcHandler {
-                conn: self.self_arc(),
-            }),
+            self.sandbox_rpc_handler(),
         )
         .await
         .map_err(Status::internal)?;

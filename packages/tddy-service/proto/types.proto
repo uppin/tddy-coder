@@ -34,3 +34,45 @@ enum HostDocumentScope {
   // FAILED_PRECONDITION, so a fetch never hands back truncated bytes.
   HOST_DOCUMENT_SCOPE_STAGED_ATTACHMENT = 5;
 }
+
+// Added by `#unbundle` node 7. `ListSessions` — family C, which stays — reaches both of these
+// through `SessionEntry`, while `session_agents.SessionAgentService` owns the roster that produces
+// them. Established by walking field types, the same way node 6 established `HostDocumentScope`, and
+// the same way anything added here later must be.
+
+// The last thing an agent was observed doing.
+message SessionAgentActivity {
+  // Unix milliseconds. Never 0 on a populated activity — a summary with no time behind it reads as
+  // current forever, which is exactly wrong for the row it is shown on.
+  uint64 at_unix_ms = 1;
+  // One short human-readable line, already truncated for display ("Read src/main.rs", "prompted:
+  // summarise the diff"). Not a structured record: the consumers are a roster pane and an MCP tool
+  // that both render it verbatim, and the structured account of a call is StreamSessionActivity's.
+  string summary = 2;
+}
+
+// What a roster agent is doing, in the vocabulary the session activity hooks already use
+// (tddy_core::session_activity::SessionActivityStatus), plus the two states only an agent whose
+// codebase lives on another host can be in.
+enum SessionAgentStatus {
+  // This daemon has nothing to say about the agent — not a claim that it is idle. The state of a
+  // roster read back from disk after a restart, and of any entry no signal has reached yet.
+  SESSION_AGENT_STATUS_UNSPECIFIED = 0;
+  // Attached and ready, with no turn in flight. An agent with no conversation open at all is IDLE
+  // too: from the operator's side "nobody has asked it anything" and "it has answered everything
+  // asked" are the same state, and splitting them would show a distinction nothing acts on.
+  SESSION_AGENT_STATUS_IDLE = 1;
+  // A turn is in flight: the agent has a prompt and has not produced its stop reason yet.
+  SESSION_AGENT_STATUS_RUNNING = 2;
+  // The agent's own loop is inside a tool call. A refinement of RUNNING, not a separate lifecycle:
+  // every EXECUTING_TOOL is also a turn in flight.
+  SESSION_AGENT_STATUS_EXECUTING_TOOL = 3;
+  // The agent is blocked on an answer only a human can give.
+  SESSION_AGENT_STATUS_WAITING_FOR_INPUT = 4;
+  // The agent cannot serve a prompt yet because the checkout behind it is still being built. Takes
+  // precedence over anything the conversation state would say: an agent whose clone is not ready
+  // refuses prompts, so reporting it IDLE would offer an agent that cannot answer.
+  SESSION_AGENT_STATUS_CONNECTING = 5;
+  // The agent cannot serve prompts at all. `clone_error` on the same entry says why.
+  SESSION_AGENT_STATUS_ERROR = 6;
+}

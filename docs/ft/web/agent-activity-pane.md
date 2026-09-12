@@ -68,7 +68,8 @@ are represented approximately (inherent to the wire type).
 
 ## Streaming design — `StreamSessionActivity`
 
-A new **server-streaming** RPC on `ConnectionService`:
+A **server-streaming** RPC on `activity.ActivityService`
+(`packages/tddy-service/proto/activity.proto`, served by the `tddy-session-activity` crate):
 
 ```protobuf
 message AgentActivityRecord { /* fields above */ }
@@ -204,7 +205,7 @@ message StreamAcpReplayRequest {
 }
 
 // The ACP `AcpAgentMessage` (session_update / error) as its protobuf bytes. Bytes keep
-// connection.proto self-contained (no cross-package import / codegen); the web decodes them with the
+// activity.proto self-contained (no cross-package import / codegen); the web decodes them with the
 // AcpAgentMessage schema and reuses the live ACP stream's session/update switch.
 message AcpReplayFrame { bytes acp_agent_message = 1; }
 ```
@@ -471,7 +472,7 @@ switches rows cannot show the previous row's bodies.
   dialog fetches the clicked call's `raw_input`/`raw_output` via `GetAcpToolCallDetail`, showing a
   loading state while in flight and an error state on failure; bodies are cached per
   `(sessionId, callId)` in the `AgentActivityRegistry` (in-memory, retry-on-error). Regenerated
-  `connection_pb.ts` for the new RPC.
+  TypeScript (`packages/tddy-web/src/gen/activity_pb.ts`) for the new RPC.
 - **In scope (Added: 2026-07-26):** distinct rendering for every way a lookup can end without bodies —
   skeleton while in flight, stated-absent `raw_input`/`raw_output` (worded apart for a running vs a
   settled call), and curated error text separating a failed lookup, an unknown `tool_call_id`, and an

@@ -97,14 +97,19 @@ Both hosts read through the same module, so the strip and the lookup live there:
 
 Both `StreamAcpReplay` hosts strip at their existing frame-wrap seam and gain the new unary:
 
-- **daemon `connection_service`** — serves dormant and daemon-hosted (claude-cli / sandbox)
-  sessions. Strips in `acp_replay_frame` (covers the snapshot loop and the live
-  `relay_acp_replay` tail). `get_acp_tool_call_detail` authenticates, resolves the session dir, and
-  returns `tool_call_detail(...)`, mapping `None` to `NOT_FOUND`; peer-forwards on a foreign
-  `daemon_instance_id`.
-- **coder `session_participant`** — serves live tool/cursor sessions. Strips in `replay_frame_bytes`
-  (covers snapshot + the live presenter tail). Adds a `GetAcpToolCallDetail` arm to its `handle_rpc`
-  dispatch resolving `tool_call_detail(&self.svc.agent_activity_dir, ..)`.
+- **`tddy-session-activity`'s `ActivityService`** — the daemon's host, serving dormant and
+  daemon-hosted (claude-cli / sandbox) sessions. Strips in `streams::acp_replay_frame` (covers the
+  snapshot loop and the live `relay_acp_replay` tail). `get_acp_tool_call_detail` authenticates,
+  resolves the session dir, and returns `tool_call_detail(...)`, mapping `None` to `NOT_FOUND`. The
+  daemon wraps that implementation in its own routing layer (`connection_service`'s
+  `PeerRoutedActivity`), which is what peer-forwards on a foreign `daemon_instance_id`.
+- **coder `session_participant::activity_service`** — serves live tool/cursor sessions. Strips in
+  `replay_frame_bytes` (covers snapshot + the live presenter tail). Adds a `GetAcpToolCallDetail`
+  arm to that module's `handle_rpc` dispatch resolving
+  `tool_call_detail(&self.svc.agent_activity_dir, ..)`.
+
+Both answer at **`activity.ActivityService`** (`packages/tddy-service/proto/activity.proto`), which
+is where `#unbundle` node 7 moved the replay family from `connection.ConnectionService`.
 
 ## Scope
 

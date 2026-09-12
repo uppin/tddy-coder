@@ -93,9 +93,10 @@ sessions started outside Telegram (web UI / direct `claude`) still notify operat
 
 ### Source of the `WaitingForInput` signal
 
-The status arrives via the **`ReportSessionStatus`** gRPC RPC, which the per-worktree
-`tddy-tools session-hook` calls whenever Claude Code fires a `Notification` hook event with
-`notification_type` of `permission_prompt`, `elicitation_dialog`, or `idle_prompt`. See
+The status arrives via the **`ReportSessionStatus`** gRPC RPC on **`activity.ActivityService`**,
+which the per-worktree `tddy-tools session-hook` calls whenever Claude Code fires a `Notification`
+hook event with `notification_type` of `permission_prompt`, `elicitation_dialog`, or
+`idle_prompt`. See
 [claude-cli-session.md § Activity status](claude-cli-session.md#session-activity-status-via-per-worktree-hooks).
 No PTY/ANSI scraping is involved.
 
@@ -103,7 +104,7 @@ No PTY/ANSI scraping is involved.
 
 **`TelegramNotificationSubscriber`** (`tddy_daemon::session_notification_subscribers`) — one
 subscriber on the daemon's **session-notification bus**, which
-**`connection_service::report_session_status`** publishes to after `update_activity_status`
+**`tddy_session_activity`'s `report_session_status`** publishes to after `update_activity_status`
 succeeds. It takes only `AttentionRequired` notifications from the activity-status path (declining
 `Activity`, so no new Telegram traffic, and declining presenter-sourced events, which keep their own
 keyboard-bearing surface below). It holds a per-session record of the last line delivered to detect

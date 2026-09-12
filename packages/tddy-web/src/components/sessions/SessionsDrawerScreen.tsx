@@ -8,6 +8,8 @@ import {
   type SessionEntry,
   type ProjectEntry,
 } from "../../gen/connection_pb";
+import { ActivityService } from "../../gen/activity_pb";
+import { SessionAgentService } from "../../gen/session_agents_pb";
 import { SessionFilesService } from "../../gen/session_files_pb";
 import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { WorktreeService } from "../../gen/worktree_pb";
@@ -97,6 +99,12 @@ export function SessionsDrawerScreen({
   // And for the thirteen file RPCs, which left it for `session_files.SessionFilesService`: the
   // inspector's Files tab and the create form's attachment staging.
   const sessionFilesClient = useDaemonClient(SessionFilesService);
+  // `#unbundle` node 7 took two more families out. The roster and conversation RPCs went to
+  // `session_agents.SessionAgentService` — the Add-agent flow and every conversation pane — and
+  // activity, notifications and ACP replay to `activity.ActivityService`. Same daemon, same wire
+  // and the same routing as `client`, for the same reason the three above follow it.
+  const sessionAgentClient = useDaemonClient(SessionAgentService);
+  const activityClient = useDaemonClient(ActivityService);
 
   // One daemon-level notification feed for the whole drawer, however many rows it has (NFR1). The
   // hook's only output is the write into `sessionNotificationRegistry`, which each row reads for
@@ -284,6 +292,19 @@ export function SessionsDrawerScreen({
     [connectedSessionId, runtimeRegistry],
   );
 
+  // The same session-scoped route, addressed at `activity.ActivityService`: `tddy-coder`'s session
+  // participant serves the replay and activity families there since `#unbundle` node 7, so the
+  // transcript still comes off the session's own process when it has one. A second builder rather
+  // than a widened one because `clientFor` is per service — one callback can only return one
+  // service's client.
+  const buildSessionActivityClient = useCallback(
+    (): Client<typeof ActivityService> | null =>
+      connectedSessionId
+        ? (runtimeRegistry.get(connectedSessionId)?.connection?.clientFor(ActivityService) ?? null)
+        : null,
+    [connectedSessionId, runtimeRegistry],
+  );
+
   // Register a session's Agent-terminal text-insert (fired once its terminal mounts), so the
   // inspector's Files tab can insert an uploaded file's host path into the focused session's terminal
   // via a click/tap.
@@ -451,6 +472,8 @@ export function SessionsDrawerScreen({
   const activeWorktreeClient = useDaemonClientFor(WorktreeService, selectedOwningHost);
   const activeTerminalClient = useDaemonClientFor(TerminalSessionService, selectedOwningHost);
   const activeSessionFilesClient = useDaemonClientFor(SessionFilesService, selectedOwningHost);
+  const activeSessionAgentClient = useDaemonClientFor(SessionAgentService, selectedOwningHost);
+  const activeActivityClient = useDaemonClientFor(ActivityService, selectedOwningHost);
   // The same daemon as a connection rather than as a client: attaching a session opens a connection
   // on its host, and the spawned-child runtimes attach theirs on the same one.
   const activeHost = useHostConnection(selectedOwningHost);
@@ -869,6 +892,16 @@ export function SessionsDrawerScreen({
                   ? (sessionFilesClient ?? undefined)
                   : (activeSessionFilesClient ?? sessionFilesClient ?? undefined)
               }
+              sessionAgentClient={
+                mode === "creating"
+                  ? (sessionAgentClient ?? undefined)
+                  : (activeSessionAgentClient ?? sessionAgentClient ?? undefined)
+              }
+              activityClient={
+                mode === "creating"
+                  ? (activityClient ?? undefined)
+                  : (activeActivityClient ?? activityClient ?? undefined)
+              }
               host={activeHost}
               sessionToken={sessionToken}
               onCancelCreate={handleCancelCreate}
@@ -887,6 +920,7 @@ export function SessionsDrawerScreen({
               onSessionDisconnect={onSessionDisconnect}
               onSessionBytes={onSessionBytes}
               buildSessionClient={buildSessionClient}
+              buildSessionActivityClient={buildSessionActivityClient}
               sessionMetadataBySessionId={sessionMetadataBySessionId}
             />
           )}

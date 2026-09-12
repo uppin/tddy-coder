@@ -1,8 +1,8 @@
 # Session agent roster — attach any number of agents, from any daemon
 
 **Status:** 📝 Planned
-**Product area:** Daemon (spans `tddy-service`, `tddy-core`, `tddy-daemon`, `tddy-discovery`,
-`tddy-tools`, `tddy-sandbox`, `tddy-sandbox-app`, `tddy-coder`, `tddy-web`)
+**Product area:** Daemon (spans `tddy-service`, `tddy-core`, `tddy-daemon`, `tddy-session-agents`,
+`tddy-discovery`, `tddy-tools`, `tddy-sandbox`, `tddy-sandbox-app`, `tddy-coder`, `tddy-web`)
 **Date:** 2026-08-16
 
 ## Summary
@@ -255,8 +255,11 @@ chunk wedges the call with no error at all — so a `Write`'s `content` must nev
 
 ### The RPCs
 
+On `session_agents.SessionAgentService` (`packages/tddy-service/proto/session_agents.proto`, served
+by the `tddy-session-agents` crate):
+
 ```proto
-service ConnectionService {
+service SessionAgentService {
   // Attach one agent to a live session. Idempotent on (session, agent_id): re-attaching an already
   // attached agent returns the current roster unchanged and does not bump `rev`.
   rpc AttachSessionAgent(AttachSessionAgentRequest) returns (SessionAgentRoster);
@@ -574,7 +577,9 @@ which is a separate feature; it is a non-goal here and recorded in `docs/dev/TOD
 Readiness, the checkout's path and every reconcile are facts only the daemon holding the checkout
 can state. The facilitating daemon owns the roster and answers every read of it, so it has to be
 *told*: a poll would have it deciding an entry is ready from the outside, which is how a prompt
-gets served from an empty tree. Two RPCs carry this, both additions to `ConnectionService`:
+gets served from an empty tree. Two additions carry this: a message the facilitating daemon sends
+inside `StartSessionRequest` (`connection.proto`), and an RPC the owning daemon calls back on
+`session_agents.SessionAgentService`:
 
 ```proto
 // The facilitating daemon forwards this inside StartSessionRequest when it commissions a clone
@@ -617,9 +622,10 @@ subagent_status      { agent, waitFor: "ready" }   → …the same, once it can 
 
 - **Local entry** → a `SpecializedSubagentSession` built from the entry's def, as today.
 - **Remote entry** → an `OpenAgentConversation` / `PromptAgentConversation` / `CancelAgentConversation`
-  RPC to the **facilitating daemon**, which forwards it to the owning daemon in the session room. The
-  in-jail transport does not change: `tddy-tools` still speaks only to daemon A, over whichever of
-  `SandboxIpc` / `LiveKit` / `DaemonHttp` it already detected.
+  RPC on `session_agents.SessionAgentService` to the **facilitating daemon**, which forwards it to
+  the owning daemon in the session room. The in-jail transport does not change: `tddy-tools` still
+  speaks only to daemon A, over whichever of `SandboxIpc` / `LiveKit` / `DaemonHttp` it already
+  detected.
 
 `TDDY_SUBAGENT`'s role as a default agent name is **removed**. `subagent_new_session` without an
 `agent` field is an error listing the roster's ids — with an unbounded roster there is no defensible
@@ -834,8 +840,8 @@ says why on its row. An unreadable roster is not an empty one, at any depth.
 11. A `.session.yaml` written before this change (carrying `specialized_agents`) loads with an
     **empty** roster and no error.
 12. Every roster RPC is refused for a caller whose `session_token` does not resolve, with the same
-    `UNAUTHENTICATED` / `PERMISSION_DENIED` treatment every other `ConnectionService` RPC gives, and
-    **before** any peer is contacted or any clone is provisioned.
+    `UNAUTHENTICATED` / `PERMISSION_DENIED` treatment every other session-scoped RPC the daemon
+    serves applies, and **before** any peer is contacted or any clone is provisioned.
 
 ### Roster — the live registry
 

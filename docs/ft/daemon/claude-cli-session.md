@@ -205,9 +205,10 @@ The `GhosttyTerminalSession` component wraps `GhosttyTerminal` and connects `onD
 
 When the daemon starts a claude-cli session it writes `.claude/settings.local.json` into the git
 worktree configuring six Claude Code lifecycle hooks. Each hook invokes
-`tddy-tools session-hook` which maps the event to a granular `SessionActivityStatus` and calls the
-new `ReportSessionStatus` gRPC RPC. The daemon validates the per-session `hook_token`, writes
-`activity_status` to `.session.yaml`, and surfaces it via `ListSessions.SessionEntry.activity_status`.
+`tddy-tools session-hook` which maps the event to a granular `SessionActivityStatus` and calls
+`ReportSessionStatus` on `activity.ActivityService`. The daemon validates the per-session
+`hook_token`, writes `activity_status` to `.session.yaml`, and surfaces it via
+`ListSessions.SessionEntry.activity_status`.
 
 ### Status mapping
 
@@ -254,7 +255,15 @@ message StartSessionRequest {
   bool   sandbox      = 15; // when true with session_type "claude-cli": darwin Seatbelt spawn (macOS only)
 }
 
-// --- Activity status hooks ---
+// SessionEntry (in ListSessionsResponse) gains:
+//   string activity_status = 15;
+```
+
+`activity.proto` — the activity-status hooks, on `activity.ActivityService` (served by
+`tddy-session-activity`; `#unbundle` node 7 moved them off `connection.ConnectionService`, so the
+hook posts to `{daemon_url}/rpc/activity.ActivityService/ReportSessionStatus`):
+
+```proto
 rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);
 
 message ReportSessionStatusRequest {
@@ -267,9 +276,6 @@ message ReportSessionStatusRequest {
 message ReportSessionStatusResponse {
   bool ok = 1;
 }
-
-// SessionEntry (in ListSessionsResponse) gains:
-//   string activity_status = 15;
 ```
 
 `StartSessionResponse`, `ConnectSessionResponse`, and `ResumeSessionResponse` are unchanged — LiveKit fields are returned as empty strings for Claude CLI sessions. The web client detects `agent == "claude-cli"` from `ListSessions` to decide which terminal component to mount.

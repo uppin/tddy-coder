@@ -79,13 +79,28 @@ pub mod relay_idle;
 pub mod runtime;
 pub mod server;
 pub mod session_admission_service;
+/// Where a clone's checkout is on this host, plus a re-export of the clone store and the mirror
+/// that moved to `tddy-session-agents` with `#unbundle` node 7. All are reached as
+/// `crate::session_agent_clone::X`, as before.
 pub mod session_agent_clone;
-pub mod session_agent_inference;
-pub mod session_agent_roster;
-pub mod session_agent_status;
+/// The other three session-agent modules, which now live in `tddy-session-agents`.
+///
+/// Named one by one rather than globbed, for the reason the worktree, host, LiveKit and
+/// session-file facades above give: every module keeps its own name in the crate it moved to, so
+/// `crate::session_agent_roster::X` goes on resolving here and no caller in this crate changed.
+/// `session_agent_clone` is absent because a fragment of it stays — see the module above.
+pub use tddy_session_agents::{
+    session_agent_inference, session_agent_roster, session_agent_status,
+};
 pub mod session_deletion;
 pub mod session_list_enrichment;
+/// The daemon's Telegram subscriber, plus a re-export of the stream subscriber that moved to
+/// `tddy-session-activity` with `#unbundle` node 7. Both are reached as
+/// `crate::session_notification_subscribers::X`, as before.
 pub mod session_notification_subscribers;
+/// A session's display label and the publish context built on it, plus a re-export of the
+/// notification bus, its event and its subscriber trait, which moved to `tddy-session-activity`
+/// with `#unbundle` node 7. All are reached as `crate::session_notifications::X`, as before.
 pub mod session_notifications;
 pub mod session_reader;
 pub mod session_toolcall;

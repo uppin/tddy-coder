@@ -151,6 +151,17 @@ injected by tddy — pass them explicitly when using print mode.
 
 Details: [cursor-cli-session.md](cursor-cli-session.md#sandbox-mode).
 
+**What else a jailed agent may reach.** Besides `ExecuteTool`, the runner forwards exactly five
+roster and conversation operations to the facilitating daemon over the `SessionChannel` —
+`StreamSessionAgents`, `OpenAgentConversation`, `PromptAgentConversation`, `CancelAgentConversation`
+and `ReportAgentConversationState`, addressed at `session_agents.SessionAgentService`
+(see [session-agent-roster.md](session-agent-roster.md)). Any other `(service, method)` pair is
+refused at the jail boundary with `not_found`. The set is unchanged from when those methods lived on
+`connection.ConnectionService`; what changed is that the jail side
+(`packages/tddy-sandbox-runner/src/runner.rs`) now reads it from
+`tddy_service::session_agents::IN_JAIL_RELAYABLE` instead of repeating the strings, because an
+allowlist that no longer names the served coordinate fails **closed** — silently, at runtime.
+
 ## Workspace tool sandbox (`session_type:"workspace"`, `sandbox:true`)
 
 The sibling above confines **the agent** and lets it reach the host worktree by asking the host to

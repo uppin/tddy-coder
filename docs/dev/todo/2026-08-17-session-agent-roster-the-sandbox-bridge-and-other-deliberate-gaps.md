@@ -70,3 +70,33 @@
   after this branch. It is superseded by
   [session-agent-roster.md](../../ft/daemon/session-agent-roster.md) and needs either a rewrite or an
   explicit "superseded by" banner.
+
+## Re-read at `#unbundle` node 7's wrap (2026-09-12)
+
+Every open bullet survives the move unchanged; the code they name is in a new crate. Corrections:
+
+- **"Detach cancels no conversation, local or remote."** Still true, and still the most consequential
+  item here. `cancel_conversations_with` is now
+  `packages/tddy-session-agents/src/service.rs` (the method at the end of the `impl`), not
+  `connection_service.rs:3988`. Its behaviour is unchanged by the move: it still `retain`s the
+  `Remote` routing record out of the local map without sending `CancelAgentConversation` to the
+  owning daemon, and a local conversation still records no agent id. The code comment claiming the
+  remote path works moved with it and is still wrong. AC15 is still unmet on both paths.
+- **The bridge coordinate changed.** `tddy_sandbox_runner::ToolExecService` forwards the same four
+  RPCs plus `ReportAgentConversationState`, but at `session_agents.SessionAgentService`, and the
+  `(service, method)` pairs are no longer literals in the runner — they are
+  `tddy_service::session_agents::IN_JAIL_RELAYABLE`, read by both sides. The permitted set is
+  unchanged.
+- **"Conversation RPCs ride the common room, not the session room."** Unchanged, and the reason is
+  unchanged: `LiveKitParticipant` still does not expose its room as a shared handle. Delivery is now
+  behind the `AgentConversationPeers` port, so the fix has a named seam it did not have before.
+- **The sandbox runner's replaced-tool set** is still derived from `TDDY_SUBAGENTS_JSON` rather than
+  from the roster, and `roster_replacement_pairs` is now in `tddy-session-agents`. The env contract
+  the bullet says a fix would change is `tddy-sandbox-runner`'s, which is unaffected by the move.
+- **A hosted clone's exec-tool path** still authenticates by the clone link. `run_hosted_clone_tool`
+  is now in `packages/tddy-session-agents/src/session_agent_clone.rs`, while `ExecuteTool` itself is
+  family A and stayed in `tddy-daemon` — so the caller and the callee of that path are now in
+  different crates, which is worth knowing before the session-scoped tool token is built.
+- **`docs/ft/coder/specialized-subagents.md`** was re-pointed at the new coordinates by this wrap.
+  The five contradicted criteria this entry names are about `builtin_fastcontext_def()` and the
+  `TDDY_SUBAGENT=fastcontext` path, which node 7 did not touch: **that bullet is still open.**

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { ConnectionService } from "../../gen/connection_pb";
+import { ActivityService } from "../../gen/activity_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { AgentChatView, TRANSCRIPT_ROOT_STYLE } from "../chat/AgentChat";
 import type { ChatMessage } from "../chat/useAgentChat";
@@ -13,7 +13,7 @@ interface SessionActivitiesPaneProps {
   /** Explicit client override — session-scoped routing where available. Falls back to the shared
    *  HTTP client from the transport context. A dormant session has no LiveKit room of its own, so
    *  in practice this is the owning daemon's client and the replay comes off disk. */
-  client?: Client<typeof ConnectionService>;
+  client?: Client<typeof ActivityService>;
 }
 
 /**
@@ -35,7 +35,7 @@ export function SessionActivitiesPane({
   client,
 }: SessionActivitiesPaneProps) {
   // `useHttpClient` is called unconditionally (hook rules); the explicit prop wins when present.
-  const httpClient = useHttpClient(ConnectionService);
+  const httpClient = useHttpClient(ActivityService);
   const resolvedClient = client ?? httpClient;
 
   const chat = useAcpReplay({ sessionId, sessionToken, client: resolvedClient });

@@ -2,7 +2,7 @@
 //! both survive a restart.
 //!
 //! Product contract: docs/ft/daemon/session-agent-roster.md § The roster, § Attaching and
-//! detaching. Module docs: packages/tddy-daemon/docs/session-agent-roster.md.
+//! detaching. Module docs: packages/tddy-session-agents/docs/session-agent-roster.md.
 //!
 //! Three properties this type exists to hold, each of them a bug somewhere else if it slips:
 //!
@@ -23,7 +23,9 @@ use std::sync::{Arc, Mutex};
 
 use tddy_core::SessionAgentRecord;
 use tddy_rpc::Status;
-use tddy_service::proto::connection::{AgentCloneState, SessionAgentEntry, SessionAgentRoster};
+use tddy_service::proto::session_agents_svc::{
+    AgentCloneState, SessionAgentEntry, SessionAgentRoster,
+};
 use tokio::sync::broadcast;
 
 use crate::session_agent_clone::SessionAgentCloneStore;
@@ -394,7 +396,7 @@ fn roster_entry(
 mod tests {
     use super::*;
     use crate::session_agent_status::ManagedAgentState;
-    use tddy_service::proto::connection::SessionAgentStatus;
+    use tddy_service::proto::types::SessionAgentStatus;
 
     use tddy_core::session_metadata::{
         write_initial_tool_session_metadata, InitialToolSessionMetadataOpts,

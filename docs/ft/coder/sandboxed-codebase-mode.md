@@ -158,9 +158,11 @@ choice, not a constraint of this mode.
 The gate this used to leave shut is the roster one, and it is closed. `tddy-tools` used to subscribe
 to `StreamSessionAgents` whenever a session-tool transport was configured — which a standalone-app
 session always configures, since `TDDY_SANDBOX_TOOL_IPC` is how *tool* calls are dispatched — while
-no standalone-app session serves that RPC: `sandboxed` answers `NOT_FOUND` for anything but
-`ExecuteTool`, and `mounted`/`managed` answer `UNIMPLEMENTED` through `NullRpcHandler`. A few seconds
-in, the follower declared the roster unreachable and refused every `subagent_*` call. The session now
+no standalone-app session serves that RPC — since `#unbundle` node 7 it is
+`session_agents.SessionAgentService/StreamSessionAgents`, a coordinate only a daemon answers:
+`sandboxed` answers `NOT_FOUND` for anything but `connection.ConnectionService/ExecuteTool`, and
+`mounted`/`managed` answer `UNIMPLEMENTED` through `NullRpcHandler`. A few seconds in, the follower
+declared the roster unreachable and refused every `subagent_*` call. The session now
 declares its roster static instead, and a specialized agent here is reached the way this mode reaches
 everything else it does not broker: directly, over the `base_url` its def names. What the refusal
 still protects is unchanged — a session that *should* have a live roster and lost it keeps refusing,

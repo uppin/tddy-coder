@@ -26,9 +26,7 @@ use tddy_daemon::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ReportSessionStatusRequest,
-};
+use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -160,6 +158,7 @@ fn a_service_with_both_subscribers(
 
 async fn report_status(service: &ConnectionServiceImpl, status: &str) {
     service
+        .activity_service()
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
