@@ -28,7 +28,7 @@ use tddy_livekit::client_connect::{connect_client, ConnectedClient};
 use tddy_livekit::{BroadcastChannel, RpcClient, TokenGenerator};
 use tddy_rpc::Status;
 use tddy_service::proto::activity::{AgentActivityDeltaChunk, AgentActivityRecord};
-use tddy_service::proto::connection::{ExecuteToolChunk, ExecuteToolRequest};
+use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolRequest};
 use tddy_service::proto::session_agents_svc::{AgentCloneState, ReportAgentCloneStateRequest};
 use tddy_service::proto::worktree_activity::WorktreeActivityEvent;
 use tddy_service::session_activity::SESSION_ACTIVITY_TOPIC;
@@ -40,7 +40,7 @@ use tddy_session_sync::{
 /// The coordinate the tool call the mirror makes is served at. Only `StreamExecuteTool` is left
 /// here: the clone report and the activity-delta stream moved to
 /// `session_agents.SessionAgentService` and `activity.ActivityService` in `#unbundle` node 7.
-const CONNECTION_SERVICE: &str = "connection.ConnectionService";
+const EXEC_TOOL_SERVICE: &str = "exec_tools.ExecToolService";
 
 /// How long the owning daemon waits for the facilitating daemon to be visible in the session room
 /// before giving up on the clone.
@@ -299,7 +299,7 @@ impl HostedClone {
         let mut frames = self
             .client
             .call_server_stream(
-                CONNECTION_SERVICE,
+                EXEC_TOOL_SERVICE,
                 "StreamExecuteTool",
                 request.encode_to_vec(),
             )
