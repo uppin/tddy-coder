@@ -17,11 +17,11 @@ import { useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type {
-  ConnectionService,
+  SessionService,
   SessionAttachmentSchema,
   StartSessionRequestSchema,
   StartSessionResponse,
-} from "../gen/connection_pb";
+} from "../gen/session_pb";
 import type { SessionFilesService } from "../gen/session_files_pb";
 import {
   duplicateBasenames,
@@ -50,11 +50,11 @@ export type SessionAttachmentInit = MessageInitShape<typeof SessionAttachmentSch
 
 export interface UseSessionAttachmentsArgs {
   /** Starts the session (`StreamStartSession`) once its attachments are staged. */
-  client: Client<typeof ConnectionService>;
+  client: Client<typeof SessionService>;
   /**
    * Stages the form's local files on the host `client` is connected to
    * (`UploadStagedAttachmentChunk`). A second client rather than a second use of `client` because
-   * the file RPCs left `the pre-unbundle monolithic RPC coordinate` for `session_files.SessionFilesService`.
+   * the file RPCs left `session.SessionService` for `session_files.SessionFilesService`.
    */
   sessionFilesClient: Client<typeof SessionFilesService>;
   sessionToken: string;

@@ -15,7 +15,7 @@
 import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
@@ -53,17 +53,17 @@ const LINTER_ON_B = "linter@server-2";
 /** The RPCs `CreateSessionPane` calls on mount, on whichever daemon it is pointed at. */
 function aCreateSessionBackend() {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-5", label: "Claude Opus 5" }],
       defaultModel: "claude-opus-5",
     }))
-    .onUnary(ConnectionService.method.listProjects, () => ({
+    .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({ agents: [] }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
-    .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "new-1" }));
+    .onUnary(SessionService.method.startSession, () => ({ sessionId: "new-1" }));
 }
 
 /**
@@ -78,7 +78,7 @@ function mountPicker(hostB: InMemoryRpcBackend): InMemoryRpcBackend {
   mountWithPerDaemonLiveKitRpc(
     withSelectedDaemon(
       <CreateSessionPane
-        client={createClient(ConnectionService, hostABackend.transport())}
+        client={createClient(SessionService, hostABackend.transport())}
         catalogClient={createClient(CatalogService, hostABackend.transport())}
         sessionFilesClient={createClient(SessionFilesService, hostABackend.transport())}
         worktreeClient={createClient(WorktreeService, hostABackend.transport())}
@@ -135,7 +135,7 @@ function startTheSession() {
 
 /** The `specialized_agents` lists carried by every `StartSession` host A received. */
 function startedSessionAgentLists(hostA: InMemoryRpcBackend): string[][] {
-  return recordedFields(hostA.callsTo(ConnectionService.method.startSession)).map(
+  return recordedFields(hostA.callsTo(SessionService.method.startSession)).map(
     (req) => (req as { specializedAgents: string[] }).specializedAgents,
   );
 }

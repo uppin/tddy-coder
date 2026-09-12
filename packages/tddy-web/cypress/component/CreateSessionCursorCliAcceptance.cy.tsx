@@ -8,7 +8,7 @@ import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
@@ -28,7 +28,7 @@ const CURSOR_CLI_MODELS = [
 
 function aBackendForCursorCliSession() {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(CatalogService.method.listSubagents, () => ({
       subagents: [
         {
@@ -47,7 +47,7 @@ function aBackendForCursorCliSession() {
         },
       ],
     }))
-    .onUnary(ConnectionService.method.listProjects, () => ({
+    .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-cursor", name: "Cursor Project", mainRepoPath: "/repo" }],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({
@@ -56,8 +56,8 @@ function aBackendForCursorCliSession() {
     .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches: ["origin/main"], defaultRemote: "origin" }))
-    .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "cursor-cli-sess-1" }))
+    .onUnary(ProjectService.method.listProjectBranches, () => ({ branches: ["origin/main"], defaultRemote: "origin" }))
+    .onUnary(SessionService.method.startSession, () => ({ sessionId: "cursor-cli-sess-1" }))
     .onUnary(CatalogService.method.listAgentModels, (req) => {
       if (req.agent === "cursor-cli") {
         return { models: CURSOR_CLI_MODELS, defaultModel: "gpt-5.3-codex" };
@@ -67,7 +67,8 @@ function aBackendForCursorCliSession() {
 }
 
 function mountCreateSessionPane(backend: InMemoryRpcBackend) {
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
   const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
@@ -75,6 +76,7 @@ function mountCreateSessionPane(backend: InMemoryRpcBackend) {
   cy.mount(
     <CreateSessionPane
       client={client}
+      projectClient={projectClient}
       catalogClient={catalogClient}
       sessionFilesClient={sessionFilesClient}
       worktreeClient={worktreeClient}
@@ -136,7 +138,7 @@ describe("CreateSessionPane — cursor-cli session type", () => {
 
     // Then
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.startSession);
+      const calls = backend.callsTo(SessionService.method.startSession);
       expect(calls).to.have.length(1);
       expect(calls[0].sessionType).to.eq("cursor-cli");
       expect(calls[0].model).to.eq("composer-2.5");
@@ -162,7 +164,7 @@ describe("CreateSessionPane — cursor-cli session type", () => {
 
     // Then
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.startSession);
+      const calls = backend.callsTo(SessionService.method.startSession);
       expect(calls).to.have.length(1);
       expect(calls[0].sessionType).to.eq("cursor-cli");
       expect(calls[0].sandbox).to.eq(true);

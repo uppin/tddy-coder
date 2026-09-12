@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ProjectEntry } from "../../gen/connection_pb";
+import type { ProjectEntry } from "../../gen/session_pb";
 import type { DaemonHost } from "../../lib/participantRole";
 
 /**

@@ -13,7 +13,7 @@
  */
 
 import { create } from "@bufbuild/protobuf";
-import { SessionEntrySchema, type SessionEntry } from "../gen/connection_pb";
+import { SessionEntrySchema, type SessionEntry } from "../gen/session_pb";
 import { parseSessionParticipantMetadata, type SessionMetadata } from "../lib/sessionParticipantMetadata";
 
 /** A live session observed as a coder participant in the common room. */

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Minimize2 } from "lucide-react";
 import type { Client } from "@connectrpc/connect";
-import { type SessionEntry } from "../../gen/connection_pb";
+import { type SessionEntry } from "../../gen/session_pb";
 import { type SessionAgentService } from "../../gen/session_agents_pb";
 import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { GhosttyTerminalSession } from "../GhosttyTerminalSession";

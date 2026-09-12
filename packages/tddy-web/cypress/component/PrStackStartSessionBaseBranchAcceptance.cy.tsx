@@ -10,7 +10,8 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { ConnectionService, type ProjectEntry, type SessionEntry } from "../../src/gen/connection_pb";
+import { type ProjectEntry } from "../../src/gen/project_pb";
+import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -64,7 +65,7 @@ const PROJECT: Partial<ProjectEntry> = {
 
 function aPrStackModalBackend() {
   return aSessionsDrawerBackend([ORCHESTRATOR_SESSION])
-    .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
+    .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
@@ -72,7 +73,7 @@ function aPrStackModalBackend() {
     }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }] }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches: [], defaultRemote: "origin" }));
+    .onUnary(ProjectService.method.listProjectBranches, () => ({ branches: [], defaultRemote: "origin" }));
 }
 
 // ---------------------------------------------------------------------------

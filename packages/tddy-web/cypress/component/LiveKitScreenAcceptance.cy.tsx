@@ -12,7 +12,7 @@ import {
   aFakeCommonRoom,
   withSelectedDaemonRoom,
 } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { byTestId, TEST_IDS, participantEntry } from "../support/testIds";
 
@@ -27,7 +27,7 @@ describe("LiveKit screen — connected participants", () => {
   it("lists the common-room participants in the connected-participants panel", () => {
     // Given — a common room with two participants
     const room = aFakeCommonRoom(["browser-alice", "daemon-local"]);
-    const backend = aConnectionServiceBackend();
+    const backend = aSessionServiceBackend();
 
     // When
     mountWithRecordingLiveKitRpc(

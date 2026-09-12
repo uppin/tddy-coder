@@ -2,8 +2,8 @@
  * In-memory `terminal_session.TerminalSessionService` backend — a session's terminals, their byte
  * streams, their scrollback and the control lease that decides who may type into them.
  *
- * Split out of `connectionServiceBackend.ts` when the nine terminal RPCs left
- * `the pre-unbundle monolithic RPC coordinate` for `terminal_session.TerminalSessionService`: a fake is registered
+ * Split out of `daemonSessionHostBackend.ts` when the nine terminal RPCs left
+ * `session.SessionService` for `terminal_session.TerminalSessionService`: a fake is registered
  * per service, so a screen's backend composes the two rather than one `.implement` covering both.
  * `aTerminalSessionServiceFake` is the composable half (`handlers` spread into a caller's own
  * `.implement(TerminalSessionService, …)`), `aTerminalSessionServiceBackend` the standalone one,

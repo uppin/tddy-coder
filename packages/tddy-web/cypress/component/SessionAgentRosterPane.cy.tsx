@@ -17,7 +17,7 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ConnectionService, SessionEntrySchema } from "../../src/gen/connection_pb";
+import { SessionService, SessionEntrySchema } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { AgentCloneState } from "../../src/gen/session_agents_pb";
 import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";

@@ -12,7 +12,7 @@ import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
@@ -30,12 +30,12 @@ const MY_EXPLORER = `my-explorer@${HOST}`;
  * specialized subagents, plus a StartSession stub. */
 function aCreateSessionBackend() {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",
     }))
-    .onUnary(ConnectionService.method.listProjects, () => ({
+    .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({ agents: [] }))
@@ -58,11 +58,12 @@ function aCreateSessionBackend() {
         },
       ],
     }))
-    .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "managed-new-1" }));
+    .onUnary(SessionService.method.startSession, () => ({ sessionId: "managed-new-1" }));
 }
 
 function mountCreatePane(backend: ReturnType<typeof aCreateSessionBackend>) {
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
   const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
@@ -70,6 +71,7 @@ function mountCreatePane(backend: ReturnType<typeof aCreateSessionBackend>) {
   cy.mount(
     <CreateSessionPane
       client={client}
+      projectClient={projectClient}
       catalogClient={catalogClient}
       sessionFilesClient={sessionFilesClient}
       worktreeClient={worktreeClient}
@@ -134,7 +136,7 @@ describe("CreateSession managed-codebase specialized-subagent picker", () => {
 
     // Then — the typed StartSession request carried managedCodebase + both qualified ids
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.startSession);
+      const calls = backend.callsTo(SessionService.method.startSession);
       expect(calls).to.have.length(1);
       expect(calls[0].sessionType).to.eq("claude-cli");
       expect(calls[0].managedCodebase).to.eq(true);

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { ConnectionService, type ProjectEntry } from "../../gen/connection_pb";
+import { type ProjectEntry } from "../../gen/project_pb";
+import { ProjectService } from "../../gen/project_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useHostConnector } from "../../rpc/connections/registry";
 import { useDaemonClient, useDaemons } from "../../rpc/selectedDaemon";
@@ -17,8 +18,8 @@ const POLL_INTERVAL_MS = 5000;
  * than throwing or faking success; see `useDaemonClient`'s contract.
  */
 function useProjectsRpc(
-  client: Client<typeof ConnectionService> | null,
-  clientForHost: (instanceId: string) => Client<typeof ConnectionService> | null,
+  client: Client<typeof ProjectService> | null,
+  clientForHost: (instanceId: string) => Client<typeof ProjectService> | null,
   sessionToken: string,
 ) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
@@ -98,15 +99,15 @@ function useProjectsRpc(
  */
 export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { sessionToken } = useAuthContext();
-  const client = useDaemonClient(ConnectionService);
+  const client = useDaemonClient(ProjectService);
   const daemons = useDaemons();
   const connectHost = useHostConnector();
   // Address the chosen target host directly — the target is only known when the operator submits,
   // so the client is resolved here through the connection registry rather than by a render-time
   // `useDaemonClientFor` hook.
   const clientForHost = useCallback(
-    (instanceId: string): Client<typeof ConnectionService> | null =>
-      connectHost(instanceId)?.clientFor(ConnectionService) ?? null,
+    (instanceId: string): Client<typeof ProjectService> | null =>
+      connectHost(instanceId)?.clientFor(ProjectService) ?? null,
     [connectHost],
   );
   const { projects, createProject, addProjectToHost, setDefaultBranch, loadProjectBranches } =

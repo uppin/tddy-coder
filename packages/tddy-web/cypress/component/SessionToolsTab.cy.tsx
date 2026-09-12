@@ -11,7 +11,7 @@
  * ⚠️ RED PHASE — these tests are intentionally failing until:
  *   1. `SessionToolsTab.tsx` is created.
  *   2. `ListSessionToolCalls` is added to `connection.proto` and regenerated into
- *      `src/gen/connection_pb.ts`.
+ *      `src/gen/session_pb.ts`.
  *   3. The component is wired to the props below.
  */
 

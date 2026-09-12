@@ -1,4 +1,4 @@
-import type { ProjectEntry, SessionEntry } from "../gen/connection_pb";
+import type { ProjectEntry, SessionEntry } from "../gen/session_pb";
 import { sortSessionsForDisplay } from "./sessionSort";
 
 function normalizeRepoPath(path: string): string {

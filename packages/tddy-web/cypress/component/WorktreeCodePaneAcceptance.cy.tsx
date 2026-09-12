@@ -11,7 +11,8 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { ConnectionService, type ProjectEntry } from "../../src/gen/connection_pb";
+import { type ProjectEntry } from "../../src/gen/project_pb";
+import { ProjectService } from "../../src/gen/project_pb";
 import {
   ListWorktreeDirectoryResponseSchema,
   ReadWorktreeFileResponseSchema,
@@ -161,7 +162,7 @@ function aProjectScopedWorktreeBackend(
   };
 
   return aSessionsDrawerBackend(sessions)
-    .onUnary(ConnectionService.method.listProjects, () => ({ projects }))
+    .onUnary(ProjectService.method.listProjects, () => ({ projects }))
     .onUnary(WorktreeService.method.listWorktreeDirectory, (req) => {
       requireResolvedProject(req.projectId);
       return create(ListWorktreeDirectoryResponseSchema, {

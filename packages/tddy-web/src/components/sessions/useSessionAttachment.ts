@@ -17,14 +17,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { ConnectionService } from "../../gen/connection_pb";
+import { SessionService } from "../../gen/session_pb";
 import { attachmentHintFromReply } from "../../rpc/connections/sessionAttachment";
 import type { SessionAttachmentHint, SessionAttachmentState } from "../../rpc/connections/session";
 import type { HostConnection } from "../../rpc/connections/types";
 
 export type { SessionAttachmentState } from "../../rpc/connections/session";
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type ConnectionClient = Client<typeof SessionService>;
 
 /**
  * One attachment: what state it is in, and the routing it was opened with.
@@ -98,7 +98,7 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
     ) => {
       setAttachment({ state: { status: "connecting", sessionId }, hint: null });
       try {
-        const reply = await call(host.clientFor(ConnectionService));
+        const reply = await call(host.clientFor(SessionService));
         const hint = attachmentHintFromReply(sessionId, reply);
         const connection = host.openSession(sessionId, hint);
         if (!mounted.current) {

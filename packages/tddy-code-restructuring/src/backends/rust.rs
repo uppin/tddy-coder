@@ -5213,7 +5213,7 @@ mod tests {
 
         assert_eq!(
             alias_target(text, "host_messages", "ProtoProbeOutcome").as_deref(),
-            Some("tddy_service::proto::connection::ProbeOutcome")
+            Some("tddy_service::proto::host::ProbeOutcome")
         );
     }
 

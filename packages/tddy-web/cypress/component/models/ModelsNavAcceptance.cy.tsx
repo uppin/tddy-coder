@@ -12,7 +12,7 @@ import React from "react";
 import { AppShell } from "../../../src/components/shell/AppShell";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../../support/rpc/daemonSessionHostBackend";
 import { mountWithRpc } from "../../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../../support/rpc/recordingLiveKitRpc";
 import {
@@ -40,7 +40,7 @@ describe("ModelsNavAcceptance — Models & Agents in the navigation menu", () =>
           <div data-testid="shell-body">body content</div>
         </AppShell>,
       ),
-      aConnectionServiceBackend(),
+      aSessionServiceBackend(),
     );
 
     // When — open the menu and choose Models & Agents
@@ -59,7 +59,7 @@ describe("ModelsNavAcceptance — Models & Agents in the navigation menu", () =>
           <div data-testid="shell-body">body content</div>
         </AppShell>,
       ),
-      aConnectionServiceBackend(),
+      aSessionServiceBackend(),
     );
 
     // When

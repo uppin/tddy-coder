@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { ConnectionService, ListSessionsRequestSchema } from "../gen/connection_pb";
+import { SessionService, ListSessionsRequestSchema } from "../gen/session_pb";
 import { AuthService, GetAuthUrlRequestSchema } from "../gen/auth_pb";
 
 import { createAuthGateInterceptor } from "./authGateInterceptor";
@@ -23,11 +23,11 @@ import { createAuthGateInterceptor } from "./authGateInterceptor";
 function aListSessionsRequest(sessionToken: string) {
   return {
     stream: false as const,
-    service: ConnectionService,
-    method: ConnectionService.method.listSessions,
+    service: SessionService,
+    method: SessionService.method.listSessions,
     message: create(ListSessionsRequestSchema, { sessionToken }),
     header: new Headers(),
-    url: "/rpc/the pre-unbundle monolithic RPC coordinate/ListSessions",
+    url: "/rpc/session.SessionService/ListSessions",
     init: {},
     signal: new AbortController().signal,
   };

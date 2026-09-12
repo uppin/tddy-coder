@@ -26,7 +26,7 @@ import { appLocationPage } from "../support/pages/appLocationPage";
  */
 const A_CONNECTION_THAT_CARRIES_A_ROSTER = true;
 
-const CONNECTION_SERVICE = "the pre-unbundle monolithic RPC coordinate";
+const CONNECTION_SERVICE = "session.SessionService";
 const TASK_SERVICE = "tasks.TaskService";
 
 const SERVICES = [

@@ -13,7 +13,7 @@
  * Feature: docs/ft/coder/pr-stack-docs.md § Listing per-PR documents
  */
 
-import { SessionContextDocKind, type SessionContextDoc } from "../../../gen/connection_pb";
+import { SessionContextDocKind, type SessionContextDoc } from "../../../gen/session_pb";
 
 export function contextDocRelativePath(doc: SessionContextDoc): string {
   if (doc.relativePath) return doc.relativePath;

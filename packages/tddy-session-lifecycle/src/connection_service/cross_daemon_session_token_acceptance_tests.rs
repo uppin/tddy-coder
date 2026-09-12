@@ -1,5 +1,6 @@
 use super::*;
 use tddy_daemon_kernel::SessionsBaseResolver;
+use tddy_service::proto::project::{ListProjectsRequest, ProjectService};
 
 /// A daemon config with GitHub auth enabled and, when `api_secret` is `Some`, a LiveKit
 /// secret that signs/verifies session tokens. Maps GitHub login "u" to OS user "u".

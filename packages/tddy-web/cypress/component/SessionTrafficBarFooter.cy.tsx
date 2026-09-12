@@ -6,15 +6,15 @@
  * FOLLOWS `SessionMainPane` / `sessions-detail-pane` — never as a descendant of the detail pane,
  * so no absolutely-positioned overlay inside the pane can ever cover it.
  *
- * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
- * common-room LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and
+ * `SessionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
+ * common-room LiveKit connection — see `aSessionServiceBackend` (in-memory fake) and
  * `SelectedDaemonProvider` (via `withSelectedDaemon`).
  */
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend, type ConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend, type SessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { hostStatsFooterPage } from "../support/pages/hostStatsFooterPage";
@@ -40,14 +40,14 @@ const CONNECTED_SESSION = {
 // ---------------------------------------------------------------------------
 
 describe("StatusBar — rendered in the bottom Host Stats Footer, outside sessions-detail-pane", () => {
-  let backend: ConnectionServiceBackend;
+  let backend: SessionServiceBackend;
 
   beforeEach(() => {
     cy.viewport(1280, 800); // desktop: session list defaults open so drawer items are clickable
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    backend = aConnectionServiceBackend({
+    backend = aSessionServiceBackend({
       sessions: [CONNECTED_SESSION],
       // Use a LiveKit session to avoid GrpcSessionTerminal streaming RPCs in tests
       connectSession: { livekitRoom: "room-footer-001", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },

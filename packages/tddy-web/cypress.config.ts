@@ -31,7 +31,7 @@ import {
 import {
   StartSessionRequestSchema,
   StartSessionResponseSchema,
-} from "./src/gen/connection_pb.js";
+} from "./src/gen/session_pb.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -971,7 +971,7 @@ export default defineConfig({
               newBranchName: `e2e-pr-stack-${Date.now()}`,
             }),
           );
-          const res = await fetch(`${baseUrl}/rpc/the pre-unbundle monolithic RPC coordinate/StartSession`, {
+          const res = await fetch(`${baseUrl}/rpc/session.SessionService/StartSession`, {
             method: "POST",
             headers: { "Content-Type": "application/proto", "Connect-Protocol-Version": "1" },
             body,

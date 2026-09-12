@@ -2,7 +2,7 @@
  * In-memory `session_files.SessionFilesService` backend — the files already uploaded to a session,
  * and their removal.
  *
- * Built when the thirteen file RPCs left `the pre-unbundle monolithic RPC coordinate` for
+ * Built when the thirteen file RPCs left `session.SessionService` for
  * `session_files.SessionFilesService`: a fake is registered per service, so a screen's backend
  * composes the two rather than one `.implement` covering both. `aSessionFilesServiceFake` is the
  * composable half (`handlers` spread into a caller's own `.implement(SessionFilesService, …)`),

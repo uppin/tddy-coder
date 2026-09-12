@@ -1,13 +1,15 @@
 import React from "react";
 import type { Client } from "@connectrpc/connect";
-import type { ConnectionService } from "../../gen/connection_pb";
+import type { SessionService } from "../../gen/session_pb";
+import type { ProjectService } from "../../gen/project_pb";
 import type { CatalogService } from "../../gen/catalog_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import { Button } from "../ui/button";
 import { CreateSessionPane, type CreateSessionInitialValues } from "./CreateSessionPane";
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type ConnectionClient = Client<typeof SessionService>;
+type ProjectClient = Client<typeof ProjectService>;
 type CatalogClient = Client<typeof CatalogService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
@@ -15,6 +17,7 @@ type WorktreeClient = Client<typeof WorktreeService>;
 export interface CreateSessionDialogProps {
   open: boolean;
   client: ConnectionClient;
+  projectClient: ProjectClient;
   catalogClient: CatalogClient;
   /**
    * The session-files service on the same host as `client` — the form stages its local attachments
@@ -43,6 +46,7 @@ export interface CreateSessionDialogProps {
 export function CreateSessionDialog({
   open,
   client,
+  projectClient,
   catalogClient,
   sessionFilesClient,
   worktreeClient,
@@ -80,6 +84,7 @@ export function CreateSessionDialog({
         <div className="min-h-0 flex-1 overflow-auto">
           <CreateSessionPane
             client={client}
+            projectClient={projectClient}
             catalogClient={catalogClient}
             sessionFilesClient={sessionFilesClient}
             worktreeClient={worktreeClient}

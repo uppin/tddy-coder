@@ -18,7 +18,7 @@
  */
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ConnectionService, type SessionEntry } from "../../../src/gen/connection_pb";
+import { SessionService, type SessionEntry } from "../../../src/gen/session_pb";
 
 /**
  * Create an in-memory backend pre-seeded with all RPCs `SessionsDrawerScreen`
@@ -28,5 +28,5 @@ export function aSessionsDrawerBackend(
   sessions: Partial<SessionEntry>[],
 ): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listSessions, () => ({ sessions }));
+    .onUnary(SessionService.method.listSessions, () => ({ sessions }));
 }

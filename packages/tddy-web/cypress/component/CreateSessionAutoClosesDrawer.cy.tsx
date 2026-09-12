@@ -1,8 +1,8 @@
 /**
  * Acceptance test for auto-closing the sessions drawer after a new session is created.
  *
- * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
- * common-room LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and
+ * `SessionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
+ * common-room LiveKit connection — see `aSessionServiceBackend` (in-memory fake) and
  * `SelectedDaemonProvider` (via `withSelectedDaemon`). The test mounts SessionsDrawerScreen
  * and drives the full create flow through the in-memory backend.
  *
@@ -12,7 +12,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { TEST_IDS, byTestId } from "../support/testIds";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
@@ -46,7 +46,7 @@ const NEW_SESSION_FIXTURE = {
 /** Backend that starts with no sessions and returns the new one after creation. */
 function backendThatCreates() {
   let callCount = 0;
-  return aConnectionServiceBackend({
+  return aSessionServiceBackend({
     projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
     agents: [{ id: "claude", label: "Claude (opus)" }],
     listSessionsFactory: () => {

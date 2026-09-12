@@ -18,16 +18,13 @@ import type { Transport, UnaryResponse } from "@connectrpc/connect";
 import { ConnectError, type Code } from "@connectrpc/connect";
 import type { DescMethod } from "@bufbuild/protobuf";
 
-import {
-  AgentInfoSchema,
-  BranchResolutionSchema,
-  ProjectEntrySchema,
-  SessionEntrySchema,
-  type AgentInfo,
-  type BranchResolution,
-  type ProjectEntry,
-  type SessionEntry,
-} from "../gen/connection_pb";
+import { type AgentInfo } from "../gen/catalog_pb";
+import { type BranchResolution } from "../gen/pr_stack_pb";
+import { type ProjectEntry } from "../gen/project_pb";
+import { BranchResolutionSchema } from "../gen/pr_stack_pb";
+import { ProjectEntrySchema } from "../gen/project_pb";
+import { SessionEntrySchema, type SessionEntry } from "../gen/session_pb";
+import { AgentInfoSchema } from "../gen/catalog_pb";
 import { EligibleDaemonEntrySchema, type EligibleDaemonEntry } from "../gen/host_pb";
 import type { StackChildSession } from "../components/sessions/prstack/stackChildSessions";
 import type { StackNode } from "../components/sessions/prstack/stackPlan";

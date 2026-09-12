@@ -17,7 +17,7 @@
  * The host browsed is the one the form's clients are connected to: `ListSessions`,
  * `ListSessionUploads` and `ListWorktreeDirectory` carry no `daemon_instance_id`, so a peer's
  * documents are not enumerable over them (tracked in the changeset). The three now live on three
- * services — `the pre-unbundle monolithic RPC coordinate`, `session_files.SessionFilesService` and
+ * services — `session.SessionService`, `session_files.SessionFilesService` and
  * `worktree.WorktreeService` — so the picker takes one client each rather than one client for all,
  * and the invariant that binds them is `browsedDaemonInstanceId` below.
  *
@@ -27,7 +27,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { ConnectionService, SessionEntry } from "../../../gen/connection_pb";
+import type { SessionService, SessionEntry } from "../../../gen/session_pb";
 import { HostDocumentScope } from "../../../gen/types_pb";
 import type { SessionFilesService, SessionUploadEntry } from "../../../gen/session_files_pb";
 import type { WorktreeService } from "../../../gen/worktree_pb";
@@ -47,7 +47,7 @@ export interface HostDocumentPick {
 
 export interface HostDocumentPickerProps {
   /** Enumerates the host's sessions (`ListSessions`) — the root of every `SESSION_*` scope. */
-  client: Client<typeof ConnectionService>;
+  client: Client<typeof SessionService>;
   /**
    * The session-files service on the **same** host `client` enumerates from — the upload scope
    * lists through it (`ListSessionUploads`).

@@ -17,7 +17,8 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { ConnectionService, type ProjectEntry, type SessionEntry } from "../../src/gen/connection_pb";
+import { type ProjectEntry } from "../../src/gen/project_pb";
+import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
 import { PrStackService } from "../../src/gen/pr_stack_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -115,7 +116,7 @@ function openPrStackScreen(
       queriedBranches.push(req.branch);
       return aBranchResolutionResponse(resolutionByBranch[req.branch] ?? { branch: req.branch });
     })
-    .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
+    .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);

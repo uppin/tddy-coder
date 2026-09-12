@@ -1,12 +1,12 @@
 /**
- * In-memory `the pre-unbundle monolithic RPC coordinate` (+ `auth.AuthService`) backend for ConnectionScreen /
+ * In-memory `session.SessionService` (+ `auth.AuthService`) backend for ConnectionScreen /
  * SessionsDrawerScreen acceptance tests.
  *
- * `ConnectionService` is daemon-level RPC (`useDaemonClient`, see `../../../src/rpc/selectedDaemon`),
+ * `SessionService` is daemon-level RPC (`useDaemonClient`, see `../../../src/rpc/selectedDaemon`),
  * routed over the shared common-room LiveKit connection — `mountWithRecordingLiveKitRpc` routes
  * both the HTTP and LiveKit transports to the *same* in-memory backend, so `AuthService`
  * (HTTP, unaffected by daemon selection), `TokenService` (HTTP, per-session/presence LiveKit token
- * issuance — the PRD's bootstrap exception), and `ConnectionService` (LiveKit, daemon-routed) can
+ * issuance — the PRD's bootstrap exception), and `SessionService` (LiveKit, daemon-routed) can
  * all be implemented on one backend object here.
  *
  * Fluent-tests preference: an in-memory fake (this file) over wire-level `cy.intercept` — the
@@ -27,18 +27,21 @@ import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-t
 import { AuthService } from "../../../src/gen/auth_pb";
 import { GenerateTokenResponseSchema, RefreshTokenResponseSchema, TokenService } from "../../../src/gen/token_pb";
 import {
-  ConnectionService,
-  ConnectSessionResponseSchema,
+  ProjectService,
   ProjectEntrySchema,
+  type ProjectEntry,
+} from "../../../src/gen/project_pb";
+import {
+  SessionService,
+  ConnectSessionResponseSchema,
   ResumeSessionResponseSchema,
   SessionEntrySchema,
   StartSessionResponseSchema,
   type ConnectSessionResponse,
-  type ProjectEntry,
   type ResumeSessionResponse,
   type SessionEntry,
   type StartSessionResponse,
-} from "../../../src/gen/connection_pb";
+} from "../../../src/gen/session_pb";
 import {
   AgentInfoSchema,
   CatalogService,
@@ -140,7 +143,7 @@ function anAgentInfo(overrides: Partial<AgentInfo>): AgentInfo {
 // Scenario options
 // ---------------------------------------------------------------------------
 
-export interface ConnectionServiceScenario
+export interface SessionServiceScenario
   extends HostServiceScenario,
     SessionFilesServiceScenario,
     TerminalSessionServiceScenario,
@@ -189,7 +192,7 @@ export interface ConnectionServiceScenario
   sessionNotifications?: SessionNotificationFeed;
 }
 
-export interface ConnectionServiceBackend
+export interface SessionServiceBackend
   extends InMemoryRpcBackend,
     AgentConversationControls,
     HostServiceControls,
@@ -218,11 +221,11 @@ export interface ConnectionServiceBackend
 
 /**
  * Build an in-memory backend implementing `AuthService.getAuthStatus` (always authenticated) and
- * the `ConnectionService` methods used by `ConnectionScreen`/`SessionsDrawerScreen`.
+ * the `SessionService` methods used by `ConnectionScreen`/`SessionsDrawerScreen`.
  */
-export function aConnectionServiceBackend(
-  scenario: ConnectionServiceScenario = {},
-): ConnectionServiceBackend {
+export function aSessionServiceBackend(
+  scenario: SessionServiceScenario = {},
+): SessionServiceBackend {
   const deletedSessionIds: string[] = [];
   const signalCalls: { sessionId: string; signal: number }[] = [];
   const executedToolSessionIds: string[] = [];
@@ -320,16 +323,21 @@ export function aConnectionServiceBackend(
         });
       },
     })
-    .implement(ConnectionService, {
+    .implement(ProjectService, {
+      listProjects: async () => ({
+        projects: projectsOverride.map((p) => aProjectEntry(p)),
+      }),
+      listProjectBranches: async () => ({
+        branches: scenario.projectBranches ?? [],
+        defaultRemote: "origin",
+      }),
+    })
+    .implement(SessionService, {
       listSessions: async () => ({
         sessions: (scenario.listSessionsFactory ? scenario.listSessionsFactory() : (scenario.sessions ?? [])).map(
           (s) => aSessionEntry(s),
         ),
       }),
-      listProjects: async () => ({
-        projects: projectsOverride.map((p) => aProjectEntry(p)),
-      }),
-      listProjectBranches: async () => ({ branches: scenario.projectBranches ?? [], defaultRemote: "origin" }),
       connectSession: async (req) => {
         connectedSessionIds.push(req.sessionId);
         const overrides =
@@ -415,12 +423,12 @@ export function aConnectionServiceBackend(
 }
 
 /**
- * `ConnectionServiceScenario` for the "same projectId hosted on two daemons" collision scenario
+ * `SessionServiceScenario` for the "same projectId hosted on two daemons" collision scenario
  * (mirrors the retired `interceptConnectionRpcsProjectIdCollision`).
  */
-export function connectionServiceProjectIdCollisionScenario(
+export function daemonSessionHostProjectIdCollisionScenario(
   sessions: Partial<SessionEntry>[] = [],
-): ConnectionServiceScenario {
+): SessionServiceScenario {
   return {
     sessions,
     daemons: [DAEMON_LOCAL, DAEMON_PEER],

@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../../gen/connection_pb";
+import type { SessionEntry } from "../../gen/session_pb";
 
 /**
  * The subagent sessions beneath one session, as a tree.

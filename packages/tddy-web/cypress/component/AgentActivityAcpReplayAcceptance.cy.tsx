@@ -1,7 +1,7 @@
 /**
  * Acceptance: the **Agent Activity overlay as a read-only ACP transcript**. The overlay body is no
  * longer a flat tool-call list — it renders an ACP-style conversation (agent text interleaved with
- * enriched tool calls) fed by `ConnectionService.StreamAcpReplay`, a server-streaming RPC that emits
+ * enriched tool calls) fed by `SessionService.StreamAcpReplay`, a server-streaming RPC that emits
  * ACP-format frames over the HTTP client (works for live and dormant sessions alike).
  *
  * These mount the self-contained `AgentActivityOverlay` over an in-memory backend whose

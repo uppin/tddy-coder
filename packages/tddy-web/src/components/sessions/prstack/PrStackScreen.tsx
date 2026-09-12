@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { ConnectionService, SessionEntry } from "../../../gen/connection_pb";
+import type { SessionService, SessionEntry } from "../../../gen/session_pb";
+import type { ProjectService } from "../../../gen/project_pb";
 import type { CatalogService } from "../../../gen/catalog_pb";
 import type { PrStackService } from "../../../gen/pr_stack_pb";
 import type { SessionFilesService } from "../../../gen/session_files_pb";
@@ -29,7 +30,8 @@ import type { CreateSessionInitialValues } from "../CreateSessionPane";
 import { remoteTrackingName } from "../../../lib/branchNames";
 import type { SessionMetadata } from "../../../lib/sessionParticipantMetadata";
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type ConnectionClient = Client<typeof SessionService>;
+type ProjectClient = Client<typeof ProjectService>;
 type CatalogClient = Client<typeof CatalogService>;
 type PrStackClient = Client<typeof PrStackService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
@@ -81,8 +83,10 @@ function unpushedPullReason(baseBranch: string, branch: string, pushError: strin
 
 export interface PrStackScreenProps {
   session: SessionEntry;
-  /** `the pre-unbundle monolithic RPC coordinate` on the orchestrator's host — Start-session only. */
+  /** `session.SessionService` on the orchestrator's host — Start-session only. */
   client?: ConnectionClient;
+  /** `project.ProjectService` on the same host — Start-session dialog project registry. */
+  projectClient?: ProjectClient;
   /** `pr_stack.PrStackService` on the same host — planned-PR mutations and `QueryBranch`. */
   prStackClient?: PrStackClient;
   /** `catalog.CatalogService` on the same host — the Start-session dialog's catalog fan-out. */
@@ -163,6 +167,7 @@ export interface PrStackScreenProps {
 export function PrStackScreen({
   session,
   client,
+  projectClient,
   prStackClient,
   catalogClient,
   sessionFilesClient,
@@ -671,10 +676,11 @@ export function PrStackScreen({
         onCommitAndPull={handleCommitDirtyWorktreeAndPull}
         onCancel={() => setDirtyWorktreePrompt(null)}
       />
-      {client && catalogClient && sessionFilesClient && worktreeClient && (
+      {client && projectClient && catalogClient && sessionFilesClient && worktreeClient && (
         <CreateSessionDialog
           open={startSessionNode !== null}
           client={client}
+          projectClient={projectClient}
           catalogClient={catalogClient}
           sessionFilesClient={sessionFilesClient}
           worktreeClient={worktreeClient}

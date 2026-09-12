@@ -12,7 +12,7 @@ six hooks (`useSessionActivity`, `useSessionAgentRoster`, `useAgentConversation`
 
 The Cypress fakes are split per service — `acpReplay.ts`, `agentConversationBackend.ts`,
 `sessionAgentRosterBackend.ts` and `sessionNotificationFeed.ts` move to the new coordinates,
-`connectionServiceBackend.ts` keeps `ListSubagents`, which stayed.
+`daemonSessionHostBackend.ts` keeps `ListSubagents`, which stayed.
 
 **A bundle and a daemon must now be upgraded together for a seventeenth time.** An older bundle
 against a newer daemon cannot attach an agent, open a conversation, or render the activity,

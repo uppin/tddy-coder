@@ -13,7 +13,8 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { ConnectionService, type ProjectEntry, type SessionEntry } from "../../src/gen/connection_pb";
+import { type ProjectEntry } from "../../src/gen/project_pb";
+import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -102,7 +103,7 @@ function anAttachDocsOrchestrator(): Partial<SessionEntry> {
  */
 function aBaseSelectionBackend(orchestrator: Partial<SessionEntry>) {
   return aSessionsDrawerBackend([orchestrator])
-    .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
+    .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
@@ -110,8 +111,8 @@ function aBaseSelectionBackend(orchestrator: Partial<SessionEntry>) {
     }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }] }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches: [], defaultRemote: "origin" }))
-    .onUnary(ConnectionService.method.startSession, () => ({
+    .onUnary(ProjectService.method.listProjectBranches, () => ({ branches: [], defaultRemote: "origin" }))
+    .onUnary(SessionService.method.startSession, () => ({
       sessionId: CHILD_SESSION_ID,
       livekitRoom: "room-child-basesel-1",
       livekitUrl: "ws://127.0.0.1:7880",
@@ -288,7 +289,7 @@ it("sends the selected base branch as selected_integration_base_ref when the ope
   // Then — StartSession carries attach-store as the integration base ref (remote-tracking), parented
   // to this orchestrator.
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.startSession);
+    const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
     expect(calls[0].stackParent).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].selectedIntegrationBaseRef).to.equal(ATTACH_STORE_REF);
@@ -324,7 +325,7 @@ it("hides the base-branch selector for a root node with no other materialized br
   // Then — no selector is rendered, and StartSession sends an empty integration base ref (default base).
   prStackScreenPage.dialogBaseBranchSelect().should("not.exist");
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.startSession);
+    const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
     expect(calls[0].selectedIntegrationBaseRef).to.equal("");
   });
@@ -463,7 +464,7 @@ it("pre-selects the project default and sends it as the integration base ref for
   // Then — StartSession carries the pre-selected default as the integration base ref — the
   // explicit override the daemon honors past the ordering gate.
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.startSession);
+    const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
     expect(calls[0].stackParent).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].selectedIntegrationBaseRef).to.equal(DEFAULT_BRANCH_REF);

@@ -19,7 +19,7 @@ import {
   type WebviewIpcBridge,
   type WebviewIpcHost,
 } from "tddy-tauri-web";
-import { ConnectionService } from "../../gen/connection_pb";
+import { SessionService } from "../../gen/session_pb";
 import type { SessionConnection } from "./session";
 import type { HostConnection } from "./types";
 import { createIpcConnectionProvider, localHostRegistrationFor } from "./localHost";
@@ -281,7 +281,7 @@ describe("the local host over the page's own daemon connection", () => {
     const host = theLocalHostOver(ipc);
 
     host.transport();
-    host.clientFor(ConnectionService);
+    host.clientFor(SessionService);
 
     // Then the host application was never asked for a daemon connection. It already holds one —
     // `daemonTransport.ts` opened it before any screen rendered — and a bridge owns one connection

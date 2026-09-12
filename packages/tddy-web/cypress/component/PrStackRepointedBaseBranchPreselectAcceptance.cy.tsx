@@ -17,7 +17,8 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { ConnectionService, type ProjectEntry, type SessionEntry } from "../../src/gen/connection_pb";
+import { type ProjectEntry } from "../../src/gen/project_pb";
+import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -103,7 +104,7 @@ function anAttachDocsOrchestratorWithRepointedUi(): Partial<SessionEntry> {
  */
 function aRepointedBaseBackend(orchestrator: Partial<SessionEntry>) {
   return aSessionsDrawerBackend([orchestrator])
-    .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
+    .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
@@ -111,8 +112,8 @@ function aRepointedBaseBackend(orchestrator: Partial<SessionEntry>) {
     }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }] }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches: [], defaultRemote: REMOTE }))
-    .onUnary(ConnectionService.method.startSession, () => ({
+    .onUnary(ProjectService.method.listProjectBranches, () => ({ branches: [], defaultRemote: REMOTE }))
+    .onUnary(SessionService.method.startSession, () => ({
       sessionId: CHILD_SESSION_ID,
       livekitRoom: "room-child-repointbase-1",
       livekitUrl: "ws://127.0.0.1:7880",
@@ -176,7 +177,7 @@ it("sends the project default branch as selected_integration_base_ref for a repo
 
   // Then — the child is based onto master, matching the repoint and the dialog's own base label.
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.startSession);
+    const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
     expect(calls[0].stackParent).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].selectedIntegrationBaseRef).to.equal(DEFAULT_BRANCH_REF);

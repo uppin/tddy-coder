@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../gen/connection_pb";
+import type { SessionEntry } from "../gen/session_pb";
 import { connectionStatusForSession } from "./connectionStatusForSession";
 
 /** One orchestrator session and its stack children, sorted by creation date. */

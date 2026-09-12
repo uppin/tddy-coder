@@ -29,7 +29,7 @@ import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
 import type { SessionRuntimeState } from "../../src/components/sessions/sessionRuntimeRegistry";
-import type { SessionEntry } from "../../src/gen/connection_pb";
+import type { SessionEntry } from "../../src/gen/session_pb";
 import { ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { VncService } from "../../src/gen/vnc_pb";
 import type { ConnectionStatus, HostConnection } from "../../src/rpc/connections/types";

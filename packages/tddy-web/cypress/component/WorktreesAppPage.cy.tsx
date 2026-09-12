@@ -1,11 +1,11 @@
 /**
  * Cypress component acceptance: the Worktrees screen loads through **`worktree.WorktreeService`**.
  *
- * Nine worktree methods left `the pre-unbundle monolithic RPC coordinate` for `worktree.WorktreeService`, and the
+ * Nine worktree methods left `session.SessionService` for `worktree.WorktreeService`, and the
  * daemon roster left it for `host.HostService` — but `ListProjects`, which this screen also reads,
  * stayed. So the screen now spans three services, and this spec pins the split: the backend serves
  * the worktree feed and the delete **only** under `worktree.WorktreeService`, the roster only under
- * `host.HostService`, and the project registry only under `the pre-unbundle monolithic RPC coordinate`. A screen
+ * `host.HostService`, and the project registry only under `session.SessionService`. A screen
  * that asked any of them of the wrong service gets `Unimplemented` and shows nothing.
  *
  * Changeset: `docs/dev/changesets/2026-09-09-unbundle-host-worktree-services.md`
@@ -15,7 +15,8 @@ import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { WorktreesAppPage } from "../../src/components/worktrees/WorktreesAppPage";
 import { AuthService } from "../../src/gen/auth_pb";
-import { ConnectionService, ProjectEntrySchema } from "../../src/gen/connection_pb";
+import { ProjectService } from "../../src/gen/project_pb";
+import { ProjectEntrySchema } from "../../src/gen/project_pb";
 import {
   GenerateTokenResponseSchema,
   RefreshTokenResponseSchema,
@@ -76,7 +77,7 @@ function aDaemonServingTheSplit(snapshot: WorktreeStatsRowInput[]): ThreeService
         refreshToken: async () =>
           create(RefreshTokenResponseSchema, { token: "mock-jwt-presence", ttlSeconds: 600n }),
       })
-      .implement(ConnectionService, {
+      .implement(ProjectService, {
         listProjects: async () => ({
           projects: [
             create(ProjectEntrySchema, {

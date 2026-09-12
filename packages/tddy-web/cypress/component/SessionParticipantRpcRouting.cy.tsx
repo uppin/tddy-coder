@@ -6,7 +6,7 @@
  * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 1)
  *
  * Green: `SessionsDrawerScreen` builds the session-scoped
- * `ConnectionService` client via `liveKitFactory(room, "daemon-<instanceId>-<sessionId>")`
+ * `SessionService` client via `liveKitFactory(room, "daemon-<instanceId>-<sessionId>")`
  * for `ExecuteTool` / `ClaimTerminalControl`. `DeleteSession` / `SignalSession` stay on the
  * daemon participant (`daemon-<instanceId>`) — see SessionStartResumeStillDaemonRouted.cy.tsx.
  */
@@ -14,7 +14,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { byTestId, TEST_IDS } from "../support/testIds";
@@ -52,7 +52,7 @@ const INACTIVE_SESSION = {
 const INACTIVE_SESSION_PARTICIPANT_IDENTITY = `daemon-${DAEMON_INSTANCE_ID}-${INACTIVE_SESSION.sessionId}`;
 
 function aBackendForSession() {
-  return aConnectionServiceBackend({
+  return aSessionServiceBackend({
     sessions: [SESSION],
     connectSession: () => ({
       livekitRoom: `room-${SESSION.sessionId}`,
@@ -100,7 +100,7 @@ describe("SessionParticipantRpcRouting — session-scoped RPCs target the sessio
     // Given — an inactive session (the inspector's Delete control only renders for inactive
     // sessions; selecting one auto-opens the inspector). Delete must still route daemon-direct so
     // it works even when the coder participant is stuck.
-    const backend = aConnectionServiceBackend({ sessions: [INACTIVE_SESSION] });
+    const backend = aSessionServiceBackend({ sessions: [INACTIVE_SESSION] });
     const harness = mountWithRecordingLiveKitRpc(
       withSelectedDaemon(<SessionsDrawerScreen />, [{ instanceId: DAEMON_INSTANCE_ID, label: "local" }]),
       backend,

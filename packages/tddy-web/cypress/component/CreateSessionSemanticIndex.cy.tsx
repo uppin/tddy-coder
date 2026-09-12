@@ -12,7 +12,7 @@ import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
@@ -21,12 +21,12 @@ import { TEST_IDS, byTestId } from "../support/testIds";
 /** A backend seeded with every RPC CreateSessionPane calls on mount, plus a StartSession stub. */
 function aCreateSessionBackend() {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",
     }))
-    .onUnary(ConnectionService.method.listProjects, () => ({
+    .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({ agents: [] }))
@@ -44,11 +44,12 @@ function aCreateSessionBackend() {
         },
       ],
     }))
-    .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "semantic-1" }));
+    .onUnary(SessionService.method.startSession, () => ({ sessionId: "semantic-1" }));
 }
 
 function mountCreatePane(backend: ReturnType<typeof aCreateSessionBackend>) {
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
   const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
@@ -56,6 +57,7 @@ function mountCreatePane(backend: ReturnType<typeof aCreateSessionBackend>) {
   cy.mount(
     <CreateSessionPane
       client={client}
+      projectClient={projectClient}
       catalogClient={catalogClient}
       sessionFilesClient={sessionFilesClient}
       worktreeClient={worktreeClient}
@@ -115,7 +117,7 @@ describe("CreateSession managed-codebase semantic index", () => {
 
     // Then — semanticIndex defaults to false
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.startSession);
+      const calls = backend.callsTo(SessionService.method.startSession);
       expect(calls).to.have.length(1);
       expect(calls[0].managedCodebase).to.eq(true);
       expect(calls[0].semanticIndex).to.eq(false);
@@ -136,7 +138,7 @@ describe("CreateSession managed-codebase semantic index", () => {
 
     // Then — the typed StartSession request carried semanticIndex=true
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.startSession);
+      const calls = backend.callsTo(SessionService.method.startSession);
       expect(calls).to.have.length(1);
       expect(calls[0].sessionType).to.eq("claude-cli");
       expect(calls[0].managedCodebase).to.eq(true);
@@ -159,7 +161,7 @@ describe("CreateSession managed-codebase semantic index", () => {
 
     // Then — the hidden Semantic index value did not leak into the request
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.startSession);
+      const calls = backend.callsTo(SessionService.method.startSession);
       expect(calls).to.have.length(1);
       expect(calls[0].managedCodebase).to.eq(false);
       expect(calls[0].semanticIndex).to.eq(false);

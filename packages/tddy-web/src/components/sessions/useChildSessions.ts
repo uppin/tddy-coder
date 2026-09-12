@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { SessionEntry } from "../../gen/connection_pb";
+import type { SessionEntry } from "../../gen/session_pb";
 
 /** A spawned child conversation of a parent session — enough to render its tab and attach it. */
 export interface ChildSession {

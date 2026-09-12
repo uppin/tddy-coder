@@ -14,7 +14,7 @@
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { AuthService } from "../../../src/gen/auth_pb";
-import { ConnectionService } from "../../../src/gen/connection_pb";
+import { SessionService } from "../../../src/gen/session_pb";
 import { TerminalSessionService } from "../../../src/gen/terminal_session_pb";
 import { aGitHubUser } from "./responses";
 
@@ -129,7 +129,7 @@ export function aDurableSessionBackend(): InMemoryRpcBackend {
         };
       },
     })
-    .implement(ConnectionService, {
+    .implement(SessionService, {
       listSessions: async () => ({ sessions: [] }),
     })
     .implement(TerminalSessionService, {
@@ -168,7 +168,7 @@ export function aDeferredRefreshSessionBackend(): {
         };
       },
     })
-    .implement(ConnectionService, {
+    .implement(SessionService, {
       listSessions: async () => ({ sessions: [] }),
     })
     .implement(TerminalSessionService, {

@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import type { Client } from "@connectrpc/connect";
-import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
+import { SessionService, type SessionEntry } from "../../gen/session_pb";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import { sortSessionsByCreation } from "../../utils/sessionSort";
 import {
@@ -144,7 +144,7 @@ export class SessionManager {
  * to add optimistic entries.
  */
 export function useSessionManager(
-  client: Client<typeof ConnectionService> | null,
+  client: Client<typeof SessionService> | null,
   sessionToken: string,
   participants: ReadonlyArray<{ identity: string; metadata?: string }>,
   selectedInstanceId: string,

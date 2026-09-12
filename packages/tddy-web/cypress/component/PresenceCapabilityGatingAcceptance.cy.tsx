@@ -41,7 +41,7 @@ import { participantListPage as roster } from "../support/pages/participantListP
 import { rpcPlaygroundPage as playground } from "../support/pages/rpcPlaygroundPage";
 import { sessionsDrawerPage as drawer } from "../support/pages/sessionsDrawerPage";
 import { aCommonRoomThatNeverFinishesConnecting } from "../support/livekit/commonRoomConnection";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { aHostConnection, aRegistryServing } from "../support/rpc/hostConnections";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { mountWithLiveCommonRoom } from "../support/rpc/withLiveCommonRoom";
@@ -133,7 +133,7 @@ function aDaemonServingOneRoom(): LiveKitRoomsBackend {
 
 /** A daemon reporting one session of its own — what `ListSessions` alone can see. */
 function aDaemonServingOneSession(): InMemoryRpcBackend {
-  return aConnectionServiceBackend({ sessions: [A_SESSION_ON_THIS_HOST] });
+  return aSessionServiceBackend({ sessions: [A_SESSION_ON_THIS_HOST] });
 }
 
 beforeEach(() => {
@@ -282,7 +282,7 @@ it("keeps the rooms panel in place, unsubscribed, while the common room is still
 
 it("keeps the LiveKit entry on a connection with no presence", () => {
   // Given a host reached without LiveKit
-  const backend = aConnectionServiceBackend();
+  const backend = aSessionServiceBackend();
   mountOn(aHostReachedWithoutLiveKit(backend), backend, <DaemonNavMenu onNavigate={cy.stub()} />);
 
   // When the operator opens the menu
@@ -321,7 +321,7 @@ it("keeps the LiveKit entry while the common room is still being joined", () => 
 
 it("offers the LiveKit entry on a host reached over the common room", () => {
   // Given a host reached over LiveKit
-  const backend = aConnectionServiceBackend();
+  const backend = aSessionServiceBackend();
   const onNavigate = cy.stub().as("onNavigate");
   mountOn(aHostReachedOverLiveKit(backend), backend, <DaemonNavMenu onNavigate={onNavigate} />);
 
@@ -340,7 +340,7 @@ it("offers the LiveKit entry on a host reached over the common room", () => {
 it("replaces the playground's participant picker with the reason there is nobody to address", () => {
   // Given a host reached without LiveKit — the participants a playground call is addressed to are
   // common-room coder participants, and the call itself rides a LiveKit data channel
-  const backend = aConnectionServiceBackend();
+  const backend = aSessionServiceBackend();
 
   // When the playground is opened
   mountOn(aHostReachedWithoutLiveKit(backend), backend, <RpcPlaygroundAppPage onNavigate={cy.stub()} />);
@@ -355,7 +355,7 @@ it("replaces the playground's participant picker with the reason there is nobody
 
 it("offers the playground's participant picker on a host reached over the common room", () => {
   // Given a host reached over LiveKit
-  const backend = aConnectionServiceBackend();
+  const backend = aSessionServiceBackend();
 
   // When the playground is opened
   mountOn(aHostReachedOverLiveKit(backend), backend, <RpcPlaygroundAppPage onNavigate={cy.stub()} />);

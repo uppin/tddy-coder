@@ -15,7 +15,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend, type ConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend, type SessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
@@ -50,8 +50,8 @@ const SESSION_B = {
 /** A two-active-session drawer backend that records `ConnectSession` + `ClaimTerminalControl` calls
  *  so the fast-path can assert neither fires on re-select. Each attach resolves to a distinct
  *  LiveKit room so the two runtimes are distinguishable. */
-function aFastSessionChangeBackend(): ConnectionServiceBackend {
-  return aConnectionServiceBackend({
+function aFastSessionChangeBackend(): SessionServiceBackend {
+  return aSessionServiceBackend({
     sessions: [SESSION_A, SESSION_B],
     connectSession: (sessionId) => ({
       livekitRoom: sessionId === SESSION_A.sessionId ? "room-fast-a" : "room-fast-b",
