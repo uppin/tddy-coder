@@ -341,6 +341,7 @@ async fn start_jail_channel(
         handle,
         crate::sandbox_session::NoCallbackSandboxService,
     )
+    .await
     .map_err(SandboxError::Io)?;
     let (out_tx, out_rx) = mpsc::channel::<SessionFrame>(16);
     let inbound = tddy_sandbox_runner::StdioSandboxClient::new(client)

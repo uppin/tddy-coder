@@ -163,7 +163,11 @@ pub async fn wait_for_sandbox_ready(
 /// returning a client for calling into the runner. Spawns the endpoint's read/dispatch/write loop
 /// on the current tokio runtime; the returned `JoinHandle` completes when the pipe closes (the
 /// sandboxed process exits).
-pub fn bridge_sandbox_stdio<S: tddy_rpc::RpcService>(
+///
+/// Does not return until the endpoint's read loop has started, so the first client frame cannot
+/// race a peer that has not yet entered its dispatch loop (the stdio attach flake exercised by
+/// `in_jail_conversation_acceptance`).
+pub async fn bridge_sandbox_stdio<S: tddy_rpc::RpcService>(
     handle: &mut tddy_sandbox::SandboxHandle,
     service: S,
 ) -> Result<(Arc<tddy_stdio::StdioRpcClient>, tokio::task::JoinHandle<()>), String> {
@@ -177,7 +181,14 @@ pub fn bridge_sandbox_stdio<S: tddy_rpc::RpcService>(
     let receiver = tokio::net::unix::pipe::Receiver::from_owned_fd(OwnedFd::from(stdout))
         .map_err(|e| format!("wrap sandbox stdout as async pipe: {e}"))?;
     let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(receiver, sender, service);
-    let run_handle = tokio::spawn(endpoint.run());
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let run_handle = tokio::spawn(async move {
+        let _ = ready_tx.send(());
+        endpoint.run().await
+    });
+    ready_rx
+        .await
+        .map_err(|_| "sandbox stdio endpoint exited before its read loop started".to_string())?;
     Ok((client, run_handle))
 }
 
@@ -384,7 +395,7 @@ pub async fn dial_and_bridge(
         "opening sandbox SessionChannel for session {session_id}"
     );
 
-    let (client, _run_handle) = bridge_sandbox_stdio(handle, NoCallbackSandboxService)?;
+    let (client, _run_handle) = bridge_sandbox_stdio(handle, NoCallbackSandboxService).await?;
     let stdio_client = tddy_sandbox_runner::StdioSandboxClient::new(client);
 
     let (term_tx, mut term_rx) = mpsc::unbounded_channel::<Bytes>();
