@@ -95,7 +95,7 @@ rest of `<tddyhome>/agents/` (or the builtin fastcontext def) from loading.
 ## Architecture
 
 ```
-<tddyhome>/agents/*.yaml + registry assistants ──►  daemon ListSubagents RPC ──►  Web agent picker
+<tddyhome>/agents/*.yaml + registry assistants ──►  catalog.CatalogService/ListSubagents ──►  Web agent picker
    (SpecializedAgentDef; Models & Agents, per host)  (resolvable_agent_defs())      (fanned out per host)
         │                                                                  │
         │ resolve selected defs by name              StartSessionRequest  │ managed_codebase,
