@@ -19,6 +19,8 @@ export default defineConfig({
     ),
   ],
   resolve: {
+    // Component tests on CI can load two React copies (app + Cypress preprocessor); dedupe keeps hooks valid.
+    dedupe: ["react", "react-dom"],
     alias: {
       "@": path.resolve(__dirname, "./src"),
       // Cypress / dev server resolve workspace packages without requiring a prior build.
