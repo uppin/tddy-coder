@@ -947,6 +947,9 @@ pub async fn build(
         // PrStackService — stack planning and branch resolution (`tddy-workflow-recipes` coordinate).
         rpc_entries.push(connection_arc.pr_stack_entry());
 
+        // SessionService — family C (`tddy-session-lifecycle`).
+        rpc_entries.push(connection_arc.session_lifecycle_entry());
+
         let connection_server = tddy_service::ConnectionServiceServer::from_arc(connection_arc);
         rpc_entries.push(tddy_rpc::ServiceEntry {
             name: "connection.ConnectionService",

@@ -82,6 +82,12 @@ impl<T> Stream for MpscResultStream<T> {
 
 impl<T> Unpin for MpscResultStream<T> {}
 
+impl<T> MpscResultStream<T> {
+    pub(crate) fn into_receiver(self) -> tokio::sync::mpsc::UnboundedReceiver<Result<T, Status>> {
+        self.rx
+    }
+}
+
 /// Opaque by design: a stream's pending items are not inspectable without consuming them, so this
 /// only names the adapter — enough for a `Result::expect_err` message on a handler that returns it.
 impl<T> std::fmt::Debug for MpscResultStream<T> {
@@ -1163,6 +1169,8 @@ mod svc_session_files_ports;
 mod svc_activity_ports;
 
 mod family_proto_bridge;
+mod session_coordinate_handlers;
+mod svc_session_lifecycle_ports;
 mod svc_catalog_ports;
 mod svc_exec_tool_ports;
 mod svc_family_entries;
