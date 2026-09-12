@@ -22,6 +22,8 @@ export default defineConfig({
     // Component tests on CI can load two React copies (app + Cypress preprocessor); dedupe keeps hooks valid.
     dedupe: ["react", "react-dom"],
     alias: {
+      react: path.resolve(__dirname, "node_modules/react"),
+      "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
       "@": path.resolve(__dirname, "./src"),
       // Cypress / dev server resolve workspace packages without requiring a prior build.
       "tddy-livekit-web": path.resolve(__dirname, "../tddy-livekit-web/src/index.ts"),

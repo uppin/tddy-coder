@@ -146,8 +146,8 @@ function aHostWithDocuments(recorder: StartRecorder): InMemoryRpcBackend {
 
 function mountCreatePane(backend: InMemoryRpcBackend) {
   const transport = backend.transport();
-  const client = createClient(ConnectionService, const client = createClient(ConnectionService, transport););
-  const catalogClient = createClient(CatalogService, const client = createClient(ConnectionService, transport););
+  const client = createClient(ConnectionService, transport);
+  const catalogClient = createClient(CatalogService, transport);
   // The same host over the same wire, under the services that now serve the file and worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, transport);
   const worktreeClient = createClient(WorktreeService, transport);
@@ -155,7 +155,7 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
-      catalogClient={catalogClient}
+        catalogClient={catalogClient}
         sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}
         sessionToken="fake-token"
