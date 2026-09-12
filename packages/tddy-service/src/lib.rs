@@ -44,7 +44,6 @@ pub use proto::activity::ActivityServiceServer;
 pub use proto::auth::{AuthServiceServer, LiveKitTokenServiceServer};
 pub use proto::bsp::BspServiceServer;
 pub use proto::catalog::CatalogServiceServer;
-pub use proto::connection::ConnectionServiceServer;
 pub use proto::demo_vm::DemoVmServiceServer;
 pub use proto::exec_tools::ExecToolServiceServer;
 pub use proto::host::HostServiceServer;
@@ -101,9 +100,6 @@ pub mod proto {
         include!(concat!(env!("OUT_DIR"), "/auth.rs"));
     }
     #[allow(unused_imports, unused_variables)]
-    pub mod connection {
-        include!(concat!(env!("OUT_DIR"), "/connection.rs"));
-    }
     /// `HostService`: the durable host registry, tooling probes, telemetry, prompts and ssh keys.
     ///
     /// Split out of [`connection`] by `#unbundle` node 1. It imports nothing from `connection` and
@@ -206,8 +202,33 @@ pub mod proto {
         #![allow(unused_imports, clippy::all)]
         include!(concat!(env!("OUT_DIR"), "/tonic_pr_stack/pr_stack.rs"));
     }
+
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `session.proto`.
+    pub mod tonic_session {
+        #![allow(unused_imports, clippy::all)]
+        include!(concat!(env!("OUT_DIR"), "/tonic_session/session.rs"));
+    }
+
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `project.proto`.
+    pub mod tonic_project {
+        #![allow(unused_imports, clippy::all)]
+        include!(concat!(env!("OUT_DIR"), "/tonic_project/project.rs"));
+    }
+
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `demo_vm.proto`.
+    pub mod tonic_demo_vm {
+        #![allow(unused_imports, clippy::all)]
+        include!(concat!(env!("OUT_DIR"), "/tonic_demo_vm/demo_vm.rs"));
+    }
+
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `local_token.proto`.
+    pub mod tonic_local_token {
+        #![allow(unused_imports, clippy::all)]
+        include!(concat!(env!("OUT_DIR"), "/tonic_local_token/local_token.rs"));
+    }
+
     /// `SessionService`: a session's whole life. Split out of [`connection`] by `#unbundle` node 9 —
-    /// the family whose needs made `ConnectionServiceImpl` a god object.
+    /// the family whose needs made `DaemonSessionHost` a god object.
     #[allow(unused_imports, unused_variables)]
     pub mod session {
         include!(concat!(env!("OUT_DIR"), "/session.rs"));
@@ -397,15 +418,6 @@ pub mod tonic_terminal {
 pub mod tonic_sandbox {
     #![allow(unused_imports, clippy::all)]
     include!(concat!(env!("OUT_DIR"), "/tonic_sandbox/sandbox.rs"));
-}
-
-/// Tonic-generated gRPC server/client for connection.proto.
-/// Uses the same message types as `proto::connection` (via extern_path), kept in a separate
-/// module from the tddy-rpc `ConnectionServiceServer` (re-exported above) so the two service
-/// codegen flavors do not collide.
-pub mod tonic_connection {
-    #![allow(unused_imports, clippy::all)]
-    include!(concat!(env!("OUT_DIR"), "/tonic_connection/connection.rs"));
 }
 
 /// Tonic-generated gRPC server/client for `host.proto`, sharing `proto::host`'s message types via

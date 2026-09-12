@@ -6,7 +6,7 @@ import "types.proto";
 
 // A session's whole life: listing, starting, connecting, resuming, signalling and deleting.
 //
-// Split out of `connection.ConnectionService` by `#unbundle` node 9 — family C, the last and hardest
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 9 — family C, the last and hardest
 // of the nine. This is the family that made the god object a god object: `ConnectionServiceImpl`'s
 // 60 fields, its 21 `with_*` builders and its `Weak` self-handle existed to serve these eight
 // methods, which is why the eight-node plan could move 73 of 90 methods and still leave the defect
@@ -311,6 +311,12 @@ message SessionEntry {
   // and unset when the status came from the hook word alone (a bare timestamp with no summary
   // renders as an agent that did something unnameable just now).
   types.SessionAgentActivity last_activity = 32;
+}
+
+enum Signal {
+  SIGNAL_SIGINT = 0;
+  SIGNAL_SIGTERM = 1;
+  SIGNAL_SIGKILL = 2;
 }
 
 message SignalSessionRequest {

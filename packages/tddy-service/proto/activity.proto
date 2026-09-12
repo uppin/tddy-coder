@@ -8,7 +8,7 @@ import "google/protobuf/struct.proto";
 
 // What an agent is doing, what a session's status is, and the transcript of both.
 //
-// Split out of `connection.ConnectionService` by `#unbundle` node 7 — families M and N. ACP
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 7 — families M and N. ACP
 // transcript replay shares this service rather than getting its own because it is a *view* of agent
 // activity: it shares `AgentActivityRecord` and `StreamMode`, and three methods do not justify a
 // fourth hand-written tonic adapter (one is needed per gRPC-served service, because
@@ -101,7 +101,7 @@ message AgentActivityDeltaChunk {
   // The poll tick this patch belongs to. A client de-duplicates by this: several calls sharing a
   // tick must apply its patch once, not once each.
   //
-  // **Ticks start at 1; 0 means unset.** On `connection.ConnectionService` the first delta was
+  // **Ticks start at 1; 0 means unset.** On `the pre-unbundle monolithic RPC coordinate` the first delta was
   // numbered 0, which is also the wire's absent value, so a consumer could not tell "the first
   // delta" from "no delta yet" — recorded in
   // `docs/dev/todo/2026-08-29-a-session-s-first-delta-is-numbered-0-…`. A fresh schema is the last

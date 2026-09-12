@@ -4,7 +4,7 @@ package local_token;
 
 // Minting a session token for a caller whose identity came from the socket it dialled.
 //
-// Split out of `connection.ConnectionService` by `#unbundle` node 9 — family Q, one method, and the
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 9 — family Q, one method, and the
 // only one in the whole surface that is **transport-restricted**: it is answered from `SO_PEERCRED`
 // on a Unix socket, so it exists on the local socket and nowhere else.
 //

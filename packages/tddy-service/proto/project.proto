@@ -4,7 +4,7 @@ package project;
 
 // Projects: the repositories a daemon knows, their hosts, and their branches.
 //
-// Split out of `connection.ConnectionService` by `#unbundle` node 9 — family D — into a crate of its
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 9 — family D — into a crate of its
 // own rather than joining `tddy-worktree-service`. The two are adjacent (a worktree belongs to a
 // project) but a project outlives every worktree cut from it, and `ListProjectBranches` reads the
 // project's *main checkout*, not a worktree.
