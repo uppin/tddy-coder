@@ -11,6 +11,10 @@ path = "src/lib.rs"
 [dependencies]
 tddy-core = { path = "../tddy-core" }
 tddy-rpc = { path = "../tddy-rpc" }
+tddy-service = { path = "../tddy-service" }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
 thiserror = "2"
 
 [dev-dependencies]

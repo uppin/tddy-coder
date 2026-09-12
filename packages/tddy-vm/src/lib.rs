@@ -43,9 +43,49 @@ pub use vm_manifest::{LoginPolicy, RunPolicy, VmManifest};
 ///
 /// Served from this crate rather than one of its own: it already serves `vm.VmService`, so the demo
 /// VM's three methods land beside the machinery that answers them.
+struct DemoVmServiceStub;
+
+#[async_trait::async_trait]
+impl tddy_service::proto::demo_vm::DemoVmService for DemoVmServiceStub {
+    async fn start_demo_vm(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::demo_vm::StartDemoVmRequest>,
+    ) -> Result<
+        tddy_rpc::Response<tddy_service::proto::demo_vm::StartDemoVmResponse>,
+        tddy_rpc::Status,
+    > {
+        Err(tddy_rpc::Status::unimplemented("demo_vm.DemoVmService migration in progress"))
+    }
+
+    async fn stop_demo_vm(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::demo_vm::StopDemoVmRequest>,
+    ) -> Result<
+        tddy_rpc::Response<tddy_service::proto::demo_vm::StopDemoVmResponse>,
+        tddy_rpc::Status,
+    > {
+        Err(tddy_rpc::Status::unimplemented("demo_vm.DemoVmService migration in progress"))
+    }
+
+    async fn get_demo_vm_status(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::demo_vm::GetDemoVmStatusRequest>,
+    ) -> Result<
+        tddy_rpc::Response<tddy_service::proto::demo_vm::GetDemoVmStatusResponse>,
+        tddy_rpc::Status,
+    > {
+        Err(tddy_rpc::Status::unimplemented("demo_vm.DemoVmService migration in progress"))
+    }
+}
+
 pub fn build_demo_vm_entry() -> tddy_rpc::ServiceEntry {
-    // TODO(daemon-becomes-wiring): implement
-    unimplemented!("build_demo_vm_entry")
+    use std::sync::Arc;
+
+    tddy_rpc::ServiceEntry {
+        name: "demo_vm.DemoVmService",
+        service: Arc::new(tddy_service::DemoVmServiceServer::new(DemoVmServiceStub))
+            as Arc<dyn tddy_rpc::RpcService>,
+    }
 }
 
 #[cfg(test)]

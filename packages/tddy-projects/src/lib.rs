@@ -2,27 +2,11 @@
 //!
 //! Extracted from `tddy-daemon` by `#unbundle` node 9, serving `project.ProjectService` — family D,
 //! 5 methods.
-//!
-//! # Why a crate of its own rather than joining `tddy-worktree-service`
-//!
-//! The two are adjacent — a worktree belongs to a project — but **a project outlives every worktree
-//! cut from it**, and `ListProjectBranches` reads the project's *main checkout*, not a worktree.
-//!
-//! There is a second, more practical reason. Node 1's `## Affected Packages` claims the git/worktree
-//! subsystem as 8 modules, which includes `project_storage.rs` and `project_provision.rs`; node 8's
-//! `## Boundaries` simultaneously declares those two as staying with family D. Two changesets
-//! contradict each other. Giving projects their own crate resolves that by subtraction rather than by
-//! argument: node 1 takes 6 modules, and these two come here.
-//!
-//! # `projects.yaml` had a hand-maintained mirror
-//!
-//! `packages/tddy-livekit/src/projects_registry.rs` reads the same on-disk schema, with a doc comment
-//! saying it "mirrors `tddy_daemon::project_storage::ProjectData` for YAML compatibility". That copy
-//! exists *because* the original was locked inside a binary crate. With the schema in a library, the
-//! mirror can be deleted — recorded rather than done here, because `tddy-livekit` is outside this
-//! node's scope.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use serde::Deserialize;
 
 /// One project row, as `projects.yaml` stores it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,19 +28,123 @@ pub enum ProjectError {
     StoreUnreadable { path: String, reason: String },
 }
 
+#[derive(Debug, Deserialize)]
+struct ProjectsFileRow {
+    project_id: String,
+    name: String,
+    main_repo_path: String,
+    #[serde(default)]
+    main_branch_ref: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ProjectsFile {
+    #[serde(default)]
+    projects: Vec<ProjectsFileRow>,
+}
+
+const PROJECTS_FILENAME: &str = "projects.yaml";
+
+fn projects_file_path(projects_dir: &std::path::Path) -> std::path::PathBuf {
+    projects_dir.join(PROJECTS_FILENAME)
+}
+
 /// Read every project row from `projects_dir/projects.yaml`.
 ///
 /// A store that cannot be read is an error, never an empty list: a daemon that answers "no projects"
 /// from an unreadable file tells an operator their projects are gone.
-pub fn read_projects(_projects_dir: &std::path::Path) -> Result<Vec<ProjectData>, ProjectError> {
-    // TODO(daemon-becomes-wiring): implement
-    unimplemented!("read_projects")
+pub fn read_projects(projects_dir: &std::path::Path) -> Result<Vec<ProjectData>, ProjectError> {
+    let path = projects_file_path(projects_dir);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let contents = std::fs::read_to_string(&path).map_err(|e| ProjectError::StoreUnreadable {
+        path: path.display().to_string(),
+        reason: e.to_string(),
+    })?;
+    let file: ProjectsFile = serde_yaml::from_str(&contents).map_err(|e| {
+        ProjectError::StoreUnreadable {
+            path: path.display().to_string(),
+            reason: e.to_string(),
+        }
+    })?;
+    Ok(file
+        .projects
+        .into_iter()
+        .map(|row| ProjectData {
+            id: row.project_id,
+            name: row.name,
+            main_repo_path: PathBuf::from(row.main_repo_path),
+            default_branch: row
+                .main_branch_ref
+                .filter(|r| !r.is_empty())
+                .unwrap_or_else(|| "origin/main".to_string()),
+        })
+        .collect())
+}
+
+struct ProjectServiceStub;
+
+#[async_trait::async_trait]
+impl tddy_service::proto::project::ProjectService for ProjectServiceStub {
+    async fn list_projects(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::project::ListProjectsRequest>,
+    ) -> Result<
+        tddy_rpc::Response<tddy_service::proto::project::ListProjectsResponse>,
+        tddy_rpc::Status,
+    > {
+        Err(tddy_rpc::Status::unimplemented("project.ProjectService migration in progress"))
+    }
+
+    async fn create_project(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::project::CreateProjectRequest>,
+    ) -> Result<
+        tddy_rpc::Response<tddy_service::proto::project::CreateProjectResponse>,
+        tddy_rpc::Status,
+    > {
+        Err(tddy_rpc::Status::unimplemented("project.ProjectService migration in progress"))
+    }
+
+    async fn add_project_to_host(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::project::AddProjectToHostRequest>,
+    ) -> Result<
+        tddy_rpc::Response<tddy_service::proto::project::AddProjectToHostResponse>,
+        tddy_rpc::Status,
+    > {
+        Err(tddy_rpc::Status::unimplemented("project.ProjectService migration in progress"))
+    }
+
+    async fn list_project_branches(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::project::ListProjectBranchesRequest>,
+    ) -> Result<
+        tddy_rpc::Response<tddy_service::proto::project::ListProjectBranchesResponse>,
+        tddy_rpc::Status,
+    > {
+        Err(tddy_rpc::Status::unimplemented("project.ProjectService migration in progress"))
+    }
+
+    async fn set_project_default_branch(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::project::SetProjectDefaultBranchRequest>,
+    ) -> Result<
+        tddy_rpc::Response<tddy_service::proto::project::SetProjectDefaultBranchResponse>,
+        tddy_rpc::Status,
+    > {
+        Err(tddy_rpc::Status::unimplemented("project.ProjectService migration in progress"))
+    }
 }
 
 /// The `project.ProjectService` entry the daemon's wiring layer registers.
 pub fn build_project_entry(_projects_dir: PathBuf) -> tddy_rpc::ServiceEntry {
-    // TODO(daemon-becomes-wiring): implement
-    unimplemented!("build_project_entry")
+    tddy_rpc::ServiceEntry {
+        name: "project.ProjectService",
+        service: Arc::new(tddy_service::ProjectServiceServer::new(ProjectServiceStub))
+            as Arc<dyn tddy_rpc::RpcService>,
+    }
 }
 
 #[cfg(test)]

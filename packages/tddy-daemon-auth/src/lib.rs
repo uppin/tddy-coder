@@ -28,6 +28,7 @@
 
 pub mod auth;
 mod codex_oauth_participant_metadata;
+mod local_token;
 pub mod codex_oauth_relay;
 pub mod github_pr_credentials;
 pub mod github_token_store;
@@ -45,6 +46,7 @@ pub use auth::{
     build_auth_entries, build_token_service_entry, session_token_authenticator, AuthBuildResult,
     LiveKitTokenServiceImpl,
 };
+pub use local_token::{build_local_token_entry, mint_local_token, LocalTokenError};
 
 /// Where the daemon keeps a user's GitHub token at rest.
 ///
@@ -91,38 +93,19 @@ mod tests {
     }
 }
 
-/// The `local_token.LocalTokenService` entry — `#unbundle` node 9, family Q.
-///
-/// **The one transport-restricted method in the whole surface**, and its implementation splits
-/// across two crates deliberately.
-///
-/// `MintLocalToken` is answered from `SO_PEERCRED` on a Unix socket, so only the transport can see
-/// the caller's identity. `local_socket_server.rs` keeps resolving uid to username as it does today
-/// and passes the **resolved** identity in; the minting happens here, in the crate that already
-/// holds the signing secret. A single home would either put credential-reading in a library that
-/// cannot see the socket, or put signing back in the daemon this stack exists to empty.
-///
-/// The `resolved_user` parameter is therefore not a convenience — it is the boundary. **This crate
-/// never reads a socket.**
-pub fn build_local_token_entry() -> tddy_rpc::ServiceEntry {
-    // TODO(daemon-becomes-wiring): implement
-    unimplemented!("build_local_token_entry")
-}
-
-/// Mint a session token for an identity the transport already resolved.
-pub fn mint_local_token(_resolved_user: &str) -> Result<String, AuthError> {
-    // TODO(daemon-becomes-wiring): implement
-    unimplemented!("mint_local_token")
-}
-
 #[cfg(test)]
 mod unbundle_local_token_tests {
-    use super::*;
+    use std::sync::Arc;
+
+    use tddy_github::SessionTokenSigner;
+
+    use super::{build_local_token_entry, mint_local_token};
 
     #[test]
     fn names_the_service_family_q_moves_to() {
+        let signer = Arc::new(SessionTokenSigner::new(b"family-q-name-test"));
         assert_eq!(
-            build_local_token_entry().name,
+            build_local_token_entry(signer).name,
             "local_token.LocalTokenService"
         );
     }
@@ -131,6 +114,10 @@ mod unbundle_local_token_tests {
     /// reason the credential read stays with the transport and only the signing moves here.
     #[test]
     fn mints_for_an_identity_the_transport_already_resolved() {
+        // Given a signer the wiring layer would have installed
+        let signer = Arc::new(SessionTokenSigner::new(b"family-q-mint-test"));
+        build_local_token_entry(signer);
+
         // When
         let token = mint_local_token("alice").expect("a resolved identity mints");
 

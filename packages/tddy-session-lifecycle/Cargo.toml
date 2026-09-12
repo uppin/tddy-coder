@@ -13,6 +13,9 @@ tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-task = { path = "../tddy-task" }
+tddy-service = { path = "../tddy-service" }
+async-trait = "0.1"
+futures-util = "0.3"
 thiserror = "2"
 
 [dev-dependencies]

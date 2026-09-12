@@ -34,6 +34,35 @@ fn read(name: &str) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|_| panic!("{name} is readable"))
 }
 
+fn walk_for(root: &Path, needle: &str) -> Vec<String> {
+    let mut hits = Vec::new();
+    walk_for_rec(root, needle, &mut hits);
+    hits
+}
+
+fn walk_for_rec(dir: &Path, needle: &str, hits: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name == "target" || name == "node_modules" || name.starts_with('.') {
+                continue;
+            }
+            walk_for_rec(&path, needle, hits);
+            continue;
+        }
+        if path.extension().is_some_and(|e| e == "rs" || e == "ts" || e == "tsx" || e == "proto")
+            && std::fs::read_to_string(&path)
+                .is_ok_and(|text| text.contains(needle))
+        {
+            hits.push(path.display().to_string());
+        }
+    }
+}
+
 const HOST_METHODS: [&str; 8] = [
     "ListEligibleDaemons",
     "ListKnownHosts",

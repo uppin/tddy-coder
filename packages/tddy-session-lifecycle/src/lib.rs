@@ -17,8 +17,10 @@
 //! moving the registry would leave five crates reaching into the daemon for something the daemon
 //! does not own. [`task_registry`] is that surface.
 
+use std::pin::Pin;
 use std::sync::Arc;
 
+use futures_util::stream::Stream;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
 /// Why a session operation could not be completed.
@@ -42,14 +44,15 @@ pub enum SessionError {
 
 /// The CLI process behind a session — the PTY, its lifecycle, and the registry it creates.
 pub struct CliSessionManager {
-    // TODO(daemon-becomes-wiring): implement
+    task_registry: tddy_task::TaskRegistry,
 }
 
 impl CliSessionManager {
     /// Build a manager, creating the `TaskRegistry` every long-running task is tracked in.
     pub fn new() -> Self {
-        // TODO(daemon-becomes-wiring): implement
-        unimplemented!("CliSessionManager::new")
+        Self {
+            task_registry: tddy_task::TaskRegistry::new(),
+        }
     }
 
     /// The registry this manager created.
@@ -57,14 +60,15 @@ impl CliSessionManager {
     /// Five services take a handle on it. It is exposed here rather than from a service impl because
     /// **this is where it is created** — the god object only ever forwarded it.
     pub fn task_registry(&self) -> tddy_task::TaskRegistry {
-        // TODO(daemon-becomes-wiring): implement
-        unimplemented!("CliSessionManager::task_registry")
+        self.task_registry.clone()
     }
 
     /// Kill every session this manager started, for shutdown.
     pub async fn kill_all(&self) {
-        // TODO(daemon-becomes-wiring): implement
-        unimplemented!("CliSessionManager::kill_all")
+        let tasks = self.task_registry.list().await;
+        for task in tasks {
+            let _ = self.task_registry.cancel_task(&task.id).await;
+        }
     }
 }
 
@@ -85,8 +89,87 @@ pub fn build_session_entry(
     _user_resolver: SessionUserResolver,
     _cli_sessions: Arc<CliSessionManager>,
 ) -> tddy_rpc::ServiceEntry {
-    // TODO(daemon-becomes-wiring): implement
-    unimplemented!("build_session_entry")
+    tddy_rpc::ServiceEntry {
+        name: "session.SessionService",
+        service: Arc::new(tddy_service::SessionServiceServer::new(SessionServiceStub))
+            as Arc<dyn tddy_rpc::RpcService>,
+    }
+}
+
+/// Placeholder until family C handlers move out of `connection_service`.
+struct SessionServiceStub;
+
+type StartSessionEventStream =
+    Pin<Box<dyn Stream<Item = Result<tddy_service::proto::session::StartSessionEvent, tddy_rpc::Status>> + Send>>;
+
+#[async_trait::async_trait]
+impl tddy_service::proto::session::SessionService for SessionServiceStub {
+    type StreamStartSessionStream = StartSessionEventStream;
+
+    async fn list_sessions(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::session::ListSessionsRequest>,
+    ) -> Result<tddy_rpc::Response<tddy_service::proto::session::ListSessionsResponse>, tddy_rpc::Status>
+    {
+        Err(tddy_rpc::Status::unimplemented("session.SessionService migration in progress"))
+    }
+
+    async fn start_session(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::session::StartSessionRequest>,
+    ) -> Result<tddy_rpc::Response<tddy_service::proto::session::StartSessionResponse>, tddy_rpc::Status>
+    {
+        Err(tddy_rpc::Status::unimplemented("session.SessionService migration in progress"))
+    }
+
+    async fn stream_start_session(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::session::StartSessionRequest>,
+    ) -> Result<tddy_rpc::Response<Self::StreamStartSessionStream>, tddy_rpc::Status> {
+        Err(tddy_rpc::Status::unimplemented("session.SessionService migration in progress"))
+    }
+
+    async fn connect_session(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::session::ConnectSessionRequest>,
+    ) -> Result<tddy_rpc::Response<tddy_service::proto::session::ConnectSessionResponse>, tddy_rpc::Status>
+    {
+        Err(tddy_rpc::Status::unimplemented("session.SessionService migration in progress"))
+    }
+
+    async fn resume_session(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::session::ResumeSessionRequest>,
+    ) -> Result<tddy_rpc::Response<tddy_service::proto::session::ResumeSessionResponse>, tddy_rpc::Status>
+    {
+        Err(tddy_rpc::Status::unimplemented("session.SessionService migration in progress"))
+    }
+
+    async fn signal_session(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::session::SignalSessionRequest>,
+    ) -> Result<tddy_rpc::Response<tddy_service::proto::session::SignalSessionResponse>, tddy_rpc::Status>
+    {
+        Err(tddy_rpc::Status::unimplemented("session.SessionService migration in progress"))
+    }
+
+    async fn delete_session(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::session::DeleteSessionRequest>,
+    ) -> Result<tddy_rpc::Response<tddy_service::proto::session::DeleteSessionResponse>, tddy_rpc::Status>
+    {
+        Err(tddy_rpc::Status::unimplemented("session.SessionService migration in progress"))
+    }
+
+    async fn get_worktree_snapshot(
+        &self,
+        _request: tddy_rpc::Request<tddy_service::proto::session::GetWorktreeSnapshotRequest>,
+    ) -> Result<
+        tddy_rpc::Response<tddy_service::proto::session::GetWorktreeSnapshotResponse>,
+        tddy_rpc::Status,
+    > {
+        Err(tddy_rpc::Status::unimplemented("session.SessionService migration in progress"))
+    }
 }
 
 #[cfg(test)]
