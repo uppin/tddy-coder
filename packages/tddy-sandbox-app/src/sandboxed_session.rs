@@ -38,7 +38,7 @@ use tddy_sandbox::{ReadReason, ReadSpec, SandboxHandle};
 use tddy_sandbox_runner::{
     run_host_relay_with_in_jail_tools, HostRelayConfig, InJailToolDispatcher, NullToolHandler,
 };
-use tddy_service::proto::connection::ExecuteToolRequest;
+use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 

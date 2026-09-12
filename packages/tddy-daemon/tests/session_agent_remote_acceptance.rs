@@ -285,6 +285,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         // `test_util::serve_daemon_rpc_participant` so this list lives in one place — which is the
         // whole reason that helper exists.
         let service_arc = Arc::new(service);
+        service_arc.set_self_handle(Arc::downgrade(&service_arc));
         let run =
             tddy_daemon::test_util::serve_daemon_rpc_participant(&ws_url, &token, &service_arc)
                 .await;
@@ -448,8 +449,10 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     )
     .expect("write session metadata");
 
+    let service_a = Arc::new(service_a);
+    service_a.set_self_handle(Arc::downgrade(&service_a));
     let fleet = Fleet {
-        a: TestDaemon::from_arc(Arc::new(service_a)),
+        a: TestDaemon::from_arc(service_a),
         session_id,
         peers: running_peers,
         _livekit: livekit,

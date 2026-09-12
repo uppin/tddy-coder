@@ -577,7 +577,7 @@ async fn read_file_in_room(
     let bytes = tokio::time::timeout(
         CALL_TIMEOUT,
         client.call_unary(
-            "connection.ConnectionService",
+            "exec_tools.ExecToolService",
             "ExecuteTool",
             ExecuteToolRequest {
                 session_token: a_caller_token().to_string(),

@@ -2,9 +2,7 @@
 // only its methods are used.
 use prost::Message as _;
 
-use tddy_service::proto::connection::ListSubagentsResponse;
-
-use tddy_service::proto::connection::ListSubagentsRequest;
+use tddy_service::proto::catalog::{ListSubagentsRequest, ListSubagentsResponse};
 
 use crate::{
     connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
@@ -117,7 +115,7 @@ impl ConnectionServiceImpl {
         let answered = crate::livekit_peer_discovery::forward_to_peer(
             slot,
             owning_daemon,
-            "connection.ConnectionService",
+            "catalog.CatalogService",
             "ListSubagents",
             ListSubagentsRequest {}.encode_to_vec(),
         )

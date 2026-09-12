@@ -617,7 +617,7 @@ async fn execute_tool_in_room(
     let bytes = tokio::time::timeout(
         CALL_TIMEOUT,
         client.call_unary(
-            "connection.ConnectionService",
+            "exec_tools.ExecToolService",
             "ExecuteTool",
             ExecuteToolRequest {
                 session_token: TEST_TOKEN.to_string(),
