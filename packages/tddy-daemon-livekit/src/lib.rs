@@ -3,7 +3,7 @@
 //!
 //! Extracted from `tddy-daemon` by `#unbundle` node 4 — four modules and 6,730 production lines,
 //! plus one module authored here because family T needs a service to be served by once
-//! `StreamLiveKitRooms` leaves `connection.ConnectionService`.
+//! `StreamLiveKitRooms` leaves `the pre-unbundle monolithic RPC coordinate`.
 //!
 //! # Four edges had to be cut before this crate could exist
 //!
@@ -23,7 +23,7 @@
 //! # The direction was already right
 //!
 //! [`session_room`] defines four trait ports — [`SessionTerminalBridge`], [`WorktreeSource`],
-//! [`SessionTokenMinter`], [`RemoteSnapshotSource`] — and `ConnectionServiceImpl` *implements* two
+//! [`SessionTokenMinter`], [`RemoteSnapshotSource`] — and `DaemonSessionHost` *implements* two
 //! of them. So the god object depended on this subsystem's abstractions rather than the reverse,
 //! which is the direction extraction wants and the reason this move is relocation, not redesign.
 //!

@@ -35,7 +35,7 @@ use tddy_core::session_agent::SessionAgentRecord;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
@@ -44,9 +44,7 @@ use tddy_daemon::test_util::{self, wait_until_peer_discovered};
 use tddy_github::{GitHubUser, SessionTokenSigner};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ResumeSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, ResumeSessionRequest};
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_argv};
 use tddy_testing_commons::wait::eventually_blocking;
 
@@ -120,7 +118,7 @@ fn current_os_user() -> String {
         .into_owned()
 }
 
-/// The identity a daemon actually serves `connection.ConnectionService` on. Fixed `daemon-` prefix,
+/// The identity a daemon actually serves `the pre-unbundle monolithic RPC coordinate` on. Fixed `daemon-` prefix,
 /// not a lookup — see `docs/ft/web/daemon-selector-livekit-rpc.md`.
 fn rpc_identity(instance_id: &str) -> String {
     format!("daemon-{instance_id}")
@@ -179,7 +177,7 @@ livekit:
 
 /// A service wired to the real common room, so it can be discovered as a peer and can route a call
 /// to one.
-fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let resolver: SessionsBaseResolver = Arc::new(move |_| Some(sessions_base.clone()));
     let resolved_user = current_os_user();
@@ -194,7 +192,7 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceI
         LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
     );
 
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         resolver,
         tddy_data_dir,
@@ -213,14 +211,14 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceI
 /// addresses. Without this the routed roster read reaches nobody.
 ///
 /// Which coordinates it serves is [`test_util::serve_daemon_rpc_participant`]'s answer rather than
-/// this suite's: a resume forwards a `connection.ConnectionService` roster read *and* the
+/// this suite's: a resume forwards a `the pre-unbundle monolithic RPC coordinate` roster read *and* the
 /// `session_files.SessionFilesService` context reads the agent host prefetches from the codebase
 /// host, and a suite-local list is how one of them stops being served.
 async fn serve_on_the_common_room(
     livekit: &LiveKitTestkit,
     ws_url: &str,
     instance_id: &str,
-    service: Arc<ConnectionServiceImpl>,
+    service: Arc<DaemonSessionHost>,
 ) -> tokio::task::JoinHandle<()> {
     let token = livekit
         .generate_token(COMMON_ROOM, &rpc_identity(instance_id))
@@ -234,7 +232,7 @@ async fn serve_on_the_common_room(
 ///
 /// Asked through `host.HostService`, which is where `ListEligibleDaemons` lives since `#unbundle`
 /// node 1, and against this service's own roster — see [`wait_until_peer_discovered`].
-async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id: &str) {
+async fn wait_until_discovered(service: &DaemonSessionHost, peer_instance_id: &str) {
     wait_until_peer_discovered(
         service,
         a_caller_token(),
@@ -773,7 +771,7 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
             common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
         }),
     };
-    let service = ConnectionServiceImpl::new(
+    let service = DaemonSessionHost::new(
         config,
         resolver,
         tddy_data_dir,

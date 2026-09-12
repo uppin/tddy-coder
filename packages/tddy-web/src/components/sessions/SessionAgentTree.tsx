@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import { type SessionEntry } from "../../gen/connection_pb";
+import { type SessionEntry } from "../../gen/session_pb";
 import {
   AgentCloneState,
   type SessionAgentEntry,

@@ -36,7 +36,7 @@ const A_UNARY_METHOD = {
   kind: "unary",
   methodKind: "unary",
   name: "ClaimTerminalControl",
-  parent: { typeName: "connection.ConnectionService" },
+  parent: { typeName: "the pre-unbundle monolithic RPC coordinate" },
   input: RpcRequestSchema,
   output: RpcResponseSchema,
 } as any;
@@ -45,7 +45,7 @@ const A_SERVER_STREAMING_METHOD = {
   kind: "rpc",
   methodKind: "server_streaming",
   name: "WatchTerminalControl",
-  parent: { typeName: "connection.ConnectionService" },
+  parent: { typeName: "the pre-unbundle monolithic RPC coordinate" },
   input: RpcRequestSchema,
   output: RpcResponseSchema,
 } as any;
@@ -54,7 +54,7 @@ const A_BIDI_METHOD = {
   kind: "rpc",
   methodKind: "bidi_streaming",
   name: "StreamSessionTerminalIO",
-  parent: { typeName: "connection.ConnectionService" },
+  parent: { typeName: "the pre-unbundle monolithic RPC coordinate" },
   input: RpcRequestSchema,
   output: RpcResponseSchema,
 } as any;

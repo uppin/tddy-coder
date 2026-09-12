@@ -145,7 +145,7 @@ export interface ReplayProjector {
  * additional bubble. Neither does `tool_call_update` — unlike the live path, which folds it into the
  * call's bubble: a *recorded* transcript already carries each call's terminal status on the
  * `tool_call` frames the host re-emits, and its bodies are fetched by id
- * (`ConnectionService.GetAcpToolCallDetail`) rather than read off the frame.
+ * (`SessionService.GetAcpToolCallDetail`) rather than read off the frame.
  */
 export function createReplayProjector(firstSeq: number): ReplayProjector {
   const ctx: ProjectionContext = {

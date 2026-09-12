@@ -22,15 +22,9 @@ import { createClient, type Client } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import {
-  ConnectionService,
-  ListProjectBranchesResponseSchema,
-  ListProjectsResponseSchema,
-  ListSessionsResponseSchema,
-  ProjectEntrySchema,
-  SessionEntrySchema,
-  type ProjectEntry,
-} from "../../src/gen/connection_pb";
+import { type ProjectEntry } from "../../src/gen/project_pb";
+import { SessionService, ListSessionsResponseSchema, SessionEntrySchema } from "../../src/gen/session_pb";
+import { ListProjectBranchesResponseSchema, ListProjectsResponseSchema, ProjectEntrySchema } from "../../src/gen/project_pb";
 import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import type { DaemonHost } from "../../src/lib/participantRole";
@@ -124,7 +118,7 @@ function aRegistryServing(hosts: string[], backend: InMemoryRpcBackend): Connect
  * those assertions to mean what they say.
  */
 function SessionCountProbe({ hostId }: { hostId: string | null }) {
-  const client = useHostClient(ConnectionService, hostId);
+  const client = useHostClient(SessionService, hostId);
   const [label, setLabel] = React.useState("resolving");
 
   React.useEffect(() => {
@@ -158,7 +152,7 @@ function SessionCountProbe({ hostId }: { hostId: string | null }) {
  * nothing would otherwise leave the assertion green.
  */
 function ClientIdentityProbe({ hostId }: { hostId: string | null }) {
-  const client = useHostClient(ConnectionService, hostId);
+  const client = useHostClient(SessionService, hostId);
   const seen = React.useRef(new Set<unknown>());
   const renders = React.useRef(0);
   const [, forceRender] = React.useState(0);
@@ -190,11 +184,11 @@ function ResolvedProviderProbe({ hostId }: { hostId: string | null }) {
 // ---------------------------------------------------------------------------
 
 describe("daemon-level RPC over the connection-provider registry", () => {
-  it("reaches a host's ConnectionService with no LiveKit provider registered at all", () => {
+  it("reaches a host's SessionService with no LiveKit provider registered at all", () => {
     // Given a registry whose only provider is an in-memory one — there is nothing in this tree
     // that could construct a `livekit-client` Room, which is the desktop app's situation when no
     // common room is configured
-    const backend = anInMemoryRpcBackend().onUnary(ConnectionService.method.listSessions, () =>
+    const backend = anInMemoryRpcBackend().onUnary(SessionService.method.listSessions, () =>
       create(ListSessionsResponseSchema, {
         sessions: [
           create(SessionEntrySchema, { sessionId: "a-session" }),
@@ -319,7 +313,7 @@ function aProject(overrides: Partial<ProjectEntry>): ProjectEntry {
 
 /**
  * The Projects screen is the smallest real daemon-level screen: its whole data path is
- * `useDaemonClient(ConnectionService)` — that is, `useHostClient` — plus a `useHostConnector` for the
+ * `useDaemonClient(SessionService)` — that is, `useHostClient` — plus a `useHostConnector` for the
  * host an operator picks. Nothing else about it is in this node's way.
  *
  * `room={null}` is the point of the mount. `SelectedDaemonProvider` still owns the host *directory*
@@ -352,10 +346,10 @@ describe("a daemon-level screen with no LiveKit room in the tree", () => {
     // Given the Projects screen's list RPC served by an in-memory backend, reachable only through a
     // connection provider that knows nothing about LiveKit
     const backend = anInMemoryRpcBackend()
-      .onUnary(ConnectionService.method.listProjects, () =>
+      .onUnary(ProjectService.method.listProjects, () =>
         create(ListProjectsResponseSchema, { projects: [aProject({ projectId: "proj-alpha" })] }),
       )
-      .onUnary(ConnectionService.method.listProjectBranches, () =>
+      .onUnary(ProjectService.method.listProjectBranches, () =>
         create(ListProjectBranchesResponseSchema, { branches: [], defaultRemote: "origin" }),
       );
 
@@ -371,14 +365,14 @@ describe("a daemon-level screen with no LiveKit room in the tree", () => {
     projectsScreenPage.card("proj-alpha").should("exist");
     projectsScreenPage.hostRowDaemonIds("proj-alpha").should("deep.equal", [PROJECT_HOST]);
     cy.wrap(backend).should((b) => {
-      expect(b.callsTo(ConnectionService.method.listProjects)).to.have.length.greaterThan(0);
+      expect(b.callsTo(ProjectService.method.listProjects)).to.have.length.greaterThan(0);
     });
   });
 
   it("renders the same screen empty, and without failing, when nothing can reach the host", () => {
     // Given the same screen with an empty registry — no LiveKit, and no other wire either, which is
     // what a desktop build looks like before node 6 registers its IPC provider
-    const backend = anInMemoryRpcBackend().onUnary(ConnectionService.method.listProjects, () =>
+    const backend = anInMemoryRpcBackend().onUnary(ProjectService.method.listProjects, () =>
       create(ListProjectsResponseSchema, { projects: [aProject({ projectId: "proj-alpha" })] }),
     );
 
@@ -394,7 +388,7 @@ describe("a daemon-level screen with no LiveKit room in the tree", () => {
     projectsScreenPage.screen().should("exist");
     projectsScreenPage.card("proj-alpha").should("not.exist");
     cy.wrap(backend).should((b) => {
-      expect(b.callsTo(ConnectionService.method.listProjects)).to.have.length(0);
+      expect(b.callsTo(ProjectService.method.listProjects)).to.have.length(0);
     });
   });
 });

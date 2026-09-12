@@ -1,14 +1,14 @@
 /**
- * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
- * common-room LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and
+ * `SessionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
+ * common-room LiveKit connection — see `aSessionServiceBackend` (in-memory fake) and
  * `SelectedDaemonProvider` (via `withSelectedDaemon`).
  */
 
 import React from "react";
-import { ConnectionService, Signal } from "../../src/gen/connection_pb";
+import { SessionService, Signal } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { anAttachedAgent } from "../support/rpc/sessionAgentRosterBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
@@ -85,7 +85,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("hides the inspector by default when a connected session is selected", () => {
     // Given
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [CONNECTED_SESSION_A],
       connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
     });
@@ -105,7 +105,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("opens the inspector as an overlay when the toggle is clicked, leaving the terminal visible", () => {
     // Given
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [CONNECTED_SESSION_A],
       connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
     });
@@ -126,7 +126,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("opens the inspector on the toggle for a disconnected session, with no terminal behind it", () => {
     // Given
-    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
+    const backend = aSessionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -144,7 +144,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("expands the inspector to fill the content area when expand is clicked, and restores on restore click", () => {
     // Given
-    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
+    const backend = aSessionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -169,7 +169,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("closes the inspector when the close button is clicked", () => {
     // Given
-    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
+    const backend = aSessionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -188,7 +188,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("renders tool, session type, updated, and previousSessionId in the inspector metadata when set", () => {
     // Given
-    const backend = aConnectionServiceBackend({ sessions: [SESSION_WITH_NEW_FIELDS] });
+    const backend = aSessionServiceBackend({ sessions: [SESSION_WITH_NEW_FIELDS] });
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -209,7 +209,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("calls ResumeSession with the disconnected session id when Resume is clicked in the inspector", () => {
     // Given
-    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
+    const backend = aSessionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -218,7 +218,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
     // Then
     cy.wrap(backend).should((b) => {
-      const calls = b.callsTo(ConnectionService.method.resumeSession);
+      const calls = b.callsTo(SessionService.method.resumeSession);
       expect(calls).to.have.length(1);
       expect(calls[0].sessionId).to.equal(DISCONNECTED_SESSION.sessionId);
     });
@@ -230,7 +230,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("requires a confirm click before calling DeleteSession when Delete is clicked in the inspector", () => {
     // Given
-    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
+    const backend = aSessionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -258,7 +258,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("calls SignalSession with SIGTERM when Terminate is clicked in the inspector for an active session", () => {
     // Given
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [CONNECTED_SESSION_A],
       connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
     });
@@ -285,7 +285,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("shows Details and Tools tabs; Details is selected by default and metadata is visible", () => {
     // Given — a disconnected session
-    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
+    const backend = aSessionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -304,7 +304,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("switches to the Tools tab and reveals the tools panel; switching back restores the metadata panel", () => {
     // Given
-    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
+    const backend = aSessionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -336,7 +336,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("reveals the session's agent roster when the Agents tab is selected", () => {
     // Given — the session's daemon holds one attached agent
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [DISCONNECTED_SESSION],
       sessionAgents: {
         sessionId: DISCONNECTED_SESSION.sessionId,
@@ -374,7 +374,7 @@ describe("SessionInspectorAcceptance — the attachment does not drive the inspe
 
   it("keeps the inspector open when the session it is showing becomes connected", () => {
     // Given — a disconnected session with the inspector opened by the operator
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [DISCONNECTED_SESSION],
       resumeSession: {
         livekitRoom: "room-resumed",
@@ -396,7 +396,7 @@ describe("SessionInspectorAcceptance — the attachment does not drive the inspe
     // base view follows the daemon's session list, which still reports this fixture dormant.
     cy.wrap(null).should(() => {
       const resumed = backend
-        .callsTo(ConnectionService.method.resumeSession)
+        .callsTo(SessionService.method.resumeSession)
         .map((c) => c.sessionId);
       expect(resumed, "ResumeSession calls").to.deep.equal([DISCONNECTED_SESSION.sessionId]);
     });
@@ -405,7 +405,7 @@ describe("SessionInspectorAcceptance — the attachment does not drive the inspe
 
   it("keeps the inspector closed when the selection moves to a disconnected session", () => {
     // Given — connected session selected; also list a disconnected session to switch to
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [CONNECTED_SESSION_A, DISCONNECTED_SESSION],
       connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
       acpReplay: { counts: [0], snapshot: [] },

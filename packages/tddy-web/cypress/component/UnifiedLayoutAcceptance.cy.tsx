@@ -10,7 +10,7 @@ import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { DaemonNavMenu } from "../../src/components/shell/DaemonNavMenu";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { appShellPage as shell } from "../support/pages/appShellPage";
 
@@ -36,7 +36,7 @@ describe("Unified layout — navigation menu on every screen", () => {
 
   it("shows the top-left navigation menu on the sessions drawer screen", () => {
     // Given — the sessions drawer with one session
-    const backend = aConnectionServiceBackend({ sessions: [A_SESSION] });
+    const backend = aSessionServiceBackend({ sessions: [A_SESSION] });
 
     // When
     mountWithRecordingLiveKitRpc(
@@ -71,7 +71,7 @@ describe("Unified layout — navigation menu contents", () => {
     const onNavigate = cy.stub().as("onNavigate");
     mountWithRecordingLiveKitRpc(
       withSelectedDaemon(<DaemonNavMenu onNavigate={onNavigate} />),
-      aConnectionServiceBackend(),
+      aSessionServiceBackend(),
     );
 
     // When — open the menu and choose LiveKit

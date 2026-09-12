@@ -236,7 +236,7 @@ type ControlVerification = std::pin::Pin<Box<dyn std::future::Future<Output = bo
 
 /// A session id as the handlers key on it: whitespace-trimmed.
 ///
-/// Trimmed in all nine methods rather than the six `connection.ConnectionService` trims in, so one
+/// Trimmed in all nine methods rather than the six `the pre-unbundle monolithic RPC coordinate` trims in, so one
 /// client cannot reach two different control leases — or two different terminals — for the same
 /// session by sending the id with a stray space.
 fn keyed_session_id(raw: &str) -> String {
@@ -341,7 +341,7 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
 
     // TODO(#unbundle-node-6): `StartTerminalSession` / `StopTerminalSession` document a
     // `control_token` "required when the session has an active terminal controller", but neither
-    // checks it — the same gap `connection.ConnectionService` has. Closing it changes who may
+    // checks it — the same gap `the pre-unbundle monolithic RPC coordinate` has. Closing it changes who may
     // start a shell in someone else's session, which is a product decision rather than a move.
     async fn start_terminal_session(
         &self,
@@ -531,7 +531,7 @@ pub const TERMINAL_SESSION_SERVICE: &str = "terminal_session.TerminalSessionServ
 ///
 /// `#unbundle` node 6 made this crate *serve* the proto it already owned: the nine methods had been
 /// extracted here as [`crate::bridge`] functions but were only ever reachable through
-/// `connection.ConnectionService`'s duplicate copy of the same schema, with hand-written converters
+/// `the pre-unbundle monolithic RPC coordinate`'s duplicate copy of the same schema, with hand-written converters
 /// between the two. Both the copy and the converters are gone; this entry is where the nine
 /// answer.
 ///

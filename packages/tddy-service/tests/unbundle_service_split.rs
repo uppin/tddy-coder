@@ -12,9 +12,16 @@
 
 use std::path::{Path, PathBuf};
 
-fn connection_proto() -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("proto/connection.proto");
-    std::fs::read_to_string(path).expect("connection.proto is readable")
+fn connection_proto_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("proto/connection.proto")
+}
+
+/// Node 9 deleted `connection.proto`; tests that used to read it now pin that deletion instead.
+fn assert_connection_proto_deleted() {
+    assert!(
+        !connection_proto_path().exists(),
+        "connection.proto was deleted once every family left it"
+    );
 }
 
 fn service_block(proto: &str, service: &str) -> String {
@@ -32,6 +39,39 @@ fn read(name: &str) -> String {
         .join("proto")
         .join(name);
     std::fs::read_to_string(path).unwrap_or_else(|_| panic!("{name} is readable"))
+}
+
+fn walk_for(root: &Path, needle: &str) -> Vec<String> {
+    let mut hits = Vec::new();
+    walk_for_rec(root, needle, &mut hits);
+    hits
+}
+
+fn walk_for_rec(dir: &Path, needle: &str, hits: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "rs") {
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                if text.contains(needle) {
+                    hits.push(path.display().to_string());
+                }
+            }
+            continue;
+        }
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if matches!(name, "target" | "gen" | "node_modules" | ".git") {
+                continue;
+            }
+            if name == "target" || name == "node_modules" || name.starts_with('.') {
+                continue;
+            }
+            walk_for_rec(&path, needle, hits);
+        }
+    }
 }
 
 const HOST_METHODS: [&str; 8] = [
@@ -105,22 +145,7 @@ fn neither_new_proto_imports_connection() {
 /// then both coordinates answer and a client can keep calling the old one.
 #[test]
 fn connection_service_no_longer_declares_the_moved_methods() {
-    // Given
-    let block = service_block(&connection_proto(), "ConnectionService");
-
-    // When
-    let still_there: Vec<&str> = HOST_METHODS
-        .into_iter()
-        .chain(WORKTREE_METHODS)
-        .filter(|method| block.contains(&format!("rpc {method}(")))
-        .collect();
-
-    // Then
-    assert!(
-        still_there.is_empty(),
-        "these moved to host.HostService / worktree.WorktreeService but are still declared on \
-         connection.ConnectionService: {still_there:?}"
-    );
+    assert_connection_proto_deleted();
 }
 
 /// The residual is the deliberate endpoint of the whole stack, not a leftover: families C (sessions
@@ -128,21 +153,7 @@ fn connection_service_no_longer_declares_the_moved_methods() {
 /// makes every later node state its arithmetic out loud instead of drifting.
 #[test]
 fn connection_service_keeps_exactly_the_methods_node_one_leaves_behind() {
-    // Given
-    let block = service_block(&connection_proto(), "ConnectionService");
-
-    // When
-    let declared = block.matches("  rpc ").count();
-
-    // Then
-    assert_eq!(
-        declared, 17,
-        "of the original 90: node 1 moved 17, node 4 moved StreamLiveKitRooms, node 6 moved 22, \
-         node 7 moved 17, node 8 moved 16 (families A, L and P to catalog, exec_tools and \
-         pr_stack). What remains is families C, D, O and Q — the deliberate endpoint of the whole \
-         stack. Recount, do not compute: restating the proto's own count back at it would pass for \
-         removing 15 or 19 just as happily"
-    );
+    assert_connection_proto_deleted();
 }
 
 const LIVEKIT_METHODS: [&str; 1] = ["StreamLiveKitRooms"];
@@ -166,16 +177,7 @@ fn livekit_service_declares_the_rooms_stream() {
 /// exists to remove.
 #[test]
 fn connection_service_no_longer_declares_the_rooms_stream() {
-    // Given
-    let block = service_block(&connection_proto(), "ConnectionService");
-
-    // Then
-    for method in LIVEKIT_METHODS {
-        assert!(
-            !block.contains(&format!("rpc {method}(")),
-            "{method} moved to livekit.LiveKitService but is still on connection.ConnectionService"
-        );
-    }
+    assert_connection_proto_deleted();
 }
 
 const SESSION_FILES_METHODS: [&str; 13] = [
@@ -227,7 +229,7 @@ fn session_files_service_declares_every_file_method() {
 fn the_shared_types_file_holds_only_what_two_served_services_both_need() {
     // Given the shared file and the two served services said to both need it
     let types = read("types.proto");
-    let connection = read("connection.proto");
+    let session = read("session.proto");
     let session_files = read("session_files.proto");
     let session_agents = read("session_agents.proto");
 
@@ -240,9 +242,9 @@ fn the_shared_types_file_holds_only_what_two_served_services_both_need() {
     // Then both services really do reach it — otherwise "two served services both need it" is a
     // claim about one, and the enum belongs in that one's own proto
     assert!(
-        connection.contains("import \"types.proto\""),
-        "connection.ConnectionService reaches the shared scope through StartSession's \
-         HostDocumentRef, so connection.proto must import types.proto"
+        session.contains("import \"types.proto\""),
+        "session.SessionService reaches the shared scope through StartSession's \
+         HostDocumentRef, so session.proto must import types.proto"
     );
     assert!(
         session_files.contains("import \"types.proto\""),
@@ -256,10 +258,10 @@ fn the_shared_types_file_holds_only_what_two_served_services_both_need() {
         "types.proto holds the two types ListSessions and the session-agent roster both reach"
     );
     assert!(
-        connection.contains("types.SessionAgentStatus")
-            && connection.contains("types.SessionAgentActivity"),
-        "connection.ConnectionService keeps ListSessions, whose SessionEntry carries both, so \
-         connection.proto must reach them rather than redeclaring them"
+        session.contains("types.SessionAgentStatus")
+            && session.contains("types.SessionAgentActivity"),
+        "session.SessionService keeps ListSessions, whose SessionEntry carries both, so \
+         session.proto must reach them rather than redeclaring them"
     );
     assert!(
         session_agents.contains("import \"types.proto\"")
@@ -322,19 +324,7 @@ fn the_terminal_service_that_already_existed_declares_every_terminal_method() {
 
 #[test]
 fn connection_service_no_longer_declares_the_session_file_or_terminal_methods() {
-    let block = service_block(&connection_proto(), "ConnectionService");
-    let still_there: Vec<&str> = SESSION_FILES_METHODS
-        .into_iter()
-        .chain(TERMINAL_METHODS)
-        .filter(|method| block.contains(&format!("rpc {method}(")))
-        .collect();
-
-    assert!(
-        still_there.is_empty(),
-        "these moved to session_files.SessionFilesService / \
-         terminal_session.TerminalSessionService but are still on connection.ConnectionService: \
-         {still_there:?}"
-    );
+    assert_connection_proto_deleted();
 }
 
 const CONVERTED_MESSAGES: [&str; 2] = [
@@ -500,18 +490,7 @@ fn activity_service_declares_every_activity_and_replay_method() {
 
 #[test]
 fn connection_service_no_longer_declares_the_agent_or_activity_methods() {
-    let block = service_block(&connection_proto(), "ConnectionService");
-    let still_there: Vec<&str> = SESSION_AGENT_METHODS
-        .into_iter()
-        .chain(ACTIVITY_METHODS)
-        .filter(|method| block.contains(&format!("rpc {method}(")))
-        .collect();
-
-    assert!(
-        still_there.is_empty(),
-        "these moved to session_agents / activity but are still on connection.ConnectionService: \
-         {still_there:?}"
-    );
+    assert_connection_proto_deleted();
 }
 
 /// ⛔ The security-relevant edit. `packages/tddy-sandbox-runner/src/runner.rs` holds the
@@ -630,18 +609,23 @@ fn pr_stack_service_declares_every_stack_method() {
 /// added while the stack was in flight, fails here rather than quietly surviving.
 #[test]
 fn connection_service_ends_at_exactly_the_residual() {
-    // Given
-    let block = service_block(&connection_proto(), "ConnectionService");
+    assert_connection_proto_deleted();
+    let session_block = service_block(&read("session.proto"), "SessionService");
+    let project_block = service_block(&read("project.proto"), "ProjectService");
+    let demo_vm_block = service_block(&read("demo_vm.proto"), "DemoVmService");
+    let local_token_block = service_block(&read("local_token.proto"), "LocalTokenService");
 
-    // When
-    let declared: Vec<String> = block
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("rpc "))
-        .filter_map(|rest| rest.split('(').next())
-        .map(str::to_string)
+    let declared: Vec<String> = [session_block, project_block, demo_vm_block, local_token_block]
+        .iter()
+        .flat_map(|block| {
+            block
+                .lines()
+                .filter_map(|line| line.trim().strip_prefix("rpc "))
+                .filter_map(|rest| rest.split('(').next())
+                .map(str::to_string)
+        })
         .collect();
 
-    // Then
     let mut unexpected: Vec<&String> = declared
         .iter()
         .filter(|name| !RESIDUAL_METHODS.contains(&name.as_str()))
@@ -688,4 +672,110 @@ fn the_shared_types_file_holds_only_the_four_types_that_genuinely_cross() {
             "types.proto is missing {expected}"
         );
     }
+}
+
+const SESSION_METHODS: [&str; 8] = [
+    "ListSessions",
+    "StartSession",
+    "StreamStartSession",
+    "ConnectSession",
+    "ResumeSession",
+    "SignalSession",
+    "DeleteSession",
+    "GetWorktreeSnapshot",
+];
+
+const PROJECT_METHODS: [&str; 5] = [
+    "ListProjects",
+    "CreateProject",
+    "AddProjectToHost",
+    "ListProjectBranches",
+    "SetProjectDefaultBranch",
+];
+
+const DEMO_VM_METHODS: [&str; 3] = ["StartDemoVm", "StopDemoVm", "GetDemoVmStatus"];
+
+#[test]
+fn session_service_declares_every_lifecycle_method() {
+    let block = service_block(&read("session.proto"), "SessionService");
+    for method in SESSION_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "session.SessionService is missing {method}"
+        );
+    }
+}
+
+#[test]
+fn project_service_declares_every_project_method() {
+    let block = service_block(&read("project.proto"), "ProjectService");
+    for method in PROJECT_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "project.ProjectService is missing {method}"
+        );
+    }
+}
+
+#[test]
+fn demo_vm_and_local_token_services_declare_their_methods() {
+    let vm = service_block(&read("demo_vm.proto"), "DemoVmService");
+    for method in DEMO_VM_METHODS {
+        assert!(
+            vm.contains(&format!("rpc {method}(")),
+            "demo_vm is missing {method}"
+        );
+    }
+    let token = service_block(&read("local_token.proto"), "LocalTokenService");
+    assert!(token.contains("rpc MintLocalToken("));
+}
+
+/// `session.proto` needs all four of `types.proto`'s types, and reaches them rather than copying.
+///
+/// Those four were justified in nodes 6-8 because a *staying* family reached them. This node moves
+/// that family, so all four are now shared between services that all moved — the file is still
+/// right, and its reason changed.
+#[test]
+fn the_session_proto_reaches_all_four_shared_types_rather_than_copying_them() {
+    let proto = read("session.proto");
+    assert!(proto.contains("import \"types.proto\""));
+    for shared in [
+        "HostDocumentScope",
+        "SessionAgentStatus",
+        "SessionAgentActivity",
+        "BranchSession",
+    ] {
+        assert!(
+            !proto.contains(&format!("enum {shared}"))
+                && !proto.contains(&format!("message {shared}")),
+            "session.proto redeclares {shared} instead of importing it"
+        );
+    }
+}
+
+/// **The completion criterion for the whole `#unbundle` effort.**
+///
+/// Not "connection.ConnectionService is down to N methods" — the file is *gone*. A service with zero
+/// methods would mean inventing a ninth service for the one thing the daemon genuinely is; the answer
+/// is that the daemon implements no session service at all.
+#[test]
+fn the_connection_proto_no_longer_exists() {
+    assert_connection_proto_deleted();
+}
+
+/// A deleted proto that something still names is a deletion in name only.
+#[test]
+fn nothing_in_the_workspace_names_the_connection_service() {
+    let packages = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut hits = Vec::new();
+    for needle in ["ConnectionServiceImpl", "connection.ConnectionService"] {
+        hits.extend(walk_for(&packages, needle));
+    }
+    hits.retain(|p| !p.contains("unbundle_service_split.rs"));
+    hits.sort();
+    hits.dedup();
+    assert!(
+        hits.is_empty(),
+        "these still name the deleted service: {hits:?}"
+    );
 }

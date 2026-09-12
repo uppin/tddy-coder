@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { SessionEntrySchema, type SessionEntry } from "../gen/connection_pb";
+import { SessionEntrySchema, type SessionEntry } from "../gen/session_pb";
 import type { SessionMetadata } from "../lib/sessionParticipantMetadata";
 import {
   mergeActiveAndFetchedSessions,

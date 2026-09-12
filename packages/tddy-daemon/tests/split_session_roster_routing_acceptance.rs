@@ -23,7 +23,7 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::{SessionAgentRecord, SessionMetadata};
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
@@ -85,7 +85,7 @@ impl EligibleDaemonSource for ACommonRoomWithTheCodebaseHost {
 
 /// A daemon in a common room with the codebase host, serving whatever sessions `_sessions` holds.
 struct ADaemonInTheCommonRoom {
-    service: ConnectionServiceImpl,
+    service: DaemonSessionHost,
     _sessions: tempfile::TempDir,
 }
 
@@ -203,7 +203,7 @@ fn a_daemon_in_the_common_room(sessions: tempfile::TempDir) -> ADaemonInTheCommo
         (token == TEST_TOKEN).then(|| tddy_daemon::test_util::TEST_USER.to_string())
     });
 
-    let service = ConnectionServiceImpl::new(
+    let service = DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         sessions.path().to_path_buf(),

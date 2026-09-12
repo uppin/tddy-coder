@@ -22,13 +22,13 @@ use tddy_service::proto::daemon_config::DaemonConfigServiceServer;
 use teloxide::prelude::Bot;
 use tokio::sync::Mutex;
 
-use crate::common_room_supervisor::{
+use tddy_session_lifecycle::common_room_supervisor::{
     cloned_entries, CommonRoomSupervisorTask, CommonRoomTarget, DaemonCommonRoomConnector,
     PeerDiscoveryHandles, SupervisedCommonRoom,
 };
 use crate::config::DaemonConfig;
 use crate::daemon_config_service::{CommonRoomSupervisor, DaemonConfigServiceImpl};
-use crate::telegram_notifier::TelegramSender;
+use tddy_session_lifecycle::telegram_notifier::TelegramSender;
 
 /// Which process is hosting this runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,7 +144,7 @@ pub struct DaemonRuntime {
     pub config: DaemonConfig,
     /// The claude-cli sessions this daemon owns. The host kills them when it is shutting down —
     /// they outlive the RPC surface otherwise.
-    pub cli_sessions: Arc<crate::cli_session_manager::CliSessionManager>,
+    pub cli_sessions: Arc<tddy_session_lifecycle::cli_session_manager::CliSessionManager>,
     /// The Telegram chat that gets the "started"/"stopped" messages, when a bot is configured.
     pub lifecycle_telegram: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
     /// Relay mode: fires once the idle timeout expires, for a server that shuts down gracefully.
@@ -178,7 +178,7 @@ pub struct RuntimeTasks {
 }
 
 /// The OAuth loopback TCP proxy, which follows the common room across a reconnect rather than
-/// belonging to any one connection — see [`crate::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel`].
+/// belonging to any one connection — see [`tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel`].
 struct OauthLoopbackTunnel {
     config: Arc<DaemonConfig>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<livekit::Room>>>>,
@@ -190,7 +190,7 @@ struct OauthLoopbackTunnel {
 /// [`CommonRoomPeerRegistry`]: tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry
 ///
 /// The daemon itself does not use it: its discovery loop is owned by
-/// [`crate::common_room_supervisor`], which stops and restarts it when the configured room changes,
+/// [`tddy_session_lifecycle::common_room_supervisor`], which stops and restarts it when the configured room changes,
 /// while the tunnel supervisor follows `room_slot` across that and so is started once. It composes
 /// a loop from `tddy-daemon-livekit` with a supervisor from `tddy-daemon-auth`, and this is the
 /// only crate that has both — which is why it is assembly and lives here rather than with either
@@ -200,7 +200,7 @@ pub fn spawn_common_room_discovery_task(
     registry: Arc<tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<livekit::Room>>>>,
 ) {
-    crate::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(&config, room_slot.clone());
+    tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(&config, room_slot.clone());
     tddy_daemon_livekit::livekit_peer_discovery::spawn_common_room_discovery_loop(
         config, registry, room_slot,
     );
@@ -208,15 +208,21 @@ pub fn spawn_common_room_discovery_task(
 
 /// Every family reachable on the binary's local Unix-domain socket, in one bundle.
 type BinaryLocalSocketServices = crate::local_socket_server::LocalSocketServices<
-    crate::connection_service::ConnectionServiceImpl,
+    tddy_session_lifecycle::SessionServiceImpl<
+        tddy_session_lifecycle::connection_service::DaemonSessionHost,
+    >,
+    tddy_projects::ProjectServiceImpl<tddy_session_lifecycle::connection_service::DaemonSessionHost>,
+    tddy_session_lifecycle::connection_service::DemoVmServiceImpl,
     tddy_host_service::HostServiceImpl,
     tddy_worktree_service::WorktreeServiceImpl,
     tddy_terminal_rpc::TerminalSessionServiceImpl,
-    crate::connection_service::PeerRoutedSessionAgents,
-    crate::connection_service::PeerRoutedActivity,
-    tddy_discovery::CatalogServiceImpl<crate::connection_service::ConnectionServiceImpl>,
-    tddy_tool_engine::ExecToolServiceImpl<crate::connection_service::ConnectionServiceImpl>,
-    crate::pr_stack_rpc::PrStackServiceImpl<crate::connection_service::ConnectionServiceImpl>,
+    tddy_session_lifecycle::connection_service::PeerRoutedSessionAgents,
+    tddy_session_lifecycle::connection_service::PeerRoutedActivity,
+    tddy_discovery::CatalogServiceImpl<tddy_session_lifecycle::connection_service::DaemonSessionHost>,
+    tddy_tool_engine::ExecToolServiceImpl<tddy_session_lifecycle::connection_service::DaemonSessionHost>,
+    tddy_session_lifecycle::pr_stack_rpc::PrStackServiceImpl<
+        tddy_session_lifecycle::connection_service::DaemonSessionHost,
+    >,
 >;
 
 /// The local Unix-domain-socket `ConnectionService` transport (SO_PEERCRED peer-trust plus
@@ -245,8 +251,8 @@ struct TelegramInbound {
     bot: Bot,
     harness: Arc<
         Mutex<
-            crate::telegram_session_control::TelegramSessionControlHarness<
-                crate::telegram_notifier::TeloxideSender,
+            tddy_session_lifecycle::telegram_session_control::TelegramSessionControlHarness<
+                tddy_session_lifecycle::telegram_notifier::TeloxideSender,
             >,
         >,
     >,
@@ -273,7 +279,7 @@ impl RuntimeTasks {
         let mut handles = Vec::new();
 
         if let Some(tunnel) = self.oauth_loopback_tunnel {
-            if let Some(handle) = crate::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
+            if let Some(handle) = tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
                 &tunnel.config,
                 tunnel.room_slot,
             ) {
@@ -342,7 +348,7 @@ impl RuntimeTasks {
         if let Some(inbound) = self.telegram_inbound {
             handles.push(tokio::spawn(async move {
                 if let Err(e) =
-                    crate::telegram_bot::run_telegram_bot(inbound.bot, inbound.harness).await
+                    tddy_session_lifecycle::telegram_bot::run_telegram_bot(inbound.bot, inbound.harness).await
                 {
                     log::warn!(
                         target: "tddy_daemon::telegram_bot",
@@ -483,14 +489,14 @@ pub async fn build(
         }
         None => config.clone(),
     };
-    let auth_result = crate::auth::build_auth_entries(&auth_config, web_host.as_str(), web_port)?;
+    let auth_result = tddy_session_lifecycle::auth::build_auth_entries(&auth_config, web_host.as_str(), web_port)?;
     let mut rpc_entries = auth_result.entries;
 
     // The room-JWT mint the web UI joins rooms through. Gated on the same session token as every
     // other daemon RPC — anything that can reach `/rpc` can call it, and a JWT it minted is
-    // admission to a LiveKit room. See `crate::auth::build_token_service_entry`.
+    // admission to a LiveKit room. See `tddy_session_lifecycle::auth::build_token_service_entry`.
     if let Some(entry) =
-        crate::auth::build_token_service_entry(&config, auth_result.user_resolver.as_ref())
+        tddy_session_lifecycle::auth::build_token_service_entry(&config, auth_result.user_resolver.as_ref())
     {
         rpc_entries.push(entry);
     }
@@ -501,14 +507,14 @@ pub async fn build(
     let common_room = Arc::new(SupervisedCommonRoom::new(config.livekit.as_ref()));
     // The same rule that admits a caller to every other gated daemon RPC — this one reads and
     // writes the daemon's own LiveKit credentials.
-    let config_service_authenticator = crate::auth::session_token_authenticator(
+    let config_service_authenticator = tddy_session_lifecycle::auth::session_token_authenticator(
         auth_result.user_resolver.as_ref(),
         DaemonConfigServiceServer::<DaemonConfigServiceImpl>::NAME,
     );
 
     // Create one shared ClaudeCliSessionManager — injected into both the Telegram spawn path and
-    // ConnectionServiceImpl so that Telegram-launched sessions are attachable via the terminal RPCs.
-    let shared_claude_cli_manager = Arc::new(crate::cli_session_manager::CliSessionManager::new());
+    // DaemonSessionHost so that Telegram-launched sessions are attachable via the terminal RPCs.
+    let shared_claude_cli_manager = Arc::new(tddy_session_lifecycle::cli_session_manager::CliSessionManager::new());
 
     // One registry of hosted session rooms for the whole daemon: `StartSession` opens rooms in it
     // and both deletion paths — the `DeleteSession` RPC and Telegram's Delete button — close them
@@ -560,17 +566,17 @@ pub async fn build(
         // One registry for the whole daemon: peer discovery writes sightings into it and the
         // `ListKnownHosts` handler reads them back. Two instances over the same directory would
         // each hold their own write lock, so a sighting and an RPC-time read could disagree.
-        let host_registry: Arc<dyn crate::host_registry::HostRegistry> =
-            Arc::new(crate::host_registry::FileHostRegistry::new(
-                crate::host_registry::host_registry_dir(&tddy_data_dir),
+        let host_registry: Arc<dyn tddy_session_lifecycle::host_registry::HostRegistry> =
+            Arc::new(tddy_session_lifecycle::host_registry::FileHostRegistry::new(
+                tddy_session_lifecycle::host_registry::host_registry_dir(&tddy_data_dir),
             ));
         // The local row is the daemon's own, and nothing else records it: the peer registry
         // deliberately holds only *remote* participants, and a daemon with LiveKit switched off
         // never syncs a room at all. Recorded at startup so `first_seen` for this machine means
         // "since tddy first ran here" rather than "since a browser first asked".
         if let Err(e) = host_registry.record_sighting(
-            &crate::host_registry::local_host_sighting(&config),
-            crate::host_registry::now_unix_ms(),
+            &tddy_session_lifecycle::host_registry::local_host_sighting(&config),
+            tddy_session_lifecycle::host_registry::now_unix_ms(),
         ) {
             log::warn!("host registry: could not record this daemon's own entry: {e}");
         }
@@ -605,13 +611,13 @@ pub async fn build(
                                 room_slot.clone(),
                             ),
                         )
-                            as Arc<dyn crate::multi_host::EligibleDaemonSource>,
+                            as Arc<dyn tddy_session_lifecycle::multi_host::EligibleDaemonSource>,
                         common_room_livekit_room: room_slot,
                     })
             }
             None => None,
         };
-        // Clone before moving into ConnectionServiceImpl — VmService and ScreenSharingService need the same resolver.
+        // Clone before moving into DaemonSessionHost — VmService and ScreenSharingService need the same resolver.
         let vm_user_resolver = user_resolver.clone();
         let sessions_base_resolver: tddy_daemon_kernel::SessionsBaseResolver = {
             let dd = tddy_data_dir.clone();
@@ -623,7 +629,7 @@ pub async fn build(
         let remote_git_user_resolver = user_resolver.clone();
         // Every project a daemon serves is resolved against *that OS user's own* registry, so
         // this mirrors `sessions_base_resolver` one directory down.
-        let projects_dir_resolver: crate::remote_git_service::ProjectsDirResolver = {
+        let projects_dir_resolver: tddy_session_lifecycle::remote_git_service::ProjectsDirResolver = {
             let dd = tddy_data_dir.clone();
             Arc::new(move |user: &str| {
                 crate::user_sessions_path::projects_path_for_user(user, Some(&dd))
@@ -631,7 +637,7 @@ pub async fn build(
         };
         // Session-addressed BSP resolver: reproduce the ExecuteTool preamble (token → os_user →
         // sessions_base → `.session.yaml` repo_path) to yield a session's worktree + catalog dir.
-        // Built here, before the resolvers are moved into ConnectionServiceImpl below.
+        // Built here, before the resolvers are moved into DaemonSessionHost below.
         let bsp_session_resolver: tddy_bsp::bsp_service::SessionPathsResolver = {
             let user_resolver = user_resolver.clone();
             let config = config.clone();
@@ -650,7 +656,7 @@ pub async fn build(
                     .map_err(|e| tddy_rpc::Status::invalid_argument(e.message()))?;
                 let sessions_base = (sessions_base_resolver)(&os_user)
                     .ok_or_else(|| tddy_rpc::Status::internal("could not resolve sessions path"))?;
-                let repo_root = crate::workspace_session::resolve_worktree_root_for_session(
+                let repo_root = tddy_session_lifecycle::workspace_session::resolve_worktree_root_for_session(
                     &sessions_base,
                     session_id,
                 )?;
@@ -700,7 +706,7 @@ pub async fn build(
                 // own registry names — including per-host checkouts of the same project.
                 let mut roots = vec![sessions_base.join("sessions")];
                 let projects =
-                    crate::project_storage::read_projects(&projects_dir).map_err(|e| {
+                    tddy_session_lifecycle::project_storage::read_projects(&projects_dir).map_err(|e| {
                         ModelRegistryError::InvalidWorkspace(format!(
                             "could not read this operator's projects: {e}"
                         ))
@@ -723,8 +729,8 @@ pub async fn build(
         let model_registry = Arc::new(
             tddy_model_registry::ModelRegistryStore::open(
                 &tddy_data_dir.join("models.db"),
-                &crate::livekit_peer_discovery::local_instance_id_for_config(&config),
-                // The same directory `ConnectionServiceImpl` resolves YAML defs from, so an
+                &tddy_session_lifecycle::livekit_peer_discovery::local_instance_id_for_config(&config),
+                // The same directory `DaemonSessionHost` resolves YAML defs from, so an
                 // assistant cannot be created under a name one of them already answers to.
                 &tddy_data_dir.join("agents"),
             )
@@ -735,19 +741,19 @@ pub async fn build(
         // The daemon's session-notification bus: Telegram takes the attention-worthy events
         // from the activity-status path, and `StreamSessionNotifications` relays every event
         // to the browsers driving the drawer's indicators. Assembled here rather than left to
-        // `ConnectionServiceImpl::new` (which would build a Telegram-only bus) because the
+        // `DaemonSessionHost::new` (which would build a Telegram-only bus) because the
         // stream subscriber must be the very one the RPC handler subscribes to.
         let session_notification_bus = {
-            let mut bus = crate::session_notifications::SessionNotificationBus::new();
+            let mut bus = tddy_session_lifecycle::session_notifications::SessionNotificationBus::new();
             if let Some(ref hooks) = telegram_hooks {
                 bus = bus.with_subscriber(Arc::new(
-                    crate::session_notification_subscribers::TelegramNotificationSubscriber::new(
+                    tddy_session_lifecycle::session_notification_subscribers::TelegramNotificationSubscriber::new(
                         Arc::clone(hooks),
                     ),
                 ));
             }
             Arc::new(bus.with_subscriber(Arc::new(
-                crate::session_notification_subscribers::SessionNotificationStreamSubscriber::new(),
+                tddy_session_lifecycle::session_notification_subscribers::SessionNotificationStreamSubscriber::new(),
             )))
         };
 
@@ -755,10 +761,10 @@ pub async fn build(
         // `ScreenSharingService` raises them for a desktop password. A prompt raised on one
         // instance and answered on another is a question nobody can answer, so both are handed
         // this one.
-        let host_prompts: Arc<dyn crate::host_prompts::HostPromptRegistry> =
-            Arc::new(crate::host_prompts::InMemoryHostPromptRegistry::new());
+        let host_prompts: Arc<dyn tddy_session_lifecycle::host_prompts::HostPromptRegistry> =
+            Arc::new(tddy_session_lifecycle::host_prompts::InMemoryHostPromptRegistry::new());
 
-        // Built before `ConnectionServiceImpl` consumes `livekit_discovery`: the host service
+        // Built before `DaemonSessionHost` consumes `livekit_discovery`: the host service
         // routes on the same live roster and forwards over the same common room, so both take a
         // handle on the one set of discovery handles rather than each deriving its own.
         let host_service_impl = {
@@ -798,7 +804,7 @@ pub async fn build(
             Arc::new(worktree_service)
         };
 
-        let mut connection_impl = crate::connection_service::ConnectionServiceImpl::new(
+        let mut connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
             config.clone(),
             sessions_base_resolver,
             tddy_data_dir.clone(),
@@ -821,10 +827,7 @@ pub async fn build(
         // local Unix-domain-socket tonic server both reference the same Arc, so a session
         // started over the socket is visible over every other transport.
         let connection_arc = Arc::new(connection_impl);
-        // Record the self-handle so `&self` methods (the sandbox-IPC RPC bridge, reached via
-        // `dial_and_bridge`) can recover this `Arc` and hand it to the in-jail `tddy-tools`'s
-        // roster/conversation dispatch. Set on the original; shared across `Clone`s.
-        connection_arc.set_self_handle(Arc::downgrade(&connection_arc));
+        connection_arc.install_sandbox_rpc_bridge();
         // Get the shared TaskRegistry before handing the impl to the servers.
         let task_registry = connection_arc.task_registry();
         // The admission registry is shared with the SessionAdmissionService served on the
@@ -857,23 +860,36 @@ pub async fn build(
                 .as_ref()
                 .and_then(|lk| lk.api_secret.clone())
                 .map(|s| tddy_github::SessionTokenSigner::new(s.as_bytes()));
-            let uid_to_username: crate::connection_tonic_adapter::UidToUsername =
+            let uid_to_username: tddy_session_lifecycle::local_token_tonic_adapter::UidToUsername =
                 Arc::new(crate::user_sessions_path::username_for_uid);
             tasks.local_socket = Some(LocalSocketTransport {
                 socket_path: config_arc.local_socket_path(),
                 services: crate::local_socket_server::LocalSocketServices {
-                    connection: crate::connection_tonic_adapter::ConnectionServiceTonicAdapter::new(
-                        connection_arc.clone(),
-                        config_arc.clone(),
-                        signer,
-                        uid_to_username,
+                    session: tddy_service::proto::session::SessionServiceTonicAdapter::new(
+                        Arc::new(connection_arc.session_lifecycle_service()),
                     ),
+                    project: tddy_service::proto::project::ProjectServiceTonicAdapter::new(
+                        Arc::new(connection_arc.project_service()),
+                    ),
+                    demo_vm: tddy_service::proto::demo_vm::DemoVmServiceTonicAdapter::new(
+                        Arc::new(
+                            tddy_session_lifecycle::connection_service::DemoVmServiceImpl::new(
+                                connection_arc.clone(),
+                            ),
+                        ),
+                    ),
+                    local_token:
+                        tddy_session_lifecycle::local_token_tonic_adapter::LocalTokenUdsTonicAdapter::new(
+                            config_arc.clone(),
+                            signer,
+                            uid_to_username,
+                        ),
                     // The same `Arc`s the entries above serve, so a host prompt raised over the
                     // socket is the one a browser answers over HTTP.
-                    host: crate::host_tonic_adapter::HostServiceTonicAdapter::new(Arc::clone(
+                    host: tddy_session_lifecycle::host_tonic_adapter::HostServiceTonicAdapter::new(Arc::clone(
                         &host_service_impl,
                     )),
-                    worktree: crate::worktree_tonic_adapter::WorktreeServiceTonicAdapter::new(
+                    worktree: tddy_session_lifecycle::worktree_tonic_adapter::WorktreeServiceTonicAdapter::new(
                         Arc::clone(&worktree_service_impl),
                     ),
                     // Built from `connection_arc` — the same `CliSessionManager` and sandbox
@@ -911,13 +927,13 @@ pub async fn build(
 
         // TerminalSessionService — the nine terminal methods, served by `tddy-terminal-rpc` on top
         // of the streaming bridge it already owned. `#unbundle` node 6 mounted this coordinate and
-        // then removed the same nine from `connection.ConnectionService`, so this is the only
+        // then removed the same nine from `the pre-unbundle monolithic RPC coordinate`, so this is the only
         // place they answer (`terminal_session_entry`).
         rpc_entries.push(connection_arc.terminal_session_entry());
 
         // SessionFilesService — the thirteen session-file methods, served by `tddy-session-files`
         // on top of the ten modules it already owned. `#unbundle` node 6 mounted this coordinate
-        // and then removed the same thirteen from `connection.ConnectionService`, so this is the
+        // and then removed the same thirteen from `the pre-unbundle monolithic RPC coordinate`, so this is the
         // only place they answer. The entry is wrapped here rather than in the crate because eight
         // of the thirteen route by `daemon_instance_id` — browsing another host's documents is a
         // forward over the common room, which is this layer's to make (`session_files_entry`).
@@ -926,7 +942,7 @@ pub async fn build(
         // SessionAgentService — the nine roster and conversation methods, served by
         // `tddy-session-agents` on top of the four modules it already owned. `#unbundle` node 7
         // mounted this coordinate and then removed the same nine from
-        // `connection.ConnectionService`, so this is the only place they answer. The entry is
+        // `the pre-unbundle monolithic RPC coordinate`, so this is the only place they answer. The entry is
         // wrapped here rather than in the crate because seven of the nine route by
         // `daemon_instance_id` — a split session's roster lives on the daemon holding the codebase,
         // and reaching it is a forward over the common room, which is this layer's to make.
@@ -947,11 +963,23 @@ pub async fn build(
         // PrStackService — stack planning and branch resolution (`tddy-workflow-recipes` coordinate).
         rpc_entries.push(connection_arc.pr_stack_entry());
 
-        let connection_server = tddy_service::ConnectionServiceServer::from_arc(connection_arc);
-        rpc_entries.push(tddy_rpc::ServiceEntry {
-            name: "connection.ConnectionService",
-            service: Arc::new(connection_server) as Arc<dyn tddy_rpc::RpcService>,
-        });
+        // SessionService — family C (`tddy-session-lifecycle`).
+        rpc_entries.push(connection_arc.session_lifecycle_entry());
+
+        // ProjectService — family D (`tddy-projects`).
+        rpc_entries.push(connection_arc.project_entry());
+
+        // DemoVmService — family O (`tddy-vm` coordinate, host logic on the session host).
+        rpc_entries.push(connection_arc.demo_vm_entry());
+
+        if let Some(signer) = config_arc
+            .livekit
+            .as_ref()
+            .and_then(|lk| lk.api_secret.clone())
+            .map(|s| Arc::new(tddy_github::SessionTokenSigner::new(s.as_bytes())))
+        {
+            rpc_entries.push(tddy_daemon_auth::build_local_token_entry(signer));
+        }
 
         // HostService — the durable host registry, each host's tooling probe, its telemetry, the
         // prompts it raises and the keys it can be given. Registered here rather than beside the
@@ -965,7 +993,7 @@ pub async fn build(
         });
 
         // LiveKitService — the rooms this daemon can see on the LiveKit server and who is joined
-        // to each. Family T left `connection.ConnectionService` in `#unbundle` node 4; the entry
+        // to each. Family T left `the pre-unbundle monolithic RPC coordinate` in `#unbundle` node 4; the entry
         // comes from `tddy-daemon-livekit` assembled, so this wiring never names the poll cadence.
         rpc_entries.push(tddy_daemon_livekit::livekit_service::build_livekit_entry(
             tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config(
@@ -1004,7 +1032,7 @@ pub async fn build(
         ));
 
         // TaskService — backed by the same registry as ConnectionService.
-        let task_service_impl = crate::task_service::TaskServiceImpl::new(
+        let task_service_impl = tddy_session_lifecycle::task_service::TaskServiceImpl::new(
             task_registry.clone(),
             vm_user_resolver.clone(),
         );
@@ -1017,7 +1045,7 @@ pub async fn build(
         // RemoteGitService — every project this daemon serves, usable as a git remote by any
         // client that can join the room (`GIT_SSH_COMMAND=tddy-remote-git-repo`).
         let remote_git_server = tddy_service::RemoteGitServiceServer::new(
-            crate::remote_git_service::RemoteGitServiceImpl::new(
+            tddy_session_lifecycle::remote_git_service::RemoteGitServiceImpl::new(
                 remote_git_user_resolver.clone(),
                 projects_dir_resolver,
                 config_arc.clone(),
@@ -1035,7 +1063,7 @@ pub async fn build(
         // session room (but whose token is expiring) can still reach this daemon over the
         // common room it never left.
         let session_admission_server = tddy_service::SessionAdmissionServiceServer::new(
-            crate::session_admission_service::SessionAdmissionServiceImpl::new(
+            tddy_session_lifecycle::session_admission_service::SessionAdmissionServiceImpl::new(
                 remote_git_user_resolver.clone(),
                 config_arc.clone(),
                 session_admissions,
@@ -1051,7 +1079,7 @@ pub async fn build(
         });
 
         // ActionService — start tools by kind via tddy-actions runtimes.
-        let action_service_impl = crate::action_service::ActionServiceImpl::new(
+        let action_service_impl = tddy_session_lifecycle::action_service::ActionServiceImpl::new(
             task_registry.clone(),
             tddy_actions::ActionCatalog::new(),
             vm_user_resolver.clone(),
@@ -1118,15 +1146,15 @@ pub async fn build(
         // to a machine, and deleting a session must not delete the host's target. The keypair is
         // the one `#hosts-screen 6/8` publishes and reads from the same directory — one key per
         // host, so a password the browser encrypted for a prompt is readable here too.
-        let ss_host_targets: Arc<dyn crate::host_desktop_targets::HostDesktopTargetStore> =
+        let ss_host_targets: Arc<dyn tddy_session_lifecycle::host_desktop_targets::HostDesktopTargetStore> =
             Arc::new(
-                crate::host_desktop_targets::FileHostDesktopTargetStore::new(
-                    crate::host_registry::host_registry_dir(&tddy_data_dir),
+                tddy_session_lifecycle::host_desktop_targets::FileHostDesktopTargetStore::new(
+                    tddy_session_lifecycle::host_registry::host_registry_dir(&tddy_data_dir),
                 ),
             );
-        let ss_host_keypair: Arc<dyn crate::host_keypair::HostKeypair> =
-            Arc::new(crate::host_keypair::FileHostKeypair::new(
-                crate::host_registry::host_registry_dir(&tddy_data_dir),
+        let ss_host_keypair: Arc<dyn tddy_session_lifecycle::host_keypair::HostKeypair> =
+            Arc::new(tddy_session_lifecycle::host_keypair::FileHostKeypair::new(
+                tddy_session_lifecycle::host_registry::host_registry_dir(&tddy_data_dir),
             ));
         let ss_svc = tddy_screen_sharing::ScreenSharingServiceImpl::new(
             ss_user_resolver,
@@ -1180,7 +1208,7 @@ pub async fn build(
 /// What a configured Telegram bot contributes: the hooks every session-notification path publishes
 /// through, and the inbound dispatcher that serves the buttons an operator presses.
 struct TelegramWiring {
-    hooks: Option<Arc<crate::telegram_session_subscriber::TelegramDaemonHooks>>,
+    hooks: Option<Arc<tddy_session_lifecycle::telegram_session_subscriber::TelegramDaemonHooks>>,
     inbound: Option<TelegramInbound>,
 }
 
@@ -1188,7 +1216,7 @@ fn build_telegram(
     config: &DaemonConfig,
     tddy_data_dir: &Path,
     options: &RuntimeOptions,
-    claude_cli_manager: &Arc<crate::cli_session_manager::CliSessionManager>,
+    claude_cli_manager: &Arc<tddy_session_lifecycle::cli_session_manager::CliSessionManager>,
     session_rooms: &Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
 ) -> TelegramWiring {
     let tg = match config.telegram.as_ref() {
@@ -1202,28 +1230,28 @@ fn build_telegram(
     };
 
     let bot = Bot::new(tg.bot_token.clone());
-    let teloxide_sender = Arc::new(crate::telegram_notifier::TeloxideSender::new(bot.clone()));
+    let teloxide_sender = Arc::new(tddy_session_lifecycle::telegram_notifier::TeloxideSender::new(bot.clone()));
     let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
     let sender: Arc<dyn TelegramSender + Send + Sync> = teloxide_sender.clone();
-    let elicitation_select_options: crate::telegram_notifier::ElicitationSelectOptionsCache =
+    let elicitation_select_options: tddy_session_lifecycle::telegram_notifier::ElicitationSelectOptionsCache =
         Arc::new(StdMutex::new(HashMap::new()));
-    let elicitation_multi_select_meta: crate::telegram_notifier::ElicitationMultiSelectMetaCache =
+    let elicitation_multi_select_meta: tddy_session_lifecycle::telegram_notifier::ElicitationMultiSelectMetaCache =
         Arc::new(StdMutex::new(HashMap::new()));
     let active_elicitation = Arc::new(StdMutex::new(
-        crate::active_elicitation::ActiveElicitationCoordinator::new(),
+        tddy_session_lifecycle::active_elicitation::ActiveElicitationCoordinator::new(),
     ));
     let telegram_tracked = Arc::new(StdMutex::new(
-        crate::telegram_tracked_session::TelegramTrackedSessionCoordinator::new(),
+        tddy_session_lifecycle::telegram_tracked_session::TelegramTrackedSessionCoordinator::new(),
     ));
     let watcher = Arc::new(Mutex::new(
-        crate::telegram_notifier::TelegramSessionWatcher::with_elicitation_caches_coordinator_and_tracked(
+        tddy_session_lifecycle::telegram_notifier::TelegramSessionWatcher::with_elicitation_caches_coordinator_and_tracked(
             elicitation_select_options.clone(),
             elicitation_multi_select_meta.clone(),
             active_elicitation.clone(),
             telegram_tracked.clone(),
         ),
     ));
-    let hooks = Arc::new(crate::telegram_session_subscriber::TelegramDaemonHooks {
+    let hooks = Arc::new(tddy_session_lifecycle::telegram_session_subscriber::TelegramDaemonHooks {
         config: config.clone(),
         sender: sender.clone(),
         watcher,
@@ -1258,7 +1286,7 @@ fn build_telegram(
     };
 
     let workflow_spawn = Some(Arc::new(
-        crate::telegram_session_control::TelegramWorkflowSpawn {
+        tddy_session_lifecycle::telegram_session_control::TelegramWorkflowSpawn {
             config: Arc::new(config.clone()),
             spawn_client: spawn_for_tg,
             os_user: user.clone(),
@@ -1273,7 +1301,7 @@ fn build_telegram(
         },
     ));
     let harness = Arc::new(Mutex::new(
-        crate::telegram_session_control::TelegramSessionControlHarness::with_workflow_spawn_and_telegram_tracked(
+        tddy_session_lifecycle::telegram_session_control::TelegramSessionControlHarness::with_workflow_spawn_and_telegram_tracked(
             tg.chat_ids.clone(),
             sessions_base,
             teloxide_sender,

@@ -27,9 +27,9 @@ import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDraw
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
-  aConnectionServiceBackend,
-  type ConnectionServiceBackend,
-} from "../support/rpc/connectionServiceBackend";
+  aSessionServiceBackend,
+  type SessionServiceBackend,
+} from "../support/rpc/daemonSessionHostBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTerminalTabsPage";
 
@@ -52,8 +52,8 @@ const SESSION = {
 /** A host-served backend (empty `livekitRoom`) with an optional set of pre-existing bash tabs. */
 function aGrpcBackend(
   terminals: Array<{ terminalId: string }> = [],
-): ConnectionServiceBackend {
-  return aConnectionServiceBackend({
+): SessionServiceBackend {
+  return aSessionServiceBackend({
     sessions: [SESSION],
     connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
     terminals,
@@ -61,7 +61,7 @@ function aGrpcBackend(
 }
 
 /** Attach the session over gRPC and wait for its terminal tab bar to render. */
-function attachSession(backend: ConnectionServiceBackend) {
+function attachSession(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
   tabs.tabs().should("exist");

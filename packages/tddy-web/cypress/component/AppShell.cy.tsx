@@ -8,7 +8,7 @@
 import React from "react";
 import { AppShell } from "../../src/components/shell/AppShell";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { appShellPage as shell } from "../support/pages/appShellPage";
 import { byTestId, TEST_IDS } from "../support/testIds";
@@ -29,7 +29,7 @@ describe("AppShell — unified header", () => {
           <div data-testid="shell-body">body content</div>
         </AppShell>,
       ),
-      aConnectionServiceBackend(),
+      aSessionServiceBackend(),
     );
 
     // Then — header chrome and body are present
@@ -48,7 +48,7 @@ describe("AppShell — unified header", () => {
           <div data-testid="shell-body">body content</div>
         </AppShell>,
       ),
-      aConnectionServiceBackend(),
+      aSessionServiceBackend(),
     );
 
     // When — open the menu and choose Sessions
@@ -72,7 +72,7 @@ describe("AppShell — unified header", () => {
           <div data-testid="shell-body">body content</div>
         </AppShell>,
       ),
-      aConnectionServiceBackend(),
+      aSessionServiceBackend(),
     );
 
     // Then — the fullbleed root and its body render, with the header still present

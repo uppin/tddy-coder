@@ -15,7 +15,7 @@
 
 import React from "react";
 import { createClient } from "@connectrpc/connect";
-import { ConnectionService, type SessionEntry } from "../../src/gen/connection_pb";
+import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
 import { SessionInspectorDrawer } from "../../src/components/sessions/SessionInspectorDrawer";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
@@ -75,7 +75,7 @@ function aRosterOnTheCodebaseHost(): RosterBackend {
 }
 
 function mountInspectorOn(session: typeof SPLIT_SESSION, roster: RosterBackend) {
-  const client = createClient(ConnectionService, roster.backend.transport());
+  const client = createClient(SessionService, roster.backend.transport());
   const noop = () => undefined;
   mountWithRpc(
     <SessionInspectorDrawer

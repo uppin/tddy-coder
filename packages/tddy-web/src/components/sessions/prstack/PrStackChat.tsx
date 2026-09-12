@@ -1,6 +1,6 @@
 import React from "react";
 import type { Room } from "livekit-client";
-import type { SessionEntry } from "../../../gen/connection_pb";
+import type { SessionEntry } from "../../../gen/session_pb";
 import type { CommonRoomStatus } from "../../../hooks/useCommonRoom";
 import { AgentChat } from "../../chat/AgentChat";
 

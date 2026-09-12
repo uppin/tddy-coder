@@ -34,7 +34,7 @@ use std::time::Duration;
 use prost::Message as _;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_daemon_sandbox::sandbox_session::{
     build_sandbox_runner_env, dial_and_bridge, pick_free_loopback_port, spawn_sandbox_runner,
@@ -354,28 +354,9 @@ async fn a_seatbelt_jail_bridged_to(daemon: &DaemonServingOneAgent) -> BridgedJa
 
 /// Wait until a relayed family-B call actually reaches the host and comes back.
 ///
-/// FIXME(sandbox-stdio-attach): the jail's end of the `SessionChannel` does not always attach, and
-/// when it does not, nothing relayed out of the jail can ever be answered — the runner refuses with
-/// "the sandbox session channel is not connected to the host daemon yet" while its tool-IPC socket
-/// answers normally and its own log shows `SandboxService serving over stdio`.
-///
-/// Measured on macOS: the first run in a fresh process/shell attaches in ~50ms and the whole
-/// conversation completes in ~0.5s; back-to-back repeats then fail about three runs in four.
-/// Killing the jails leaked by a failed run does not change that rate, so it is not contention
-/// from leftovers.
-///
-/// The race is **not** family B's. The untouched
-/// `sandbox_session_stdio_acceptance::real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_over_stdio`
-/// fails the same way (1 of 3 back-to-back runs), and with `NullRpcHandler` in place of the
-/// daemon's handler this suite's probe comes back with that handler's own
-/// "this host does not serve session_agents.SessionAgentService/StreamSessionAgents" — the relay
-/// carrying a family-B call to the host and the refusal back, at the new coordinate. So the defect
-/// is in the stdio bridge (`tddy-daemon-sandbox::bridge_sandbox_stdio` and the runner's
-/// `StdioEndpoint::from_process_stdio`), which `#unbundle` node 7 does not own.
-///
-/// Reported rather than worked around: a setup retry would hide a real defect behind a suite that
-/// looks green, and the retry experiment showed the conversation timing out even after a later
-/// attempt attached.
+/// Waits until a relayed family-B call succeeds. `dial_and_bridge` already blocks until the stdio
+/// `SessionChannel` delivers its first jail-originated frame; this loop covers the brief window
+/// before the roster stream's first snapshot arrives.
 async fn await_the_host_relay(
     handle: &mut tddy_sandbox::SandboxHandle,
     egress_dir: &Path,
@@ -500,7 +481,7 @@ fn a_built_binary(name: &str) -> PathBuf {
 
 /// The host side of the relay: a daemon whose session has one local agent to converse with.
 struct DaemonServingOneAgent {
-    service: Arc<ConnectionServiceImpl>,
+    service: Arc<DaemonSessionHost>,
     session_id: String,
     agent_id: String,
     _data_dir: tempfile::TempDir,
@@ -522,7 +503,7 @@ async fn a_daemon_with_one_agent_attached(model_base_url: &str) -> DaemonServing
         .expect("write session metadata");
 
     let service = test_service(data_dir.path().to_path_buf()).as_arc();
-    service.set_self_handle(Arc::downgrade(&service));
+    service.install_sandbox_rpc_bridge();
 
     // Read the agent id the way a client reads it: a hand-spelled "explorer@some-host" would pass
     // while the daemon stamped something else entirely.

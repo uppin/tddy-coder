@@ -24,7 +24,7 @@ import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
@@ -64,7 +64,7 @@ function anOrchestratorSession(sessionId: string) {
  */
 function aCreateSessionBackend() {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listProjects, () => ({
+    .onUnary(ProjectService.method.listProjects, () => ({
       projects: [
         {
           projectId: PROJECT_ID,
@@ -82,11 +82,11 @@ function aCreateSessionBackend() {
     .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", version: "0.1.0" }],
     }))
-    .onUnary(ConnectionService.method.listSessions, () => ({
+    .onUnary(SessionService.method.listSessions, () => ({
       sessions: [anOrchestratorSession(ORCHESTRATOR), anOrchestratorSession(ANOTHER_ORCHESTRATOR)],
     }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({
+    .onUnary(ProjectService.method.listProjectBranches, () => ({
       branches: [],
       defaultRemote: "origin",
     }))
@@ -94,7 +94,7 @@ function aCreateSessionBackend() {
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",
     }))
-    .onUnary(ConnectionService.method.startSession, () => ({
+    .onUnary(SessionService.method.startSession, () => ({
       sessionId: "child-session-stack-node-id-1",
       livekitRoom: "room-child-1",
       livekitUrl: "ws://127.0.0.1:7880",
@@ -104,7 +104,8 @@ function aCreateSessionBackend() {
 
 /** The form as the PR-Stack row opens it: stacked on `ORCHESTRATOR`, materializing `NODE_ID`. */
 function mountPaneForPlannedNode(backend: ReturnType<typeof aCreateSessionBackend>) {
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
   const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
@@ -136,7 +137,7 @@ function theSubmittedStart(
   assertion: (call: { stackParent: string; stackNodeId: string }) => void,
 ) {
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.startSession);
+    const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
     assertion(calls[0] as { stackParent: string; stackNodeId: string });
   });

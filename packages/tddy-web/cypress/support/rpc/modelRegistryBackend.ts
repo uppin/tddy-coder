@@ -1,7 +1,7 @@
 /**
  * Builders and an in-memory `ModelRegistryService` for the Models & Agents acceptance tests.
  *
- * Mirrors `connectionServiceBackend.ts`: a stateful in-memory fake rather than a wall of stubs, so
+ * Mirrors `daemonSessionHostBackend.ts`: a stateful in-memory fake rather than a wall of stubs, so
  * a load/unload actually changes what the next `ListModels` returns and a created assistant
  * actually shows up in `ListAssistants`.
  *
@@ -11,11 +11,8 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import {
-  ListProjectsResponseSchema,
-  ProjectEntrySchema,
-  type ProjectEntry,
-} from "../../../src/gen/connection_pb";
+import { type ProjectEntry } from "../../../src/gen/project_pb";
+import { ListProjectsResponseSchema, ProjectEntrySchema } from "../../../src/gen/project_pb";
 import {
   ModelLoadState,
   ModelRegistryService,
@@ -136,7 +133,7 @@ export function aProject(overrides: Partial<Omit<ProjectEntry, "$typeName">> = {
   });
 }
 
-/** What a daemon answers `ConnectionService.ListProjects` with. */
+/** What a daemon answers `SessionService.ListProjects` with. */
 export function listedProjects(projects: ProjectEntry[]) {
   return create(ListProjectsResponseSchema, { projects });
 }

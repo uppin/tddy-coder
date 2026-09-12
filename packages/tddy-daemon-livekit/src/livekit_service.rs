@@ -1,7 +1,7 @@
 //! `livekit.LiveKitService`: what rooms this daemon can see on the LiveKit server, and who is in
 //! them.
 //!
-//! Split out of `connection.ConnectionService` by `#unbundle` node 4. One method — leaving it
+//! Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 4. One method — leaving it
 //! behind would keep the daemon serving a handler for a subsystem that lives in
 //! `tddy-daemon-livekit`, which is the shape this stack exists to remove.
 //!

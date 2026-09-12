@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../../gen/connection_pb";
+import type { SessionEntry } from "../../gen/session_pb";
 
 /** Which session, on which daemon, a roster call names. */
 export interface RosterHalf {

@@ -15,9 +15,7 @@ use std::path::PathBuf;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListSessionsRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, ListSessionsRequest};
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
 /// Simulates the path that `sessions_base_for_user` returns: `~/.tddy`.

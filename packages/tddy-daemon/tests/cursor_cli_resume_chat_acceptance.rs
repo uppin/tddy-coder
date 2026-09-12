@@ -29,11 +29,9 @@ use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 
 use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ResumeSessionRequest, StartSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, ResumeSessionRequest, StartSessionRequest};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -189,7 +187,7 @@ impl CursorArgvAssertions for Vec<String> {
 
 /// A daemon with one registered project and a stub `cursor-agent`.
 struct CursorCliDaemon {
-    service: ConnectionServiceImpl,
+    service: DaemonSessionHost,
     manager: Arc<CliSessionManager>,
     agent: StubCursorAgent,
     sessions_base: PathBuf,
@@ -345,13 +343,13 @@ fn connection_service(
     config: DaemonConfig,
     sessions_base: PathBuf,
     manager: Arc<CliSessionManager>,
-) -> ConnectionServiceImpl {
+) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

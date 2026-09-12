@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../gen/connection_pb";
+import type { SessionEntry } from "../gen/session_pb";
 
 /**
  * The four states a session's drawer dot can be in.

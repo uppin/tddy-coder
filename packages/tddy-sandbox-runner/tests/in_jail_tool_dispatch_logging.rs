@@ -23,7 +23,7 @@ use common::{serve_fake_over_tcp, Mode};
 use tddy_sandbox_runner::{
     run_host_relay_with_in_jail_tools, HostRelayConfig, InJailToolDispatcher, NullToolHandler,
 };
-use tddy_service::proto::connection::ExecuteToolRequest;
+use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
 use tokio::sync::mpsc;
 

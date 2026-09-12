@@ -8,7 +8,7 @@
 //!
 //! It exists for a specific reason that is easy to miss: **`pub(crate)` does not cross a crate
 //! boundary.** A `docs/dev/todo/` entry (since closed and removed) predicted the
-//! cost of a split as *"`ConnectionServiceImpl`'s ~60 private fields would have to become
+//! cost of a split as *"`DaemonSessionHost`'s ~60 private fields would have to become
 //! `pub(crate)` or move behind accessors"* — which is true for a module split and insufficient for a
 //! crate split. Widening to `pub(crate)` buys nothing once the consumer is a different crate, so the
 //! shared surface has to be a crate of its own.

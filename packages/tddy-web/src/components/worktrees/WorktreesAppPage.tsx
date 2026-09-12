@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { ConnectionService, type ProjectEntry } from "../../gen/connection_pb";
+import { type ProjectEntry } from "../../gen/project_pb";
+import { ProjectService } from "../../gen/project_pb";
 import { HostService, type EligibleDaemonEntry } from "../../gen/host_pb";
 import { WorktreeService } from "../../gen/worktree_pb";
 import { GitHubLoginButton } from "../GitHubLoginButton";
@@ -45,10 +46,10 @@ export function WorktreesAppPage({
   onNavigate: (path: string) => void;
 }) {
   const { isAuthenticated, login, sessionToken } = useAuthContext();
-  // Three services, one daemon: the project registry stayed on `ConnectionService`, the daemon
+  // Three services, one daemon: the project registry stayed on `ProjectService`, the daemon
   // roster moved to `host.HostService`, and the worktree reads and writes to
   // `worktree.WorktreeService`.
-  const client = useDaemonClient(ConnectionService);
+  const client = useDaemonClient(ProjectService);
   const hostClient = useDaemonClient(HostService);
   const worktreeClient = useDaemonClient(WorktreeService);
 

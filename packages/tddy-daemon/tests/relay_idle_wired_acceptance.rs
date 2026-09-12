@@ -1,4 +1,4 @@
-//! Acceptance tests: idle-timeout tracker wired into ConnectionServiceImpl (Phase 3 follow-up).
+//! Acceptance tests: idle-timeout tracker wired into DaemonSessionHost (Phase 3 follow-up).
 //!
 //! AC: in relay mode, every RPC call bumps the `IdleTimeoutTracker`'s last-activity timestamp so
 //! the daemon does not self-terminate while a remote session is active.
@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::relay_idle::IdleTimeoutTracker;
 use tddy_daemon::test_util::TestDaemon;
 use tddy_rpc::Request;
@@ -24,7 +24,7 @@ fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> TestDaemon 
     let user_resolver: UserResolver = Arc::new(|_| None);
 
     TestDaemon::from_arc(Arc::new(
-        ConnectionServiceImpl::new(
+        DaemonSessionHost::new(
             DaemonConfig::default(),
             sessions_base,
             std::env::temp_dir().join("tddy-idle-test"),
@@ -65,7 +65,7 @@ async fn rpc_call_bumps_idle_tracker_so_shutdown_is_not_triggered() {
     );
 }
 
-/// Phase 3 AC: `ConnectionServiceImpl::with_idle_tracker` is a builder that attaches
+/// Phase 3 AC: `DaemonSessionHost::with_idle_tracker` is a builder that attaches
 /// a tracker without changing the main `new()` signature (existing callers pass no tracker).
 #[tokio::test]
 async fn connection_service_accepts_idle_tracker_via_builder() {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { canResumeSession, sessionBaseViewMode } from "./sessionBaseView";
-import type { SessionEntry } from "../../gen/connection_pb";
+import type { SessionEntry } from "../../gen/session_pb";
 
 /** Named for the `hasWorkflowView` argument, so a call site reads as a sentence rather than as a
  *  bare boolean whose meaning the reader has to look up. */

@@ -2,7 +2,7 @@
 //!
 //! Two halves of one change, and both have to hold or the split is only half done: the coordinate
 //! `livekit.LiveKitService` has to be *served* — a proto nothing registers is a file, not a service
-//! — and `connection.ConnectionService` has to have stopped answering `StreamLiveKitRooms`,
+//! — and `the pre-unbundle monolithic RPC coordinate` has to have stopped answering `StreamLiveKitRooms`,
 //! because while both answer a client can keep calling the old one and the move never lands.
 //!
 //! Read from the runtime the binary actually builds, and by *dispatching* rather than by reading a
@@ -121,10 +121,10 @@ async fn no_longer_answers_the_rooms_stream_on_the_connection_service() {
 
     // When the old coordinate is called
     let refusal = status_of(
-        entry_named(&entries, "connection.ConnectionService")
+        entry_named(&entries, "the pre-unbundle monolithic RPC coordinate")
             .service
             .handle_rpc(
-                "connection.ConnectionService",
+                "the pre-unbundle monolithic RPC coordinate",
                 "StreamLiveKitRooms",
                 &a_rooms_subscription(),
             )
@@ -137,6 +137,6 @@ async fn no_longer_answers_the_rooms_stream_on_the_connection_service() {
     assert_eq!(
         refusal.code(),
         Code::NotFound,
-        "connection.ConnectionService still answers StreamLiveKitRooms: {refusal:?}"
+        "the pre-unbundle monolithic RPC coordinate still answers StreamLiveKitRooms: {refusal:?}"
     );
 }

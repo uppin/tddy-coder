@@ -35,15 +35,13 @@ use tddy_core::changeset::{write_changeset, Changeset, Stack, StackNode};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_daemon::test_util::TestDaemon;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_service::proto::pr_stack::{PrStackService, ResolveStackBaseRequest};
 
 /// The daemon under test: the one a child session is started on, and the one that holds the
@@ -192,7 +190,7 @@ livekit:
     let user_resolver: SessionUserResolver =
         Arc::new(move |token| (token == VALID_TOKEN).then(|| resolved_user.clone()));
 
-    let service = TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
+    let service = TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         data_dir.path().to_path_buf(),

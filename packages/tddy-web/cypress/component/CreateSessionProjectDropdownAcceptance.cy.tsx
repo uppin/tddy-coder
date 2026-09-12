@@ -15,7 +15,7 @@ import { Room } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
@@ -45,13 +45,13 @@ interface ProjectRowFixture {
 /** A backend seeded with every RPC CreateSessionPane issues, listing `projects` as aggregated rows. */
 function aCreateSessionBackend(projects: ProjectRowFixture[]): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",
     }))
-    .onUnary(ConnectionService.method.listProjects, () => ({
+    .onUnary(ProjectService.method.listProjects, () => ({
       projects: projects.map((p) => ({
         projectId: p.projectId,
         name: p.name,
@@ -63,14 +63,15 @@ function aCreateSessionBackend(projects: ProjectRowFixture[]): InMemoryRpcBacken
     .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({
+    .onUnary(ProjectService.method.listProjectBranches, () => ({
       branches: ["origin/master"],
       defaultRemote: "origin",
     }));
 }
 
 function mountCreatePane(backend: InMemoryRpcBackend) {
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
   const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());

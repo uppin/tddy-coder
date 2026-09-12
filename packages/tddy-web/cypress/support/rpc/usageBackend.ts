@@ -14,7 +14,7 @@
 
 import { create } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import type { SessionEntry } from "../../../src/gen/connection_pb";
+import type { SessionEntry } from "../../../src/gen/session_pb";
 import { TddyRemote, ServerMessageSchema } from "../../../src/gen/tddy/v1/remote_pb";
 import { aSessionsDrawerBackend } from "./vncBackend";
 

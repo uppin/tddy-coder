@@ -3,9 +3,9 @@ import { createClient } from "@connectrpc/connect";
 import { WorktreeService, WorktreeSizeStatus } from "../../src/gen/worktree_pb";
 import { SessionWorktreeTab } from "../../src/components/sessions/SessionWorktreeTab";
 import {
-  aConnectionServiceBackend,
-  type ConnectionServiceBackend,
-} from "../support/rpc/connectionServiceBackend";
+  aSessionServiceBackend,
+  type SessionServiceBackend,
+} from "../support/rpc/daemonSessionHostBackend";
 import { sessionWorktreeTabPage as page } from "../support/pages/sessionWorktreeTabPage";
 
 const PROJECT_ID = "proj-worktree-inspector";
@@ -15,7 +15,7 @@ const REPO_PATH = "/repos/demo/.worktrees/feat-x";
 // 1.2 GB expressed in bytes (1.2 * 1024^3) — formats to the label "1.2 GB".
 const ONE_POINT_TWO_GB = 1288490189n;
 
-function mountTab(backend: ConnectionServiceBackend, repoPath: string = REPO_PATH) {
+function mountTab(backend: SessionServiceBackend, repoPath: string = REPO_PATH) {
   const client = createClient(WorktreeService, backend.transport());
   cy.mountWithRpc(
     <SessionWorktreeTab
@@ -32,7 +32,7 @@ function mountTab(backend: ConnectionServiceBackend, repoPath: string = REPO_PAT
 describe("Session Inspector — Worktree tab", () => {
   it("shows the session's worktree disk usage and branch", () => {
     // Given the stream's snapshot carries the session's worktree as already cached
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       worktreeStatsSnapshot: [
         {
           path: REPO_PATH,
@@ -57,7 +57,7 @@ describe("Session Inspector — Worktree tab", () => {
   it("shows Calculating until the size streams in", () => {
     // Given the snapshot streams the session's worktree while its size is still calculating,
     // followed by an update frame flipping it to cached with a byte count
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       worktreeStatsSnapshot: [
         {
           path: REPO_PATH,
@@ -82,7 +82,7 @@ describe("Session Inspector — Worktree tab", () => {
 
   it("Refresh re-triggers a size calculation for this session's worktree", () => {
     // Given the tab is open on a cached worktree
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       worktreeStatsSnapshot: [
         {
           path: REPO_PATH,
@@ -106,7 +106,7 @@ describe("Session Inspector — Worktree tab", () => {
 
   it("clears the worktree only after the confirm step", () => {
     // Given the tab is open on a cached worktree
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       worktreeStatsSnapshot: [
         { path: REPO_PATH, branchLabel: "feature/x", sizeStatus: WorktreeSizeStatus.CACHED, diskBytes: ONE_POINT_TWO_GB },
       ],
@@ -132,7 +132,7 @@ describe("Session Inspector — Worktree tab", () => {
 
   it("deletes the worktree only after the confirm step", () => {
     // Given the tab is open on a cached worktree
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       worktreeStatsSnapshot: [
         { path: REPO_PATH, branchLabel: "feature/x", sizeStatus: WorktreeSizeStatus.CACHED, diskBytes: ONE_POINT_TWO_GB },
       ],
@@ -158,7 +158,7 @@ describe("Session Inspector — Worktree tab", () => {
 
   it("offers Restore when the worktree is missing", () => {
     // Given the stream's snapshot has no row matching the session's repo path
-    const backend = aConnectionServiceBackend({ worktreeStatsSnapshot: [] });
+    const backend = aSessionServiceBackend({ worktreeStatsSnapshot: [] });
 
     // When the Worktree tab is shown
     mountTab(backend);

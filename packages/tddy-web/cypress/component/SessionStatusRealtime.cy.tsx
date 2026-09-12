@@ -21,8 +21,8 @@
  * every `ListSessions` call, so it can report the session alive at mount and dead a moment later —
  * modelling the real PID-liveness flip.
  *
- * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared common-room
- * LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and `withSelectedDaemon`.
+ * `SessionService` is daemon-level RPC (`useDaemonClient`), routed over the shared common-room
+ * LiveKit connection — see `aSessionServiceBackend` (in-memory fake) and `withSelectedDaemon`.
  *
  * Feature: `docs/ft/web/session-drawer.md` (session connection state / real-time status).
  */
@@ -30,7 +30,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend, type ConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend, type SessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
@@ -58,9 +58,9 @@ const ENDS_AFTER_MS = 500;
  * Mount the sessions drawer against a backend whose `ListSessions` reports `LIVE_SESSION` as active
  * until `ENDS_AFTER_MS` after mount, then inactive — as if its PID died with no user action.
  */
-function aSessionThatEndsExternally(): ConnectionServiceBackend {
+function aSessionThatEndsExternally(): SessionServiceBackend {
   const mountedAt = Date.now();
-  const backend = aConnectionServiceBackend({
+  const backend = aSessionServiceBackend({
     listSessionsFactory: () => {
       const alive = Date.now() - mountedAt < ENDS_AFTER_MS;
       return [{ ...LIVE_SESSION, isActive: alive, status: alive ? "active" : "ended" }];

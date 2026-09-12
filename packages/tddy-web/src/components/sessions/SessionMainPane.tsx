@@ -1,7 +1,8 @@
 import React from "react";
 import { ConnectError, type Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
-import type { ConnectionService, SessionEntry, ProjectEntry } from "../../gen/connection_pb";
+import type { SessionService, SessionEntry } from "../../gen/session_pb";
+import type { ProjectService, ProjectEntry } from "../../gen/project_pb";
 import type { CatalogService } from "../../gen/catalog_pb";
 import type { ExecToolService } from "../../gen/exec_tools_pb";
 import type { PrStackService } from "../../gen/pr_stack_pb";
@@ -39,7 +40,8 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type ConnectionClient = Client<typeof SessionService>;
+type ProjectClient = Client<typeof ProjectService>;
 type CatalogClient = Client<typeof CatalogService>;
 type ExecToolClient = Client<typeof ExecToolService>;
 type PrStackClient = Client<typeof PrStackService>;
@@ -67,6 +69,8 @@ interface SessionMainPaneProps {
   // Create session mode
   isCreating?: boolean;
   client?: ConnectionClient;
+  /** `project.ProjectService` on the same host as `client` — create form project registry reads. */
+  projectClient?: ProjectClient;
   /**
    * The worktree service on the same host as `client` — the Code pane, the inspector's Worktree tab
    * and the create form's host-document picker all read worktrees through it. Absent for the same
@@ -88,7 +92,7 @@ interface SessionMainPaneProps {
   /**
    * The session-agent service on the same host as `client` — the Add-agent flow attaches through
    * it and each runtime's conversation panes talk to their agent over it. `#unbundle` node 7 took
-   * the roster and conversation RPCs out of `connection.ConnectionService`, so they need their own
+   * the roster and conversation RPCs out of `session.SessionService`, so they need their own
    * client; absent for the same reason `client` can be.
    */
   sessionAgentClient?: SessionAgentClient;
@@ -179,6 +183,7 @@ export function SessionMainPane({
   onTerminate,
   isCreating = false,
   client,
+  projectClient,
   worktreeClient,
   terminalClient,
   sessionFilesClient,
@@ -336,6 +341,7 @@ export function SessionMainPane({
   const customView = !isCreating
     ? resolveWorkflowView(selectedSession, {
         client,
+        projectClient,
         catalogClient,
         prStackClient,
         sessionFilesClient,
@@ -462,9 +468,10 @@ export function SessionMainPane({
       data-testid="sessions-detail-pane"
       className="flex-1 min-w-0 flex flex-col h-full overflow-hidden relative"
     >
-      {isCreating && client && catalogClient && sessionFilesClient && worktreeClient && (
+      {isCreating && client && projectClient && catalogClient && sessionFilesClient && worktreeClient && (
         <CreateSessionPane
           client={client}
+          projectClient={projectClient}
           catalogClient={catalogClient}
           sessionFilesClient={sessionFilesClient}
           worktreeClient={worktreeClient}

@@ -9,12 +9,10 @@ use std::sync::Arc;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::read_session_metadata;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::test_util::TestDaemon;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
-};
+use tddy_service::proto::session::{ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -47,7 +45,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> TestDaemon {
             None
         }
     });
-    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

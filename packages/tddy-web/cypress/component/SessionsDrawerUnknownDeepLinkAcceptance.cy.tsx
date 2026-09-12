@@ -8,7 +8,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
@@ -35,7 +35,7 @@ describe("Sessions drawer — unknown deep link", () => {
   it("shows a not-found message with a Home link for an unknown session id", () => {
     // Given — a deep link to a session id that is not in the loaded list
     window.location.hash = "/sessions/does-not-exist-999";
-    const backend = aConnectionServiceBackend({ sessions: [KNOWN_SESSION] });
+    const backend = aSessionServiceBackend({ sessions: [KNOWN_SESSION] });
 
     // When
     mountWithRecordingLiveKitRpc(

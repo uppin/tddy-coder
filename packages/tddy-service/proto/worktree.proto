@@ -5,7 +5,7 @@ package worktree;
 // Everything about worktrees: listing them per project, their disk usage, their lifecycle, and
 // browsing and reading the files inside one.
 //
-// Split out of `connection.ConnectionService` by `#unbundle` node 1, alongside `host.proto`. The two
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 1, alongside `host.proto`. The two
 // share no message with each other and none with what stayed behind.
 
 service WorktreeService {

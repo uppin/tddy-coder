@@ -10,7 +10,7 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { ConnectionService, type SessionEntry } from "../../src/gen/connection_pb";
+import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
 import { PrStackService } from "../../src/gen/pr_stack_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";

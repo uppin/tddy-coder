@@ -20,7 +20,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
-use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::{
     EgressRequest, EgressResponse, HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,
@@ -85,18 +85,22 @@ impl SessionChannelClient for StdioSandboxClient {
     ) -> Result<SessionFrameStream, String> {
         let client = Arc::clone(&self.client);
         let (result_tx, result_rx) = mpsc::channel::<Result<SessionFrame, String>>(64);
+        let (bridge_ready_tx, bridge_ready_rx) = oneshot::channel::<Result<(), String>>();
 
         tokio::spawn(async move {
             let (mut sender, mut receiver) =
                 match client.start_bidi_stream("sandbox.SandboxService", "SessionChannel") {
                     Ok(pair) => pair,
                     Err(e) => {
-                        let _ = result_tx
-                            .send(Err(format!("start SessionChannel bidi call: {e}")))
-                            .await;
+                        let msg = format!("start SessionChannel bidi call: {e}");
+                        let _ = bridge_ready_tx.send(Err(msg.clone()));
+                        let _ = result_tx.send(Err(msg)).await;
                         return;
                     }
                 };
+            if bridge_ready_tx.send(Ok(())).is_err() {
+                return;
+            }
             loop {
                 tokio::select! {
                     frame = outbound.next() => {
@@ -127,6 +131,16 @@ impl SessionChannelClient for StdioSandboxClient {
                 }
             }
         });
+
+        match bridge_ready_rx.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                return Err(
+                    "SessionChannel stdio bridge exited before start_bidi_stream".to_string(),
+                );
+            }
+        }
 
         Ok(Box::pin(ReceiverStream::new(result_rx)))
     }
@@ -185,7 +199,7 @@ pub trait HostToolHandler: Send + Sync + 'static {
 /// forwards each as an [`RpcRequest`]; the host dispatches it here and the response (unary or
 /// server-streaming) rides back as [`RpcStreamFrame`]s multiplexed by `request_id`. The host is
 /// the only thing the jail can reach, and these RPCs live on the daemon — so the daemon supplies
-/// the implementation that calls its `ConnectionServiceImpl`; the standalone app and tests supply
+/// the implementation that calls its `DaemonSessionHost`; the standalone app and tests supply
 /// [`NullRpcHandler`], which refuses every call the way a daemon-less session should.
 ///
 /// [`RpcRequest`]: tddy_service::proto::sandbox::RpcRequest
@@ -531,21 +545,26 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
     let host_tx_reader = host_tx.clone();
     let end_signal = Arc::new(EndSignal::new());
     let in_jail_tools = Arc::new(InJailToolExchange::default());
+    let (attached_tx, attached_rx) = oneshot::channel();
 
     let reader = tokio::spawn({
         let end_signal = Arc::clone(&end_signal);
         let rpc_handler = Arc::clone(&rpc_handler);
         let in_jail_tools = Arc::clone(&in_jail_tools);
+        let mut attached_tx = Some(attached_tx);
         async move {
             // CONNECT tunnels: tunnel_id → sender feeding agent→host bytes into the outbound TCP socket.
             let mut tunnels: HashMap<String, mpsc::UnboundedSender<Bytes>> = HashMap::new();
             while let Some(Ok(frame)) = session.next().await {
+                if let Some(tx) = attached_tx.take() {
+                    let _ = tx.send(());
+                }
                 match frame.payload {
                     Some(SessionPayload::SessionEnded(_)) => {
-                        // The pty command exited — stop polling and let both ends of the stream drop,
-                        // so the in-jail gRPC server can finish shutting down (see `signal_session_ended`).
+                        // The pty command exited — stop polling so terminal input is not written to a
+                        // dead pty, but keep reading: in-jail `tddy-tools` may still relay roster and
+                        // conversation RPCs over the same `SessionChannel` until the stream closes.
                         end_signal.signal();
-                        break;
                     }
                     Some(SessionPayload::ToolRequest(req)) => {
                         let resp = tool_handler
@@ -740,6 +759,15 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
             }
         }
     });
+
+    tokio::time::timeout(Duration::from_secs(10), attached_rx)
+        .await
+        .map_err(|_| {
+            "timed out waiting for the jail's SessionChannel to deliver its first frame".to_string()
+        })?
+        .map_err(|_| {
+            "the jail's SessionChannel reader exited before delivering its first frame".to_string()
+        })?;
 
     Ok((
         reader,

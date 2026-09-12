@@ -13,7 +13,7 @@ import React from "react";
 import { AppShell } from "../../src/components/shell/AppShell";
 import { appShellPage as shell } from "../support/pages/appShellPage";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import {
   A_SIGNED_IN_SESSION_TOKEN,
@@ -69,7 +69,7 @@ describe("The daemon-mode navigation menu", () => {
           <div data-testid="shell-body">body content</div>
         </AppShell>,
       ),
-      aConnectionServiceBackend(),
+      aSessionServiceBackend(),
     );
 
     // When the operator opens the menu and chooses Settings

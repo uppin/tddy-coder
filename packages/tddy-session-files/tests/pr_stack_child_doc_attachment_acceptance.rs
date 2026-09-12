@@ -14,9 +14,7 @@
 use std::fs;
 use std::path::Path;
 
-use tddy_service::proto::connection::{
-    session_attachment::Source, HostDocumentRef, SessionAttachment,
-};
+use tddy_service::proto::session::{session_attachment::Source, HostDocumentRef, SessionAttachment};
 use tddy_service::proto::types::HostDocumentScope;
 use tddy_session_files::stack_doc_attachments::stack_doc_attachments;
 

@@ -2199,7 +2199,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
             ];
-            // The session's three coordinates — `connection.ConnectionService`,
+            // The session's three coordinates — `the pre-unbundle monolithic RPC coordinate`,
             // `terminal_session.TerminalSessionService` and `activity.ActivityService` — over one
             // service object, so a terminal started on either is the same terminal, and the activity
             // this session reports is the activity it replays.
@@ -3537,7 +3537,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 .unwrap_or_else(|| std::path::PathBuf::from(".")),
             presenter_events: Some(event_tx.clone()),
         };
-        // The session's three coordinates — `connection.ConnectionService`,
+        // The session's three coordinates — `the pre-unbundle monolithic RPC coordinate`,
         // `terminal_session.TerminalSessionService` and `activity.ActivityService` — over one
         // service object, so a terminal started on either is the same terminal, and the activity
         // this session reports is the activity it replays.

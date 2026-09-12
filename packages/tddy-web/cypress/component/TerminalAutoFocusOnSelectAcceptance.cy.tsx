@@ -17,7 +17,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend, type ConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend, type SessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
@@ -51,8 +51,8 @@ const SESSION_B = {
 
 /** A two-active-session drawer backend; each attach resolves to a distinct LiveKit room so the two
  *  runtimes (and their terminals) are independently addressable. */
-function aTerminalFocusBackend(): ConnectionServiceBackend {
-  return aConnectionServiceBackend({
+function aTerminalFocusBackend(): SessionServiceBackend {
+  return aSessionServiceBackend({
     sessions: [SESSION_A, SESSION_B],
     connectSession: (sessionId) => ({
       livekitRoom: sessionId === SESSION_A.sessionId ? "room-focus-a" : "room-focus-b",
@@ -62,7 +62,7 @@ function aTerminalFocusBackend(): ConnectionServiceBackend {
   });
 }
 
-function aTerminalFocusScreen(): ConnectionServiceBackend {
+function aTerminalFocusScreen(): SessionServiceBackend {
   const backend = aTerminalFocusBackend();
   mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   return backend;

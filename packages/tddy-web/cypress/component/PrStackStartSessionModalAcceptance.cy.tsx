@@ -11,7 +11,8 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { ConnectionService, type ProjectEntry, type SessionEntry } from "../../src/gen/connection_pb";
+import { type ProjectEntry } from "../../src/gen/project_pb";
+import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -68,7 +69,7 @@ const PROJECT: Partial<ProjectEntry> = {
  */
 function aPrStackModalBackend() {
   return aSessionsDrawerBackend([ORCHESTRATOR_SESSION])
-    .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
+    .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
@@ -76,8 +77,8 @@ function aPrStackModalBackend() {
     }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }] }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches: [], defaultRemote: "origin" }))
-    .onUnary(ConnectionService.method.startSession, () => ({
+    .onUnary(ProjectService.method.listProjectBranches, () => ({ branches: [], defaultRemote: "origin" }))
+    .onUnary(SessionService.method.startSession, () => ({
       sessionId: CHILD_SESSION_ID,
       livekitRoom: "room-child-modal-1",
       livekitUrl: "ws://127.0.0.1:7880",
@@ -113,7 +114,7 @@ it("opens the session-creation dialog when Start session is clicked, without sta
   prStackScreenPage.createSessionDialog().should("be.visible");
   prStackScreenPage.createSessionPaneInDialog().should("be.visible");
   cy.wrap(backend).should((b) => {
-    expect(b.callsTo(ConnectionService.method.startSession)).to.have.length(0);
+    expect(b.callsTo(SessionService.method.startSession)).to.have.length(0);
   });
 });
 
@@ -146,7 +147,7 @@ it("creates the stack-parented child session when the dialog is submitted", () =
   // Then — StartSession is parented to this orchestrator, carries the planned branch as the new
   // branch name, and the child appears in the drawer.
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.startSession);
+    const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
     expect(calls[0].stackParent).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].newBranchName).to.equal(NODE_BRANCH);
@@ -168,7 +169,7 @@ it("names the planned node the child materializes on the StartSession it submits
   // instead, as the daemon used to, unlinks the node the moment the operator renames the branch in
   // this dialog — and cannot be derived at all when the child spawns on another host (D34).
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.startSession);
+    const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
     expect(calls[0].stackNodeId).to.equal("n1");
   });

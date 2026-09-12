@@ -13,9 +13,9 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { ConnectionService, type SessionEntry } from "../../src/gen/connection_pb";
+import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { createSessionPage } from "../support/pages/createSessionPage";
 import { branchConflictDialogPage } from "../support/pages/branchConflictDialogPage";
@@ -90,12 +90,12 @@ function aCreation() {
  */
 function aBackendRefusing(refusals: number) {
   let calls = 0;
-  return aConnectionServiceBackend({
+  return aSessionServiceBackend({
     sessions: [OWNER_SESSION],
     projectsOverride: [{ projectId: PROJECT_ID, name: "Branch Conflict Project" }],
     agents: [{ id: AGENT_ID, label: "Claude (opus)" }],
     connectSession: { livekitRoom: `room-${OWNER_SESSION_ID}` },
-  }).onUnary(ConnectionService.method.startSession, (req) => {
+  }).onUnary(SessionService.method.startSession, (req) => {
     calls += 1;
     return calls <= refusals ? aRefusalFor(req.newBranchName) : aCreation();
   });
@@ -138,7 +138,7 @@ it("asks the daemon to reject an owned branch instead of suffixing it", () => {
 
   // Then — without this field the daemon silently creates `<branch>-1`.
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.startSession);
+    const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
     expect(calls[0].onBranchConflict).to.equal("reject");
   });
@@ -181,9 +181,9 @@ it("attaches to the owning session when Switch is chosen, without creating a ses
 
   // Then — the owning session is attached and no second creation was attempted.
   cy.wrap(backend).should((b) => {
-    const connects = b.callsTo(ConnectionService.method.connectSession);
+    const connects = b.callsTo(SessionService.method.connectSession);
     expect(connects.map((c) => c.sessionId)).to.include(OWNER_SESSION_ID);
-    expect(b.callsTo(ConnectionService.method.startSession)).to.have.length(1);
+    expect(b.callsTo(SessionService.method.startSession)).to.have.length(1);
   });
   branchConflictDialogPage.dialog().should("not.exist");
 });
@@ -199,7 +199,7 @@ it("starts a second agent on the owned branch when Add another agent is chosen",
 
   // Then — the re-submission joins the existing branch, which reuses the owner's worktree.
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.startSession);
+    const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(2);
     expect(calls[1].branchWorktreeIntent).to.equal("work_on_selected_branch");
     expect(calls[1].selectedBranchToWorkOn).to.equal(OWNED_BRANCH);
@@ -230,7 +230,7 @@ it("creates the session under the typed branch name when the rename is submitted
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.startSession);
+    const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(2);
     expect(calls[1].branchWorktreeIntent).to.equal("new_branch_from_base");
     expect(calls[1].newBranchName).to.equal(FREE_BRANCH);
@@ -265,6 +265,6 @@ it("returns to the filled creation form when the dialog is cancelled", () => {
   branchConflictDialogPage.dialog().should("not.exist");
   sessionsDrawerPage.createSessionPane().should("be.visible");
   cy.wrap(backend).should((b) => {
-    expect(b.callsTo(ConnectionService.method.startSession)).to.have.length(1);
+    expect(b.callsTo(SessionService.method.startSession)).to.have.length(1);
   });
 });

@@ -78,12 +78,9 @@ use livekit::prelude::{
 use livekit::DisconnectReason;
 use prost::Message;
 use serde::Deserialize;
-use tddy_service::proto::connection::{
-    AddProjectToHostRequest, AddProjectToHostResponse, DeleteSessionRequest, DeleteSessionResponse,
-    ExecuteToolChunk, ExecuteToolRequest, ListProjectsRequest, ListProjectsResponse,
-    ProjectEntry as ProtoProjectEntry, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse,
-};
+use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolRequest};
+use tddy_service::proto::project::{AddProjectToHostRequest, AddProjectToHostResponse, ListProjectsRequest, ListProjectsResponse, ProjectEntry as ProtoProjectEntry, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse};
+use tddy_service::proto::session::{DeleteSessionRequest, DeleteSessionResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse};
 use tddy_service::proto::session_files::{
     DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse, HostDocumentChunk,
     ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, ReadHostDocumentRequest,
@@ -109,7 +106,7 @@ pub const LOG_LIVEKIT_PEER_METADATA: &str = "tddy_daemon::livekit_peer_discovery
 /// LiveKit-backed eligible listing plus the shared common-room [`Room`] handle for **StartSession** forwarding.
 ///
 /// Construct this in `tddy-daemon`'s `runtime::build` when `livekit.common_room` and credentials are
-/// set; pass [`None`] to `tddy-daemon`'s `connection_service::ConnectionServiceImpl::new` for
+/// set; pass [`None`] to `tddy-daemon`'s `connection_service::DaemonSessionHost::new` for
 /// single-host / discovery-disabled mode.
 pub struct LiveKitDiscoveryHandles {
     pub eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
@@ -632,7 +629,7 @@ impl EligibleDaemonSource for LiveKitEligibleDaemonSource {
                 let bytes = forward_to_peer(
                     &room_slot,
                     &peer_id,
-                    "connection.ConnectionService",
+                    "project.ProjectService",
                     "ListProjects",
                     req.encode_to_vec(),
                 )
@@ -1265,7 +1262,7 @@ pub async fn forward_start_session_via_livekit_within(
     let out = forward_to_peer_within(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        "session.SessionService",
         "StartSession",
         body,
         deadline,
@@ -1291,7 +1288,7 @@ pub async fn forward_stream_start_session_via_livekit(
     forward_server_stream_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        "session.SessionService",
         "StreamStartSession",
         request.encode_to_vec(),
         |bytes| {
@@ -1316,7 +1313,7 @@ pub async fn forward_delete_session_via_livekit(
     let out = forward_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        "session.SessionService",
         "DeleteSession",
         request.encode_to_vec(),
     )
@@ -1342,7 +1339,7 @@ pub async fn forward_stream_execute_tool_via_livekit(
     forward_server_stream_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        "exec_tools.ExecToolService",
         "StreamExecuteTool",
         request.encode_to_vec(),
         |bytes| {
@@ -1366,7 +1363,7 @@ pub async fn forward_add_project_to_host_via_livekit(
     let out = forward_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        "project.ProjectService",
         "AddProjectToHost",
         body,
     )
@@ -1388,7 +1385,7 @@ pub async fn forward_set_project_default_branch_via_livekit(
     let out = forward_to_peer(
         room_slot,
         peer_instance_id,
-        "connection.ConnectionService",
+        "project.ProjectService",
         "SetProjectDefaultBranch",
         body,
     )

@@ -27,7 +27,7 @@ use tddy_sandbox::{CgroupConfig, MountSpec, SandboxError, SandboxPlan};
 // standalone app speak the same one-call-at-a-time protocol into the same jail, so a call still
 // legitimate on one of them must not already have been abandoned on the other.
 use tddy_sandbox_runner::{SessionChannelClient, IN_JAIL_TOOL_TIMEOUT};
-use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::SessionFrame;
 use tokio::sync::{mpsc, Mutex};
@@ -341,6 +341,7 @@ async fn start_jail_channel(
         handle,
         crate::sandbox_session::NoCallbackSandboxService,
     )
+    .await
     .map_err(SandboxError::Io)?;
     let (out_tx, out_rx) = mpsc::channel::<SessionFrame>(16);
     let inbound = tddy_sandbox_runner::StdioSandboxClient::new(client)

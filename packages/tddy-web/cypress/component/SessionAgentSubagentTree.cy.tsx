@@ -27,7 +27,7 @@
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
-import { SessionEntrySchema, type SessionEntry } from "../../src/gen/connection_pb";
+import { SessionEntrySchema, type SessionEntry } from "../../src/gen/session_pb";
 import { SessionAgentStatus } from "../../src/gen/types_pb";
 import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
 import {

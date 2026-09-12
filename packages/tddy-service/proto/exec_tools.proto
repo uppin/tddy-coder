@@ -4,7 +4,7 @@ package exec_tools;
 
 // Executing a tool, and what has been executed.
 //
-// Split out of `connection.ConnectionService` by `#unbundle` node 8 — family L — and served from
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 8 — family L — and served from
 // `tddy-tool-engine`.
 //
 // # This is where a duplication ends

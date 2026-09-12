@@ -1,6 +1,6 @@
 //! Multi-host daemon identity, discoverability, and routing.
 
-use tddy_service::proto::connection::ProjectEntry;
+use tddy_service::proto::project::ProjectEntry;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::daemon_identity::{

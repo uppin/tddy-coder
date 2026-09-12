@@ -23,7 +23,7 @@ use tddy_service::proto::activity::{ReportAgentActivityRequest, ReportSessionSta
 /// serving it cannot disagree about the name.
 ///
 /// `#unbundle` node 7 moved `ReportSessionStatus` and `ReportAgentActivity` off
-/// `connection.ConnectionService`, which no longer declares either. A name spelled out here would
+/// `the pre-unbundle monolithic RPC coordinate`, which no longer declares either. A name spelled out here would
 /// go on posting to the vacated coordinate, and the fail-quiet contract above would swallow every
 /// refusal: session status, the attention alerts read off it and every agent-activity row would
 /// stop with nothing said. Hence the constant rather than a literal — the same reason

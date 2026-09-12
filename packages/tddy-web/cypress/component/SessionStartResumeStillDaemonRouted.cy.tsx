@@ -12,10 +12,10 @@
  */
 
 import React from "react";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
@@ -51,7 +51,7 @@ const DAEMON_INSTANCE_ID = "local";
 const DAEMON_PARTICIPANT_IDENTITY = `daemon-${DAEMON_INSTANCE_ID}`;
 
 function aBackendForSessions() {
-  return aConnectionServiceBackend({
+  return aSessionServiceBackend({
     sessions: [ACTIVE_SESSION, DISCONNECTED_SESSION],
     connectSession: () => ({
       livekitRoom: `room-${ACTIVE_SESSION.sessionId}`,
@@ -93,7 +93,7 @@ describe("SessionStartResumeStillDaemonRouted — bootstrap RPCs keep targeting 
 
     // Then — ResumeSession reached the backend and a LiveKit client was built for the daemon participant
     cy.wrap(backend).should((b) => {
-      const calls = b.callsTo(ConnectionService.method.resumeSession);
+      const calls = b.callsTo(SessionService.method.resumeSession);
       expect(calls).to.have.length(1);
       expect(calls[0].sessionId).to.equal(DISCONNECTED_SESSION.sessionId);
     });
@@ -115,7 +115,7 @@ describe("SessionStartResumeStillDaemonRouted — bootstrap RPCs keep targeting 
 
     // Then — ConnectSession reached the backend via the daemon participant identity
     cy.wrap(backend).should((b) => {
-      const calls = b.callsTo(ConnectionService.method.connectSession);
+      const calls = b.callsTo(SessionService.method.connectSession);
       expect(calls).to.have.length(1);
       expect(calls[0].sessionId).to.equal(ACTIVE_SESSION.sessionId);
     });

@@ -838,19 +838,19 @@ async fn the_terminal_coordinate_does_not_answer_under_the_connection_service_na
     let refusal = session
         .coder_participant
         .refusal_at(
-            "connection.ConnectionService",
+            "the pre-unbundle monolithic RPC coordinate",
             "StreamTerminalOutput",
             session.a_tail_open(),
         )
         .await;
 
     // Then — it is refused as an unknown service: the participant no longer registers
-    // `connection.ConnectionService` at all
+    // `the pre-unbundle monolithic RPC coordinate` at all
     assert_eq!(
         (refusal.code(), refusal.message()),
         (
             Code::NotFound,
-            "Unknown service: connection.ConnectionService"
+            "Unknown service: the pre-unbundle monolithic RPC coordinate"
         )
     );
 }

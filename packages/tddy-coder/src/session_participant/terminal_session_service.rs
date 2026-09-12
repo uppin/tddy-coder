@@ -44,7 +44,7 @@ const UNSERVED_METHODS: [&str; 2] = ["StreamSessionTerminalIO", "WatchTerminalCo
 
 /// The `terminal_session.TerminalSessionService` entry the coder's participant registers.
 ///
-/// Built from the same [`SessionConnectionService`] the `connection.ConnectionService` entry is, so
+/// Built from the same [`SessionConnectionService`] the `the pre-unbundle monolithic RPC coordinate` entry is, so
 /// the session's tools and its terminals reach one
 /// [`TerminalManager`](super::terminal_manager::TerminalManager) and one control lease — a second
 /// manager here would mean a terminal started through this coordinate was invisible to the session
@@ -54,7 +54,7 @@ const UNSERVED_METHODS: [&str; 2] = ["StreamSessionTerminalIO", "WatchTerminalCo
 ///
 /// [`current_os_user`](super::terminal_manager::current_os_user) reads the passwd entry of this
 /// process's effective uid and falls back to `$USER`. If both come up empty, all seven served
-/// methods answer `PERMISSION_DENIED`, where the pre-move `connection.ConnectionService` handlers
+/// methods answer `PERMISSION_DENIED`, where the pre-move `the pre-unbundle monolithic RPC coordinate` handlers
 /// had no such gate. That is deliberate and not softened here: every one of those methods reaches
 /// a PTY, `StartTerminalSession` resolves the login shell *from the named user*, and a terminal
 /// whose owning OS user this process cannot name is one nothing downstream can attribute. Naming

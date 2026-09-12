@@ -6,7 +6,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use tddy_sandbox::format_egress_logs;
 use tddy_sandbox_darwin::{connect_sandbox_client, run_sandbox_runner, SandboxRunnerArgs};
-use tddy_service::proto::connection::ExecuteToolResponse;
+use tddy_service::proto::exec_tools::ExecuteToolResponse;
 use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::{
     EchoRequest, EchoStreamFrame, HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,

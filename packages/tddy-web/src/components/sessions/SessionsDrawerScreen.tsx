@@ -2,12 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
-import {
-  ConnectionService,
-  SessionEntrySchema,
-  type SessionEntry,
-  type ProjectEntry,
-} from "../../gen/connection_pb";
+import { ProjectService, type ProjectEntry } from "../../gen/project_pb";
+import { SessionService, SessionEntrySchema, type SessionEntry } from "../../gen/session_pb";
 import { ActivityService } from "../../gen/activity_pb";
 import { CatalogService } from "../../gen/catalog_pb";
 import { ExecToolService } from "../../gen/exec_tools_pb";
@@ -60,7 +56,7 @@ import {
 } from "../../routing/appRoutes";
 import { PARAM_CODE, PARAM_FULL, PARAM_INSPECTOR } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
-import { Signal } from "../../gen/connection_pb";
+import { Signal } from "../../gen/session_pb";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { detectIsMobile, useIsMobile } from "../../hooks/useIsMobile";
 import { resolveShortcutsForSession } from "../../lib/toolShortcuts";
@@ -82,19 +78,20 @@ export function SessionsDrawerScreen({
   const { sessionToken: authSessionToken } = useAuthContext();
   const sessionToken = authSessionToken ?? "";
 
-  // ConnectionService is daemon-level RPC — routed to whichever daemon is currently selected over
+  // SessionService is daemon-level RPC — routed to whichever daemon is currently selected over
   // whichever wire reaches it (see `SelectedDaemonProvider` and `rpc/connections`).
   // `null` until a daemon is selected and a wire reaches it; every call site below guards.
   // The selected-daemon `client` still owns the CREATE flow (a new session is created on the
   // selected host); cross-host interaction routes through `activeClient` (computed below).
-  const client = useDaemonClient(ConnectionService);
-  // The worktree RPCs left `ConnectionService` for `worktree.WorktreeService`, so they need their
+  const client = useDaemonClient(SessionService);
+  const projectClient = useDaemonClient(ProjectService);
+  // The worktree RPCs left `SessionService` for `worktree.WorktreeService`, so they need their
   // own client — the same daemon, over the same wire, addressed under the service that now serves
   // them. It follows `client`'s routing exactly (selected daemon here, owning host in
   // `activeWorktreeClient` below) so the pane and its worktree reads cannot disagree about which
   // host they are talking to.
   const worktreeClient = useDaemonClient(WorktreeService);
-  // Likewise for the nine terminal RPCs, which left `ConnectionService` for
+  // Likewise for the nine terminal RPCs, which left `SessionService` for
   // `terminal_session.TerminalSessionService`. Same daemon, same wire, and the same routing as
   // `client` — a runtime's control lease and its terminal I/O must reach the host the session's
   // PTY actually lives on.
@@ -125,14 +122,14 @@ export function SessionsDrawerScreen({
   // over a wire with no roster yields `null`, and each of those already handles its absence.
   const room = useHostPresence(selectedInstanceId);
   const daemons = useDaemons();
-  // Address any daemon's ConnectionService directly. Used to connect to a cross-host row's owning
+  // Address any daemon's SessionService directly. Used to connect to a cross-host row's owning
   // daemon at click time, when the owner is known but the selected session (and thus `activeClient`)
   // hasn't updated yet — a host named that late cannot have a hook of its own, so it is resolved
   // through the connection registry rather than by `useDaemonClientFor`.
   const connectHost = useHostConnector();
   const clientForHost = useCallback(
-    (instanceId: string): Client<typeof ConnectionService> | null =>
-      connectHost(instanceId)?.clientFor(ConnectionService) ?? null,
+    (instanceId: string): Client<typeof SessionService> | null =>
+      connectHost(instanceId)?.clientFor(SessionService) ?? null,
     [connectHost],
   );
 
@@ -236,15 +233,15 @@ export function SessionsDrawerScreen({
   // the call fails, so the drawer still renders.
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   useEffect(() => {
-    if (!client) {
+    if (!projectClient) {
       setProjects([]);
       return;
     }
-    client
+    projectClient
       .listProjects({ sessionToken })
       .then((res) => setProjects(res.projects))
       .catch(() => setProjects([]));
-  }, [client, sessionToken]);
+  }, [projectClient, sessionToken]);
 
   // Default closed on mobile (the open 280px panel would cover the main pane);
   // open on desktop.
@@ -278,10 +275,10 @@ export function SessionsDrawerScreen({
   // is closed.
   useEffect(() => () => runtimeRegistry.closeAll(), [runtimeRegistry]);
 
-  // Session-scoped ConnectionService client — the one that reaches the session's own process rather
+  // Session-scoped SessionService client — the one that reaches the session's own process rather
   // than the daemon that hosts it. Built LAZILY, only when the user actually invokes a session-scoped
   // RPC (ExecuteTool), so that lifecycle RPCs (Delete/Signal/Resume/Connect) stay daemon-direct.
-  // `ClaimTerminalControl` is no longer one of them: the terminal RPCs left `ConnectionService` for
+  // `ClaimTerminalControl` is no longer one of them: the terminal RPCs left `SessionService` for
   // `terminal_session.TerminalSessionService`, and each runtime builds that client off its own
   // connection. The connection memoises the client per service,
   // so an unchanged route yields one stable client identity: this callback is invoked inline while
@@ -475,7 +472,7 @@ export function SessionsDrawerScreen({
     () => (selectedSession ? owningHostForSession(selectedSession, selectedInstanceId ?? "") : null),
     [selectedSession, selectedInstanceId],
   );
-  const activeClient = useDaemonClientFor(ConnectionService, selectedOwningHost);
+  const activeClient = useDaemonClientFor(SessionService, selectedOwningHost);
   const activeWorktreeClient = useDaemonClientFor(WorktreeService, selectedOwningHost);
   const activeTerminalClient = useDaemonClientFor(TerminalSessionService, selectedOwningHost);
   const activeSessionFilesClient = useDaemonClientFor(SessionFilesService, selectedOwningHost);
@@ -887,6 +884,7 @@ export function SessionsDrawerScreen({
               onTerminate={handleTerminate}
               isCreating={mode === "creating"}
               client={mode === "creating" ? (client ?? undefined) : (activeClient ?? client ?? undefined)}
+              projectClient={projectClient ?? undefined}
               worktreeClient={
                 mode === "creating"
                   ? (worktreeClient ?? undefined)

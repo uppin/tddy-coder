@@ -13,7 +13,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
@@ -34,7 +34,7 @@ const SESSION = {
 };
 
 function aBackendForSession() {
-  return aConnectionServiceBackend({
+  return aSessionServiceBackend({
     sessions: [SESSION],
     connectSession: () => ({
       livekitRoom: `room-${SESSION.sessionId}`,

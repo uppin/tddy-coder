@@ -13,7 +13,7 @@ import React from "react";
 import { createClient, ConnectError, Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
@@ -44,9 +44,9 @@ const CLAUDE_CLI_MODELS = [
  *  keyed by the requested agent. `cursorFails` makes the cursor probe reject (auth failure). */
 function aBackendWithModels({ cursorFails = false }: { cursorFails?: boolean } = {}) {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listProjects, () => ({
+    .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({
@@ -58,7 +58,7 @@ function aBackendWithModels({ cursorFails = false }: { cursorFails?: boolean } =
     .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
-    .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "model-sess-1" }))
+    .onUnary(SessionService.method.startSession, () => ({ sessionId: "model-sess-1" }))
     .onUnary(CatalogService.method.listAgentModels, (req) => {
       if (req.agent === "cursor") {
         if (cursorFails) {
@@ -74,7 +74,8 @@ function aBackendWithModels({ cursorFails = false }: { cursorFails?: boolean } =
 }
 
 function mountWith(backend: InMemoryRpcBackend) {
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
   const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
@@ -82,6 +83,7 @@ function mountWith(backend: InMemoryRpcBackend) {
   cy.mount(
     <CreateSessionPane
       client={client}
+      projectClient={projectClient}
       catalogClient={catalogClient}
       sessionFilesClient={sessionFilesClient}
       worktreeClient={worktreeClient}
@@ -148,7 +150,7 @@ describe("CreateSessionPane — tool-session model selection", () => {
 
     // Then — the typed StartSession request carried the chosen model on the tool path
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.startSession);
+      const calls = backend.callsTo(SessionService.method.startSession);
       expect(calls).to.have.length(1);
       expect(calls[0].sessionType).to.eq("");
       expect(calls[0].agent).to.eq("claude");

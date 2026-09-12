@@ -29,17 +29,13 @@ use prost::Message;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    session_attachment::Source as AttachmentSource, ConnectSessionRequest,
-    ConnectionService as ConnectionServiceTrait, SessionAttachment, StagedAttachmentRef,
-    StartSessionRequest, StartSessionResponse,
-};
+use tddy_service::proto::session::{session_attachment::Source as AttachmentSource, ConnectSessionRequest, SessionService as SessionServiceTrait, SessionAttachment, StagedAttachmentRef, StartSessionRequest, StartSessionResponse};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::livekit::LiveKitRoomInfo;
 use tddy_service::proto::session_files::{ReadHostDocumentRequest, ReadHostDocumentResponse};
@@ -116,7 +112,7 @@ fn a_codebase_holding_no_agent_guidance() -> (
 const ACTIVITY_TIMEOUT: Duration = Duration::from_secs(30);
 const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// The identity a daemon serves `connection.ConnectionService` on. Fixed `daemon-` prefix, not a
+/// The identity a daemon serves `the pre-unbundle monolithic RPC coordinate` on. Fixed `daemon-` prefix, not a
 /// lookup — see `docs/ft/web/daemon-selector-livekit-rpc.md`.
 fn rpc_identity(instance_id: &str) -> String {
     format!("daemon-{instance_id}")
@@ -293,7 +289,7 @@ impl AnAgent {
 
 /// The daemon running the agent: it hosts the session room and answers tool calls in it.
 struct FacilitatingDaemon {
-    service: ConnectionServiceImpl,
+    service: DaemonSessionHost,
     /// The PTY manager the service was built with, so a test can ask whether a session still has a
     /// terminal at all.
     agents: Arc<tddy_daemon::claude_cli_session::ClaudeCliSessionManager>,
@@ -353,7 +349,7 @@ impl FacilitatingDaemon {
         // Held by the test as well as by the service: the manager owns the sessions' PTYs, and
         // "this session has no terminal to bridge" is a fact only it can be asked for.
         let agents = Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new());
-        let service = ConnectionServiceImpl::new(
+        let service = DaemonSessionHost::new(
             config.clone(),
             resolver,
             sessions.path().to_path_buf(),
@@ -644,7 +640,7 @@ async fn read_host_document_in_room(
         CALL_TIMEOUT,
         client.call_unary(
             // The coordinate that declares it since `#unbundle` node 6. A session room serves it
-            // beside `connection.ConnectionService`, so an in-room agent reaches it unchanged.
+            // beside `the pre-unbundle monolithic RPC coordinate`, so an in-room agent reaches it unchanged.
             "session_files.SessionFilesService",
             "ReadHostDocument",
             ReadHostDocumentRequest {
@@ -1269,7 +1265,7 @@ impl FacilitatingDaemon {
     async fn connect_to(
         &self,
         session_id: &str,
-    ) -> Result<tddy_service::proto::connection::ConnectSessionResponse, tddy_rpc::Status> {
+    ) -> Result<tddy_service::proto::session::ConnectSessionResponse, tddy_rpc::Status> {
         self.service
             .connect_session(Request::new(ConnectSessionRequest {
                 session_token: TEST_TOKEN.to_string(),

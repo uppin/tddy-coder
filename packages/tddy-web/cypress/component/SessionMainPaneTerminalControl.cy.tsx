@@ -14,7 +14,7 @@ import React from "react";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
-import type { SessionEntry } from "../../src/gen/connection_pb";
+import type { SessionEntry } from "../../src/gen/session_pb";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
 
 // ---------------------------------------------------------------------------

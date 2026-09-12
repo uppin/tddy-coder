@@ -28,7 +28,7 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { createClient, type Transport } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import type { SessionEntry } from "../../src/gen/connection_pb";
+import type { SessionEntry } from "../../src/gen/session_pb";
 import {
   ClaimTerminalControlResponseSchema,
   TerminalControlEventSchema,
@@ -40,7 +40,7 @@ import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
 import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
@@ -151,7 +151,7 @@ describe("SessionInactiveInspectorOverlay — overlay-drawer layout", () => {
 
   it("keeps a disconnected session's activities mounted behind the open inspector", () => {
     // Given
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [DISCONNECTED_SESSION],
       acpReplay: { counts: [0], snapshot: [] },
     });
@@ -169,7 +169,7 @@ describe("SessionInactiveInspectorOverlay — overlay-drawer layout", () => {
 
   it("keeps a connected session's terminal mounted behind the open inspector", () => {
     // Given
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [CONNECTED_SESSION],
       connectSession: {
         livekitRoom: "room-live",
@@ -190,7 +190,7 @@ describe("SessionInactiveInspectorOverlay — overlay-drawer layout", () => {
 
   it("expands a disconnected session's inspector on request", () => {
     // Given
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [DISCONNECTED_SESSION],
       acpReplay: { counts: [0], snapshot: [] },
     });
@@ -208,7 +208,7 @@ describe("SessionInactiveInspectorOverlay — overlay-drawer layout", () => {
 
   it("keeps the expand and close controls available for a disconnected session", () => {
     // Given
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [DISCONNECTED_SESSION],
       acpReplay: { counts: [0], snapshot: [] },
     });

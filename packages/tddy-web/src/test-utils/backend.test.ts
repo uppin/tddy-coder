@@ -17,7 +17,7 @@ import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 
 import { AuthService } from "../gen/auth_pb";
 import { TokenService } from "../gen/token_pb";
-import { ConnectionService } from "../gen/connection_pb";
+import { SessionService } from "../gen/session_pb";
 
 // ---------------------------------------------------------------------------
 // .onUnary — single-method stub
@@ -133,13 +133,13 @@ describe("anInMemoryRpcBackend — .failWith", () => {
     expect((err as ConnectError).rawMessage).toBe("no session");
   });
 
-  it("rejects ConnectionService calls with PermissionDenied when stubbed", async () => {
+  it("rejects SessionService calls with PermissionDenied when stubbed", async () => {
     // Given
     const backend = anInMemoryRpcBackend().failWith(
-      ConnectionService.method.deleteSession,
+      SessionService.method.deleteSession,
       Code.PermissionDenied,
     );
-    const client = createClient(ConnectionService, backend.transport());
+    const client = createClient(SessionService, backend.transport());
 
     // When
     const err = await client

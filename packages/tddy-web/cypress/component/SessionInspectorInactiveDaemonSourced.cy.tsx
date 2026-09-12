@@ -15,7 +15,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
@@ -41,7 +41,7 @@ const INACTIVE_SESSION = {
 } as unknown as Record<string, unknown>;
 
 function aBackendWithInactiveSession() {
-  return aConnectionServiceBackend({
+  return aSessionServiceBackend({
     sessions: [INACTIVE_SESSION as never],
   });
 }

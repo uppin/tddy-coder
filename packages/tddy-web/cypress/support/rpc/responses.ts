@@ -10,20 +10,22 @@
 import { create, toBinary } from "@bufbuild/protobuf";
 
 import {
-  ConnectSessionResponseSchema,
   ListProjectBranchesResponseSchema,
   ListProjectsResponseSchema,
-  ListSessionsResponseSchema,
   ProjectEntrySchema,
+  type ProjectEntry,
+} from "../../../src/gen/project_pb";
+import {
+  ConnectSessionResponseSchema,
+  ListSessionsResponseSchema,
   ResumeSessionResponseSchema,
   SessionEntrySchema,
   StartSessionResponseSchema,
   type ConnectSessionResponse,
-  type ProjectEntry,
   type ResumeSessionResponse,
   type SessionEntry,
   type StartSessionResponse,
-} from "../../../src/gen/connection_pb";
+} from "../../../src/gen/session_pb";
 import {
   AgentInfoSchema,
   ListAgentModelsResponseSchema,

@@ -11,13 +11,13 @@
  */
 
 import React from "react";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import {
   withSelectedDaemonRoom,
   aFakeCommonRoomWithMetadata,
 } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
@@ -58,7 +58,7 @@ describe("SessionsListParticipantMetadata — drawer row renders session metadat
   it("renders goal, state, agent, and model from the participant metadata with no ListSessions call for that row", () => {
     // Given — host A is selected; the peer session is present only as a live participant on host B
     // (host A's ListSessions returns nothing for it).
-    const backend = aConnectionServiceBackend({ sessions: [] });
+    const backend = aSessionServiceBackend({ sessions: [] });
     const room = aFakeCommonRoomWithMetadata([
       { identity: PEER_PARTICIPANT_IDENTITY, metadata: PEER_SESSION_METADATA },
     ]);
@@ -82,7 +82,7 @@ describe("SessionsListParticipantMetadata — drawer row renders session metadat
 
     // ... and ListSessions was called only once (the selected host's fetch) — no fan-out for the row.
     cy.wrap(backend).should((b) => {
-      const listCalls = b.callsTo(ConnectionService.method.listSessions);
+      const listCalls = b.callsTo(SessionService.method.listSessions);
       expect(listCalls).to.have.length(1);
     });
   });

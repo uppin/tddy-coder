@@ -18,9 +18,9 @@ import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDraw
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
-  aConnectionServiceBackend,
-  type ConnectionServiceBackend,
-} from "../support/rpc/connectionServiceBackend";
+  aSessionServiceBackend,
+  type SessionServiceBackend,
+} from "../support/rpc/daemonSessionHostBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTerminalTabsPage";
 
@@ -62,15 +62,15 @@ const CHILD = {
 };
 
 /** A host-served backend (empty `livekitRoom`) listing the given sessions. */
-function aGrpcBackend(sessions: typeof PARENT[] | Array<Record<string, unknown>>): ConnectionServiceBackend {
-  return aConnectionServiceBackend({
+function aGrpcBackend(sessions: typeof PARENT[] | Array<Record<string, unknown>>): SessionServiceBackend {
+  return aSessionServiceBackend({
     sessions,
     connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
   });
 }
 
 /** Attach the parent session over gRPC and wait for its terminal tab bar to render. */
-function attachParent(backend: ConnectionServiceBackend) {
+function attachParent(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PARENT.sessionId).click();
   tabs.tabs().should("exist");
@@ -107,7 +107,7 @@ describe("SessionChildTabs — spawned conversations render as tabs in the paren
     tabs.childTab(CHILD.sessionId).click();
 
     // Then the child session is attached (ConnectSession called for the child's id) ...
-    cy.wrap(backend).should((b: ConnectionServiceBackend) => {
+    cy.wrap(backend).should((b: SessionServiceBackend) => {
       expect(b.connectedSessionIds).to.include(CHILD.sessionId);
     });
 

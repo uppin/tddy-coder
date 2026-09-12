@@ -24,10 +24,10 @@
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
-  aConnectionServiceBackend,
-  type ConnectionServiceBackend,
-  type ConnectionServiceScenario,
-} from "../support/rpc/connectionServiceBackend";
+  aSessionServiceBackend,
+  type SessionServiceBackend,
+  type SessionServiceScenario,
+} from "../support/rpc/daemonSessionHostBackend";
 import { HostsAppPage } from "../../src/components/hosts/HostsAppPage";
 import { HostService, type KnownHostEntry } from "../../src/gen/host_pb";
 import { HostRowTelemetry } from "../../src/components/hosts/HostRowTelemetry";
@@ -55,9 +55,9 @@ const CPU_PER_CORE = [12, 48];
 const CPU_AFTER_UPDATE = [90, 90];
 
 function aTelemetryBackend(
-  overrides: Partial<ConnectionServiceScenario> = {},
-): ConnectionServiceBackend {
-  return aConnectionServiceBackend({ hostDisk: DISK, hostCpuPerCore: CPU_PER_CORE, ...overrides });
+  overrides: Partial<SessionServiceScenario> = {},
+): SessionServiceBackend {
+  return aSessionServiceBackend({ hostDisk: DISK, hostCpuPerCore: CPU_PER_CORE, ...overrides });
 }
 
 type Row = { instanceId: string; online: boolean };
@@ -66,7 +66,7 @@ type Row = { instanceId: string; online: boolean };
  * Mount one telemetry cell per row. `reachable` names the hosts a wire can route to — by default
  * every mounted row, so a test opts into unreachability by naming a shorter list.
  */
-function mountCells(backend: ConnectionServiceBackend, rows: Row[], reachable: string[] = rows.map((r) => r.instanceId)) {
+function mountCells(backend: SessionServiceBackend, rows: Row[], reachable: string[] = rows.map((r) => r.instanceId)) {
   mountWithRpc(
     withSelectedDaemon(
       <div>
@@ -242,7 +242,7 @@ describe("Hosts screen telemetry", () => {
     /**
      * A daemon that lists `hosts` and streams the telemetry fixture for any of them.
      *
-     * Composed here rather than taken from `aConnectionServiceBackend`, which does not serve
+     * Composed here rather than taken from `aSessionServiceBackend`, which does not serve
      * `ListKnownHosts` — that RPC belongs to `#hosts-screen 1/8`, and teaching the shared helper
      * about it from this node would collide with the PR that owns it.
      */

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { SessionEntry } from "../gen/connection_pb";
+import type { SessionEntry } from "../gen/session_pb";
 import { TableCell } from "@/components/ui/table";
 
 function displayOrDash(value: string | undefined): string {

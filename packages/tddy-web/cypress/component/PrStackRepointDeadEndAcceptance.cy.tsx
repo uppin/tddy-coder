@@ -28,11 +28,8 @@ import React from "react";
 import { PrStackService } from "../../src/gen/pr_stack_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import {
-  ConnectionService,
-  type ProjectEntry,
-  type SessionEntry,
-} from "../../src/gen/connection_pb";
+import { type ProjectEntry } from "../../src/gen/project_pb";
+import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -141,7 +138,7 @@ interface PrStackScreenOptions {
 /** Everything but `RepointPlannedPr`, which is what the two openers differ on. */
 function aPrStackBackend(options: PrStackScreenOptions) {
   return aSessionsDrawerBackend([anOrchestratorSession(options.nodes)])
-    .onUnary(ConnectionService.method.listProjects, () => ({
+    .onUnary(ProjectService.method.listProjects, () => ({
       projects: [aProject(options.mainBranchRef ?? DEFAULT_BRANCH)],
     }))
     .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>

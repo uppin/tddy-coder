@@ -28,6 +28,7 @@
 
 pub mod auth;
 mod codex_oauth_participant_metadata;
+mod local_token;
 pub mod codex_oauth_relay;
 pub mod github_pr_credentials;
 pub mod github_token_store;
@@ -45,11 +46,12 @@ pub use auth::{
     build_auth_entries, build_token_service_entry, session_token_authenticator, AuthBuildResult,
     LiveKitTokenServiceImpl,
 };
+pub use local_token::{build_local_token_entry, mint_local_token, LocalTokenError};
 
 /// Where the daemon keeps a user's GitHub token at rest.
 ///
 /// The trait is `tddy-github`'s, not this crate's: `AuthServiceImpl` writes through it at the end
-/// of an OAuth exchange and `ConnectionServiceImpl` reads through it when it looks up an
+/// of an OAuth exchange and `DaemonSessionHost` reads through it when it looks up an
 /// operator's PRs, so a second definition here would be a second trait two crates could not pass
 /// to one another. [`github_token_store::FileGitHubTokenStore`] is this crate's implementation of
 /// it.
@@ -88,5 +90,38 @@ mod tests {
             tddy_daemon_kernel::config::DaemonConfig::load(&path).unwrap(),
             dir,
         )
+    }
+}
+
+#[cfg(test)]
+mod unbundle_local_token_tests {
+    use std::sync::Arc;
+
+    use tddy_github::SessionTokenSigner;
+
+    use super::{build_local_token_entry, mint_local_token};
+
+    #[test]
+    fn names_the_service_family_q_moves_to() {
+        let signer = Arc::new(SessionTokenSigner::new(b"family-q-name-test"));
+        assert_eq!(
+            build_local_token_entry(signer).name,
+            "local_token.LocalTokenService"
+        );
+    }
+
+    /// The mint takes an identity the transport resolved. It never reads a socket, which is the whole
+    /// reason the credential read stays with the transport and only the signing moves here.
+    #[test]
+    fn mints_for_an_identity_the_transport_already_resolved() {
+        // Given a signer the wiring layer would have installed
+        let signer = Arc::new(SessionTokenSigner::new(b"family-q-mint-test"));
+        build_local_token_entry(signer);
+
+        // When
+        let token = mint_local_token("alice").expect("a resolved identity mints");
+
+        // Then
+        assert!(!token.is_empty());
     }
 }

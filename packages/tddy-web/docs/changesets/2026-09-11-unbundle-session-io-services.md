@@ -15,7 +15,7 @@ coordinate rather than one overall.
 
 The Cypress fakes are split the same way —
 `cypress/support/rpc/terminalSessionServiceBackend.ts` and `sessionFilesServiceBackend.ts` beside
-`connectionServiceBackend.ts`, following the shape `hostServiceBackend.ts` established. A spec
+`daemonSessionHostBackend.ts`, following the shape `hostServiceBackend.ts` established. A spec
 mounts only the backends its component talks to.
 
 Cross-package proto generation cost **one manifest line**. `session_files_pb.ts` and `types_pb.ts`

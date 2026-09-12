@@ -19,7 +19,7 @@ import React, { useState } from "react";
 import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
 import { useDaemonClient } from "../../src/rpc/selectedDaemon";
 import { AuthService } from "../../src/gen/auth_pb";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -65,13 +65,13 @@ function RemountableTokenProbe({ probeId }: { probeId: string }) {
 }
 
 /**
- * Issues `ConnectionService.ListSessions` (daemon-level RPC) with the shared session token on
+ * Issues `SessionService.ListSessions` (daemon-level RPC) with the shared session token on
  * click — proves the token from `useAuthContext()` actually reaches a request sent to a connected
  * daemon, not just a display value.
  */
 function DaemonRpcProbe({ probeId }: { probeId: string }) {
   const { sessionToken } = useAuthContext();
-  const client = useDaemonClient(ConnectionService);
+  const client = useDaemonClient(SessionService);
   return (
     <button
       data-testid={listSessionsBtnTestId(probeId)}
@@ -211,7 +211,7 @@ describe("AuthProvider — shared session-token lifecycle", () => {
 
     // Then — the daemon received the refreshed token, not a stale one
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.listSessions);
+      const calls = backend.callsTo(SessionService.method.listSessions);
       expect(calls.map((c) => c.sessionToken)).to.deep.equal([REFRESHED_ACCESS_TOKEN]);
     });
   });

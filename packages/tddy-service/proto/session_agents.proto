@@ -6,7 +6,7 @@ import "types.proto";
 
 // The agents attached to a session, and the conversations held with them.
 //
-// Split out of `connection.ConnectionService` by `#unbundle` node 7 — family B.
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 7 — family B.
 //
 // Five of these nine methods are named in a **security boundary**:
 // `packages/tddy-sandbox-runner/src/runner.rs`'s `(service, method)` tuple allowlist is what an

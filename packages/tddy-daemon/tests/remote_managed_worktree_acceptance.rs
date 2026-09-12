@@ -23,15 +23,13 @@ use std::time::Duration;
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::{
-    classify_codebase_placement, CodebasePlacement, ConnectionServiceImpl,
+    classify_codebase_placement, CodebasePlacement, DaemonSessionHost,
 };
 use tddy_daemon::livekit_peer_discovery::{LiveKitDiscoveryHandles, PEER_FORWARD_TIMEOUT};
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_daemon::test_util::{TestDaemon, TEST_TOKEN};
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, StartSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, DeleteSessionRequest, StartSessionRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -121,7 +119,7 @@ fn service_with_known_codebase_peer_and_config(
         }) as Arc<dyn EligibleDaemonSource>,
         common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
     };
-    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
         config,
         resolver,
         sessions_base,
@@ -141,7 +139,7 @@ fn service_with_a_user_this_daemon_does_not_map(sessions_base: PathBuf) -> TestD
         Arc::new(move |_| Some(base.clone()))
     };
     let unmapped_user: UserResolver = Arc::new(|_| Some("someone-else".to_string()));
-    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
         test_config(),
         resolver,
         sessions_base,

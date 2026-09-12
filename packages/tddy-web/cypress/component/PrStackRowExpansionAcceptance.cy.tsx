@@ -16,7 +16,8 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { ConnectionService, type ProjectEntry, type SessionEntry } from "../../src/gen/connection_pb";
+import { type ProjectEntry } from "../../src/gen/project_pb";
+import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
 import { PrStackService } from "../../src/gen/pr_stack_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -101,7 +102,7 @@ function openPrStackScreen(opts: MountOptions = {}) {
         opts.resolutionByBranch?.[req.branch] ?? { branch: req.branch },
       ),
     )
-    .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
+    .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "opus", label: "Claude Opus (latest)" }],
@@ -109,7 +110,7 @@ function openPrStackScreen(opts: MountOptions = {}) {
     }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches: [] }));
+    .onUnary(ProjectService.method.listProjectBranches, () => ({ branches: [] }));
 
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
@@ -262,7 +263,7 @@ it("keeps a row expanded when its branch resolution changes on the poll interval
             : { exists: false },
       });
     })
-    .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
+    .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);

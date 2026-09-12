@@ -21,12 +21,8 @@ import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDraw
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { create } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import {
-  ConnectionService,
-  StartSessionEventSchema,
-  type ProjectEntry,
-  type StartSessionRequest,
-} from "../../src/gen/connection_pb";
+import { type ProjectEntry } from "../../src/gen/project_pb";
+import { SessionService, StartSessionEventSchema, type StartSessionRequest } from "../../src/gen/session_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend, type SessionEntryFixture } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
@@ -101,7 +97,7 @@ function anOrchestratorBackend(
     contextDocs,
   };
   return aSessionsDrawerBackend([orchestrator])
-    .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
+    .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listAgents, () => ({
       agents: [{ id: "claude", label: "Claude" }],
     }))
@@ -113,11 +109,11 @@ function anOrchestratorBackend(
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({
+    .onUnary(ProjectService.method.listProjectBranches, () => ({
       branches: [],
       defaultRemote: "origin",
     }))
-    .implement(ConnectionService, {
+    .implement(SessionService, {
       async *streamStartSession(req: StartSessionRequest) {
         recorder.requests.push(req);
         yield create(StartSessionEventSchema, {

@@ -1,17 +1,17 @@
 /**
  * Acceptance tests for the Create New Session flow in the sessions drawer.
  *
- * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
- * common-room LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and
+ * `SessionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
+ * common-room LiveKit connection — see `aSessionServiceBackend` (in-memory fake) and
  * `SelectedDaemonProvider` (via `withSelectedDaemon`). All tests mount SessionsDrawerScreen
  * and exercise the full flow via the in-memory backend.
  */
 import React from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { TEST_IDS, byTestId } from "../support/testIds";
 import {
@@ -74,7 +74,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("shows a '+ New session' button in the sessions drawer header", () => {
-    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION] });
+    const backend = aSessionServiceBackend({ sessions: [CONNECTED_SESSION] });
 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
@@ -88,7 +88,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("clicking '+ New session' shows the create form in the main pane with the drawer still visible", () => {
-    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION] });
+    const backend = aSessionServiceBackend({ sessions: [CONNECTED_SESSION] });
 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
@@ -105,7 +105,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("switching to Claude CLI hides Agent/Recipe and shows Model/Permission/Prompt", () => {
-    const backend = aConnectionServiceBackend({ sessions: [] });
+    const backend = aSessionServiceBackend({ sessions: [] });
 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
@@ -140,7 +140,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("populates the project dropdown from the ListProjects RPC response", () => {
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [],
       projectsOverride: [
         { projectId: "proj-alpha", name: "Alpha Project", mainRepoPath: "/home/dev/alpha" },
@@ -163,7 +163,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("populates the agent dropdown from the ListAgents RPC response", () => {
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [],
       agents: [
         { id: "claude", label: "Claude (opus)" },
@@ -186,7 +186,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("shows every model the daemon advertises in the dropdown when session type is Claude CLI", () => {
-    const backend = aConnectionServiceBackend({ sessions: [] });
+    const backend = aSessionServiceBackend({ sessions: [] });
 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
@@ -201,7 +201,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   });
 
   it("preselects the versionless alias so a new Claude CLI session tracks the latest model", () => {
-    const backend = aConnectionServiceBackend({ sessions: [] });
+    const backend = aSessionServiceBackend({ sessions: [] });
 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
@@ -216,7 +216,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("Create button is disabled until required fields are filled (tool session)", () => {
-    const backend = aConnectionServiceBackend({ sessions: [], projectsOverride: [] });
+    const backend = aSessionServiceBackend({ sessions: [], projectsOverride: [] });
 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
@@ -231,7 +231,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("shows the new branch name input when branch mode is 'new branch from base'", () => {
-    const backend = aConnectionServiceBackend({ sessions: [] });
+    const backend = aSessionServiceBackend({ sessions: [] });
 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
@@ -249,7 +249,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("shows a branch selector when branch mode is 'work on existing branch'", () => {
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [],
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
       projectBranches: ["origin/main", "origin/feature-x"],
@@ -275,7 +275,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("clicking Cancel dismisses the create form and restores the main pane placeholder", () => {
-    const backend = aConnectionServiceBackend({ sessions: [] });
+    const backend = aSessionServiceBackend({ sessions: [] });
 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
@@ -293,7 +293,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("submitting the form calls StartSession and auto-attaches to the new session", () => {
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [],
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
       agents: [{ id: "claude", label: "Claude (opus)" }],
@@ -327,11 +327,11 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("shows an error message when StartSession RPC fails and keeps the form open", () => {
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [],
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
       agents: [{ id: "claude", label: "Claude (opus)" }],
-    }).onUnary(ConnectionService.method.startSession, async () => {
+    }).onUnary(SessionService.method.startSession, async () => {
       throw new ConnectError("internal error", Code.Internal);
     });
 
@@ -372,7 +372,7 @@ describe("CreateSession acceptance — post-creation list refresh", () => {
   it("re-fetches the sessions list after creation so the new session appears in the drawer", () => {
     // Given — first listSessions returns empty; second returns the newly-created session
     let callCount = 0;
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
       agents: [{ id: "claude", label: "Claude (opus)" }],
       listSessionsFactory: () => {
@@ -412,7 +412,7 @@ describe("CreateSession acceptance — post-creation list refresh", () => {
   it("shows the new session's terminal in the detail pane rather than the empty placeholder", () => {
     // Given — same two-phase list setup
     let callCount = 0;
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
       agents: [{ id: "claude", label: "Claude (opus)" }],
       listSessionsFactory: () => {

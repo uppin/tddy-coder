@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../gen/connection_pb";
+import type { SessionEntry } from "../gen/session_pb";
 
 /**
  * Returns sessions that are referenced as `orchestratorSessionId` by at least one other session

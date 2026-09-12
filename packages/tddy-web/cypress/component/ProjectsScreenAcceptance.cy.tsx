@@ -15,7 +15,8 @@ import { Room } from "livekit-client";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";
 import { ProjectsScreen } from "../../src/components/projects/ProjectsScreen";
-import { ConnectionService, type ProjectEntry } from "../../src/gen/connection_pb";
+import { type ProjectEntry } from "../../src/gen/project_pb";
+import { ProjectService } from "../../src/gen/project_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";
@@ -64,9 +65,9 @@ function aProjectsBackend(
 ): InMemoryRpcBackend {
   const state = [...projects];
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listProjects, () => ({ projects: state }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches, defaultRemote }))
-    .onUnary(ConnectionService.method.createProject, (req) => {
+    .onUnary(ProjectService.method.listProjects, () => ({ projects: state }))
+    .onUnary(ProjectService.method.listProjectBranches, () => ({ branches, defaultRemote }))
+    .onUnary(ProjectService.method.createProject, (req) => {
       const project = aProject({
         projectId: "proj-new",
         name: req.name,
@@ -76,7 +77,7 @@ function aProjectsBackend(
       state.push(project);
       return { project };
     })
-    .onUnary(ConnectionService.method.setProjectDefaultBranch, (req) => {
+    .onUnary(ProjectService.method.setProjectDefaultBranch, (req) => {
       for (const p of state) {
         if (p.projectId === req.projectId) p.mainBranchRef = req.mainBranchRef;
       }
@@ -147,7 +148,7 @@ it("creates a project from the screen and shows it after the list refreshes", ()
 
   // Then
   cy.wrap(backend).should((b) => {
-    expect(b.callsTo(ConnectionService.method.createProject)).to.have.length(1);
+    expect(b.callsTo(ProjectService.method.createProject)).to.have.length(1);
   });
   projectsScreenPage.card("proj-new").should("exist");
 });
@@ -210,7 +211,7 @@ it("sends the add-to-host RPC directly to the chosen host's daemon", () => {
   // selected daemon (which serves the screen) is the local host.
   const backend = aProjectsBackend([
     aProject({ projectId: "proj-alpha", daemonInstanceId: LOCAL_HOST }),
-  ]).onUnary(ConnectionService.method.addProjectToHost, () => ({
+  ]).onUnary(ProjectService.method.addProjectToHost, () => ({
     project: aProject({ projectId: "proj-alpha", daemonInstanceId: REMOTE_HOST }),
   }));
 
@@ -223,7 +224,7 @@ it("sends the add-to-host RPC directly to the chosen host's daemon", () => {
   // (daemon-server-2), not only the selected local daemon it double-hops through today.
   cy.wrap(null).should(() => {
     expect(targets).to.include(daemonRpcIdentity(REMOTE_HOST));
-    const calls = backend.callsTo(ConnectionService.method.addProjectToHost);
+    const calls = backend.callsTo(ProjectService.method.addProjectToHost);
     expect(calls).to.have.length(1);
     expect(calls[0].daemonInstanceId).to.equal(REMOTE_HOST);
   });
@@ -369,7 +370,7 @@ it("sets the project default branch to the chosen remote branch", () => {
 
   // Then — SetProjectDefaultBranch is called with the chosen ref for that project
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.setProjectDefaultBranch);
+    const calls = b.callsTo(ProjectService.method.setProjectDefaultBranch);
     expect(calls).to.have.length(1);
     expect(calls[0].projectId).to.equal("proj-alpha");
     expect(calls[0].mainBranchRef).to.equal("origin/dev");

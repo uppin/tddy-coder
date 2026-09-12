@@ -9,11 +9,7 @@ import React from "react";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
-import {
-  ConnectionService,
-  StartSessionRequestSchema,
-  StartSessionResponseSchema,
-} from "../../src/gen/connection_pb";
+import { SessionService, StartSessionRequestSchema, StartSessionResponseSchema } from "../../src/gen/session_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
@@ -52,7 +48,7 @@ function testTransport() {
 }
 
 function createTestClient() {
-  return createClient(ConnectionService, testTransport());
+  return createClient(SessionService, testTransport());
 }
 
 function createTestCatalogClient() {
@@ -77,7 +73,7 @@ const TEST_TOOL_PATH = "/usr/bin/tddy-coder";
 
 function interceptBaseline() {
   const projectsBody = toArrayBuffer(listProjects([TEST_PROJECT]));
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
+  cy.intercept("POST", "**/rpc/project.ProjectService/ListProjects", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: projectsBody });
   }).as("listProjects");
 
@@ -114,6 +110,7 @@ function mountCreateSessionPane(overrides: {
   cy.mount(
     <CreateSessionPane
       client={client}
+      projectClient={projectClient}
       catalogClient={catalogClient}
       sessionFilesClient={sessionFilesClient}
       worktreeClient={worktreeClient}
@@ -226,7 +223,7 @@ describe("CreateSessionPane — claude-cli session fields", () => {
 describe("CreateSessionPane — create button enabled state", () => {
   it("Create button is disabled when no project is selected", () => {
     const noProjectsBody = toArrayBuffer(listProjects([]));
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
+    cy.intercept("POST", "**/rpc/project.ProjectService/ListProjects", (req) => {
       req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: noProjectsBody });
     }).as("listProjects");
 
@@ -311,7 +308,7 @@ describe("CreateSessionPane — submit behaviour", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
       capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
       req.continue();
     });
@@ -347,7 +344,7 @@ describe("CreateSessionPane — submit behaviour", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
       capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
       req.continue();
     });
@@ -389,7 +386,7 @@ describe("CreateSessionPane — submit behaviour", () => {
     const responseBody = toArrayBuffer(
       toBinary(StartSessionResponseSchema, create(StartSessionResponseSchema, { sessionId: "in-flight-check" })),
     );
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
       req.reply({ delay: 3000, statusCode: 200, headers: { "Content-Type": "application/proto" }, body: responseBody });
     }).as("startSessionSlow");
 
@@ -418,7 +415,7 @@ describe("CreateSessionPane — submit behaviour", () => {
 
   it("shows an error message when startSession fails and keeps the form open", () => {
     interceptBaseline();
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
       req.reply({ statusCode: 500, body: "daemon error" });
     }).as("startSessionFail");
 
@@ -455,7 +452,7 @@ function interceptBaselineWithSessions(
     recipe: s.recipe ?? "",
     orchestratorSessionId: s.orchestratorSessionId ?? "",
   }))));
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
+  cy.intercept("POST", "**/rpc/session.SessionService/ListSessions", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: sessionsBody });
   }).as("listSessions");
 }
@@ -508,7 +505,7 @@ describe("CreateSessionPane — recipe dropdown", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
       capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
       req.continue();
     });
@@ -592,7 +589,7 @@ describe("CreateSessionPane — stack parent picker", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
       capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
       req.continue();
     });
@@ -620,7 +617,7 @@ describe("CreateSessionPane — stack parent picker", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
       capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
       req.continue();
     });
@@ -650,4 +647,4 @@ describe("CreateSessionPane — stack parent picker", () => {
 // ---------------------------------------------------------------------------
 // Type alias to avoid import gymnastics above
 // ---------------------------------------------------------------------------
-type StartSessionRequest = import("../../src/gen/connection_pb").StartSessionRequest;
+type StartSessionRequest = import("../../src/gen/session_pb").StartSessionRequest;
