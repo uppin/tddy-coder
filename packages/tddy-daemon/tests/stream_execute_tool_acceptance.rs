@@ -20,10 +20,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, StartSessionRequest,
 };
-use tddy_service::proto::exec_tools::{
-    ExecToolService, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
-    ListExecToolsRequest,
-};
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolChunk, ExecuteToolRequest};
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a39";
 
 /// Comfortably more than one frame, so the reassembly path is genuinely exercised.

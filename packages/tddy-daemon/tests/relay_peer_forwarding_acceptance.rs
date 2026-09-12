@@ -20,10 +20,7 @@ use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaem
 use tddy_daemon::test_util::TestDaemon;
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
-use tddy_service::proto::exec_tools::{
-    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
-};
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ListExecToolsRequest};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

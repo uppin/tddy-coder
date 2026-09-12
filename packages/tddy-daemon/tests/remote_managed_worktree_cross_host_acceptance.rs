@@ -49,7 +49,7 @@ use tddy_service::proto::connection::{
     ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse,
     ListSessionsRequest, StartSessionRequest,
 };
-use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ListExecToolsRequest};
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;

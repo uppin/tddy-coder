@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use pretty_assertions::assert_eq;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
-use tddy_daemon::connection_service::{roster_replacement_pairs, ConnectionServiceImpl};
+use tddy_daemon::connection_service::roster_replacement_pairs;
 use tddy_daemon::split_session::{split_claude_extra_args, wire_roster_withdrawals};
 use tddy_daemon::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_discovery::subagent::normalize_replaced_tools;

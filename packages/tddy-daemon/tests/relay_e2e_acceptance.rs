@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use livekit::prelude::RoomOptions;
 use serial_test::serial;
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
@@ -23,10 +22,8 @@ use tddy_daemon::multi_host::EligibleDaemonSource;
 use tddy_daemon::relay_idle::IdleTimeoutTracker;
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon::test_util::TestDaemon;
-use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 use tddy_service::proto::exec_tools::{ExecToolService, ListExecToolsRequest};
 
 const RELAY_ROOM: &str = "relay-e2e-common-room";

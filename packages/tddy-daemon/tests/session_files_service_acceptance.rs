@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use prost::Message as _;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon::connection_service::{ConnectionServiceImpl, PeerRoutedSessionFiles};
+use tddy_daemon::connection_service::PeerRoutedSessionFiles;
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_daemon::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_rpc::{Code, RpcMessage, RpcResult, RpcService, Status};

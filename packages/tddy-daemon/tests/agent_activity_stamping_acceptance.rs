@@ -16,7 +16,6 @@ use pretty_assertions::assert_eq;
 use tddy_core::agent_activity::{read_agent_activity, AgentActivityRecord};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::test_util::{test_service, TEST_USER};
 use tddy_rpc::Request;
 use tddy_service::proto::activity::{ActivityService as _, ReportAgentActivityRequest};

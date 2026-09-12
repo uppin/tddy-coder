@@ -32,9 +32,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, StartSessionRequest,
 };
-use tddy_service::proto::exec_tools::{
-    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
-};
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

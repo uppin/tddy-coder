@@ -40,9 +40,7 @@ use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, SessionAttachment, StagedAttachmentRef,
     StartSessionRequest, StartSessionResponse,
 };
-use tddy_service::proto::exec_tools::{
-    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
-};
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::livekit::LiveKitRoomInfo;
 use tddy_service::proto::session_files::{ReadHostDocumentRequest, ReadHostDocumentResponse};
 use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};

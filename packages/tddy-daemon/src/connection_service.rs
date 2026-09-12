@@ -55,8 +55,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 #[cfg(test)]
 use tddy_service::proto::connection::{
-    AddPlannedPrRequest, ExecuteToolRequest, ListProjectsRequest, Signal, SignalSessionRequest,
-    StartSessionRequest,
+    ExecuteToolRequest, ListProjectsRequest, Signal, SignalSessionRequest, StartSessionRequest,
 };
 
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
