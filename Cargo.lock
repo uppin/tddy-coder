@@ -12226,6 +12226,7 @@ dependencies = [
  "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
  "tddy-service",
+ "tddy-session-tool-client",
  "tddy-stdio",
  "tddy-task",
  "tddy-tool-engine",
