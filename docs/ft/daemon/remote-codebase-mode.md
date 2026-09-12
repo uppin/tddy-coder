@@ -151,7 +151,7 @@ injected by tddy — pass them explicitly when using print mode.
 
 Details: [cursor-cli-session.md](cursor-cli-session.md#sandbox-mode).
 
-**What else a jailed agent may reach.** Besides `ExecuteTool`, the runner forwards exactly five
+**What else a jailed agent may reach.** Besides `exec_tools.ExecToolService/ExecuteTool`, the runner forwards exactly five
 roster and conversation operations to the facilitating daemon over the `SessionChannel` —
 `StreamSessionAgents`, `OpenAgentConversation`, `PromptAgentConversation`, `CancelAgentConversation`
 and `ReportAgentConversationState`, addressed at `session_agents.SessionAgentService`

@@ -18,6 +18,7 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ConnectionService, SessionEntrySchema } from "../../src/gen/connection_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { AgentCloneState } from "../../src/gen/session_agents_pb";
 import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
 import { daemonRpcIdentity, type DaemonHost } from "../../src/lib/participantRole";
@@ -122,7 +123,7 @@ function mountPaneAcrossHosts(roster: RosterBackend, hostB: InMemoryRpcBackend) 
  * so nothing on screen distinguishes one read from two.
  */
 function catalogReadsReceivedBy(roster: RosterBackend) {
-  return cy.then(() => roster.backend.callsTo(ConnectionService.method.listSubagents));
+  return cy.then(() => roster.backend.callsTo(CatalogService.method.listSubagents));
 }
 
 describe("Agent roster pane", () => {

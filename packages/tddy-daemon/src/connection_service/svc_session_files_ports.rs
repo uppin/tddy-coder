@@ -93,6 +93,9 @@ impl ConnectionServiceImpl {
             self.session_agents_entry(),
             self.activity_entry(),
             self.terminal_session_entry(),
+            self.catalog_entry(),
+            self.exec_tool_entry(),
+            self.pr_stack_entry(),
             tddy_rpc::ServiceEntry {
                 name: "connection.ConnectionService",
                 service: Arc::new(tddy_service::ConnectionServiceServer::from_arc(Arc::clone(

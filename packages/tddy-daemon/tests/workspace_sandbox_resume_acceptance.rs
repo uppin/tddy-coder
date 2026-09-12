@@ -17,17 +17,20 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::test_util::{test_service, TEST_TOKEN};
+use tddy_daemon::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
 use tddy_rpc::{Request, Status};
 use tddy_sandbox::SandboxError;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
-    ExecuteToolResponse, ResumeSessionRequest, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ResumeSessionRequest,
+    StartSessionRequest,
 };
+use tddy_service::proto::connection::{
+    ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse,
+};
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ExecuteToolResponse};
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a42";
 
@@ -69,13 +72,13 @@ impl RecordingSandbox {
 
 #[async_trait]
 impl WorkspaceSandbox for RecordingSandbox {
-    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse {
+    async fn execute_tool(&self, req: &ConnExecuteToolRequest) -> ConnExecuteToolResponse {
         self.calls.lock().unwrap().push(JailedCall {
             session_id: req.session_id.clone(),
             tool_name: req.tool_name.clone(),
             args_json: req.args_json.clone(),
         });
-        ExecuteToolResponse {
+        ConnExecuteToolResponse {
             result_json: serde_json::json!({ "marker": JAIL_MARKER, "tool": req.tool_name })
                 .to_string(),
             is_error: false,
@@ -164,7 +167,7 @@ fn register_project(sessions_base: &Path, repo_path: &Path) {
 
 /// A daemon holding a registered project, ready to be asked for a workspace session.
 struct CodebaseHost {
-    service: ConnectionServiceImpl,
+    service: TestDaemon,
     sessions: tempfile::TempDir,
     _repo: tempfile::TempDir,
 }
@@ -235,7 +238,7 @@ impl CodebaseHost {
     fn restarted_with_provisioner(
         &self,
         provisioner: Arc<dyn WorkspaceSandboxProvisioner>,
-    ) -> ConnectionServiceImpl {
+    ) -> TestDaemon {
         test_service(self.sessions.path().to_path_buf())
             .with_workspace_sandbox_provisioner(provisioner)
     }
@@ -254,7 +257,7 @@ fn a_tool_request(session_id: &str, tool: &str, args: &str) -> ExecuteToolReques
 /// Run one tool call against a bare service (the restarted daemon) and unwrap its result, the way
 /// [`CodebaseHost::execute_tool`] does for the host that owns the tempdir.
 async fn execute_tool_on(
-    service: &ConnectionServiceImpl,
+    service: &TestDaemon,
     session_id: &str,
     tool: &str,
     args: &str,
@@ -267,7 +270,7 @@ async fn execute_tool_on(
 }
 
 /// Delete a session against a bare service (the restarted daemon).
-async fn delete_on(service: &ConnectionServiceImpl, session_id: &str) {
+async fn delete_on(service: &TestDaemon, session_id: &str) {
     service
         .delete_session(Request::new(DeleteSessionRequest {
             session_token: TEST_TOKEN.to_string(),
@@ -405,10 +408,10 @@ struct LingeringProcessSandbox {
 
 #[async_trait]
 impl WorkspaceSandbox for LingeringProcessSandbox {
-    async fn execute_tool(&self, _req: &ExecuteToolRequest) -> ExecuteToolResponse {
+    async fn execute_tool(&self, _req: &ConnExecuteToolRequest) -> ConnExecuteToolResponse {
         // The delete test never dispatches a tool; the jail exists only so its process lifetime is
         // observable.
-        ExecuteToolResponse::default()
+        ConnExecuteToolResponse::default()
     }
 
     fn stop(&self) {

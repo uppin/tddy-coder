@@ -28,18 +28,16 @@ import "types.proto";
 // types.proto and `SessionEntry` reaches them there rather than keeping a second copy. No field
 // number on a surviving message was vacated, so none needed reserving — `SessionEntry` keeps 31 and
 // 32, pointing at the shared declarations.
+//
+// Families A, L and P left for `catalog.CatalogService` (packages/tddy-service/proto/catalog.proto,
+// 4 rpcs), `exec_tools.ExecToolService` (packages/tddy-service/proto/exec_tools.proto, 4 rpcs) and
+// `pr_stack.PrStackService` (packages/tddy-service/proto/pr_stack.proto, 8 rpcs) in `#unbundle`
+// node 8, taking this service from 33 rpcs to **17** — families C, D, O and Q, the deliberate
+// endpoint of the whole stack. Their request, response and payload messages went with them.
+// `BranchSession` is reached by `ListSessions` through the branch views it reports, so it moved to
+// `types.proto` and `SessionEntry` reaches it there rather than keeping a second copy.
 
 service ConnectionService {
-  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
-  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
-  // Models selectable for a given agent (or the "claude-cli" pseudo-agent). Enumerated from the
-  // underlying agent command where possible (cursor --list-models, ACP available_models), else a
-  // curated tddy-core list. Probes the agent subprocess, so it is called on demand per selected
-  // agent — not folded into the cheap ListAgents. See docs/ft/web/tool-session-model-selection.md.
-  rpc ListAgentModels(ListAgentModelsRequest) returns (ListAgentModelsResponse);
-  // Specialized subagents (YAML-defined; see docs/ft/coder/specialized-subagents.md) available to
-  // wire into a managed-codebase session — builtin defs plus <tddyhome>/agents/*.yaml.
-  rpc ListSubagents(ListSubagentsRequest) returns (ListSubagentsResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
   rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
@@ -57,64 +55,10 @@ service ConnectionService {
   // Set a project's default integration base ref (logical-project scope: forwarded to peer hosts
   // owning the same project_id). See docs/ft/coder/git-integration-base-ref.md.
   rpc SetProjectDefaultBranch(SetProjectDefaultBranchRequest) returns (SetProjectDefaultBranchResponse);
-  // Remote-codebase mode: execute a tool in a session worktree, or list available tools.
-  rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
-  // Streaming twin of ExecuteTool, for a result past the transport's message-size budget. A `Read`
-  // of a large file or a broad `Grep` crosses it on day one, and over LiveKit an oversized response
-  // is chunk-framed with best-effort reassembly — one lost frame wedges the call with no error. The
-  // frames here are bounded below that budget instead. Used by the split-placement tool path
-  // (docs/ft/daemon/remote-managed-worktree.md); the unary call still serves stdio and HTTP.
-  rpc StreamExecuteTool(ExecuteToolRequest) returns (stream ExecuteToolChunk);
-  rpc ListExecTools(ListExecToolsRequest) returns (ListExecToolsResponse);
-  rpc ListSessionToolCalls(ListSessionToolCallsRequest) returns (ListSessionToolCallsResponse);
   // Demo VM lifecycle — UI-driven QEMU boot/shutdown for the demo goal.
   rpc StartDemoVm(StartDemoVmRequest) returns (StartDemoVmResponse);
   rpc StopDemoVm(StopDemoVmRequest) returns (StopDemoVmResponse);
   rpc GetDemoVmStatus(GetDemoVmStatusRequest) returns (GetDemoVmStatusResponse);
-  // PR-Stack Chat Screen: manually append a planned PR to an orchestrator session's stack,
-  // choosing its ancestors (parent node ids) from the already-planned nodes. See
-  // docs/ft/coder/pr-stacking.md § Manually adding a planned PR.
-  rpc AddPlannedPr(AddPlannedPrRequest) returns (AddPlannedPrResponse);
-  // PR-Stack Chat Screen: live GitHub PR status for one planned-PR branch (number, link, state).
-  // Polled by the web so the stack view shows PR status without the orchestrator agent running.
-  // See docs/ft/coder/pr-stack-live-status.md.
-  rpc GetPrStatus(GetPrStatusRequest) returns (GetPrStatusResponse);
-  // PR-Stack Chat Screen: repoint a planned node after a predecessor merged — drop merged parents,
-  // rebase the local branch onto the effective base, and re-target the open PR's base branch.
-  rpc RepointPlannedPr(RepointPlannedPrRequest) returns (RepointPlannedPrResponse);
-  // PR-Stack Chat Screen: move one planned node up or down the operator's reading order. Changes
-  // only `StackNode.display_order` — the dependency graph (`parents`) is a different fact and is
-  // left alone. See docs/ft/coder/pr-stack-live-status.md.
-  rpc ReorderPlannedPr(ReorderPlannedPrRequest) returns (ReorderPlannedPrResponse);
-  // PR-Stack Chat Screen: take a base branch's commits into a planned node's branch, inside that
-  // node's own worktree, and push the result. Merge by default; rebase on request.
-  rpc PullBaseIntoBranch(PullBaseIntoBranchRequest) returns (PullBaseIntoBranchResponse);
-  // PR-Stack Chat Screen: resolve one head branch to its in-progress child session, on-disk
-  // worktree, and live GitHub PR status in a single call. Polled by the web per rendered branch.
-  // See docs/ft/coder/pr-stack-live-status.md.
-  rpc QueryBranch(QueryBranchRequest) returns (QueryBranchResponse);
-  // Resolve, on the daemon that **owns** a PR-stack parent, what a child spawn's branch bases off.
-  //
-  // `stack_parent` is a bare session id, and every resolver behind it reads the parent's
-  // `changeset.yaml` out of the serving daemon's own sessions tree. The new-session form's
-  // orchestrator picker is fed by a fanned-out, all-host `ListSessions`, so it routinely offers an
-  // orchestrator that lives on a different daemon than the child is started on — and resolved
-  // locally that parent is not "not yet planned" but simply absent, which refuses the spawn over a
-  // session that exists one host over.
-  //
-  // So the spawning daemon asks the owner instead. The owner is the only place the parent's stack,
-  // its already-spawned child sessions and a checkout of the same logical project exist together,
-  // which is exactly what the answer is assembled from. See docs/ft/coder/pr-stacking.md.
-  rpc ResolveStackBase(ResolveStackBaseRequest) returns (ResolveStackBaseResponse);
-  // Record, on the daemon that **owns** a PR-stack orchestrator, that one of its planned nodes has
-  // been materialized: which child session did it, and which branch that session created.
-  //
-  // The write half of `ResolveStackBase`, routed for the same reason. A planned node lives in its
-  // orchestrator's own `changeset.yaml`, so a child spawned on another host writing its own sessions
-  // tree writes nothing at all — the node keeps neither a branch nor a child, and every descendant
-  // stays unspawnable because `Stack::base_ref_for_spawn` gates on a parent owning a branch. See
-  // docs/ft/coder/pr-stack-live-status.md (D35).
-  rpc LinkStackNode(LinkStackNodeRequest) returns (LinkStackNodeResponse);
   // One measurement of a session's checkout, for the daemon hosting that session's room.
   //
   // A session room lives on the daemon running the session's agent; when the repo is remote that

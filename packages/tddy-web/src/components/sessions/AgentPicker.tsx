@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ConnectionService } from "../../gen/connection_pb";
+import { CatalogService } from "../../gen/catalog_pb";
 import { safeTestIdPart } from "../../lib/testId";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHttpClient } from "../../rpc/transportProvider";
@@ -46,7 +46,7 @@ export function AgentPicker({ testIdPrefix, errorTestId, onAttach, onClose }: Ag
   // host that owns the session. `ListSubagents` carries no routing field and a daemon never forwards
   // it, so the fan-out reads its home host through this client and addresses every *other*
   // common-room daemon over LiveKit RPC.
-  const client = useHttpClient(ConnectionService);
+  const client = useHttpClient(CatalogService);
   const { servingInstanceId } = useSelectedDaemon();
   const available = useAvailableAgents(client, servingInstanceId ?? "");
 

@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package exec_tools;
+
+// Executing a tool, and what has been executed.
+//
+// Split out of `connection.ConnectionService` by `#unbundle` node 8 — family L — and served from
+// `tddy-tool-engine`.
+//
+// # This is where a duplication ends
+//
+// `tddy-tool-engine` already **defines** the ten tools and **executes** them. With this service it
+// also serves them, so there is one catalog, one executor and one served coordinate. Until node 5
+// there were three copies of the catalog — this crate's, a hand-written `RemoteToolDef` clone in
+// `tddy-tools`, and a guard test in the daemon — kept in step by matched tests in both crates. Node 5
+// collapsed the clone; node 8 deletes the guards as vacuous, because a test whose failure is
+// impossible reads as coverage without being any.
+//
+// `ExecuteTool` is also the method named in `tddy-sandbox-runner`'s relay allowlist at `runner.rs:69`
+// and in `tddy-sandbox-app`'s mirror guard, and the one `tddy-discovery` used to reach through a
+// hand-built URL.
+
+service ExecToolService {
+  // Remote-codebase mode: execute a tool in a session worktree, or list available tools.
+  rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
+  // Streaming twin of ExecuteTool, for a result past the transport's message-size budget. A `Read`
+  // of a large file or a broad `Grep` crosses it on day one, and over LiveKit an oversized response
+  // is chunk-framed with best-effort reassembly — one lost frame wedges the call with no error. The
+  // frames here are bounded below that budget instead. Used by the split-placement tool path
+  // (docs/ft/daemon/remote-managed-worktree.md); the unary call still serves stdio and HTTP.
+  rpc StreamExecuteTool(ExecuteToolRequest) returns (stream ExecuteToolChunk);
+  rpc ListExecTools(ListExecToolsRequest) returns (ListExecToolsResponse);
+  rpc ListSessionToolCalls(ListSessionToolCallsRequest) returns (ListSessionToolCallsResponse);
+}
+
+// One frame of a StreamExecuteTool response. The result is the concatenation of every frame's
+// `result_chunk`, in arrival order, decoded as the UTF-8 of the unary call's `result_json`.
+message ExecuteToolChunk {
+  // Next slice of the result. An empty result still yields exactly one frame, so a consumer never
+  // has to distinguish "empty result" from "nothing arrived".
+  bytes  result_chunk   = 1;
+  // Outcome of the call, carried on the final frame only — a tool error is a result, not an RPC
+  // failure, exactly as in unary ExecuteTool. Only routing failures terminate the stream.
+  bool   is_error       = 2;
+  string error_message  = 3;
+  string job_id         = 4;
+  bool   job_running    = 5;
+  // Final-frame marker. A stream that ends without it was truncated, not completed.
+  bool   last           = 6;
+}
+
+message ExecuteToolRequest {
+  string session_token      = 1;
+  string session_id         = 2;
+  string tool_name          = 3;
+  string args_json          = 4;
+  string daemon_instance_id = 5;
+}
+
+message ExecuteToolResponse {
+  string result_json    = 1;
+  bool   is_error       = 2;
+  string error_message  = 3;
+  string job_id         = 4;
+  bool   job_running    = 5;
+}
+
+message ListExecToolsRequest {
+  string session_token      = 1;
+  string daemon_instance_id = 2;
+}
+
+message ListExecToolsResponse {
+  repeated ToolDef tools = 1;
+}
+
+message ListSessionToolCallsRequest {
+  string session_token      = 1;
+  string session_id         = 2;
+  string daemon_instance_id = 3;
+}
+
+message ListSessionToolCallsResponse {
+  repeated ToolCallInfo tool_calls = 1;
+}
+
+message ToolCallInfo {
+  string task_id          = 1;
+  string tool_name        = 2;
+  string args_json        = 3;
+  string result_json      = 4;
+  bool   is_error         = 5;
+  string error_message    = 6;
+  bool   job_running      = 7;
+  uint64 created_unix_ms  = 8;
+}
+
+message ToolDef {
+  string name              = 1;
+  string description       = 2;
+  string input_schema_json = 3;
+}

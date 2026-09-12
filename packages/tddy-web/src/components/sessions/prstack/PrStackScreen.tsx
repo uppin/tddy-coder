@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../../gen/connection_pb";
+import type { CatalogService } from "../../../gen/catalog_pb";
+import type { PrStackService } from "../../../gen/pr_stack_pb";
 import type { SessionFilesService } from "../../../gen/session_files_pb";
 import type { WorktreeService } from "../../../gen/worktree_pb";
 import type { SessionAttachmentHint } from "../../../rpc/connections/session";
@@ -28,6 +30,8 @@ import { remoteTrackingName } from "../../../lib/branchNames";
 import type { SessionMetadata } from "../../../lib/sessionParticipantMetadata";
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type CatalogClient = Client<typeof CatalogService>;
+type PrStackClient = Client<typeof PrStackService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
 
@@ -77,7 +81,12 @@ function unpushedPullReason(baseBranch: string, branch: string, pushError: strin
 
 export interface PrStackScreenProps {
   session: SessionEntry;
+  /** `connection.ConnectionService` on the orchestrator's host — Start-session only. */
   client?: ConnectionClient;
+  /** `pr_stack.PrStackService` on the same host — planned-PR mutations and `QueryBranch`. */
+  prStackClient?: PrStackClient;
+  /** `catalog.CatalogService` on the same host — the Start-session dialog's catalog fan-out. */
+  catalogClient?: CatalogClient;
   /** The session-files service on the same host as `client` — the Start-session dialog stages
    *  its attachments through it. */
   sessionFilesClient?: SessionFilesClient;
@@ -154,6 +163,8 @@ export interface PrStackScreenProps {
 export function PrStackScreen({
   session,
   client,
+  prStackClient,
+  catalogClient,
   sessionFilesClient,
   worktreeClient,
   sessionToken = "",
@@ -239,7 +250,7 @@ export function PrStackScreen({
   // One-call branch resolution (worktree + in-progress session + remote + PR + base sync) per branch,
   // polled on the same interval and independent of the agent.
   const { resolutionByBranch: branchResolutionByBranch, setResolution } = useQueryBranch(
-    client,
+    prStackClient,
     sessionToken,
     session.sessionId,
     branchQueries,
@@ -363,8 +374,8 @@ export function PrStackScreen({
   };
 
   const handleAddPlannedPr = async (input: AddPlannedPrFormSubmission) => {
-    if (!client) return;
-    const res = await client.addPlannedPr({
+    if (!prStackClient) return;
+    const res = await prStackClient.addPlannedPr({
       sessionToken,
       sessionId: session.sessionId,
       title: input.title,
@@ -407,7 +418,7 @@ export function PrStackScreen({
   // was promised rather than re-deriving it from a git probe that cannot tell "absent from origin"
   // from "could not tell" (D18).
   const handleRepoint = async (nodeId: string) => {
-    if (!client) return;
+    if (!prStackClient) return;
     const node = nodes.find((n) => n.nodeId === nodeId);
     if (!node) return;
     // The control is disabled while any mutation of this branch is in flight, but a second call must
@@ -419,7 +430,7 @@ export function PrStackScreen({
     // report a failure that is no longer the current state.
     setRepointErrorByNodeId((prev) => withoutNode(prev, nodeId));
     try {
-      const res = await client.repointPlannedPr({
+      const res = await prStackClient.repointPlannedPr({
         sessionToken,
         sessionId: session.sessionId,
         nodeId,
@@ -445,14 +456,14 @@ export function PrStackScreen({
   // re-rendered through the same override `handleAddPlannedPr` uses, since the `session` prop only
   // refreshes on a later refetch.
   const handleReorder = async (nodeId: string, direction: "up" | "down") => {
-    if (!client) return;
+    if (!prStackClient) return;
     // The control is disabled while a reorder is in flight, but a second call must be impossible
     // rather than merely hard to trigger: two reorders of one node race over which returned plan wins.
     if (reorderingNodeIds.has(nodeId)) return;
     setReorderingNodeIds((prev) => new Set(prev).add(nodeId));
     setReorderErrorByNodeId((prev) => withoutNode(prev, nodeId));
     try {
-      const res = await client.reorderPlannedPr({
+      const res = await prStackClient.reorderPlannedPr({
         sessionToken,
         sessionId: session.sessionId,
         nodeId,
@@ -481,7 +492,7 @@ export function PrStackScreen({
     dirtyWorktreeAction: "" | "commit";
     commitMessage: string;
   }) => {
-    if (!client) return;
+    if (!prStackClient) return;
     const { nodeId, branch } = pull;
     // Every control that touches this branch is disabled while one of them runs, but a concurrent
     // merge, rebase or repoint of one branch is destructive rather than merely wasteful, so it must
@@ -492,7 +503,7 @@ export function PrStackScreen({
     // reports a state that is no longer true.
     setSyncErrorByNodeId((prev) => withoutNode(prev, nodeId));
     try {
-      const res = await client.pullBaseIntoBranch({
+      const res = await prStackClient.pullBaseIntoBranch({
         sessionToken,
         sessionId: session.sessionId,
         nodeId,
@@ -660,10 +671,11 @@ export function PrStackScreen({
         onCommitAndPull={handleCommitDirtyWorktreeAndPull}
         onCancel={() => setDirtyWorktreePrompt(null)}
       />
-      {client && sessionFilesClient && worktreeClient && (
+      {client && catalogClient && sessionFilesClient && worktreeClient && (
         <CreateSessionDialog
           open={startSessionNode !== null}
           client={client}
+          catalogClient={catalogClient}
           sessionFilesClient={sessionFilesClient}
           worktreeClient={worktreeClient}
           sessionToken={sessionToken}

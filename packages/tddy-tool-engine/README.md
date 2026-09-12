@@ -39,9 +39,17 @@ additionally resolves the call against the session's live agent roster, which is
 concern. Advertisement is **not** filtered by that roster: a tool an agent has taken over is still
 advertised and refused at dispatch, because `--allowedTools` is fixed when `claude` spawns.
 
-`tddy-daemon`'s `tool_catalog_sync` guard test stays, because it guards a pair that has *not*
-collapsed — this catalog against `tddy_sandbox::workspace_exec_tool_names`, the allowlist a
-sandboxed `claude` is spawned with.
+## `exec_tools.ExecToolService`
+
+This crate also **serves** the ten tools it defines, at `exec_tools.ExecToolService`
+(`build_exec_tool_entry`). The daemon, session rooms, LiveKit participants, local Unix socket, and
+`tddy-coder`'s session participant register that entry beside the other unbundled families.
+`tddy-session-tool-client` and in-jail relays call `ExecuteTool` / `StreamExecuteTool` on that
+coordinate.
+
+Handlers live in `exec_tool_service.rs` and `tool_call_log.rs` (moved from the daemon in `#unbundle`
+node 8). `ListExecTools` maps `tool_catalog()` to proto `ToolDef` at the wire boundary;
+`ListSessionToolCalls` reads the session JSONL log.
 
 ## Tools
 
@@ -66,8 +74,7 @@ rejected.
 
 - **`tddy-daemon`** — imports the crate via a `pub use tddy_tool_engine as tool_engine;`
   re-export so legacy `tool_engine::execute_tool` / `execute_tool_with_env` call sites are
-  unchanged; `ListExecTools` maps `tddy_tool_engine::ToolDef` → proto `ToolDef` at the RPC
-  boundary. The sandbox-allowlist sync test lives in `src/tool_catalog_sync.rs`.
+  unchanged; registers `build_exec_tool_entry` on every transport.
 - **`tddy-coder`** — `CoderSessionToolExecutor` holds the session's `worktree_root` (the
   coder's `agent_working_dir`) and a per-session `tddy_task::TaskRegistry`;
   `coder_session_tool_catalog()` mirrors the shared catalog. The `ToolExecutor` seam is

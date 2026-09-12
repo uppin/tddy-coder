@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use livekit::prelude::RoomOptions;
 use serial_test::serial;
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
@@ -22,12 +21,10 @@ use tddy_daemon::livekit_peer_discovery::{
 use tddy_daemon::multi_host::EligibleDaemonSource;
 use tddy_daemon::relay_idle::IdleTimeoutTracker;
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_livekit::LiveKitParticipant;
+use tddy_daemon::test_util::TestDaemon;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListExecToolsRequest,
-};
+use tddy_service::proto::exec_tools::{ExecToolService, ListExecToolsRequest};
 
 const RELAY_ROOM: &str = "relay-e2e-common-room";
 const RELAY_PEER_ID: &str = "relay-e2e-remote-peer";
@@ -196,7 +193,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let (_tmp_b, path_b) = write_daemon_yaml(&ws_url, Some(RELAY_PEER_ID));
     let config_b = DaemonConfig::load(&path_b).unwrap();
     let sessions_b = tempfile::tempdir().unwrap();
-    let service_b = ConnectionServiceImpl::new(
+    let service_b = Arc::new(ConnectionServiceImpl::new(
         config_b.clone(),
         sessions_resolver(sessions_b.path().to_path_buf()),
         sessions_b.path().to_path_buf(),
@@ -205,7 +202,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         None, // B has no discovery of its own — it only serves its local tools
         None,
         Arc::new(ClaudeCliSessionManager::new()),
-    );
+    ));
 
     // B's discovery participant: bare instance id, publishes the advertisement A discovers.
     spawn_common_room_discovery_task(
@@ -218,18 +215,8 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let token_b = livekit
         .generate_token(RELAY_ROOM, &rpc_identity(RELAY_PEER_ID))
         .expect("LiveKit token for remote peer B");
-    let connection_server_b = tddy_service::ConnectionServiceServer::new(service_b);
-    let participant_b = LiveKitParticipant::connect(
-        &ws_url,
-        &token_b,
-        connection_server_b,
-        RoomOptions::default(),
-        None,
-        None,
-    )
-    .await
-    .expect("remote peer B joins LiveKit common room");
-    let peer_run = tokio::spawn(async move { participant_b.run().await });
+    let peer_run =
+        tddy_daemon::test_util::serve_daemon_rpc_participant(&ws_url, &token_b, &service_b).await;
 
     // ── Service A: the relay. Has LiveKit discovery that will see B.
     let (_tmp_a, path_a) = write_daemon_yaml(&ws_url, None);
@@ -252,7 +239,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         valid_user_resolver(),
     )
     .with_eligible_daemon_source(Arc::clone(&eligible));
-    let service_a = ConnectionServiceImpl::new(
+    let service_a = TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
         config_a,
         sessions_resolver(sessions_a.path().to_path_buf()),
         sessions_a.path().to_path_buf(),
@@ -264,7 +251,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         }),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
-    );
+    )));
 
     // When
     // Wait until A's discovery sees B in the common room.

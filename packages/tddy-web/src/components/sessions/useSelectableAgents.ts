@@ -20,11 +20,11 @@
  */
 
 import { createClient, type Client } from "@connectrpc/connect";
-import { ConnectionService } from "../../gen/connection_pb";
+import { CatalogService } from "../../gen/catalog_pb";
 import { useHostFanOut, type HostReadFailure, type HostReader } from "../../rpc/useHostFanOut";
 import { selectableAgentValue, type SelectableAgent } from "./selectableAgentOptions";
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type CatalogClient = Client<typeof CatalogService>;
 
 export interface SelectableAgents {
   /** Every host's agents, in host order (home first), de-duplicated by `id@daemonInstanceId`. */
@@ -32,8 +32,8 @@ export interface SelectableAgents {
   readonly failures: HostReadFailure[];
 }
 
-const AGENT_READER: HostReader<ConnectionClient, SelectableAgent> = {
-  clientFor: (transport) => createClient(ConnectionService, transport),
+const AGENT_READER: HostReader<CatalogClient, SelectableAgent> = {
+  clientFor: (transport) => createClient(CatalogService, transport),
   read: async (client, daemonInstanceId, signal) => {
     const response = await client.listAgents({}, { signal });
     return response.agents.map((info) => ({
@@ -52,7 +52,7 @@ const AGENT_READER: HostReader<ConnectionClient, SelectableAgent> = {
  * common room. See {@link useHostFanOut} for what `homeClient` and `homeInstanceId` are.
  */
 export function useSelectableAgents(
-  homeClient: ConnectionClient,
+  homeClient: CatalogClient,
   homeInstanceId: string,
 ): SelectableAgents {
   const { rows, failures } = useHostFanOut(homeClient, homeInstanceId, AGENT_READER);

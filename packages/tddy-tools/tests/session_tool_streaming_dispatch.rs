@@ -18,7 +18,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use prost::Message as _;
 use tddy_rpc::{RpcClientTransport, RpcMessage, RpcResult, RpcService, Status};
-use tddy_service::proto::connection::ExecuteToolChunk;
+use tddy_service::proto::exec_tools::ExecuteToolChunk;
 use tddy_tools::session_tool_client::{dispatch_via_streaming_rpc, SessionToolEnvelope};
 use tokio::sync::mpsc;
 use tokio::time::{timeout, Duration};
@@ -39,7 +39,7 @@ struct FramePlayingExecuteTool {
 #[async_trait]
 impl RpcService for FramePlayingExecuteTool {
     async fn handle_rpc(&self, service: &str, method: &str, _message: &RpcMessage) -> RpcResult {
-        assert_eq!(service, "connection.ConnectionService");
+        assert_eq!(service, "exec_tools.ExecToolService");
         assert_eq!(method, "StreamExecuteTool");
         let (tx, rx) = mpsc::channel(self.frames.len().max(1));
         for frame in &self.frames {

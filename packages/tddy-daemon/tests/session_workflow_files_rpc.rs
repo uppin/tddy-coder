@@ -46,7 +46,7 @@ async fn list_session_workflow_files_returns_allowlisted_basenames() {
     std::fs::write(session_dir.join("PRD.md"), "# Plan\n").unwrap();
     std::fs::write(session_dir.join("TODO.md"), "- [ ] item\n").unwrap();
     std::fs::write(session_dir.join(".env"), "SECRET=must-not-appear-in-list\n").unwrap();
-    let service = std::sync::Arc::new(test_service(sessions_base)).session_files_service();
+    let service = std::sync::Arc::new(test_service(sessions_base).as_arc()).session_files_service();
 
     // When
     let response = service
@@ -98,7 +98,7 @@ async fn read_session_workflow_file_rejects_path_outside_session_dir() {
         .build();
     write_session_yaml(&session_dir, &metadata);
     std::fs::write(session_dir.join("changeset.yaml"), "safe: true\n").unwrap();
-    let service = std::sync::Arc::new(test_service(sessions_base)).session_files_service();
+    let service = std::sync::Arc::new(test_service(sessions_base).as_arc()).session_files_service();
 
     // When / Then
     for malicious in [
@@ -150,7 +150,7 @@ async fn read_session_workflow_file_returns_utf8_content_for_yaml() {
         .build();
     write_session_yaml(&session_dir, &metadata);
     std::fs::write(session_dir.join("changeset.yaml"), golden).unwrap();
-    let service = std::sync::Arc::new(test_service(sessions_base)).session_files_service();
+    let service = std::sync::Arc::new(test_service(sessions_base).as_arc()).session_files_service();
 
     // When
     let response = service

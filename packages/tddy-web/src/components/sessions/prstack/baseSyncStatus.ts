@@ -1,4 +1,4 @@
-import type { BranchResolution } from "../../../gen/connection_pb";
+import type { BranchResolution } from "../../../gen/pr_stack_pb";
 
 /**
  * How a planned-PR row states its branch's standing against its base.

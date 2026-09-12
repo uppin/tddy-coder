@@ -1,5 +1,5 @@
 use super::*;
-use crate::test_util::{test_service, TEST_TOKEN};
+use crate::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use std::sync::Mutex;
 use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
@@ -81,7 +81,7 @@ fn a_git_repo_with_origin() -> tempfile::TempDir {
 
 /// A sandboxed workspace session, plus the jail standing in for its confinement.
 struct SeededWorkspace {
-    service: ConnectionServiceImpl,
+    service: TestDaemon,
     sandbox: Arc<RecordingSandbox>,
     session_id: String,
     session_dir: PathBuf,

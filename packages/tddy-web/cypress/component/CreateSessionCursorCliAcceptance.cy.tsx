@@ -9,6 +9,7 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import { createSessionPage } from "../support/pages/createSessionPage";
@@ -28,7 +29,7 @@ const CURSOR_CLI_MODELS = [
 function aBackendForCursorCliSession() {
   return anInMemoryRpcBackend()
     .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
-    .onUnary(ConnectionService.method.listSubagents, () => ({
+    .onUnary(CatalogService.method.listSubagents, () => ({
       subagents: [
         {
           name: "fastcontext",
@@ -49,15 +50,15 @@ function aBackendForCursorCliSession() {
     .onUnary(ConnectionService.method.listProjects, () => ({
       projects: [{ projectId: "proj-cursor", name: "Cursor Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(ConnectionService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => ({
       agents: [{ id: "claude", label: "Claude" }],
     }))
-    .onUnary(ConnectionService.method.listTools, () => ({
+    .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
     .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches: ["origin/main"], defaultRemote: "origin" }))
     .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "cursor-cli-sess-1" }))
-    .onUnary(ConnectionService.method.listAgentModels, (req) => {
+    .onUnary(CatalogService.method.listAgentModels, (req) => {
       if (req.agent === "cursor-cli") {
         return { models: CURSOR_CLI_MODELS, defaultModel: "gpt-5.3-codex" };
       }
@@ -67,12 +68,14 @@ function aBackendForCursorCliSession() {
 
 function mountCreateSessionPane(backend: InMemoryRpcBackend) {
   const client = createClient(ConnectionService, backend.transport());
+  const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
   cy.mount(
     <CreateSessionPane
       client={client}
+      catalogClient={catalogClient}
       sessionFilesClient={sessionFilesClient}
       worktreeClient={worktreeClient}
       sessionToken="tok-cursor"

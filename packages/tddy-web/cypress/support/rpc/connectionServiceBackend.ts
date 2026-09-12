@@ -27,25 +27,29 @@ import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-t
 import { AuthService } from "../../../src/gen/auth_pb";
 import { GenerateTokenResponseSchema, RefreshTokenResponseSchema, TokenService } from "../../../src/gen/token_pb";
 import {
-  AgentInfoSchema,
   ConnectionService,
   ConnectSessionResponseSchema,
   ProjectEntrySchema,
   ResumeSessionResponseSchema,
   SessionEntrySchema,
   StartSessionResponseSchema,
-  ToolInfoSchema,
-  ExecuteToolResponseSchema,
-  ListExecToolsResponseSchema,
-  ListSessionToolCallsResponseSchema,
-  ToolDefSchema,
-  type AgentInfo,
   type ConnectSessionResponse,
   type ProjectEntry,
   type ResumeSessionResponse,
   type SessionEntry,
   type StartSessionResponse,
 } from "../../../src/gen/connection_pb";
+import {
+  AgentInfoSchema,
+  CatalogService,
+  ToolInfoSchema,
+  type AgentInfo,
+} from "../../../src/gen/catalog_pb";
+import {
+  ExecToolService,
+  ExecuteToolResponseSchema,
+  ToolDefSchema,
+} from "../../../src/gen/exec_tools_pb";
 import { ActivityService } from "../../../src/gen/activity_pb";
 import { HostService } from "../../../src/gen/host_pb";
 import { SessionAgentService } from "../../../src/gen/session_agents_pb";
@@ -277,7 +281,7 @@ export function aConnectionServiceBackend(
       refreshToken: async () =>
         create(RefreshTokenResponseSchema, { token: "mock-jwt-presence", ttlSeconds: 600n }),
     })
-    .implement(ConnectionService, {
+    .implement(CatalogService, {
       listTools: async () => ({
         tools: (scenario.tools ?? [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }]).map((t) =>
           create(ToolInfoSchema, t),
@@ -290,6 +294,33 @@ export function aConnectionServiceBackend(
         models: DEFAULT_CLAUDE_CLI_MODELS,
         defaultModel: DEFAULT_CLAUDE_CLI_MODEL,
       }),
+      ...(rosterFake ? rosterFake.catalogHandlers : {}),
+    })
+    .implement(ExecToolService, {
+      listExecTools: async () => ({
+        tools: [
+          create(ToolDefSchema, {
+            name: "Echo",
+            description: "Echo a message",
+            inputSchemaJson: JSON.stringify({
+              type: "object",
+              properties: { message: { type: "string" } },
+              required: ["message"],
+            }),
+          }),
+        ],
+      }),
+      listSessionToolCalls: async () => ({ toolCalls: [] }),
+      executeTool: async (req) => {
+        executedToolSessionIds.push(req.sessionId);
+        return create(ExecuteToolResponseSchema, {
+          resultJson: '{"ok":true}',
+          isError: false,
+          errorMessage: "",
+        });
+      },
+    })
+    .implement(ConnectionService, {
       listSessions: async () => ({
         sessions: (scenario.listSessionsFactory ? scenario.listSessionsFactory() : (scenario.sessions ?? [])).map(
           (s) => aSessionEntry(s),
@@ -312,11 +343,6 @@ export function aConnectionServiceBackend(
           ...overrides,
         });
       },
-      // `ListSubagents` — the agent *catalogue* the picker fans out over, which stayed on this
-      // service when node 7 took the roster. Spread for the same reason as everything above: one
-      // `.implement(ConnectionService, …)` per backend, since Connect's router fills every omitted
-      // method of a registered service with an `Unimplemented` handler.
-      ...(rosterFake ? rosterFake.connectionHandlers : {}),
       resumeSession: async (req) => {
         const overrides =
           typeof scenario.resumeSession === "function"
@@ -353,28 +379,6 @@ export function aConnectionServiceBackend(
       deleteSession: async (req) => {
         deletedSessionIds.push(req.sessionId);
         return {};
-      },
-      listExecTools: async () => ({
-        tools: [
-          create(ToolDefSchema, {
-            name: "Echo",
-            description: "Echo a message",
-            inputSchemaJson: JSON.stringify({
-              type: "object",
-              properties: { message: { type: "string" } },
-              required: ["message"],
-            }),
-          }),
-        ],
-      }),
-      listSessionToolCalls: async () => ({ toolCalls: [] }),
-      executeTool: async (req) => {
-        executedToolSessionIds.push(req.sessionId);
-        return create(ExecuteToolResponseSchema, {
-          resultJson: '{"ok":true}',
-          isError: false,
-          errorMessage: "",
-        });
       },
     });
 

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+tddy-rpc = { path = "../tddy-rpc" }
 async-trait = "0.1"
 glob = "0.3"
 log = "0.4"
@@ -24,8 +25,6 @@ tddy-service = { path = "../tddy-service" }
 # roster: how a jail reaches its facilitating daemon at all — the transport `session_agents` was
 # already detecting when it lived in `tddy-tools`.
 tddy-session-tool-client = { path = "../tddy-session-tool-client" }
-# roster/link: the `RpcClientTransport` a roster stream and a conversation RPC share.
-tddy-rpc = { path = "../tddy-rpc" }
 prost = "0.13"
 # roster/registry: the conversation id minted for a call that named none.
 uuid = { version = "1", features = ["v4"] }

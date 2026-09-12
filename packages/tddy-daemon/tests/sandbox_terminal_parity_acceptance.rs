@@ -588,7 +588,7 @@ struct ADaemonServingAJailedSession {
     _data_dir: tempfile::TempDir,
     /// The daemon itself, held so the jail stays registered in the registry the coordinate below
     /// resolves terminals out of.
-    _daemon: tddy_daemon::connection_service::ConnectionServiceImpl,
+    _daemon: tddy_daemon::test_util::TestDaemon,
     terminals: tddy_terminal_rpc::TerminalSessionServiceImpl,
     stdin_rx: mpsc::UnboundedReceiver<Bytes>,
 }

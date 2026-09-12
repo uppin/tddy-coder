@@ -16,7 +16,7 @@
 //! 2. the host relay, which both fulfils the jail's CONNECT tunnels (so a jailed `cargo build`
 //!    reaches crates.io through this host's socket) and carries the tool calls the other way —
 //!    which is why the dispatcher has to live *on* the relay rather than beside it;
-//! 3. a Unix socket on this host speaking `connection.ConnectionService/ExecuteTool`, whose every
+//! 3. a Unix socket on this host speaking `exec_tools.ExecToolService/ExecuteTool`, whose every
 //!    call is forwarded into the jail. This is the mirror image of the in-jail tool-IPC server
 //!    (`tddy_sandbox_runner::runner::start_tool_ipc_server`): same wire, opposite direction, and
 //!    `tddy-tools --mcp` cannot tell which end it is talking to — nor should it.
@@ -38,7 +38,7 @@ use tddy_sandbox::{ReadReason, ReadSpec, SandboxHandle};
 use tddy_sandbox_runner::{
     run_host_relay_with_in_jail_tools, HostRelayConfig, InJailToolDispatcher, NullToolHandler,
 };
-use tddy_service::proto::connection::ExecuteToolRequest;
+use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -627,7 +627,7 @@ fn host_tool_ipc_socket_path(session_id: &str) -> PathBuf {
     tmp.join(format!("tddy-app-{tail}.sock"))
 }
 
-/// Serve `connection.ConnectionService/ExecuteTool` on `path`, forwarding every call into the jail.
+/// Serve `exec_tools.ExecToolService/ExecuteTool` on `path`, forwarding every call into the jail.
 ///
 /// The mirror image of `tddy_sandbox_runner::runner::start_tool_ipc_server`: the same
 /// length-prefixed `tddy-stdio` framing over the same Unix socket, so `tddy-tools`'
@@ -705,7 +705,7 @@ impl tddy_rpc::RpcService for HostToolIpcService {
         method: &str,
         message: &tddy_rpc::RpcMessage,
     ) -> tddy_rpc::RpcResult {
-        if service != "connection.ConnectionService" || method != "ExecuteTool" {
+        if service != "exec_tools.ExecToolService" || method != "ExecuteTool" {
             // The roster and conversation RPCs have no counterpart here: they are served by a
             // facilitating daemon, and this session has none — the app resolved its own roster from
             // YAML and seeded it into the MCP server's env, and a wired-in specialized agent runs

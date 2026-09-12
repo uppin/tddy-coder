@@ -27,12 +27,12 @@ use tddy_daemon::connection_service::{
 };
 use tddy_daemon::livekit_peer_discovery::{LiveKitDiscoveryHandles, PEER_FORWARD_TIMEOUT};
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
-use tddy_daemon::test_util::TEST_TOKEN;
+use tddy_daemon::test_util::{TestDaemon, TEST_TOKEN};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
-    StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, StartSessionRequest,
 };
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -103,14 +103,14 @@ fn user_resolver_valid() -> UserResolver {
 
 /// A service that knows `workstation-b` as an eligible peer but holds no LiveKit room, so a valid
 /// split request gets as far as routing and then fails there.
-fn service_with_known_codebase_peer(sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn service_with_known_codebase_peer(sessions_base: PathBuf) -> TestDaemon {
     service_with_known_codebase_peer_and_config(sessions_base, test_config())
 }
 
 fn service_with_known_codebase_peer_and_config(
     sessions_base: PathBuf,
     config: DaemonConfig,
-) -> ConnectionServiceImpl {
+) -> TestDaemon {
     let resolver: SessionsBaseResolver = {
         let base = sessions_base.clone();
         Arc::new(move |_| Some(base.clone()))
@@ -121,7 +121,7 @@ fn service_with_known_codebase_peer_and_config(
         }) as Arc<dyn EligibleDaemonSource>,
         common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
     };
-    ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
         config,
         resolver,
         sessions_base,
@@ -130,18 +130,18 @@ fn service_with_known_codebase_peer_and_config(
         Some(discovery),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
-    )
+    )))
 }
 
 /// The same service, but every token resolves to a GitHub user this daemon has no OS mapping for —
 /// the shape a split session takes when the codebase host was never told about the caller.
-fn service_with_a_user_this_daemon_does_not_map(sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn service_with_a_user_this_daemon_does_not_map(sessions_base: PathBuf) -> TestDaemon {
     let resolver: SessionsBaseResolver = {
         let base = sessions_base.clone();
         Arc::new(move |_| Some(base.clone()))
     };
     let unmapped_user: UserResolver = Arc::new(|_| Some("someone-else".to_string()));
-    ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
         test_config(),
         resolver,
         sessions_base,
@@ -150,7 +150,7 @@ fn service_with_a_user_this_daemon_does_not_map(sessions_base: PathBuf) -> Conne
         None,
         None,
         Arc::new(ClaudeCliSessionManager::new()),
-    )
+    )))
 }
 
 fn an_exec_tool_request(session_token: &str) -> ExecuteToolRequest {

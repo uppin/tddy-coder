@@ -19,17 +19,19 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::test_util::{test_service, TEST_TOKEN};
+use tddy_daemon::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
 use tddy_rpc::{Code, Request, Status};
 use tddy_sandbox::SandboxError;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
-    ExecuteToolResponse, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, StartSessionRequest,
 };
+use tddy_service::proto::connection::{
+    ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse,
+};
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ExecuteToolResponse};
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a40";
 
@@ -70,13 +72,13 @@ impl RecordingSandbox {
 
 #[async_trait]
 impl WorkspaceSandbox for RecordingSandbox {
-    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse {
+    async fn execute_tool(&self, req: &ConnExecuteToolRequest) -> ConnExecuteToolResponse {
         self.calls.lock().unwrap().push(JailedCall {
             session_id: req.session_id.clone(),
             tool_name: req.tool_name.clone(),
             args_json: req.args_json.clone(),
         });
-        ExecuteToolResponse {
+        ConnExecuteToolResponse {
             result_json: serde_json::json!({ "marker": JAIL_MARKER, "tool": req.tool_name })
                 .to_string(),
             is_error: false,
@@ -179,7 +181,7 @@ fn register_project(sessions_base: &Path, repo_path: &Path) {
 
 /// A daemon holding a registered project, ready to be asked for a workspace session.
 struct CodebaseHost {
-    service: ConnectionServiceImpl,
+    service: TestDaemon,
     sessions: tempfile::TempDir,
     _repo: tempfile::TempDir,
 }
@@ -278,7 +280,7 @@ impl CodebaseHost {
     /// The same sessions base served by a **fresh** daemon: a restart. Its `.session.yaml` files
     /// survive, its jails do not — which is how a session recorded as sandboxed ends up with no
     /// jail registered for it.
-    fn after_a_daemon_restart(&self) -> ConnectionServiceImpl {
+    fn after_a_daemon_restart(&self) -> TestDaemon {
         test_service(self.sessions.path().to_path_buf())
     }
 }

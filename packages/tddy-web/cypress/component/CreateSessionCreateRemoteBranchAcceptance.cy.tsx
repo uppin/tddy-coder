@@ -12,6 +12,7 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -41,7 +42,7 @@ function aCreateSessionBackend() {
         },
       ],
     }))
-    .onUnary(ConnectionService.method.listAgentModels, () => ({
+    .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",
     }))
@@ -57,6 +58,7 @@ function mountPane(backend: ReturnType<typeof aCreateSessionBackend>) {
   // The pane takes a Connect client directly (not via a hook), so build one over the in-memory
   // backend's transport — its `callsTo` still records every StartSession the pane issues.
   const client = createClient(ConnectionService, backend.transport());
+  const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
@@ -64,6 +66,7 @@ function mountPane(backend: ReturnType<typeof aCreateSessionBackend>) {
     withSelectedDaemon(
       <CreateSessionPane
         client={client}
+      catalogClient={catalogClient}
         sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}
         sessionToken="fake-token"

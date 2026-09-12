@@ -20,7 +20,7 @@ import { byTestId, TEST_IDS } from "../support/testIds";
 
 // These imports fail until the components are created and the proto is regenerated.
 import { SessionToolsTab } from "../../src/components/sessions/SessionToolsTab";
-import type { ToolDef } from "../../src/gen/connection_pb";
+import type { ToolDef } from "../../src/gen/exec_tools_pb";
 
 // ---------------------------------------------------------------------------
 // Fixtures

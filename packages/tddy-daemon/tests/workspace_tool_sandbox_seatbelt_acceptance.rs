@@ -15,12 +15,12 @@
 use std::path::{Path, PathBuf};
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon::test_util::{test_service, TEST_TOKEN};
+use tddy_daemon::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ExecuteToolResponse,
-    StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
 };
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ExecuteToolResponse};
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a43";
 
@@ -95,7 +95,7 @@ fn register_project(sessions_base: &Path, repo_path: &Path) {
 /// A sandboxed workspace session on a real daemon, plus a host file deliberately left outside its
 /// worktree for the jail to fail to reach.
 struct JailedWorkspace {
-    service: tddy_daemon::connection_service::ConnectionServiceImpl,
+    service: TestDaemon,
     session_id: String,
     worktree: PathBuf,
     host_secret_file: PathBuf,

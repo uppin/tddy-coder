@@ -5,11 +5,34 @@
 //! use tddy_daemon::test_util::{test_config, test_service, TEST_TOKEN, TEST_USER};
 //! ```
 
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use tddy_rpc::{Request, Response, Status};
+use tddy_service::proto::catalog::{
+    CatalogService, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
+    ListAgentsResponse, ListSubagentsRequest, ListSubagentsResponse, ListToolsRequest,
+    ListToolsResponse,
+};
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse,
+};
+use tddy_service::proto::pr_stack::{
+    AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
+    LinkStackNodeRequest, LinkStackNodeResponse, PrStackService, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
+    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
+    ResolveStackBaseRequest, ResolveStackBaseResponse,
+};
+use tddy_worktree_service::stream::MpscResultStream;
+
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
 use crate::connection_service::ConnectionServiceImpl;
-use std::path::PathBuf;
-use std::sync::Arc;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
 /// Token accepted by [`test_service`] as a valid session token.
@@ -31,10 +54,7 @@ pub fn test_config() -> DaemonConfig {
     DaemonConfig::load(&path).expect("load test config")
 }
 
-/// Build a [`ConnectionServiceImpl`] wired to `sessions_base` with the standard test resolvers.
-///
-/// [`TEST_TOKEN`] resolves to [`TEST_USER`]; any other token returns `None`.
-pub fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn new_connection_service(sessions_base: PathBuf) -> Arc<ConnectionServiceImpl> {
     let config = test_config();
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -46,7 +66,7 @@ pub fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
             None
         }
     });
-    ConnectionServiceImpl::new(
+    let service = Arc::new(ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -55,7 +75,252 @@ pub fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
         None,
         None,
         Arc::new(CliSessionManager::new()),
-    )
+    ));
+    install_self_handle(&service);
+    service
+}
+
+/// Record the weak back-pointer [`ConnectionServiceImpl::self_arc`] needs — same wiring as
+/// `runtime::build` right after its `Arc::new`.
+pub fn install_self_handle(service: &Arc<ConnectionServiceImpl>) {
+    service.set_self_handle(Arc::downgrade(service));
+}
+
+/// Daemon under test: the connection service plus the catalogue, exec-tool and PR-stack families
+/// unbundled onto their own coordinates (`#unbundle` node 8).
+#[derive(Clone)]
+pub struct TestDaemon {
+    inner: Arc<ConnectionServiceImpl>,
+}
+
+impl TestDaemon {
+    #[must_use]
+    pub fn from_arc(inner: Arc<ConnectionServiceImpl>) -> Self {
+        Self { inner }
+    }
+
+    #[must_use]
+    pub fn connection(&self) -> &ConnectionServiceImpl {
+        self.inner.as_ref()
+    }
+
+    #[must_use]
+    pub fn as_arc(&self) -> Arc<ConnectionServiceImpl> {
+        Arc::clone(&self.inner)
+    }
+
+    /// Substitute what builds a sandboxed workspace session's jail — same contract as
+    /// [`ConnectionServiceImpl::with_workspace_sandbox_provisioner`], but safe on the shared
+    /// `Arc` tests keep inside a [`TestDaemon`].
+    pub fn with_workspace_sandbox_provisioner(
+        mut self,
+        provisioner: Arc<
+            dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner,
+        >,
+    ) -> Self {
+        Arc::make_mut(&mut self.inner).set_workspace_sandbox_provisioner(provisioner);
+        self
+    }
+
+    pub fn with_staging_base_dir(mut self, staging_base_dir: PathBuf) -> Self {
+        Arc::make_mut(&mut self.inner).set_staging_base_dir(staging_base_dir);
+        self
+    }
+
+    pub fn with_eligible_daemon_source(
+        mut self,
+        eligible_daemon_source: Arc<dyn crate::multi_host::EligibleDaemonSource>,
+    ) -> Self {
+        Arc::make_mut(&mut self.inner).set_eligible_daemon_source(eligible_daemon_source);
+        self
+    }
+
+    pub fn with_roster_keepalive_interval(mut self, interval: std::time::Duration) -> Self {
+        Arc::make_mut(&mut self.inner).set_roster_keepalive_interval(interval);
+        self
+    }
+}
+
+impl Deref for TestDaemon {
+    type Target = ConnectionServiceImpl;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_ref()
+    }
+}
+
+#[async_trait]
+impl CatalogService for TestDaemon {
+    async fn list_tools(
+        &self,
+        request: Request<ListToolsRequest>,
+    ) -> Result<Response<ListToolsResponse>, Status> {
+        self.inner.catalog_rpc_service().list_tools(request).await
+    }
+
+    async fn list_agents(
+        &self,
+        request: Request<ListAgentsRequest>,
+    ) -> Result<Response<ListAgentsResponse>, Status> {
+        self.inner.catalog_rpc_service().list_agents(request).await
+    }
+
+    async fn list_agent_models(
+        &self,
+        request: Request<ListAgentModelsRequest>,
+    ) -> Result<Response<ListAgentModelsResponse>, Status> {
+        self.inner
+            .catalog_rpc_service()
+            .list_agent_models(request)
+            .await
+    }
+
+    async fn list_subagents(
+        &self,
+        request: Request<ListSubagentsRequest>,
+    ) -> Result<Response<ListSubagentsResponse>, Status> {
+        self.inner
+            .catalog_rpc_service()
+            .list_subagents(request)
+            .await
+    }
+}
+
+#[async_trait]
+impl ExecToolService for TestDaemon {
+    type StreamExecuteToolStream = MpscResultStream<ExecuteToolChunk>;
+
+    async fn execute_tool(
+        &self,
+        request: Request<ExecuteToolRequest>,
+    ) -> Result<Response<ExecuteToolResponse>, Status> {
+        self.inner
+            .exec_tool_rpc_service()
+            .execute_tool(request)
+            .await
+    }
+
+    async fn stream_execute_tool(
+        &self,
+        request: Request<ExecuteToolRequest>,
+    ) -> Result<Response<Self::StreamExecuteToolStream>, Status> {
+        self.inner
+            .exec_tool_rpc_service()
+            .stream_execute_tool(request)
+            .await
+    }
+
+    async fn list_exec_tools(
+        &self,
+        request: Request<ListExecToolsRequest>,
+    ) -> Result<Response<ListExecToolsResponse>, Status> {
+        self.inner
+            .exec_tool_rpc_service()
+            .list_exec_tools(request)
+            .await
+    }
+
+    async fn list_session_tool_calls(
+        &self,
+        request: Request<ListSessionToolCallsRequest>,
+    ) -> Result<Response<ListSessionToolCallsResponse>, Status> {
+        self.inner
+            .exec_tool_rpc_service()
+            .list_session_tool_calls(request)
+            .await
+    }
+}
+
+#[async_trait]
+impl PrStackService for TestDaemon {
+    async fn add_planned_pr(
+        &self,
+        request: Request<AddPlannedPrRequest>,
+    ) -> Result<Response<AddPlannedPrResponse>, Status> {
+        self.inner
+            .pr_stack_rpc_service()
+            .add_planned_pr(request)
+            .await
+    }
+
+    async fn get_pr_status(
+        &self,
+        request: Request<GetPrStatusRequest>,
+    ) -> Result<Response<GetPrStatusResponse>, Status> {
+        self.inner
+            .pr_stack_rpc_service()
+            .get_pr_status(request)
+            .await
+    }
+
+    async fn query_branch(
+        &self,
+        request: Request<QueryBranchRequest>,
+    ) -> Result<Response<QueryBranchResponse>, Status> {
+        self.inner
+            .pr_stack_rpc_service()
+            .query_branch(request)
+            .await
+    }
+
+    async fn resolve_stack_base(
+        &self,
+        request: Request<ResolveStackBaseRequest>,
+    ) -> Result<Response<ResolveStackBaseResponse>, Status> {
+        self.inner
+            .pr_stack_rpc_service()
+            .resolve_stack_base(request)
+            .await
+    }
+
+    async fn link_stack_node(
+        &self,
+        request: Request<LinkStackNodeRequest>,
+    ) -> Result<Response<LinkStackNodeResponse>, Status> {
+        self.inner
+            .pr_stack_rpc_service()
+            .link_stack_node(request)
+            .await
+    }
+
+    async fn repoint_planned_pr(
+        &self,
+        request: Request<RepointPlannedPrRequest>,
+    ) -> Result<Response<RepointPlannedPrResponse>, Status> {
+        self.inner
+            .pr_stack_rpc_service()
+            .repoint_planned_pr(request)
+            .await
+    }
+
+    async fn reorder_planned_pr(
+        &self,
+        request: Request<ReorderPlannedPrRequest>,
+    ) -> Result<Response<ReorderPlannedPrResponse>, Status> {
+        self.inner
+            .pr_stack_rpc_service()
+            .reorder_planned_pr(request)
+            .await
+    }
+
+    async fn pull_base_into_branch(
+        &self,
+        request: Request<PullBaseIntoBranchRequest>,
+    ) -> Result<Response<PullBaseIntoBranchResponse>, Status> {
+        self.inner
+            .pr_stack_rpc_service()
+            .pull_base_into_branch(request)
+            .await
+    }
+}
+
+/// Build a [`TestDaemon`] wired to `sessions_base` with the standard test resolvers.
+///
+/// [`TEST_TOKEN`] resolves to [`TEST_USER`]; any other token returns `None`.
+pub fn test_service(sessions_base: PathBuf) -> TestDaemon {
+    TestDaemon {
+        inner: new_connection_service(sessions_base),
+    }
 }
 
 /// Block until `host.HostService` lists `peer_instance_id` among this daemon's eligible peers.
@@ -137,6 +402,9 @@ pub async fn serve_daemon_rpc_participant(
         service.session_files_entry(),
         service.session_agents_entry(),
         service.activity_entry(),
+        service.catalog_entry(),
+        service.exec_tool_entry(),
+        service.pr_stack_entry(),
         tddy_rpc::ServiceEntry {
             name: "connection.ConnectionService",
             service: Arc::new(tddy_service::ConnectionServiceServer::from_arc(Arc::clone(

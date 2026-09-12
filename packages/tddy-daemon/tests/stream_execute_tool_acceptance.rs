@@ -15,12 +15,12 @@ use std::path::Path;
 
 use futures_util::StreamExt;
 use tddy_daemon::connection_service::EXEC_TOOL_FRAME_BYTES;
-use tddy_daemon::test_util::{test_service, TEST_TOKEN};
+use tddy_daemon::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
 };
-
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolChunk, ExecuteToolRequest};
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a39";
 
 /// Comfortably more than one frame, so the reassembly path is genuinely exercised.
@@ -73,7 +73,7 @@ fn register_project(sessions_base: &Path, repo_path: &Path) {
 
 /// A workspace session plus the service that owns it — the unit the exec tools run against.
 struct Workspace {
-    service: tddy_daemon::connection_service::ConnectionServiceImpl,
+    service: TestDaemon,
     session_id: String,
     worktree: std::path::PathBuf,
     _repo: tempfile::TempDir,
@@ -141,9 +141,7 @@ struct DrainedResult {
 }
 
 async fn drain_result(
-    mut stream: impl futures_util::Stream<
-            Item = Result<tddy_service::proto::connection::ExecuteToolChunk, tddy_rpc::Status>,
-        > + Unpin,
+    mut stream: impl futures_util::Stream<Item = Result<ExecuteToolChunk, tddy_rpc::Status>> + Unpin,
 ) -> DrainedResult {
     let mut bytes: Vec<u8> = Vec::new();
     let mut frame_sizes: Vec<usize> = Vec::new();

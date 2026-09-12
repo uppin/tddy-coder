@@ -12,7 +12,7 @@
 //! Mirrors `subagent_mcp_acceptance.rs`: spawn the actual compiled `tddy-tools` binary and speak
 //! the real newline-delimited JSON-RPC wire. The action-author model is a wiremock
 //! `/v1/chat/completions` endpoint; the host side of `EstablishAction` is a fake
-//! `connection.ConnectionService/ExecuteTool` service hosted on a Unix socket in this test
+//! `exec_tools.ExecToolService/ExecuteTool` service hosted on a Unix socket in this test
 //! process (the same protocol `dispatch_via_sandbox_ipc` speaks to the sandbox runner relay).
 
 use std::collections::BTreeSet;
@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use prost::Message;
 use serde_json::{json, Value};
 use tddy_rpc::{RpcMessage, RpcResult, RpcService};
-use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use wiremock::matchers::{method, path};
@@ -192,7 +192,7 @@ struct FakeHostToolService {
 #[async_trait]
 impl RpcService for FakeHostToolService {
     async fn handle_rpc(&self, service: &str, method: &str, message: &RpcMessage) -> RpcResult {
-        assert_eq!(service, "connection.ConnectionService");
+        assert_eq!(service, "exec_tools.ExecToolService");
         assert_eq!(method, "ExecuteTool");
         let request = ExecuteToolRequest::decode(message.payload.as_ref())
             .expect("decode ExecuteToolRequest");

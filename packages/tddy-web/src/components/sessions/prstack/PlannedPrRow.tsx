@@ -1,7 +1,7 @@
 import React from "react";
 import { ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
 import { Button } from "../../ui/button";
-import type { BranchResolution } from "../../../gen/connection_pb";
+import type { BranchResolution } from "../../../gen/pr_stack_pb";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 import { isNodeOrphaned } from "./isNodeOrphaned";
 import type { StackChildSession } from "./stackChildSessions";

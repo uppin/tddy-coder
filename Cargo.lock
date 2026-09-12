@@ -12226,6 +12226,7 @@ dependencies = [
  "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
  "tddy-service",
+ "tddy-session-tool-client",
  "tddy-stdio",
  "tddy-task",
  "tddy-tool-engine",
@@ -13192,14 +13193,20 @@ dependencies = [
 name = "tddy-tool-engine"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "bytes",
+ "futures-util",
  "glob",
  "log",
  "pretty_assertions",
+ "serde",
  "serde_json",
  "tddy-core",
+ "tddy-rpc",
+ "tddy-service",
  "tddy-task",
+ "tddy-worktree-service",
  "tempfile",
  "tokio",
 ]
@@ -13390,6 +13397,7 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tddy-core",
+ "tddy-rpc",
  "tddy-testing-commons",
  "tddy-workflow",
  "tempfile",

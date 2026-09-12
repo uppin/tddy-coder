@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file types.proto.
  */
 export const file_types: GenFile = /*@__PURE__*/
-  fileDesc("Cgt0eXBlcy5wcm90bxIFdHlwZXMiOwoUU2Vzc2lvbkFnZW50QWN0aXZpdHkSEgoKYXRfdW5peF9tcxgBIAEoBBIPCgdzdW1tYXJ5GAIgASgJKoUCChFIb3N0RG9jdW1lbnRTY29wZRIjCh9IT1NUX0RPQ1VNRU5UX1NDT1BFX1VOU1BFQ0lGSUVEEAASKAokSE9TVF9ET0NVTUVOVF9TQ09QRV9TRVNTSU9OX0FSVElGQUNUEAESJgoiSE9TVF9ET0NVTUVOVF9TQ09QRV9TRVNTSU9OX1VQTE9BRBACEigKJEhPU1RfRE9DVU1FTlRfU0NPUEVfU0VTU0lPTl9XT1JLVFJFRRADEiQKIEhPU1RfRE9DVU1FTlRfU0NPUEVfUFJPSkVDVF9SRVBPEAQSKQolSE9TVF9ET0NVTUVOVF9TQ09QRV9TVEFHRURfQVRUQUNITUVOVBAFKpUCChJTZXNzaW9uQWdlbnRTdGF0dXMSJAogU0VTU0lPTl9BR0VOVF9TVEFUVVNfVU5TUEVDSUZJRUQQABIdChlTRVNTSU9OX0FHRU5UX1NUQVRVU19JRExFEAESIAocU0VTU0lPTl9BR0VOVF9TVEFUVVNfUlVOTklORxACEicKI1NFU1NJT05fQUdFTlRfU1RBVFVTX0VYRUNVVElOR19UT09MEAMSKgomU0VTU0lPTl9BR0VOVF9TVEFUVVNfV0FJVElOR19GT1JfSU5QVVQQBBIjCh9TRVNTSU9OX0FHRU5UX1NUQVRVU19DT05ORUNUSU5HEAUSHgoaU0VTU0lPTl9BR0VOVF9TVEFUVVNfRVJST1IQBmIGcHJvdG8z");
+  fileDesc("Cgt0eXBlcy5wcm90bxIFdHlwZXMiOwoUU2Vzc2lvbkFnZW50QWN0aXZpdHkSEgoKYXRfdW5peF9tcxgBIAEoBBIPCgdzdW1tYXJ5GAIgASgJIlYKDUJyYW5jaFNlc3Npb24SDgoGZXhpc3RzGAEgASgIEhIKCnNlc3Npb25faWQYAiABKAkSEQoJaXNfYWN0aXZlGAMgASgIEg4KBnN0YXR1cxgEIAEoCSqFAgoRSG9zdERvY3VtZW50U2NvcGUSIwofSE9TVF9ET0NVTUVOVF9TQ09QRV9VTlNQRUNJRklFRBAAEigKJEhPU1RfRE9DVU1FTlRfU0NPUEVfU0VTU0lPTl9BUlRJRkFDVBABEiYKIkhPU1RfRE9DVU1FTlRfU0NPUEVfU0VTU0lPTl9VUExPQUQQAhIoCiRIT1NUX0RPQ1VNRU5UX1NDT1BFX1NFU1NJT05fV09SS1RSRUUQAxIkCiBIT1NUX0RPQ1VNRU5UX1NDT1BFX1BST0pFQ1RfUkVQTxAEEikKJUhPU1RfRE9DVU1FTlRfU0NPUEVfU1RBR0VEX0FUVEFDSE1FTlQQBSqVAgoSU2Vzc2lvbkFnZW50U3RhdHVzEiQKIFNFU1NJT05fQUdFTlRfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHQoZU0VTU0lPTl9BR0VOVF9TVEFUVVNfSURMRRABEiAKHFNFU1NJT05fQUdFTlRfU1RBVFVTX1JVTk5JTkcQAhInCiNTRVNTSU9OX0FHRU5UX1NUQVRVU19FWEVDVVRJTkdfVE9PTBADEioKJlNFU1NJT05fQUdFTlRfU1RBVFVTX1dBSVRJTkdfRk9SX0lOUFVUEAQSIwofU0VTU0lPTl9BR0VOVF9TVEFUVVNfQ09OTkVDVElORxAFEh4KGlNFU1NJT05fQUdFTlRfU1RBVFVTX0VSUk9SEAZiBnByb3RvMw");
 
 /**
  * The last thing an agent was observed doing.
@@ -42,6 +42,42 @@ export type SessionAgentActivity = Message<"types.SessionAgentActivity"> & {
  */
 export const SessionAgentActivitySchema: GenMessage<SessionAgentActivity> = /*@__PURE__*/
   messageDesc(file_types, 0);
+
+/**
+ * @generated from message types.BranchSession
+ */
+export type BranchSession = Message<"types.BranchSession"> & {
+  /**
+   * False when no session owns the branch.
+   *
+   * @generated from field: bool exists = 1;
+   */
+  exists: boolean;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: bool is_active = 3;
+   */
+  isActive: boolean;
+
+  /**
+   * e.g. "active" | "idle".
+   *
+   * @generated from field: string status = 4;
+   */
+  status: string;
+};
+
+/**
+ * Describes the message types.BranchSession.
+ * Use `create(BranchSessionSchema)` to create a new message.
+ */
+export const BranchSessionSchema: GenMessage<BranchSession> = /*@__PURE__*/
+  messageDesc(file_types, 1);
 
 /**
  * @generated from enum types.HostDocumentScope
