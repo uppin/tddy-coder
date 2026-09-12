@@ -950,6 +950,9 @@ pub async fn build(
         // SessionService — family C (`tddy-session-lifecycle`).
         rpc_entries.push(connection_arc.session_lifecycle_entry());
 
+        // ProjectService — family D (`tddy-projects`).
+        rpc_entries.push(connection_arc.project_entry());
+
         let connection_server = tddy_service::ConnectionServiceServer::from_arc(connection_arc);
         rpc_entries.push(tddy_rpc::ServiceEntry {
             name: "connection.ConnectionService",

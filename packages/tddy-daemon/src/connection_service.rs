@@ -1171,6 +1171,8 @@ mod svc_activity_ports;
 mod family_proto_bridge;
 mod session_coordinate_handlers;
 mod svc_session_lifecycle_ports;
+mod project_coordinate_handlers;
+mod svc_project_ports;
 mod svc_catalog_ports;
 mod svc_exec_tool_ports;
 mod svc_family_entries;

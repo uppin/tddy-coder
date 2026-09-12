@@ -8,8 +8,7 @@
 pub mod base_sync_cache;
 pub mod branch_intent;
 pub mod branch_owner;
-pub mod project_provision;
-pub mod project_storage;
+pub use tddy_projects::{project_provision, project_storage};
 pub mod remote_git_service;
 pub mod worktree_files;
 pub mod worktrees;

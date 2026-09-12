@@ -13,9 +13,12 @@ tddy-core = { path = "../tddy-core" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 async-trait = "0.1"
+anyhow = "1"
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 rstest = { workspace = true }

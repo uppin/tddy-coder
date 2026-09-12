@@ -26,6 +26,7 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-task = { path = "../tddy-task" }
 tokio-stream = "0.1"
 tddy-service = { path = "../tddy-service" }
+tddy-projects = { path = "../tddy-projects" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
