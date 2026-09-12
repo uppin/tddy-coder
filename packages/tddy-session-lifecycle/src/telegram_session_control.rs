@@ -1062,7 +1062,7 @@ pub struct TelegramWorkflowSpawn {
     /// Chat id → session id (full) when the user tapped "Other" and we await a free-text follow-up message.
     pub pending_elicitation_other: Arc<Mutex<HashMap<i64, String>>>,
     /// Shared registry of active Claude Code CLI sessions, injected so Telegram-launched sessions
-    /// are attachable via the terminal-stream RPCs (same `Arc` as `ConnectionServiceImpl`).
+    /// are attachable via the terminal-stream RPCs (same `Arc` as `DaemonSessionHost`).
     pub claude_cli_manager: Arc<crate::cli_session_manager::CliSessionManager>,
 }
 

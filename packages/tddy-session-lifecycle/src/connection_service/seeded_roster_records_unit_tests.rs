@@ -1,4 +1,4 @@
-//! Unit tests: `ConnectionServiceImpl::seeded_roster_records` — what a session's
+//! Unit tests: `DaemonSessionHost::seeded_roster_records` — what a session's
 //! `specialized_agents` seed resolves to, before anything is started for it.
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md § Seeding at start, § Remote agents.
@@ -13,7 +13,7 @@ use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
 /// A daemon with no peers: the whole common room is this host, so a reference naming any other
 /// daemon is one nothing here can resolve.
-fn a_daemon_with_no_peers(tddy_data_dir: std::path::PathBuf) -> ConnectionServiceImpl {
+fn a_daemon_with_no_peers(tddy_data_dir: std::path::PathBuf) -> DaemonSessionHost {
     let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
@@ -22,7 +22,7 @@ fn a_daemon_with_no_peers(tddy_data_dir: std::path::PathBuf) -> ConnectionServic
     let base = tddy_data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     let user_resolver: SessionUserResolver = Arc::new(|_| Some("u".to_string()));
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

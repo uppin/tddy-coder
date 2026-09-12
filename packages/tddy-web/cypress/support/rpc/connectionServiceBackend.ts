@@ -1,5 +1,5 @@
 /**
- * In-memory `connection.ConnectionService` (+ `auth.AuthService`) backend for ConnectionScreen /
+ * In-memory `the pre-unbundle monolithic RPC coordinate` (+ `auth.AuthService`) backend for ConnectionScreen /
  * SessionsDrawerScreen acceptance tests.
  *
  * `ConnectionService` is daemon-level RPC (`useDaemonClient`, see `../../../src/rpc/selectedDaemon`),

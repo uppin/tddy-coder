@@ -88,7 +88,7 @@ export interface ConnectionRpcOptions {
 
 /**
  * Registers cy.intercept aliases for all six RPCs used by ConnectionScreen:
- * GetAuthStatus, ListTools, ListAgents, ListSessions, ListProjects (`connection.ConnectionService`)
+ * GetAuthStatus, ListTools, ListAgents, ListSessions, ListProjects (`the pre-unbundle monolithic RPC coordinate`)
  * and ListEligibleDaemons (`host.HostService`).
  *
  * Always sets aliases @getAuthStatus, @listTools, @listAgents, @listEligibleDaemons,
@@ -131,13 +131,13 @@ export function interceptConnectionRpcs(
   // Sessions — either factory (dynamic) or static body
   if (opts.listSessionsFactory) {
     const factory = opts.listSessionsFactory;
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/ListSessions", (req) => {
       const body = toArrayBuffer(listSessions(factory()));
       req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
     }).as("listSessions");
   } else {
     const sessionsBody = toArrayBuffer(listSessions(sessions));
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/ListSessions", (req) => {
       req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: sessionsBody });
     }).as("listSessions");
   }
@@ -154,14 +154,14 @@ export function interceptConnectionRpcs(
   } else {
     projectsBody = toArrayBuffer(listProjects([{}]));
   }
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
+  cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/ListProjects", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: projectsBody });
   }).as("listProjects");
 
   // DeleteSession — always registered; optionally captures decoded session ids
   if (opts.captureDeleteSessionIds !== undefined) {
     const captureIds = opts.captureDeleteSessionIds;
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/DeleteSession", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/DeleteSession", (req) => {
       const u8 = decodeProtoRequestBody(req.body);
       const decoded = fromBinary(DeleteSessionRequestSchema, u8);
       captureIds.push(decoded.sessionId);
@@ -172,7 +172,7 @@ export function interceptConnectionRpcs(
       });
     }).as("deleteSession");
   } else {
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/DeleteSession", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/DeleteSession", (req) => {
       req.reply({
         statusCode: 200,
         headers: { "Content-Type": "application/proto" },
@@ -244,7 +244,7 @@ export function interceptConnectSession(
   overrides: { livekitRoom?: string; livekitUrl?: string; livekitServerIdentity?: string } = {},
 ): void {
   const body = toArrayBuffer(aConnectSessionResponse(overrides));
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ConnectSession", (req) => {
+  cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/ConnectSession", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
   }).as("connectSession");
 }
@@ -254,7 +254,7 @@ export function interceptConnectSession(
  * Used for multi-session tests where each session gets its own LiveKit room.
  */
 export function interceptConnectSessionPerSessionId(): void {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ConnectSession", (req) => {
+  cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/ConnectSession", (req) => {
     const bodyBytes = new Uint8Array(req.body as ArrayBuffer);
     const decoded = fromBinary(ConnectSessionRequestSchema, bodyBytes);
     const sid = decoded.sessionId;
@@ -285,7 +285,7 @@ export function interceptResumeSession(sessionId: string): void {
       }),
     ),
   );
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ResumeSession", (req) => {
+  cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/ResumeSession", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
   }).as("resumeSession");
 }
@@ -317,7 +317,7 @@ export function interceptStartSession(sessionId: string): void {
   // skip subsequent handlers (confirmed from Cypress runner source: finish(true) skips, finish(false)
   // propagates).
   cy.intercept(
-    "**/rpc/connection.ConnectionService/StartSession",
+    "**/rpc/the pre-unbundle monolithic RPC coordinate/StartSession",
     { method: "POST", middleware: true },
     (req) => {
       req.on("before:response", (res) => {
@@ -338,14 +338,14 @@ export function interceptStartSession(sessionId: string): void {
 /** Intercept ListProjectBranches and reply with the given branch names (default remote `origin`). */
 export function interceptListProjectBranches(branches: string[] = [], defaultRemote = "origin"): void {
   const body = toArrayBuffer(listProjectBranches(branches, defaultRemote));
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjectBranches", (req) => {
+  cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/ListProjectBranches", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
   }).as("listProjectBranches");
 }
 
 /** Intercept SignalSession and reply with ok:true. */
 export function interceptSignalSession(): void {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/SignalSession", (req) => {
+  cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/SignalSession", (req) => {
     req.reply({
       statusCode: 200,
       headers: { "Content-Type": "application/proto" },
@@ -356,7 +356,7 @@ export function interceptSignalSession(): void {
 
 /** Intercept SignalSession and reply with a 412 error. */
 export function interceptSignalSessionError(): void {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/SignalSession", (req) => {
+  cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/SignalSession", (req) => {
     req.reply({
       statusCode: 412,
       headers: { "Content-Type": "application/json" },
@@ -367,7 +367,7 @@ export function interceptSignalSessionError(): void {
 
 /** Intercept DeleteSession and reply with ok:true. Decodes and captures the session id. */
 export function interceptDeleteSession(captureIds: string[]): void {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/DeleteSession", (req) => {
+  cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/DeleteSession", (req) => {
     const u8 = decodeProtoRequestBody(req.body);
     const decoded = fromBinary(DeleteSessionRequestSchema, u8);
     captureIds.push(decoded.sessionId);

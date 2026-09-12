@@ -19,9 +19,7 @@ use tddy_core::{
     format_elapsed_compact, read_changeset, read_session_metadata, Changeset,
     SessionEntry as CsSessionEntry,
 };
-use tddy_service::proto::connection::{
-    SessionContextDocKind as ProtoContextDocKind, SessionEntry as ProtoSessionEntry,
-};
+use tddy_service::proto::session::{SessionContextDocKind as ProtoContextDocKind, SessionEntry as ProtoSessionEntry};
 
 use crate::session_context_docs::ContextDocKind;
 
@@ -306,7 +304,7 @@ pub fn apply_session_list_status_to_proto(
     entry.context_docs =
         crate::session_context_docs::context_docs_for_session(&status.recipe, session_dir)
             .into_iter()
-            .map(|doc| tddy_service::proto::connection::SessionContextDoc {
+            .map(|doc| tddy_service::proto::session::SessionContextDoc {
                 key: doc.key,
                 basename: doc.basename,
                 path: doc.path.to_string_lossy().into_owned(),
@@ -1054,7 +1052,7 @@ state:
     /// `SessionEntry` field 21.
     #[test]
     fn apply_orchestrator_session_id_to_proto_sets_field() {
-        use tddy_service::proto::connection::SessionEntry as ProtoSessionEntry;
+        use tddy_service::proto::session::SessionEntry as ProtoSessionEntry;
 
         let dir = tempdir().unwrap();
         let session_dir = dir.path();
@@ -1278,7 +1276,7 @@ recipe: pr-stack
     /// session, the `recipe` must be copied into proto `SessionEntry` field 22.
     #[test]
     fn apply_recipe_to_proto_sets_field() {
-        use tddy_service::proto::connection::SessionEntry as ProtoSessionEntry;
+        use tddy_service::proto::session::SessionEntry as ProtoSessionEntry;
 
         let dir = tempdir().unwrap();
         let session_dir = dir.path();
@@ -1414,9 +1412,7 @@ recipe: pr-stack
 
     use crate::session_attachments::copy_attachment_into_session;
     use crate::session_context_docs::ATTACHMENT_DOC_DESCRIPTION;
-    use tddy_service::proto::connection::{
-        SessionContextDoc as ProtoContextDoc, SessionContextDocKind,
-    };
+    use tddy_service::proto::session::{SessionContextDoc as ProtoContextDoc, SessionContextDocKind};
     use tddy_workflow::session_attachments_root;
     use tempfile::TempDir;
 
@@ -1829,7 +1825,7 @@ state:
     /// copy `stack_plan_json` into proto `SessionEntry` field 23.
     #[test]
     fn apply_stack_plan_json_to_proto_sets_field() {
-        use tddy_service::proto::connection::SessionEntry as ProtoSessionEntry;
+        use tddy_service::proto::session::SessionEntry as ProtoSessionEntry;
 
         let dir = tempdir().unwrap();
         let session_dir = dir.path();

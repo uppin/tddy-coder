@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::session_file_upload::write_upload_chunk;
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_rpc::{Code, Request};
@@ -229,7 +229,7 @@ users:
 
 /// The daemon's `session_files.SessionFilesService`, over this test's own data dir.
 ///
-/// `#unbundle` node 6 moved the thirteen session-file methods off `connection.ConnectionService`;
+/// `#unbundle` node 6 moved the thirteen session-file methods off `the pre-unbundle monolithic RPC coordinate`;
 /// this is the served implementation the host registers, built from the same daemon.
 fn test_service(
     sessions_base: PathBuf,
@@ -241,7 +241,7 @@ fn test_service(
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
-    Arc::new(ConnectionServiceImpl::new(
+    Arc::new(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

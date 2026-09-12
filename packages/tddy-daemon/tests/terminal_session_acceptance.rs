@@ -14,7 +14,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID};
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_rpc::{Code, Request};
 
 mod common;
@@ -46,7 +46,7 @@ fn minimal_service_with_manager(
     config: DaemonConfig,
     sessions_base: PathBuf,
     manager: Arc<ClaudeCliSessionManager>,
-) -> ConnectionServiceImpl {
+) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -57,7 +57,7 @@ fn minimal_service_with_manager(
             None
         }
     });
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -72,7 +72,7 @@ fn minimal_service_with_manager(
 /// The terminal coordinate this daemon serves, wired to `manager`, with the temp-dir guards that
 /// must stay alive around it.
 ///
-/// `terminal_session.TerminalSessionService` rather than `connection.ConnectionService`: the nine
+/// `terminal_session.TerminalSessionService` rather than `the pre-unbundle monolithic RPC coordinate`: the nine
 /// terminal methods left that service with `#unbundle` node 6, and this is the daemon's own served
 /// implementation of them — the same one `runtime::build` registers, over the same managers.
 fn make_service(

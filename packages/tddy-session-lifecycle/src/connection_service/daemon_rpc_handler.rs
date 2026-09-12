@@ -9,27 +9,11 @@ use tddy_service::proto::session_agents_svc::SessionAgentService as _;
 
 use std::sync::Arc;
 
-use super::{ConnectionServiceImpl, DaemonRpcHandler};
+use super::{DaemonSessionHost, DaemonRpcHandler};
 
 /// The coordinate an in-jail agent relays family B at, read from the crate that serves it so this
 /// bridge and `tddy-sandbox-runner`'s allowlist cannot disagree about the name.
 const SESSION_AGENT_SERVICE: &str = tddy_session_agents::SERVICE_NAME;
-
-impl ConnectionServiceImpl {
-    /// The host-side dispatch a sandboxed session's `SessionChannel` relays family B to.
-    ///
-    /// Named here rather than assembled at each of the three sandboxed-session spawn paths, so a
-    /// jail reaches one handler built one way. Public because it is the thing under test in
-    /// `in_jail_conversation_acceptance.rs`: five of family B's nine methods are what
-    /// `tddy-sandbox-runner`'s relay allowlist permits, and a test that built its own handler would
-    /// prove the allowlist against a lookalike rather than against what a real session spawns.
-    #[must_use]
-    pub fn sandbox_rpc_handler(&self) -> Arc<dyn tddy_sandbox_runner::HostRpcHandler> {
-        Arc::new(DaemonRpcHandler {
-            conn: self.self_arc(),
-        })
-    }
-}
 
 #[async_trait::async_trait]
 impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {

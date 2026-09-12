@@ -1,7 +1,7 @@
 // `encode_to_vec` is a `prost::Message` method; the trait is imported anonymously because
 // only its methods are used.
 use prost::Message as _;
-use tddy_service::proto::connection::ExecuteToolRequest;
+use tddy_service::proto::exec_tools::ExecuteToolRequest;
 
 use tddy_service::proto::session_agents_svc::OpenAgentConversationResponse;
 
@@ -20,9 +20,9 @@ use crate::user_sessions_path::projects_path_for_user;
 
 use tddy_rpc::Status;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// Turn a freshly created `workspace` checkout into a live mirror of the facilitating daemon's
     /// session.
     ///
@@ -33,7 +33,7 @@ impl ConnectionServiceImpl {
     /// can be trusted — nothing on the facilitating daemon can see this checkout.
     pub(crate) async fn start_hosted_agent_clone(
         &self,
-        placement: &tddy_service::proto::connection::AgentClonePlacement,
+        placement: &tddy_service::proto::session::AgentClonePlacement,
         sessions_base: &Path,
         codebase_session_id: &str,
         project_id: &str,

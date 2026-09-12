@@ -13,9 +13,9 @@ use tddy_rpc::Status;
 
 use std::sync::Arc;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// Spawn sandbox-runner + SessionChannel bridge for an existing session directory.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn relaunch_sandboxed_runner(

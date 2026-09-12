@@ -7,10 +7,10 @@
 //! * `terminal_session.TerminalSessionService` — the terminal family, served by
 //!   [`terminal_session_service`] from `tddy-terminal-rpc`'s own handlers, so this process and the
 //!   daemon answer one session identically. `#unbundle` node 6 moved the terminal streaming off
-//!   `connection.ConnectionService` here for that reason.
+//!   `the pre-unbundle monolithic RPC coordinate` here for that reason.
 //! * `activity.ActivityService` — the session's activity stream and its ACP replay, served by
 //!   [`activity_service`]. `#unbundle` node 7 moved families M and N off
-//!   `connection.ConnectionService`, and this participant moved with them in the same PR: the two
+//!   `the pre-unbundle monolithic RPC coordinate`, and this participant moved with them in the same PR: the two
 //!   servers of one session have to answer it the same way.
 //!
 //! `DeleteSession` / `SignalSession` are **not** served here: the web routes them directly to the

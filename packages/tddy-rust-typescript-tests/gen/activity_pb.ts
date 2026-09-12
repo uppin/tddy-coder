@@ -79,7 +79,7 @@ export type AgentActivityDeltaChunk = Message<"activity.AgentActivityDeltaChunk"
    * The poll tick this patch belongs to. A client de-duplicates by this: several calls sharing a
    * tick must apply its patch once, not once each.
    *
-   * **Ticks start at 1; 0 means unset.** On `connection.ConnectionService` the first delta was
+   * **Ticks start at 1; 0 means unset.** On `the pre-unbundle monolithic RPC coordinate` the first delta was
    * numbered 0, which is also the wire's absent value, so a consumer could not tell "the first
    * delta" from "no delta yet" — recorded in
    * `docs/dev/todo/2026-08-29-a-session-s-first-delta-is-numbered-0-…`. A fresh schema is the last

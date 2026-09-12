@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_rpc::{Response, Status};
-use tddy_service::proto::connection::StartSessionResponse;
+use tddy_service::proto::session::StartSessionResponse;
 
 use crate::project_storage;
 use crate::user_sessions_path::projects_path_for_user;

@@ -5206,7 +5206,7 @@ mod tests {
     /// referred to. rust-analyzer offers the unaliased path, which binds nothing.
     #[test]
     fn reads_the_path_behind_an_alias_the_parent_declares() {
-        let text = "use tddy_service::proto::connection::ProbeOutcome as ProtoProbeOutcome;\n\
+        let text = "use tddy_service::proto::host::ProbeOutcome as ProtoProbeOutcome;\n\
                     mod host_messages {\n\
                         fn f(o: &ProtoProbeOutcome) {}\n\
                     }\n";
@@ -5392,19 +5392,20 @@ mod tests {
     #[test]
     fn settles_a_contested_name_on_the_module_the_file_already_imports_from() {
         let offered = [
-            "Import `tddy_service::proto::connection::Signal`",
+            "Import `tddy_service::proto::session::Signal`",
             "Import `sysinfo::Signal`",
             "Import `tokio::signal::unix::Signal`",
         ];
 
         let chosen = choose_import(
-            "use tddy_service::proto::connection::{ListToolsRequest, StartSessionResponse};\n",
+            "use tddy_service::proto::catalog::{ListToolsRequest};
+use tddy_service::proto::session::{StartSessionResponse};\n",
             &offered,
         );
 
         assert_eq!(
             chosen,
-            Some("Import `tddy_service::proto::connection::Signal`")
+            Some("Import `tddy_service::proto::session::Signal`")
         );
     }
 

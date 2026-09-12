@@ -11,8 +11,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use tddy_service::proto::connection::{MintLocalTokenRequest, StartSessionRequest};
-use tddy_service::tonic_connection::connection_service_client::ConnectionServiceClient;
+use tddy_service::proto::local_token::{MintLocalTokenRequest};
+use tddy_service::proto::session::{StartSessionRequest};
+use tddy_service::proto::tonic_local_token::local_token_service_client::LocalTokenServiceClient;
+use tddy_service::proto::tonic_session::session_service_client::SessionServiceClient;
 use tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput;
 use tddy_terminal_rpc::proto::tonic_terminal_session::terminal_session_service_client::TerminalSessionServiceClient;
 use tokio::sync::mpsc;
@@ -49,14 +51,16 @@ pub async fn run(params: DaemonClientParams) -> Result<()> {
     let socket = resolve_daemon_socket_path(params.daemon_socket);
     eprintln!("connecting to tddy-daemon at {}", socket.display());
     let channel = connect_daemon_channel(&socket).await?;
-    let mut client = ConnectionServiceClient::new(channel.clone());
+    let mut token_client = LocalTokenServiceClient::new(channel.clone());
 
-    let session_token = client
+    let session_token = token_client
         .mint_local_token(MintLocalTokenRequest {})
         .await
         .map_err(|status| map_daemon_status("mint local token", &status))?
         .into_inner()
         .session_token;
+
+    let mut client = SessionServiceClient::new(channel.clone());
 
     let codebase_mode = if params.managed_codebase {
         "managed"
@@ -116,7 +120,7 @@ fn default_socket_path_from(xdg_runtime_dir: Option<&Path>) -> PathBuf {
 /// Connect a tonic channel to the daemon's AF_UNIX socket, reusing the shared UDS connector from
 /// `tddy-sandbox-runner`.
 ///
-/// One channel carries both clients this flow needs: `connection.ConnectionService` for
+/// One channel carries both clients this flow needs: `the pre-unbundle monolithic RPC coordinate` for
 /// `MintLocalToken` / `StartSession`, and `terminal_session.TerminalSessionService` for the bidi
 /// terminal stream — two coordinates on the same socket since `#unbundle` node 6 moved the terminal
 /// family out of `connection.proto`.

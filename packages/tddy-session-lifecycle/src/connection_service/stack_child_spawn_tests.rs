@@ -22,7 +22,7 @@ const AGENT_SPAWN: Duration = Duration::from_secs(10);
 /// A pr-stack orchestrator session on a daemon that can really start a child: a registered
 /// project with a git repo, and a stub in place of `claude` that records its argv.
 struct Orchestrator {
-    service: ConnectionServiceImpl,
+    service: DaemonSessionHost,
     config: DaemonConfig,
     os_user: String,
     sessions: tempfile::TempDir,
@@ -63,7 +63,7 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
     let resolved_user = os_user.clone();
     let user_resolver: SessionUserResolver =
         Arc::new(move |token| (token == VALID_TOKEN).then(|| resolved_user.clone()));
-    let service = ConnectionServiceImpl::new(
+    let service = DaemonSessionHost::new(
         config.clone(),
         resolver,
         sessions.path().to_path_buf(),
@@ -161,7 +161,7 @@ impl Orchestrator {
     }
 
     /// The handler the `pr_spawn_child` tool reaches, wired exactly as
-    /// [`ConnectionServiceImpl::start_claude_cli_session`] wires it for a pr-stack session.
+    /// [`DaemonSessionHost::start_claude_cli_session`] wires it for a pr-stack session.
     fn child_spawn_handler(&self) -> StackChildSpawnHandler {
         StackChildSpawnHandler {
             // Same clone production passes: the orchestrator is a session of this daemon, so

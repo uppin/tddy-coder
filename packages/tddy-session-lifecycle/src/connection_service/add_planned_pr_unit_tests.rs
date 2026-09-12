@@ -1,4 +1,4 @@
-//! Unit tests: `ConnectionServiceImpl::add_planned_pr` — the recipe guard rejecting a
+//! Unit tests: `DaemonSessionHost::add_planned_pr` — the recipe guard rejecting a
 //! non-"pr-stack" session before its `Changeset.stack` is touched.
 //!
 //! PRD: docs/ft/coder/pr-stacking.md § Manually adding a planned PR.
@@ -22,11 +22,11 @@ fn make_unit_config() -> crate::config::DaemonConfig {
 
 fn make_unit_stack_service(
     sessions_base: std::path::PathBuf,
-) -> PrStackServiceImpl<ConnectionServiceImpl> {
+) -> PrStackServiceImpl<DaemonSessionHost> {
     PrStackServiceImpl::new(Arc::new(make_unit_connection(sessions_base)))
 }
 
-fn make_unit_connection(sessions_base: std::path::PathBuf) -> ConnectionServiceImpl {
+fn make_unit_connection(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
     let config = make_unit_config();
     let base = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
@@ -37,7 +37,7 @@ fn make_unit_connection(sessions_base: std::path::PathBuf) -> ConnectionServiceI
             None
         }
     });
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         sessions_base,

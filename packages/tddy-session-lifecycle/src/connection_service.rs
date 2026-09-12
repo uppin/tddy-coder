@@ -11,13 +11,9 @@ use tddy_core::session_lifecycle::validate_session_id_segment;
 use tddy_core::Changeset;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::catalog::{ListAgentModelsResponse, ModelInfo as CatalogModelInfo};
-use tddy_service::proto::connection::{
-    start_session_event::Event as StartSessionEventKind, AttachmentMaterializationProgress,
-    SessionAttachment, StartSessionEvent,
-};
-use tddy_service::proto::connection::{
-    ProjectEntry as ProtoProjectEntry, SplitAgentPlacement, StartSessionResponse,
-};
+use tddy_service::proto::session::{start_session_event::Event as StartSessionEventKind, AttachmentMaterializationProgress, SessionAttachment, StartSessionEvent};
+use tddy_service::proto::project::{ProjectEntry as ProtoProjectEntry};
+use tddy_service::proto::session::{SplitAgentPlacement, StartSessionResponse};
 use uuid::Uuid;
 
 use crate::branch_intent::{
@@ -33,7 +29,7 @@ use crate::workspace_session;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
 use tddy_daemon_livekit::session_room::ActivityDelta;
 use tddy_service::proto::activity::AgentActivityDeltaChunk;
-use tddy_service::proto::connection::{ExecuteToolChunk, ExecuteToolResponse};
+use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolResponse};
 use tddy_spawn::spawn_worker;
 use tddy_spawn::spawner::{self};
 use tddy_task::TaskRegistry;
@@ -52,11 +48,11 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 #[cfg(test)]
 use tddy_rpc::Request;
 #[cfg(test)]
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
+use tddy_service::proto::session::SessionService as SessionServiceTrait;
 #[cfg(test)]
-use tddy_service::proto::connection::{
-    ExecuteToolRequest, ListProjectsRequest, Signal, SignalSessionRequest, StartSessionRequest,
-};
+use tddy_service::proto::exec_tools::{ExecuteToolRequest};
+use tddy_service::proto::project::{ListProjectsRequest};
+use tddy_service::proto::session::{Signal, SignalSessionRequest, StartSessionRequest};
 
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 
@@ -128,7 +124,7 @@ mod activity_hub;
 /// the same session managers, registries and caches. The server-streaming handlers need it — they
 /// hand the work to a `tokio::spawn`ed producer task, which must own a `'static` service.
 #[derive(Clone)]
-pub struct ConnectionServiceImpl {
+pub struct DaemonSessionHost {
     config: DaemonConfig,
     #[allow(dead_code)]
     // Kept for API compatibility; callers pass a resolver but tddy_data_dir is used directly.
@@ -227,13 +223,8 @@ pub struct ConnectionServiceImpl {
     /// nothing is listening: publishing is skipped, and `StreamSessionNotifications` has no feed to
     /// hand a client.
     session_notification_bus: Option<Arc<crate::session_notifications::SessionNotificationBus>>,
-    /// Self-reference for handing out `Arc<ConnectionServiceImpl>` from a `&self` method. Set
-    /// once (via [`Self::set_self_handle`]) right after the top-level `Arc::new` in `runtime.rs`;
-    /// shared across `Clone`s because it is itself behind an `Arc`, so a clone tonic holds can
-    /// still recover the original `Arc`. Used by the sandbox-IPC RPC bridge: a sandboxed session's
-    /// `dial_and_bridge` builds a `DaemonRpcHandler` from `self_arc()` so the in-jail `tddy-tools`
-    /// can reach the roster and conversation RPCs on this daemon over the `SessionChannel`.
-    self_handle: Arc<std::sync::OnceLock<std::sync::Weak<ConnectionServiceImpl>>>,
+    /// Sandbox-IPC bridge installed once the top-level `Arc` exists (`runtime::build`).
+    sandbox_rpc_bridge: Arc<std::sync::OnceLock<Arc<dyn tddy_sandbox_runner::HostRpcHandler>>>,
 }
 
 mod seed_codebase;
@@ -661,7 +652,7 @@ mod svc_split_context_from_codebase_host;
 mod svc_relaunch_sandboxed_runner;
 
 /// Launch inputs for a managed claude-cli session, produced by
-/// [`ConnectionServiceImpl::prepare_managed_workflow`]: the workflow wiring (whose listener must be
+/// [`DaemonSessionHost::prepare_managed_workflow`]: the workflow wiring (whose listener must be
 /// kept alive for the session's lifetime), the orchestration-prompt file to append to claude's
 /// system prompt, and the per-session env (`TDDY_SOCKET` + `PATH`) for host-side `tddy-tools`.
 pub(crate) struct ManagedLaunch {
@@ -670,7 +661,7 @@ pub(crate) struct ManagedLaunch {
     env: Vec<(String, String)>,
 }
 
-/// Free-function form of [`ConnectionServiceImpl::prepare_managed_workflow`] so the shared
+/// Free-function form of [`DaemonSessionHost::prepare_managed_workflow`] so the shared
 /// claude-cli spawn logic ([`spawn_claude_cli_session_inner`]) — which has no `self` — can reuse it.
 /// `child_spawn_handler`, when present, is bound to the managed session's toolcall listener so the
 /// agent's `pr_spawn_child` relay reaches a spawner (used for PR-stack orchestrators).
@@ -761,9 +752,9 @@ struct StackChildSpawnHandler {
 
     /// The daemon whose attachment path materializes the child's documents. A shallow clone (every
     /// mutable field is behind an `Arc`), exactly as [`DaemonSeedCloneClaimant`] holds one: the
-    /// documents go through [`ConnectionServiceImpl::prepare_session_attachments`], the same
+    /// documents go through [`DaemonSessionHost::prepare_session_attachments`], the same
     /// materializer `StartSession` uses, so a child cannot differ by how it was started.
-    service: ConnectionServiceImpl,
+    service: DaemonSessionHost,
     config: DaemonConfig,
     tddy_data_dir: PathBuf,
     claude_cli_manager: Arc<CliSessionManager>,
@@ -953,7 +944,7 @@ impl AttachmentProgressReporter<'_> {
 /// session lives, what to attach, and where progress goes.
 ///
 /// One cohesive context rather than six carried parameters — every field travels together from the
-/// per-session-type branch in [`ConnectionServiceImpl::start_session_core`] down to the copy.
+/// per-session-type branch in [`DaemonSessionHost::start_session_core`] down to the copy.
 pub(crate) struct AttachmentMaterialization<'a> {
     session_token: &'a str,
     os_user: &'a str,
@@ -1217,21 +1208,23 @@ async fn merge_listed_projects_with_peers(
 
 /// The host-side RPC dispatch for a sandboxed session's `SessionChannel`: routes the roster and
 /// conversation RPCs the in-jail `tddy-tools` issues (forwarded by the runner as `RpcRequest`s)
-/// to this daemon's `ConnectionServiceImpl`. The runner's `ToolExecService` forwards
+/// to this daemon's `DaemonSessionHost`. The runner's `ToolExecService` forwards
 /// `StreamSessionAgents` / `OpenAgentConversation` / `PromptAgentConversation` /
 /// `CancelAgentConversation` / `ReportAgentConversationState`; this handler decodes each, calls the
 /// matching typed method on the
-/// `Arc<ConnectionServiceImpl>` it holds, and returns the encoded response — unary for the two
+/// `Arc<DaemonSessionHost>` it holds, and returns the encoded response — unary for the two
 /// unary RPCs, a server stream of encoded frames for the two streaming ones. `tonic::Status`
 /// errors are carried back to the in-jail caller as a single terminal `RpcStreamFrame` with
 /// `error` set, which the runner's relay turns into the `tddy_rpc::Status` the caller sees.
 struct DaemonRpcHandler {
-    conn: Arc<ConnectionServiceImpl>,
+    conn: Arc<DaemonSessionHost>,
 }
 
 mod daemon_rpc_handler;
 
-mod rpc_service;
+mod demo_vm_coordinate_handlers;
+mod svc_demo_vm_ports;
+pub use svc_demo_vm_ports::DemoVmServiceImpl;
 
 /// Reject an obvious path traversal in a path-bearing exec tool's arguments, before any I/O.
 ///
@@ -1492,9 +1485,9 @@ fn owner_repo_from_repo_root(repo_root: &std::path::Path) -> Option<String> {
 fn pr_status_unavailable(
     branch: &str,
     reason: String,
-) -> tddy_service::proto::connection::PrStatusView {
+) -> tddy_service::proto::pr_stack::PrStatusView {
     log::warn!("PR status unavailable for branch {branch}: {reason}");
-    tddy_service::proto::connection::PrStatusView {
+    tddy_service::proto::pr_stack::PrStatusView {
         unavailable: true,
         unavailable_reason: reason,
         ..Default::default()
@@ -1523,8 +1516,8 @@ fn base_sync_through_cache(
 /// come from (D28).
 fn base_sync_view(
     sync: tddy_core::base_sync::BranchBaseSync,
-) -> tddy_service::proto::connection::BranchBaseSync {
-    tddy_service::proto::connection::BranchBaseSync {
+) -> tddy_service::proto::pr_stack::BranchBaseSync {
+    tddy_service::proto::pr_stack::BranchBaseSync {
         base_branch: sync.base_ref.clone(),
         behind_count: sync.behind_count,
         ahead_count: sync.ahead_count,
@@ -1543,8 +1536,8 @@ fn base_sync_view(
 fn base_sync_unavailable(
     base_branch: &str,
     reason: &str,
-) -> tddy_service::proto::connection::BranchBaseSync {
-    tddy_service::proto::connection::BranchBaseSync {
+) -> tddy_service::proto::pr_stack::BranchBaseSync {
+    tddy_service::proto::pr_stack::BranchBaseSync {
         base_branch: base_branch.to_string(),
         unavailable: true,
         unavailable_reason: reason.to_string(),
@@ -1560,8 +1553,8 @@ fn base_sync_unavailable(
 fn worktree_leg(
     repo_root: Option<&std::path::Path>,
     branch: &str,
-) -> tddy_service::proto::connection::BranchWorktree {
-    use tddy_service::proto::connection::BranchWorktree;
+) -> tddy_service::proto::pr_stack::BranchWorktree {
+    use tddy_service::proto::pr_stack::BranchWorktree;
 
     let Some(path) =
         repo_root.and_then(|root| tddy_core::worktree::worktree_path_for_branch(root, branch))
@@ -1786,7 +1779,7 @@ mod workspace_start_request_unit_tests;
 /// Changeset: `docs/dev/changesets/`, 2026-08-30 workspace tool sandbox.
 ///
 /// Lives here rather than in `tests/workspace_tool_sandbox_acceptance.rs` because
-/// [`ConnectionServiceImpl::local_agent_codebase_access`] is the seam under test and it is private:
+/// [`DaemonSessionHost::local_agent_codebase_access`] is the seam under test and it is private:
 /// widening it to `pub` purely so a test could call it would export an internal for no other
 /// caller. This is the roster half of the dispatch contract; the remote-caller half is proven from
 /// the outside, over the RPC surface.

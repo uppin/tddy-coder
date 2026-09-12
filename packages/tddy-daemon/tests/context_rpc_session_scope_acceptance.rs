@@ -2,7 +2,7 @@
 //!
 //! The three context RPCs carry an `agent` field, and it is **advisory**. Authorization on this
 //! path is per OS user rather than per session
-//! (`ConnectionServiceImpl::authorize_exec_tool_caller`), so a caller holding a valid token for one
+//! (`DaemonSessionHost::authorize_exec_tool_caller`), so a caller holding a valid token for one
 //! of its sessions can name any other session of the same user. If the field also chose the table
 //! row, that caller could hand itself `.claude/**`, `.cursor/**` and `.mcp.json` out of a checkout
 //! it was never granted them on — the files that routinely carry API tokens in MCP `env` blocks,
@@ -25,9 +25,7 @@ use futures_util::StreamExt;
 use pretty_assertions::assert_eq;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, SplitAgentPlacement, StartSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, SplitAgentPlacement, StartSessionRequest};
 use tddy_service::proto::session_files::{
     ContextManifestRequest, ReadContextFileBatchRequest, ReadContextFileRequest,
     SessionFilesService as SessionFilesServiceTrait,
@@ -82,7 +80,7 @@ fn register_project(sessions_base: &Path, repo_path: &Path) {
 
 /// A session on a real checkout, plus the service that serves it.
 struct ASession {
-    /// The three context reads left `connection.ConnectionService` with `#unbundle` node 6; this is
+    /// The three context reads left `the pre-unbundle monolithic RPC coordinate` with `#unbundle` node 6; this is
     /// the coordinate that declares them, built from the daemon that started the session.
     service: tddy_daemon::connection_service::PeerRoutedSessionFiles,
     session_id: String,

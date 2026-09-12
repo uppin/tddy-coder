@@ -77,7 +77,7 @@ const TEST_TOOL_PATH = "/usr/bin/tddy-coder";
 
 function interceptBaseline() {
   const projectsBody = toArrayBuffer(listProjects([TEST_PROJECT]));
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
+  cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/ListProjects", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: projectsBody });
   }).as("listProjects");
 
@@ -226,7 +226,7 @@ describe("CreateSessionPane — claude-cli session fields", () => {
 describe("CreateSessionPane — create button enabled state", () => {
   it("Create button is disabled when no project is selected", () => {
     const noProjectsBody = toArrayBuffer(listProjects([]));
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/ListProjects", (req) => {
       req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: noProjectsBody });
     }).as("listProjects");
 
@@ -311,7 +311,7 @@ describe("CreateSessionPane — submit behaviour", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/StartSession", (req) => {
       capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
       req.continue();
     });
@@ -347,7 +347,7 @@ describe("CreateSessionPane — submit behaviour", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/StartSession", (req) => {
       capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
       req.continue();
     });
@@ -389,7 +389,7 @@ describe("CreateSessionPane — submit behaviour", () => {
     const responseBody = toArrayBuffer(
       toBinary(StartSessionResponseSchema, create(StartSessionResponseSchema, { sessionId: "in-flight-check" })),
     );
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/StartSession", (req) => {
       req.reply({ delay: 3000, statusCode: 200, headers: { "Content-Type": "application/proto" }, body: responseBody });
     }).as("startSessionSlow");
 
@@ -418,7 +418,7 @@ describe("CreateSessionPane — submit behaviour", () => {
 
   it("shows an error message when startSession fails and keeps the form open", () => {
     interceptBaseline();
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/StartSession", (req) => {
       req.reply({ statusCode: 500, body: "daemon error" });
     }).as("startSessionFail");
 
@@ -455,7 +455,7 @@ function interceptBaselineWithSessions(
     recipe: s.recipe ?? "",
     orchestratorSessionId: s.orchestratorSessionId ?? "",
   }))));
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
+  cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/ListSessions", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: sessionsBody });
   }).as("listSessions");
 }
@@ -508,7 +508,7 @@ describe("CreateSessionPane — recipe dropdown", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/StartSession", (req) => {
       capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
       req.continue();
     });
@@ -592,7 +592,7 @@ describe("CreateSessionPane — stack parent picker", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/StartSession", (req) => {
       capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
       req.continue();
     });
@@ -620,7 +620,7 @@ describe("CreateSessionPane — stack parent picker", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/StartSession", (req) => {
       capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
       req.continue();
     });

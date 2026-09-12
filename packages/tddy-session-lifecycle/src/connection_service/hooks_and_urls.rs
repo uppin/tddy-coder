@@ -2,7 +2,7 @@ use crate::{
     connection_service::stack_parent,
     project_storage::{self},
 };
-use tddy_service::proto::connection::ProjectEntry as ProtoProjectEntry;
+use tddy_service::proto::project::ProjectEntry as ProtoProjectEntry;
 
 use crate::config::DaemonConfig;
 

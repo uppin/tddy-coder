@@ -1,7 +1,7 @@
 //! Acceptance tests that `GetTerminalHistory` at the new coordinate answers with the same frames,
 //! at the same offsets, as the old one.
 //!
-//! `connection.ConnectionService::GetTerminalHistory` does two things: it authenticates, and it
+//! `the pre-unbundle monolithic RPC coordinate::GetTerminalHistory` does two things: it authenticates, and it
 //! calls `serve_get_terminal_history_with` over a `TerminalSessionStore`, copying the chunk
 //! field-for-field into its own proto. So the oracle each test compares against is that same bridge
 //! call over the same capture ring — which makes these tests about the *plumbing*: a request field

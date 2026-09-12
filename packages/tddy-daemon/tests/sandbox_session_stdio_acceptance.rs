@@ -203,9 +203,9 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
 #[test]
 fn sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags() {
     // Given
-    let connection_service_rs = include_str!(concat!(
+      let connection_service_rs = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/connection_service.rs"
+        "/../tddy-session-lifecycle/src/connection_service.rs"
     ));
 
     // When / Then — the sandbox-runner spawn argv must request the stdio transport…

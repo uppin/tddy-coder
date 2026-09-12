@@ -1,11 +1,11 @@
 /**
  * Cypress component acceptance: the Worktrees screen loads through **`worktree.WorktreeService`**.
  *
- * Nine worktree methods left `connection.ConnectionService` for `worktree.WorktreeService`, and the
+ * Nine worktree methods left `the pre-unbundle monolithic RPC coordinate` for `worktree.WorktreeService`, and the
  * daemon roster left it for `host.HostService` — but `ListProjects`, which this screen also reads,
  * stayed. So the screen now spans three services, and this spec pins the split: the backend serves
  * the worktree feed and the delete **only** under `worktree.WorktreeService`, the roster only under
- * `host.HostService`, and the project registry only under `connection.ConnectionService`. A screen
+ * `host.HostService`, and the project registry only under `the pre-unbundle monolithic RPC coordinate`. A screen
  * that asked any of them of the wrong service gets `Unimplemented` and shows nothing.
  *
  * Changeset: `docs/dev/changesets/2026-09-09-unbundle-host-worktree-services.md`

@@ -51,7 +51,7 @@ pub use local_token::{build_local_token_entry, mint_local_token, LocalTokenError
 /// Where the daemon keeps a user's GitHub token at rest.
 ///
 /// The trait is `tddy-github`'s, not this crate's: `AuthServiceImpl` writes through it at the end
-/// of an OAuth exchange and `ConnectionServiceImpl` reads through it when it looks up an
+/// of an OAuth exchange and `DaemonSessionHost` reads through it when it looks up an
 /// operator's PRs, so a second definition here would be a second trait two crates could not pass
 /// to one another. [`github_token_store::FileGitHubTokenStore`] is this crate's implementation of
 /// it.

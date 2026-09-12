@@ -50,7 +50,7 @@ pub use context_sync::{ContextSource, ContextSyncer, LocalWorktreeSource, Prefet
 /// of it.
 ///
 /// The enum is in `types.proto` rather than `session_files.proto` because
-/// `connection.ConnectionService`'s `StartSession` needs it too: a session start names the staged
+/// `the pre-unbundle monolithic RPC coordinate`'s `StartSession` needs it too: a session start names the staged
 /// attachments to materialise, and each carries a scope. Re-exported rather than re-declared so a
 /// caller never has to convert, and so [`HostDocumentScope::Unspecified`] — the proto3 zero value a
 /// hand-written mirror silently drops — stays representable and therefore refusable.

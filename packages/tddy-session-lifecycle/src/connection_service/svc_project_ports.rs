@@ -3,11 +3,17 @@
 use async_trait::async_trait;
 use tddy_projects::ProjectHandler;
 use tddy_rpc::{Request, Response, Status};
+use tddy_service::proto::project::{
+    AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest,
+    CreateProjectResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
+    ListProjectsRequest, ListProjectsResponse, ProjectService, SetProjectDefaultBranchRequest,
+    SetProjectDefaultBranchResponse,
+};
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
 #[async_trait]
-impl ProjectHandler for ConnectionServiceImpl {
+impl ProjectHandler for DaemonSessionHost {
     async fn list_projects(
         &self,
         request: Request<tddy_service::proto::project::ListProjectsRequest>,
@@ -44,7 +50,45 @@ impl ProjectHandler for ConnectionServiceImpl {
     }
 }
 
-impl ConnectionServiceImpl {
+#[async_trait]
+impl ProjectService for DaemonSessionHost {
+    async fn list_projects(
+        &self,
+        request: Request<ListProjectsRequest>,
+    ) -> Result<Response<ListProjectsResponse>, Status> {
+        ProjectHandler::list_projects(self, request).await
+    }
+
+    async fn create_project(
+        &self,
+        request: Request<CreateProjectRequest>,
+    ) -> Result<Response<CreateProjectResponse>, Status> {
+        ProjectHandler::create_project(self, request).await
+    }
+
+    async fn add_project_to_host(
+        &self,
+        request: Request<AddProjectToHostRequest>,
+    ) -> Result<Response<AddProjectToHostResponse>, Status> {
+        ProjectHandler::add_project_to_host(self, request).await
+    }
+
+    async fn list_project_branches(
+        &self,
+        request: Request<ListProjectBranchesRequest>,
+    ) -> Result<Response<ListProjectBranchesResponse>, Status> {
+        ProjectHandler::list_project_branches(self, request).await
+    }
+
+    async fn set_project_default_branch(
+        &self,
+        request: Request<SetProjectDefaultBranchRequest>,
+    ) -> Result<Response<SetProjectDefaultBranchResponse>, Status> {
+        ProjectHandler::set_project_default_branch(self, request).await
+    }
+}
+
+impl DaemonSessionHost {
     #[must_use]
     pub fn project_service(
         self: &std::sync::Arc<Self>,

@@ -41,7 +41,7 @@ use tddy_session_agents::ports::{
 use tddy_session_agents::SessionAgentServiceImpl;
 use tddy_worktree_service::stream::MpscResultStream;
 
-use super::{agent_roster, seed_codebase, ConnectionServiceImpl};
+use super::{agent_roster, seed_codebase, DaemonSessionHost};
 use crate::livekit_peer_discovery::local_instance_id_for_config;
 
 /// The coordinate this daemon serves family B at, and the one a forwarded family-B call is
@@ -49,7 +49,7 @@ use crate::livekit_peer_discovery::local_instance_id_for_config;
 /// addressed at a name nothing answers.
 const SESSION_AGENT_SERVICE: &str = tddy_session_agents::SERVICE_NAME;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// The `session_agents.SessionAgentService` entry this daemon registers.
     ///
     /// Public because it is wiring: the host that assembles the roster registers it
@@ -118,7 +118,7 @@ impl ConnectionServiceImpl {
 /// The defs this daemon can resolve an agent id against — its own `<tddyhome>/agents` entries and
 /// its model registry's assistants, or a peer's own `ListSubagents` for an id naming that peer.
 struct DefsResolvableFromThisDaemon {
-    connection: ConnectionServiceImpl,
+    connection: DaemonSessionHost,
 }
 
 #[async_trait]
@@ -132,7 +132,7 @@ impl AgentCatalog for DefsResolvableFromThisDaemon {
 /// enforce the withdrawal the agent declares, and — for an agent a peer owns — the checkout on that
 /// peer the entry will name.
 struct ClonesClaimedOnOwningPeers {
-    connection: ConnectionServiceImpl,
+    connection: DaemonSessionHost,
 }
 
 #[async_trait]
@@ -208,7 +208,7 @@ impl AgentAdmission for ClonesClaimedOnOwningPeers {
 
 /// The session room a roster snapshot is broadcast into, when this daemon hosts one.
 struct TheSessionsOwnRoom {
-    connection: ConnectionServiceImpl,
+    connection: DaemonSessionHost,
 }
 
 #[async_trait]
@@ -225,7 +225,7 @@ impl RosterBroadcast for TheSessionsOwnRoom {
 /// The turn loops this daemon can open — one against a clone it holds for a peer's session, one
 /// against a session's own worktree — and the two refusals that decide whether it should.
 struct TurnLoopsThisDaemonCanOpen {
-    connection: ConnectionServiceImpl,
+    connection: DaemonSessionHost,
 }
 
 #[async_trait]
@@ -281,7 +281,7 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
 /// Re-addressing is the point. A request still naming the daemon holding the roster would be routed
 /// back here on that axis, and the two daemons would hand the same turn to each other.
 struct ConversationsForwardedOverTheCommonRoom {
-    connection: ConnectionServiceImpl,
+    connection: DaemonSessionHost,
 }
 
 #[async_trait]
@@ -361,15 +361,15 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
 /// The wrapper is *this* side of the boundary for the reason node 6's `PeerRoutedSessionFiles`
 /// gives: it implements the generated service trait rather than wrapping the entry's encoded
 /// [`tddy_rpc::RpcService`], so the fork sits in front of the *handler* — the layer it was in
-/// before this node moved these methods off `connection.ConnectionService`.
+/// before this node moved these methods off `the pre-unbundle monolithic RPC coordinate`.
 pub struct PeerRoutedSessionAgents {
-    connection: ConnectionServiceImpl,
+    connection: DaemonSessionHost,
     /// The `tddy-session-agents` implementation, which serves every request this daemon keeps.
     local: SessionAgentServiceImpl,
 }
 
 impl PeerRoutedSessionAgents {
-    /// The same bump every `connection.ConnectionService` handler makes: in relay mode the idle
+    /// The same bump every `the pre-unbundle monolithic RPC coordinate` handler makes: in relay mode the idle
     /// monitor shuts the process down, and a client that has moved to this coordinate is still a
     /// client using it.
     fn record_activity(&self) {
@@ -379,7 +379,7 @@ impl PeerRoutedSessionAgents {
     /// The roster a peer answered with, when the call was that peer's to serve.
     ///
     /// Routed **before** any session lookup, which is the order every one of these had on
-    /// `connection.ConnectionService`: a split session's roster lives on the daemon holding the
+    /// `the pre-unbundle monolithic RPC coordinate`: a split session's roster lives on the daemon holding the
     /// codebase, so resolved out of this daemon's own sessions it does not exist at all.
     async fn roster_from_peer<Req>(
         &self,

@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon::cli_session_manager::CliSessionManager;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::test_util::TestDaemon;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
@@ -124,7 +124,7 @@ fn a_service(sessions_base: PathBuf) -> TestDaemon {
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     let user_resolver: SessionUserResolver =
         Arc::new(|token| (token == TOKEN).then(|| "u".to_string()));
-    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         sessions_base,

@@ -32,14 +32,14 @@ fn a_github_user(login: &str) -> tddy_github::GitHubUser {
 fn a_peer_daemon(
     config: crate::config::DaemonConfig,
     data_dir: std::path::PathBuf,
-) -> ConnectionServiceImpl {
+) -> DaemonSessionHost {
     let resolver = crate::auth::build_auth_entries(&config, "127.0.0.1", 0)
         .expect("auth wiring should build")
         .user_resolver
         .expect("auth wiring should produce a session resolver");
     let base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         data_dir,

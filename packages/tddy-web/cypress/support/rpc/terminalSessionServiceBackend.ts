@@ -3,7 +3,7 @@
  * streams, their scrollback and the control lease that decides who may type into them.
  *
  * Split out of `connectionServiceBackend.ts` when the nine terminal RPCs left
- * `connection.ConnectionService` for `terminal_session.TerminalSessionService`: a fake is registered
+ * `the pre-unbundle monolithic RPC coordinate` for `terminal_session.TerminalSessionService`: a fake is registered
  * per service, so a screen's backend composes the two rather than one `.implement` covering both.
  * `aTerminalSessionServiceFake` is the composable half (`handlers` spread into a caller's own
  * `.implement(TerminalSessionService, …)`), `aTerminalSessionServiceBackend` the standalone one,

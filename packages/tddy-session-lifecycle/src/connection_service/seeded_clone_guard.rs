@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::connection_service::seed_codebase;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
 /// One agent a start has already put on a session's roster, as its unwind needs to name it.
 ///
@@ -25,7 +25,7 @@ pub(crate) struct SeededAgent {
 /// a failed start that this daemon cannot clean up later.
 ///
 /// Spawned because `Drop` cannot await, and swallowed for the reason
-/// [`ConnectionServiceImpl::unwind_seeded_roster`] swallows: whatever is unwinding this already has
+/// [`DaemonSessionHost::unwind_seeded_roster`] swallows: whatever is unwinding this already has
 /// the error worth reporting.
 pub struct SeededCloneGuard {
     /// What to give back, and to whom. `None` once the start has kept the clones — and from the
@@ -34,7 +34,7 @@ pub struct SeededCloneGuard {
 }
 
 pub(crate) struct SeededCloneRelease {
-    pub(crate) service: ConnectionServiceImpl,
+    pub(crate) service: DaemonSessionHost,
     pub(crate) session_id: String,
     pub(crate) session_token: String,
     pub(crate) seeded: Vec<SeededAgent>,
@@ -49,7 +49,7 @@ impl SeededCloneGuard {
     /// A guard for a start that is about to claim, opened before the first claim so an early
     /// return releases whatever it got through.
     pub(crate) fn claiming(
-        service: ConnectionServiceImpl,
+        service: DaemonSessionHost,
         session_id: &str,
         session_token: &str,
     ) -> Self {

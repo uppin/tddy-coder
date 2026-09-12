@@ -3,7 +3,7 @@
 //! [`StartSession`](crate::connection_service) currently requires the project to be registered
 //! locally with an on-disk `main_repo_path`, returning `not_found` / `invalid_argument` otherwise.
 //! This module isolates the "make the working copy exist here, cloning it if missing" step so it can
-//! be exercised without a live LiveKit room or a full `ConnectionServiceImpl`: cloning and
+//! be exercised without a live LiveKit room or a full `DaemonSessionHost`: cloning and
 //! peer-project discovery are injected as closures.
 
 use std::collections::HashMap;

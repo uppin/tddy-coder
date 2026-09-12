@@ -81,7 +81,7 @@ function unpushedPullReason(baseBranch: string, branch: string, pushError: strin
 
 export interface PrStackScreenProps {
   session: SessionEntry;
-  /** `connection.ConnectionService` on the orchestrator's host — Start-session only. */
+  /** `the pre-unbundle monolithic RPC coordinate` on the orchestrator's host — Start-session only. */
   client?: ConnectionClient;
   /** `pr_stack.PrStackService` on the same host — planned-PR mutations and `QueryBranch`. */
   prStackClient?: PrStackClient;

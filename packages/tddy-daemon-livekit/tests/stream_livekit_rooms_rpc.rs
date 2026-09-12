@@ -6,7 +6,7 @@
 //! it opens a stream, it turns a *sequence* of roster readings into a snapshot followed by changes,
 //! silence, or an error, and it stops reading LiveKit once its subscriber is gone.
 //!
-//! The method left `connection.ConnectionService` in `#unbundle` node 4, so the subject here is
+//! The method left `the pre-unbundle monolithic RPC coordinate` in `#unbundle` node 4, so the subject here is
 //! `LiveKitServiceImpl` rather than the daemon's god object, and the only thing the suite needs
 //! from outside this crate is a resolver that says yes to one token.
 //!

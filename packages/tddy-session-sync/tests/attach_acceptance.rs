@@ -7,7 +7,7 @@
 //! not tested here and are not faked here; see the crate README's Status table.
 
 use pretty_assertions::assert_eq;
-use tddy_service::proto::connection::SessionEntry;
+use tddy_service::proto::session::SessionEntry;
 use tddy_session_sync::{
     daemon_identity, resolve_session, session_room_name, syncer_identity, AttachError,
     SessionAddress,

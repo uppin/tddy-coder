@@ -6,9 +6,7 @@
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, DeleteSessionRequest};
 use tddy_testing_commons::builders::a_session_metadata;
 use tddy_testing_commons::fs::write_session_yaml;
 

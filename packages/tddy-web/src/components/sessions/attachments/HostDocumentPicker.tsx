@@ -17,7 +17,7 @@
  * The host browsed is the one the form's clients are connected to: `ListSessions`,
  * `ListSessionUploads` and `ListWorktreeDirectory` carry no `daemon_instance_id`, so a peer's
  * documents are not enumerable over them (tracked in the changeset). The three now live on three
- * services — `connection.ConnectionService`, `session_files.SessionFilesService` and
+ * services — `the pre-unbundle monolithic RPC coordinate`, `session_files.SessionFilesService` and
  * `worktree.WorktreeService` — so the picker takes one client each rather than one client for all,
  * and the invariant that binds them is `browsedDaemonInstanceId` below.
  *

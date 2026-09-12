@@ -296,7 +296,7 @@ describe("a session connection on a host that serves its own session RPC", () =>
 
   it("serves the session's own RPC through the connection", () => {
     // Given the daemon answering a session-scoped call
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
+    cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/ListSessions", (req) => {
       req.reply({
         statusCode: 200,
         headers: { "Content-Type": "application/proto" },

@@ -3426,11 +3426,11 @@ export const DemoVmStateSchema: GenEnum<DemoVmState> = /*@__PURE__*/
   enumDesc(file_connection, 2);
 
 /**
- * @generated from service connection.ConnectionService
+ * @generated from service the pre-unbundle monolithic RPC coordinate
  */
 export const ConnectionService: GenService<{
   /**
-   * @generated from rpc connection.ConnectionService.ListSessions
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.ListSessions
    */
   listSessions: {
     methodKind: "unary";
@@ -3438,7 +3438,7 @@ export const ConnectionService: GenService<{
     output: typeof ListSessionsResponseSchema;
   },
   /**
-   * @generated from rpc connection.ConnectionService.ListProjects
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.ListProjects
    */
   listProjects: {
     methodKind: "unary";
@@ -3446,7 +3446,7 @@ export const ConnectionService: GenService<{
     output: typeof ListProjectsResponseSchema;
   },
   /**
-   * @generated from rpc connection.ConnectionService.CreateProject
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.CreateProject
    */
   createProject: {
     methodKind: "unary";
@@ -3459,7 +3459,7 @@ export const ConnectionService: GenService<{
    * repo and registers a projects.yaml row with the same project_id. See
    * docs/ft/web/projects-screen-multi-host.md.
    *
-   * @generated from rpc connection.ConnectionService.AddProjectToHost
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.AddProjectToHost
    */
   addProjectToHost: {
     methodKind: "unary";
@@ -3467,7 +3467,7 @@ export const ConnectionService: GenService<{
     output: typeof AddProjectToHostResponseSchema;
   },
   /**
-   * @generated from rpc connection.ConnectionService.StartSession
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.StartSession
    */
   startSession: {
     methodKind: "unary";
@@ -3475,7 +3475,7 @@ export const ConnectionService: GenService<{
     output: typeof StartSessionResponseSchema;
   },
   /**
-   * @generated from rpc connection.ConnectionService.ConnectSession
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.ConnectSession
    */
   connectSession: {
     methodKind: "unary";
@@ -3483,7 +3483,7 @@ export const ConnectionService: GenService<{
     output: typeof ConnectSessionResponseSchema;
   },
   /**
-   * @generated from rpc connection.ConnectionService.ResumeSession
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.ResumeSession
    */
   resumeSession: {
     methodKind: "unary";
@@ -3491,7 +3491,7 @@ export const ConnectionService: GenService<{
     output: typeof ResumeSessionResponseSchema;
   },
   /**
-   * @generated from rpc connection.ConnectionService.SignalSession
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.SignalSession
    */
   signalSession: {
     methodKind: "unary";
@@ -3499,7 +3499,7 @@ export const ConnectionService: GenService<{
     output: typeof SignalSessionResponseSchema;
   },
   /**
-   * @generated from rpc connection.ConnectionService.DeleteSession
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.DeleteSession
    */
   deleteSession: {
     methodKind: "unary";
@@ -3507,7 +3507,7 @@ export const ConnectionService: GenService<{
     output: typeof DeleteSessionResponseSchema;
   },
   /**
-   * @generated from rpc connection.ConnectionService.ListProjectBranches
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.ListProjectBranches
    */
   listProjectBranches: {
     methodKind: "unary";
@@ -3518,7 +3518,7 @@ export const ConnectionService: GenService<{
    * Set a project's default integration base ref (logical-project scope: forwarded to peer hosts
    * owning the same project_id). See docs/ft/coder/git-integration-base-ref.md.
    *
-   * @generated from rpc connection.ConnectionService.SetProjectDefaultBranch
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.SetProjectDefaultBranch
    */
   setProjectDefaultBranch: {
     methodKind: "unary";
@@ -3528,7 +3528,7 @@ export const ConnectionService: GenService<{
   /**
    * Demo VM lifecycle — UI-driven QEMU boot/shutdown for the demo goal.
    *
-   * @generated from rpc connection.ConnectionService.StartDemoVm
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.StartDemoVm
    */
   startDemoVm: {
     methodKind: "unary";
@@ -3536,7 +3536,7 @@ export const ConnectionService: GenService<{
     output: typeof StartDemoVmResponseSchema;
   },
   /**
-   * @generated from rpc connection.ConnectionService.StopDemoVm
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.StopDemoVm
    */
   stopDemoVm: {
     methodKind: "unary";
@@ -3544,7 +3544,7 @@ export const ConnectionService: GenService<{
     output: typeof StopDemoVmResponseSchema;
   },
   /**
-   * @generated from rpc connection.ConnectionService.GetDemoVmStatus
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.GetDemoVmStatus
    */
   getDemoVmStatus: {
     methodKind: "unary";
@@ -3559,7 +3559,7 @@ export const ConnectionService: GenService<{
    * codebase daemon would take of itself. One round trip per poll rather than three, because the
    * measurement is assembled where the files are.
    *
-   * @generated from rpc connection.ConnectionService.GetWorktreeSnapshot
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.GetWorktreeSnapshot
    */
   getWorktreeSnapshot: {
     methodKind: "unary";
@@ -3572,7 +3572,7 @@ export const ConnectionService: GenService<{
    * credential is not present on ConnectRPC-HTTP or LiveKit), and only for a peer uid mapped to a
    * configured user.
    *
-   * @generated from rpc connection.ConnectionService.MintLocalToken
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.MintLocalToken
    */
   mintLocalToken: {
     methodKind: "unary";
@@ -3586,7 +3586,7 @@ export const ConnectionService: GenService<{
    * never emits a result; the partial attachments are rolled back first. Unary StartSession stays
    * the entry point for every non-interactive caller.
    *
-   * @generated from rpc connection.ConnectionService.StreamStartSession
+   * @generated from rpc the pre-unbundle monolithic RPC coordinate.StreamStartSession
    */
   streamStartSession: {
     methodKind: "server_streaming";

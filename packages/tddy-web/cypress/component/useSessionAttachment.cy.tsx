@@ -149,7 +149,7 @@ function AttachmentHarness() {
 }
 
 function interceptConnectSession(body: ArrayBuffer) {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ConnectSession", (req) => {
+  cy.intercept("POST", "**/rpc/the pre-unbundle monolithic RPC coordinate/ConnectSession", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
   }).as("connectSession");
 }

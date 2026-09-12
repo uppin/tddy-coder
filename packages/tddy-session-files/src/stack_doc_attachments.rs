@@ -13,9 +13,7 @@
 
 use std::path::Path;
 
-use tddy_service::proto::connection::{
-    session_attachment::Source, HostDocumentRef, SessionAttachment,
-};
+use tddy_service::proto::session::{session_attachment::Source, HostDocumentRef, SessionAttachment};
 use tddy_service::proto::types::HostDocumentScope;
 use tddy_workflow::{session_artifacts_root, SESSION_ATTACHMENTS_SUBDIR};
 use tddy_workflow_recipes::plan_pr_stack::PR_STACK_PLAN_MD_BASENAME;
@@ -128,9 +126,7 @@ pub fn prompt_with_attached_changeset(
 mod tests {
     use super::*;
     use std::fs;
-    use tddy_service::proto::connection::{
-        session_attachment::Source, HostDocumentRef, StagedAttachmentRef,
-    };
+    use tddy_service::proto::session::{session_attachment::Source, HostDocumentRef, StagedAttachmentRef};
     use tddy_service::proto::types::HostDocumentScope;
 
     const ORCHESTRATOR_ID: &str = "018f1111-aaaa-7000-1111-000000000001";

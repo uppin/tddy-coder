@@ -1,13 +1,12 @@
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
-use tddy_service::proto::connection::ExecuteToolResponse;
+use tddy_service::proto::exec_tools::ExecuteToolResponse;
 
-use tddy_service::proto::connection::SplitAgentPlacement;
+use tddy_service::proto::session::SplitAgentPlacement;
 
-use tddy_service::proto::connection::StartSessionRequest;
+use tddy_service::proto::session::StartSessionRequest;
 
-use tddy_service::proto::connection::SubagentInfo;
+use tddy_service::proto::catalog::SubagentInfo;
 
-use tddy_service::proto::connection::GetWorktreeSnapshotRequest;
+use tddy_service::proto::session::GetWorktreeSnapshotRequest;
 
 use tddy_rpc::Request;
 
@@ -15,7 +14,7 @@ use tddy_rpc::Status;
 
 use crate::connection_service::{seed_codebase, seeded_clone_guard, SeededAgentClones};
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
 /// The daemon in its capacity as the claimant of the clones a session's peer-owned agents read.
 ///
@@ -23,7 +22,7 @@ use super::ConnectionServiceImpl;
 /// itself, so the free spawn functions can be handed the one collaborator they need without naming
 /// the concrete daemon type in their signatures.
 pub(crate) struct DaemonSeedCloneClaimant {
-    pub(crate) service: ConnectionServiceImpl,
+    pub(crate) service: DaemonSessionHost,
 }
 
 /// The daemon measuring a checkout that lives on one of its peers.
@@ -32,23 +31,21 @@ pub(crate) struct DaemonSeedCloneClaimant {
 /// measurement takes exactly the path a caller's would — including the peer routing and the
 /// blocking-pool budget.
 #[async_trait::async_trait]
-impl tddy_daemon_livekit::session_room::RemoteSnapshotSource for ConnectionServiceImpl {
+impl tddy_daemon_livekit::session_room::RemoteSnapshotSource for DaemonSessionHost {
     async fn snapshot(
         &self,
         session_token: &str,
         codebase_session_id: &str,
         codebase_instance_id: &str,
     ) -> Result<tddy_daemon_livekit::session_room::WorktreeSnapshot, Status> {
-        let answered = ConnectionServiceTrait::get_worktree_snapshot(
-            self,
-            Request::new(GetWorktreeSnapshotRequest {
+        let answered = self
+            .get_worktree_snapshot_at_session_coordinate(Request::new(GetWorktreeSnapshotRequest {
                 session_token: session_token.to_string(),
                 session_id: codebase_session_id.to_string(),
                 daemon_instance_id: codebase_instance_id.to_string(),
-            }),
-        )
-        .await?
-        .into_inner();
+            }))
+            .await?
+            .into_inner();
         Ok(tddy_daemon_livekit::session_room::WorktreeSnapshot {
             head_commit: answered.head_commit,
             branch: answered.branch,

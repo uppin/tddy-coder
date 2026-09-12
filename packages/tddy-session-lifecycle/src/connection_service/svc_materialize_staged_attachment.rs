@@ -6,15 +6,15 @@ use crate::{
 
 use uuid::Uuid;
 
-use tddy_service::proto::connection::StartSessionResponse;
+use tddy_service::proto::session::StartSessionResponse;
 
 use tddy_rpc::Response;
 
 use super::AttachmentProgressSink;
 
-use tddy_service::proto::connection::StartSessionRequest;
+use tddy_service::proto::session::StartSessionRequest;
 
-use tddy_service::proto::connection::HostDocumentRef;
+use tddy_service::proto::session::HostDocumentRef;
 
 /// The scope every side of this resolves against — `types.proto`'s, which `connection.proto` and
 /// `session_files.proto` both import rather than duplicating, so a `HostDocumentRef` built for a
@@ -33,13 +33,13 @@ use tddy_rpc::Status;
 
 use super::AttachmentProgressReporter;
 
-use tddy_service::proto::connection::StagedAttachmentRef;
+use tddy_service::proto::session::StagedAttachmentRef;
 
 use std::path::Path;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// Copies one staged file into the session's attachments.
     ///
     /// The browser stages to whichever daemon it is connected to and may then start the session on

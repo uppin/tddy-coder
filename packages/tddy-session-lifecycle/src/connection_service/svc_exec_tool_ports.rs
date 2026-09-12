@@ -1,19 +1,14 @@
 //! Family L exec-tool RPCs — host side of [`tddy_tool_engine::exec_tool_service::ExecToolHandler`].
 
 use super::family_proto_bridge::wire_same;
-use super::{exec_tool_result_frames, reject_exec_tool_path_traversal, ConnectionServiceImpl};
+use super::{exec_tool_result_frames, reject_exec_tool_path_traversal, DaemonSessionHost};
 use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
 use crate::tool_engine;
 use async_trait::async_trait;
 use prost::Message as _;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::{Request, Response, Status};
-use tddy_service::proto::connection::{
-    ExecuteToolChunk as ConnExecuteToolChunk, ExecuteToolRequest as ConnExecuteToolRequest,
-    ExecuteToolResponse as ConnExecuteToolResponse,
-    ListExecToolsResponse as ConnListExecToolsResponse,
-    ListSessionToolCallsResponse as ConnListSessionToolCallsResponse,
-};
+use tddy_service::proto::exec_tools::{ExecuteToolChunk as ConnExecuteToolChunk, ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse, ListExecToolsResponse as ConnListExecToolsResponse, ListSessionToolCallsResponse as ConnListSessionToolCallsResponse};
 use tddy_service::proto::exec_tools::{
     ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
     ListExecToolsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
@@ -23,7 +18,7 @@ use tddy_tool_engine::EXEC_TOOL_SERVICE;
 use tddy_worktree_service::stream::MpscResultStream;
 
 #[async_trait]
-impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ConnectionServiceImpl {
+impl tddy_tool_engine::exec_tool_service::ExecToolHandler for DaemonSessionHost {
     async fn execute_tool(
         &self,
         request: Request<ExecuteToolRequest>,

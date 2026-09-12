@@ -2,9 +2,9 @@
 // only its methods are used.
 use crate::tool_engine;
 use prost::Message as _;
-use tddy_service::proto::connection::ExecuteToolResponse;
+use tddy_service::proto::exec_tools::ExecuteToolResponse;
 
-use tddy_service::proto::connection::ExecuteToolRequest;
+use tddy_service::proto::exec_tools::ExecuteToolRequest;
 
 use std::{path::Path, sync::Arc};
 
@@ -14,20 +14,20 @@ use tddy_service::proto::session_agents_svc::SessionAgentRoster;
 
 use super::peer_has_no_such_session;
 
-use tddy_service::proto::connection::DeleteSessionRequest;
+use tddy_service::proto::session::DeleteSessionRequest;
 
 use crate::{
     connection_service::{agent_roster, hooks_and_urls, seed_codebase},
     livekit_peer_discovery::local_instance_id_for_config,
 };
 
-use tddy_service::proto::connection::StartSessionRequest;
+use tddy_service::proto::session::StartSessionRequest;
 
 use tddy_rpc::Status;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// Ask `daemon_instance_id` for the checkout this session's agents on it will read.
     ///
     /// The same `workspace`-session primitive a split placement uses, and for the same reasons: the
@@ -79,7 +79,7 @@ impl ConnectionServiceImpl {
             daemon_instance_id: String::new(),
             codebase_daemon_instance_id: String::new(),
             requested_session_id: codebase_session_id.to_string(),
-            agent_clone: Some(tddy_service::proto::connection::AgentClonePlacement {
+            agent_clone: Some(tddy_service::proto::session::AgentClonePlacement {
                 session_id: session_id.to_string(),
                 facilitating_daemon_instance_id: local_instance_id_for_config(&self.config),
                 facilitating_daemon_url: hooks_and_urls::advertise_daemon_url(&self.config),

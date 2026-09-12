@@ -4,7 +4,7 @@
 //! The coder is the *second* server of the activity family, exactly as
 //! [`super::terminal_session_service`] made it the second server of the terminal family: a session
 //! reached over LiveKit is answered here and the same session reached over HTTP is answered by the
-//! daemon. `#unbundle` node 7 moved these four off `connection.ConnectionService`, so this module
+//! daemon. `#unbundle` node 7 moved these four off `the pre-unbundle monolithic RPC coordinate`, so this module
 //! is where they answer.
 //!
 //! # Four of the eight
@@ -41,7 +41,7 @@ use super::AGENT_ACTIVITY_CHANNEL_CAPACITY;
 
 /// The `activity.ActivityService` entry the coder's participant registers.
 ///
-/// Built from the same [`SessionConnectionService`] the `connection.ConnectionService` entry is, so
+/// Built from the same [`SessionConnectionService`] the `the pre-unbundle monolithic RPC coordinate` entry is, so
 /// the replay this coordinate serves and the tool calls that coordinate reports come from one
 /// transcript directory and one presenter broadcast.
 #[must_use]

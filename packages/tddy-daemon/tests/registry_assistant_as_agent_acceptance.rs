@@ -11,15 +11,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::test_util::TestDaemon;
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_model_registry::{ModelRegistryStore, NewAssistant, NewProvider};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest, SubagentInfo};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_service::proto::models::ProviderKind;
 
 // ---------------------------------------------------------------------------
@@ -155,7 +153,7 @@ async fn a_daemon_with_a_registry() -> Harness {
     let config = DaemonConfig::load(&config_path).expect("the daemon config must parse");
 
     // The registry's name space and the daemon's def resolution read the same `<tddyhome>/agents`,
-    // as they do in production — the store is opened on the directory `ConnectionServiceImpl`
+    // as they do in production — the store is opened on the directory `DaemonSessionHost`
     // resolves YAML defs from.
     let agents_dir = dir.path().join("agents");
     let store = Arc::new(
@@ -184,7 +182,7 @@ async fn a_daemon_with_a_registry() -> Harness {
     let user_resolver: UserResolver =
         Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
     let service = TestDaemon::from_arc(Arc::new(
-        ConnectionServiceImpl::new(
+        DaemonSessionHost::new(
             config,
             sessions_base_resolver,
             tddy_data_dir,

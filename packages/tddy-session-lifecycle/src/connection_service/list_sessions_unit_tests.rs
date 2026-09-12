@@ -3,7 +3,7 @@ use std::fs;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::{write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
-use tddy_service::proto::connection::ListSessionsRequest;
+use tddy_service::proto::session::ListSessionsRequest;
 
 fn make_unit_config() -> crate::config::DaemonConfig {
     let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
@@ -13,7 +13,7 @@ fn make_unit_config() -> crate::config::DaemonConfig {
     crate::config::DaemonConfig::load(&path).unwrap()
 }
 
-fn make_unit_service(sessions_base: std::path::PathBuf) -> ConnectionServiceImpl {
+fn make_unit_service(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
     let config = make_unit_config();
     let base = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
@@ -24,7 +24,7 @@ fn make_unit_service(sessions_base: std::path::PathBuf) -> ConnectionServiceImpl
             None
         }
     });
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         sessions_base.clone(),

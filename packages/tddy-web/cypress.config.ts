@@ -971,7 +971,7 @@ export default defineConfig({
               newBranchName: `e2e-pr-stack-${Date.now()}`,
             }),
           );
-          const res = await fetch(`${baseUrl}/rpc/connection.ConnectionService/StartSession`, {
+          const res = await fetch(`${baseUrl}/rpc/the pre-unbundle monolithic RPC coordinate/StartSession`, {
             method: "POST",
             headers: { "Content-Type": "application/proto", "Connect-Protocol-Version": "1" },
             body,

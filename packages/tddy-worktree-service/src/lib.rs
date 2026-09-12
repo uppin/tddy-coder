@@ -1,7 +1,7 @@
 //! The git worktrees a daemon serves: listing them, cleaning and removing them, sizing them,
 //! restoring one for a session and reading files out of one — served as `worktree.WorktreeService`.
 //!
-//! Split out of `connection.ConnectionService` by `#unbundle` node 1. None of these nine methods
+//! Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 1. None of these nine methods
 //! routes to a peer: a worktree is a directory on the daemon that holds it, and there is no
 //! `daemon_instance_id` on any request here to route by.
 

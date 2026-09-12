@@ -11,7 +11,7 @@ use tddy_rpc::Status;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use tddy_sandbox::{MountSpec, SandboxContextDir, SandboxError, SandboxPlan};
-use tddy_service::proto::connection::ExecuteToolResponse;
+use tddy_service::proto::exec_tools::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
 use tddy_task::TerminalCapture;
 

@@ -17,11 +17,11 @@ use tddy_terminal_rpc::service::{
 };
 use tokio::sync::broadcast;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 use crate::cli_session_manager::CliSessionManager;
 use crate::terminal_session_adapter::DaemonTerminalSessionStore;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// Every terminal this daemon serves, behind one
     /// [`TerminalSessionStore`](tddy_terminal_rpc::session::TerminalSessionStore).
     ///
@@ -56,7 +56,7 @@ impl ConnectionServiceImpl {
     /// coordinate and a session's own lifecycle address one set of terminals and one control
     /// lease — a second `CliSessionManager` here would mean a terminal started through the
     /// coordinate was invisible to the session that owns it.
-    pub(crate) fn terminal_session_entry(&self) -> tddy_rpc::ServiceEntry {
+    pub fn terminal_session_entry(&self) -> tddy_rpc::ServiceEntry {
         tddy_terminal_rpc::build_terminal_session_entry(self.terminal_session_ports())
     }
 

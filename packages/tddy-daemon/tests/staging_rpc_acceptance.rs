@@ -3,7 +3,7 @@
 //! PRD: `docs/ft/coder/session-attachments.md` § Start-session materialization
 //! (amends `docs/ft/coder/session-attachments.md`).
 //!
-//! These pin the host-side contract end-to-end through `ConnectionServiceImpl`:
+//! These pin the host-side contract end-to-end through `DaemonSessionHost`:
 //! - a staged attachment referenced by `StartSession` lands under
 //!   `{session_dir}/artifacts/attachments/<basename>` before the agent runs;
 //! - a `StagedAttachmentRef` naming a `daemon_instance_id` this host cannot reach is a request
@@ -24,13 +24,10 @@ use std::sync::Arc;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::host_documents::MAX_HOST_DOCUMENT_BYTES;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    session_attachment::Source as AttachmentSource, ConnectionService as ConnectionServiceTrait,
-    HostDocumentRef, SessionAttachment, StagedAttachmentRef, StartSessionRequest,
-};
+use tddy_service::proto::session::{session_attachment::Source as AttachmentSource, SessionService as SessionServiceTrait, HostDocumentRef, SessionAttachment, StagedAttachmentRef, StartSessionRequest};
 use tddy_service::proto::session_files::{
     SessionFilesService as SessionFilesServiceTrait, UploadStagedAttachmentChunkRequest,
 };
@@ -64,7 +61,7 @@ fn minimal_service(
     config: DaemonConfig,
     sessions_base: PathBuf,
     staging_base: PathBuf,
-) -> ConnectionServiceImpl {
+) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -75,7 +72,7 @@ fn minimal_service(
             None
         }
     });
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -124,7 +121,7 @@ fn a_workspace_service() -> (
     tempfile::TempDir,
     tempfile::TempDir,
     tempfile::TempDir,
-    Arc<ConnectionServiceImpl>,
+    Arc<DaemonSessionHost>,
 ) {
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
@@ -141,7 +138,7 @@ fn a_workspace_service() -> (
 }
 
 async fn start_workspace(
-    service: &ConnectionServiceImpl,
+    service: &DaemonSessionHost,
     attachments: Vec<SessionAttachment>,
 ) -> Result<String, (Code, String)> {
     let resp = service
@@ -161,7 +158,7 @@ async fn start_workspace(
 
 /// Uploads one file's bytes as a single final chunk to `UploadStagedAttachmentChunk`.
 async fn stage_one_file(
-    service: &Arc<ConnectionServiceImpl>,
+    service: &Arc<DaemonSessionHost>,
     daemon_instance_id: &str,
     staging_id: &str,
     file_name: &str,

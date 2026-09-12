@@ -120,7 +120,7 @@ function aBrowserConnection(clientEpoch: number) {
       const queue = new AsyncQueue<Uint8Array>();
       registry.pendingStreams.set(requestId, {
         call: {
-          service: "connection.ConnectionService",
+          service: "the pre-unbundle monolithic RPC coordinate",
           method: "WatchTerminalControl",
         },
         target: THE_DAEMON,
@@ -136,7 +136,7 @@ function aBrowserConnection(clientEpoch: number) {
         endOfStream: false,
         clientEpoch: epoch,
         callMetadata: create(CallMetadataSchema, {
-          service: "connection.ConnectionService",
+          service: "the pre-unbundle monolithic RPC coordinate",
           method,
         }),
       });

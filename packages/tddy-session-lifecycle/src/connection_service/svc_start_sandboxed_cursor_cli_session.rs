@@ -24,7 +24,7 @@ use crate::user_sessions_path::projects_path_for_user;
 
 use tddy_rpc::Status;
 
-use tddy_service::proto::connection::StartSessionResponse;
+use tddy_service::proto::session::StartSessionResponse;
 
 use tddy_rpc::Response;
 
@@ -32,9 +32,9 @@ use std::sync::Arc;
 
 use std::path::PathBuf;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// Handle `StartSession` for sandboxed `cursor-cli` sessions (darwin Seatbelt / Linux cgroups).
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn start_sandboxed_cursor_cli_session(

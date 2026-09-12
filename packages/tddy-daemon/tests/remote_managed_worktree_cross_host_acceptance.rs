@@ -31,7 +31,7 @@ use async_trait::async_trait;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
@@ -44,11 +44,8 @@ use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_sandbox::SandboxError;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest,
-    ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse,
-    ListSessionsRequest, StartSessionRequest,
-};
+use tddy_service::proto::exec_tools::{ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, DeleteSessionRequest, ListSessionsRequest, StartSessionRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 
@@ -98,7 +95,7 @@ fn resolve_user_by_verifying_the_token(token: &str) -> Option<String> {
         .map(|claims| claims.login)
 }
 
-/// The identity a daemon actually serves `connection.ConnectionService` on. Fixed `daemon-` prefix,
+/// The identity a daemon actually serves `the pre-unbundle monolithic RPC coordinate` on. Fixed `daemon-` prefix,
 /// not a lookup — see `docs/ft/web/daemon-selector-livekit-rpc.md`.
 fn rpc_identity(instance_id: &str) -> String {
     format!("daemon-{instance_id}")
@@ -193,7 +190,7 @@ fn create_test_repo_with_origin(dir: &Path) {
 }
 
 struct Daemon {
-    service: Arc<ConnectionServiceImpl>,
+    service: Arc<DaemonSessionHost>,
     sessions_base: PathBuf,
     _sessions: tempfile::TempDir,
     _config: tempfile::TempDir,
@@ -225,7 +222,7 @@ async fn a_daemon(
         LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
     );
 
-    let service = ConnectionServiceImpl::new(
+    let service = DaemonSessionHost::new(
         config,
         resolver,
         sessions.path().to_path_buf(),
@@ -254,13 +251,13 @@ async fn a_daemon(
 /// Joins the common room as `daemon-{instance_id}` — the identity a forward addresses — serving
 /// every coordinate a forward can name. The coordinate list is
 /// [`test_util::serve_daemon_rpc_participant`]'s rather than this suite's: a split start forwards
-/// both a `connection.ConnectionService` call and the `session_files.SessionFilesService` context
+/// both a `the pre-unbundle monolithic RPC coordinate` call and the `session_files.SessionFilesService` context
 /// reads, and a suite-local list is how one of them stops being served.
 async fn serve_rpc_participant(
     livekit: &LiveKitTestkit,
     ws_url: &str,
     instance_id: &str,
-    service: Arc<ConnectionServiceImpl>,
+    service: Arc<DaemonSessionHost>,
 ) -> tokio::task::JoinHandle<()> {
     let token = livekit
         .generate_token(ROOM, &rpc_identity(instance_id))
@@ -277,7 +274,7 @@ async fn serve_rpc_participant(
 ///
 /// Asked through `host.HostService`, which is where `ListEligibleDaemons` lives since `#unbundle`
 /// node 1, and against this service's own roster — see [`wait_until_peer_discovered`].
-async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id: &str) {
+async fn wait_until_discovered(service: &DaemonSessionHost, peer_instance_id: &str) {
     wait_until_peer_discovered(
         service,
         a_caller_token(),
@@ -433,7 +430,7 @@ fn session_directories_on(sessions_base: &Path) -> Vec<String> {
     names
 }
 
-async fn sessions_on(service: &ConnectionServiceImpl) -> Vec<String> {
+async fn sessions_on(service: &DaemonSessionHost) -> Vec<String> {
     service
         .list_sessions(Request::new(ListSessionsRequest {
             session_token: a_caller_token().to_string(),

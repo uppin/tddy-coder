@@ -4,7 +4,7 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 
 use super::peer_has_no_such_session;
 
-use tddy_service::proto::connection::DeleteSessionRequest;
+use tddy_service::proto::session::DeleteSessionRequest;
 
 use super::SplitStartFailure;
 
@@ -26,19 +26,19 @@ use tddy_core::output::SESSIONS_SUBDIR;
 
 use tddy_rpc::Status;
 
-use tddy_service::proto::connection::StartSessionResponse;
+use tddy_service::proto::session::StartSessionResponse;
 
 use tddy_rpc::Response;
 
 use super::AttachmentProgressSink;
 
-use tddy_service::proto::connection::StartSessionRequest;
+use tddy_service::proto::session::StartSessionRequest;
 
 use std::path::Path;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// Spawn the agent half of a split session and record the pairing.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_split_agent(

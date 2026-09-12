@@ -15,9 +15,9 @@ use tddy_rpc::Status;
 
 use std::path::PathBuf;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// Ensure the project's working copy exists on this (local) host before a session starts,
     /// auto-cloning it when missing: from the local registry's `git_url` if the project is already
     /// registered here, otherwise from a peer daemon that hosts it (reusing the logical
@@ -37,7 +37,7 @@ impl ConnectionServiceImpl {
         projects_dir: &Path,
         project_id: &str,
         session_token: &str,
-        agent_clone: Option<&tddy_service::proto::connection::AgentClonePlacement>,
+        agent_clone: Option<&tddy_service::proto::session::AgentClonePlacement>,
     ) -> Result<project_storage::ProjectData, Status> {
         // Resolved lazily: only a peer-provisioned clone needs a base path. A locally-registered
         // project (the common case) never consults it, so a `None` here must not fail the start —

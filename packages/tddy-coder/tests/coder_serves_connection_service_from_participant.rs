@@ -172,7 +172,7 @@ async fn coder_serves_connection_service_from_participant() -> Result<()> {
     );
 
     // And — ClaimTerminalControl answers from the session participant, at the coordinate that
-    // declares it: the terminal family left `connection.ConnectionService` with `#unbundle` node 6,
+    // declares it: the terminal family left `the pre-unbundle monolithic RPC coordinate` with `#unbundle` node 6,
     // and the participant registers both entries off one service.
     let claim_resp = tokio::time::timeout(
         RPC_TIMEOUT,

@@ -29,7 +29,7 @@ use tddy_daemon_kernel::SessionUserResolver;
 pub struct AuthBuildResult {
     pub entries: Vec<ServiceEntry>,
     pub user_resolver: Option<SessionUserResolver>,
-    /// `Some` when `auth_storage` is configured. Shared with `ConnectionServiceImpl`, which reads
+    /// `Some` when `auth_storage` is configured. Shared with `DaemonSessionHost`, which reads
     /// the caller's token from it; `None` leaves PR status *unavailable* for a real login.
     pub github_token_store: Option<Arc<dyn GitHubTokenStore>>,
 }

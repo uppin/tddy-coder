@@ -106,16 +106,17 @@ pub async fn run_remote(args: RemoteArgs) -> Result<()> {
     }
 }
 
-/// POST to `{base_url}/connection.ConnectionService/{method}` with a JSON body.
+/// POST to `{base_url}/{service}/{method}` with a JSON body.
 ///
 /// Uses the Connect-protocol transport: `POST /rpc/{service}/{method}` with
 /// `content-type: application/json`. Returns the parsed JSON response body.
 async fn connect_post(
     base_url: &str,
+    service: &str,
     method: &str,
     body: serde_json::Value,
 ) -> anyhow::Result<serde_json::Value> {
-    let url = format!("{}/connection.ConnectionService/{}", base_url, method);
+    let url = format!("{}/{}/{}", base_url, service, method);
     let client = reqwest::Client::new();
     let resp = client
         .post(&url)
@@ -198,7 +199,7 @@ async fn run_list_tools(args: ListToolsArgs) -> Result<()> {
         "daemonInstanceId": ""
     });
 
-    let resp = match connect_post(&base_url, "ListExecTools", body).await {
+    let resp = match connect_post(&base_url, "exec_tools.ExecToolService", "ListExecTools", body).await {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
@@ -239,7 +240,7 @@ async fn run_start_session(args: StartSessionArgs) -> Result<()> {
         "daemonInstanceId": ""
     });
 
-    let resp = match connect_post(&base_url, "StartSession", body).await {
+    let resp = match connect_post(&base_url, "session.SessionService", "StartSession", body).await {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
@@ -267,7 +268,7 @@ async fn run_connect_session(args: ConnectSessionArgs) -> Result<()> {
         "sessionToken": token
     });
 
-    let resp = match connect_post(&base_url, "ConnectSession", body).await {
+    let resp = match connect_post(&base_url, "session.SessionService", "ConnectSession", body).await {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
@@ -298,7 +299,7 @@ async fn run_sync_context(args: SyncContextArgs) -> Result<()> {
         "daemonInstanceId": ""
     });
 
-    let resp = match connect_post(&base_url, "ExecuteTool", body).await {
+    let resp = match connect_post(&base_url, "exec_tools.ExecToolService", "ExecuteTool", body).await {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);

@@ -20,7 +20,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
-use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::{
     EgressRequest, EgressResponse, HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,
@@ -185,7 +185,7 @@ pub trait HostToolHandler: Send + Sync + 'static {
 /// forwards each as an [`RpcRequest`]; the host dispatches it here and the response (unary or
 /// server-streaming) rides back as [`RpcStreamFrame`]s multiplexed by `request_id`. The host is
 /// the only thing the jail can reach, and these RPCs live on the daemon — so the daemon supplies
-/// the implementation that calls its `ConnectionServiceImpl`; the standalone app and tests supply
+/// the implementation that calls its `DaemonSessionHost`; the standalone app and tests supply
 /// [`NullRpcHandler`], which refuses every call the way a daemon-less session should.
 ///
 /// [`RpcRequest`]: tddy_service::proto::sandbox::RpcRequest

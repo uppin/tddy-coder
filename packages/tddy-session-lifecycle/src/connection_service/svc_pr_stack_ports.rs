@@ -3,7 +3,7 @@
 use super::family_proto_bridge::{wire_same, wire_same_anyhow};
 use super::{
     base_sync_unavailable, base_sync_view, owner_repo_from_repo_root,
-    require_pr_stack_orchestrator, worktree_leg, ConnectionServiceImpl,
+    require_pr_stack_orchestrator, worktree_leg, DaemonSessionHost,
 };
 use crate::connection_service::hooks_and_urls;
 use crate::connection_service::service_util;
@@ -24,7 +24,7 @@ use tddy_service::proto::pr_stack::{
 use tddy_service::proto::types::BranchSession;
 
 #[async_trait]
-impl crate::pr_stack_rpc::PrStackHandler for ConnectionServiceImpl {
+impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
     async fn add_planned_pr(
         &self,
         request: Request<AddPlannedPrRequest>,

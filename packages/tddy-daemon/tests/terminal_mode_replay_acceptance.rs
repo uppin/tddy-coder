@@ -16,7 +16,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, PtyHandle};
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
 use tddy_terminal_rpc::proto::terminal_session::{
     StreamReplayMode, StreamTerminalOutputRequest,
@@ -75,7 +75,7 @@ fn make_service(
             None
         }
     });
-    let service = ConnectionServiceImpl::new(
+    let service = DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

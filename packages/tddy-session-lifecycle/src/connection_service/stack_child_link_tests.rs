@@ -171,7 +171,7 @@ fn linking_records_the_branch_a_child_created_on_the_planned_node_it_materialize
     let orchestrator_dir = an_orchestrator_with_a_two_node_stack(tmp.path());
 
     // When — a child creates the branch the bottom node was planned to own
-    ConnectionServiceImpl::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_stack_node_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/bottom",
@@ -200,7 +200,7 @@ fn linking_records_the_child_session_as_a_fallback_route_to_the_branch() {
     let orchestrator_dir = an_orchestrator_with_a_two_node_stack(tmp.path());
 
     // When — a child creates the bottom node's branch
-    ConnectionServiceImpl::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_stack_node_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/bottom",
@@ -233,7 +233,7 @@ fn linking_a_planned_node_unblocks_spawning_its_dependent_node() {
     );
 
     // When — `bottom`'s branch is created and linked
-    ConnectionServiceImpl::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_stack_node_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/bottom",
@@ -256,14 +256,14 @@ fn linking_is_a_no_op_when_the_spawn_materializes_no_planned_node() {
     let orchestrator_dir = an_orchestrator_with_a_two_node_stack(tmp.path());
 
     // No stack parent at all, and a branch no planned node claims: both are ordinary sessions.
-    ConnectionServiceImpl::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_stack_node_to_spawned_branch(
         tmp.path(),
         None,
         "feature/bottom",
         "child-1",
     )
     .expect("a parentless spawn must not error");
-    ConnectionServiceImpl::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_stack_node_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/unplanned",
@@ -283,7 +283,7 @@ fn linking_repoints_a_node_to_the_child_session_that_now_owns_its_branch() {
     // Given — the bottom node's branch was first created by child-1
     let tmp = tempfile::tempdir().expect("temp dir");
     let orchestrator_dir = an_orchestrator_with_a_two_node_stack(tmp.path());
-    ConnectionServiceImpl::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_stack_node_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/bottom",
@@ -292,7 +292,7 @@ fn linking_repoints_a_node_to_the_child_session_that_now_owns_its_branch() {
     .expect("first link must succeed");
 
     // When — that session is replaced by a new one on the same branch (restart, re-attach)
-    ConnectionServiceImpl::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_stack_node_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/bottom",
@@ -320,7 +320,7 @@ fn a_spawn_resuming_an_existing_branch_relinks_the_node_that_owns_it() {
     let orchestrator_dir = an_orchestrator_whose_bottom_node_lost_its_child_session(tmp.path());
 
     // When — the spawn links its node on the branch it actually operates on
-    ConnectionServiceImpl::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_stack_node_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         effective_spawn_branch("work_on_selected_branch", "", "feature/bottom", "origin"),
@@ -348,7 +348,7 @@ fn a_spawn_resuming_a_remote_tracking_branch_relinks_the_node_that_owns_it() {
     let orchestrator_dir = an_orchestrator_whose_bottom_node_lost_its_child_session(tmp.path());
 
     // When
-    ConnectionServiceImpl::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_stack_node_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         effective_spawn_branch(
@@ -380,7 +380,7 @@ fn linking_matches_a_node_by_the_branch_it_recorded_rather_than_its_suggestion()
     let orchestrator_dir = an_orchestrator_with_a_renamed_bottom_branch(tmp.path());
 
     // When — a session attaches to the branch the node actually owns
-    ConnectionServiceImpl::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_stack_node_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/bottom-renamed",

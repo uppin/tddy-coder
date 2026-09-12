@@ -11,7 +11,7 @@
 //!
 //! **It is currently unreferenced.** Nothing in the workspace calls it, and nothing did before
 //! `#unbundle` node 7 either — the similarly named
-//! [`crate::connection_service::ConnectionServiceImpl::agent_clone_worktree_path`] is a different
+//! [`crate::connection_service::DaemonSessionHost::agent_clone_worktree_path`] is a different
 //! function and is what the acceptance suites drive. So this module is not what kept the clone
 //! domain out of `tddy-session-agents`; the re-export above is the whole of its current use. Left
 //! in place rather than removed, because pre-existing dead code is not a move's to delete.

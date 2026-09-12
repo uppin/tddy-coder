@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use tddy_service::proto::connection::ResumeSessionResponse;
+use tddy_service::proto::session::ResumeSessionResponse;
 use tddy_service::proto::session_files::{
     ContextFileBatchChunk, ContextManifestEntry, ContextManifestRequest,
     ReadContextFileBatchRequest, SessionFilesService,
@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use tddy_rpc::Status;
 
-use super::{ConnectionServiceImpl, PeerRoutedSessionFiles};
+use super::{DaemonSessionHost, PeerRoutedSessionFiles};
 
 /// Every frame of one served context read, as the single value the split path below needs.
 ///
@@ -167,7 +167,7 @@ impl ContextRead<'_> {
     }
 }
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// This daemon's `session_files.SessionFilesService` surface — the one coordinate the two
     /// context reads below are served at, whichever host holds the codebase.
     ///
@@ -200,7 +200,7 @@ impl ConnectionServiceImpl {
     ///
     /// Asked of the *service* rather than read here, even when the codebase is on this host: that
     /// surface is what classifies the route, gates the read by
-    /// [`ConnectionServiceImpl::session_context_scope`] and bounds it by this host's
+    /// [`DaemonSessionHost::session_context_scope`] and bounds it by this host's
     /// `spawn_worker_request_timeout`. A second local read beside it would be a second answer to
     /// all three — and an unbounded one, which is what a stalled checkout turns into a split start
     /// that never finishes and never says why.
@@ -437,7 +437,7 @@ impl ConnectionServiceImpl {
 
 /// The deadline a split session's own context read is bounded by.
 ///
-/// In-crate rather than under `tests/` because [`ConnectionServiceImpl::split_context_from_codebase_host`]
+/// In-crate rather than under `tests/` because [`DaemonSessionHost::split_context_from_codebase_host`]
 /// is `pub(crate)`: the behaviour worth pinning is what *this* path does with a checkout that
 /// stalls, and an integration test could only reach it by starting a whole split session against a
 /// peer.
@@ -494,7 +494,7 @@ mod the_deadline_a_split_sessions_context_read_is_bounded_by {
     struct ASplitSession {
         _data_dir: tempfile::TempDir,
         _checkout: tempfile::TempDir,
-        service: ConnectionServiceImpl,
+        service: DaemonSessionHost,
     }
 
     /// This daemon holding the codebase of one split session, allowing a context read `budget_secs`.
@@ -513,7 +513,7 @@ mod the_deadline_a_split_sessions_context_read_is_bounded_by {
             Arc::new(move |_| Some(base.clone()));
         let users: tddy_daemon_kernel::SessionUserResolver =
             Arc::new(|token| (token == TEST_TOKEN).then(|| TEST_USER.to_string()));
-        let service = ConnectionServiceImpl::new(
+        let service = DaemonSessionHost::new(
             config,
             sessions_base,
             data_dir.path().to_path_buf(),

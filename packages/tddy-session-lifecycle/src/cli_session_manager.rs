@@ -235,7 +235,7 @@ impl CliSessionManager {
         Self::with_task_registry(TaskRegistry::new())
     }
 
-    /// Create a manager sharing the given [`TaskRegistry`] (used by `ConnectionServiceImpl`).
+    /// Create a manager sharing the given [`TaskRegistry`] (used by `DaemonSessionHost`).
     pub fn with_task_registry(task_registry: TaskRegistry) -> Self {
         let (control_tx, _) = broadcast::channel(64);
         Self {

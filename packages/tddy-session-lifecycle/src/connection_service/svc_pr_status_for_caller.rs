@@ -7,11 +7,11 @@ use crate::{
     user_sessions_path::projects_path_for_user,
 };
 
-use tddy_service::proto::connection::BranchSession;
+use tddy_service::proto::types::BranchSession;
 
-use tddy_service::proto::connection::BranchConflict;
+use tddy_service::proto::session::BranchConflict;
 
-use tddy_service::proto::connection::StartSessionRequest;
+use tddy_service::proto::session::StartSessionRequest;
 
 use super::prepare_managed_workflow_inner;
 
@@ -43,9 +43,9 @@ use super::pr_status_unavailable;
 
 use std::path::Path;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// PR status for one branch, resolved with the calling operator's own GitHub credential.
     ///
     /// `repo_root` is `None` when no file in the session directory records a checkout (see
@@ -59,9 +59,9 @@ impl ConnectionServiceImpl {
         github_login: &str,
         repo_root: Option<&std::path::Path>,
         branch: &str,
-    ) -> tddy_service::proto::connection::PrStatusView {
+    ) -> tddy_service::proto::pr_stack::PrStatusView {
         use crate::github_pr_credentials::{pr_lookup_for_caller, PrLookup};
-        use tddy_service::proto::connection::PrStatusView;
+        use tddy_service::proto::pr_stack::PrStatusView;
         use tddy_workflow_recipes::orchestrate_pr_stack::github::PrLookupOutcome;
 
         // Both ways of failing to name a GitHub repository leave the lookup un-performable, so they
@@ -143,7 +143,7 @@ impl ConnectionServiceImpl {
         repo_root: Option<&std::path::Path>,
         branch: &str,
         base_branch: &str,
-    ) -> Option<tddy_service::proto::connection::BranchBaseSync> {
+    ) -> Option<tddy_service::proto::pr_stack::BranchBaseSync> {
         if base_branch.is_empty() {
             return Some(base_sync_unavailable(
                 "",

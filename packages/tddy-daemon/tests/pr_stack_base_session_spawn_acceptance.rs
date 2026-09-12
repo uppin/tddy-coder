@@ -29,12 +29,10 @@ use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::{validate_stack_seed_base_session, ConnectionServiceImpl};
+use tddy_daemon::connection_service::{validate_stack_seed_base_session, DaemonSessionHost};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_spawn::spawner::pr_stack_spawn_args;
 
 const BASE_SESSION: &str = "session-auth-store";
@@ -569,13 +567,13 @@ livekit:
     )
 }
 
-fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
     let base = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     let resolved_user = current_os_user();
     let user_resolver: SessionUserResolver =
         Arc::new(move |token| (token == VALID_TOKEN).then(|| resolved_user.clone()));
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         sessions_base,

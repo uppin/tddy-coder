@@ -1,6 +1,6 @@
 use super::cleanup_materialized_attachments;
 use crate::tool_engine;
-use tddy_service::proto::connection::session_attachment::Source as AttachmentSource;
+use tddy_service::proto::session::session_attachment::Source as AttachmentSource;
 
 use super::attachment_size_bytes;
 
@@ -12,7 +12,8 @@ use crate::{
 };
 
 use tddy_sandbox_runner::ExecuteToolResponse;
-use tddy_service::proto::connection::{ExecuteToolRequest, SessionAttachment};
+use tddy_service::proto::exec_tools::{ExecuteToolRequest};
+use tddy_service::proto::session::{SessionAttachment};
 
 use super::AttachmentMaterialization;
 
@@ -34,9 +35,9 @@ use crate::livekit_peer_discovery::PeerRoute;
 
 use tddy_rpc::Status;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     pub(crate) fn resolve_os_user(&self, session_token: &str) -> Result<String, Status> {
         let github_user = (self.user_resolver)(session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;

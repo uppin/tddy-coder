@@ -12,9 +12,9 @@ use tddy_service::proto::session_agents_svc::CancelAgentConversationRequest;
 
 use tddy_rpc::Status;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// Ask `daemon_instance_id` to cancel a conversation its own turn loop is running.
     pub(crate) async fn forward_cancel_agent_conversation(
         &self,

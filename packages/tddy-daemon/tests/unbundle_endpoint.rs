@@ -3,7 +3,7 @@
 //!
 //! The brief was *"move most of the code from tddy-daemon and tddy-tools and leave them only for
 //! high-level wiring"*. Nodes 1–8 moved 73 of 90 RPC methods and left ≈21,500 lines, of which 3,699
-//! was wiring — and left `ConnectionServiceImpl` intact, because family C is precisely what needed
+//! was wiring — and left `DaemonSessionHost` intact, because family C is precisely what needed
 //! its 60 fields and its `self_arc` handle. Node 9 is what makes the brief true, and these are the
 //! assertions that stop it being true only in prose.
 
@@ -68,7 +68,7 @@ fn the_connection_service_module_is_gone() {
     );
 }
 
-/// `self_arc` exists only because `ConnectionServiceImpl` exists: a `&self` handler had to produce an
+/// `self_arc` exists only because `DaemonSessionHost` exists: a `&self` handler had to produce an
 /// `Arc<Self>` for `tddy_sandbox_runner::HostRpcHandler`. With that bridge in `tddy-daemon-sandbox`,
 /// nothing needs it.
 ///

@@ -1,4 +1,4 @@
-//! The local socket keeps the surface `connection.ConnectionService` gave it.
+//! The local socket keeps the surface `the pre-unbundle monolithic RPC coordinate` gave it.
 //!
 //! That service carried all 90 methods on the daemon's local Unix socket, so any local caller could
 //! reach any family — `tddy-sandbox-app` dials it today, and nothing constrains callers outside this
@@ -48,7 +48,7 @@ fn the_socket_serves_every_service_the_stack_moved_onto_it() {
         assert!(
             server.contains(expected),
             "{expected} is not mounted on the local socket; a caller that reached it through \
-             connection.ConnectionService would silently stop being able to"
+             the pre-unbundle monolithic RPC coordinate would silently stop being able to"
         );
     }
 }

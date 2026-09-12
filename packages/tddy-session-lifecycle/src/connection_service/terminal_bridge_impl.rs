@@ -2,10 +2,10 @@ use tddy_rpc::Status;
 
 use tddy_spawn::spawner;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
 #[async_trait::async_trait]
-impl tddy_daemon_livekit::session_room::SessionTerminalBridge for ConnectionServiceImpl {
+impl tddy_daemon_livekit::session_room::SessionTerminalBridge for DaemonSessionHost {
     /// Bridge the session's PTY into the room a remote client drives it from.
     ///
     /// The same coordinates `StartSession` reported and the Telegram attach hint hands out — the

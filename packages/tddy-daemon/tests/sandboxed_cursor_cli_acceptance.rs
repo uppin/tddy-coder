@@ -9,11 +9,9 @@ use futures_util::StreamExt;
 use tddy_core::session_metadata::read_session_metadata;
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
-};
+use tddy_service::proto::session::{ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_terminal_rpc::proto::terminal_session::{
     StreamReplayMode, StreamTerminalOutputRequest,
     TerminalSessionService as TerminalSessionServiceTrait,
@@ -87,7 +85,7 @@ fn an_agent_def_pointing_fastcontext_at(tddy_data_dir: &std::path::Path, base_ur
     .unwrap();
 }
 
-fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -98,7 +96,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionSe
             None
         }
     });
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

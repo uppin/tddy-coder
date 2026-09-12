@@ -17,7 +17,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID};
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_rpc::{Request, Status};
 use tddy_terminal_rpc::proto::terminal_session::{
     SessionTerminalInput, SessionTerminalOutput, StreamReplayMode, StreamTerminalOutputRequest,
@@ -55,7 +55,7 @@ fn make_service(
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
-    let service = ConnectionServiceImpl::new(
+    let service = DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

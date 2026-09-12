@@ -7,7 +7,7 @@
 //! A daemon joins the common room **twice**: a discovery participant under the bare instance id
 //! (`livekit_peer_discovery::spawn_common_room_discovery_task`) which publishes the advertisement
 //! and serves no RPC, and an RPC participant under `daemon-{instance_id}` (`main.rs`) which serves
-//! `connection.ConnectionService`. Every other forwarding test in this repo stands up a peer whose
+//! `the pre-unbundle monolithic RPC coordinate`. Every other forwarding test in this repo stands up a peer whose
 //! **serving** identity is the bare id, so none of them exercises the identity a real peer answers
 //! on. This suite does, which is why it is separate from
 //! `tests/staging_forwarding_acceptance.rs`.
@@ -25,7 +25,7 @@ use futures_util::{Stream, StreamExt};
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
@@ -33,11 +33,7 @@ use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon::test_util::{self, wait_until_peer_discovered, TEST_TOKEN};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request, Status};
-use tddy_service::proto::connection::{
-    session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent,
-    AttachmentMaterializationProgress, ConnectionService as ConnectionServiceTrait,
-    SessionAttachment, StagedAttachmentRef, StartSessionRequest,
-};
+use tddy_service::proto::session::{session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent, AttachmentMaterializationProgress, SessionService as SessionServiceTrait, SessionAttachment, StagedAttachmentRef, StartSessionRequest};
 use tddy_service::proto::session_files::{
     HostDocumentChunk, ReadHostDocumentRequest, SessionFilesService as SessionFilesServiceTrait,
     UploadStagedAttachmentChunkRequest,
@@ -57,7 +53,7 @@ const LK_API_SECRET: &str = "secret";
 const TEST_PROJECT_ID: &str = "attach-cross-host-proj";
 const STAGING_ID: &str = "cccccccc-cccc-7ccc-8ccc-cccccccccccc";
 
-/// The identity a daemon actually serves `connection.ConnectionService` on. Fixed `daemon-` prefix,
+/// The identity a daemon actually serves `the pre-unbundle monolithic RPC coordinate` on. Fixed `daemon-` prefix,
 /// not a lookup — see `docs/ft/web/daemon-selector-livekit-rpc.md`.
 fn rpc_identity(instance_id: &str) -> String {
     format!("daemon-{instance_id}")
@@ -134,7 +130,7 @@ fn create_test_repo_with_origin(dir: &Path) {
 /// same common room. The **RPC** participant on `daemon-{instance_id}` is joined separately by
 /// [`serve_rpc_participant`], because that needs the finished service.
 struct Daemon {
-    service: Arc<ConnectionServiceImpl>,
+    service: Arc<DaemonSessionHost>,
     /// Sessions/data root — where a session started on this host puts its attachments.
     sessions_base: PathBuf,
     /// Staging base — where bytes staged *to this host* land.
@@ -168,7 +164,7 @@ async fn a_daemon(
         LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
     );
 
-    let service = ConnectionServiceImpl::new(
+    let service = DaemonSessionHost::new(
         config,
         resolver,
         sessions.path().to_path_buf(),
@@ -197,14 +193,14 @@ async fn a_daemon(
 /// only one that answers.
 ///
 /// Which coordinates it serves is [`test_util::serve_daemon_rpc_participant`]'s answer rather than
-/// this suite's: `StartSession` is still `connection.ConnectionService`'s, while the staging and
+/// this suite's: `StartSession` is still `the pre-unbundle monolithic RPC coordinate`'s, while the staging and
 /// host-document RPCs a forward addresses became `session_files.SessionFilesService`'s with
 /// `#unbundle` node 6, and a suite-local list is how one of them stops being served.
 async fn serve_rpc_participant(
     livekit: &LiveKitTestkit,
     ws_url: &str,
     instance_id: &str,
-    service: Arc<ConnectionServiceImpl>,
+    service: Arc<DaemonSessionHost>,
 ) -> tokio::task::JoinHandle<()> {
     let token = livekit
         .generate_token(ROOM, &rpc_identity(instance_id))
@@ -220,7 +216,7 @@ async fn serve_rpc_participant(
 ///
 /// Asked through `host.HostService`, which is where `ListEligibleDaemons` lives since `#unbundle`
 /// node 1, and against this service's own roster — see [`wait_until_peer_discovered`].
-async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id: &str) {
+async fn wait_until_discovered(service: &DaemonSessionHost, peer_instance_id: &str) {
     wait_until_peer_discovered(
         service,
         TEST_TOKEN,
@@ -234,7 +230,7 @@ async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id
 /// able to route to the other: A forwards a session start to B, and B fetches staged bytes back
 /// from A.
 struct TwoDaemons {
-    service_a: Arc<ConnectionServiceImpl>,
+    service_a: Arc<DaemonSessionHost>,
     /// A's sessions/data root — where a session started on A puts its attachments.
     local_base: PathBuf,
     /// A's staging base — where bytes staged on the host the browser is connected to land.
@@ -305,7 +301,7 @@ async fn two_daemons() -> TwoDaemons {
 }
 
 /// Stages one complete file on the peer, by addressing the staging RPC at the peer's instance id.
-async fn stage_on_peer(service_a: &Arc<ConnectionServiceImpl>, file_name: &str, data: &[u8]) {
+async fn stage_on_peer(service_a: &Arc<DaemonSessionHost>, file_name: &str, data: &[u8]) {
     service_a
         .session_files_service()
         .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {

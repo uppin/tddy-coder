@@ -6,17 +6,14 @@ use std::sync::{Arc, Mutex};
 use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
 use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::connection_service::{
     SeedCodebase, SeededAgentClones, SeededCloneGuard, SpawnStackParent, StackBaseLookup,
     StackNodeLink, StackParentHost,
 };
 use tddy_daemon::cursor_cli_spawn::spawn_cursor_cli_session_inner;
 use tddy_rpc::{Code, Request, Response, Status};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListSessionsRequest, StartSessionRequest,
-    StartSessionResponse,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, ListSessionsRequest, StartSessionRequest, StartSessionResponse};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -82,7 +79,7 @@ fn write_config_with_stub_cursor_agent() -> (tempfile::TempDir, DaemonConfig) {
     (dir, config)
 }
 
-fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -93,7 +90,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionSe
             None
         }
     });
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -304,7 +301,7 @@ async fn cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available() {
     let stub = write_echo_argv_script(repo_dir.path());
     let (_cfg_dir, config) = write_config_with_cursor_cli_binary(stub.to_str().unwrap());
     let service = Arc::new(minimal_service(config, sessions_tmp.path().to_path_buf()));
-    tddy_daemon::test_util::install_self_handle(&service);
+    service.install_sandbox_rpc_bridge();
 
     let mut req = start_cursor_cli_request();
     req.sandbox = true;
@@ -665,7 +662,7 @@ fn a_cursor_cli_daemon() -> ACursorCliDaemon {
 
 impl ACursorCliDaemon {
     /// Start a cursor-cli session at the spawn helper itself, so the room host is the test's
-    /// instead of the one `ConnectionServiceImpl` builds for itself out of its LiveKit config.
+    /// instead of the one `DaemonSessionHost` builds for itself out of its LiveKit config.
     async fn start_cursor_cli_session(
         &self,
         session_id: &str,

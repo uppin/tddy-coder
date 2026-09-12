@@ -5,15 +5,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListProjectsRequest,
-    ProjectEntry as ProtoProjectEntry,
-};
+use tddy_service::proto::project::{ProjectService as ProjectServiceTrait, ListProjectsRequest, ProjectEntry as ProtoProjectEntry};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -36,7 +34,7 @@ fn test_service(
     sessions_base: PathBuf,
     os_user: &str,
     eligible: Arc<dyn EligibleDaemonSource>,
-) -> ConnectionServiceImpl {
+) -> DaemonSessionHost {
     let config = test_config_for_os_user(os_user);
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -48,7 +46,7 @@ fn test_service(
             None
         }
     });
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

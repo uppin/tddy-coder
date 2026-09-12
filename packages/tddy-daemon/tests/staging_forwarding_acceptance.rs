@@ -18,7 +18,7 @@ use prost::Message as _;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
@@ -27,10 +27,7 @@ use tddy_daemon::test_util::{wait_until_peer_discovered, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Request, RpcMessage, RpcResult, RpcService as _};
-use tddy_service::proto::connection::{
-    session_attachment::Source as AttachmentSource, ConnectionService as ConnectionServiceTrait,
-    HostDocumentRef, SessionAttachment, StartSessionRequest,
-};
+use tddy_service::proto::session::{session_attachment::Source as AttachmentSource, SessionService as SessionServiceTrait, HostDocumentRef, SessionAttachment, StartSessionRequest};
 use tddy_service::proto::session_files::UploadStagedAttachmentChunkRequest;
 use tddy_service::proto::types::HostDocumentScope;
 
@@ -44,7 +41,7 @@ const LK_API_SECRET: &str = "secret";
 const TEST_PROJECT_ID: &str = "attach-start-fwd-proj";
 const STAGING_ID: &str = "ffffffff-ffff-7fff-8fff-ffffffffffff";
 
-/// The identity a daemon serves `connection.ConnectionService` on — a fixed `daemon-` prefix over
+/// The identity a daemon serves `the pre-unbundle monolithic RPC coordinate` on — a fixed `daemon-` prefix over
 /// its instance id, the way `main.rs` joins the common room. The bare instance id belongs to the
 /// discovery participant, which publishes the advertisement and serves no RPC.
 /// See `docs/ft/web/daemon-selector-livekit-rpc.md`.
@@ -125,7 +122,7 @@ fn create_test_repo_with_origin(dir: &std::path::Path) {
 /// they survive for the test body — `projects.yaml` and the worktree origin must still exist when
 /// the test runs. Dropping this struct at test end tears everything down.
 struct TwoDaemons {
-    service_a: Arc<ConnectionServiceImpl>,
+    service_a: Arc<DaemonSessionHost>,
     peer_base: PathBuf,
     /// The peer's staging base — its own root, separate from its data dir since staging moved to a
     /// restart-cleared location.
@@ -168,7 +165,7 @@ async fn two_daemons() -> TwoDaemons {
     register_project(&sessions_b.path().join("projects"), repo_dir.path());
     let base_b = sessions_b.path().to_path_buf();
     let resolver_b: SessionsBaseResolver = Arc::new(move |_| Some(base_b.clone()));
-    let service_b = ConnectionServiceImpl::new(
+    let service_b = DaemonSessionHost::new(
         config_b.clone(),
         resolver_b,
         sessions_b.path().to_path_buf(),
@@ -192,16 +189,13 @@ async fn two_daemons() -> TwoDaemons {
         .generate_token(ROOM, &rpc_identity(PEER_INSTANCE_ID))
         .expect("LiveKit token for peer");
     // Both coordinates, because a forward is addressed at the service that *declares* the method:
-    // `StartSession` is still `connection.ConnectionService`'s, while the staging and host-document
+    // `StartSession` is still `the pre-unbundle monolithic RPC coordinate`'s, while the staging and host-document
     // RPCs became `session_files.SessionFilesService`'s with `#unbundle` node 6.
     let service_b = Arc::new(service_b);
     let server = tddy_rpc::MultiRpcService::new(vec![
         service_b.session_files_entry(),
-        tddy_rpc::ServiceEntry {
-            name: "connection.ConnectionService",
-            service: Arc::new(tddy_service::ConnectionServiceServer::from_arc(service_b))
-                as Arc<dyn tddy_rpc::RpcService>,
-        },
+        service_b.session_lifecycle_entry(),
+        service_b.project_entry(),
     ]);
     let participant = LiveKitParticipant::connect(
         &ws_url,
@@ -228,7 +222,7 @@ async fn two_daemons() -> TwoDaemons {
     let eligible: Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource> = Arc::new(
         LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
     );
-    let service_a = ConnectionServiceImpl::new(
+    let service_a = DaemonSessionHost::new(
         config_a,
         resolver_a,
         sessions_a.path().to_path_buf(),

@@ -11,7 +11,7 @@ use tddy_service::proto::catalog::{
 
 use super::family_proto_bridge::wire_same;
 use super::{
-    agent_models_cache, list_models_probe_args, parse_agent_models_json, ConnectionServiceImpl,
+    agent_models_cache, list_models_probe_args, parse_agent_models_json, DaemonSessionHost,
     AGENT_MODELS_CACHE_TTL,
 };
 use crate::agent_list_mapping::agent_allowlist_rows;
@@ -20,7 +20,7 @@ use crate::livekit_peer_discovery::local_instance_id_for_config;
 use tddy_spawn::spawner;
 
 #[async_trait]
-impl tddy_discovery::catalog_service::CatalogHandler for ConnectionServiceImpl {
+impl tddy_discovery::catalog_service::CatalogHandler for DaemonSessionHost {
     async fn list_tools(
         &self,
         _request: Request<ListToolsRequest>,

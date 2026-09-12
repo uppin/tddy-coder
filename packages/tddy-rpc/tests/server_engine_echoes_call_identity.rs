@@ -61,7 +61,7 @@ fn a_request(request_id: i32, method: &str, client_epoch: u32) -> RpcRequest {
         request_id,
         request_message: b"hello".to_vec(),
         call_metadata: Some(CallMetadata {
-            service: "connection.ConnectionService".to_string(),
+            service: "the pre-unbundle monolithic RPC coordinate".to_string(),
             method: method.to_string(),
         }),
         metadata: None,

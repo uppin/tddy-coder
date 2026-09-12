@@ -2,12 +2,19 @@
 
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
-use tddy_session_lifecycle::SessionHandler;
+use tddy_service::proto::session::{
+    ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
+    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListSessionsRequest,
+    ListSessionsResponse, ResumeSessionRequest, ResumeSessionResponse, SessionService,
+    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
+};
 
-use super::ConnectionServiceImpl;
+use crate::SessionHandler;
+
+use super::DaemonSessionHost;
 
 #[async_trait]
-impl SessionHandler for ConnectionServiceImpl {
+impl SessionHandler for DaemonSessionHost {
     async fn list_sessions(
         &self,
         request: Request<tddy_service::proto::session::ListSessionsRequest>,
@@ -25,7 +32,7 @@ impl SessionHandler for ConnectionServiceImpl {
     async fn stream_start_session(
         &self,
         request: Request<tddy_service::proto::session::StartSessionRequest>,
-    ) -> Result<Response<tddy_session_lifecycle::SessionStartEventStream>, Status> {
+    ) -> Result<Response<crate::SessionStartEventStream>, Status> {
         use super::family_proto_bridge::wire_same;
 
         let response = self.stream_start_session_at_session_coordinate(request).await?;
@@ -79,16 +86,78 @@ impl SessionHandler for ConnectionServiceImpl {
     }
 }
 
-impl ConnectionServiceImpl {
+/// Legacy direct calls on [`DaemonSessionHost`] in acceptance tests and internal helpers.
+#[async_trait]
+impl SessionService for DaemonSessionHost {
+    type StreamStartSessionStream = crate::SessionStartEventStream;
+
+    async fn list_sessions(
+        &self,
+        request: Request<ListSessionsRequest>,
+    ) -> Result<Response<ListSessionsResponse>, Status> {
+        SessionHandler::list_sessions(self, request).await
+    }
+
+    async fn start_session(
+        &self,
+        request: Request<StartSessionRequest>,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        SessionHandler::start_session(self, request).await
+    }
+
+    async fn stream_start_session(
+        &self,
+        request: Request<StartSessionRequest>,
+    ) -> Result<Response<Self::StreamStartSessionStream>, Status> {
+        SessionHandler::stream_start_session(self, request).await
+    }
+
+    async fn connect_session(
+        &self,
+        request: Request<ConnectSessionRequest>,
+    ) -> Result<Response<ConnectSessionResponse>, Status> {
+        SessionHandler::connect_session(self, request).await
+    }
+
+    async fn resume_session(
+        &self,
+        request: Request<ResumeSessionRequest>,
+    ) -> Result<Response<ResumeSessionResponse>, Status> {
+        SessionHandler::resume_session(self, request).await
+    }
+
+    async fn signal_session(
+        &self,
+        request: Request<SignalSessionRequest>,
+    ) -> Result<Response<SignalSessionResponse>, Status> {
+        SessionHandler::signal_session(self, request).await
+    }
+
+    async fn delete_session(
+        &self,
+        request: Request<DeleteSessionRequest>,
+    ) -> Result<Response<DeleteSessionResponse>, Status> {
+        SessionHandler::delete_session(self, request).await
+    }
+
+    async fn get_worktree_snapshot(
+        &self,
+        request: Request<GetWorktreeSnapshotRequest>,
+    ) -> Result<Response<GetWorktreeSnapshotResponse>, Status> {
+        SessionHandler::get_worktree_snapshot(self, request).await
+    }
+}
+
+impl DaemonSessionHost {
     #[must_use]
     pub fn session_lifecycle_service(
         self: &std::sync::Arc<Self>,
-    ) -> tddy_session_lifecycle::SessionServiceImpl<Self> {
-        tddy_session_lifecycle::SessionServiceImpl::new(std::sync::Arc::clone(self))
+    ) -> crate::SessionServiceImpl<Self> {
+        crate::SessionServiceImpl::new(std::sync::Arc::clone(self))
     }
 
     #[must_use]
     pub fn session_lifecycle_entry(self: &std::sync::Arc<Self>) -> tddy_rpc::ServiceEntry {
-        tddy_session_lifecycle::build_session_entry(self.session_lifecycle_service())
+        crate::build_session_entry(self.session_lifecycle_service())
     }
 }

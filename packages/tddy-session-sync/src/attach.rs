@@ -28,7 +28,7 @@ use tddy_livekit::broadcast::BroadcastMessage;
 use tddy_livekit::client_connect::{connect_client, ConnectError, ConnectedClient};
 use tddy_livekit::{BroadcastChannel, TokenGenerator, DEFAULT_LIVEKIT_JWT_TTL_SECS};
 use tddy_service::proto::auth::{RefreshSessionRequest, RefreshSessionResponse};
-use tddy_service::proto::connection::{
+use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, ListSessionsRequest, ListSessionsResponse,
     SessionEntry,
 };
@@ -422,7 +422,7 @@ impl DaemonHttp {
     ) -> Result<Vec<SessionEntry>, DaemonHttpError> {
         let response: ListSessionsResponse = self
             .unary(
-                "connection.ConnectionService",
+                "the pre-unbundle monolithic RPC coordinate",
                 "ListSessions",
                 ListSessionsRequest {
                     session_token: session_token.to_string(),
@@ -444,7 +444,7 @@ impl DaemonHttp {
     ) -> Result<(), DaemonHttpError> {
         let _: ConnectSessionResponse = self
             .unary(
-                "connection.ConnectionService",
+                "the pre-unbundle monolithic RPC coordinate",
                 "ConnectSession",
                 ConnectSessionRequest {
                     session_token: session_token.to_string(),

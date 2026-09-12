@@ -1,4 +1,4 @@
-//! Unit tests: `ConnectionServiceImpl::specialized_subagent_env` — resolving
+//! Unit tests: `DaemonSessionHost::specialized_subagent_env` — resolving
 //! `StartSessionRequest.specialized_agents` names into the `TDDY_SUBAGENT`/
 //! `TDDY_SUBAGENTS_JSON` jail env pair.
 //!
@@ -21,7 +21,7 @@ fn make_unit_config() -> crate::config::DaemonConfig {
     crate::config::DaemonConfig::load(&path).unwrap()
 }
 
-fn make_unit_service(tddy_data_dir: std::path::PathBuf) -> ConnectionServiceImpl {
+fn make_unit_service(tddy_data_dir: std::path::PathBuf) -> DaemonSessionHost {
     let config = make_unit_config();
     let base = tddy_data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
@@ -32,7 +32,7 @@ fn make_unit_service(tddy_data_dir: std::path::PathBuf) -> ConnectionServiceImpl
             None
         }
     });
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

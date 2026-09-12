@@ -27,7 +27,7 @@ function aListSessionsRequest(sessionToken: string) {
     method: ConnectionService.method.listSessions,
     message: create(ListSessionsRequestSchema, { sessionToken }),
     header: new Headers(),
-    url: "/rpc/connection.ConnectionService/ListSessions",
+    url: "/rpc/the pre-unbundle monolithic RPC coordinate/ListSessions",
     init: {},
     signal: new AbortController().signal,
   };

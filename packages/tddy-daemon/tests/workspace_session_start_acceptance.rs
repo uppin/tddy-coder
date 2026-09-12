@@ -25,9 +25,7 @@ use std::process::Command;
 
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, SplitAgentPlacement, StartSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, SplitAgentPlacement, StartSessionRequest};
 use tddy_service::proto::session_agents_svc::{ListSessionAgentsRequest, SessionAgentService as _};
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a38";
@@ -140,7 +138,7 @@ fn an_agent_def_on_this_host(tddy_data_dir: &Path, name: &str) {
 
 /// The agents a session lists, read the way an operator's Agents tab reads them.
 async fn agent_ids_on_the_roster_of(
-    service: &tddy_daemon::connection_service::ConnectionServiceImpl,
+    service: &tddy_daemon::connection_service::DaemonSessionHost,
     session_id: &str,
 ) -> Vec<String> {
     service

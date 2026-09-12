@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use tddy_rpc::Status;
 
-use tddy_service::proto::connection::ResumeSessionResponse;
+use tddy_service::proto::session::ResumeSessionResponse;
 
 use tddy_rpc::Response;
 
@@ -18,9 +18,9 @@ use std::path::PathBuf;
 
 use crate::connection_service::hooks_and_urls;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// Handle `ResumeSession` for `session_type = "claude-cli"` sessions.
     pub(crate) async fn resume_claude_cli_session(
         &self,

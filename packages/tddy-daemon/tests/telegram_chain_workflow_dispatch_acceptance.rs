@@ -5,7 +5,10 @@
 #[test]
 fn telegram_bot_rs_dispatches_chain_workflow_command() {
     // When / Then
-    let src = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/telegram_bot.rs"));
+    let src = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tddy-session-lifecycle/src/telegram_bot.rs"
+    ));
     assert!(
         src.contains("parse_chain_workflow_prompt") && src.contains("handle_chain_workflow"),
         "telegram_bot.rs must route /chain-workflow after parse_chain_workflow_prompt and call handle_chain_workflow"

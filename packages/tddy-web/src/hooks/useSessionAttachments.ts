@@ -54,7 +54,7 @@ export interface UseSessionAttachmentsArgs {
   /**
    * Stages the form's local files on the host `client` is connected to
    * (`UploadStagedAttachmentChunk`). A second client rather than a second use of `client` because
-   * the file RPCs left `connection.ConnectionService` for `session_files.SessionFilesService`.
+   * the file RPCs left `the pre-unbundle monolithic RPC coordinate` for `session_files.SessionFilesService`.
    */
   sessionFilesClient: Client<typeof SessionFilesService>;
   sessionToken: string;

@@ -23,16 +23,13 @@ use tddy_connectrpc::connect_router;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::remote_git_service::{ProjectsDirResolver, RemoteGitServiceImpl};
 use tddy_daemon::test_util::{TestDaemon, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, MultiRpcService, Request, RpcBridge, RpcService, ServiceEntry};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ListSessionsRequest,
-    StartSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, DeleteSessionRequest, ListSessionsRequest, StartSessionRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_service::proto::session_agents_svc::{
     AttachSessionAgentRequest, CancelAgentConversationRequest, DetachSessionAgentRequest,
@@ -258,7 +255,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
 
         let base = sessions.path().to_path_buf();
         let resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
-        let service = ConnectionServiceImpl::new(
+        let service = DaemonSessionHost::new(
             config.clone(),
             resolver,
             sessions.path().to_path_buf(),
@@ -278,14 +275,14 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         let token = livekit
             .generate_token(ROOM, &format!("daemon-{instance_id}"))
             .expect("LiveKit token for peer daemon");
-        // Every coordinate a peer answers a *forwarded* call on, not `connection.ConnectionService`
+        // Every coordinate a peer answers a *forwarded* call on, not `the pre-unbundle monolithic RPC coordinate`
         // alone: `#unbundle` node 7 moved the roster and conversation RPCs onto
         // `session_agents.SessionAgentService`, and a peer that mounts only the old service answers
         // a forward to the new one with `Unknown service`. Served through
         // `test_util::serve_daemon_rpc_participant` so this list lives in one place — which is the
         // whole reason that helper exists.
         let service_arc = Arc::new(service);
-        service_arc.set_self_handle(Arc::downgrade(&service_arc));
+        service_arc.install_sandbox_rpc_bridge();
         let run =
             tddy_daemon::test_util::serve_daemon_rpc_participant(&ws_url, &token, &service_arc)
                 .await;
@@ -313,10 +310,10 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
 
     // A's Connect-HTTP surface serving `auth.LiveKitTokenService` — the address a peer's
     // `tddy-remote-git-repo` mints a common-room token from before it opens a `RemoteGitService`
-    // stream on A (PRD AC37). Built before `ConnectionServiceImpl` so the same `daemon_url` can be
+    // stream on A (PRD AC37). Built before `DaemonSessionHost` so the same `daemon_url` can be
     // advertised to peers via `listen.advertise_url`.
     //
-    // The mint's resolver is the fleet's own `user_resolver` (the same one `ConnectionServiceImpl`
+    // The mint's resolver is the fleet's own `user_resolver` (the same one `DaemonSessionHost`
     // uses), not the HMAC verifier `auth::build_auth_entries` would build — the fleet authenticates
     // with the plain `TEST_TOKEN`, which is not a signed token, so the HMAC path would refuse it.
     let livekit_token_entry = tddy_rpc::ServiceEntry {
@@ -362,7 +359,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             room_slot.clone(),
         ),
     );
-    let service_a = ConnectionServiceImpl::new(
+    let service_a = DaemonSessionHost::new(
         config_a.clone(),
         resolver_a,
         sessions_a.path().to_path_buf(),
@@ -450,7 +447,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     .expect("write session metadata");
 
     let service_a = Arc::new(service_a);
-    service_a.set_self_handle(Arc::downgrade(&service_a));
+    service_a.install_sandbox_rpc_bridge();
     let fleet = Fleet {
         a: TestDaemon::from_arc(service_a),
         session_id,

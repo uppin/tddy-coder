@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use super::{service_util, AttachmentProgressSink, ConnectionServiceImpl, MpscResultStream};
+use super::{service_util, AttachmentProgressSink, DaemonSessionHost, MpscResultStream};
 use crate::connection_service::hooks_and_urls;
 use crate::{session_deletion, session_list_enrichment, session_reader};
 use tddy_core::output::SESSIONS_SUBDIR;
@@ -14,9 +14,8 @@ use tddy_core::{read_session_metadata, Changeset};
 use tddy_rpc::{Request, Response, Status};
 use tddy_spawn::{spawn_worker, spawner};
 use tddy_spawn::spawner::SpawnOptions;
-use tddy_service::proto::connection::SessionEntry as ConnSessionEntry;
-use tddy_service::proto::connection::StartSessionEvent as ConnStartSessionEvent;
-use tddy_service::proto::connection::start_session_event::Event as ConnStartSessionEventKind;
+use tddy_service::proto::session::SessionEntry as ConnSessionEntry;
+use tddy_service::proto::session::StartSessionEvent as ConnStartSessionEvent;
 use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
@@ -25,14 +24,14 @@ use tddy_service::proto::session::{
     SignalSessionRequest, SignalSessionResponse, StartSessionEvent, StartSessionRequest,
     StartSessionResponse,
 };
-use tddy_service::proto::connection::Signal;
+use tddy_service::proto::session::Signal;
 use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
 use crate::user_sessions_path::projects_path_for_user;
-use tddy_service::proto::connection::ExecuteToolRequest;
-use tddy_service::proto::connection::ResumeSessionResponse as ConnResumeSessionResponse;
+use tddy_service::proto::exec_tools::ExecuteToolRequest;
+use tddy_service::proto::session::ResumeSessionResponse as ConnResumeSessionResponse;
 
 /// The coordinate a forwarded call from the legacy connection service is addressed at on the peer.
-const CONNECTION_SERVICE: &str = "connection.ConnectionService";
+const SESSION_SERVICE: &str = "session.SessionService";
 
 fn bridge_conn_resume_response(
     resp: Result<Response<ConnResumeSessionResponse>, Status>,
@@ -43,7 +42,7 @@ fn bridge_conn_resume_response(
     ))
 }
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
 
 pub(crate) async fn list_sessions_at_session_coordinate(
         &self,
@@ -177,7 +176,7 @@ pub(crate) async fn list_sessions_at_session_coordinate(
         &self,
         request: Request<StartSessionRequest>,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        let conn_req: tddy_service::proto::connection::StartSessionRequest =
+        let conn_req: tddy_service::proto::session::StartSessionRequest =
             super::family_proto_bridge::wire_same(&request.into_inner())?;
         let conn_resp = self
             .start_session_core(conn_req, &AttachmentProgressSink::discarding())
@@ -553,7 +552,7 @@ pub(crate) async fn signal_session_at_session_coordinate(
 
         #[cfg(unix)]
         {
-            use tddy_service::proto::connection::Signal;
+            use tddy_service::proto::session::Signal;
 
             let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
             if !alive {
@@ -687,7 +686,7 @@ pub(crate) async fn get_worktree_snapshot_at_session_coordinate(
         // one answer to "which daemon owns this session's files".
         if let Some(answered) = self
             .rpc_served_by_peer(
-                CONNECTION_SERVICE,
+                SESSION_SERVICE,
                 "GetWorktreeSnapshot",
                 &req.daemon_instance_id,
                 &req,
@@ -746,7 +745,7 @@ pub(crate) async fn get_worktree_snapshot_at_session_coordinate(
         request: Request<StartSessionRequest>,
     ) -> Result<Response<MpscResultStream<StartSessionEvent>>, Status> {
         self.record_rpc_activity();
-        let req: tddy_service::proto::connection::StartSessionRequest = super::family_proto_bridge::wire_same(&request.into_inner())?;
+        let req: tddy_service::proto::session::StartSessionRequest = super::family_proto_bridge::wire_same(&request.into_inner())?;
         // Authenticate before classifying the route: forwarding opens an outbound RPC to a peer and
         // holds a pending-call slot on both hosts for the forward's whole deadline, so an
         // unauthenticated caller must never get that far. The resolved user is not used here — the

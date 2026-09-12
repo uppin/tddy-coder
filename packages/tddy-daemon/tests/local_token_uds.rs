@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use hyper_util::rt::TokioIo;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_tonic_adapter::{ConnectionServiceTonicAdapter, UidToUsername};
+use tddy_daemon::local_token_tonic_adapter::{LocalTokenUdsTonicAdapter, UidToUsername};
 use tddy_daemon::host_tonic_adapter::HostServiceTonicAdapter;
 use tddy_daemon::local_socket_server::{serve_connection_uds, LocalSocketServices};
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
@@ -40,8 +40,11 @@ use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_github::{SessionTokenSigner, TokenKind};
 use tddy_service::proto::activity::{ActivityServiceTonicAdapter, ReportSessionStatusRequest};
 use tddy_service::proto::catalog::CatalogServiceTonicAdapter;
-use tddy_service::proto::connection::MintLocalTokenRequest;
+use tddy_service::proto::demo_vm::DemoVmServiceTonicAdapter;
 use tddy_service::proto::exec_tools::ExecToolServiceTonicAdapter;
+use tddy_service::proto::local_token::MintLocalTokenRequest;
+use tddy_service::proto::project::ProjectServiceTonicAdapter;
+use tddy_service::proto::session::SessionServiceTonicAdapter;
 use tddy_service::proto::host::{ListEligibleDaemonsRequest, StreamHostStatsRequest};
 use tddy_service::proto::pr_stack::PrStackServiceTonicAdapter;
 use tddy_service::proto::session_agents_svc::{
@@ -52,7 +55,7 @@ use tddy_service::proto::tonic_session_agents::session_agent_service_client::Ses
 use tddy_service::proto::worktree::{
     ListWorktreesForProjectRequest, StreamWorktreeStatsRequest, WorktreeRow,
 };
-use tddy_service::tonic_connection::connection_service_client::ConnectionServiceClient;
+use tddy_service::proto::tonic_local_token::local_token_service_client::LocalTokenServiceClient;
 use tddy_service::tonic_host::host_service_client::HostServiceClient;
 use tddy_service::tonic_worktree::worktree_service_client::WorktreeServiceClient;
 use tddy_terminal_rpc::proto::terminal_session::{
@@ -99,13 +102,20 @@ fn start_local_socket_server(
 
     let uid_to_username: UidToUsername = Arc::new(username_for_uid);
     let connection = test_service(sessions_base).as_arc();
-    let adapter = ConnectionServiceTonicAdapter::new(
-        Arc::clone(&connection),
+    let session_adapter = SessionServiceTonicAdapter::new(Arc::new(
+        connection.session_lifecycle_service(),
+    ));
+    let project_adapter =
+        ProjectServiceTonicAdapter::new(Arc::new(connection.project_service()));
+    let demo_vm_adapter = DemoVmServiceTonicAdapter::new(Arc::new(
+        tddy_daemon::connection_service::DemoVmServiceImpl::new(Arc::clone(&connection)),
+    ));
+    let local_token_adapter = LocalTokenUdsTonicAdapter::new(
         Arc::new(config.clone()),
         signer,
         uid_to_username,
     );
-    // The terminal coordinate is built from the *same* `ConnectionServiceImpl` the socket's
+    // The terminal coordinate is built from the *same* `DaemonSessionHost` the socket's
     // `ConnectionService` is, so it addresses that instance's terminals and control lease — the
     // wiring `runtime::build` does, rather than a second set of managers only this suite would see.
     let terminal_adapter =
@@ -127,7 +137,7 @@ fn start_local_socket_server(
             &current_username(),
         )));
 
-    // Node 7's two coordinates, likewise built from the same `ConnectionServiceImpl`: five of the
+    // Node 7's two coordinates, likewise built from the same `DaemonSessionHost`: five of the
     // nine family-B methods are what `tddy-sandbox-runner`'s relay allowlist permits an in-jail
     // agent to reach, and this socket is the only transport a jail has.
     let session_agent_adapter =
@@ -150,7 +160,10 @@ fn start_local_socket_server(
         serve_connection_uds(
             &serve_path,
             LocalSocketServices {
-                connection: adapter,
+                session: session_adapter,
+                project: project_adapter,
+                demo_vm: demo_vm_adapter,
+                local_token: local_token_adapter,
                 host: host_adapter,
                 worktree: worktree_adapter,
                 terminal: terminal_adapter,
@@ -191,8 +204,8 @@ async fn connect_channel(socket_path: &Path) -> Channel {
         .expect("connect over local socket")
 }
 
-async fn connect_client(socket_path: &Path) -> ConnectionServiceClient<Channel> {
-    ConnectionServiceClient::new(connect_channel(socket_path).await)
+async fn connect_local_token_client(socket_path: &Path) -> LocalTokenServiceClient<Channel> {
+    LocalTokenServiceClient::new(connect_channel(socket_path).await)
 }
 
 #[tokio::test]
@@ -201,7 +214,7 @@ async fn mints_an_access_token_for_the_mapped_local_peer() {
     let signer = SessionTokenSigner::new(TEST_SECRET);
     let config = a_daemon_config_mapping(&current_username(), "octocat-local");
     let (socket_path, _dir, _shutdown) = start_local_socket_server(config, Some(signer.clone()));
-    let mut client = connect_client(&socket_path).await;
+    let mut client = connect_local_token_client(&socket_path).await;
 
     // When
     let response = client
@@ -224,7 +237,7 @@ async fn denies_minting_for_an_unmapped_local_peer() {
     let signer = SessionTokenSigner::new(TEST_SECRET);
     let config = a_daemon_config_mapping("someone-else", "octocat-local");
     let (socket_path, _dir, _shutdown) = start_local_socket_server(config, Some(signer));
-    let mut client = connect_client(&socket_path).await;
+    let mut client = connect_local_token_client(&socket_path).await;
 
     // When
     let status = client
@@ -613,10 +626,10 @@ async fn grants_terminal_control_from_the_lease_behind_the_mounted_coordinate() 
 
 // ---------------------------------------------------------------------------
 // session_agents.SessionAgentService and activity.ActivityService — the two
-// coordinates `#unbundle` node 7 moved off `connection.ConnectionService`
+// coordinates `#unbundle` node 7 moved off `the pre-unbundle monolithic RPC coordinate`
 //
 // Both are mounted on this socket by `start_local_socket_server` above, for the reason the
-// policy gives: `connection.ConnectionService` carried all 90 methods here, so dropping a family
+// policy gives: `the pre-unbundle monolithic RPC coordinate` carried all 90 methods here, so dropping a family
 // is a silent capability removal on a privileged interface — and for family B it is the jail's
 // only transport, since five of `tddy-sandbox-runner`'s relay allowlist entries are its methods.
 //

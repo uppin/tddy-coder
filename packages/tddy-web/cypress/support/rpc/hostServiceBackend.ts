@@ -2,7 +2,7 @@
  * In-memory `host.HostService` backend — the daemon roster and the host telemetry feed.
  *
  * Split out of `connectionServiceBackend.ts` when the eight host RPCs left
- * `connection.ConnectionService` for `host.HostService`: a fake is registered per service, so a
+ * `the pre-unbundle monolithic RPC coordinate` for `host.HostService`: a fake is registered per service, so a
  * screen's backend composes the two rather than one `.implement` covering both. `aHostServiceFake`
  * is the composable half (`handlers` spread into a caller's own `.implement(HostService, …)`),
  * `aHostServiceBackend` the standalone one, mirroring `sessionAgentRosterBackend.ts`.

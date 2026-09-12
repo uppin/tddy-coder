@@ -15,11 +15,9 @@ use std::sync::Arc;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ResumeSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, ResumeSessionRequest};
 use tddy_testing_commons::builders::a_session_metadata;
 use tddy_testing_commons::fs::write_session_yaml;
 
@@ -28,10 +26,10 @@ const VALID_TOKEN: &str = "valid-token";
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-/// A `ConnectionServiceImpl` with LiveKit configured (so the only thing missing for resume is
+/// A `DaemonSessionHost` with LiveKit configured (so the only thing missing for resume is
 /// the session's own recorded tool path — an unconfigured LiveKit section would otherwise fail
 /// first with an unrelated error, masking the behavior this test is about).
-fn service_with_livekit_configured(sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn service_with_livekit_configured(sessions_base: PathBuf) -> DaemonSessionHost {
     let config_dir = tempfile::tempdir().unwrap();
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
@@ -62,7 +60,7 @@ livekit:
             None
         }
     });
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

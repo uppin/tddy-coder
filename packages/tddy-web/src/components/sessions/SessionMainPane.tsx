@@ -88,7 +88,7 @@ interface SessionMainPaneProps {
   /**
    * The session-agent service on the same host as `client` — the Add-agent flow attaches through
    * it and each runtime's conversation panes talk to their agent over it. `#unbundle` node 7 took
-   * the roster and conversation RPCs out of `connection.ConnectionService`, so they need their own
+   * the roster and conversation RPCs out of `the pre-unbundle monolithic RPC coordinate`, so they need their own
    * client; absent for the same reason `client` can be.
    */
   sessionAgentClient?: SessionAgentClient;

@@ -28,9 +28,9 @@ use std::path::Path;
 
 use std::path::PathBuf;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// Resolve the `tddy-tools` binary as a sibling of the configured tool (`tddy-coder`) path, so
     /// an installed deployment and a dev `target/debug` tree both find the co-located binary. Falls
     /// back to a bare `tddy-tools` (PATH lookup) when the tool path has no directory component.
@@ -136,28 +136,25 @@ impl ConnectionServiceImpl {
             ),
             agent_conversations: Arc::new(tddy_session_agents::OpenAgentConversations::new()),
             session_notification_bus,
-            self_handle: Arc::new(std::sync::OnceLock::new()),
+            sandbox_rpc_bridge: Arc::new(std::sync::OnceLock::new()),
         }
     }
 
-    /// Record the `Weak` to the top-level `Arc<ConnectionServiceImpl>` so a `&self` method can
-    /// recover the `Arc` via [`Self::self_arc`]. Called once, right after `Arc::new`, in `runtime.rs`.
-    /// Shared across `Clone`s (the field is an `Arc<OnceLock<…>>`), so a clone tonic holds still
-    /// sees the same handle. Idempotent: a second call is a no-op, which is what tests want when
-    /// they re-construct a service in the same process.
-    pub fn set_self_handle(&self, handle: std::sync::Weak<ConnectionServiceImpl>) {
-        let _ = self.self_handle.set(handle);
+    /// Install the in-jail family-B relay once this service lives behind an `Arc` (see `runtime::build`).
+    pub fn install_sandbox_rpc_bridge(self: &Arc<Self>) {
+        let handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler> =
+            Arc::new(super::DaemonRpcHandler {
+                conn: Arc::clone(self),
+            });
+        let _ = self.sandbox_rpc_bridge.set(handler);
     }
 
-    /// Recover the `Arc<ConnectionServiceImpl>` this `&self` belongs to. Panics if
-    /// [`Self::set_self_handle`] was never called — which is a wiring bug, not a runtime condition:
-    /// the daemon's `main.rs` sets it at startup, and tests that do not exercise the sandbox-IPC
-    /// RPC bridge never call this.
-    pub fn self_arc(&self) -> Arc<ConnectionServiceImpl> {
-        self.self_handle
+    /// The host-side dispatch a sandboxed session's `SessionChannel` relays family B to.
+    pub fn sandbox_rpc_handler(&self) -> Arc<dyn tddy_sandbox_runner::HostRpcHandler> {
+        self.sandbox_rpc_bridge
             .get()
-            .and_then(|weak| weak.upgrade())
-            .expect("ConnectionServiceImpl::self_arc called before set_self_handle")
+            .cloned()
+            .expect("sandbox RPC bridge not installed — runtime must call install_sandbox_rpc_bridge")
     }
 
     /// Share this daemon's model registry (builder), so an assistant defined in it is listed by

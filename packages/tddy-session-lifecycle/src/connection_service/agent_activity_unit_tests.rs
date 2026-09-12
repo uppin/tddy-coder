@@ -26,13 +26,13 @@ fn make_unit_config() -> crate::config::DaemonConfig {
     crate::config::DaemonConfig::load(&path).unwrap()
 }
 
-fn make_unit_service(sessions_base: std::path::PathBuf) -> ConnectionServiceImpl {
+fn make_unit_service(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
     let config = make_unit_config();
     let base = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     let user_resolver: SessionUserResolver =
         Arc::new(|token| (token == "valid").then(|| "u".to_string()));
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         sessions_base,

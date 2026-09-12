@@ -3,7 +3,7 @@
 //! The coder is the *second* server of the exec-tool family, exactly as
 //! [`super::activity_service`] made it the second server of the activity family: a session reached
 //! over LiveKit is answered here and the same session reached over HTTP is answered by the daemon.
-//! `#unbundle` node 8 moved these four off `connection.ConnectionService`, so this module is where
+//! `#unbundle` node 8 moved these four off `the pre-unbundle monolithic RPC coordinate`, so this module is where
 //! they answer.
 
 use std::sync::Arc;

@@ -35,17 +35,17 @@ use crate::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_rpc::Status;
 
-use tddy_service::proto::connection::StartSessionResponse;
+use tddy_service::proto::session::StartSessionResponse;
 
 use tddy_rpc::Response;
 
 use super::AttachmentProgressSink;
 
-use tddy_service::proto::connection::StartSessionRequest;
+use tddy_service::proto::session::StartSessionRequest;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// The one implementation behind both `StartSession` and `StreamStartSession`.
     ///
     /// `progress` is where attachment materialization reports to: the stream's sender for the
@@ -236,7 +236,7 @@ impl ConnectionServiceImpl {
                 &req.pr_stack_base_session_id,
                 Path::new(&project.main_repo_path),
             )
-            .map_err(crate::connection_tonic_adapter::to_rpc_status)?;
+            .map_err(tddy_service::to_rpc_status)?;
         }
 
         // A requested new branch another session already owns is refused here, before the

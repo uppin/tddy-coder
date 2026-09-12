@@ -27,15 +27,11 @@ use std::time::Duration;
 use futures_util::{Stream, StreamExt};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::host_documents::MAX_HOST_DOCUMENT_BYTES;
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::{Code, Request, Status};
-use tddy_service::proto::connection::{
-    session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent,
-    ConnectionService as ConnectionServiceTrait, SessionAttachment, StagedAttachmentRef,
-    StartSessionEvent, StartSessionRequest,
-};
+use tddy_service::proto::session::{session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent, SessionService as SessionServiceTrait, SessionAttachment, StagedAttachmentRef, StartSessionEvent, StartSessionRequest};
 use tddy_service::proto::session_files::{
     HostDocumentChunk, ReadHostDocumentRequest, SessionFilesService as SessionFilesServiceTrait,
     UploadStagedAttachmentChunkRequest,
@@ -108,7 +104,7 @@ fn register_project(projects_dir: &Path, repo_path: &Path) {
 /// A service whose staging base is an explicit temp root, so a test can assert *where* staged bytes
 /// land. Owns every `TempDir` the service depends on for the test's lifetime.
 struct Fixture {
-    service: Arc<ConnectionServiceImpl>,
+    service: Arc<DaemonSessionHost>,
     /// The staging base the service was told to use (stands in for `std::env::temp_dir()`).
     staging_base: PathBuf,
     /// `tddy_data_dir` — staged files must **not** appear under here.
@@ -134,7 +130,7 @@ fn a_workspace_service_with_cap(max_attachment_bytes: u64) -> Fixture {
     let user_resolver: UserResolver =
         Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
 
-    let service = ConnectionServiceImpl::new(
+    let service = DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         sessions_base.clone(),
@@ -164,7 +160,7 @@ fn a_workspace_service() -> Fixture {
 /// Uploads `data` as one chunk. `last` controls whether the batch is marked complete — an
 /// unfinished upload is exactly what the completeness gate must refuse.
 async fn stage_chunk(
-    service: &Arc<ConnectionServiceImpl>,
+    service: &Arc<DaemonSessionHost>,
     staging_id: &str,
     file_name: &str,
     data: &[u8],
@@ -185,7 +181,7 @@ async fn stage_chunk(
 }
 
 async fn stage_complete_file(
-    service: &Arc<ConnectionServiceImpl>,
+    service: &Arc<DaemonSessionHost>,
     staging_id: &str,
     file_name: &str,
     data: &[u8],
@@ -655,11 +651,15 @@ async fn stream_start_session_refuses_an_invalid_token_before_it_classifies_the_
     };
 
     // When — the session is started over the streaming RPC
-    let err = fixture
-        .service
-        .stream_start_session(Request::new(request))
-        .await
-        .expect_err("an invalid token must be refused at call time, not mid-stream");
+    let err = match SessionServiceTrait::stream_start_session(
+        &*fixture.service,
+        Request::new(request),
+    )
+    .await
+    {
+        Err(status) => status,
+        Ok(_) => panic!("an invalid token must be refused at call time, not mid-stream"),
+    };
 
     // Then — UNAUTHENTICATED, at call time
     assert_eq!(err.code, Code::Unauthenticated, "got {err:?}");

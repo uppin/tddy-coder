@@ -34,7 +34,7 @@ use std::time::Duration;
 use prost::Message as _;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_daemon_sandbox::sandbox_session::{
     build_sandbox_runner_env, dial_and_bridge, pick_free_loopback_port, spawn_sandbox_runner,
@@ -500,7 +500,7 @@ fn a_built_binary(name: &str) -> PathBuf {
 
 /// The host side of the relay: a daemon whose session has one local agent to converse with.
 struct DaemonServingOneAgent {
-    service: Arc<ConnectionServiceImpl>,
+    service: Arc<DaemonSessionHost>,
     session_id: String,
     agent_id: String,
     _data_dir: tempfile::TempDir,
@@ -522,7 +522,7 @@ async fn a_daemon_with_one_agent_attached(model_base_url: &str) -> DaemonServing
         .expect("write session metadata");
 
     let service = test_service(data_dir.path().to_path_buf()).as_arc();
-    service.set_self_handle(Arc::downgrade(&service));
+    service.install_sandbox_rpc_bridge();
 
     // Read the agent id the way a client reads it: a hand-spelled "explorer@some-host" would pass
     // while the daemon stamped something else entirely.

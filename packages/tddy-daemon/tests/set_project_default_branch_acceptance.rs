@@ -12,16 +12,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon::{project_storage, user_sessions_path};
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListProjectsRequest,
-    SetProjectDefaultBranchRequest,
-};
+use tddy_service::proto::project::{ProjectService as ProjectServiceTrait, ListProjectsRequest, SetProjectDefaultBranchRequest};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -37,14 +35,14 @@ fn test_config(os_user: &str) -> DaemonConfig {
     DaemonConfig::load(&path).unwrap()
 }
 
-fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> ConnectionServiceImpl {
+fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> DaemonSessionHost {
     let sessions_base = tddy_data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
     let eligible: Arc<dyn EligibleDaemonSource> = Arc::new(StubEligibleDaemonSource);
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use super::hooks_and_urls;
-use super::{merge_listed_projects_with_peers, service_util, ConnectionServiceImpl};
+use super::{merge_listed_projects_with_peers, service_util, DaemonSessionHost};
 use tddy_spawn::{spawn_worker, spawner};
 use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
 use crate::project_storage::{self, ProjectData};
@@ -14,7 +14,7 @@ use crate::user_sessions_path::{
 };
 use super::family_proto_bridge::wire_same;
 use tddy_rpc::{Request, Response, Status};
-use tddy_service::proto::connection::ProjectEntry as ConnProjectEntry;
+use tddy_service::proto::project::ProjectEntry as ConnProjectEntry;
 use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
@@ -22,7 +22,7 @@ use tddy_service::proto::project::{
     SetProjectDefaultBranchResponse,
 };
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
 
 pub(crate) async fn list_projects_at_project_coordinate(
         &self,
@@ -244,7 +244,7 @@ pub(crate) async fn add_project_to_host_at_project_coordinate(
                     "cannot forward AddProjectToHost: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
                 )
             })?;
-            let conn_req: tddy_service::proto::connection::AddProjectToHostRequest =
+            let conn_req: tddy_service::proto::project::AddProjectToHostRequest =
                 wire_same(&req)?;
             let inner = tddy_daemon_livekit::livekit_peer_discovery::forward_add_project_to_host_via_livekit(
                 slot,
@@ -409,7 +409,7 @@ pub(crate) async fn set_project_default_branch_at_project_coordinate(
                     "cannot forward SetProjectDefaultBranch: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
                 )
             })?;
-            let conn_req: tddy_service::proto::connection::SetProjectDefaultBranchRequest =
+            let conn_req: tddy_service::proto::project::SetProjectDefaultBranchRequest =
                 wire_same(&req)?;
             let inner =
                 tddy_daemon_livekit::livekit_peer_discovery::forward_set_project_default_branch_via_livekit(

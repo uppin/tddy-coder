@@ -44,7 +44,7 @@ const LOG_TARGET: &str = "tddy_daemon::remote_git_service";
 pub type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// Resolves an OS user to that user's project registry directory
-/// (`~/.tddy/projects/`). Mirrors `ConnectionServiceImpl`'s sessions-base resolver.
+/// (`~/.tddy/projects/`). Mirrors `DaemonSessionHost`'s sessions-base resolver.
 pub type ProjectsDirResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 
 /// Largest payload carried in one `GitServerFrame`. Kept well under

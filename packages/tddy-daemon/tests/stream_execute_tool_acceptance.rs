@@ -17,9 +17,7 @@ use futures_util::StreamExt;
 use tddy_daemon::connection_service::EXEC_TOOL_FRAME_BYTES;
 use tddy_daemon::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolChunk, ExecuteToolRequest};
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a39";
 

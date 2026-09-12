@@ -334,7 +334,7 @@ const FAKE_METHOD_RETURNING_CALL_METADATA = {
 
 /** Long enough that its response envelope needs three chunk frames under a 200-byte budget — the
  *  small-scale stand-in for a `ListSessionsResponse` that outgrows one LiveKit packet. */
-const A_LONG_SERVICE_NAME = "connection.ConnectionService".padEnd(400, ".");
+const A_LONG_SERVICE_NAME = "the pre-unbundle monolithic RPC coordinate".padEnd(400, ".");
 
 /** The message id both senders' messages carry: each counter starts at 0, so ids collide. */
 const REUSED_MESSAGE_ID = 7;

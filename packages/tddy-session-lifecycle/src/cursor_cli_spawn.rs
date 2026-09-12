@@ -1,4 +1,4 @@
-//! Cursor Agent CLI session spawn/resume helpers for `ConnectionServiceImpl`.
+//! Cursor Agent CLI session spawn/resume helpers for `DaemonSessionHost`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -9,7 +9,7 @@ use tddy_core::{
     SessionMetadata,
 };
 use tddy_rpc::{Response, Status};
-use tddy_service::proto::connection::{ResumeSessionResponse, StartSessionResponse};
+use tddy_service::proto::session::{ResumeSessionResponse, StartSessionResponse};
 use uuid::Uuid;
 
 use crate::branch_intent::{

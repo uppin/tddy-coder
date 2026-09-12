@@ -32,7 +32,7 @@ use tddy_session_activity::{
 };
 use tddy_worktree_service::stream::MpscResultStream;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 use crate::livekit_peer_discovery::PeerRoute;
 
 /// The coordinate a forward is addressed at on the peer. A forwarded call has to land on the same
@@ -42,7 +42,7 @@ use crate::livekit_peer_discovery::PeerRoute;
 /// out-of-process subscriber are named from one place.
 const ACTIVITY_SERVICE: &str = tddy_service::session_activity::ACTIVITY_SERVICE;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// The `activity.ActivityService` entry this daemon registers.
     ///
     /// Public because it is wiring: the host that assembles the roster registers it
@@ -66,7 +66,7 @@ impl ConnectionServiceImpl {
     /// same value in the generated tonic adapter for the local Unix socket.
     ///
     /// **There is no compatibility shim.** All eight methods were deleted from
-    /// `connection.ConnectionService` — from `connection.proto` (down to 33 rpcs) and from
+    /// `the pre-unbundle monolithic RPC coordinate` — from `connection.proto` (down to 33 rpcs) and from
     /// `connection_tonic_adapter.rs` alike — so a caller still addressing the old coordinate is
     /// answered `unimplemented` rather than delegated here. Every consumer moved in the same PR;
     /// the constants this module and its callers read exist so the next one cannot be missed
@@ -122,7 +122,7 @@ impl SessionLabels for SessionsNamedAsListSessionsNamesThem {
 /// one — so a session with no room here has no delta and never will, which is the
 /// [`DeltaLookup::NoRoomHere`] the crate reports as an absence rather than a failure.
 struct RoomsHostedByThisDaemon {
-    connection: ConnectionServiceImpl,
+    connection: DaemonSessionHost,
 }
 
 impl SessionDeltaStores for RoomsHostedByThisDaemon {
@@ -170,12 +170,12 @@ impl SessionDeltaStores for RoomsHostedByThisDaemon {
 /// The wrapper is *this* side of the boundary for the reason node 6's `PeerRoutedSessionFiles`
 /// gives: it implements the generated service trait rather than wrapping the entry's encoded
 /// [`tddy_rpc::RpcService`], so the fork sits in front of the *handler* — the layer it was in
-/// before this node moved these methods off `connection.ConnectionService`. Routing a step later,
+/// before this node moved these methods off `the pre-unbundle monolithic RPC coordinate`. Routing a step later,
 /// at the transport, would leave every in-process caller of the surface serving a request that
 /// names another host out of this host's own directories, and would decode each routed request a
 /// second time to find the id it routes on.
 pub struct PeerRoutedActivity {
-    connection: ConnectionServiceImpl,
+    connection: DaemonSessionHost,
     /// The `tddy-session-activity` implementation, which serves every request this daemon keeps.
     local: ActivityServiceImpl,
 }
@@ -185,7 +185,7 @@ impl PeerRoutedActivity {
     /// this daemon's own to serve.
     ///
     /// Routed **before** the caller is authenticated, as these were on
-    /// `connection.ConnectionService`: the caller is usually a relay with no local sessions, whose
+    /// `the pre-unbundle monolithic RPC coordinate`: the caller is usually a relay with no local sessions, whose
     /// token the daemon holding the transcript is the one to verify.
     fn forward_target(
         &self,
@@ -251,7 +251,7 @@ impl PeerRoutedActivity {
             .map_err(|e| Status::internal(format!("decode {rpc_name} answer from peer: {e}")))
     }
 
-    /// The same bump every `connection.ConnectionService` handler makes: in relay mode the idle
+    /// The same bump every `the pre-unbundle monolithic RPC coordinate` handler makes: in relay mode the idle
     /// monitor shuts the process down, and a client that has moved to this coordinate is still a
     /// client using it.
     fn record_activity(&self) {

@@ -21,6 +21,18 @@ use tddy_service::proto::exec_tools::{
     ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
     ListSessionToolCallsResponse,
 };
+use tddy_service::proto::project::{
+    AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest,
+    CreateProjectResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
+    ListProjectsRequest, ListProjectsResponse, ProjectService, SetProjectDefaultBranchRequest,
+    SetProjectDefaultBranchResponse,
+};
+use tddy_service::proto::session::{
+    ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
+    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListSessionsRequest,
+    ListSessionsResponse, ResumeSessionRequest, ResumeSessionResponse, SessionService,
+    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
+};
 use tddy_service::proto::pr_stack::{
     AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
     LinkStackNodeRequest, LinkStackNodeResponse, PrStackService, PullBaseIntoBranchRequest,
@@ -32,7 +44,7 @@ use tddy_worktree_service::stream::MpscResultStream;
 
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
-use crate::connection_service::ConnectionServiceImpl;
+use crate::connection_service::DaemonSessionHost;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
 /// Token accepted by [`test_service`] as a valid session token.
@@ -54,7 +66,7 @@ pub fn test_config() -> DaemonConfig {
     DaemonConfig::load(&path).expect("load test config")
 }
 
-fn new_connection_service(sessions_base: PathBuf) -> Arc<ConnectionServiceImpl> {
+fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
     let config = test_config();
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -66,7 +78,7 @@ fn new_connection_service(sessions_base: PathBuf) -> Arc<ConnectionServiceImpl> 
             None
         }
     });
-    let service = Arc::new(ConnectionServiceImpl::new(
+    let service = Arc::new(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -76,41 +88,35 @@ fn new_connection_service(sessions_base: PathBuf) -> Arc<ConnectionServiceImpl> 
         None,
         Arc::new(CliSessionManager::new()),
     ));
-    install_self_handle(&service);
+    service.install_sandbox_rpc_bridge();
     service
-}
-
-/// Record the weak back-pointer [`ConnectionServiceImpl::self_arc`] needs — same wiring as
-/// `runtime::build` right after its `Arc::new`.
-pub fn install_self_handle(service: &Arc<ConnectionServiceImpl>) {
-    service.set_self_handle(Arc::downgrade(service));
 }
 
 /// Daemon under test: the connection service plus the catalogue, exec-tool and PR-stack families
 /// unbundled onto their own coordinates (`#unbundle` node 8).
 #[derive(Clone)]
 pub struct TestDaemon {
-    inner: Arc<ConnectionServiceImpl>,
+    inner: Arc<DaemonSessionHost>,
 }
 
 impl TestDaemon {
     #[must_use]
-    pub fn from_arc(inner: Arc<ConnectionServiceImpl>) -> Self {
+    pub fn from_arc(inner: Arc<DaemonSessionHost>) -> Self {
         Self { inner }
     }
 
     #[must_use]
-    pub fn connection(&self) -> &ConnectionServiceImpl {
+    pub fn connection(&self) -> &DaemonSessionHost {
         self.inner.as_ref()
     }
 
     #[must_use]
-    pub fn as_arc(&self) -> Arc<ConnectionServiceImpl> {
+    pub fn as_arc(&self) -> Arc<DaemonSessionHost> {
         Arc::clone(&self.inner)
     }
 
     /// Substitute what builds a sandboxed workspace session's jail — same contract as
-    /// [`ConnectionServiceImpl::with_workspace_sandbox_provisioner`], but safe on the shared
+    /// [`DaemonSessionHost::with_workspace_sandbox_provisioner`], but safe on the shared
     /// `Arc` tests keep inside a [`TestDaemon`].
     pub fn with_workspace_sandbox_provisioner(
         mut self,
@@ -142,10 +148,124 @@ impl TestDaemon {
 }
 
 impl Deref for TestDaemon {
-    type Target = ConnectionServiceImpl;
+    type Target = DaemonSessionHost;
 
     fn deref(&self) -> &Self::Target {
         self.inner.as_ref()
+    }
+}
+
+#[async_trait]
+impl SessionService for TestDaemon {
+    type StreamStartSessionStream = crate::SessionStartEventStream;
+
+    async fn list_sessions(
+        &self,
+        request: Request<ListSessionsRequest>,
+    ) -> Result<Response<ListSessionsResponse>, Status> {
+        self.inner.session_lifecycle_service().list_sessions(request).await
+    }
+
+    async fn start_session(
+        &self,
+        request: Request<StartSessionRequest>,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        self.inner.session_lifecycle_service().start_session(request).await
+    }
+
+    async fn stream_start_session(
+        &self,
+        request: Request<StartSessionRequest>,
+    ) -> Result<Response<Self::StreamStartSessionStream>, Status> {
+        self.inner
+            .session_lifecycle_service()
+            .stream_start_session(request)
+            .await
+    }
+
+    async fn connect_session(
+        &self,
+        request: Request<ConnectSessionRequest>,
+    ) -> Result<Response<ConnectSessionResponse>, Status> {
+        self.inner
+            .session_lifecycle_service()
+            .connect_session(request)
+            .await
+    }
+
+    async fn resume_session(
+        &self,
+        request: Request<ResumeSessionRequest>,
+    ) -> Result<Response<ResumeSessionResponse>, Status> {
+        self.inner.session_lifecycle_service().resume_session(request).await
+    }
+
+    async fn signal_session(
+        &self,
+        request: Request<SignalSessionRequest>,
+    ) -> Result<Response<SignalSessionResponse>, Status> {
+        self.inner.session_lifecycle_service().signal_session(request).await
+    }
+
+    async fn delete_session(
+        &self,
+        request: Request<DeleteSessionRequest>,
+    ) -> Result<Response<DeleteSessionResponse>, Status> {
+        self.inner.session_lifecycle_service().delete_session(request).await
+    }
+
+    async fn get_worktree_snapshot(
+        &self,
+        request: Request<GetWorktreeSnapshotRequest>,
+    ) -> Result<Response<GetWorktreeSnapshotResponse>, Status> {
+        self.inner
+            .session_lifecycle_service()
+            .get_worktree_snapshot(request)
+            .await
+    }
+}
+
+#[async_trait]
+impl ProjectService for TestDaemon {
+    async fn list_projects(
+        &self,
+        request: Request<ListProjectsRequest>,
+    ) -> Result<Response<ListProjectsResponse>, Status> {
+        self.inner.project_service().list_projects(request).await
+    }
+
+    async fn create_project(
+        &self,
+        request: Request<CreateProjectRequest>,
+    ) -> Result<Response<CreateProjectResponse>, Status> {
+        self.inner.project_service().create_project(request).await
+    }
+
+    async fn add_project_to_host(
+        &self,
+        request: Request<AddProjectToHostRequest>,
+    ) -> Result<Response<AddProjectToHostResponse>, Status> {
+        self.inner.project_service().add_project_to_host(request).await
+    }
+
+    async fn list_project_branches(
+        &self,
+        request: Request<ListProjectBranchesRequest>,
+    ) -> Result<Response<ListProjectBranchesResponse>, Status> {
+        self.inner
+            .project_service()
+            .list_project_branches(request)
+            .await
+    }
+
+    async fn set_project_default_branch(
+        &self,
+        request: Request<SetProjectDefaultBranchRequest>,
+    ) -> Result<Response<SetProjectDefaultBranchResponse>, Status> {
+        self.inner
+            .project_service()
+            .set_project_default_branch(request)
+            .await
     }
 }
 
@@ -329,14 +449,14 @@ pub fn test_service(sessions_base: PathBuf) -> TestDaemon {
 /// know before they route anything is that the *call* a client would make answers with the peer, and
 /// a source that holds a row the handler would not report is exactly the failure worth catching.
 ///
-/// The host service is built here from `service`'s own [`ConnectionServiceImpl::routing_view`], so
+/// The host service is built here from `service`'s own [`DaemonSessionHost::routing_view`], so
 /// the roster this waits on is the one the connection service will classify the subsequent route
 /// against. Two sources would let this return on a peer the route then cannot find.
 ///
 /// Panics with the list that *was* returned rather than a bare timeout: "these three daemons were
 /// visible and yours was not" is a different bug report from "nothing happened".
 pub async fn wait_until_peer_discovered(
-    service: &ConnectionServiceImpl,
+    service: &DaemonSessionHost,
     session_token: &str,
     peer_instance_id: &str,
     timeout: std::time::Duration,
@@ -386,7 +506,7 @@ pub async fn wait_until_peer_discovered(
 /// One helper rather than one per suite. Which coordinates a peer serves is a fact about the
 /// daemon, not about the suite that pins a forward, and a peer that does not mount a coordinate
 /// answers a forward to it with `Unknown service` — so four copies of this list is how three
-/// cross-host suites came to still be serving `connection.ConnectionService` alone after
+/// cross-host suites came to still be serving `the pre-unbundle monolithic RPC coordinate` alone after
 /// `#unbundle` node 6 moved the thirteen session-file RPCs onto
 /// `session_files.SessionFilesService`.
 ///
@@ -396,7 +516,7 @@ pub async fn wait_until_peer_discovered(
 pub async fn serve_daemon_rpc_participant(
     ws_url: &str,
     token: &str,
-    service: &Arc<ConnectionServiceImpl>,
+    service: &Arc<DaemonSessionHost>,
 ) -> tokio::task::JoinHandle<()> {
     let roster = tddy_rpc::MultiRpcService::new(vec![
         service.session_files_entry(),
@@ -405,12 +525,8 @@ pub async fn serve_daemon_rpc_participant(
         service.catalog_entry(),
         service.exec_tool_entry(),
         service.pr_stack_entry(),
-        tddy_rpc::ServiceEntry {
-            name: "connection.ConnectionService",
-            service: Arc::new(tddy_service::ConnectionServiceServer::from_arc(Arc::clone(
-                service,
-            ))) as Arc<dyn tddy_rpc::RpcService>,
-        },
+        service.session_lifecycle_entry(),
+        service.project_entry(),
     ]);
     let participant = tddy_livekit::LiveKitParticipant::connect(
         ws_url,

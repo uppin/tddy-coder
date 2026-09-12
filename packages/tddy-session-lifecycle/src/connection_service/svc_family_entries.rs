@@ -2,24 +2,24 @@
 
 use std::sync::Arc;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 use crate::pr_stack_rpc::{build_pr_stack_entry, PrStackServiceImpl};
 use tddy_discovery::CatalogServiceImpl;
 use tddy_tool_engine::ExecToolServiceImpl;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     #[must_use]
-    pub fn catalog_rpc_service(self: &Arc<Self>) -> CatalogServiceImpl<ConnectionServiceImpl> {
+    pub fn catalog_rpc_service(self: &Arc<Self>) -> CatalogServiceImpl<DaemonSessionHost> {
         CatalogServiceImpl::new(Arc::clone(self))
     }
 
     #[must_use]
-    pub fn exec_tool_rpc_service(self: &Arc<Self>) -> ExecToolServiceImpl<ConnectionServiceImpl> {
+    pub fn exec_tool_rpc_service(self: &Arc<Self>) -> ExecToolServiceImpl<DaemonSessionHost> {
         ExecToolServiceImpl::new(Arc::clone(self))
     }
 
     #[must_use]
-    pub fn pr_stack_rpc_service(self: &Arc<Self>) -> PrStackServiceImpl<ConnectionServiceImpl> {
+    pub fn pr_stack_rpc_service(self: &Arc<Self>) -> PrStackServiceImpl<DaemonSessionHost> {
         PrStackServiceImpl::new(Arc::clone(self))
     }
 

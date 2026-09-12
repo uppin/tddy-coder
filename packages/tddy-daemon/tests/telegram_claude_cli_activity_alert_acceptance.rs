@@ -1,7 +1,7 @@
 //! Acceptance tests: Telegram alerts for claude-cli session activity status transitions
 //! (PRD: docs/ft/daemon/telegram-notifications.md#claude-code-cli-session-activity-alerts).
 //!
-//! The full RPC path: `ConnectionServiceImpl::report_session_status` is called with a valid
+//! The full RPC path: `DaemonSessionHost::report_session_status` is called with a valid
 //! `hook_token` and a status string. When Telegram is configured and a chat is tracking the
 //! session, the watcher fires `on_claude_cli_activity_status_changed`, which sends to the
 //! tracked chats.
@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::telegram_notifier::{InMemoryTelegramSender, TelegramSessionWatcher};
 use tddy_daemon::telegram_session_subscriber::TelegramDaemonHooks;
 use tddy_daemon::telegram_tracked_session::{
@@ -78,7 +78,7 @@ fn write_claude_cli_session(
     write_session_metadata(session_dir, &meta).unwrap();
 }
 
-/// Build a `ConnectionServiceImpl` wired with:
+/// Build a `DaemonSessionHost` wired with:
 /// - `sessions_base_for_user` pointing at `sessions_base`
 /// - `TelegramDaemonHooks` carrying `InMemoryTelegramSender` + a watcher sharing `tracked`
 /// - A no-op user resolver (accepts OS_USER)
@@ -86,7 +86,7 @@ fn make_service(
     sessions_base: PathBuf,
     sender: Arc<InMemoryTelegramSender>,
     tracked: SharedTelegramTrackedSessionCoordinator,
-) -> ConnectionServiceImpl {
+) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_os_user| Some(sessions_base.clone()));
@@ -114,7 +114,7 @@ fn make_service(
         watcher: watcher_arc,
     });
 
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         test_daemon_config(),
         sessions_base_resolver,
         tddy_data_dir,

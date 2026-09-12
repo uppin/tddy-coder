@@ -3,7 +3,7 @@
 //! PRD: docs/ft/daemon/session-notifications.md
 //! (FR1/AC1, FR2/AC3, FR7/AC4).
 //!
-//! The path under test is the real one: `ConnectionServiceImpl::report_session_status` is called
+//! The path under test is the real one: `DaemonSessionHost::report_session_status` is called
 //! with a valid `hook_token`, exactly as the per-worktree `tddy-tools session-hook` calls it when
 //! Claude Code fires a hook. One publish onto `SessionNotificationBus` must reach every interested
 //! subscriber — the Telegram subscriber that ships today's copy, and any indicator subscriber
@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::session_notification_subscribers::TelegramNotificationSubscriber;
 use tddy_daemon::session_notifications::{
     RecordingSessionNotificationSubscriber, SessionNotificationBus, SessionNotificationKind,
@@ -124,13 +124,13 @@ fn telegram_hooks(sender: Arc<InMemoryTelegramSender>) -> Arc<TelegramDaemonHook
     })
 }
 
-/// A `ConnectionServiceImpl` whose notification bus carries the Telegram subscriber and one
+/// A `DaemonSessionHost` whose notification bus carries the Telegram subscriber and one
 /// indicator subscriber — the shape `main.rs` assembles in production.
 fn a_service_with_both_subscribers(
     sessions_base: PathBuf,
     sender: Arc<InMemoryTelegramSender>,
     indicators: Arc<RecordingSessionNotificationSubscriber>,
-) -> ConnectionServiceImpl {
+) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_os_user| Some(sessions_base.clone()));
@@ -143,7 +143,7 @@ fn a_service_with_both_subscribers(
         ))))
         .with_subscriber(indicators);
 
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         a_daemon_config(),
         sessions_base_resolver,
         tddy_data_dir,
@@ -156,7 +156,7 @@ fn a_service_with_both_subscribers(
     .with_session_notification_bus(Arc::new(bus))
 }
 
-async fn report_status(service: &ConnectionServiceImpl, status: &str) {
+async fn report_status(service: &DaemonSessionHost, status: &str) {
     service
         .activity_service()
         .report_session_status(Request::new(ReportSessionStatusRequest {

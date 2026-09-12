@@ -30,7 +30,7 @@ use tddy_core::output::SESSIONS_SUBDIR;
 
 use tddy_rpc::Status;
 
-use tddy_service::proto::connection::StartSessionResponse;
+use tddy_service::proto::session::StartSessionResponse;
 
 use tddy_rpc::Response;
 
@@ -38,9 +38,9 @@ use std::sync::Arc;
 
 use std::path::PathBuf;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// Handle `StartSession` for sandboxed `claude-cli` sessions (darwin Seatbelt, local gRPC).
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn start_sandboxed_claude_cli_session(

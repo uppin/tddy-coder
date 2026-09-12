@@ -11,15 +11,12 @@ use std::time::Duration;
 use livekit::prelude::RoomOptions;
 use serial_test::serial;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ListSessionsRequest,
-    StartSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, DeleteSessionRequest, ListSessionsRequest, StartSessionRequest};
 use tddy_testing_commons::a_session_metadata;
 
 const REMOTE_ACCEPTANCE_ROOM: &str = "acceptance-common-room";
@@ -28,7 +25,7 @@ const REMOTE_LK_API_KEY: &str = "devkey";
 const REMOTE_LK_API_SECRET: &str = "secret";
 const REMOTE_ROUTING_PROJECT_ID: &str = "remote-routing-proj";
 
-/// The identity a daemon serves `connection.ConnectionService` on — a fixed `daemon-` prefix over
+/// The identity a daemon serves `the pre-unbundle monolithic RPC coordinate` on — a fixed `daemon-` prefix over
 /// its instance id, the way `main.rs` joins the common room. The bare instance id is the discovery
 /// participant's, which publishes the advertisement and serves no RPC.
 /// See `docs/ft/web/daemon-selector-livekit-rpc.md`.
@@ -295,7 +292,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     tddy_daemon::project_storage::write_projects(&projects_dir_b, &[project]).unwrap();
     let base_b = sessions_b.path().to_path_buf();
     let resolver_b: SessionsBaseResolver = Arc::new(move |_| Some(base_b.clone()));
-    let service_b = ConnectionServiceImpl::new(
+    let service_b = DaemonSessionHost::new(
         config_b.clone(),
         resolver_b,
         sessions_b.path().to_path_buf(),
@@ -320,7 +317,9 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
             &rpc_identity(REMOTE_PEER_INSTANCE_ID),
         )
         .expect("LiveKit token for peer daemon");
-    let connection_server = tddy_service::ConnectionServiceServer::new(service_b);
+    let service_b = Arc::new(service_b);
+    let connection_server =
+        tddy_service::SessionServiceServer::new(service_b.session_lifecycle_service());
     let participant = LiveKitParticipant::connect(
         &ws_url,
         &token_b,
@@ -361,7 +360,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         Arc::clone(&user_resolver),
     )
     .with_eligible_daemon_source(Arc::clone(&eligible));
-    let service_a = ConnectionServiceImpl::new(
+    let service_a = DaemonSessionHost::new(
         config_a,
         resolver_a,
         sessions_a.path().to_path_buf(),

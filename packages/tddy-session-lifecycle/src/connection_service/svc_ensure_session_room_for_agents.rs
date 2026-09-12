@@ -12,9 +12,9 @@ use uuid::Uuid;
 
 use tddy_rpc::Status;
 
-use super::ConnectionServiceImpl;
+use super::DaemonSessionHost;
 
-impl ConnectionServiceImpl {
+impl DaemonSessionHost {
     /// [`Self::ensure_session_room`] for the attach path, so an owning daemon has something to be
     /// admitted to.
     ///
