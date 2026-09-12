@@ -103,6 +103,7 @@ function mountForm(
     withSelectedDaemon(
       <CreateSessionPane
         client={createClient(ConnectionService, hostA.transport())}
+        catalogClient={createClient(CatalogService, hostA.transport())}
         sessionFilesClient={createClient(SessionFilesService, hostA.transport())}
         worktreeClient={createClient(WorktreeService, hostA.transport())}
         sessionToken="tok"
@@ -136,6 +137,7 @@ function mountFormForHost(
     withSelectedDaemon(
       <CreateSessionPane
         client={createClient(ConnectionService, hostA.transport())}
+        catalogClient={createClient(CatalogService, hostA.transport())}
         sessionFilesClient={createClient(SessionFilesService, hostA.transport())}
         worktreeClient={createClient(WorktreeService, hostA.transport())}
         sessionToken="tok"

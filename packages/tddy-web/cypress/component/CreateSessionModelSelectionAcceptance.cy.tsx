@@ -75,11 +75,20 @@ function aBackendWithModels({ cursorFails = false }: { cursorFails?: boolean } =
 
 function mountWith(backend: InMemoryRpcBackend) {
   const client = createClient(ConnectionService, backend.transport());
+  const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
   cy.mount(
-    <CreateSessionPane client={client} sessionFilesClient={sessionFilesClient} worktreeClient={worktreeClient} sessionToken="tok" onCancel={cy.stub()} onCreated={cy.stub()} />,
+    <CreateSessionPane
+      client={client}
+      catalogClient={catalogClient}
+      sessionFilesClient={sessionFilesClient}
+      worktreeClient={worktreeClient}
+      sessionToken="tok"
+      onCancel={cy.stub()}
+      onCreated={cy.stub()}
+    />,
   );
 }
 

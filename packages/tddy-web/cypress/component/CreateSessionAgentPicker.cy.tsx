@@ -79,6 +79,7 @@ function mountPicker(hostB: InMemoryRpcBackend): InMemoryRpcBackend {
     withSelectedDaemon(
       <CreateSessionPane
         client={createClient(ConnectionService, hostABackend.transport())}
+        catalogClient={createClient(CatalogService, hostABackend.transport())}
         sessionFilesClient={createClient(SessionFilesService, hostABackend.transport())}
         worktreeClient={createClient(WorktreeService, hostABackend.transport())}
         sessionToken="tok"
