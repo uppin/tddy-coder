@@ -17,9 +17,11 @@ use std::path::{Path, PathBuf};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
+};
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ExecuteToolResponse,
-    StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
 };
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a43";

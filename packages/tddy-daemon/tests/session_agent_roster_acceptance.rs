@@ -23,9 +23,7 @@ use tddy_core::SessionMetadata;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListSubagentsRequest,
-};
+use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 use tddy_service::proto::session_agents_svc::{
     AttachSessionAgentRequest, DetachSessionAgentRequest, ListSessionAgentsRequest,
     ReportAgentCloneStateRequest, SessionAgentRoster, SessionAgentService as _,

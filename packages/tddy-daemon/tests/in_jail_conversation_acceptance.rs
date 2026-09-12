@@ -41,9 +41,7 @@ use tddy_daemon_sandbox::sandbox_session::{
     SandboxRunnerSpawn,
 };
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListSubagentsRequest,
-};
+use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, AttachSessionAgentRequest, CancelAgentConversationRequest,
     CancelAgentConversationResponse, OpenAgentConversationRequest, OpenAgentConversationResponse,

@@ -25,9 +25,7 @@ use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_discovery::subagent::normalize_replaced_tools;
 use tddy_rpc::{Code, Request};
 use tddy_sandbox_recipes::{build_claude_allowlist, build_claude_disallowlist};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListSubagentsRequest,
-};
+use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 use tddy_service::proto::session_agents_svc::{
     AttachSessionAgentRequest, DetachSessionAgentRequest, SessionAgentRoster,
     SessionAgentService as _,

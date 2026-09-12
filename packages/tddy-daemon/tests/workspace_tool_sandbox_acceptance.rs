@@ -25,10 +25,15 @@ use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
 use tddy_rpc::{Code, Request, Status};
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
+};
 use tddy_sandbox::SandboxError;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
-    ExecuteToolResponse, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, StartSessionRequest,
+};
+use tddy_service::proto::connection::{
+    ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse,
 };
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a40";
@@ -70,13 +75,13 @@ impl RecordingSandbox {
 
 #[async_trait]
 impl WorkspaceSandbox for RecordingSandbox {
-    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse {
+    async fn execute_tool(&self, req: &ConnExecuteToolRequest) -> ConnExecuteToolResponse {
         self.calls.lock().unwrap().push(JailedCall {
             session_id: req.session_id.clone(),
             tool_name: req.tool_name.clone(),
             args_json: req.args_json.clone(),
         });
-        ExecuteToolResponse {
+        ConnExecuteToolResponse {
             result_json: serde_json::json!({ "marker": JAIL_MARKER, "tool": req.tool_name })
                 .to_string(),
             is_error: false,

@@ -184,6 +184,24 @@ pub mod proto {
     pub mod pr_stack {
         include!(concat!(env!("OUT_DIR"), "/pr_stack.rs"));
     }
+
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `catalog.proto`.
+    pub mod tonic_catalog {
+        #![allow(unused_imports, clippy::all)]
+        include!(concat!(env!("OUT_DIR"), "/tonic_catalog/catalog.rs"));
+    }
+
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `exec_tools.proto`.
+    pub mod tonic_exec_tools {
+        #![allow(unused_imports, clippy::all)]
+        include!(concat!(env!("OUT_DIR"), "/tonic_exec_tools/exec_tools.rs"));
+    }
+
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `pr_stack.proto`.
+    pub mod tonic_pr_stack {
+        #![allow(unused_imports, clippy::all)]
+        include!(concat!(env!("OUT_DIR"), "/tonic_pr_stack/pr_stack.rs"));
+    }
     /// `RemoteGitService`: a daemon project served as a git remote. See
     /// `docs/ft/daemon/remote-git-repo.md`.
     #[allow(unused_imports, unused_variables)]

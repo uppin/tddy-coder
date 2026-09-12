@@ -23,10 +23,16 @@ use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
 use tddy_rpc::{Request, Status};
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
+};
 use tddy_sandbox::SandboxError;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
-    ExecuteToolResponse, ResumeSessionRequest, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ResumeSessionRequest,
+    StartSessionRequest,
+};
+use tddy_service::proto::connection::{
+    ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse,
 };
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a42";
@@ -69,13 +75,13 @@ impl RecordingSandbox {
 
 #[async_trait]
 impl WorkspaceSandbox for RecordingSandbox {
-    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse {
+    async fn execute_tool(&self, req: &ConnExecuteToolRequest) -> ConnExecuteToolResponse {
         self.calls.lock().unwrap().push(JailedCall {
             session_id: req.session_id.clone(),
             tool_name: req.tool_name.clone(),
             args_json: req.args_json.clone(),
         });
-        ExecuteToolResponse {
+        ConnExecuteToolResponse {
             result_json: serde_json::json!({ "marker": JAIL_MARKER, "tool": req.tool_name })
                 .to_string(),
             is_error: false,
@@ -405,10 +411,10 @@ struct LingeringProcessSandbox {
 
 #[async_trait]
 impl WorkspaceSandbox for LingeringProcessSandbox {
-    async fn execute_tool(&self, _req: &ExecuteToolRequest) -> ExecuteToolResponse {
+    async fn execute_tool(&self, _req: &ConnExecuteToolRequest) -> ConnExecuteToolResponse {
         // The delete test never dispatches a tool; the jail exists only so its process lifetime is
         // observable.
-        ExecuteToolResponse::default()
+        ConnExecuteToolResponse::default()
     }
 
     fn stop(&self) {

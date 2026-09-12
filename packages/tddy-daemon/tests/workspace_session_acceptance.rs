@@ -11,9 +11,11 @@ use tddy_core::session_metadata::read_session_metadata;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::Request;
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
+};
 use tddy_service::proto::connection::{
-    ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, ExecuteToolRequest,
-    StartSessionRequest,
+    ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;

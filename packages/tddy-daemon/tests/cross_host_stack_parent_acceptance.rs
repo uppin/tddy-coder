@@ -40,9 +40,8 @@ use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaem
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ResolveStackBaseRequest, StartSessionRequest,
-};
+use tddy_service::proto::connection::{ConnectionService as ConnectionServiceTrait, StartSessionRequest};
+use tddy_service::proto::pr_stack::{PrStackService, ResolveStackBaseRequest};
 
 /// The daemon under test: the one a child session is started on, and the one that holds the
 /// project. In the reported failure it is also the host with no orchestrator of its own.

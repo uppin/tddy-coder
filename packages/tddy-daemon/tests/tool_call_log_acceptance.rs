@@ -18,9 +18,12 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_daemon::tool_call_log::{read_tool_calls, TOOL_CALLS_FILENAME};
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ListSessionToolCallsRequest,
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
+    ListSessionToolCallsRequest,
 };
+use tddy_service::proto::connection::{
+    ConnectionService as ConnectionServiceTrait, };
 use tddy_testing_commons::a_session_metadata;
 
 // ---------------------------------------------------------------------------

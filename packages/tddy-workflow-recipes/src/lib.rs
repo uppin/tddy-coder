@@ -91,18 +91,13 @@ pub use writer::{
 ///
 /// After this node the whole PR-stack domain is in one crate, which is the first point at which
 /// several of the seven open backlog items against it are fixable in one place.
-pub fn build_pr_stack_entry() -> tddy_rpc::ServiceEntry {
-    // TODO(exec-prstack-services): implement
-    unimplemented!("build_pr_stack_entry")
-}
+/// The coordinate family P moves to — published here because this crate owns the PR-stack domain.
+pub const PR_STACK_SERVICE: &str = "pr_stack.PrStackService";
 
 #[cfg(test)]
 mod unbundle_pr_stack_entry_tests {
     #[test]
     fn names_the_service_family_p_moves_to() {
-        assert_eq!(
-            super::build_pr_stack_entry().name,
-            "pr_stack.PrStackService"
-        );
+        assert_eq!(super::PR_STACK_SERVICE, "pr_stack.PrStackService");
     }
 }

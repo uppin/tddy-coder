@@ -31,9 +31,8 @@ use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    BranchBaseSync, BranchResolution, ConnectionService as ConnectionServiceTrait,
-    QueryBranchRequest,
+use tddy_service::proto::pr_stack::{
+    BranchBaseSync, BranchResolution, PrStackService, QueryBranchRequest,
 };
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 

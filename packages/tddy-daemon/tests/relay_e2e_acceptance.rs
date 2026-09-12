@@ -25,8 +25,9 @@ use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
+use tddy_service::proto::exec_tools::{ExecToolService, ListExecToolsRequest};
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListExecToolsRequest,
+    ConnectionService as ConnectionServiceTrait, 
 };
 
 const RELAY_ROOM: &str = "relay-e2e-common-room";

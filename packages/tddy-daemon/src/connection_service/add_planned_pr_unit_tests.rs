@@ -7,6 +7,7 @@
 use super::*;
 use tddy_core::changeset::{read_changeset, write_changeset};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
+use tddy_service::proto::pr_stack::{AddPlannedPrRequest, PrStackService};
 
 fn make_unit_config() -> crate::config::DaemonConfig {
     let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";

@@ -1166,6 +1166,9 @@ mod svc_activity_ports;
 /// The daemon's half of `session_agents.SessionAgentService` — the host capabilities family B
 /// reads, and the routing the daemon keeps. `#unbundle` node 7.
 mod svc_session_agent_ports;
+mod family_proto_bridge;
+mod svc_unbundled_family_alp;
+mod svc_family_entries;
 
 pub use svc_session_files_ports::PeerRoutedSessionFiles;
 

@@ -25,8 +25,6 @@ tddy-service = { path = "../tddy-service" }
 # roster: how a jail reaches its facilitating daemon at all — the transport `session_agents` was
 # already detecting when it lived in `tddy-tools`.
 tddy-session-tool-client = { path = "../tddy-session-tool-client" }
-# roster/link: the `RpcClientTransport` a roster stream and a conversation RPC share.
-tddy-rpc = { path = "../tddy-rpc" }
 prost = "0.13"
 # roster/registry: the conversation id minted for a call that named none.
 uuid = { version = "1", features = ["v4"] }

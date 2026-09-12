@@ -136,13 +136,12 @@ fn connection_service_keeps_exactly_the_methods_node_one_leaves_behind() {
 
     // Then
     assert_eq!(
-        declared, 33,
+        declared, 17,
         "of the original 90: node 1 moved 17, node 4 moved StreamLiveKitRooms, node 6 moved 22, \
-         node 7 moved 17 (family B's 9 to session_agents, families M and N's 8 to activity). \
-         Every node updates this number — a node that lands and leaves it alone turns this test red \
-         for the next one, who will read a passing assertion as a promise rather than as the \
-         arithmetic its own change owes. Recount, do not compute: restating the proto's own count \
-         back at it would pass for removing 21 or 23 just as happily"
+         node 7 moved 17, node 8 moved 16 (families A, L and P to catalog, exec_tools and \
+         pr_stack). What remains is families C, D, O and Q — the deliberate endpoint of the whole \
+         stack. Recount, do not compute: restating the proto's own count back at it would pass for \
+         removing 15 or 19 just as happily"
     );
 }
 
@@ -269,15 +268,18 @@ fn the_shared_types_file_holds_only_what_two_served_services_both_need() {
          session_agents.proto must reach the shared types"
     );
 
+    // Then node 8 added BranchSession, and both ListSessions and pr_stack.QueryBranch reach it
+    assert!(
+        types.contains("message BranchSession"),
+        "types.proto holds BranchSession for ListSessions and QueryBranch"
+    );
+
     // Then nothing else has been parked there
     let declared = types.matches("\nenum ").count() + types.matches("\nmessage ").count();
     assert_eq!(
-        declared, 3,
-        "types.proto must hold only what genuinely crosses; anything added needs two really-served \
-         services reaching it. Node 7 added SessionAgentStatus and SessionAgentActivity, and both \
-         clear that bar: connection.ConnectionService keeps ListSessions, whose SessionEntry \
-         carries an agent_status and a last_activity, while session_agents.SessionAgentService \
-         reaches both through the SessionAgentEntry rows of the roster it owns"
+        declared, 4,
+        "types.proto must hold only what genuinely crosses; node 8 added BranchSession as the \
+         fourth type"
     );
 }
 

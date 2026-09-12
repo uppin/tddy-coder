@@ -18,8 +18,10 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "process"] }
 tddy-core = { path = "../tddy-core" }
 tddy-task = { path = "../tddy-task" }
+tddy-service = { path = "../tddy-service" }
 
 [dev-dependencies]
+futures-util = "0.3"
 pretty_assertions = { workspace = true }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "process"] }

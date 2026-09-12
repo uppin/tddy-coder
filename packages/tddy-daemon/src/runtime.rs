@@ -223,6 +223,9 @@ struct LocalSocketTransport {
         tddy_terminal_rpc::TerminalSessionServiceImpl,
         crate::connection_service::PeerRoutedSessionAgents,
         crate::connection_service::PeerRoutedActivity,
+        crate::connection_service::ConnectionServiceImpl,
+        crate::connection_service::ConnectionServiceImpl,
+        crate::connection_service::ConnectionServiceImpl,
     >,
 }
 
@@ -891,6 +894,15 @@ pub async fn build(
                     activity: tddy_service::proto::activity::ActivityServiceTonicAdapter::new(
                         Arc::new(connection_arc.activity_service()),
                     ),
+                    catalog: tddy_service::proto::catalog::CatalogServiceTonicAdapter::new(
+                        Arc::clone(&connection_arc),
+                    ),
+                    exec_tools: tddy_service::proto::exec_tools::ExecToolServiceTonicAdapter::new(
+                        Arc::clone(&connection_arc),
+                    ),
+                    pr_stack: tddy_service::proto::pr_stack::PrStackServiceTonicAdapter::new(
+                        Arc::clone(&connection_arc),
+                    ),
                 },
             });
         }
@@ -923,6 +935,15 @@ pub async fn build(
         // owned. Mounted, and the old coordinate's eight removed, on the same terms as the nine
         // above.
         rpc_entries.push(connection_arc.activity_entry());
+
+        // CatalogService — tools, agents, models and subagents (`tddy-discovery`).
+        rpc_entries.push(connection_arc.catalog_entry());
+
+        // ExecToolService — execute, stream, list tools and session tool calls (`tddy-tool-engine`).
+        rpc_entries.push(connection_arc.exec_tool_entry());
+
+        // PrStackService — stack planning and branch resolution (`tddy-workflow-recipes` coordinate).
+        rpc_entries.push(connection_arc.pr_stack_entry());
 
         let connection_server = tddy_service::ConnectionServiceServer::from_arc(connection_arc);
         rpc_entries.push(tddy_rpc::ServiceEntry {

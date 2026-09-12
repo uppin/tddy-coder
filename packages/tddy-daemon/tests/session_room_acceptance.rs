@@ -35,10 +35,13 @@ use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
+};
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource, ConnectSessionRequest,
-    ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ExecuteToolResponse,
-    SessionAttachment, StagedAttachmentRef, StartSessionRequest, StartSessionResponse,
+    ConnectionService as ConnectionServiceTrait, SessionAttachment, StagedAttachmentRef,
+    StartSessionRequest, StartSessionResponse,
 };
 use tddy_service::proto::livekit::LiveKitRoomInfo;
 use tddy_service::proto::session_files::{ReadHostDocumentRequest, ReadHostDocumentResponse};

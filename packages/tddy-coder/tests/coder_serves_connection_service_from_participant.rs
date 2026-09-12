@@ -21,7 +21,9 @@ use tddy_coder::session_participant::{
 };
 use tddy_livekit::RpcClient;
 use tddy_livekit_testkit::LiveKitTestkit;
-use tddy_service::proto::connection::{ExecuteToolRequest, ListExecToolsRequest};
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ListExecToolsRequest};
+
+const EXEC_TOOL_SERVICE: &str = tddy_tool_engine::EXEC_TOOL_SERVICE;
 use tddy_terminal_rpc::proto::terminal_session::{
     ClaimTerminalControlRequest, ClaimTerminalControlResponse,
 };
@@ -123,7 +125,7 @@ async fn coder_serves_connection_service_from_participant() -> Result<()> {
     let list_resp = tokio::time::timeout(
         RPC_TIMEOUT,
         rpc_client.call_unary(
-            "connection.ConnectionService",
+            EXEC_TOOL_SERVICE,
             "ListExecTools",
             ListExecToolsRequest {
                 session_token: "fake-token".to_string(),
@@ -136,7 +138,7 @@ async fn coder_serves_connection_service_from_participant() -> Result<()> {
     .map_err(|_| anyhow::anyhow!("ListExecTools timed out"))?
     .map_err(|e| anyhow::anyhow!("ListExecTools RPC: {}", e))?;
     let list_response =
-        tddy_service::proto::connection::ListExecToolsResponse::decode(&list_resp[..])?;
+        tddy_service::proto::exec_tools::ListExecToolsResponse::decode(&list_resp[..])?;
     assert!(
         !list_response.tools.is_empty(),
         "session participant must serve ListExecTools with a non-empty tools list"
@@ -146,7 +148,7 @@ async fn coder_serves_connection_service_from_participant() -> Result<()> {
     let exec_resp = tokio::time::timeout(
         RPC_TIMEOUT,
         rpc_client.call_unary(
-            "connection.ConnectionService",
+            EXEC_TOOL_SERVICE,
             "ExecuteTool",
             ExecuteToolRequest {
                 session_token: "fake-token".to_string(),
@@ -162,7 +164,7 @@ async fn coder_serves_connection_service_from_participant() -> Result<()> {
     .map_err(|_| anyhow::anyhow!("ExecuteTool timed out"))?
     .map_err(|e| anyhow::anyhow!("ExecuteTool RPC: {}", e))?;
     let exec_response =
-        tddy_service::proto::connection::ExecuteToolResponse::decode(&exec_resp[..])?;
+        tddy_service::proto::exec_tools::ExecuteToolResponse::decode(&exec_resp[..])?;
     assert!(
         !exec_response.is_error,
         "ExecuteTool must succeed on the session participant; error_message='{}'",
@@ -256,7 +258,7 @@ async fn coder_session_participant_executes_a_real_read_against_its_worktree() -
     let list_resp = tokio::time::timeout(
         RPC_TIMEOUT,
         rpc_client.call_unary(
-            "connection.ConnectionService",
+            EXEC_TOOL_SERVICE,
             "ListExecTools",
             ListExecToolsRequest {
                 session_token: "fake-token".to_string(),
@@ -269,7 +271,7 @@ async fn coder_session_participant_executes_a_real_read_against_its_worktree() -
     .map_err(|_| anyhow::anyhow!("ListExecTools timed out"))?
     .map_err(|e| anyhow::anyhow!("ListExecTools RPC: {}", e))?;
     let list_response =
-        tddy_service::proto::connection::ListExecToolsResponse::decode(&list_resp[..])?;
+        tddy_service::proto::exec_tools::ListExecToolsResponse::decode(&list_resp[..])?;
 
     // Then — the catalog lists every shared engine tool, with non-empty schemas
     let names: Vec<String> = list_response.tools.iter().map(|t| t.name.clone()).collect();
@@ -302,7 +304,7 @@ async fn coder_session_participant_executes_a_real_read_against_its_worktree() -
     let exec_resp = tokio::time::timeout(
         RPC_TIMEOUT,
         rpc_client.call_unary(
-            "connection.ConnectionService",
+            EXEC_TOOL_SERVICE,
             "ExecuteTool",
             ExecuteToolRequest {
                 session_token: "fake-token".to_string(),
@@ -318,7 +320,7 @@ async fn coder_session_participant_executes_a_real_read_against_its_worktree() -
     .map_err(|_| anyhow::anyhow!("ExecuteTool(Read) timed out"))?
     .map_err(|e| anyhow::anyhow!("ExecuteTool(Read) RPC: {}", e))?;
     let exec_response =
-        tddy_service::proto::connection::ExecuteToolResponse::decode(&exec_resp[..])?;
+        tddy_service::proto::exec_tools::ExecuteToolResponse::decode(&exec_resp[..])?;
     assert!(
         !exec_response.is_error,
         "ExecuteTool(Read) must succeed; error_message='{}'",

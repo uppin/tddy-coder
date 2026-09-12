@@ -17,10 +17,12 @@ use futures_util::StreamExt;
 use tddy_daemon::connection_service::EXEC_TOOL_FRAME_BYTES;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, StartSessionRequest,
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
 };
-
+use tddy_service::proto::connection::{
+    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
+};
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a39";
 
 /// Comfortably more than one frame, so the reassembly path is genuinely exercised.
@@ -142,7 +144,7 @@ struct DrainedResult {
 
 async fn drain_result(
     mut stream: impl futures_util::Stream<
-            Item = Result<tddy_service::proto::connection::ExecuteToolChunk, tddy_rpc::Status>,
+            Item = Result<ExecuteToolChunk, tddy_rpc::Status>,
         > + Unpin,
 ) -> DrainedResult {
     let mut bytes: Vec<u8> = Vec::new();

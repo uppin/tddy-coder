@@ -6,12 +6,13 @@
 //! the same service instances (via `Arc`) so work started over the socket is visible over every
 //! other transport.
 //!
-//! **Six services, one socket.** `#unbundle` node 1 split hosts and worktrees out of
-//! `connection.ConnectionService`, node 6 split the terminal family out after them, and node 7 the
-//! session-agent and activity families after that; a caller that reached any of them over this
-//! socket must go on reaching it over this socket. One `Server::builder()` with six `add_service`
-//! calls is what keeps that true — a second socket would be a second address to configure, and a
-//! service left off this builder would answer on every transport except the local one. The in-jail
+//! **Nine services, one socket.** `#unbundle` node 1 split hosts and worktrees out of
+//! `connection.ConnectionService`, node 6 split the terminal family out after them, node 7 the
+//! session-agent and activity families after that, and node 8 the catalog, exec-tool and PR-stack
+//! families; a caller that reached any of them over this socket must go on reaching it over this
+//! socket. One `Server::builder()` with nine `add_service` calls is what keeps that true — a second
+//! socket would be a second address to configure, and a service left off this builder would answer
+//! on every transport except the local one. The in-jail
 //! `tddy-sandbox-app` is the caller that proves it for `terminal_session.TerminalSessionService`:
 //! its whole terminal bridge is the bidi `StreamSessionTerminalIO`, dialled here and nowhere else.
 //!
@@ -34,12 +35,24 @@ use tonic::transport::Server;
 use tddy_service::proto::activity::{
     ActivityService as RpcActivityService, ActivityServiceTonicAdapter,
 };
+use tddy_service::proto::catalog::{
+    CatalogService as RpcCatalogService, CatalogServiceTonicAdapter,
+};
 use tddy_service::proto::connection::ConnectionService as RpcConnectionService;
+use tddy_service::proto::exec_tools::{
+    ExecToolService as RpcExecToolService, ExecToolServiceTonicAdapter,
+};
 use tddy_service::proto::host::HostService as RpcHostService;
+use tddy_service::proto::pr_stack::{
+    PrStackService as RpcPrStackService, PrStackServiceTonicAdapter,
+};
 use tddy_service::proto::session_agents_svc::{
     SessionAgentService as RpcSessionAgentService, SessionAgentServiceTonicAdapter,
 };
 use tddy_service::proto::tonic_activity::activity_service_server::ActivityServiceServer;
+use tddy_service::proto::tonic_catalog::catalog_service_server::CatalogServiceServer;
+use tddy_service::proto::tonic_exec_tools::exec_tool_service_server::ExecToolServiceServer;
+use tddy_service::proto::tonic_pr_stack::pr_stack_service_server::PrStackServiceServer;
 use tddy_service::proto::tonic_session_agents::session_agent_service_server::SessionAgentServiceServer;
 use tddy_service::proto::worktree::WorktreeService as RpcWorktreeService;
 use tddy_service::tonic_connection::connection_service_server::ConnectionServiceServer;
@@ -95,12 +108,12 @@ pub fn resolve_socket_source(
     SocketSource::Activated(SD_LISTEN_FDS_START)
 }
 
-/// The six adapters mounted on the one socket, passed as a bundle.
+/// The nine adapters mounted on the one socket, passed as a bundle.
 ///
-/// A bundle rather than six positional parameters because the list only grows: every `#unbundle`
+/// A bundle rather than nine positional parameters because the list only grows: every `#unbundle`
 /// node that takes a family out of `connection.ConnectionService` adds one, and a caller that has
-/// to get six same-shaped arguments in the right order is a caller that can silently swap two.
-pub struct LocalSocketServices<C, H, W, T, S, A> {
+/// to get nine same-shaped arguments in the right order is a caller that can silently swap two.
+pub struct LocalSocketServices<C, H, W, T, S, A, Cat, E, P> {
     /// Reads the caller's SO_PEERCRED credentials in `MintLocalToken`; the reason this transport
     /// exists at all.
     pub connection: ConnectionServiceTonicAdapter<C>,
@@ -115,18 +128,25 @@ pub struct LocalSocketServices<C, H, W, T, S, A> {
     pub session_agents: SessionAgentServiceTonicAdapter<S>,
     /// Node 7's activity, status, notifications and ACP replay.
     pub activity: ActivityServiceTonicAdapter<A>,
+    /// Node 8's catalog — tools, agents, models and subagents.
+    pub catalog: CatalogServiceTonicAdapter<Cat>,
+    /// Node 8's exec-tool family. `ExecuteTool` is what `tddy-sandbox-runner`'s relay allowlist
+    /// gates; a coordinate missing here fails closed inside a jail.
+    pub exec_tools: ExecToolServiceTonicAdapter<E>,
+    /// Node 8's PR-stack planning and branch resolution.
+    pub pr_stack: PrStackServiceTonicAdapter<P>,
 }
 
-/// Bind `socket_path` and serve the six local-socket services until `shutdown` resolves.
+/// Bind `socket_path` and serve the nine local-socket services until `shutdown` resolves.
 ///
 /// When launched via systemd socket activation (`LISTEN_PID`/`LISTEN_FDS` addressed to this
 /// process), the inherited listener is adopted instead — systemd owns the socket node and its
 /// permissions, so no directory is created, no stale file is unlinked, and no chmod is applied.
 /// Otherwise a stale socket left by a previous run is unlinked first so the bind does not fail
 /// with `EADDRINUSE`, and the parent directory is created if missing.
-pub async fn serve_connection_uds<C, H, W, T, S, A>(
+pub async fn serve_connection_uds<C, H, W, T, S, A, Cat, E, P>(
     socket_path: &Path,
-    services: LocalSocketServices<C, H, W, T, S, A>,
+    services: LocalSocketServices<C, H, W, T, S, A, Cat, E, P>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()>
 where
@@ -150,6 +170,10 @@ where
     A::StreamSessionNotificationsStream: 'static,
     A::StreamAgentActivityDeltaStream: 'static,
     A::StreamAcpReplayStream: 'static,
+    Cat: RpcCatalogService,
+    E: RpcExecToolService,
+    E::StreamExecuteToolStream: 'static,
+    P: RpcPrStackService,
 {
     let listen_pid = std::env::var("LISTEN_PID").ok();
     let listen_fds = std::env::var("LISTEN_FDS").ok();
@@ -207,6 +231,9 @@ where
         .add_service(TerminalSessionServiceServer::new(services.terminal))
         .add_service(SessionAgentServiceServer::new(services.session_agents))
         .add_service(ActivityServiceServer::new(services.activity))
+        .add_service(CatalogServiceServer::new(services.catalog))
+        .add_service(ExecToolServiceServer::new(services.exec_tools))
+        .add_service(PrStackServiceServer::new(services.pr_stack))
         .serve_with_incoming_shutdown(UnixListenerStream::new(listener), shutdown)
         .await
         .context("serve the local-socket services")?;

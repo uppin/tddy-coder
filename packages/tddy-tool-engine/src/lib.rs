@@ -781,17 +781,65 @@ pub mod dynamic_proxy {
 /// tests in both crates. Node 5 collapsed the clone. Node 8 deletes the guards, because with one
 /// catalog they compare a value to itself — and a test whose failure is impossible reads as coverage
 /// without being any.
-pub fn build_exec_tool_entry() -> tddy_rpc::ServiceEntry {
-    // TODO(exec-prstack-services): implement
-    unimplemented!("build_exec_tool_entry")
-}
+pub mod exec_tool_entry;
+pub use exec_tool_entry::{build_exec_tool_entry, EXEC_TOOL_SERVICE};
 
 #[cfg(test)]
 mod unbundle_exec_tool_entry_tests {
     #[test]
     fn names_the_service_family_l_moves_to() {
+        struct EmptyExec;
+        #[async_trait::async_trait]
+        impl tddy_service::proto::exec_tools::ExecToolService for EmptyExec {
+            type StreamExecuteToolStream =
+                futures_util::stream::Empty<Result<tddy_service::proto::exec_tools::ExecuteToolChunk, tddy_rpc::Status>>;
+            async fn execute_tool(
+                &self,
+                _request: tddy_rpc::Request<tddy_service::proto::exec_tools::ExecuteToolRequest>,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::exec_tools::ExecuteToolResponse>,
+                tddy_rpc::Status,
+            > {
+                Err(tddy_rpc::Status::unimplemented("stub"))
+            }
+            async fn stream_execute_tool(
+                &self,
+                _request: tddy_rpc::Request<tddy_service::proto::exec_tools::ExecuteToolRequest>,
+            ) -> Result<
+                tddy_rpc::Response<Self::StreamExecuteToolStream>,
+                tddy_rpc::Status,
+            > {
+                Err(tddy_rpc::Status::unimplemented("stub"))
+            }
+            async fn list_exec_tools(
+                &self,
+                _request: tddy_rpc::Request<tddy_service::proto::exec_tools::ListExecToolsRequest>,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::exec_tools::ListExecToolsResponse>,
+                tddy_rpc::Status,
+            > {
+                Ok(tddy_rpc::Response::new(
+                    tddy_service::proto::exec_tools::ListExecToolsResponse { tools: vec![] },
+                ))
+            }
+            async fn list_session_tool_calls(
+                &self,
+                _request: tddy_rpc::Request<
+                    tddy_service::proto::exec_tools::ListSessionToolCallsRequest,
+                >,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::exec_tools::ListSessionToolCallsResponse>,
+                tddy_rpc::Status,
+            > {
+                Ok(tddy_rpc::Response::new(
+                    tddy_service::proto::exec_tools::ListSessionToolCallsResponse {
+                        tool_calls: vec![],
+                    },
+                ))
+            }
+        }
         assert_eq!(
-            super::build_exec_tool_entry().name,
+            super::build_exec_tool_entry(EmptyExec).name,
             "exec_tools.ExecToolService"
         );
     }

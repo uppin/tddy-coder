@@ -31,9 +31,7 @@ use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, LinkStackNodeRequest,
-};
+use tddy_service::proto::pr_stack::{LinkStackNodeRequest, PrStackService};
 
 const ORCHESTRATOR: &str = "orchestrator-1";
 const CHILD: &str = "dddddddd-0000-4000-8000-000000000004";

@@ -11,32 +11,71 @@ pub mod roster;
 pub mod subagent;
 /// Every conversation a session has open with a subagent, and what each has spent.
 pub mod subagent_runtime;
+pub mod catalog_entry;
 pub mod tools;
 pub mod warmup;
 
-/// The `catalog.CatalogService` entry — `#unbundle` node 8, family A.
-///
-/// Served from this crate because it already resolves every one of these answers: `agent_def`
-/// owns `SpecializedAgentDef`, and since node 5 [`roster`] owns the live roster a `ListSubagents`
-/// is answered from.
-///
-/// It takes **rows**, not a `DaemonConfig`. `main.rs` already extracts them with
-/// `agent_list_mapping::agent_allowlist_rows`, and handing a leaf crate the daemon's whole
-/// configuration type to read four lists would be the wrong trade.
-pub fn build_catalog_entry(
-    _allowed_tools: Vec<String>,
-    _allowed_agents: Vec<String>,
-) -> tddy_rpc::ServiceEntry {
-    // TODO(exec-prstack-services): implement
-    unimplemented!("build_catalog_entry")
-}
+pub use catalog_entry::{build_catalog_entry, CATALOG_SERVICE};
 
 #[cfg(test)]
 mod unbundle_catalog_entry_tests {
     #[test]
     fn names_the_service_family_a_moves_to() {
+        struct EmptyCatalog;
+        #[async_trait::async_trait]
+        impl tddy_service::proto::catalog::CatalogService for EmptyCatalog {
+            async fn list_tools(
+                &self,
+                _request: tddy_rpc::Request<tddy_service::proto::catalog::ListToolsRequest>,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::catalog::ListToolsResponse>,
+                tddy_rpc::Status,
+            > {
+                Ok(tddy_rpc::Response::new(
+                    tddy_service::proto::catalog::ListToolsResponse { tools: vec![] },
+                ))
+            }
+            async fn list_agents(
+                &self,
+                _request: tddy_rpc::Request<tddy_service::proto::catalog::ListAgentsRequest>,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::catalog::ListAgentsResponse>,
+                tddy_rpc::Status,
+            > {
+                Ok(tddy_rpc::Response::new(
+                    tddy_service::proto::catalog::ListAgentsResponse { agents: vec![] },
+                ))
+            }
+            async fn list_agent_models(
+                &self,
+                _request: tddy_rpc::Request<tddy_service::proto::catalog::ListAgentModelsRequest>,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::catalog::ListAgentModelsResponse>,
+                tddy_rpc::Status,
+            > {
+                Ok(tddy_rpc::Response::new(
+                    tddy_service::proto::catalog::ListAgentModelsResponse {
+                        models: vec![],
+                        default_model: String::new(),
+                    },
+                ))
+            }
+            async fn list_subagents(
+                &self,
+                _request: tddy_rpc::Request<tddy_service::proto::catalog::ListSubagentsRequest>,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::catalog::ListSubagentsResponse>,
+                tddy_rpc::Status,
+            > {
+                Ok(tddy_rpc::Response::new(
+                    tddy_service::proto::catalog::ListSubagentsResponse {
+                        subagents: vec![],
+                    },
+                ))
+            }
+        }
         assert_eq!(
-            super::build_catalog_entry(Vec::new(), Vec::new()).name,
+            super::build_catalog_entry(EmptyCatalog).name,
             "catalog.CatalogService"
         );
     }

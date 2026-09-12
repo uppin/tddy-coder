@@ -19,9 +19,7 @@ use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListSubagentsRequest,
-};
+use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, AttachSessionAgentRequest, CancelAgentConversationRequest,
     OpenAgentConversationRequest, PromptAgentConversationRequest, SessionAgentService as _,

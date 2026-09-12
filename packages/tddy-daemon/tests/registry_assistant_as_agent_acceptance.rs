@@ -15,10 +15,8 @@ use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_model_registry::{ModelRegistryStore, NewAssistant, NewProvider};
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListSubagentsRequest, StartSessionRequest,
-    SubagentInfo,
-};
+use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest, SubagentInfo};
+use tddy_service::proto::connection::{ConnectionService as ConnectionServiceTrait, StartSessionRequest};
 use tddy_service::proto::models::ProviderKind;
 
 // ---------------------------------------------------------------------------

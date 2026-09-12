@@ -7,9 +7,9 @@ use std::sync::Arc;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::{Code, Request};
+use tddy_service::proto::catalog::{CatalogService, ListAgentsRequest, ListToolsRequest};
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListAgentsRequest, ListToolsRequest,
-    StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;

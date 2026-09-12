@@ -39,7 +39,10 @@ use tddy_daemon::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_github::{SessionTokenSigner, TokenKind};
 use tddy_service::proto::activity::{ActivityServiceTonicAdapter, ReportSessionStatusRequest};
+use tddy_service::proto::catalog::CatalogServiceTonicAdapter;
 use tddy_service::proto::connection::MintLocalTokenRequest;
+use tddy_service::proto::exec_tools::ExecToolServiceTonicAdapter;
+use tddy_service::proto::pr_stack::PrStackServiceTonicAdapter;
 use tddy_service::proto::host::{ListEligibleDaemonsRequest, StreamHostStatsRequest};
 use tddy_service::proto::session_agents_svc::{
     ListSessionAgentsRequest, SessionAgentServiceTonicAdapter,
@@ -131,6 +134,9 @@ fn start_local_socket_server(
         SessionAgentServiceTonicAdapter::new(Arc::new(connection.session_agents_service()));
     let activity_adapter =
         ActivityServiceTonicAdapter::new(Arc::new(connection.activity_service()));
+    let catalog_adapter = CatalogServiceTonicAdapter::new(Arc::clone(&connection));
+    let exec_tool_adapter = ExecToolServiceTonicAdapter::new(Arc::clone(&connection));
+    let pr_stack_adapter = PrStackServiceTonicAdapter::new(Arc::clone(&connection));
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let serve_path = socket_path.clone();
@@ -147,6 +153,9 @@ fn start_local_socket_server(
                 terminal: terminal_adapter,
                 session_agents: session_agent_adapter,
                 activity: activity_adapter,
+                catalog: catalog_adapter,
+                exec_tools: exec_tool_adapter,
+                pr_stack: pr_stack_adapter,
             },
             shutdown,
         )

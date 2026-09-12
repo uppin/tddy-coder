@@ -34,9 +34,11 @@ use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
+};
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ExecuteToolResponse,
-    StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
 };
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_env};

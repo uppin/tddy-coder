@@ -29,9 +29,11 @@ use tddy_daemon::livekit_peer_discovery::{LiveKitDiscoveryHandles, PEER_FORWARD_
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_rpc::Request;
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
+};
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
-    StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, StartSessionRequest,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;

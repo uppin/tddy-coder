@@ -43,10 +43,13 @@ use tddy_daemon_sandbox::workspace_tool_sandbox::{
 use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolRequest, ListExecToolsRequest,
+};
 use tddy_sandbox::SandboxError;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
-    ExecuteToolResponse, ListSessionsRequest, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest as ConnExecuteToolRequest,
+    ExecuteToolResponse as ConnExecuteToolResponse, ListSessionsRequest, StartSessionRequest,
 };
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 
@@ -507,13 +510,13 @@ impl RecordingSandbox {
 
 #[async_trait]
 impl WorkspaceSandbox for RecordingSandbox {
-    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse {
+    async fn execute_tool(&self, req: &ConnExecuteToolRequest) -> ConnExecuteToolResponse {
         self.calls.lock().unwrap().push(JailedCall {
             session_id: req.session_id.clone(),
             tool_name: req.tool_name.clone(),
             args_json: req.args_json.clone(),
         });
-        ExecuteToolResponse {
+        ConnExecuteToolResponse {
             result_json: serde_json::json!({ "marker": SPLIT_JAIL_MARKER, "tool": req.tool_name })
                 .to_string(),
             is_error: false,
@@ -550,7 +553,7 @@ impl WorkspaceSandboxProvisioner for RecordingProvisioner {
 }
 
 /// The `marker` a jailed result carries, or `None` when the result did not come from the jail.
-fn jail_marker_of(response: &ExecuteToolResponse) -> Option<String> {
+fn jail_marker_of(response: &tddy_service::proto::exec_tools::ExecuteToolResponse) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(&response.result_json)
         .ok()?
         .get("marker")?

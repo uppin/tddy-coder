@@ -37,9 +37,9 @@ use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::{Code, Request, Status};
-use tddy_service::proto::connection::{
-    BranchResolution, ConnectionService as ConnectionServiceTrait, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, ReorderPlannedPrRequest, ReorderPlannedPrResponse,
+use tddy_service::proto::pr_stack::{
+    BranchResolution, PrStackService, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    ReorderPlannedPrRequest, ReorderPlannedPrResponse,
 };
 
 const ORCHESTRATOR: &str = "orchestrator-1";
