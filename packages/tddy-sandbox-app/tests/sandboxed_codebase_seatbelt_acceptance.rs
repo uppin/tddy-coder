@@ -199,7 +199,7 @@ impl SandboxedCodebase {
     /// Dispatch a tool the way the host-run agent's `tddy-tools --mcp` does: over the app-served
     /// IPC socket named by `TDDY_SANDBOX_TOOL_IPC`, which the app forwards into the jail.
     async fn dispatch(&self, tool: &str, args: serde_json::Value) -> ToolResult {
-        let raw = tddy_tools::session_tool_client::dispatch_via_sandbox_ipc(
+        let raw = tddy_session_tool_client::dispatch_via_sandbox_ipc(
             self.session.tool_ipc_socket(),
             tool,
             &args,

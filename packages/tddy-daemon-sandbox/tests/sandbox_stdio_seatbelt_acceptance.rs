@@ -208,7 +208,7 @@ impl tddy_sandbox_runner::HostToolHandler for FakeToolHandler {
 /// the same code path `tddy-daemon`'s real session lifecycle would run once it's switched over
 /// (not yet done — see the changeset's Technical Debt). A concurrent tool call, dispatched from
 /// inside the jail exactly as a real MCP tool call would be (via
-/// `tddy_tools::session_tool_client::dispatch_via_sandbox_ipc`, the same function
+/// `tddy_session_tool_client::dispatch_via_sandbox_ipc`, the same function
 /// `tddy-tools --mcp` uses), proves `ToolRequest`/`ToolResponse` frames round-trip correctly
 /// through `StdioSandboxClient`'s send/receive loop, not just Echo or raw PTY bytes.
 #[tokio::test]
@@ -318,7 +318,7 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
     // tool call would be
     let ipc_result = tokio::time::timeout(
         CALL_TIMEOUT,
-        tddy_tools::session_tool_client::dispatch_via_sandbox_ipc(
+        tddy_session_tool_client::dispatch_via_sandbox_ipc(
             &tool_ipc_socket,
             "Read",
             &serde_json::json!({"path": "README.md"}),

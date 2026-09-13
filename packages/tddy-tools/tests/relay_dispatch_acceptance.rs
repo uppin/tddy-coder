@@ -4,9 +4,11 @@
 //! `dispatch_dynamic_tool` must forward the call to the relay's ExecuteTool RPC and return
 //! the relay's response — not the "relay not yet implemented" stub error.
 //!
-//! AC (hard-deny): when TDDY_REMOTE_SESSION_ID is set, the MCP approval handler must
-//! hard-deny native fs/shell tools (Write, Edit, NotebookEdit) even if they are not in the
-//! allowlist — ensuring an agent in remote mode cannot accidentally write local files.
+//! AC (hard-deny): when TDDY_REMOTE_SESSION_ID is set, native fs/shell tools (Write, Edit,
+//! NotebookEdit) must be hard-denied even if they are not in the allowlist, so an agent in remote
+//! mode cannot accidentally write local files. The predicate that classifies them moved to
+//! `tddy_tool_engine::dynamic_proxy` with the rest of the remote-codebase tool surface, and is
+//! covered there.
 
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -46,41 +48,12 @@ async fn dispatch_dynamic_tool_does_not_return_stub_error_when_env_set() {
     );
 }
 
-/// Verify that `is_native_tool_denied_in_remote_mode` returns true for native write tools.
-///
-/// Phase 4 adds this public helper so both the approval_prompt handler and tests can check
-/// whether a tool must be hard-denied when the agent is in remote mode.
-#[test]
-fn is_native_tool_denied_in_remote_mode_covers_write_edit_notebook() {
-    // Given
-    let must_deny = ["Write", "Edit", "NotebookEdit"];
-    let must_allow = ["approval_prompt", "submit", "AskUserQuestion"];
-
-    // When / Then
-
-    for tool in &must_deny {
-        assert!(
-            tddy_tools::server::is_native_tool_denied_in_remote_mode(tool),
-            "'{}' must be classified as denied in remote mode",
-            tool
-        );
-    }
-
-    for tool in &must_allow {
-        assert!(
-            !tddy_tools::server::is_native_tool_denied_in_remote_mode(tool),
-            "'{}' must NOT be classified as denied in remote mode",
-            tool
-        );
-    }
-}
-
 /// Verify `build_dynamic_tool_list` does NOT include any native fs/shell tools by default —
 /// the names must come exclusively from the daemon catalog passed in.
 #[tokio::test]
 async fn build_dynamic_tool_list_does_not_inject_native_tools() {
     // Given
-    let catalog = vec![tddy_tools::server::RemoteToolDef {
+    let catalog = vec![tddy_tools::mcp_primitives::RemoteToolDef {
         name: "Read".to_string(),
         description: "Remote read".to_string(),
         input_schema_json: r#"{"type":"object"}"#.to_string(),

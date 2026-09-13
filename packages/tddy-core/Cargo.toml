@@ -5,6 +5,12 @@ edition = "2021"
 description = "Core library for tddy-coder"
 
 [dependencies]
+# Added at #unbundle node 5 / M5b with explicit developer authorisation: the CLI-facing modules
+# moving in from `tddy-tools` (`session_context`, the local session-action path, the model
+# catalogue) carry `anyhow::Result` and `with_context` messages that are part of what the CLI
+# prints. Rewriting them into `thiserror` would break the verbatim-move property this node's
+# behaviour-preserving claim rests on. New `tddy-core` APIs still prefer `thiserror`.
+anyhow = "1"
 agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }
 async-trait = "0.1"
 futures = "0.3"

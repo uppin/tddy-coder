@@ -687,3 +687,86 @@ async fn tool_semantic_search(
     // is, an existing index cannot be queried. See docs/ft/coder/semantic-index.md.
     ToolOutcome::err("SemanticSearch: index query not yet wired")
 }
+
+/// The dependency-free half of the MCP→daemon dynamic tool proxy, moved here from `tddy-tools`'
+/// `server.rs` by `#unbundle` node 5.
+///
+/// # This is where a duplication ends
+///
+/// `tddy-tools`' `server::exec_tool_catalog()` was a hand-copied clone of this crate's
+/// [`catalog::tool_catalog`] — same ten tools, same descriptions, same schema strings, in a struct
+/// with the same three fields under a different name. It was kept in step by a guard test in
+/// `tddy-tools` and a matching one in the daemon's `tool_catalog_sync.rs`; the codebase already
+/// knew about the duplication and was paying to maintain it.
+///
+/// There is now one catalog. `tddy-tools` derives its `RemoteToolDef`s from
+/// [`catalog::tool_catalog`] at the single point that needs the MCP shape, the same way it already
+/// derives the `Lsp*` tools from `tddy_lsp_executor`. The `tddy-tools`-side guard test went with
+/// the copy it guarded; the daemon's stayed, because it guards a different pair — this catalog
+/// against `tddy_sandbox::workspace_exec_tool_names`, the allowlist a sandboxed `claude` is
+/// spawned with — and that pair has not collapsed.
+///
+/// # What node 8 builds against
+///
+/// [`catalog::tool_catalog`] for the tool set, [`crate::execute_tool`] to run one, and
+/// [`dynamic_proxy::is_native_tool_denied_in_remote_mode`] for the remote-mode refusal.
+///
+/// # What is deliberately not here
+///
+/// The MCP shape of these tools — `RemoteToolDef`, `build_dynamic_tool_list`,
+/// `dynamic_tool_router` and `dispatch_dynamic_tool` — stays in `tddy-tools`, which is the crate
+/// that speaks MCP. Putting it here would mean `rmcp` in a crate every workspace-session host
+/// links, and `dispatch_dynamic_tool` additionally resolves the call against the session's live
+/// agent roster, which is a `tddy-service` concern. Advertisement is not filtered by that roster:
+/// a tool an agent has taken over is still advertised and refused at dispatch, because
+/// `--allowedTools` is fixed when `claude` spawns and an agent attaching at minute forty can only
+/// take a tool over by having the call refused where it is made
+/// (docs/ft/daemon/session-agent-roster.md § Enforced at two layers).
+pub mod dynamic_proxy {
+    /// Whether `tool_name` is a native mutation tool that must be hard-denied when the agent is
+    /// running against a remote codebase (`TDDY_REMOTE_SESSION_ID` set).
+    ///
+    /// A denial rather than an absence: in remote mode the local working directory is not the
+    /// worktree the agent is editing, so a native write would corrupt it silently. The agent needs
+    /// to be told it was refused, not that the tool was never there — the replacement is this
+    /// crate's own `Write`, dispatched against the real worktree.
+    pub fn is_native_tool_denied_in_remote_mode(tool_name: &str) -> bool {
+        matches!(tool_name, "Write" | "Edit" | "NotebookEdit")
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// The three tools a remote-mode agent must not reach are the three that write to disk.
+        #[test]
+        fn denies_every_native_tool_that_writes_to_the_local_disk() {
+            // Given / When / Then
+            for tool in ["Write", "Edit", "NotebookEdit"] {
+                assert!(
+                    is_native_tool_denied_in_remote_mode(tool),
+                    "{tool} writes to disk and must be denied in remote mode"
+                );
+            }
+        }
+
+        /// The denial is a list, not a default: refusing a read or the approval prompt would take
+        /// the agent's ability to ask for anything.
+        #[test]
+        fn leaves_reads_and_the_approval_prompt_alone() {
+            // Given / When / Then
+            for tool in [
+                "Read",
+                "Grep",
+                "approval_prompt",
+                "submit",
+                "AskUserQuestion",
+            ] {
+                assert!(
+                    !is_native_tool_denied_in_remote_mode(tool),
+                    "{tool} does not write to the local disk and must not be denied"
+                );
+            }
+        }
+    }
+}

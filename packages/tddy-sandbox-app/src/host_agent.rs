@@ -16,7 +16,7 @@
 //! loaded, because the agent's working directory is a repository nobody audited.
 //!
 //! The session's specialized agents ride along on the first of those three. A roster is read by
-//! `tddy_tools::server::subagents_from_env` in whichever process runs `tddy-tools --mcp`, and in
+//! `tddy_discovery::roster::subagents_from_env` in whichever process runs `tddy-tools --mcp`, and in
 //! this mode that process is the host one this module configures — so seeding it is the same env
 //! overlay every other mode writes ([`crate::spawn::subagent_env_overlay`]), carried in the MCP
 //! server's `env` block instead of the jail's.

@@ -101,7 +101,7 @@ modes reaches the network through, serving the build instead.
 ### Specialized subagents
 
 A session's roster (`--specialized-agent`, config `specialized_agents:`, inline `subagents:`) works
-here, and works by the same mechanism as everywhere else. `tddy_tools::server::subagents_from_env`
+here, and works by the same mechanism as everywhere else. `tddy_discovery::roster::subagents_from_env`
 reads `TDDY_SUBAGENTS_JSON` in **whichever process runs `tddy-tools --mcp`**; in this mode that
 process is the host one the app registers in the agent's MCP config, so the roster is seeded in that
 config's `env` block instead of the jail's. Nothing about the def, the format or the reader changes
@@ -120,7 +120,7 @@ The consequences are the ones the mechanism implies:
   checkout where the checkout is, under the same confinement the main agent's tool calls run under.
 - The roster is **not** followed over an RPC, and the same overlay says so:
   `TDDY_SUBAGENT_ROSTER_STATIC` declares that this session's roster is fixed for its lifetime, and
-  `tddy_tools::session_agents::decide_roster_subscription` reads it and opens no
+  `tddy_discovery::roster::decide_roster_subscription` reads it and opens no
   `StreamSessionAgents` subscription. The declaration is unconditional across `mounted`, `managed`
   and `sandboxed` — `config::resolve_session_agents` resolves the roster once, before the session
   starts, and this app has no attach or detach to change it with, so the seed *is* the whole roster

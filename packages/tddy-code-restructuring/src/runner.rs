@@ -90,7 +90,7 @@ impl Default for Options {
     }
 }
 
-/// Dispatch a restructuring subcommand.
+/// Dispatch a restructuring subcommand given a raw command line.
 ///
 /// `client` is required for LSP-backed operations (`apply`, `anchors`, `check --deep`).
 pub fn run(args: &[String], client: Option<Arc<LspClient>>) -> Result<()> {
@@ -100,7 +100,14 @@ pub fn run(args: &[String], client: Option<Arc<LspClient>>) -> Result<()> {
         return Err(usage(format!("unknown command `{command}`")));
     }
 
-    let options = parse_options(args)?;
+    dispatch(parse_options(args)?, client)
+}
+
+/// Dispatch a restructuring subcommand that has already been parsed.
+///
+/// This is what [`crate::restructure_cli`] calls: clap parsed the command line once, and re-parsing
+/// its own output is what `cli_vector` used to do when the CLI lived in another package.
+pub fn dispatch(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
     match options.command {
         Command::Apply => apply(options, client),
         Command::Status => status(options),

@@ -176,7 +176,7 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
     // call would be, returns the actual worktree file content it was bridged to
     let ipc_result = tokio::time::timeout(
         CALL_TIMEOUT,
-        tddy_tools::session_tool_client::dispatch_via_sandbox_ipc(
+        tddy_session_tool_client::dispatch_via_sandbox_ipc(
             &tool_ipc_socket,
             "Read",
             &serde_json::json!({"path": "README.md"}),

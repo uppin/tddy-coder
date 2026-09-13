@@ -280,6 +280,13 @@ adapt their respective `PtyHandle`s to the traits and delegate `StreamTerminalOu
 split), so existing clients keep working; the new offset fields default to `0` and the new RPC is
 opt-in.
 
+The **client** half is in the same crate: `pty_relay::{PtyRelayConfig, run_pty_relay}` is the relay
+that attaches a local terminal to a session — spawning a command in a local PTY, or starting and
+connecting to a daemon session (including a sandboxed one) over HTTP or LiveKit, four dispatch modes
+selected by which fields are set. `tddy-tools pty-relay` keeps only the clap surface that builds the
+config. Both relays share one termios guard and terminal-size probe (`local_terminal`) rather than
+declaring one each.
+
 ---
 
 ## Non-goals (out of scope)

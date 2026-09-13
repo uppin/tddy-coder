@@ -42,16 +42,26 @@ command: [cargo, test, -p, tddy-core]
 
 // ─── MCP wire harness (same shape as subagent_mcp_acceptance.rs) ───────────────
 
-/// Every variable that would give the server a session-tool transport. Cleared before each spawn so
-/// a test states its own transport: one leaked from the developer's shell decides what `tools/list`
-/// advertises.
-const TRANSPORT_ENV_KEYS: [&str; 5] = [
+/// Every variable that would give the server a session-tool transport, plus the host's separate
+/// claim to serve the action surface. Cleared before each spawn so a test states its own
+/// environment: one leaked from the developer's shell decides what `tools/list` advertises.
+const TRANSPORT_ENV_KEYS: [&str; 6] = [
     "TDDY_SANDBOX_TOOL_IPC",
     "TDDY_REMOTE_LIVEKIT_URL",
     "TDDY_REMOTE_LIVEKIT_ROOM",
     "TDDY_REMOTE_LIVEKIT_TOKEN",
     "TDDY_REMOTE_SESSION_ID",
+    SERVES_ACTIONS.0,
 ];
+
+/// The host declaring that it routes `EstablishAction` / `ListActions` / `InvokeAction` to
+/// something that implements them.
+///
+/// A reachable transport is not that declaration and never was: `tddy-daemon`'s handler dispatches
+/// into `tddy_tool_engine::execute_tool_with_env`, which has no arm for any of the three, so a
+/// daemon-hosted session used to advertise three tools that always answered `unknown tool`. The
+/// claim is what `tddy-sandbox-app` sets for the one placement that does answer them.
+const SERVES_ACTIONS: (&str, &str) = ("TDDY_SESSION_ACTION_TOOLS", "1");
 
 fn spawn_mcp_server(env: &[(&str, &str)]) -> Child {
     let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_tddy-tools"));
@@ -271,12 +281,47 @@ fn final_answer_response(answer: &str) -> Value {
 
 // ─── tools/list gating ──────────────────────────────────────────────────────────
 
-/// The three tools are advertised to a session that has a host tool surface, with no agent attached
-/// and nothing replaced: the tools are host round-trips, and having somewhere to round-trip to is
-/// what they need.
+/// The three tools are advertised to a session whose host claims to serve them, with no agent
+/// attached and nothing replaced: the tools are host round-trips, and a host that answers them is
+/// the whole of what they need.
 #[tokio::test]
-async fn a_session_with_a_host_tool_surface_advertises_the_action_tools() {
-    // Given — a transport is configured (the socket needn't answer for tools/list)
+async fn a_session_whose_host_serves_the_action_surface_advertises_the_action_tools() {
+    // Given — a transport is configured (the socket needn't answer for tools/list) and the host
+    // has claimed the action surface
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("unused.sock");
+    let mut child = spawn_mcp_server(&[
+        ("TDDY_SANDBOX_TOOL_IPC", socket.to_str().unwrap()),
+        SERVES_ACTIONS,
+    ]);
+    let mut stdin = child.stdin.take().expect("child stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+    initialize_mcp_session(&mut stdin, &mut stdout).await;
+
+    // When
+    let names = tools_list_names(&mut stdin, &mut stdout).await;
+    let _ = child.kill().await;
+
+    // Then
+    for tool in ["request_action", "list_actions", "invoke_action"] {
+        assert!(
+            names.contains(&tool.to_string()),
+            "a session whose host serves the action surface must advertise '{tool}'; got: {names:?}"
+        );
+    }
+    assert!(
+        names.contains(&"Shell".to_string()),
+        "nothing was replaced, so Shell must still be advertised; got: {names:?}"
+    );
+}
+
+/// A reachable transport whose host has not claimed the action surface advertises none of the
+/// three, exec catalog and all. This is the daemon-hosted case: its handler answers every one of
+/// them `unknown tool`, and an agent that read that refusal as "the specialized agent is not
+/// registered" is why the advertisement is a claim now rather than an inference.
+#[tokio::test]
+async fn a_transport_whose_host_does_not_serve_actions_advertises_no_action_tools() {
+    // Given — a transport, and no claim
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("unused.sock");
     let mut child = spawn_mcp_server(&[("TDDY_SANDBOX_TOOL_IPC", socket.to_str().unwrap())]);
@@ -291,13 +336,13 @@ async fn a_session_with_a_host_tool_surface_advertises_the_action_tools() {
     // Then
     for tool in ["request_action", "list_actions", "invoke_action"] {
         assert!(
-            names.contains(&tool.to_string()),
-            "a session with a host tool surface must advertise '{tool}'; got: {names:?}"
+            !names.contains(&tool.to_string()),
+            "a host that does not serve actions must not advertise '{tool}'; got: {names:?}"
         );
     }
     assert!(
         names.contains(&"Shell".to_string()),
-        "nothing was replaced, so Shell must still be advertised; got: {names:?}"
+        "the exec catalog still comes from the transport; got: {names:?}"
     );
 }
 
@@ -428,6 +473,7 @@ async fn request_action_establishes_a_manifest_written_by_the_named_agent() {
             &author_def_json(&author_server.uri()),
         ),
         ("TDDY_SANDBOX_TOOL_IPC", socket_path.to_str().unwrap()),
+        SERVES_ACTIONS,
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
@@ -502,6 +548,7 @@ async fn request_action_retries_after_an_invalid_manifest_and_then_establishes()
             &author_def_json(&author_server.uri()),
         ),
         ("TDDY_SANDBOX_TOOL_IPC", socket_path.to_str().unwrap()),
+        SERVES_ACTIONS,
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
@@ -551,6 +598,7 @@ async fn request_action_naming_no_agent_is_refused_listing_the_attached_agents()
     let mut child = spawn_mcp_server(&[
         ("TDDY_SUBAGENTS_JSON", &defs),
         ("TDDY_SANDBOX_TOOL_IPC", socket_path.to_str().unwrap()),
+        SERVES_ACTIONS,
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
@@ -591,6 +639,7 @@ async fn request_action_naming_an_unattached_agent_is_refused() {
     let mut child = spawn_mcp_server(&[
         ("TDDY_SUBAGENTS_JSON", &defs),
         ("TDDY_SANDBOX_TOOL_IPC", socket_path.to_str().unwrap()),
+        SERVES_ACTIONS,
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));

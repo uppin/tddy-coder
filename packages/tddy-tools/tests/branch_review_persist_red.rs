@@ -15,8 +15,7 @@ fn persist_review_md_from_submit_accepts_minimal_valid_json() {
     })
     .to_string();
     // When
-    let r =
-        tddy_tools::review_persist::persist_review_md_from_branch_review_json(dir.path(), &json);
+    let r = tddy_workflow_recipes::review::persist_review_md_to_session_dir(dir.path(), &json);
     // Then
     assert!(r.is_ok(), "must write review.md and return Ok; got {:?}", r);
     let path: PathBuf = dir.path().join("review.md");

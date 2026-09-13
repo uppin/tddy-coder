@@ -1,19 +1,15 @@
 //! `tddy-tools list-models --agent <id>` — enumerate a backend's selectable models as JSON.
 //!
-//! The daemon shells out to this subcommand for `ListAgentModels` and parses the JSON. This module
-//! owns the JSON contract (rendering side); the daemon owns the parsing side. See
+//! The daemon shells out to this subcommand for `ListAgentModels` and parses the JSON. The
+//! catalogue assembly and the JSON contract it renders live in
+//! [`tddy_core::backend::model_catalog`], beside the backends they enumerate; what stays here is
+//! the argument parsing and the line written to stdout. See
 //! docs/ft/web/tool-session-model-selection.md.
 
 use std::path::PathBuf;
 
-use anyhow::Context;
 use clap::Parser;
-use serde::Serialize;
-use tddy_core::backend::{
-    claude_cli_models, cursor_cli_models, AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend,
-    CodexAcpBackend, CodexBackend, CursorBackend, StubBackend,
-};
-use tddy_core::backend::{BackendModels, CodingBackend};
+use tddy_core::backend::{render_models_json, resolve_agent_models, BackendCliPaths};
 
 /// `tddy-tools list-models --agent <id>` — print an agent's selectable models as JSON.
 #[derive(Parser)]
@@ -37,136 +33,20 @@ pub struct ListModelsArgs {
     pub codex_acp_cli_path: Option<PathBuf>,
 }
 
-/// JSON wire shape for a single model in the daemon⇄tools contract.
-#[derive(Serialize)]
-struct ModelJson {
-    id: String,
-    label: String,
-}
-
-/// JSON wire shape for a backend's model catalog.
-#[derive(Serialize)]
-struct ModelsJson {
-    models: Vec<ModelJson>,
-    default_model: String,
-}
-
-impl From<&BackendModels> for ModelsJson {
-    fn from(catalog: &BackendModels) -> Self {
-        Self {
-            models: catalog
-                .models
-                .iter()
-                .map(|m| ModelJson {
-                    id: m.id.clone(),
-                    label: m.label.clone(),
-                })
-                .collect(),
-            default_model: catalog.default_model.clone(),
+impl ListModelsArgs {
+    /// The binary-path overrides these arguments carry, in the shape the catalogue takes them.
+    fn cli_paths(&self) -> BackendCliPaths {
+        BackendCliPaths {
+            cursor_cli_path: self.cursor_cli_path.clone(),
+            claude_acp_cli_path: self.claude_acp_cli_path.clone(),
+            codex_acp_cli_path: self.codex_acp_cli_path.clone(),
         }
     }
 }
 
-/// The `claude-cli` session type is not a `CodingBackend`; it enumerates a curated catalog.
-pub const CLAUDE_CLI_AGENT: &str = "claude-cli";
-
-/// The `cursor-cli` session type pseudo-agent for model listing.
-pub const CURSOR_CLI_AGENT: &str = "cursor-cli";
-
-/// Render a [`BackendModels`] catalog as the daemon⇄tools JSON contract:
-/// `{"models":[{"id":..,"label":..}],"default_model":".."}`.
-#[must_use]
-pub fn render_models_json(models: &BackendModels) -> String {
-    serde_json::to_string(&ModelsJson::from(models))
-        .expect("BackendModels serializes to JSON infallibly")
-}
-
-/// Enumerate the models an agent supports and render them as the JSON contract.
-///
-/// `claude-cli` resolves to the curated Claude catalog directly; every other agent is enumerated
-/// through its [`tddy_core::backend::CodingBackend::list_models`] (querying the underlying command
-/// for cursor/ACP backends, or the curated list otherwise).
+/// Enumerate the models an agent supports and print them as the JSON contract.
 pub async fn run_list_models(args: &ListModelsArgs) -> anyhow::Result<()> {
-    let catalog = resolve_models(args).await?;
+    let catalog = resolve_agent_models(&args.agent, &args.cli_paths()).await?;
     println!("{}", render_models_json(&catalog));
     Ok(())
-}
-
-async fn resolve_models(args: &ListModelsArgs) -> anyhow::Result<BackendModels> {
-    let agent = args.agent.trim();
-    if agent == CLAUDE_CLI_AGENT {
-        return Ok(claude_cli_models());
-    }
-    if agent == CURSOR_CLI_AGENT {
-        return Ok(cursor_cli_models());
-    }
-    let backend =
-        build_backend(args).with_context(|| format!("no backend for agent {:?}", agent))?;
-    backend
-        .list_models()
-        .await
-        .with_context(|| format!("listing models for agent {:?}", agent))
-}
-
-/// Construct the backend for `agent`, honoring any CLI-path overrides. Errors on an unknown agent.
-fn build_backend(args: &ListModelsArgs) -> anyhow::Result<AnyBackend> {
-    let backend = match args.agent.trim() {
-        "claude" => AnyBackend::Claude(ClaudeCodeBackend::new()),
-        "claude-acp" => AnyBackend::ClaudeAcp(match &args.claude_acp_cli_path {
-            Some(p) => ClaudeAcpBackend::with_agent_path(p.clone()),
-            None => ClaudeAcpBackend::new(),
-        }),
-        "cursor" => AnyBackend::Cursor(match &args.cursor_cli_path {
-            Some(p) => CursorBackend::with_path(p.clone()),
-            None => CursorBackend::new(),
-        }),
-        "codex" => AnyBackend::Codex(CodexBackend::new()),
-        "codex-acp" => AnyBackend::CodexAcp(match &args.codex_acp_cli_path {
-            Some(p) => CodexAcpBackend::with_agent_path(p.clone()),
-            None => CodexAcpBackend::new(),
-        }),
-        "stub" => AnyBackend::Stub(StubBackend::new()),
-        other => anyhow::bail!("unknown agent {:?}", other),
-    };
-    Ok(backend)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tddy_core::backend::BackendModel;
-
-    #[test]
-    fn renders_backend_models_as_the_daemon_tools_json_contract() {
-        // Given
-        let catalog = BackendModels {
-            models: vec![
-                BackendModel::new("opus", "Claude Opus"),
-                BackendModel::new("sonnet", "Claude Sonnet"),
-            ],
-            default_model: "opus".to_string(),
-        };
-
-        // When
-        let json = render_models_json(&catalog);
-
-        // Then — a well-formed contract the daemon can parse back
-        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json");
-        assert_eq!(parsed["default_model"], "opus");
-        assert_eq!(parsed["models"][0]["id"], "opus");
-        assert_eq!(parsed["models"][0]["label"], "Claude Opus");
-        assert_eq!(parsed["models"][1]["id"], "sonnet");
-    }
-
-    #[test]
-    fn list_models_cursor_cli_agent_returns_curated_catalog() {
-        // Given / When
-        let catalog = cursor_cli_models();
-        let json = render_models_json(&catalog);
-
-        // Then
-        assert!(json.contains("gpt-5.3-codex"));
-        assert_eq!(catalog.default_model, "claude-4.6-sonnet-medium-thinking");
-        assert!(catalog.models.len() >= 3);
-    }
 }

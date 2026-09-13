@@ -8,7 +8,7 @@ use std::process::Command;
 use tddy_core::changeset::{merge_persisted_workflow_into_context, write_changeset, Changeset};
 use tddy_core::workflow::context::Context;
 use tddy_testing_commons::fs::temp_session_dir;
-use tddy_tools::schema::validate_output;
+use tddy_workflow_recipes::schema::validate_output;
 
 // Note: do not assert `validate_output(...).is_ok()` on the full intent payload here — until the
 // schema lists intent fields, jsonschema may still accept unknown properties; the round-trip and

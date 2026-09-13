@@ -476,7 +476,7 @@ async fn sandboxed_claude_cli_tool_exec_via_ipc_reads_host_worktree() {
     let args = serde_json::json!({
         "path": "README.md"
     });
-    let raw = tddy_tools::session_tool_client::dispatch_session_tool("Read", args).await;
+    let raw = tddy_session_tool_client::dispatch_session_tool("Read", args).await;
 
     // Then — dispatch_session_tool returns tool result JSON directly on success
     let result: serde_json::Value = serde_json::from_str(&raw).expect("valid tool result json");

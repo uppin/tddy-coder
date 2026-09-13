@@ -64,6 +64,7 @@ serial_test = "3"
 # The acceptance suite watches a real jail come up and go away; `wait::eventually` is the
 # workspace's one polling helper, and its failures name the last state observed.
 tddy-testing-commons = { path = "../tddy-testing-commons" }
-# The acceptance suite dispatches through the very socket the host `tddy-tools --mcp` uses, so it
-# drives the real client rather than a re-implementation of its wire format.
-tddy-tools = { path = "../tddy-tools" }
+# The acceptance suite dispatches through the very socket the host MCP server uses, so it drives
+# the real client rather than a re-implementation of its wire format. No `livekit`: the jailed
+# codebase is always reached over the in-jail socket.
+tddy-session-tool-client = { path = "../tddy-session-tool-client" }

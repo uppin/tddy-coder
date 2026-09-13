@@ -31,4 +31,6 @@ serial_test = "3"
 futures-util = "0.3"
 tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
-tddy-tools = { path = "../tddy-tools" }
+# The runner acceptance suite dispatches through the real in-session client, over the socket the
+# jail is given. No `livekit`: nothing here is a split session.
+tddy-session-tool-client = { path = "../tddy-session-tool-client" }

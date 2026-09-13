@@ -2,26 +2,18 @@
 //!
 //! These functions are used as the LOCAL FALLBACK when `TDDY_SOCKET` is not set.
 //! The relay path (when the socket is available) is handled in `cli.rs` directly.
+//!
+//! The listing and invocation themselves live in `tddy_core::session_actions`; what stays here is
+//! the JSON written to stdout and the exit code an invocation failure classifies to.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use log::{debug, info};
-use serde::Serialize;
 
 use tddy_core::session_actions::{
-    classify_session_actions_exit_code, derive_repo_key, invoke_action_core, list_action_summaries,
-    repo_actions_root, ActionSummary, DiscoveryQuery, SessionActionsError,
+    classify_session_actions_exit_code, invoke_action_in_session_dir, list_actions_in_session_dir,
+    DiscoveryQuery,
 };
-use tddy_core::{read_changeset, WorkflowError};
-
-#[derive(Debug, Serialize)]
-pub struct ListActionsResponse {
-    pub actions: Vec<ActionSummary>,
-    pub total: usize,
-    pub offset: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<usize>,
-}
 
 /// Local (non-relay) `list-actions` implementation.
 pub fn run_list_actions(
@@ -36,27 +28,13 @@ pub fn run_list_actions(
         "list-actions (local) session_dir={}",
         session_dir.display()
     );
-    let repo_root = load_repo_root(session_dir).map_err(anyhow::Error::from)?;
     let query = DiscoveryQuery {
         path_prefix: path_prefix.map(str::to_owned),
         query: query_str.map(str::to_owned),
         limit,
         offset,
     };
-    let tddy_data_dir = resolve_tddy_data_dir();
-    let result = list_action_summaries(
-        Some(session_dir),
-        repo_root.as_deref(),
-        &tddy_data_dir,
-        &query,
-    )
-    .map_err(anyhow::Error::from)?;
-    let out = ListActionsResponse {
-        actions: result.actions,
-        total: result.total,
-        offset,
-        limit,
-    };
+    let out = list_actions_in_session_dir(session_dir, &query).map_err(anyhow::Error::from)?;
     println!("{}", serde_json::to_string(&out)?);
     Ok(())
 }
@@ -74,21 +52,7 @@ pub fn run_invoke_action(
         session_dir.display()
     );
 
-    let repo_root = load_repo_root(session_dir).map_err(anyhow::Error::from)?;
-    let tddy_data_dir = resolve_tddy_data_dir();
-    let store_root = repo_root.as_ref().map(|r| {
-        let canon = std::fs::canonicalize(r).unwrap_or_else(|_| r.clone());
-        let key = derive_repo_key(&canon);
-        repo_actions_root(&tddy_data_dir, &key)
-    });
-
-    match invoke_action_core(
-        Some(session_dir),
-        store_root.as_deref(),
-        repo_root.as_deref(),
-        action_id,
-        data_json,
-    ) {
+    match invoke_action_in_session_dir(session_dir, action_id, data_json) {
         Ok(v) => {
             println!("{}", serde_json::to_string(&v)?);
             Ok(())
@@ -98,39 +62,5 @@ pub fn run_invoke_action(
             eprintln!("{e}");
             std::process::exit(code);
         }
-    }
-}
-
-/// Resolve the tddy data directory using the profile default or `$HOME/.tddy`.
-fn resolve_tddy_data_dir() -> PathBuf {
-    tddy_core::output::default_tddy_data_dir().unwrap_or_else(|| {
-        let home = std::env::var("HOME").unwrap_or_default();
-        PathBuf::from(home).join(".tddy")
-    })
-}
-
-fn load_repo_root(session_dir: &Path) -> Result<Option<PathBuf>, SessionActionsError> {
-    match read_changeset(session_dir) {
-        Ok(cs) => {
-            let p = cs
-                .repo_path
-                .as_ref()
-                .filter(|s| !s.trim().is_empty())
-                .map(PathBuf::from);
-            debug!(
-                target: "tddy_tools::session_actions_cli",
-                "load_repo_root: repo_path={:?}",
-                p.as_ref().map(|x| x.display().to_string())
-            );
-            Ok(p)
-        }
-        Err(WorkflowError::ChangesetMissing(_)) => {
-            debug!(
-                target: "tddy_tools::session_actions_cli",
-                "load_repo_root: no changeset.yaml; repo_path unavailable"
-            );
-            Ok(None)
-        }
-        Err(e) => Err(SessionActionsError::ChangesetRead(e.to_string())),
     }
 }

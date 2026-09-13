@@ -5,7 +5,7 @@ use assert_cmd::Command;
 use serde_json::Value;
 use std::path::Path;
 
-/// Parity with `tddy_tools::schema::GOAL_SCHEMA_FILES` — the registered workflow goals.
+/// Parity with `tddy_workflow_recipes::schema::GOAL_SCHEMA_FILES` — the registered workflow goals.
 const REGISTERED_GOALS: &[&str] = &[
     "acceptance-tests",
     "analyze",

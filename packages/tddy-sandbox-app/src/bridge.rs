@@ -282,7 +282,7 @@ pub async fn run_terminal_bridge(
 ///
 /// Both tuples are `(rows, cols)` (matching [`terminal_size_or_default`]'s return order); the OSC
 /// payload itself is `cols;rows`, matching the wire format `tddy_daemon::claude_cli_session::
-/// strip_resize` and `tddy_tools::pty_relay::encode_resize_osc` already use.
+/// strip_resize` and `tddy_terminal_rpc::pty_relay::encode_resize_osc` already use.
 pub(crate) fn resize_frame_if_changed(current: (u16, u16), last_sent: (u16, u16)) -> Option<Bytes> {
     if current == last_sent {
         return None;
@@ -411,7 +411,7 @@ mod tests {
     // resize_frame_if_changed — decides whether a polled host terminal size (as returned by
     // `terminal_size_or_default`, `(rows, cols)`) differs from the size last sent to the jail,
     // and if so encodes the `\x1b]resize;{cols};{rows}\x07` OSC sequence (the same wire format
-    // `tddy_daemon::claude_cli_session::strip_resize` and `tddy_tools::pty_relay::encode_resize_osc`
+    // `tddy_daemon::claude_cli_session::strip_resize` and `tddy_terminal_rpc::pty_relay::encode_resize_osc`
     // already use) so the sandboxed PTY can be resized live instead of only once at attach time.
     // -----------------------------------------------------------------------
 

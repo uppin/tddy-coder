@@ -203,7 +203,7 @@ pub trait HostRpcHandler: Send + Sync + 'static {
 /// or conversation RPCs.
 ///
 /// Nothing routine reaches it: `tddy-sandbox-app` declares its roster fixed for the session's
-/// lifetime (`TDDY_SUBAGENT_ROSTER_STATIC`, see `tddy_tools::session_agents`), so the in-jail
+/// lifetime (`TDDY_SUBAGENT_ROSTER_STATIC`, see `tddy_discovery::roster`), so the in-jail
 /// `tddy-tools` answers `subagent_*` from its spawn seed and opens no roster subscription. A call
 /// that does arrive is a caller assuming a daemon that is not there, and the refusal names it
 /// rather than hanging.
