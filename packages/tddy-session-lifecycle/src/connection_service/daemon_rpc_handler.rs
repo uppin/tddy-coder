@@ -7,9 +7,7 @@ use tddy_service::proto::session_agents_svc::{
 // trait must be in scope.
 use tddy_service::proto::session_agents_svc::SessionAgentService as _;
 
-use std::sync::Arc;
-
-use super::{DaemonRpcHandler, DaemonSessionHost};
+use super::DaemonRpcHandler;
 
 /// The coordinate an in-jail agent relays family B at, read from the crate that serves it so this
 /// bridge and `tddy-sandbox-runner`'s allowlist cannot disagree about the name.

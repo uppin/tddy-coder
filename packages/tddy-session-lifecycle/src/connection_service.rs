@@ -52,9 +52,9 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_rpc::Request;
 #[cfg(test)]
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
-use tddy_service::proto::project::ListProjectsRequest;
 #[cfg(test)]
 use tddy_service::proto::session::SessionService as SessionServiceTrait;
+#[cfg(test)]
 use tddy_service::proto::session::{Signal, SignalSessionRequest, StartSessionRequest};
 
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;

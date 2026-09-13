@@ -3,22 +3,18 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use uuid::Uuid;
-
 use super::{service_util, AttachmentProgressSink, DaemonSessionHost, MpscResultStream};
-use crate::connection_service::hooks_and_urls;
 use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
 use crate::user_sessions_path::projects_path_for_user;
 use crate::{session_deletion, session_list_enrichment, session_reader};
 use tddy_core::output::SESSIONS_SUBDIR;
+use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
-use tddy_core::{read_session_metadata, Changeset};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
 use tddy_service::proto::session::ResumeSessionResponse as ConnResumeSessionResponse;
 use tddy_service::proto::session::SessionEntry as ConnSessionEntry;
-use tddy_service::proto::session::Signal;
 use tddy_service::proto::session::StartSessionEvent as ConnStartSessionEvent;
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
@@ -734,11 +730,6 @@ impl DaemonSessionHost {
             attachments,
         }))
     }
-
-    /// Local peer-trust minting is not available on this transport. Peer credentials
-    /// (SO_PEERCRED) exist only on the daemon's local Unix-domain socket; over ConnectRPC-HTTP or
-    /// LiveKit there is no peer uid to trust, so those transports reach this tddy-rpc handler and
-    /// are rejected. The UDS tonic adapter handles `MintLocalToken` itself and never delegates here.
 
     pub(crate) async fn stream_start_session_at_session_coordinate(
         &self,

@@ -7,7 +7,7 @@ use uuid::Uuid;
 use super::family_proto_bridge::wire_same;
 use super::hooks_and_urls;
 use super::{merge_listed_projects_with_peers, service_util, DaemonSessionHost};
-use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
+use crate::livekit_peer_discovery::local_instance_id_for_config;
 use crate::project_storage::{self, ProjectData};
 use crate::user_sessions_path::{
     project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
