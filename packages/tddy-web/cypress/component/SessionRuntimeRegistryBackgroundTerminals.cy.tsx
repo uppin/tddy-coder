@@ -10,10 +10,10 @@
  */
 
 import React from "react";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
@@ -46,7 +46,7 @@ const SESSION_B = {
 };
 
 function aBackendForBothSessions() {
-  return aConnectionServiceBackend({
+  return aSessionServiceBackend({
     sessions: [SESSION_A, SESSION_B],
     connectSession: (sessionId) => ({
       livekitRoom: `room-${sessionId}`,
@@ -86,7 +86,7 @@ describe("SessionRuntimeRegistryBackgroundTerminals — background terminals sur
 
     // ... and no ConnectSession reconnect was issued for A (focus switch is not a re-attach).
     cy.wrap(backend).should((b) => {
-      const reconnects = b.callsTo(ConnectionService.method.connectSession).filter(
+      const reconnects = b.callsTo(SessionService.method.connectSession).filter(
         (c) => c.sessionId === SESSION_A.sessionId,
       );
       expect(reconnects).to.have.length(1, "session A should be attached exactly once, not reconnected on focus switch");

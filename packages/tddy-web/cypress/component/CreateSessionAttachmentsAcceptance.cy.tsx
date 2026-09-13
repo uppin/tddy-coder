@@ -13,16 +13,13 @@
 
 import React from "react";
 import { CatalogService } from "../../src/gen/catalog_pb";
+import { ProjectService } from "../../src/gen/project_pb";
 import { Room } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import {
-  ConnectionService,
-  StartSessionEventSchema,
-  type StartSessionRequest,
-} from "../../src/gen/connection_pb";
+import { SessionService, StartSessionEventSchema, type StartSessionRequest } from "../../src/gen/session_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
@@ -85,12 +82,12 @@ interface StartRecorder {
 /** Every RPC the form issues except the session start itself, which each test decides. */
 function anAttachmentBackendWithoutStart(): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",
     }))
-    .onUnary(ConnectionService.method.listProjects, () => ({
+    .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({
@@ -100,7 +97,7 @@ function anAttachmentBackendWithoutStart(): InMemoryRpcBackend {
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({
+    .onUnary(ProjectService.method.listProjectBranches, () => ({
       branches: ["origin/main"],
       defaultRemote: "origin",
     }))
@@ -116,7 +113,7 @@ function anAttachmentBackendWithoutStart(): InMemoryRpcBackend {
           }
         : undefined,
     }))
-    .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "attach-1" }));
+    .onUnary(SessionService.method.startSession, () => ({ sessionId: "attach-1" }));
 }
 
 /** A backend seeded with every RPC the form issues, plus staging and session start. */
@@ -124,7 +121,7 @@ function anAttachmentBackend(recorder: StartRecorder = { requests: [] }): InMemo
   // A form carrying attachments starts the session over the streaming RPC, so the host reports
   // materialization progress. Implemented via `.implement()` because `onUnary` is typed to unary
   // methods.
-  return anAttachmentBackendWithoutStart().implement(ConnectionService, {
+  return anAttachmentBackendWithoutStart().implement(SessionService, {
     async *streamStartSession(req: StartSessionRequest) {
       recorder.requests.push(req);
       for (const attachment of req.attachments) {
@@ -158,7 +155,7 @@ function aBackendRefusingTheFirstStartAsABranchConflict(
   recorder: StartRecorder,
 ): InMemoryRpcBackend {
   let starts = 0;
-  return anAttachmentBackendWithoutStart().implement(ConnectionService, {
+  return anAttachmentBackendWithoutStart().implement(SessionService, {
     async *streamStartSession(req: StartSessionRequest) {
       recorder.requests.push(req);
       starts += 1;
@@ -178,7 +175,8 @@ function aBackendRefusingTheFirstStartAsABranchConflict(
 }
 
 function mountCreatePane(backend: InMemoryRpcBackend, onCreated = cy.stub().as("onCreated")) {
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
   const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
@@ -190,7 +188,8 @@ function mountCreatePane(backend: InMemoryRpcBackend, onCreated = cy.stub().as("
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
-      catalogClient={catalogClient}
+        projectClient={projectClient}
+        catalogClient={catalogClient}
         sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}
         sessionToken="fake-token"

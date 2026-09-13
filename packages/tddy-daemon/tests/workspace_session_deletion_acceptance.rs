@@ -17,8 +17,8 @@ use std::process::Command;
 
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, StartSessionRequest,
+use tddy_service::proto::session::{
+    DeleteSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a37";

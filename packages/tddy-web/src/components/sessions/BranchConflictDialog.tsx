@@ -12,7 +12,7 @@
  */
 
 import React, { useState } from "react";
-import type { BranchConflict } from "../../gen/connection_pb";
+import type { BranchConflict } from "../../gen/session_pb";
 import { Button } from "../ui/button";
 
 // ---------------------------------------------------------------------------

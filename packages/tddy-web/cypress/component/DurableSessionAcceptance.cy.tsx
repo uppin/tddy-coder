@@ -13,7 +13,7 @@ import React, { useRef } from "react";
 import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
 import { useDaemonClient } from "../../src/rpc/selectedDaemon";
 import { AuthService } from "../../src/gen/auth_pb";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { TerminalSessionService } from "../../src/gen/terminal_session_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
@@ -56,10 +56,10 @@ function RefreshingProbe() {
   return <div data-testid={refreshingTestId}>{isRefreshing ? "refreshing" : "idle"}</div>;
 }
 
-/** Issues `ConnectionService.ListSessions` with the shared token — proves the fresh token reaches a daemon RPC. */
+/** Issues `SessionService.ListSessions` with the shared token — proves the fresh token reaches a daemon RPC. */
 function DaemonRpcProbe() {
   const { sessionToken } = useAuthContext();
-  const client = useDaemonClient(ConnectionService);
+  const client = useDaemonClient(SessionService);
   return (
     <button
       data-testid={listSessionsBtnTestId}
@@ -182,7 +182,7 @@ describe("Durable web session — refresh-token + RPC token gate", () => {
 
     // Then — the daemon received the refreshed token, never the stale expired one
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.listSessions);
+      const calls = backend.callsTo(SessionService.method.listSessions);
       expect(calls.map((c) => c.sessionToken)).to.deep.equal([REFRESHED_ACCESS_TOKEN]);
     });
   });

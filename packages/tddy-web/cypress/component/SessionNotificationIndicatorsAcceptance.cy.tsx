@@ -10,14 +10,14 @@
  * `StreamSessionNotifications` feed, which is why these specs drive the feed rather than the
  * session list.
  *
- * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared common-room
- * LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and `withSelectedDaemon`.
+ * `SessionService` is daemon-level RPC (`useDaemonClient`), routed over the shared common-room
+ * LiveKit connection — see `aSessionServiceBackend` (in-memory fake) and `withSelectedDaemon`.
  */
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import {
@@ -84,7 +84,7 @@ function aDrawerWatchingNotifications(
   sessions: Array<typeof WORKING_SESSION>,
 ): SessionNotificationFeed {
   const notifications = aSessionNotificationFeed();
-  const backend = aConnectionServiceBackend({ sessions, sessionNotifications: notifications });
+  const backend = aSessionServiceBackend({ sessions, sessionNotifications: notifications });
   mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   // The feed is push-driven, so a spec must not push before the screen has subscribed. This gate
   // retries until the one subscription the drawer opens is live.

@@ -12,17 +12,17 @@
  * and the "Terminate" button never went away, making a session that had, in fact,
  * already ended look like clicking Terminate "did nothing".
  *
- * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
- * common-room LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and
+ * `SessionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
+ * common-room LiveKit connection — see `aSessionServiceBackend` (in-memory fake) and
  * `SelectedDaemonProvider` (via `withSelectedDaemon`).
  */
 
 import React from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
-import { ConnectionService, Signal } from "../../src/gen/connection_pb";
+import { SessionService, Signal } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend, type ConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend, type SessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
@@ -43,7 +43,7 @@ const CONNECTED_SESSION = {
   pendingElicitation: false,
 };
 
-function mountAndSelect(backend: ConnectionServiceBackend) {
+function mountAndSelect(backend: SessionServiceBackend) {
   mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
   sessionsDrawerPage.inspectorToggle().click();
@@ -66,10 +66,10 @@ describe("SessionsDrawerScreen — Terminate refetches the session list", () => 
     // Given — the session starts active; ListSessions reports it inactive once SignalSession
     // has actually been received by the daemon.
     let terminated = false;
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       listSessionsFactory: () => [{ ...CONNECTED_SESSION, isActive: !terminated }],
       connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
-    }).onUnary(ConnectionService.method.signalSession, async () => {
+    }).onUnary(SessionService.method.signalSession, async () => {
       // Flip synchronously inside the request handler — exactly when the app's own request
       // actually lands — so the *next* ListSessions response is guaranteed to reflect it.
       terminated = true;
@@ -80,7 +80,7 @@ describe("SessionsDrawerScreen — Terminate refetches the session list", () => 
     // When — Terminate is clicked and SignalSession succeeds
     sessionsDrawerPage.inspectorTerminateBtn(CONNECTED_SESSION.sessionId).click();
     cy.wrap(backend).should((b) => {
-      const calls = b.callsTo(ConnectionService.method.signalSession);
+      const calls = b.callsTo(SessionService.method.signalSession);
       expect(calls).to.have.length(1);
       expect(calls[0].sessionId).to.equal(CONNECTED_SESSION.sessionId);
       expect(calls[0].signal).to.equal(Signal.SIGTERM);
@@ -96,10 +96,10 @@ describe("SessionsDrawerScreen — Terminate refetches the session list", () => 
     // once the process is confirmed dead — the same daemon-side check that makes SignalSession
     // itself fail with "process is not alive").
     let sessionEnded = false;
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       listSessionsFactory: () => [{ ...CONNECTED_SESSION, isActive: !sessionEnded }],
       connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
-    }).onUnary(ConnectionService.method.signalSession, async () => {
+    }).onUnary(SessionService.method.signalSession, async () => {
       sessionEnded = true;
       throw new ConnectError("Process not alive", Code.FailedPrecondition);
     });
@@ -108,7 +108,7 @@ describe("SessionsDrawerScreen — Terminate refetches the session list", () => 
     // When — Terminate is clicked but SignalSession fails ("process is not alive")
     sessionsDrawerPage.inspectorTerminateBtn(CONNECTED_SESSION.sessionId).click();
     cy.wrap(backend).should((b) => {
-      expect(b.callsTo(ConnectionService.method.signalSession)).to.have.length(1);
+      expect(b.callsTo(SessionService.method.signalSession)).to.have.length(1);
     });
 
     // Then — the row now reflects the session as inactive, so Terminate is gone

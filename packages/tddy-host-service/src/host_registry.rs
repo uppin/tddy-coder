@@ -154,7 +154,7 @@ impl HostSighting {
 /// Records sightings durably and reports what has been seen.
 ///
 /// A trait so the RPC layer can be handed a deterministic double, the way `HostStats` is — see
-/// `ConnectionServiceImpl::with_host_stats`.
+/// `DaemonSessionHost::with_host_stats`.
 pub trait HostRegistry: Send + Sync {
     /// Record one whole snapshot: everyone visible now, and everyone who has stopped being visible.
     ///

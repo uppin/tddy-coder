@@ -10,14 +10,14 @@
  */
 
 import React from "react";
-import { ConnectionService, Signal } from "../../src/gen/connection_pb";
+import { SessionService, Signal } from "../../src/gen/session_pb";
 import { daemonRpcIdentity, type DaemonHost } from "../../src/lib/participantRole";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import {
-  aConnectionServiceBackend,
-  type ConnectionServiceBackend,
-} from "../support/rpc/connectionServiceBackend";
+  aSessionServiceBackend,
+  type SessionServiceBackend,
+} from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { mountWithPerDaemonLiveKitRpc } from "../support/rpc/perDaemonLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
@@ -90,8 +90,8 @@ function coderIdentityFor(session: { sessionId: string; daemonInstanceId: string
  * live coder participants in the common room (so they count as active regardless of `ListSessions`).
  */
 function mountCrossHost(
-  backendA: ConnectionServiceBackend,
-  backendB: ConnectionServiceBackend,
+  backendA: SessionServiceBackend,
+  backendB: SessionServiceBackend,
   liveSessions: Array<{ sessionId: string; daemonInstanceId: string }> = [],
 ) {
   mountWithPerDaemonLiveKitRpc(
@@ -104,8 +104,8 @@ function mountCrossHost(
   );
 }
 
-const listSessionsCount = (b: ConnectionServiceBackend) =>
-  b.callsTo(ConnectionService.method.listSessions).length;
+const listSessionsCount = (b: SessionServiceBackend) =>
+  b.callsTo(SessionService.method.listSessions).length;
 
 // ---------------------------------------------------------------------------
 // Specs
@@ -121,26 +121,26 @@ describe("SessionsDrawerCrossHostAcceptance — active sessions across hosts", (
 
   it("queries only the selected host for the session list — no fan-out to other daemons", () => {
     // Given — host B has a live participant; host B's backend must never be asked for its list.
-    const backendA = aConnectionServiceBackend({ sessions: [SESSION_A] });
-    const backendB = aConnectionServiceBackend({ sessions: [SESSION_B_ACTIVE] });
+    const backendA = aSessionServiceBackend({ sessions: [SESSION_A] });
+    const backendB = aSessionServiceBackend({ sessions: [SESSION_B_ACTIVE] });
 
     // When
     mountCrossHost(backendA, backendB, [SESSION_B_ACTIVE]);
 
     // Then — the live cross-host row still shows, but only host A was queried for the list.
     sessionsDrawerPage.drawerItem(SESSION_B_ACTIVE.sessionId).should("exist");
-    cy.wrap(backendA).should((b: ConnectionServiceBackend) => {
+    cy.wrap(backendA).should((b: SessionServiceBackend) => {
       expect(listSessionsCount(b), "host A ListSessions calls").to.be.greaterThan(0);
     });
-    cy.wrap(backendB).should((b: ConnectionServiceBackend) => {
+    cy.wrap(backendB).should((b: SessionServiceBackend) => {
       expect(listSessionsCount(b), "host B ListSessions calls (no fan-out)").to.equal(0);
     });
   });
 
   it("shows a host-B session with a live participant while host A is selected", () => {
     // Given
-    const backendA = aConnectionServiceBackend({ sessions: [SESSION_A] });
-    const backendB = aConnectionServiceBackend({ sessions: [] });
+    const backendA = aSessionServiceBackend({ sessions: [SESSION_A] });
+    const backendB = aSessionServiceBackend({ sessions: [] });
 
     // When
     mountCrossHost(backendA, backendB, [SESSION_B_ACTIVE]);
@@ -152,8 +152,8 @@ describe("SessionsDrawerCrossHostAcceptance — active sessions across hosts", (
 
   it("does not show a host-B session that has no live participant", () => {
     // Given — host B has an inactive session and no live participant.
-    const backendA = aConnectionServiceBackend({ sessions: [SESSION_A] });
-    const backendB = aConnectionServiceBackend({ sessions: [SESSION_C_INACTIVE] });
+    const backendA = aSessionServiceBackend({ sessions: [SESSION_A] });
+    const backendB = aSessionServiceBackend({ sessions: [SESSION_C_INACTIVE] });
 
     // When — nothing seeded live.
     mountCrossHost(backendA, backendB, []);
@@ -165,8 +165,8 @@ describe("SessionsDrawerCrossHostAcceptance — active sessions across hosts", (
 
   it("labels a cross-host row with its owning host, and does not label same-host rows", () => {
     // Given
-    const backendA = aConnectionServiceBackend({ sessions: [SESSION_A] });
-    const backendB = aConnectionServiceBackend({ sessions: [] });
+    const backendA = aSessionServiceBackend({ sessions: [SESSION_A] });
+    const backendB = aSessionServiceBackend({ sessions: [] });
 
     // When
     mountCrossHost(backendA, backendB, [SESSION_B_ACTIVE]);
@@ -178,22 +178,22 @@ describe("SessionsDrawerCrossHostAcceptance — active sessions across hosts", (
 
   it("routes ConnectSession to the owning host when a cross-host row is selected", () => {
     // Given
-    const backendA = aConnectionServiceBackend({ sessions: [SESSION_A], connectSession: LIVEKIT_CONNECT });
-    const backendB = aConnectionServiceBackend({ sessions: [], connectSession: LIVEKIT_CONNECT });
+    const backendA = aSessionServiceBackend({ sessions: [SESSION_A], connectSession: LIVEKIT_CONNECT });
+    const backendB = aSessionServiceBackend({ sessions: [], connectSession: LIVEKIT_CONNECT });
 
     // When — select the live host-B session
     mountCrossHost(backendA, backendB, [SESSION_B_ACTIVE]);
     sessionsDrawerPage.drawerItem(SESSION_B_ACTIVE.sessionId).click();
 
     // Then — ConnectSession lands on host B (the owner), never on host A, and the terminal appears
-    cy.wrap(backendB).should((b: ConnectionServiceBackend) => {
-      const calls = b.callsTo(ConnectionService.method.connectSession);
+    cy.wrap(backendB).should((b: SessionServiceBackend) => {
+      const calls = b.callsTo(SessionService.method.connectSession);
       expect(calls, "backendB (host B) ConnectSession calls").to.have.length(1);
       expect(calls[0].sessionId).to.equal(SESSION_B_ACTIVE.sessionId);
     });
-    cy.wrap(backendA).should((b: ConnectionServiceBackend) => {
+    cy.wrap(backendA).should((b: SessionServiceBackend) => {
       expect(
-        b.callsTo(ConnectionService.method.connectSession),
+        b.callsTo(SessionService.method.connectSession),
         "backendA (host A) ConnectSession calls",
       ).to.have.length(0);
     });
@@ -202,28 +202,28 @@ describe("SessionsDrawerCrossHostAcceptance — active sessions across hosts", (
 
   it("does not switch the selected host when a cross-host row is selected", () => {
     // Given
-    const backendA = aConnectionServiceBackend({ sessions: [SESSION_A], connectSession: LIVEKIT_CONNECT });
-    const backendB = aConnectionServiceBackend({ sessions: [], connectSession: LIVEKIT_CONNECT });
+    const backendA = aSessionServiceBackend({ sessions: [SESSION_A], connectSession: LIVEKIT_CONNECT });
+    const backendB = aSessionServiceBackend({ sessions: [], connectSession: LIVEKIT_CONNECT });
     mountCrossHost(backendA, backendB, [SESSION_B_ACTIVE]);
 
     // When — select the cross-host row (connects to host B)
     sessionsDrawerPage.drawerItem(SESSION_B_ACTIVE.sessionId).click();
-    cy.wrap(backendB).should((b: ConnectionServiceBackend) => {
-      expect(b.callsTo(ConnectionService.method.connectSession)).to.have.length(1);
+    cy.wrap(backendB).should((b: SessionServiceBackend) => {
+      expect(b.callsTo(SessionService.method.connectSession)).to.have.length(1);
     });
 
     // Then — the selected host is unchanged: host A's own session is still listed, and host A's
     // list was never re-queried against host B.
     sessionsDrawerPage.drawerItem(SESSION_A.sessionId).should("exist");
-    cy.wrap(backendB).should((b: ConnectionServiceBackend) => {
+    cy.wrap(backendB).should((b: SessionServiceBackend) => {
       expect(listSessionsCount(b), "host B ListSessions calls (never became selected)").to.equal(0);
     });
   });
 
   it("routes a SIGTERM Terminate to the owning host for a cross-host live session", () => {
     // Given
-    const backendA = aConnectionServiceBackend({ sessions: [SESSION_A], connectSession: LIVEKIT_CONNECT });
-    const backendB = aConnectionServiceBackend({ sessions: [], connectSession: LIVEKIT_CONNECT });
+    const backendA = aSessionServiceBackend({ sessions: [SESSION_A], connectSession: LIVEKIT_CONNECT });
+    const backendB = aSessionServiceBackend({ sessions: [], connectSession: LIVEKIT_CONNECT });
 
     // When — select the live host-B session, open the inspector, and Terminate
     mountCrossHost(backendA, backendB, [SESSION_B_ACTIVE]);
@@ -232,12 +232,12 @@ describe("SessionsDrawerCrossHostAcceptance — active sessions across hosts", (
     sessionsDrawerPage.inspectorTerminateBtn(SESSION_B_ACTIVE.sessionId).click();
 
     // Then — SignalSession(SIGTERM) lands on host B, never host A
-    cy.wrap(backendB).should((b: ConnectionServiceBackend) => {
+    cy.wrap(backendB).should((b: SessionServiceBackend) => {
       expect(b.signalCalls, "backendB (host B) SignalSession calls").to.have.length(1);
       expect(b.signalCalls[0].sessionId).to.equal(SESSION_B_ACTIVE.sessionId);
       expect(b.signalCalls[0].signal).to.equal(Signal.SIGTERM);
     });
-    cy.wrap(backendA).should((b: ConnectionServiceBackend) => {
+    cy.wrap(backendA).should((b: SessionServiceBackend) => {
       expect(b.signalCalls, "backendA (host A) SignalSession calls").to.have.length(0);
     });
   });
@@ -246,7 +246,7 @@ describe("SessionsDrawerCrossHostAcceptance — active sessions across hosts", (
     // Given — one daemon, one session the daemon returns with an empty daemonInstanceId (legacy
     // local daemon). Regression guard for the owning-host attribution fallback.
     const legacySession = { ...SESSION_A, daemonInstanceId: "" };
-    const backend = aConnectionServiceBackend({ sessions: [legacySession] });
+    const backend = aSessionServiceBackend({ sessions: [legacySession] });
 
     // When — mounted with the single default fixture daemon
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);

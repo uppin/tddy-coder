@@ -8,7 +8,7 @@
  * PRD: `docs/ft/web/1-WIP/PRD-2026-07-22-streamed-host-stats.md`
  * Changeset: `2026-07-22-streamed-host-stats`
  *
- * Host stats are sourced from a single `ConnectionService.StreamHostStats` server-stream over the
+ * Host stats are sourced from a single `SessionService.StreamHostStats` server-stream over the
  * daemon client, stubbed by the in-memory backend. The disk fixture is 42.1 GB free of a 100 GB
  * filesystem; the CPU fixture is four logical cores at 10 / 55 / 90 / 30 %.
  */
@@ -18,10 +18,10 @@ import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDraw
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
-  aConnectionServiceBackend,
-  type ConnectionServiceBackend,
-  type ConnectionServiceScenario,
-} from "../support/rpc/connectionServiceBackend";
+  aSessionServiceBackend,
+  type SessionServiceBackend,
+  type SessionServiceScenario,
+} from "../support/rpc/daemonSessionHostBackend";
 import { hostStatsFooterPage as footer } from "../support/pages/hostStatsFooterPage";
 
 // ---------------------------------------------------------------------------
@@ -37,9 +37,9 @@ const DISK = {
 const CPU_PER_CORE = [10, 55, 90, 30];
 
 function aHostStatsBackend(
-  overrides: Partial<ConnectionServiceScenario> = {},
-): ConnectionServiceBackend {
-  return aConnectionServiceBackend({
+  overrides: Partial<SessionServiceScenario> = {},
+): SessionServiceBackend {
+  return aSessionServiceBackend({
     sessions: [],
     hostDisk: DISK,
     hostCpuPerCore: CPU_PER_CORE,
@@ -47,7 +47,7 @@ function aHostStatsBackend(
   });
 }
 
-function mountScreen(backend: ConnectionServiceBackend) {
+function mountScreen(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 }
 

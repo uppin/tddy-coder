@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use tddy_daemon::claude_cli_session::{ClaimOutcome, ClaudeCliSessionManager};
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_rpc::{Code, Request};
 use tddy_terminal_rpc::proto::terminal_session::{
     ClaimTerminalControlRequest, SessionTerminalInput, StreamReplayMode,
@@ -67,7 +67,7 @@ fn make_service(
             None
         }
     });
-    let service = ConnectionServiceImpl::new(
+    let service = DaemonSessionHost::new(
         config,
         sessions_base,
         tddy_data_dir,

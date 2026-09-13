@@ -1,7 +1,7 @@
 //! The hosts a daemon knows: the durable registry, each host's tooling probe, its telemetry, the
 //! prompts it raises and the ssh keys it can be given — served as `host.HostService`.
 //!
-//! Split out of `connection.ConnectionService` by `#unbundle` node 1. The host-key path
+//! Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 1. The host-key path
 //! (`host_keypair`, `host_private_key`, `ssh_agent`, `ssh_agent_add`) travels with hosts rather than
 //! with auth because `AddHostKey` and `ListHostKeyCandidates` are host-service methods, and moving
 //! it here cuts the `host_tooling ⇄ ssh_agent` cycle as a side effect.

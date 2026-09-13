@@ -7,7 +7,7 @@ import "types.proto";
 // Session file I/O: the workflow files a recipe wrote, agent context sync, uploads, and the staged
 // attachments and host documents a session start draws on.
 //
-// Split out of `connection.ConnectionService` by `#unbundle` node 6 — families I, J, R and S. Four
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 6 — families I, J, R and S. Four
 // families in one service rather than four services because they are all *session file I/O*, they
 // share `SessionAttachment`, `StagedAttachmentRef` and `HostDocumentRef` among themselves, and four
 // services of two to five methods each would multiply the hand-written tonic adapters (one per

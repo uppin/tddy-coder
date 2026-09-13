@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../gen/connection_pb";
+import type { SessionEntry } from "../gen/session_pb";
 
 /**
  * The em-dash `session_list_enrichment` puts in `workflow_goal` when it cannot report a real one —

@@ -13,7 +13,7 @@
 
 use std::path::Path;
 
-use tddy_service::proto::connection::{
+use tddy_service::proto::session::{
     session_attachment::Source, HostDocumentRef, SessionAttachment,
 };
 use tddy_service::proto::types::HostDocumentScope;
@@ -128,7 +128,7 @@ pub fn prompt_with_attached_changeset(
 mod tests {
     use super::*;
     use std::fs;
-    use tddy_service::proto::connection::{
+    use tddy_service::proto::session::{
         session_attachment::Source, HostDocumentRef, StagedAttachmentRef,
     };
     use tddy_service::proto::types::HostDocumentScope;

@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
-import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
+import type { SessionService, SessionEntry } from "../../gen/session_pb";
 import type { ExecToolService } from "../../gen/exec_tools_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
@@ -45,7 +45,7 @@ interface SessionInspectorDrawerProps {
   onResume: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
   onTerminate: (sessionId: string) => void;
-  client?: Client<typeof ConnectionService>;
+  client?: Client<typeof SessionService>;
   /** `exec_tools.ExecToolService` on the same host as `client` — the Tools tab. */
   execToolClient?: Client<typeof ExecToolService>;
   /**

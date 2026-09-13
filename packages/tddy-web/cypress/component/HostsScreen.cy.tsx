@@ -1,10 +1,10 @@
 /**
  * Cypress component acceptance: the Hosts screen loads through **`host.HostService`**.
  *
- * `ListKnownHosts`, `GetHostTooling` and `StreamHostStats` used to be `connection.ConnectionService`
+ * `ListKnownHosts`, `GetHostTooling` and `StreamHostStats` used to be `session.SessionService`
  * methods; they are now `host.HostService`'s. The screen therefore has to address the new service,
  * and this spec is what says so: its backend implements `host.HostService` and **nothing else**, so
- * a screen still bound to `ConnectionService` gets `Unimplemented` and renders its error instead of
+ * a screen still bound to `SessionService` gets `Unimplemented` and renders its error instead of
  * a table. Reading only the rendered rows would not distinguish the two — a fixture served under
  * either coordinate produces the same table — which is why the recorded call is asserted too.
  *
@@ -53,7 +53,7 @@ function aDaemonServingOnlyHostService(hosts: KnownHostEntry[]): InMemoryRpcBack
 describe("Hosts screen over host.HostService", () => {
   it("lists the known hosts a daemon serving only host.HostService reports", () => {
     // Given a daemon that answers ListKnownHosts under `host.HostService` and serves no
-    // `connection.ConnectionService` at all
+    // `session.SessionService` at all
     const backend = aDaemonServingOnlyHostService([aKnownHost({})]);
 
     // When the Hosts screen is opened

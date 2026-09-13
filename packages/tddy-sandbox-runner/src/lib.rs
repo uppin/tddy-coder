@@ -23,4 +23,4 @@ pub use runner::{
 
 /// Re-exported so host-relay callers can implement [`HostToolHandler`] without depending on
 /// `tddy-service` directly.
-pub use tddy_service::proto::connection::ExecuteToolResponse;
+pub use tddy_service::proto::exec_tools::ExecuteToolResponse;

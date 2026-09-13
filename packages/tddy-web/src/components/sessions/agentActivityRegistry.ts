@@ -19,7 +19,7 @@
 
 import type { ChatMessage } from "../chat/useAgentChat";
 
-/** One tool call's bodies, as `ConnectionService.GetAcpToolCallDetail` resolved them. Either side may
+/** One tool call's bodies, as `SessionService.GetAcpToolCallDetail` resolved them. Either side may
  *  be absent: a still-running call has an input but no output yet. */
 export interface ToolCallDetail {
   readonly rawInput?: string;

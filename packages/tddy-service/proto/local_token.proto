@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package local_token;
+
+// Minting a session token for a caller whose identity came from the socket it dialled.
+//
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 9 — family Q, one method, and the
+// only one in the whole surface that is **transport-restricted**: it is answered from `SO_PEERCRED`
+// on a Unix socket, so it exists on the local socket and nowhere else.
+//
+// The implementation splits across two crates deliberately. The **peer-credential read stays with
+// the transport**, because only the transport can see it — `local_socket_server.rs` resolves
+// uid to username as it does today and passes the resolved identity in. The **minting moves** to
+// `tddy-daemon-auth`, which already holds the signing secret. A single home would either put
+// credential-reading in a library that cannot see the socket, or put signing back in the daemon this
+// stack exists to empty.
+
+service LocalTokenService {
+  // Local peer-trust: mint a session token for the caller identified by its SO_PEERCRED peer uid
+  // over the daemon's Unix-domain socket. Available only on the local UDS transport (the peer
+  // credential is not present on ConnectRPC-HTTP or LiveKit), and only for a peer uid mapped to a
+  // configured user.
+  rpc MintLocalToken(MintLocalTokenRequest) returns (MintLocalTokenResponse);
+}
+
+message MintLocalTokenRequest {}
+
+message MintLocalTokenResponse {
+  string session_token = 1;
+}

@@ -18,14 +18,14 @@
  */
 
 import React from "react";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
-  aConnectionServiceBackend,
-  type ConnectionServiceBackend,
-} from "../support/rpc/connectionServiceBackend";
+  aSessionServiceBackend,
+  type SessionServiceBackend,
+} from "../support/rpc/daemonSessionHostBackend";
 import { replayAgentText } from "../support/rpc/acpReplay";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
 import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
@@ -68,7 +68,7 @@ const OVER_GRPC = { livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }
 // Mount + synchronisation helpers
 // ---------------------------------------------------------------------------
 
-function mountScreen(backend: ConnectionServiceBackend) {
+function mountScreen(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 }
 
@@ -81,7 +81,7 @@ function mountScreen(backend: ConnectionServiceBackend) {
  * 10s: the recovery is gated on the screen's 2s session-list poll, so a 4s default can expire on a
  * loaded runner before the first post-eviction poll has even landed.
  */
-function awaitTerminalFeedsServed(backend: ConnectionServiceBackend, count: number) {
+function awaitTerminalFeedsServed(backend: SessionServiceBackend, count: number) {
   cy.wrap(null, { timeout: 10_000 }).should(() => {
     expect(backend.streamedTerminals, "terminal feeds opened").to.have.length(count);
   });
@@ -101,7 +101,7 @@ describe("SessionTerminalFeedRecovery — a live session re-attaches after its f
     // Given — a dormant session the daemon reports alive once resumed, whose first terminal feed
     // ends the way the incident's did
     let sessionIsLive = false;
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       listSessionsFactory: () => [
         sessionIsLive ? { ...DORMANT, isActive: true, status: "active", pid: 44861 } : DORMANT,
       ],
@@ -128,7 +128,7 @@ describe("SessionTerminalFeedRecovery — a live session re-attaches after its f
   it("recovers a dropped feed by re-attaching, never by resuming the live agent again", () => {
     // Given — the same resumed session whose first terminal feed drops
     let sessionIsLive = false;
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       listSessionsFactory: () => [
         sessionIsLive ? { ...DORMANT, isActive: true, status: "active", pid: 44861 } : DORMANT,
       ],
@@ -151,7 +151,7 @@ describe("SessionTerminalFeedRecovery — a live session re-attaches after its f
     // ResumeSession would spawn over a live process rather than re-attach to it.
     cy.wrap(null).should(() => {
       const resumed = backend
-        .callsTo(ConnectionService.method.resumeSession)
+        .callsTo(SessionService.method.resumeSession)
         .map((c) => c.sessionId);
       expect(resumed, "ResumeSession calls").to.deep.equal([DORMANT.sessionId]);
       expect(backend.connectedSessionIds, "ConnectSession calls").to.deep.equal([
@@ -163,7 +163,7 @@ describe("SessionTerminalFeedRecovery — a live session re-attaches after its f
   it("shows the terminal again after a selected live session's terminal feed drops", () => {
     // Given — a session that was already alive when the operator selected it, so its attach came
     // from the selection rather than from a resume, and whose first terminal feed drops
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [LIVE],
       acpReplay: RECORDED_TRANSCRIPT,
       connectSession: OVER_GRPC,

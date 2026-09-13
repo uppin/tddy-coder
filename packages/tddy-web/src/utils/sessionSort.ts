@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../gen/connection_pb";
+import type { SessionEntry } from "../gen/session_pb";
 
 /**
  * Parse `createdAt` as ISO-8601 (or other strings `Date` understands).

@@ -90,7 +90,7 @@ pub fn context_agent_for_session_type(session_type: &str) -> &'static str {
 /// This is the authoritative answer, and the reason it exists is a widening the request field would
 /// otherwise permit. `ReadContextFileRequest.agent` and `ContextManifestRequest.agent` are
 /// caller-chosen and authorization is per OS user, not per session
-/// (`ConnectionServiceImpl::authorize_exec_tool_caller`), so a caller holding a valid token for a
+/// (`DaemonSessionHost::authorize_exec_tool_caller`), so a caller holding a valid token for a
 /// `codex` session could name `cursor` and be served that row: `.claude/**`, `.cursor/**` and
 /// `.mcp.json` out of a checkout it was never granted them on — the very files that carry API
 /// tokens in MCP `env` blocks, and precisely the gitignored ones the git-listing gate used to

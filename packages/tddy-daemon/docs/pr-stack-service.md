@@ -15,8 +15,8 @@ Family **P** — planned-PR stack mutations and branch resolution for `pr-stack`
 
 ## Where logic lives
 
-- **Handlers and peer routing** — `packages/tddy-daemon/src/pr_stack_rpc.rs` and
-  `connection_service/svc_pr_stack_ports.rs` on `ConnectionServiceImpl`.
+- **Handlers and peer routing** — `packages/tddy-daemon/src/pr_stack_rpc.rs` and port wiring beside
+  it on the daemon endpoint.
 - **Orchestration and MCP tools** — `tddy-workflow-recipes` (`pr_stack`, `github_pr`, recipes).
 
 `PrStackService` is served on the daemon's transports (HTTP `/rpc`, LiveKit common room, session

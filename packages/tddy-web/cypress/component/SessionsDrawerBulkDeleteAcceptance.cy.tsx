@@ -9,7 +9,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { byTestId, TEST_IDS, sessionRowSelect } from "../support/testIds";
 
@@ -59,7 +59,7 @@ describe("Sessions drawer — bulk delete", () => {
 
   it("deletes exactly the selected sessions and leaves the rest", () => {
     // Given — three sessions in the drawer
-    const backend = aConnectionServiceBackend({ sessions: [SESSION_A, SESSION_B, SESSION_C] });
+    const backend = aSessionServiceBackend({ sessions: [SESSION_A, SESSION_B, SESSION_C] });
     mountWithRecordingLiveKitRpc(
       withSelectedDaemon(<SessionsDrawerScreen onNavigate={cy.stub()} />),
       backend,
@@ -84,7 +84,7 @@ describe("Sessions drawer — bulk delete", () => {
 
   it("select-all from the minibar ticks every session, then deletes them all", () => {
     // Given — three sessions in the drawer
-    const backend = aConnectionServiceBackend({ sessions: [SESSION_A, SESSION_B, SESSION_C] });
+    const backend = aSessionServiceBackend({ sessions: [SESSION_A, SESSION_B, SESSION_C] });
     mountWithRecordingLiveKitRpc(
       withSelectedDaemon(<SessionsDrawerScreen onNavigate={cy.stub()} />),
       backend,

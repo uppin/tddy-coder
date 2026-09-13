@@ -8,7 +8,7 @@
 import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import type { Transport } from "@connectrpc/connect";
-import { ConnectionService, ListSessionsRequestSchema } from "../gen/connection_pb";
+import { SessionService, ListSessionsRequestSchema } from "../gen/session_pb";
 import {
   SessionTerminalInputSchema,
   StreamTerminalOutputRequestSchema,
@@ -29,8 +29,8 @@ function aRecordingTransport(): Transport & {
       unaryInputs.push(input);
       return {
         stream: false as const,
-        service: ConnectionService,
-        method: ConnectionService.method.listSessions,
+        service: SessionService,
+        method: SessionService.method.listSessions,
         message: {},
         header: new Headers(),
         trailer: new Headers(),
@@ -112,7 +112,7 @@ describe("wrapTransportWithAuthGate", () => {
     const inner = aRecordingTransport();
     const gated = wrapTransportWithAuthGate(inner, () => pending);
     const call = gated.unary(
-      ConnectionService.method.listSessions,
+      SessionService.method.listSessions,
       undefined,
       undefined,
       undefined,

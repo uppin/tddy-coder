@@ -19,11 +19,11 @@ import { WorktreeSizeStatus } from "../../src/gen/worktree_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
-  aConnectionServiceBackend,
-  type ConnectionServiceBackend,
-  type ConnectionServiceScenario,
+  aSessionServiceBackend,
+  type SessionServiceBackend,
+  type SessionServiceScenario,
   type WorktreeStatsRowInput,
-} from "../support/rpc/connectionServiceBackend";
+} from "../support/rpc/daemonSessionHostBackend";
 import { ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN } from "../support/rpc/durableSessionBackend";
 import { worktreesPage as page } from "../support/pages/worktreesPage";
 
@@ -62,15 +62,15 @@ const NONE_ROW_CACHED_UPDATE: WorktreeStatsRowInput = {
 };
 
 function aWorktreesBackend(
-  overrides: Partial<ConnectionServiceScenario> = {},
-): ConnectionServiceBackend {
-  return aConnectionServiceBackend({
+  overrides: Partial<SessionServiceScenario> = {},
+): SessionServiceBackend {
+  return aSessionServiceBackend({
     worktreeStatsSnapshot: [NONE_ROW, CACHED_ROW],
     ...overrides,
   });
 }
 
-function mountWorktrees(backend: ConnectionServiceBackend) {
+function mountWorktrees(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<WorktreesAppPage onNavigate={() => undefined} />), backend);
 }
 

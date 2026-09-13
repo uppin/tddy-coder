@@ -20,20 +20,20 @@ import { create } from "@bufbuild/protobuf";
 import { createClient, type Transport } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ActivityService } from "../../src/gen/activity_pb";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import {
   ClaimTerminalControlResponseSchema,
   TerminalControlEventSchema,
   TerminalSessionService,
 } from "../../src/gen/terminal_session_pb";
-import type { SessionEntry } from "../../src/gen/connection_pb";
+import type { SessionEntry } from "../../src/gen/session_pb";
 import type { SessionRuntimeState } from "../../src/components/sessions/sessionRuntimeRegistry";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
@@ -118,7 +118,7 @@ const NO_TRANSCRIPT = { counts: [0], snapshot: [] };
 // Mount helpers
 // ---------------------------------------------------------------------------
 
-function mountScreen(backend: ReturnType<typeof aConnectionServiceBackend>) {
+function mountScreen(backend: ReturnType<typeof aSessionServiceBackend>) {
   mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 }
 
@@ -198,7 +198,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
   it("shows the recorded activity transcript as the main view when an inactive session is selected", () => {
     // Given — a dormant session whose transcript the daemon can still replay
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [DORMANT],
       acpReplay: RECORDED_TRANSCRIPT,
     });
@@ -215,7 +215,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
   it("keeps the inspector closed when an inactive session is selected", () => {
     // Given
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [DORMANT],
       acpReplay: RECORDED_TRANSCRIPT,
     });
@@ -230,7 +230,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
   it("offers Resume in the pane top bar for an inactive session", () => {
     // Given
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [DORMANT],
       acpReplay: RECORDED_TRANSCRIPT,
     });
@@ -245,7 +245,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
   it("resumes the session through the owning daemon when the top-bar Resume is clicked", () => {
     // Given
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [DORMANT],
       acpReplay: RECORDED_TRANSCRIPT,
     });
@@ -257,7 +257,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
     // Then — exactly one ResumeSession, for this session
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.resumeSession);
+      const calls = backend.callsTo(SessionService.method.resumeSession);
       expect(calls.map((c) => c.sessionId), "ResumeSession calls").to.deep.equal([
         DORMANT.sessionId,
       ]);
@@ -266,7 +266,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
   it("shows an explicit empty state when the inactive session recorded no activity", () => {
     // Given — a dormant session that never produced a transcript
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [DORMANT],
       acpReplay: NO_TRANSCRIPT,
     });
@@ -286,7 +286,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     // distinguishes "recorded nothing" from "not counted yet", and a feed that fails never answers
     // at all — so the same window covers a failed read.
     const { scenario, releaseCount } = aHeldCountReplay({ counts: [0], snapshot: [] });
-    const backend = aConnectionServiceBackend({ sessions: [DORMANT], acpReplay: scenario });
+    const backend = aSessionServiceBackend({ sessions: [DORMANT], acpReplay: scenario });
 
     // When
     mountScreen(backend);
@@ -305,7 +305,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
   it("shows the terminal and no Resume button for an active session", () => {
     // Given — a live session
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [LIVE],
       acpReplay: RECORDED_TRANSCRIPT,
       connectSession: {
@@ -327,7 +327,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
   it("opens a deep-linked inspector tab for an inactive session", () => {
     // Given — a link that explicitly asks for the Details tab
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [DORMANT],
       acpReplay: RECORDED_TRANSCRIPT,
     });
@@ -344,7 +344,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
   it("returns to the terminal view once the session becomes active", () => {
     // Given — a session the daemon reports dormant until the test says otherwise
     let sessionIsLive = false;
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       listSessionsFactory: () => [
         sessionIsLive ? { ...DORMANT, isActive: true, status: "active" } : DORMANT,
       ],
@@ -370,7 +370,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     sessionActivitiesPage.resumeBtn(DORMANT.sessionId, { timeout: 1000 }).should("not.exist");
     cy.wrap(null).should(() => {
       const attached = backend
-        .callsTo(ConnectionService.method.connectSession)
+        .callsTo(SessionService.method.connectSession)
         .map((c) => c.sessionId);
       expect(attached, "ConnectSession calls").to.deep.equal([DORMANT.sessionId]);
     });
@@ -381,7 +381,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     // The attach claim is per live epoch, so the second revival owes a second ConnectSession; a
     // claim that survived the death in between would strand the pane on an empty placeholder.
     let sessionIsLive = false;
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       listSessionsFactory: () => [
         sessionIsLive ? { ...DORMANT, isActive: true, status: "active" } : DORMANT,
       ],
@@ -413,7 +413,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     page.detailTerminalContainer().should("exist");
     cy.wrap(null).should(() => {
       const attached = backend
-        .callsTo(ConnectionService.method.connectSession)
+        .callsTo(SessionService.method.connectSession)
         .map((c) => c.sessionId);
       expect(attached, "ConnectSession calls").to.deep.equal([
         DORMANT.sessionId,
@@ -426,7 +426,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     // Given — a dormant session whose ResumeSession already returns LiveKit coordinates, and which
     // the daemon reports alive once the resume has spawned it
     let sessionIsLive = false;
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       listSessionsFactory: () => [
         sessionIsLive ? { ...DORMANT, isActive: true, status: "active" } : DORMANT,
       ],
@@ -449,7 +449,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     page.drawerItem(DORMANT.sessionId).click();
     sessionActivitiesPage.resume(DORMANT.sessionId);
     cy.wrap(null).should(() => {
-      expect(backend.callsTo(ConnectionService.method.resumeSession)).to.have.length(1);
+      expect(backend.callsTo(SessionService.method.resumeSession)).to.have.length(1);
     });
     cy.then(() => {
       sessionIsLive = true;
@@ -461,10 +461,10 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     // through a reconnect and another ClaimTerminalControl
     cy.wrap(null).should(() => {
       const resumed = backend
-        .callsTo(ConnectionService.method.resumeSession)
+        .callsTo(SessionService.method.resumeSession)
         .map((c) => c.sessionId);
       expect(resumed, "ResumeSession calls").to.deep.equal([DORMANT.sessionId]);
-      expect(backend.callsTo(ConnectionService.method.connectSession), "ConnectSession calls").to
+      expect(backend.callsTo(SessionService.method.connectSession), "ConnectSession calls").to
         .be.empty;
     });
   });
@@ -637,7 +637,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
         selectedSession={DORMANT as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
         inspectorState="closed"
-        client={createClient(ConnectionService, transport)}
+        client={createClient(SessionService, transport)}
         terminalClient={createClient(TerminalSessionService, transport)}
         activityClient={createClient(ActivityService, transport)}
         runtimes={[aHostServedRuntimeFor(DORMANT.sessionId, transport)]}

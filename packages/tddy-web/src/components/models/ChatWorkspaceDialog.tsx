@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ConnectionService, type ProjectEntry } from "../../gen/connection_pb";
+import { type ProjectEntry } from "../../gen/project_pb";
+import { ProjectService } from "../../gen/project_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { safeTestIdPart } from "../../lib/testId";
 import { useDaemonClientFor } from "../../rpc/selectedDaemon";
@@ -17,7 +18,7 @@ import { errorTextOf } from "./useModelRegistryFanOut";
  * empty `cwd` is refused outright (`model_registry::workspace::resolve_chat_workspace`).
  *
  * So the choice is offered from the one list that is guaranteed to satisfy that rule: the projects
- * **that daemon's own registry** holds for this operator (`ConnectionService.ListProjects` with
+ * **that daemon's own registry** holds for this operator (`ProjectService.ListProjects` with
  * `local_only`, read straight off the owning daemon). Both sides read the same `projects.yaml`
  * through `projects_path_for_user`, so every `main_repo_path` offered here is by construction one
  * of the roots the daemon will accept — rather than a free-text path the operator has to guess and
@@ -46,7 +47,7 @@ export function ChatWorkspaceDialog({
   onChoose: (cwd: string) => void;
   onClose: () => void;
 }) {
-  const client = useDaemonClientFor(ConnectionService, assistant.daemonInstanceId);
+  const client = useDaemonClientFor(ProjectService, assistant.daemonInstanceId);
   const { sessionToken } = useAuthContext();
   const [options, setOptions] = useState<WorkspaceOptions>({ status: "loading" });
 

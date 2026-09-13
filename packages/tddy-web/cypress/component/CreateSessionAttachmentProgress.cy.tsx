@@ -15,16 +15,13 @@
 
 import React from "react";
 import { CatalogService } from "../../src/gen/catalog_pb";
+import { ProjectService } from "../../src/gen/project_pb";
 import { Room } from "livekit-client";
 import { createClient, ConnectError, Code } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import {
-  ConnectionService,
-  StartSessionEventSchema,
-  type StartSessionRequest,
-} from "../../src/gen/connection_pb";
+import { SessionService, StartSessionEventSchema, type StartSessionRequest } from "../../src/gen/session_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
@@ -49,12 +46,12 @@ function aFilePick(fileName: string, contents: string): Cypress.FileReferenceObj
 /** Every RPC the form issues besides the session start itself. */
 function aBaselineBackend(): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",
     }))
-    .onUnary(ConnectionService.method.listProjects, () => ({
+    .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({
@@ -64,7 +61,7 @@ function aBaselineBackend(): InMemoryRpcBackend {
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({
+    .onUnary(ProjectService.method.listProjectBranches, () => ({
       branches: ["origin/main"],
       defaultRemote: "origin",
     }))
@@ -98,7 +95,7 @@ function aBackendHoldingProgressAt(basename: string, percentDone: number): HeldS
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const backend = aBaselineBackend().implement(ConnectionService, {
+  const backend = aBaselineBackend().implement(SessionService, {
     async *streamStartSession(req: StartSessionRequest) {
       opens.count += 1;
       const total = 1000n;
@@ -124,7 +121,8 @@ function aBackendHoldingProgressAt(basename: string, percentDone: number): HeldS
 }
 
 function mountCreatePane(backend: InMemoryRpcBackend) {
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(SessionService, backend.transport());
+  const projectClient = createClient(ProjectService, backend.transport());
   const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
@@ -133,7 +131,8 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
-      catalogClient={catalogClient}
+        projectClient={projectClient}
+        catalogClient={catalogClient}
         sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}
         sessionToken="fake-token"
@@ -199,7 +198,7 @@ it("keeps Create disabled while the host is still materializing", () => {
 
 it("surfaces a failed materialization as a creation error and creates no session", () => {
   // Given a host that reports progress and then fails the stream
-  const backend = aBaselineBackend().implement(ConnectionService, {
+  const backend = aBaselineBackend().implement(SessionService, {
     async *streamStartSession(req: StartSessionRequest) {
       yield create(StartSessionEventSchema, {
         event: {
@@ -233,8 +232,8 @@ it("surfaces a failed materialization as a creation error and creates no session
 it("starts a session with no attachments over the unary RPC, leaving that path unchanged", () => {
   // Given a form with nothing attached, and a host whose streaming RPC would fail if used
   const backend = aBaselineBackend()
-    .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "unary-1" }))
-    .implement(ConnectionService, {
+    .onUnary(SessionService.method.startSession, () => ({ sessionId: "unary-1" }))
+    .implement(SessionService, {
       async *streamStartSession() {
         throw new ConnectError("the streaming RPC must not be used without attachments", Code.Internal);
         yield create(StartSessionEventSchema, {});
@@ -250,6 +249,6 @@ it("starts a session with no attachments over the unary RPC, leaving that path u
   // Then the unary RPC created it
   cy.get("@onCreated").should("have.been.calledWith", "unary-1");
   cy.wrap(null).should(() => {
-    expect(backend.callsTo(ConnectionService.method.startSession)).to.have.length(1);
+    expect(backend.callsTo(SessionService.method.startSession)).to.have.length(1);
   });
 });

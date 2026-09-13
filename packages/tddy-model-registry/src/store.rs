@@ -670,7 +670,7 @@ impl ModelRegistryStore {
             )));
         }
         // The registry wins over a YAML def of the same name wherever both resolve
-        // (`ConnectionServiceImpl::resolvable_agent_defs`), so admitting this name would stop the
+        // (`DaemonSessionHost::resolvable_agent_defs`), so admitting this name would stop the
         // operator's own def from resolving, with nothing said about it anywhere.
         if let Some(def_file) = self.agent_def_named(name)? {
             return Err(ModelRegistryError::InvalidName(format!(
@@ -695,7 +695,7 @@ impl ModelRegistryStore {
     /// answers to it.
     ///
     /// Whether a def answers is decided by [`load_agent_defs`] — the same call
-    /// `ConnectionServiceImpl::resolvable_agent_defs` makes — so this guard and the resolver can
+    /// `DaemonSessionHost::resolvable_agent_defs` makes — so this guard and the resolver can
     /// never disagree about what `--agent <name>` means. A malformed YAML file therefore reserves
     /// nothing: it resolves to no agent, so no name is taken by it.
     ///

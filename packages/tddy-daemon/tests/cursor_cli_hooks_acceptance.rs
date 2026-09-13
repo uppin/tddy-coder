@@ -8,7 +8,7 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
@@ -18,7 +18,7 @@ type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 const TEST_HOOK_TOKEN: &str = "cursor-hook-token-abc";
 const TEST_OS_USER: &str = "testuser";
 
-fn minimal_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn minimal_service(sessions_base: PathBuf) -> DaemonSessionHost {
     let yaml =
         format!("users:\n  - github_user: \"{TEST_OS_USER}\"\n    os_user: \"{TEST_OS_USER}\"\n");
     let dir = tempfile::tempdir().unwrap();
@@ -36,7 +36,7 @@ fn minimal_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
     });
     let user_resolver: SessionUserResolver = Arc::new(|_| Some(TEST_OS_USER.to_string()));
 
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         sessions_base,

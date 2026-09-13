@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../gen/connection_pb";
+import type { SessionEntry } from "../gen/session_pb";
 
 /**
  * Resolves the child session that owns a planned node's branch — the PR-Stack view's

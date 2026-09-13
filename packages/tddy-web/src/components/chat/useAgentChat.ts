@@ -32,7 +32,7 @@ export interface ChatMessage {
   toolStatus?: "running" | "completed" | "error";
   /** The ACP `ToolCall.tool_call_id` of a `from: "tool"` entry. The transcript stream carries tool
    *  metadata only, so the detail dialog names the call by this id to fetch its bodies through
-   *  `ConnectionService.GetAcpToolCallDetail`. Unset for non-tool bubbles. */
+   *  `SessionService.GetAcpToolCallDetail`. Unset for non-tool bubbles. */
   toolCallId?: string;
   /** Epoch ms when this message was first shown — used for the exported transcript timeline. */
   at: number;

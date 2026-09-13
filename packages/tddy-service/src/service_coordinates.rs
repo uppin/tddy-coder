@@ -19,7 +19,7 @@
 
 /// The coordinate `session_files.proto`'s thirteen session-file methods are served at.
 ///
-/// Served by `tddy_daemon::connection_service::ConnectionServiceImpl::session_files_entry`, which
+/// Served by `tddy_daemon::connection_service::DaemonSessionHost::session_files_entry`, which
 /// mounts `tddy_session_files::SessionFilesServiceImpl` behind the wrapper that routes eight of the
 /// thirteen to a peer; addressed by `tddy-daemon-livekit`'s session-file forwarders. `package session_files` + `service SessionFilesService`, which
 /// `tests/service_coordinates.rs` pins against the schema itself.

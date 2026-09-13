@@ -16,7 +16,7 @@ import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { create, toBinary } from "@bufbuild/protobuf";
 import { ConnectionState, Room } from "livekit-client";
-import { ConnectSessionResponseSchema } from "../../src/gen/connection_pb";
+import { ConnectSessionResponseSchema } from "../../src/gen/session_pb";
 import { TokenService, GenerateTokenResponseSchema } from "../../src/gen/token_pb";
 import { useSessionAttachment } from "../../src/components/sessions/useSessionAttachment";
 import { LiveKitConnectionProvider } from "../../src/rpc/connections/liveKit";
@@ -149,7 +149,7 @@ function AttachmentHarness() {
 }
 
 function interceptConnectSession(body: ArrayBuffer) {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ConnectSession", (req) => {
+  cy.intercept("POST", "**/rpc/session.SessionService/ConnectSession", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
   }).as("connectSession");
 }

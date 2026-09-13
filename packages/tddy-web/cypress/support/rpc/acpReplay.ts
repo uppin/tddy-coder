@@ -170,7 +170,7 @@ export function aHeldCountReplay(config: AcpReplayScenario) {
 /**
  * The `StreamAcpReplay` + `GetAcpToolCallDetail` handlers for a fixed transcript, as a spreadable
  * `ActivityService` partial. Extracted so the two-phase protocol has ONE implementation shared by
- * the focused {@link aReplayBackend} and the full-screen `aConnectionServiceBackend` — a spec that
+ * the focused {@link aReplayBackend} and the full-screen `aSessionServiceBackend` — a spec that
  * drives `SessionsDrawerScreen` needs both the session list and the replay on one backend, and a
  * second copy of the mode branching would be free to drift from this one.
  *

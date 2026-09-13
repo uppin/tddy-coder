@@ -13,7 +13,7 @@ service-generic, so what moved is import paths, call sites and the six hard-code
 
 `src/gen/` was regenerated — `connection_pb.ts` shrinks by 4,126 lines alongside
 `tddy-rust-typescript-tests/gen/connection_pb.ts` — and the 736-line Cypress
-`connectionServiceBackend.ts` fake splits per service. The generated TypeScript stays in
+`daemonSessionHostBackend.ts` fake splits per service. The generated TypeScript stays in
 `src/gen/`: a workspace package per generated service would need a root `workspaces` entry, a
 `workspace:*` entry, a fresh `bun install` and regenerated lockfiles for no gain, since
 `buf generate` already produces one `*_pb.ts` per proto with no config change.

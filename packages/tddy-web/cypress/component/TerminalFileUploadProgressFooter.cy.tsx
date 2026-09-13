@@ -14,7 +14,7 @@ import { HostStatsFooter } from "../../src/components/sessions/HostStatsFooter";
 import { TerminalFileDropZone } from "../../src/components/connection/TerminalFileDropZone";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { terminalFileUploadPage as page } from "../support/pages/terminalFileUploadPage";
@@ -28,7 +28,7 @@ const HOST_DISK = { availableBytes: 42_100_000_000n, totalBytes: 100_000_000_000
  * holds every upload chunk until resolved, so a test can observe the mid-upload state.
  */
 function mountFooterWithDropZone(gate?: Promise<void>) {
-  const backend = aConnectionServiceBackend({ hostCpuPerCore: [12], hostDisk: HOST_DISK }).onUnary(
+  const backend = aSessionServiceBackend({ hostCpuPerCore: [12], hostDisk: HOST_DISK }).onUnary(
     SessionFilesService.method.uploadSessionFileChunk,
     async (req) => {
       if (gate) await gate;

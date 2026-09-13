@@ -26,9 +26,9 @@ import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDraw
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
-  aConnectionServiceBackend,
-  type ConnectionServiceBackend,
-} from "../support/rpc/connectionServiceBackend";
+  aSessionServiceBackend,
+  type SessionServiceBackend,
+} from "../support/rpc/daemonSessionHostBackend";
 import { anActivity, anAttachedAgent } from "../support/rpc/sessionAgentRosterBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { sessionAgentRosterPage as page } from "../support/pages/sessionAgentRosterPage";
@@ -71,8 +71,8 @@ const CLAUDE_SUBAGENT = {
   lastActivity: anActivity("Bash: cargo test", NOW_MS - 12_000),
 };
 
-function aBackendWithASubagent(): ConnectionServiceBackend {
-  return aConnectionServiceBackend({
+function aBackendWithASubagent(): SessionServiceBackend {
+  return aSessionServiceBackend({
     sessions: [MAIN_SESSION, CLAUDE_SUBAGENT],
     connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
     sessionAgents: {
@@ -84,7 +84,7 @@ function aBackendWithASubagent(): ConnectionServiceBackend {
 }
 
 /** Select the main session and open its Agents tab — every case starts here. */
-function openAgentsTab(backend: ConnectionServiceBackend) {
+function openAgentsTab(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(MAIN_SESSION_ID).click();
   sessionsDrawerPage.inspectorToggle().click();

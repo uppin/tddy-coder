@@ -48,6 +48,8 @@ members = [
     "packages/tddy-session-files",
     "packages/tddy-session-agents",
     "packages/tddy-session-activity",
+    "packages/tddy-session-lifecycle",
+    "packages/tddy-projects",
     "packages/tddy-workflow-recipes",
     "packages/tddy-actions",
     "packages/tddy-task",

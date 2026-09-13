@@ -14,7 +14,7 @@ use std::time::Duration;
 use serial_test::serial;
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
@@ -193,7 +193,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let (_tmp_b, path_b) = write_daemon_yaml(&ws_url, Some(RELAY_PEER_ID));
     let config_b = DaemonConfig::load(&path_b).unwrap();
     let sessions_b = tempfile::tempdir().unwrap();
-    let service_b = Arc::new(ConnectionServiceImpl::new(
+    let service_b = Arc::new(DaemonSessionHost::new(
         config_b.clone(),
         sessions_resolver(sessions_b.path().to_path_buf()),
         sessions_b.path().to_path_buf(),
@@ -239,7 +239,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         valid_user_resolver(),
     )
     .with_eligible_daemon_source(Arc::clone(&eligible));
-    let service_a = TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
+    let service_a = TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
         config_a,
         sessions_resolver(sessions_a.path().to_path_buf()),
         sessions_a.path().to_path_buf(),

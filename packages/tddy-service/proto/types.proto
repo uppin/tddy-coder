@@ -10,7 +10,7 @@ package types;
 // families, node 4's, and node 6's terminal family: all three cuts were fully self-contained.
 //
 // This file exists because exactly **one** type genuinely crosses: `HostDocumentScope`. The session
-// files service needs it for `ReadHostDocument`, and `connection.ConnectionService`'s `StartSession`
+// files service needs it for `ReadHostDocument`, and `the pre-unbundle monolithic RPC coordinate`'s `StartSession`
 // needs it too — a session start names the staged attachments to materialise, and each carries a
 // scope.
 //

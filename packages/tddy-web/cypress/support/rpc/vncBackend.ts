@@ -21,11 +21,7 @@
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AuthService } from "../../../src/gen/auth_pb";
-import {
-  ConnectionService,
-  type SessionContextDocSchema,
-  type SessionEntry,
-} from "../../../src/gen/connection_pb";
+import { SessionService, type SessionContextDocSchema, type SessionEntry } from "../../../src/gen/session_pb";
 import { aGitHubUser } from "./responses";
 
 // ---------------------------------------------------------------------------
@@ -52,5 +48,5 @@ export function aSessionsDrawerBackend(
 ): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
     .onUnary(AuthService.method.getAuthStatus, () => ({ authenticated: true, user: aGitHubUser() }))
-    .onUnary(ConnectionService.method.listSessions, () => ({ sessions }));
+    .onUnary(SessionService.method.listSessions, () => ({ sessions }));
 }

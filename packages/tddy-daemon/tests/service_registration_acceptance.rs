@@ -134,7 +134,7 @@ async fn registers_the_session_files_service_that_tddy_session_files_now_owns() 
 }
 
 /// The same node gave the nine terminal methods their own coordinate, served by
-/// `tddy-terminal-rpc`, and removed them from `connection.ConnectionService` — so this roster is
+/// `tddy-terminal-rpc`, and removed them from `the pre-unbundle monolithic RPC coordinate` — so this roster is
 /// the only place a LiveKit- or HTTP-reached terminal is answered from. Dropping the one line that
 /// pushes it would leave every such terminal unserved: the UDS builder takes its terminal adapter
 /// as a separate argument, so `local_token_uds.rs` would still pass.

@@ -15,7 +15,7 @@
 
 import React from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { ConnectionService } from "../../../src/gen/connection_pb";
+import { ProjectService } from "../../../src/gen/project_pb";
 import {
   AcpService,
   type AcpAgentMessage,
@@ -88,7 +88,7 @@ function aRegistryWithAssistant(options: {
     assistants: [anAssistant({ tools: options.tools })],
   })
     .implement(AcpService, { session: options.session })
-    .onUnary(ConnectionService.method.listProjects, () =>
+    .onUnary(ProjectService.method.listProjects, () =>
       listedProjects(options.projects ?? [TDDY_CODER, SANDBOX]),
     );
 }
@@ -198,7 +198,7 @@ describe("AssistantChatAcceptance — chatting with an assistant", () => {
     // Then — a fanned-out ListProjects also returns peers' rows, whose paths exist on other hosts
     // and would be refused by this one
     cy.wrap(backend).should((b) => {
-      const calls = b.callsTo(ConnectionService.method.listProjects);
+      const calls = b.callsTo(ProjectService.method.listProjects);
       expect(calls).to.have.length(1);
       expect(calls[0].localOnly).to.equal(true);
     });
@@ -259,7 +259,7 @@ describe("AssistantChatAcceptance — chatting with an assistant", () => {
       assistants: [anAssistant({ tools: ["Read"] })],
     })
       .implement(AcpService, { session: anAnsweringAgent() })
-      .onUnary(ConnectionService.method.listProjects, () => {
+      .onUnary(ProjectService.method.listProjects, () => {
         throw new ConnectError("could not resolve projects path", Code.Internal);
       });
     mount(backend);
@@ -307,7 +307,7 @@ describe("AssistantChatAcceptance — routing to the assistant's owning daemon",
     const backendA = aModelRegistryBackend({
       providers: [anOllamaProvider({ daemonInstanceId: HOST_A.instanceId })],
       models: [anLlmModel({ daemonInstanceId: HOST_A.instanceId })],
-    }).onUnary(ConnectionService.method.listProjects, () =>
+    }).onUnary(ProjectService.method.listProjects, () =>
       listedProjects([aProject({ projectId: "proj-a", mainRepoPath: "/home/dev/on-workstation" })]),
     );
     const backendB = aModelRegistryBackend({
@@ -324,7 +324,7 @@ describe("AssistantChatAcceptance — routing to the assistant's owning daemon",
       ],
     })
       .implement(AcpService, { session: recorder.session })
-      .onUnary(ConnectionService.method.listProjects, () =>
+      .onUnary(ProjectService.method.listProjects, () =>
         listedProjects([aProject({ projectId: "proj-b", mainRepoPath: "/srv/checkouts/tddy-coder" })]),
       );
     mountWithPerDaemonLiveKitRpc(

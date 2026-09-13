@@ -17,17 +17,13 @@
 
 import React from "react";
 import { CatalogService } from "../../src/gen/catalog_pb";
+import { ProjectService } from "../../src/gen/project_pb";
 import { Room } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import {
-  ConnectionService,
-  SessionContextDocKind,
-  StartSessionEventSchema,
-  type StartSessionRequest,
-} from "../../src/gen/connection_pb";
+import { SessionService, SessionContextDocKind, StartSessionEventSchema, type StartSessionRequest } from "../../src/gen/session_pb";
 import { HostDocumentScope } from "../../src/gen/types_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
@@ -62,7 +58,7 @@ interface StartRecorder {
  */
 function aHostWithDocuments(recorder: StartRecorder): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listSessions, () => ({
+    .onUnary(SessionService.method.listSessions, () => ({
       sessions: [
         {
           sessionId: OWNING_SESSION,
@@ -106,7 +102,7 @@ function aHostWithDocuments(recorder: StartRecorder): InMemoryRpcBackend {
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",
     }))
-    .onUnary(ConnectionService.method.listProjects, () => ({
+    .onUnary(ProjectService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
     .onUnary(CatalogService.method.listAgents, () => ({
@@ -116,7 +112,7 @@ function aHostWithDocuments(recorder: StartRecorder): InMemoryRpcBackend {
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({
+    .onUnary(ProjectService.method.listProjectBranches, () => ({
       branches: ["origin/main"],
       defaultRemote: "origin",
     }))
@@ -134,7 +130,7 @@ function aHostWithDocuments(recorder: StartRecorder): InMemoryRpcBackend {
         ],
       }).handlers,
     )
-    .implement(ConnectionService, {
+    .implement(SessionService, {
       async *streamStartSession(req: StartSessionRequest) {
         recorder.requests.push(req);
         yield create(StartSessionEventSchema, {
@@ -146,7 +142,8 @@ function aHostWithDocuments(recorder: StartRecorder): InMemoryRpcBackend {
 
 function mountCreatePane(backend: InMemoryRpcBackend) {
   const transport = backend.transport();
-  const client = createClient(ConnectionService, transport);
+  const client = createClient(SessionService, transport);
+  const projectClient = createClient(ProjectService, transport);
   const catalogClient = createClient(CatalogService, transport);
   // The same host over the same wire, under the services that now serve the file and worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, transport);
@@ -155,6 +152,7 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
+        projectClient={projectClient}
         catalogClient={catalogClient}
         sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}

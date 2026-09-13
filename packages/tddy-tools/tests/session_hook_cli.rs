@@ -210,7 +210,7 @@ fn session_hook_unreachable_daemon_exits_zero() {
 // The fail-quiet contract above makes every assertion in this file blind to the URL: the hook
 // exits 0 whether the daemon answered, refused or was never there. So a coordinate that no
 // service answers any more — `#unbundle` node 7 moved both methods off
-// `connection.ConnectionService` — would leave every test here green while session status, the
+// `the pre-unbundle monolithic RPC coordinate` — would leave every test here green while session status, the
 // attention alerts read off it and every agent-activity row silently stopped.
 //
 // These tests close that by serving the **real** `/rpc/{service}/{method}` router with the

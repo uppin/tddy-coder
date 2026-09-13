@@ -17,7 +17,7 @@ import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { hostStatsFooterPage } from "../support/pages/hostStatsFooterPage";
@@ -155,7 +155,7 @@ const AGG_SESSION_B = {
 };
 
 function aTwoSessionBackend() {
-  return aConnectionServiceBackend({
+  return aSessionServiceBackend({
     sessions: [AGG_SESSION_A, AGG_SESSION_B],
     connectSession: (sessionId: string) => ({
       livekitRoom: `room-${sessionId}`,

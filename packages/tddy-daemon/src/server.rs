@@ -8,8 +8,8 @@ use tddy_connectrpc::connect_router;
 use tddy_rpc::{MultiRpcService, RpcBridge};
 
 use crate::config::DaemonConfig;
-use crate::livekit_peer_discovery::local_instance_id_for_config;
-use crate::telegram_notifier::{send_daemon_lifecycle_message, TelegramSender};
+use tddy_session_lifecycle::livekit_peer_discovery::local_instance_id_for_config;
+use tddy_session_lifecycle::telegram_notifier::{send_daemon_lifecycle_message, TelegramSender};
 
 /// Everything [`run_server`] needs to bring the daemon's HTTP surface up.
 ///

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::session_file_upload::write_upload_chunk;
 use tddy_daemon::session_uploads::{delete_upload, list_uploads};
 use tddy_daemon::test_util::TEST_TOKEN;
@@ -240,7 +240,7 @@ fn test_service(
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
-    Arc::new(ConnectionServiceImpl::new(
+    Arc::new(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

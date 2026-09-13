@@ -1,5 +1,5 @@
 /**
- * Cross-daemon fan-out for `ConnectionService.ListAgents` — the agents a tool session can be started
+ * Cross-daemon fan-out for `SessionService.ListAgents` — the agents a tool session can be started
  * *as*, gathered from the whole fleet.
  *
  * `ListAgents` carries no routing field, so a daemon answers with its own config allowlist plus its

@@ -25,7 +25,7 @@ use crate::daemon_settings::{apply_update, redacted_settings};
 /// Defined in `tddy-daemon-livekit` beside its one implementation, because the supervisor that
 /// implements it moved there and a trait cannot be implemented across a dependency the wrong way
 /// round. Re-exported so this service's callers name it where they always did.
-pub use crate::common_room_supervisor::CommonRoomSupervisor;
+pub use tddy_session_lifecycle::common_room_supervisor::CommonRoomSupervisor;
 
 /// Decides whether the caller's `session_token` may read or write the daemon's configuration.
 /// `true` admits the call; `false` refuses it with `UNAUTHENTICATED`.
@@ -199,13 +199,16 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
             // The same allowlist rows the HTTP `/api/config` snapshot carries: config entries only,
             // because assistants come and go while the daemon runs and `ListAgents` is their live
             // source.
-            allowed_agents: crate::agent_list_mapping::agent_allowlist_rows(&config, &[])
-                .into_iter()
-                .map(|row| ClientAllowedAgent {
-                    id: row.id,
-                    label: row.display_label,
-                })
-                .collect(),
+            allowed_agents: tddy_session_lifecycle::agent_list_mapping::agent_allowlist_rows(
+                &config,
+                &[],
+            )
+            .into_iter()
+            .map(|row| ClientAllowedAgent {
+                id: row.id,
+                label: row.display_label,
+            })
+            .collect(),
             debug: config.debug.clone(),
             daemon_instance_id: Some(
                 tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&config),

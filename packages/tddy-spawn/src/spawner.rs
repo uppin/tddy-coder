@@ -1928,7 +1928,7 @@ mod run_capture_as_user_tests {
         let os_user = current_username();
 
         // When — run_capture_as_user receives the *relative* program path exactly as
-        // `ConnectionServiceImpl::resolve_tddy_tools_path` produces it ("target/debug/tddy-tools")
+        // `DaemonSessionHost::resolve_tddy_tools_path` produces it ("target/debug/tddy-tools")
         let result = run_capture_as_user(&os_user, Path::new("target/debug/tddy-tools"), &[]);
 
         // Then — it locates and runs the daemon's own toolchain build via the daemon's own cwd,

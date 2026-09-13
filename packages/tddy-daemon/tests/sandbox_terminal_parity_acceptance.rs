@@ -1,6 +1,6 @@
 //! Acceptance tests that a **sandboxed** session's terminal, now served through the unified store,
 //! produces exactly the frames and offsets the hand-rolled loop inside
-//! `connection.ConnectionService::StreamTerminalOutput` produced.
+//! `the pre-unbundle monolithic RPC coordinate::StreamTerminalOutput` produced.
 //!
 //! That loop was a transcription of `tddy_terminal_rpc::bridge`'s replay/offset arm — its own
 //! comment said so — living behind an `if let Some(sandbox) = self.sandbox_manager.get(…)` branch
@@ -518,7 +518,7 @@ async fn serves_a_jails_scroll_up_history_where_the_old_coordinate_refused_it() 
     // Given a jail whose PTY has produced ten bytes
     let session = SandboxedSession::holding(b"0123456789").await;
 
-    // When a client scrolls up — a request `connection.ConnectionService` answered `not_found` for
+    // When a client scrolls up — a request `the pre-unbundle monolithic RPC coordinate` answered `not_found` for
     // any sandboxed session, so a jail's terminal had no history at all
     let mut rx = serve_get_terminal_history_with(
         &session.store,
@@ -581,7 +581,7 @@ const A_BROWSER_SCREEN: &str = "browser-screen-a";
 /// reach it through.
 ///
 /// Built from [`tddy_daemon::test_util::test_service`] and the daemon's own
-/// [`ConnectionServiceImpl::sandbox_sessions`] registry, so the store, the lease and the handlers
+/// [`DaemonSessionHost::sandbox_sessions`] registry, so the store, the lease and the handlers
 /// are the ones production wires — the point of these tests is what *this daemon's* coordinate does
 /// with a jail's terminal, which a re-assembled set of ports could not answer.
 struct ADaemonServingAJailedSession {

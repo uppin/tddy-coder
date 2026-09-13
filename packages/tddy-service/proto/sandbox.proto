@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package sandbox;
 
-import "connection.proto";
+import "exec_tools.proto";
 
 // gRPC service exposed INSIDE the darwin sandbox. The host daemon is the client.
 service SandboxService {
@@ -22,11 +22,11 @@ message SessionFrame {
     HostPoll host_poll = 1;
     SubscribeTerminal subscribe_terminal = 2;
     SandboxInput terminal_input = 3;
-    connection.ExecuteToolResponse tool_response = 4;
+    exec_tools.ExecuteToolResponse tool_response = 4;
     EgressResponse egress_response = 7;
     TunnelOpenAck tunnel_open_ack = 9;
     // Sandbox → host (server stream; only after host inbound)
-    connection.ExecuteToolRequest tool_request = 5;
+    exec_tools.ExecuteToolRequest tool_request = 5;
     SandboxTerminalOutput terminal_output = 6;
     EgressRequest egress_request = 8;
     TunnelOpen tunnel_open = 10;
@@ -54,11 +54,11 @@ message SessionFrame {
     // sandboxed `workspace` session dispatches through, so the confinement around a tool call is
     // the kernel's rather than the tool engine's path checks
     // (docs/ft/daemon/remote-codebase-mode.md § Workspace tool sandbox).
-    connection.ExecuteToolRequest in_jail_tool_request = 16;
+    exec_tools.ExecuteToolRequest in_jail_tool_request = 16;
     // Sandbox → host: the result of the `in_jail_tool_request` the host is waiting on. Carries no
     // request id because the host keeps exactly one in-jail call outstanding at a time, the same
     // one-at-a-time discipline `tool_request`/`tool_response` already use.
-    connection.ExecuteToolResponse in_jail_tool_response = 17;
+    exec_tools.ExecuteToolResponse in_jail_tool_response = 17;
   }
 }
 

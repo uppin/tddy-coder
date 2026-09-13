@@ -11,7 +11,7 @@
  */
 
 import React, { useSyncExternalStore } from "react";
-import type { SessionEntry } from "../../gen/connection_pb";
+import type { SessionEntry } from "../../gen/session_pb";
 import { sessionIndicatorFor, type SessionIndicator } from "../../lib/sessionIndicator";
 import { sessionNotificationRegistry } from "./sessionNotificationRegistry";
 import { cn } from "../../lib/utils";

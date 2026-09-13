@@ -20,14 +20,14 @@
  */
 
 import React from "react";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
-  aConnectionServiceBackend,
-  type ConnectionServiceBackend,
-} from "../support/rpc/connectionServiceBackend";
+  aSessionServiceBackend,
+  type SessionServiceBackend,
+} from "../support/rpc/daemonSessionHostBackend";
 import { anAvailableAgent } from "../support/rpc/sessionAgentRosterBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTerminalTabsPage";
@@ -64,8 +64,8 @@ const SESSION = {
 function aBackendOffering(
   offers: ReturnType<typeof anAvailableAgent>[],
   answer: string[] = ["ready when you are"],
-): ConnectionServiceBackend {
-  return aConnectionServiceBackend({
+): SessionServiceBackend {
+  return aSessionServiceBackend({
     sessions: [SESSION],
     connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
     sessionAgents: { sessionId: SESSION.sessionId, initial: [], rev: 0, offers },
@@ -94,8 +94,8 @@ const WORKFLOW_SESSION = {
 /** The session plus a workflow session to switch away to, both offering `offers`. */
 function aBackendWithAWorkflowSessionToo(
   offers: ReturnType<typeof anAvailableAgent>[],
-): ConnectionServiceBackend {
-  return aConnectionServiceBackend({
+): SessionServiceBackend {
+  return aSessionServiceBackend({
     sessions: [SESSION, WORKFLOW_SESSION],
     connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
     sessionAgents: { sessionId: SESSION.sessionId, initial: [], rev: 0, offers },
@@ -107,8 +107,8 @@ function aBackendWithAWorkflowSessionToo(
 function aBackendThatCannotOpen(
   offers: ReturnType<typeof anAvailableAgent>[],
   message: string,
-): ConnectionServiceBackend {
-  return aConnectionServiceBackend({
+): SessionServiceBackend {
+  return aSessionServiceBackend({
     sessions: [SESSION],
     connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
     sessionAgents: { sessionId: SESSION.sessionId, initial: [], rev: 0, offers },
@@ -117,7 +117,7 @@ function aBackendThatCannotOpen(
 }
 
 /** Attach the session and wait for its tab strip — every case starts here. */
-function attachSession(backend: ConnectionServiceBackend) {
+function attachSession(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
   tabs.tabs().should("exist");
@@ -202,8 +202,8 @@ describe("Add agent — attach a roster agent and open a conversation with it", 
     page.tabs().should("have.length", 1);
 
     // Then no peer session was spawned — this is the behaviour the flow replaced
-    cy.wrap(backend).should((b: ConnectionServiceBackend) => {
-      expect(b.callsTo(ConnectionService.method.startSession)).to.have.length(0);
+    cy.wrap(backend).should((b: SessionServiceBackend) => {
+      expect(b.callsTo(SessionService.method.startSession)).to.have.length(0);
     });
   });
 

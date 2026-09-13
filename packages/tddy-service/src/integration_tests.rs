@@ -1528,8 +1528,8 @@ mod reflection_acceptance {
             .map(|f| f.name.as_deref().unwrap_or(""))
             .collect();
 
-        // Then — the set contains at minimum echo, token, and connection service proto files
-        // Must contain at minimum echo, token, auth, terminal, connection service files.
+        // Then — the set contains at minimum echo, token, and session service proto files
+        // Must contain at minimum echo, token, auth, terminal, session service files.
         assert!(
             filenames.iter().any(|n| n.contains("echo")),
             "FileDescriptorSet must include echo service proto; found: {:?}",
@@ -1541,8 +1541,13 @@ mod reflection_acceptance {
             filenames
         );
         assert!(
-            filenames.iter().any(|n| n.contains("connection")),
-            "FileDescriptorSet must include connection service proto; found: {:?}",
+            filenames.iter().any(|n| n.contains("session")),
+            "FileDescriptorSet must include session service proto; found: {:?}",
+            filenames
+        );
+        assert!(
+            !filenames.iter().any(|n| n.contains("connection")),
+            "FileDescriptorSet must not include deleted connection service proto; found: {:?}",
             filenames
         );
     }

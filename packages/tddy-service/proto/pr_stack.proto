@@ -6,7 +6,7 @@ import "types.proto";
 
 // Planning, querying and repointing a stack of dependent pull requests.
 //
-// Split out of `connection.ConnectionService` by `#unbundle` node 8 — family P — and served from
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 8 — family P — and served from
 // `tddy-workflow-recipes`, which already owns `orchestrate_pr_stack`, `pr_stack`, `plan_pr_stack`
 // and — since node 5 — the 14 PR-stack MCP tools. A `tddy-pr-stack-service` crate would have split
 // one domain across two.

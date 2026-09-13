@@ -1,9 +1,9 @@
 /**
  * Shared test-only wrapper providing the minimal `SelectedDaemonProvider` fixture a mounted
- * screen needs for `useDaemonClient(ConnectionService)` (and other daemon-level RPC hooks) to
+ * screen needs for `useDaemonClient(SessionService)` (and other daemon-level RPC hooks) to
  * resolve to a non-null client.
  *
- * `SessionsDrawerScreen` (and anything it renders) now sources `ConnectionService` via
+ * `SessionsDrawerScreen` (and anything it renders) now sources `SessionService` via
  * `useDaemonClient`, which returns `null` without a `SelectedDaemonProvider` ancestor providing a
  * connected `room` and at least one daemon. `mountWithRpc` / `mountWithRecordingLiveKitRpc`
  * (`./inMemory.tsx`, `./recordingLiveKitRpc.tsx`) already route *both* the HTTP and LiveKit

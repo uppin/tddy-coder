@@ -9,7 +9,7 @@
 import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { type SessionEntry } from "../../src/gen/connection_pb";
+import { type SessionEntry } from "../../src/gen/session_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { SessionInspectorDrawer } from "../../src/components/sessions/SessionInspectorDrawer";
 import { mountWithRpc } from "../support/rpc/inMemory";

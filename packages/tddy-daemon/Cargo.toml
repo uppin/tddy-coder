@@ -129,6 +129,8 @@ tddy-session-activity = { path = "../tddy-session-activity" }
 # store and mirror — `#unbundle` node 7. The daemon keeps `clone_worktree_path`, which resolves a
 # checkout through `workspace_session`, and re-exports the rest through the same four module paths.
 tddy-session-agents = { path = "../tddy-session-agents" }
+tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
+tddy-projects = { path = "../tddy-projects" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

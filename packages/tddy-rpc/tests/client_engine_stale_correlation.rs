@@ -52,7 +52,7 @@ async fn ignores_a_stream_frame_left_over_from_a_previous_connection() {
     // Given — a control watch open on this connection
     let engine = ClientEngine::with_client_epoch("web-alice", THIS_CONNECTION);
     let (request, mut rx) = engine.begin_stream(
-        "connection.ConnectionService",
+        "the pre-unbundle monolithic RPC coordinate",
         "WatchTerminalControl",
         vec![],
     );
@@ -64,7 +64,7 @@ async fn ignores_a_stream_frame_left_over_from_a_previous_connection() {
             request.request_id,
             THE_CLOSED_CONNECTION,
             b"\x1b[2K  6. Chat about this\r\n",
-            "connection.ConnectionService",
+            "the pre-unbundle monolithic RPC coordinate",
             "StreamTerminalOutput",
         ))
         .await;
@@ -81,7 +81,7 @@ async fn delivers_a_stream_frame_minted_by_this_connection() {
     // Given — a control watch open on this connection
     let engine = ClientEngine::with_client_epoch("web-alice", THIS_CONNECTION);
     let (request, mut rx) = engine.begin_stream(
-        "connection.ConnectionService",
+        "the pre-unbundle monolithic RPC coordinate",
         "WatchTerminalControl",
         vec![],
     );
@@ -92,7 +92,7 @@ async fn delivers_a_stream_frame_minted_by_this_connection() {
             request.request_id,
             THIS_CONNECTION,
             b"screen-1755100800000-k3f9qz",
-            "connection.ConnectionService",
+            "the pre-unbundle monolithic RPC coordinate",
             "WatchTerminalControl",
         ))
         .await;
@@ -112,7 +112,7 @@ async fn ignores_a_frame_answering_a_different_method_on_the_same_request_id() {
     // Given — this connection's call is a control watch
     let engine = ClientEngine::with_client_epoch("web-alice", THIS_CONNECTION);
     let (request, mut rx) = engine.begin_stream(
-        "connection.ConnectionService",
+        "the pre-unbundle monolithic RPC coordinate",
         "WatchTerminalControl",
         vec![],
     );
@@ -125,7 +125,7 @@ async fn ignores_a_frame_answering_a_different_method_on_the_same_request_id() {
             request.request_id,
             THIS_CONNECTION,
             b"\x1b[2K  6. Chat about this\r\n",
-            "connection.ConnectionService",
+            "the pre-unbundle monolithic RPC coordinate",
             "StreamTerminalOutput",
         ))
         .await;
@@ -142,7 +142,7 @@ async fn ignores_a_unary_response_left_over_from_a_previous_connection() {
     // Given — a unary claim in flight on this connection
     let engine = ClientEngine::with_client_epoch("web-alice", THIS_CONNECTION);
     let (request, rx) = engine.begin_unary(
-        "connection.ConnectionService",
+        "the pre-unbundle monolithic RPC coordinate",
         "ClaimTerminalControl",
         vec![],
     );
@@ -152,7 +152,7 @@ async fn ignores_a_unary_response_left_over_from_a_previous_connection() {
         request.request_id,
         THE_CLOSED_CONNECTION,
         b"stale",
-        "connection.ConnectionService",
+        "the pre-unbundle monolithic RPC coordinate",
         "ClaimTerminalControl",
     );
     stale.end_of_stream = true;

@@ -1,5 +1,5 @@
 /**
- * Cross-daemon fan-out for `ConnectionService.ListSubagents` — the agents a picker can offer.
+ * Cross-daemon fan-out for `SessionService.ListSubagents` — the agents a picker can offer.
  *
  * A daemon answers `ListSubagents` for its **own** defs only; it never forwards to its peers (the
  * request carries no routing field at all). So a picker that asks one daemon can only ever offer

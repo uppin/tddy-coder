@@ -6,14 +6,12 @@ use std::sync::Arc;
 
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
 
 mod common;
 use common::{a_capture_showing, PTY_STUB_OUTPUT};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
-};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 
 // ---------------------------------------------------------------------------
 // Test helpers (shared with claude_cli_session_acceptance.rs patterns)
@@ -62,7 +60,7 @@ fn minimal_service_with_manager(
     config: DaemonConfig,
     sessions_base: PathBuf,
     manager: Arc<ClaudeCliSessionManager>,
-) -> ConnectionServiceImpl {
+) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -74,7 +72,7 @@ fn minimal_service_with_manager(
             None
         }
     });
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

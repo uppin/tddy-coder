@@ -1,4 +1,4 @@
-import type { SessionEntry } from "../gen/connection_pb";
+import type { SessionEntry } from "../gen/session_pb";
 
 /** Display status token for a session. */
 export type ConnectionStatus = "connected" | "disconnected" | "needs-input";

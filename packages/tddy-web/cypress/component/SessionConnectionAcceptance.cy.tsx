@@ -23,11 +23,7 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import { create, toBinary } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ConnectionState, type Room } from "livekit-client";
-import {
-  ConnectionService,
-  ListSessionsResponseSchema,
-  SessionEntrySchema,
-} from "../../src/gen/connection_pb";
+import { SessionService, ListSessionsResponseSchema, SessionEntrySchema } from "../../src/gen/session_pb";
 import { TokenService, GenerateTokenResponseSchema } from "../../src/gen/token_pb";
 import { daemonRpcIdentity } from "../../src/lib/participantRole";
 import { SessionRuntime } from "../../src/components/sessions/SessionRuntime";
@@ -138,7 +134,7 @@ function SessionProbe({ connections }: { connections: SessionConnection[] }) {
     setRefusals(
       connections.map((c) => {
         try {
-          c.clientFor(ConnectionService);
+          c.clientFor(SessionService);
           return `${c.sessionId}:served`;
         } catch {
           return `${c.sessionId}:refused`;
@@ -174,7 +170,7 @@ function SessionCallProbe({ connection }: { connection: SessionConnection }) {
 
   React.useEffect(() => {
     void connection
-      .clientFor(ConnectionService)
+      .clientFor(SessionService)
       .listSessions({})
       .then((res) => setLabel(`sessions: ${res.sessions.length}`));
   }, [connection]);
@@ -296,7 +292,7 @@ describe("a session connection on a host that serves its own session RPC", () =>
 
   it("serves the session's own RPC through the connection", () => {
     // Given the daemon answering a session-scoped call
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
+    cy.intercept("POST", "**/rpc/session.SessionService/ListSessions", (req) => {
       req.reply({
         statusCode: 200,
         headers: { "Content-Type": "application/proto" },

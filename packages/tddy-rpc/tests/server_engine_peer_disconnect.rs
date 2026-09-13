@@ -173,7 +173,7 @@ fn an_opening_request(
         request_id,
         request_message: payload.to_vec(),
         call_metadata: Some(CallMetadata {
-            service: "connection.ConnectionService".to_string(),
+            service: "the pre-unbundle monolithic RPC coordinate".to_string(),
             method: method.to_string(),
         }),
         metadata: None,

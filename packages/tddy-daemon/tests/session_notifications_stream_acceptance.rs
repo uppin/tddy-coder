@@ -19,7 +19,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_daemon::config::{DaemonConfig, UserMapping};
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::session_notification_subscribers::SessionNotificationStreamSubscriber;
 use tddy_daemon::session_notifications::SessionNotificationBus;
 use tddy_rpc::Request;
@@ -135,7 +135,7 @@ fn a_config_for_two_operators() -> DaemonConfig {
 /// `sessions_base_for_user` answers for every user once a data directory is configured — the shape
 /// a real daemon runs in. A session's owner is therefore not something the directory layout says;
 /// it is what the reporting hook names, and what the notification carries.
-fn a_service_with_a_notification_stream(sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn a_service_with_a_notification_stream(sessions_base: PathBuf) -> DaemonSessionHost {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_os_user| Some(sessions_base.clone()));
@@ -148,7 +148,7 @@ fn a_service_with_a_notification_stream(sessions_base: PathBuf) -> ConnectionSer
     let bus = SessionNotificationBus::new()
         .with_subscriber(Arc::new(SessionNotificationStreamSubscriber::new()));
 
-    ConnectionServiceImpl::new(
+    DaemonSessionHost::new(
         a_config_for_two_operators(),
         sessions_base_resolver,
         tddy_data_dir,
@@ -164,7 +164,7 @@ fn a_service_with_a_notification_stream(sessions_base: PathBuf) -> ConnectionSer
 type NotificationStream = <tddy_daemon::connection_service::PeerRoutedActivity
     as ActivityService>::StreamSessionNotificationsStream;
 
-async fn a_subscribed_client(service: &ConnectionServiceImpl) -> NotificationStream {
+async fn a_subscribed_client(service: &DaemonSessionHost) -> NotificationStream {
     service
         .activity_service()
         .stream_session_notifications(Request::new(StreamSessionNotificationsRequest {
@@ -175,14 +175,14 @@ async fn a_subscribed_client(service: &ConnectionServiceImpl) -> NotificationStr
         .into_inner()
 }
 
-async fn report_status(service: &ConnectionServiceImpl, session_id: &str, status: &str) {
+async fn report_status(service: &DaemonSessionHost, session_id: &str, status: &str) {
     report_status_owned_by(service, OS_USER, session_id, status).await;
 }
 
 /// The same hook, reported for a session belonging to `os_user`. The owner a hook names is the
 /// owner the notification carries.
 async fn report_status_owned_by(
-    service: &ConnectionServiceImpl,
+    service: &DaemonSessionHost,
     os_user: &str,
     session_id: &str,
     status: &str,

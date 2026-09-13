@@ -15,7 +15,7 @@ use tokio_stream::StreamExt;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status, Streaming};
 
-use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::{
     EchoRequest, EchoResponse, EchoStreamFrame, EgressRequest, EgressResponse,
@@ -532,6 +532,15 @@ impl SandboxSessionRelay {
         String,
         tokio::sync::mpsc::UnboundedReceiver<Result<Vec<u8>, tddy_rpc::Status>>,
     )> {
+        // CONNECT tunnels already wait for the host to attach; roster and conversation RPCs
+        // must do the same — the jail's tool-IPC socket comes up before `dial_and_bridge` finishes
+        // opening the stdio `SessionChannel`, and an immediate refusal looks like a broken relay.
+        if self.outbound.lock().unwrap().is_none()
+            && !self.wait_for_outbound(Duration::from_secs(10)).await
+        {
+            return None;
+        }
+
         let request_id = format!("rpc-{}", self.rpc_seq.fetch_add(1, Ordering::Relaxed));
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         self.rpc_streams

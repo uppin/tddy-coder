@@ -447,7 +447,7 @@ async fn start_claude_model_callback_launches_claude_cli() {
 
 /// **start_claude_uses_shared_manager**: after `spawn_telegram_claude_cli`, the injected
 /// `Arc<ClaudeCliSessionManager>` must contain the session — proving it is attachable via the
-/// terminal-stream RPCs (the same registry the daemon's `ConnectionServiceImpl` uses).
+/// terminal-stream RPCs (the same registry the daemon's `DaemonSessionHost` uses).
 #[tokio::test]
 #[serial_test::serial]
 async fn start_claude_uses_shared_manager() {

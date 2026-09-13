@@ -19,7 +19,7 @@ import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { DaemonSelectorConnected } from "../../src/components/shell/DaemonSelector";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { daemonSelectorPage } from "../support/pages/daemonSelectorPage";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
@@ -87,7 +87,7 @@ describe("SessionsDrawerScreen — changing daemon reloads the screen", () => {
     // `connectSession` config mirrors the proven SessionTerminateRefetch harness: an active
     // session's terminal mounts on select and connects to a (deliberately unreachable) LiveKit URL,
     // failing gracefully — without the config it renders down a broken path.
-    const backend = aConnectionServiceBackend({
+    const backend = aSessionServiceBackend({
       sessions: [SESSION_ON_ALPHA],
       connectSession: {
         livekitRoom: "room-a",

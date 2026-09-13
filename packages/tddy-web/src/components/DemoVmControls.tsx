@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ConnectionService,
-  DemoVmState,
-} from "../gen/connection_pb";
+import { DemoVmService, DemoVmState } from "../gen/demo_vm_pb";
 import { useDaemonClient } from "../rpc/selectedDaemon";
 import { Button } from "@/components/ui/button";
 
@@ -26,7 +23,7 @@ export function DemoVmControls({
   const [status, setStatus] = useState<VmStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const client = useDaemonClient(ConnectionService);
+  const client = useDaemonClient(DemoVmService);
 
   const fetchStatus = useCallback(async () => {
     if (!client) return;

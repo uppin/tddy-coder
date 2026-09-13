@@ -13,9 +13,8 @@ use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
 use tddy_service::acp_replay::{append_acp_frame, tool_use_frame};
 use tddy_service::proto::acp::ToolCallStatus;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListSessionsRequest,
-    SessionEntry as ProtoSessionEntry,
+use tddy_service::proto::session::{
+    ListSessionsRequest, SessionEntry as ProtoSessionEntry, SessionService as SessionServiceTrait,
 };
 use tddy_service::proto::types::SessionAgentStatus;
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};

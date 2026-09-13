@@ -2,8 +2,8 @@
  * In-memory `worktree.WorktreeService` backend — the session Worktree tab's cache-backed list and
  * its clear/delete/restore writes, plus the Worktrees screen's lazy streamed disk usage.
  *
- * Split out of `connectionServiceBackend.ts` when the nine worktree RPCs left
- * `connection.ConnectionService` for `worktree.WorktreeService`: a fake is registered per service,
+ * Split out of `daemonSessionHostBackend.ts` when the nine worktree RPCs left
+ * `session.SessionService` for `worktree.WorktreeService`: a fake is registered per service,
  * so a screen's backend composes the two rather than one `.implement` covering both.
  * `aWorktreeServiceFake` is the composable half (`handlers` spread into a caller's own
  * `.implement(WorktreeService, …)`), `aWorktreeServiceBackend` the standalone one, mirroring

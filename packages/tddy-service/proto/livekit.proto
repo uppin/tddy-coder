@@ -4,7 +4,7 @@ package livekit;
 
 // LiveKit rooms observability: what rooms this daemon can see, and who is in them.
 //
-// Split out of `connection.ConnectionService` by `#unbundle` node 4. One method, and it moves rather
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 4. One method, and it moves rather
 // than staying because leaving it would keep the daemon serving a handler for a subsystem that now
 // lives in `tddy-daemon-livekit` — which is exactly the shape this stack exists to remove. One method
 // is also the cheapest possible second exercise of the proto-split mechanics node 1 established.

@@ -2023,7 +2023,7 @@ pub trait SessionTokenMinter: Send + Sync {
 
 /// One `GetWorktreeSnapshot` call, as the room's poll loop needs it.
 ///
-/// A trait so the room does not depend on `ConnectionServiceImpl`: the daemon supplies the real
+/// A trait so the room does not depend on `DaemonSessionHost`: the daemon supplies the real
 /// implementation, and the dependency runs one way.
 #[async_trait::async_trait]
 pub trait RemoteSnapshotSource: Send + Sync {

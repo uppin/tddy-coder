@@ -29,7 +29,7 @@ describe("projectSelectOptions", () => {
 
   it("keeps the first row's name when the same project is registered under two different names", () => {
     // Given — one project id, named differently in each host's registry (the `dup-*` collision
-    // fixture in cypress/support/rpc/connectionServiceBackend.ts)
+    // fixture in cypress/support/rpc/daemonSessionHostBackend.ts)
     const rows = [
       aProjectRow({ projectId: "proj-dup", name: "dup-workstation" }),
       aProjectRow({ projectId: "proj-dup", name: "dup-server" }),

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::test_util::TestDaemon;
 use tddy_rpc::Request;
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
@@ -36,7 +36,7 @@ fn service_with_config(config: DaemonConfig, tddy_data_dir: PathBuf) -> TestDaem
             None
         }
     });
-    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,

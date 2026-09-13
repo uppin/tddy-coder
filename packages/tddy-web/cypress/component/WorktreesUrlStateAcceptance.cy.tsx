@@ -14,9 +14,9 @@ import { WorktreeSizeStatus } from "../../src/gen/worktree_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
-  aConnectionServiceBackend,
+  aSessionServiceBackend,
   type WorktreeStatsRowInput,
-} from "../support/rpc/connectionServiceBackend";
+} from "../support/rpc/daemonSessionHostBackend";
 import { ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN } from "../support/rpc/durableSessionBackend";
 import { worktreesPage } from "../support/pages/worktreesPage";
 import { appLocationPage } from "../support/pages/appLocationPage";
@@ -51,7 +51,7 @@ const A_ROW: WorktreeStatsRowInput = {
 };
 
 function mountWorktrees() {
-  const backend = aConnectionServiceBackend({
+  const backend = aSessionServiceBackend({
     projectsOverride: [ALPHA_PROJECT, BRAVO_PROJECT],
     worktreeStatsSnapshot: [A_ROW],
   });

@@ -4,13 +4,16 @@
 //! They fail until live `tcp:` dispatch, chain integration-base merge, and explicit-operator merge land.
 
 fn telegram_bot_rs() -> &'static str {
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/telegram_bot.rs"))
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tddy-session-lifecycle/src/telegram_bot.rs"
+    ))
 }
 
 fn telegram_session_control_rs() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/telegram_session_control.rs"
+        "/../tddy-session-lifecycle/src/telegram_session_control.rs"
     ))
 }
 

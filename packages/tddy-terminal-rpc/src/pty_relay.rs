@@ -126,8 +126,8 @@ async fn run_local_pty(config: PtyRelayConfig) -> Result<()> {
 fn build_start_session_request(
     config: &PtyRelayConfig,
     session_token: &str,
-) -> tddy_service::proto::connection::StartSessionRequest {
-    use tddy_service::proto::connection::StartSessionRequest;
+) -> tddy_service::proto::session::StartSessionRequest {
+    use tddy_service::proto::session::StartSessionRequest;
 
     StartSessionRequest {
         session_token: session_token.to_string(),
@@ -174,7 +174,7 @@ async fn run_grpc_connect_only(config: PtyRelayConfig) -> Result<()> {
 
 async fn run_grpc_start_and_connect(config: PtyRelayConfig) -> Result<()> {
     use prost::Message as _;
-    use tddy_service::proto::connection::StartSessionResponse;
+    use tddy_service::proto::session::StartSessionResponse;
 
     let project_id = config
         .project_id
@@ -193,7 +193,7 @@ async fn run_grpc_start_and_connect(config: PtyRelayConfig) -> Result<()> {
     let resp_bytes = connectrpc_post(
         &reqwest::Client::new(),
         &config.daemon_url,
-        "connection.ConnectionService",
+        "session.SessionService",
         "StartSession",
         req.encode_to_vec(),
     )
@@ -226,7 +226,7 @@ async fn run_grpc_start_and_connect(config: PtyRelayConfig) -> Result<()> {
 #[cfg(feature = "livekit")]
 async fn run_livekit_session(config: PtyRelayConfig) -> Result<()> {
     use prost::Message as _;
-    use tddy_service::proto::connection::StartSessionResponse;
+    use tddy_service::proto::session::StartSessionResponse;
 
     // Connect-only path: no StartSession, just connect to the given LiveKit identity.
     if let Some(server_identity) = config.server_identity.clone() {
@@ -254,7 +254,7 @@ async fn run_livekit_session(config: PtyRelayConfig) -> Result<()> {
     let resp_bytes = connectrpc_post(
         &reqwest::Client::new(),
         &config.daemon_url,
-        "connection.ConnectionService",
+        "session.SessionService",
         "StartSession",
         req.encode_to_vec(),
     )
@@ -512,12 +512,12 @@ async fn connect_session_over_http(
     session_id: &str,
 ) -> Result<()> {
     use prost::Message as _;
-    use tddy_service::proto::connection::ConnectSessionRequest;
+    use tddy_service::proto::session::ConnectSessionRequest;
 
     connectrpc_post(
         &reqwest::Client::new(),
         daemon_url,
-        "connection.ConnectionService",
+        "session.SessionService",
         "ConnectSession",
         ConnectSessionRequest {
             session_token: session_token.to_string(),

@@ -5,7 +5,7 @@ package catalog;
 // What this daemon can offer: the tools it allows, the coding backends it allows, each backend's
 // models, and every subagent a name resolves against here.
 //
-// Split out of `connection.ConnectionService` by `#unbundle` node 8 — family A — and served from
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 8 — family A — and served from
 // `tddy-discovery`, which already resolves every one of these answers.
 //
 // The four methods are answered from **configuration rows and the agent catalogue**, not from daemon

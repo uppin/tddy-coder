@@ -10,14 +10,14 @@
  */
 
 import React from "react";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionService } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
-  aConnectionServiceBackend,
-  type ConnectionServiceBackend,
-} from "../support/rpc/connectionServiceBackend";
+  aSessionServiceBackend,
+  type SessionServiceBackend,
+} from "../support/rpc/daemonSessionHostBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTerminalTabsPage";
 
@@ -40,8 +40,8 @@ const SESSION = {
 /** A host-served backend (empty `livekitRoom`) with an optional set of pre-existing bash tabs. */
 function aGrpcBackend(
   terminals: Array<{ terminalId: string }> = [],
-): ConnectionServiceBackend {
-  return aConnectionServiceBackend({
+): SessionServiceBackend {
+  return aSessionServiceBackend({
     sessions: [SESSION],
     connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
     terminals,
@@ -49,7 +49,7 @@ function aGrpcBackend(
 }
 
 /** Attach the session over gRPC and wait for its terminal tab bar to render. */
-function attachSession(backend: ConnectionServiceBackend) {
+function attachSession(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
   tabs.tabs().should("exist");
@@ -87,7 +87,7 @@ describe("SessionTerminalTabs — Agent + bash terminals per session", () => {
     tabs.newTab().click();
 
     // Then StartTerminalSession was called for this session ...
-    cy.wrap(backend).should((b: ConnectionServiceBackend) => {
+    cy.wrap(backend).should((b: SessionServiceBackend) => {
       expect(b.startTerminalSessionIds).to.include(SESSION.sessionId);
     });
 
@@ -96,7 +96,7 @@ describe("SessionTerminalTabs — Agent + bash terminals per session", () => {
     tabs.agentTab().should("have.attr", "aria-selected", "false");
 
     // ... and its terminal opens an output stream addressed to the new terminal_id.
-    cy.wrap(backend).should((b: ConnectionServiceBackend) => {
+    cy.wrap(backend).should((b: SessionServiceBackend) => {
       expect(b.streamedTerminals.map((s) => s.terminalId)).to.include("bash-1");
     });
   });
@@ -130,7 +130,7 @@ describe("SessionTerminalTabs — Agent + bash terminals per session", () => {
     tabs.tabClose("bash-1").click();
 
     // Then StopTerminalSession was called for that terminal_id ...
-    cy.wrap(backend).should((b: ConnectionServiceBackend) => {
+    cy.wrap(backend).should((b: SessionServiceBackend) => {
       expect(b.stoppedTerminals).to.deep.include({
         sessionId: SESSION.sessionId,
         terminalId: "bash-1",
@@ -156,7 +156,7 @@ describe("SessionTerminalTabs — Agent + bash terminals per session", () => {
     tabs.paneTerminal("bash-1").click().type("ls\n");
 
     // Then the input is sent tagged with the active terminal's id, not "main".
-    cy.wrap(backend).should((b: ConnectionServiceBackend) => {
+    cy.wrap(backend).should((b: SessionServiceBackend) => {
       const targets = new Set(b.sentTerminalInput.map((i) => i.terminalId));
       expect(targets).to.include("bash-1");
       expect(b.sentTerminalInput.every((i) => i.sessionId === SESSION.sessionId)).to.equal(true);

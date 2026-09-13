@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ConnectError } from "@connectrpc/connect";
-import { type SessionEntry } from "../../gen/connection_pb";
+import { type SessionEntry } from "../../gen/session_pb";
 import { SessionAgentService, type SessionAgentEntry } from "../../gen/session_agents_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { Button } from "../ui/button";

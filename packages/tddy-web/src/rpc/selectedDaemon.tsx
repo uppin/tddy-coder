@@ -3,7 +3,7 @@
  *
  * A `tddy-daemon` joins the common room as two participants (see `participantRole.ts`'s
  * `daemonRpcIdentity` doc comment): the selector lists daemons by their discovery identity, but
- * daemon-level RPC (`ConnectionService`, `TaskService`, `VmService`, …) must address
+ * daemon-level RPC (`SessionService`, `TaskService`, `VmService`, …) must address
  * `daemon-{instanceId}`. `SelectedDaemonProvider` owns the one common-room connection shared by
  * every daemon-mode screen, the currently selected daemon, and `useDaemonClient` — the daemon-level
  * equivalent of `useHttpClient` from `./transportProvider`.

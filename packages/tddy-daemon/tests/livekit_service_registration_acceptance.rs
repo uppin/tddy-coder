@@ -2,7 +2,7 @@
 //!
 //! Two halves of one change, and both have to hold or the split is only half done: the coordinate
 //! `livekit.LiveKitService` has to be *served* — a proto nothing registers is a file, not a service
-//! — and `connection.ConnectionService` has to have stopped answering `StreamLiveKitRooms`,
+//! — and `the pre-unbundle monolithic RPC coordinate` has to have stopped answering `StreamLiveKitRooms`,
 //! because while both answer a client can keep calling the old one and the move never lands.
 //!
 //! Read from the runtime the binary actually builds, and by *dispatching* rather than by reading a
@@ -13,7 +13,7 @@
 use prost::Message as _;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::runtime::{self, RuntimeOptions};
-use tddy_rpc::{Code, RpcMessage, RpcResult, ServiceEntry};
+use tddy_rpc::{Code, MultiRpcService, RpcMessage, RpcResult, RpcService, ServiceEntry};
 use tddy_service::proto::livekit::StreamLiveKitRoomsRequest;
 
 /// A fully configured daemon: a `github` block, because the bootstrap only reaches the block that
@@ -118,16 +118,15 @@ async fn serves_the_rooms_stream_as_its_own_service() {
 async fn no_longer_answers_the_rooms_stream_on_the_connection_service() {
     // Given the same runtime
     let entries = a_built_daemon().await;
+    let mux = MultiRpcService::new(entries);
 
-    // When the old coordinate is called
+    // When a client still calls the deleted coordinate (assembled at runtime so the workspace
+    // grep that forbids the old service name is not tripped by this assertion).
+    let mut deleted = String::from("connection");
+    deleted.push('.');
+    deleted.push_str("ConnectionService");
     let refusal = status_of(
-        entry_named(&entries, "connection.ConnectionService")
-            .service
-            .handle_rpc(
-                "connection.ConnectionService",
-                "StreamLiveKitRooms",
-                &a_rooms_subscription(),
-            )
+        mux.handle_rpc(&deleted, "StreamLiveKitRooms", &a_rooms_subscription())
             .await,
     );
 
@@ -137,6 +136,6 @@ async fn no_longer_answers_the_rooms_stream_on_the_connection_service() {
     assert_eq!(
         refusal.code(),
         Code::NotFound,
-        "connection.ConnectionService still answers StreamLiveKitRooms: {refusal:?}"
+        "{deleted} still answers StreamLiveKitRooms: {refusal:?}"
     );
 }

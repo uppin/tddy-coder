@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
-import type { BranchConflict, ConnectionService, ProjectEntry, SessionEntry } from "../../gen/connection_pb";
+import type { BranchConflict, SessionService, SessionEntry } from "../../gen/session_pb";
+import type { ProjectService, ProjectEntry } from "../../gen/project_pb";
 import { CatalogService, type ToolInfo } from "../../gen/catalog_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
@@ -58,7 +59,8 @@ const WORKFLOW_RECIPES = [
 // Types
 // ---------------------------------------------------------------------------
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type ConnectionClient = Client<typeof SessionService>;
+type ProjectClient = Client<typeof ProjectService>;
 type CatalogClient = Client<typeof CatalogService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
@@ -127,6 +129,8 @@ export type CreateSessionInitialValues = Partial<{
 
 export interface CreateSessionPaneProps {
   client: ConnectionClient;
+  /** `project.ProjectService` on the same host as `client` — project registry reads. */
+  projectClient: ProjectClient;
   /** `catalog.CatalogService` on the same host as `client` — tools, agents and model probes. */
   catalogClient: CatalogClient;
   /**
@@ -153,6 +157,7 @@ export interface CreateSessionPaneProps {
 
 export function CreateSessionPane({
   client,
+  projectClient,
   catalogClient,
   sessionFilesClient,
   worktreeClient,
@@ -378,7 +383,7 @@ export function CreateSessionPane({
 
     // Agents are not read here: they are fanned out across every host by `useSelectableAgents`,
     // since one daemon's answer speaks only for itself.
-    Promise.all([client.listProjects({ sessionToken }), catalogClient.listTools({})])
+    Promise.all([projectClient.listProjects({ sessionToken }), catalogClient.listTools({})])
       .then(([projectsResp, toolsResp]) => {
         if (cancelled) return;
 
@@ -407,13 +412,13 @@ export function CreateSessionPane({
     return () => {
       cancelled = true;
     };
-  }, [client, catalogClient, sessionToken]);
+  }, [client, projectClient, catalogClient, sessionToken]);
 
   // Load branches when projectId changes and intent is work_on_selected_branch
   useEffect(() => {
     if (!projectId || branchIntent !== "work_on_selected_branch") return;
     let cancelled = false;
-    client
+    projectClient
       .listProjectBranches({ sessionToken, projectId, daemonInstanceId })
       .then((resp) => {
         if (!cancelled) {

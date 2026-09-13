@@ -153,8 +153,9 @@ async fn round_trips_an_echo_over_stdio_through_a_real_seatbelt_jail() {
     assert!(ready_marker.exists(), "ready marker must appear");
 
     // When bridging the jailed process's piped stdio into an RPC client and calling Echo
-    let (client, _run_handle) =
-        bridge_sandbox_stdio(&mut handle, NoCallbackService).expect("bridge sandbox stdio");
+    let (client, _run_handle) = bridge_sandbox_stdio(&mut handle, NoCallbackService)
+        .await
+        .expect("bridge sandbox stdio");
     let request = EchoRequest {
         message: "hello-through-seatbelt".to_string(),
     };
@@ -300,8 +301,9 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
     assert!(ready_marker.exists(), "ready marker must appear");
 
     // When bridging the jailed process's piped stdio, driving it via the real run_host_relay
-    let (client, _run_handle) =
-        bridge_sandbox_stdio(&mut handle, NoCallbackService).expect("bridge sandbox stdio");
+    let (client, _run_handle) = bridge_sandbox_stdio(&mut handle, NoCallbackService)
+        .await
+        .expect("bridge sandbox stdio");
     let stdio_client = tddy_sandbox_runner::StdioSandboxClient::new(client);
     let (_stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
     let (term_tx, _term_rx) = tokio::sync::mpsc::unbounded_channel();

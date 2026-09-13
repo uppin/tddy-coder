@@ -5,7 +5,7 @@
 // PRD: docs/ft/web/inactive-session-activities.md § View selection.
 
 import { connectionStatusForSession } from "../../utils/connectionStatusForSession";
-import type { SessionEntry } from "../../gen/connection_pb";
+import type { SessionEntry } from "../../gen/session_pb";
 
 /** The main pane's base view: a per-workflow screen, the recorded ACP transcript, or the terminal. */
 export type SessionBaseViewMode = "workflow" | "activities" | "terminal";

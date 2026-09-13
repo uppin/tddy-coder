@@ -24,7 +24,7 @@
 import { describe, it, expect } from "bun:test";
 import type { Client, Transport } from "@connectrpc/connect";
 import { ConnectionState, type Room } from "livekit-client";
-import { ConnectionService } from "../../../gen/connection_pb";
+import { SessionService } from "../../../gen/session_pb";
 import type { TokenService } from "../../../gen/token_pb";
 import { daemonRpcIdentity } from "../../../lib/participantRole";
 import { LiveKitConnectionProvider, type LiveKitSessionResources } from "../liveKit";
@@ -274,7 +274,7 @@ describe("opening a session whose attach reply names a room", () => {
     );
 
     // When it builds a client
-    session.clientFor(ConnectionService);
+    session.clientFor(SessionService);
 
     // Then the calls go where the daemon said — not to the daemon participant, which is where a
     // session RPC quietly landed whenever the LiveKit path was not taken
@@ -293,7 +293,7 @@ describe("opening a session whose attach reply names a room", () => {
     );
 
     // When it builds a client
-    session.clientFor(ConnectionService);
+    session.clientFor(SessionService);
 
     // Then the identity is derived, exactly as `sessionParticipantRpcClient` has always built it
     expect(routes.map((r) => r.targetIdentity)).toEqual([`daemon-${A_HOST}-${A_SESSION}`]);
@@ -494,7 +494,7 @@ describe("opening a session whose attach reply names no room", () => {
 
     // Then it is the host's own client, not a second one built over a room that was never named.
     // This is today's `connected-grpc` fallback, except that it is no longer a fallback.
-    expect(session.clientFor(ConnectionService)).toBe(host.clientFor(ConnectionService));
+    expect(session.clientFor(SessionService)).toBe(host.clientFor(SessionService));
   });
 
   it("advertises rpc only, so the media surfaces do not apply to it", () => {
@@ -533,8 +533,8 @@ describe("a session client's identity", () => {
     }).openSession(A_SESSION, attachmentHintFromReply(A_SESSION, A_ROOM_BACKED_REPLY));
 
     // When its client is asked for twice — what a host re-rendering does
-    const first = session.clientFor(ConnectionService);
-    const second = session.clientFor(ConnectionService);
+    const first = session.clientFor(SessionService);
+    const second = session.clientFor(SessionService);
 
     // Then it is one client. `useAcpReplay` keys an effect on it and cancels an in-flight snapshot
     // pull when it changes, so a re-render that mints a new one loses the Agent Activity feed.
@@ -559,8 +559,8 @@ describe("a session client's identity", () => {
     );
 
     // When each builds a client
-    one.clientFor(ConnectionService);
-    other.clientFor(ConnectionService);
+    one.clientFor(SessionService);
+    other.clientFor(SessionService);
 
     // Then the two are routed to different participants. Asserting merely that the clients are
     // different objects proves nothing here — `openSession` is not memoised, so *any* two calls
@@ -639,7 +639,7 @@ describe("detaching a session", () => {
     session.close();
 
     // Then a call issued against it says so, rather than being sent somewhere that will never answer
-    expect(() => session.clientFor(ConnectionService)).toThrow(
+    expect(() => session.clientFor(SessionService)).toThrow(
       `session ${A_SESSION} on host ${A_HOST} is closed`,
     );
   });

@@ -12,7 +12,7 @@
  */
 
 import React from "react";
-import { ConnectionService } from "../../../src/gen/connection_pb";
+import { ProjectService } from "../../../src/gen/project_pb";
 import { AcpService, type AcpAgentMessage } from "../../../src/gen/tddy/acp/v1/acp_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import { daemonRpcIdentity, type DaemonHost } from "../../../src/lib/participantRole";
@@ -60,7 +60,7 @@ function aChattingAssistant(...frames: AcpAgentMessage[]) {
     assistants: [anAssistant({ tools: ["Read", "Grep"] })],
   })
     .implement(AcpService, { session: acpScriptedSession(...frames) })
-    .onUnary(ConnectionService.method.listProjects, () => listedProjects([TDDY_CODER]));
+    .onUnary(ProjectService.method.listProjects, () => listedProjects([TDDY_CODER]));
 }
 
 /** Open the assistant's chat in its daemon's only checkout. */

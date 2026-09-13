@@ -11,10 +11,10 @@
 
 import React from "react";
 import {
-  aConnectionServiceBackend,
-  type ConnectionServiceBackend,
-  type ConnectionServiceScenario,
-} from "../support/rpc/connectionServiceBackend";
+  aSessionServiceBackend,
+  type SessionServiceBackend,
+  type SessionServiceScenario,
+} from "../support/rpc/daemonSessionHostBackend";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -28,12 +28,12 @@ const DISK = {
 /** Mounts the footer through its real screen, exactly as `HostStatsFooterAcceptance` does — the
  *  footer reads context the screen provides, so mounting it bare fails on the harness rather than
  *  on the feature. */
-function mountFooter(backend: ConnectionServiceBackend) {
+function mountFooter(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 }
 
-function aBackend(overrides: Partial<ConnectionServiceScenario>): ConnectionServiceBackend {
-  return aConnectionServiceBackend({ sessions: [], hostDisk: DISK, ...overrides });
+function aBackend(overrides: Partial<SessionServiceScenario>): SessionServiceBackend {
+  return aSessionServiceBackend({ sessions: [], hostDisk: DISK, ...overrides });
 }
 
 describe("Host resource readings", () => {
