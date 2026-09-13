@@ -1,6 +1,6 @@
 //! Session-addressed BSP service for daemon-managed sessions.
 //!
-//! The per-session [`tddy_bsp::BspServiceImpl`] is bound to one `(session_dir, repo_root)` at
+//! The per-session [`crate::BspServiceImpl`] is bound to one `(session_dir, repo_root)` at
 //! construction — fine on the coder participant, which is single-session. Daemon-managed
 //! claude-cli/cursor sessions instead share the daemon's one RPC surface, so every request must say
 //! *which* session it targets. This service reads the `session_token`/`session_id` on each request,
@@ -11,8 +11,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::BspServiceImpl;
 use async_trait::async_trait;
-use tddy_bsp::BspServiceImpl;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::bsp::{
     BspService, BuildTargetActionRequest, BuildTargetActionResponse, BuildTargetOutputPathsRequest,
@@ -145,7 +145,7 @@ targets:
     #[tokio::test]
     async fn a_valid_session_lists_that_sessions_build_targets() {
         // Given — a repo with one target, reachable via the resolver for token "good".
-        tddy_bsp::register_catalog_provider();
+        crate::register_catalog_provider();
         let repo = tempfile::tempdir().expect("repo tempdir");
         std::fs::create_dir_all(repo.path().join("packages/foo")).expect("mkdir");
         std::fs::write(repo.path().join("packages/foo/BUILD.yaml"), A_RUST_LIBRARY)

@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tddy_daemon::workspace_tool_sandbox::{
+use tddy_daemon_sandbox::workspace_tool_sandbox::{
     build_workspace_tool_plan, workspace_sandbox_platform_support, WorkspaceSandboxLayout,
     WorkspaceToolPlanRequest,
 };

@@ -40,6 +40,8 @@ members = [
     "packages/tddy-model-registry",
     "packages/tddy-telegram",
     "packages/tddy-screen-sharing",
+    "packages/tddy-daemon-sandbox",
+    "packages/tddy-spawn",
     "packages/tddy-workflow-recipes",
     "packages/tddy-actions",
     "packages/tddy-task",

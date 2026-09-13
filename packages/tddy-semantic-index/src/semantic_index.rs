@@ -2,7 +2,7 @@
 //!
 //! When a managed `claude-cli`/`cursor-cli` session is started with `semantic_index = true`, the
 //! daemon:
-//! 1. runs a **blocking** [`tddy_semantic_index::SemanticIndexTask`] over the worktree, writing the
+//! 1. runs a **blocking** [`crate::SemanticIndexTask`] over the worktree, writing the
 //!    vector DB to `<session_dir>/semantic-index.db`, and **aborts the start** if indexing fails;
 //! 2. injects `TDDY_SEMANTIC_INDEX_DB=<that path>` into the session env so the in-jail
 //!    `SemanticSearch` tool resolves against the per-session index.
@@ -35,7 +35,7 @@ pub fn semantic_index_env(session_dir: &Path) -> (String, String) {
 ///
 /// Returns the DB path on success, or an error message if indexing failed or was cancelled — the
 /// caller aborts the session start on `Err` (no fallback).
-pub async fn run_semantic_index_blocking<E: tddy_semantic_index::Embedder + 'static>(
+pub async fn run_semantic_index_blocking<E: crate::Embedder + 'static>(
     worktree_root: &Path,
     session_dir: &Path,
     embedder: E,
@@ -44,19 +44,14 @@ pub async fn run_semantic_index_blocking<E: tddy_semantic_index::Embedder + 'sta
 ) -> Result<PathBuf, String> {
     let db_path = semantic_index_db_path(session_dir);
 
-    let task = tddy_semantic_index::SemanticIndexTask {
+    let task = crate::SemanticIndexTask {
         worktree_root: worktree_root.to_path_buf(),
         db_path: db_path.clone(),
         embedder,
     };
 
     let handle = registry
-        .spawn(
-            task,
-            tddy_semantic_index::SEMANTIC_INDEX_TASK_KIND,
-            session_id,
-            vec![],
-        )
+        .spawn(task, crate::SEMANTIC_INDEX_TASK_KIND, session_id, vec![])
         .await;
 
     let mut status = handle.status_watch();

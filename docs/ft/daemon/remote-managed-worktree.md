@@ -242,7 +242,7 @@ identity, ttl).generate()` already produces exactly this shape, with grants `roo
 being the one the RPC data channel requires. The daemon calls it at spawn with the common room and
 a session-scoped participant identity.
 
-This deliberately does **not** follow the precedent at `spawner.rs:886-902`, which passes
+This deliberately does **not** follow the precedent in `tddy-spawn`'s `spawner.rs`, which passes
 `--livekit-api-secret` to spawned `tddy-coder` on the command line, where it is readable from
 `/proc/<pid>/cmdline`. An agent process running model-authored code is not the place for a
 credential that mints tokens for any room.

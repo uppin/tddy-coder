@@ -1,5 +1,13 @@
 # ConnectionService (tddy-daemon)
 
+> **Where this code lives.** `#unbundle` node 3 moved the sandbox and spawn subsystems out of
+> `tddy-daemon`. `sandbox_session`, `workspace_tool_sandbox`, `sandbox_action`,
+> `sandbox_plan_builder` and `sandbox_runtime` are now in **`tddy-daemon-sandbox`**;
+> `spawner`, `spawn_worker`, `supervisor_spawn` and `supervisor_client` are in **`tddy-spawn`**.
+> `connection_service` itself stays here and calls into both. Module names below are qualified
+> where they refer to the moved crates.
+
+
 Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` in **daemon mode**.
 
 ## Where the code lives
@@ -240,7 +248,7 @@ The coder refuses the same conditions again at its own writer seam, because
 `require_pr_stack_orchestrator` beside each mutator's own validation.
 
 **Threading.** `SpawnOptions.stack_seed_base_session` and `SpawnRequest.stack_seed_base_session` follow
-`stack_parent` through the same sites, and **`spawner::pr_stack_spawn_args(stack_parent, stack_seed_base_session)`**
+`stack_parent` through the same sites, and **`tddy_spawn::spawner::pr_stack_spawn_args(stack_parent, stack_seed_base_session)`**
 builds both stack flags as one `Vec<String>` (each trimmed, a blank one omitted) instead of two inline
 `cmd.arg` blocks — a flag that is silently not passed is this feature's failure mode, since the
 orchestrator then comes up looking successful with an empty stack, and an argument vector can be asserted
@@ -363,7 +371,7 @@ A "host" is a daemon instance; the selectable set is the connected `tddy-daemon`
 - Not registered locally ⇒ peer-discovers `(name, git_url)` via `EligibleDaemonSource::peer_project_entries` (the same fan-out as aggregated `ListProjects`), clones into `repos_base_for_user(os_user, repos_base_path)/<name>`, and registers it via `add_or_get_project` (reusing the logical `project_id`).
 - Unknown locally and on every peer ⇒ `NotFound`.
 
-The helper takes injected `cloner` + `peer_lookup` closures for testability; the RPC wires the real cloner (`SpawnClient::clone_repo` when a spawn worker is configured, else `spawner::clone_as_user`, mirroring `AddProjectToHost`) and runs the blocking clone via `spawn_blocking` + `timeout`. Clone failures surface as errors (no masking); `NotFound` is preserved (not flattened to `internal`).
+The helper takes injected `cloner` + `peer_lookup` closures for testability; the RPC wires the real cloner (`SpawnClient::clone_repo` when a spawn worker is configured, else `tddy_spawn::spawner::clone_as_user`, mirroring `AddProjectToHost`) and runs the blocking clone via `spawn_blocking` + `timeout`. Clone failures surface as errors (no masking); `NotFound` is preserved (not flattened to `internal`).
 
 See [projects-screen-multi-host.md](../../../docs/ft/web/projects-screen-multi-host.md).
 
@@ -530,7 +538,7 @@ When `StartSessionRequest.session_type == "claude-cli"` **and** `sandbox == true
 1. Creates the same git worktree as a non-sandbox claude-cli session (host `tool_engine::execute_tool` operates on this worktree).
 2. Prepares a read-only **context dir** (`SandboxContextDir`: synced `CLAUDE.md`/`AGENTS.md`/skills + `REMOTE_APPENDIX`).
 3. Renders an SBPL profile and spawns `tddy-tools sandbox-runner` via `sandbox-exec` (`tddy-sandbox-darwin`).
-4. Waits for the ready marker, then **`dial_and_bridge`** dials the runner over its piped stdio (`--stdio`, via `bridge_sandbox_stdio` → `StdioSandboxClient`) for a single bidi **`SessionChannel`** (`sandbox_session.rs`) — no gRPC socket or port is involved for this call site (the runner's own tonic gRPC server is retained only for `tddy-sandbox-app`'s standalone demo path and `sandbox_action.rs`'s separate generic-action-execution flow).
+4. Waits for the ready marker, then **`dial_and_bridge`** dials the runner over its piped stdio (`--stdio`, via `bridge_sandbox_stdio` → `StdioSandboxClient`) for a single bidi **`SessionChannel`** (`tddy-daemon-sandbox`'s `sandbox_session.rs`) — no gRPC socket or port is involved for this call site (the runner's own tonic gRPC server is retained only for `tddy-sandbox-app`'s standalone demo path and `tddy-daemon-sandbox`'s `sandbox_action.rs` separate generic-action-execution flow).
 5. Writes `.session.yaml` with `sandbox: true`; returns empty LiveKit fields.
 
 **Specialized subagents:** the jail never mounts the repo — the agent reaches it only through the `mcp__tddy-tools__*` exec tools (this is what `managed_codebase` on `StartSessionRequest` names for users; it doesn't toggle mount behavior, since this path is always mount-free). When `specialized_agents` is non-empty, the start resolves each reference into a **roster record** (`seeded_roster_records`, § Seeding the roster at start — a qualified id naming another daemon resolves from *that* daemon; an unresolvable reference fails the request with `INVALID_ARGUMENT`) and `ConnectionServiceImpl::specialized_subagent_env` turns the resulting defs into `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` on the spawned jail's env, so the in-jail `tddy-tools --mcp` process registers the `subagent_new_session`/`subagent_prompt`/`subagent_cancel` MCP tools for those agents — see [specialized-subagents.md](../../../docs/ft/coder/specialized-subagents.md).
@@ -539,7 +547,7 @@ When `StartSessionRequest.session_type == "claude-cli"` **and** `sandbox == true
 
 The budget is **operator config**, not a constant: `DaemonConfig.agent_warmup` (`timeout_secs` 120, `retry_interval_ms` 1000, `request_timeout_secs` 120 — today's `WarmupOptions::default()`) feeds `config.agent_warmup_options()`, overridable per process by `TDDY_AGENT_WARMUP_TIMEOUT_SECS`, `TDDY_AGENT_WARMUP_RETRY_INTERVAL_MS`, `TDDY_AGENT_WARMUP_REQUEST_TIMEOUT_SECS`. A host whose endpoint is a local stub, not a GPU bringing a model up cold, sets a budget to match instead of waiting out two minutes to learn the stub is not running. `tddy-sandbox-app` still uses `WarmupOptions::default()` (its own config schema), so a daemon-hosted and a standalone session on one host can warm up with different budgets.
 
-**Claude binary + persistent jail `$HOME`:** the runner is always given the **real** `claude` as an absolute path. `config::resolve_claude_binary_path` prefers `~/.local/bin/claude`, then scans `$PATH` skipping wrapper-shim dirs (e.g. Superset's `~/.superset/bin`, which can't resolve inside the jail's `/usr/bin:/bin` PATH); overridable by the `TDDY_CLAUDE_BINARY` env var or an explicit `claude_cli.binary_path`. A bare name would give `binary_exec_reads` an empty parent (`Path::parent("claude") == Some("")`), emitting `(subpath "")` — which macOS `sandbox-exec` rejects (`empty subpath pattern`, exit 65) — so `binary_exec_reads` skips empty parents and `SandboxBuilder::build` drops empty-host reads (which would otherwise shadow the whole read allow-list). The jail `$HOME` is a **single daemon-wide persistent dir** (`config::resolve_claude_home_dir`: `TDDY_SANDBOX_CLAUDE_HOME` env > `claude_cli.claude_home_dir` > `$HOME/.tddy/sandbox-claude-home`), mounted read-write and reused across sessions so refreshed OAuth tokens, session history, and settings persist. `sandbox_session::prepare_persistent_claude_home` seeds `.claude/.credentials.json` once (non-clobbering) and mirrors the claude install so the in-jail self-check passes; the spawn passes `host_home: None` (`SandboxRunnerSpawn`) so the recipe's per-session credential copy can't overwrite a refreshed jail token. A shared **claude-sandbox config** file — per-OS `claude-sandbox.<os>.yaml` (`darwin`/`linux`) then generic `claude-sandbox.yaml`, or the `TDDY_SANDBOX_CONFIG` path (`config::resolve_sandbox_config_path`) — is intended to give the daemon parity with the `./claude-sandbox` launcher's `SandboxAppConfig`; **only the path resolver ships now — the loader that reads the file is a follow-up.**
+**Claude binary + persistent jail `$HOME`:** the runner is always given the **real** `claude` as an absolute path. `config::resolve_claude_binary_path` prefers `~/.local/bin/claude`, then scans `$PATH` skipping wrapper-shim dirs (e.g. Superset's `~/.superset/bin`, which can't resolve inside the jail's `/usr/bin:/bin` PATH); overridable by the `TDDY_CLAUDE_BINARY` env var or an explicit `claude_cli.binary_path`. A bare name would give `binary_exec_reads` an empty parent (`Path::parent("claude") == Some("")`), emitting `(subpath "")` — which macOS `sandbox-exec` rejects (`empty subpath pattern`, exit 65) — so `binary_exec_reads` skips empty parents and `SandboxBuilder::build` drops empty-host reads (which would otherwise shadow the whole read allow-list). The jail `$HOME` is a **single daemon-wide persistent dir** (`config::resolve_claude_home_dir`: `TDDY_SANDBOX_CLAUDE_HOME` env > `claude_cli.claude_home_dir` > `$HOME/.tddy/sandbox-claude-home`), mounted read-write and reused across sessions so refreshed OAuth tokens, session history, and settings persist. `tddy_daemon_sandbox::sandbox_session::prepare_persistent_claude_home` seeds `.claude/.credentials.json` once (non-clobbering) and mirrors the claude install so the in-jail self-check passes; the spawn passes `host_home: None` (`SandboxRunnerSpawn`) so the recipe's per-session credential copy can't overwrite a refreshed jail token. A shared **claude-sandbox config** file — per-OS `claude-sandbox.<os>.yaml` (`darwin`/`linux`) then generic `claude-sandbox.yaml`, or the `TDDY_SANDBOX_CONFIG` path (`config::resolve_sandbox_config_path`) — is intended to give the daemon parity with the `./claude-sandbox` launcher's `SandboxAppConfig`; **only the path resolver ships now — the loader that reads the file is a follow-up.**
 
 **`SessionChannel`** (`packages/tddy-service/proto/sandbox.proto`) multiplexes PTY output, MCP tool exec, and LLM egress on one host-poll-driven bidi stream:
 
@@ -547,11 +555,11 @@ The budget is **operator config**, not a constant: `DaemonConfig.agent_warmup` (
 |----------------|----------------|
 | `SubscribeTerminal`, `HostPoll`, `SandboxInput`, `ExecuteToolResponse`, `EgressResponse`, `TunnelOpenAck`, `TunnelData`, `TunnelClose` | `SessionTerminalOutput`, `ExecuteToolRequest`, `EgressRequest`, `TunnelOpen`, `TunnelData`, `TunnelClose` |
 
-Outbound network from the jail is **`(deny network*)`** — the sandbox never dials out. The agent reaches the network through an **in-jail HTTPS_PROXY CONNECT tunnel**: the runner exports `HTTPS_PROXY`/`HTTP_PROXY` to the `claude` PTY pointing at the loopback egress shim; `claude` issues `CONNECT api.anthropic.com:443`; the shim relays the raw (still TLS-encrypted) bytes over `SessionChannel` `TunnelOpen`/`TunnelData`/`TunnelClose` frames; the **host** (`sandbox_session.rs::spawn_tunnel`) opens the real outbound socket and pumps bytes both ways. TLS stays end-to-end, so the host never sees plaintext or credentials. The legacy unary `EgressRequest`/`EgressResponse` path (host `reqwest` fetch) is retained only for the `GET /probe` connectivity check.
+Outbound network from the jail is **`(deny network*)`** — the sandbox never dials out. The agent reaches the network through an **in-jail HTTPS_PROXY CONNECT tunnel**: the runner exports `HTTPS_PROXY`/`HTTP_PROXY` to the `claude` PTY pointing at the loopback egress shim; `claude` issues `CONNECT api.anthropic.com:443`; the shim relays the raw (still TLS-encrypted) bytes over `SessionChannel` `TunnelOpen`/`TunnelData`/`TunnelClose` frames; the **host** (`tddy_daemon_sandbox::sandbox_session::spawn_tunnel`) opens the real outbound socket and pumps bytes both ways. TLS stays end-to-end, so the host never sees plaintext or credentials. The legacy unary `EgressRequest`/`EgressResponse` path (host `reqwest` fetch) is retained only for the `GET /probe` connectivity check.
 
 > **Read confinement:** the SBPL profile is rendered from an explicit `SandboxPlan` read allow-list (`render_plan`) with **no** `(allow file-read*)` wildcard. The Claude read recipe (`tddy-sandbox/src/claude_spawn.rs`: `claude_required_reads`/`system_baseline_reads`) enumerates exactly what the V8/Node `claude` binary needs (dyld root `/`, system libs, ICU/timezone data, toolchain, the binary's `otool -L` deps, PTY devices). Both read and write are confined.
 
-> **Status:** the egress tunnel is wired in the shared `runner.rs` + `sandbox_session.rs` helpers and validated for the `tddy-sandbox-app` host path (acceptance: `sandbox_runner_tunnels_https_proxy_connect_via_session_channel`). End-to-end validation through the daemon `StartSession` (`sandbox=true`) flow is **pending** (the runtime code is shared, but no daemon-specific egress acceptance test yet).
+> **Status:** the egress tunnel is wired in the shared `runner.rs` + `tddy-daemon-sandbox`'s `sandbox_session.rs` helpers and validated for the `tddy-sandbox-app` host path (acceptance: `sandbox_runner_tunnels_https_proxy_connect_via_session_channel`). End-to-end validation through the daemon `StartSession` (`sandbox=true`) flow is **pending** (the runtime code is shared, but no daemon-specific egress acceptance test yet).
 
 **In-jail runner** (`tddy-tools sandbox-runner`): binds loopback gRPC, spawns `claude` in a PTY with `mcp__tddy-tools__*` allowlist (`sandbox_claude_spawn.rs`), routes MCP `call_tool` through tool IPC → relay queue → `ExecuteToolRequest` on `HostPoll`.
 
@@ -640,7 +648,7 @@ of escape-boundary trimming live in
 [tddy-task terminal-capture.md](../../tddy-task/docs/terminal-capture.md).
 
 Sandbox sessions take a separate branch: their PTY output arrives over the stdio bridge in
-`sandbox_session.rs` and is captured in `SandboxSessionState.capture`, a `TerminalCapture` of its
+`tddy-daemon-sandbox`'s `sandbox_session.rs` and is captured in `SandboxSessionState.capture`, a `TerminalCapture` of its
 own (it predates `TaskChannel` on this path). Attach replays through `sandbox_replay_frames`, which
 is `chunk_terminal_output(&capture.replay(), …)` — prologue first, same contract, and a named seam so
 the behaviour is unit-testable without spawning a real sandbox. Sandbox streams carry no unary
@@ -710,9 +718,9 @@ becomes commonly-open.
 
 ## Spawn worker
 
-Spawn and **git clone** requests run through a forked single-threaded worker (`spawn_worker`) so fork+setuid from a Tokio process avoids deadlocks. JSON protocol: `WorkerRequest` (`spawn` | `clone`) and `WorkerResponse` (`spawn_ok` | `clone_ok` | `error`).
+Spawn and **git clone** requests run through a forked single-threaded worker (`tddy_spawn::spawn_worker`) so fork+setuid from a Tokio process avoids deadlocks. JSON protocol: `WorkerRequest` (`spawn` | `clone`) and `WorkerResponse` (`spawn_ok` | `clone_ok` | `error`).
 
-**Startup watch** — after the fork, `spawn_as_user` watches the child for an early exit before reporting success. How long, and how often, is `spawner::StartupWatch { grace, poll }`, built from `DaemonConfig.spawn_startup_grace_period_ms` (500) and `spawn_startup_poll_interval_ms` (25) — the values that used to be `spawner` constants — and overridable by `TDDY_SPAWN_STARTUP_GRACE_PERIOD_MS` / `TDDY_SPAWN_STARTUP_POLL_INTERVAL_MS`. The worker is forked **before** env overrides are applied and holds no `DaemonConfig`, so the two values travel per request as `SpawnRequest.startup_grace_period_ms` / `startup_poll_interval_ms` (`#[serde(default = …)]`, following `child_log_level`/`child_log_format`: a legacy client's JSON decodes to the production default). `supervisor_spawn::watch_session_startup` takes the same value; `wait_for_exit` keeps its own `CLONE_POLL_INTERVAL`, because how often a *clone* is polled is a different concern from how long a session is watched.
+**Startup watch** — after the fork, `spawn_as_user` watches the child for an early exit before reporting success. How long, and how often, is `tddy_spawn::spawner::StartupWatch { grace, poll }`, built from `DaemonConfig.spawn_startup_grace_period_ms` (500) and `spawn_startup_poll_interval_ms` (25) — the values that used to be `spawner` constants — and overridable by `TDDY_SPAWN_STARTUP_GRACE_PERIOD_MS` / `TDDY_SPAWN_STARTUP_POLL_INTERVAL_MS`. The worker is forked **before** env overrides are applied and holds no `DaemonConfig`, so the two values travel per request as `SpawnRequest.startup_grace_period_ms` / `startup_poll_interval_ms` (`#[serde(default = …)]`, following `child_log_level`/`child_log_format`: a legacy client's JSON decodes to the production default). `tddy_spawn::supervisor_spawn::watch_session_startup` takes the same value; `wait_for_exit` keeps its own `CLONE_POLL_INTERVAL`, because how often a *clone* is polled is a different concern from how long a session is watched.
 
 ## Durable tool-call log
 

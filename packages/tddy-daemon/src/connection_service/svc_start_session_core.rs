@@ -1,8 +1,10 @@
 use crate::{
     connection_service::{seed_codebase, service_util, stack_parent},
-    project_storage, session_deletion, spawn_worker,
+    project_storage, session_deletion, workspace_session,
+};
+use tddy_spawn::{
+    spawn_worker,
     spawner::{self, SpawnOptions},
-    workspace_session,
 };
 
 use super::recipe_enables_conversation_spawn;
@@ -751,8 +753,8 @@ impl ConnectionServiceImpl {
             .await?;
             pre_session_id = Some(tool_session_id);
         }
-        let result = match crate::supervisor_client::spawn_backend_choice(&self.config) {
-            crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+        let result = match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
                 let spawn_req = spawn_worker::build_spawn_request(
                     &os_user,
@@ -781,11 +783,14 @@ impl ConnectionServiceImpl {
                 service_util::await_supervised_with_timeout(
                     timeout,
                     "StartSession: spawn via tddy-supervisor",
-                    crate::supervisor_spawn::spawn_session_via_supervisor(&socket_path, &spawn_req),
+                    tddy_spawn::supervisor_spawn::spawn_session_via_supervisor(
+                        &socket_path,
+                        &spawn_req,
+                    ),
                 )
                 .await?
             }
-            crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
                 service_util::spawn_blocking_with_timeout(
                     timeout,
                     "StartSession: spawn",

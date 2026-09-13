@@ -18,11 +18,11 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use bytes::Bytes;
 #[cfg(target_os = "macos")]
-use tddy_daemon::tool_engine;
-#[cfg(target_os = "macos")]
 use tddy_sandbox_runner::{run_host_relay, ExecuteToolResponse, HostRelayConfig, HostToolHandler};
 #[cfg(target_os = "macos")]
 use tddy_task::TaskRegistry;
+#[cfg(target_os = "macos")]
+use tddy_tool_engine as tool_engine;
 #[cfg(target_os = "macos")]
 use tokio::sync::mpsc;
 

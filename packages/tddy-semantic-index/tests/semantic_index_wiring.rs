@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tddy_daemon::semantic_index::{run_semantic_index_blocking, semantic_index_env};
+use tddy_semantic_index::semantic_index::{run_semantic_index_blocking, semantic_index_env};
 use tddy_semantic_index::Embedder;
 use tddy_task::TaskRegistry;
 use tempfile::TempDir;

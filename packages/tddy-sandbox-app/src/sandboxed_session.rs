@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use prost::Message;
-use tddy_daemon::sandbox_session::{
+use tddy_daemon_sandbox::sandbox_session::{
     build_sandbox_plan, build_sandbox_runner_env, pick_free_loopback_port,
     resolve_sandbox_runner_path, resolve_tddy_tools_path, spawn_sandbox_plan,
     terminate_sandbox_process, wait_for_sandbox_ready, SandboxRunnerSpawn,

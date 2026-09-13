@@ -259,7 +259,7 @@ impl ConnectionServiceImpl {
         if let Some(state) = self.sandbox_manager.remove(session_id).await {
             state.stop();
         } else if let Some(pid) = meta.pid {
-            crate::sandbox_session::terminate_sandbox_process(pid);
+            tddy_daemon_sandbox::sandbox_session::terminate_sandbox_process(pid);
         }
         tokio::time::sleep(Duration::from_millis(300)).await;
 

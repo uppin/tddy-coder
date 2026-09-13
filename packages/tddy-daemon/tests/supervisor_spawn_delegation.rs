@@ -20,14 +20,14 @@ use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_daemon::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
-use tddy_daemon::spawner::{self, LiveKitCreds, SpawnOptions};
-use tddy_daemon::supervisor_client::{spawn_worker_for, SpawnBackendChoice};
-use tddy_daemon::supervisor_spawn;
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     AddProjectToHostRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
 };
+use tddy_spawn::spawner::{self, LiveKitCreds, SpawnOptions};
+use tddy_spawn::supervisor_client::{spawn_worker_for, SpawnBackendChoice};
+use tddy_spawn::supervisor_spawn;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

@@ -56,9 +56,9 @@ pub struct RuntimeOptions {
     ///
     /// It cannot be forked here: `fork` from a multi-threaded process can deadlock, and [`build`]
     /// already runs on the host's async runtime. `None` means this daemon spawns nothing itself —
-    /// either because `tddy-supervisor` does it (see [`crate::supervisor_client`]) or because the
+    /// either because `tddy-supervisor` does it (see [`tddy_spawn::supervisor_client`]) or because the
     /// host has no worker to offer.
-    pub spawn_client: Option<(crate::spawn_worker::SpawnClient, i32)>,
+    pub spawn_client: Option<(tddy_spawn::spawn_worker::SpawnClient, i32)>,
     /// The YAML file this daemon was loaded from, which `daemon_config.DaemonConfigService` writes
     /// an accepted update back to. `None` — a host that configured the daemon in code — makes every
     /// update a refusal, because there is nowhere to persist one.
@@ -128,7 +128,7 @@ impl RuntimeOptions {
     /// Hand over the spawn worker this host forked before its runtime started.
     pub fn with_spawn_worker(
         mut self,
-        spawn_client: Option<(crate::spawn_worker::SpawnClient, i32)>,
+        spawn_client: Option<(tddy_spawn::spawn_worker::SpawnClient, i32)>,
     ) -> Self {
         self.spawn_client = spawn_client;
         self
@@ -602,7 +602,7 @@ pub async fn build(
         // Session-addressed BSP resolver: reproduce the ExecuteTool preamble (token → os_user →
         // sessions_base → `.session.yaml` repo_path) to yield a session's worktree + catalog dir.
         // Built here, before the resolvers are moved into ConnectionServiceImpl below.
-        let bsp_session_resolver: crate::bsp_service::SessionPathsResolver = {
+        let bsp_session_resolver: tddy_bsp::bsp_service::SessionPathsResolver = {
             let user_resolver = user_resolver.clone();
             let config = config.clone();
             let sessions_base_resolver = sessions_base_resolver.clone();
@@ -956,13 +956,10 @@ pub async fn build(
         // BSP build server — session-addressed: each request's token/session_id resolves to that
         // session's worktree + catalog.db (`bsp_service`), so daemon-managed claude-cli/cursor
         // sessions expose build targets over the same surface as ConnectionService.
-        let bsp_server = tddy_service::BspServiceServer::new(
-            crate::bsp_service::DaemonBspService::new(bsp_session_resolver, tddy_data_dir.clone()),
-        );
-        rpc_entries.push(tddy_rpc::ServiceEntry {
-            name: "bsp.BspService",
-            service: Arc::new(bsp_server) as Arc<dyn tddy_rpc::RpcService>,
-        });
+        rpc_entries.push(tddy_bsp::build_bsp_service_entry(
+            bsp_session_resolver,
+            tddy_data_dir.clone(),
+        ));
 
         // VM lifecycle service — gated on auth being configured (same as ConnectionService).
         // Per-VM manifest files under the VM & Image Library are the source of truth
@@ -1146,7 +1143,7 @@ fn build_telegram(
         .as_ref()
         .map(|(c, _)| Arc::new(c.clone()));
     #[cfg(not(unix))]
-    let spawn_for_tg: Option<Arc<crate::spawn_worker::SpawnClient>> = {
+    let spawn_for_tg: Option<Arc<tddy_spawn::spawn_worker::SpawnClient>> = {
         let _ = options;
         None
     };

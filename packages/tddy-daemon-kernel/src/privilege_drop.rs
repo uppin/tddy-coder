@@ -13,7 +13,7 @@
 ///
 /// Sets `HOME` to the target user's home directory (so per-user config/credentials resolve there)
 /// and prepends the user's configured `PATH` extra ahead of the daemon's `PATH` (so a user-local
-/// install such as `~/.local/bin/claude` is found). Mirrors the env `tddy_daemon::spawner::spawn_as_user`
+/// install such as `~/.local/bin/claude` is found). Mirrors the env `tddy_spawn::spawner::spawn_as_user`
 /// applies to non-interactive spawns.
 pub fn pty_user_env_overrides(
     home_dir: &std::path::Path,
@@ -66,7 +66,7 @@ pub struct ResolvedPtyUser {
 }
 
 /// Resolve `os_user` to its uid/gid/home via `getpwnam_r`. Mirrors the passwd lookup in
-/// `tddy_daemon::spawner::spawn_as_user`.
+/// `tddy_spawn::spawner::spawn_as_user`.
 ///
 /// Public so non-PTY spawns that impersonate an OS user (the git pipe relay in
 /// `tddy_worktree_service::remote_git_service`) resolve the same ids from the same place, rather than deriving

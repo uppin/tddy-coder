@@ -255,7 +255,7 @@ impl HostRelayConfig {
 /// which answer belongs to which request — the frame carries no request id, so the channel is torn
 /// down rather than reused.
 ///
-/// Public, and the daemon's own in-jail exchange (`tddy_daemon::workspace_tool_sandbox`) uses this
+/// Public, and the daemon's own in-jail exchange (`tddy_daemon_sandbox::workspace_tool_sandbox`) uses this
 /// very constant rather than a matching number of its own. Two hosts drive this protocol into the
 /// same jail, and a call still legitimate on one of them must not already be abandoned on the
 /// other — an invariant a second declaration states but nothing enforces.

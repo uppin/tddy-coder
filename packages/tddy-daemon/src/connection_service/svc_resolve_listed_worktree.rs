@@ -5,9 +5,9 @@ use tddy_core::session_lifecycle::validate_session_id_segment;
 use std::path::Path;
 
 use crate::{
-    connection_service::agent_roster, project_storage, spawn_worker, spawner,
-    user_sessions_path::repos_base_for_user,
+    connection_service::agent_roster, project_storage, user_sessions_path::repos_base_for_user,
 };
+use tddy_spawn::{spawn_worker, spawner};
 
 use crate::livekit_peer_discovery::local_instance_id_for_config;
 
@@ -88,7 +88,7 @@ impl ConnectionServiceImpl {
                 .await
         };
 
-        let spawn_backend = crate::supervisor_client::spawn_backend_choice(&self.config);
+        let spawn_backend = tddy_spawn::supervisor_client::spawn_backend_choice(&self.config);
         // `ensure_project_available_locally` clones synchronously while the supervisor's client is
         // async. Handing the closure a runtime handle keeps that seam here: the closure already runs
         // on a blocking thread, which is precisely where awaiting a future by blocking belongs.
@@ -111,22 +111,26 @@ impl ConnectionServiceImpl {
         let handle = tokio::task::spawn_blocking(move || {
             let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
                 match &spawn_backend {
-                    crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                    tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor {
+                        socket_path,
+                    } => {
                         let mut env = std::collections::BTreeMap::new();
                         if let Some(ref ssh) = ssh_command {
                             env.insert("GIT_SSH_COMMAND".to_string(), ssh.clone());
                         }
                         runtime
-                            .block_on(crate::supervisor_spawn::clone_repo_via_supervisor_with_env(
-                                socket_path,
-                                &os_user_owned,
-                                git_url,
-                                dest,
-                                env,
-                            ))
+                            .block_on(
+                                tddy_spawn::supervisor_spawn::clone_repo_via_supervisor_with_env(
+                                    socket_path,
+                                    &os_user_owned,
+                                    git_url,
+                                    dest,
+                                    env,
+                                ),
+                            )
                             .map_err(|e| format!("{e:#}"))
                     }
-                    crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+                    tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
                         if let Some(ref client) = spawn_client {
                             if ssh_command.is_none() {
                                 // No transport env var to carry: the forked worker's `clone_repo` is

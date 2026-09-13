@@ -13,8 +13,8 @@
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
-use tddy_daemon::spawner::{self, LiveKitCreds, SpawnOptions};
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
+use tddy_spawn::spawner::{self, LiveKitCreds, SpawnOptions};
 
 // ---------------------------------------------------------------------------
 // Fixtures

@@ -3,10 +3,8 @@
 
 use std::path::PathBuf;
 
-use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::supervisor_client::{
-    connect_supervisor, spawn_backend_choice, SpawnBackendChoice,
-};
+use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_spawn::supervisor_client::{connect_supervisor, spawn_backend_choice, SpawnBackendChoice};
 
 fn a_daemon_config(yaml: &str) -> DaemonConfig {
     serde_yaml::from_str(yaml).expect("parse daemon config")

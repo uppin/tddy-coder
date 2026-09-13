@@ -67,6 +67,12 @@ pub struct ManagedWorkflow {
     pub event_drain: std::thread::JoinHandle<()>,
 }
 
+/// A sandbox session holds its managed workflow only so the workflow's toolcall socket is unlinked
+/// when the session ends — it never calls into it. `tddy-daemon-sandbox` therefore stores the
+/// carrier type-erased, because naming `ManagedWorkflow` from there would point the sandbox crate
+/// back at this one.
+impl tddy_daemon_sandbox::sandbox_session::SessionScopedResource for ManagedWorkflow {}
+
 /// Bind a per-session toolcall listener whose `transition` handler is `controller`.
 ///
 /// `socket_dir` must be a short directory (the AF_UNIX path is bound on the host and must satisfy

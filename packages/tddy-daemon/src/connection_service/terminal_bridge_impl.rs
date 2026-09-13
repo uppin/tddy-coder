@@ -1,6 +1,6 @@
 use tddy_rpc::Status;
 
-use crate::spawner;
+use tddy_spawn::spawner;
 
 use super::ConnectionServiceImpl;
 

@@ -15,7 +15,19 @@ use tddy_service::proto::connection::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
 use tddy_task::TerminalCapture;
 
-use crate::tool_engine;
+use tddy_tool_engine as tool_engine;
+
+/// A resource whose lifetime is tied to a sandbox session and whose cleanup happens on `Drop`.
+///
+/// The daemon's managed-workflow wiring is the only implementor: a per-session toolcall listener
+/// plus its workflow controller, held by [`SandboxSessionState`] purely so the listener's AF_UNIX
+/// socket is unlinked when the session ends. Nothing in this crate ever calls it.
+///
+/// It is a trait rather than the concrete type because `ManagedWorkflow` stays in `tddy-daemon`,
+/// which depends on this crate — naming it here would be a cycle. Dropping a
+/// `Box<dyn SessionScopedResource>` runs the concrete type's drop glue through the vtable, so the
+/// cleanup that happens is exactly the one that happened before the type was erased.
+pub trait SessionScopedResource: Send + Sync {}
 
 /// Active sandbox session state on the host daemon.
 pub struct SandboxSessionState {
@@ -30,7 +42,10 @@ pub struct SandboxSessionState {
     handle: StdMutex<Option<tddy_sandbox::SandboxHandle>>,
     /// Managed-workflow wiring (per-session toolcall listener + controller) when this is a managed
     /// session; kept here so its lifetime is tied to the session and its socket is cleaned up on drop.
-    _managed_workflow: Option<crate::session_toolcall::ManagedWorkflow>,
+    ///
+    /// Type-erased as [`SessionScopedResource`]: the concrete `ManagedWorkflow` lives in
+    /// `tddy-daemon`, which depends on this crate, and nothing here ever calls it.
+    _managed_workflow: Option<Box<dyn SessionScopedResource>>,
 }
 
 /// Fields required to register an active sandbox session on the host.
@@ -42,7 +57,7 @@ pub struct SandboxSessionStateInit {
     pub stdin_tx: mpsc::UnboundedSender<Bytes>,
     pub ready_marker: PathBuf,
     pub handle: tddy_sandbox::SandboxHandle,
-    pub managed_workflow: Option<crate::session_toolcall::ManagedWorkflow>,
+    pub managed_workflow: Option<Box<dyn SessionScopedResource>>,
 }
 
 impl SandboxSessionState {
@@ -110,7 +125,7 @@ pub async fn wait_for_sandbox_ready(
     loop {
         if ready_marker.exists() {
             log::info!(
-                target: "tddy_daemon::sandbox_session",
+                target: "tddy_daemon_sandbox::sandbox_session",
                 "sandbox ready marker appeared at {}",
                 ready_marker.display()
             );
@@ -120,7 +135,7 @@ pub async fn wait_for_sandbox_ready(
             let project_root = ready_marker.parent();
             let logs = tddy_sandbox::format_sandbox_diagnostics(egress_dir, project_root);
             log::error!(
-                target: "tddy_daemon::sandbox_session",
+                target: "tddy_daemon_sandbox::sandbox_session",
                 "sandbox child died before ready marker: {reason}"
             );
             return Err(format!(
@@ -296,7 +311,7 @@ impl DaemonToolHandler {
         if let Err(e) = tddy_core::agent_activity::append_agent_activity(&self.session_dir, record)
         {
             log::warn!(
-                target: "tddy_daemon::sandbox_session",
+                target: "tddy_daemon_sandbox::sandbox_session",
                 "agent_activity: failed to persist {} row for session {}: {}",
                 record.status,
                 session_id,
@@ -365,7 +380,7 @@ pub async fn dial_and_bridge(
     rpc_handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler>,
 ) -> Result<(), String> {
     log::info!(
-        target: "tddy_daemon::sandbox_session",
+        target: "tddy_daemon_sandbox::sandbox_session",
         "opening sandbox SessionChannel for session {session_id}"
     );
 
@@ -473,7 +488,7 @@ pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
 /// Prepare the jail's context dir from the worktree's agent configuration.
 ///
 /// `globs` is the session backend's allow-list
-/// ([`crate::context_files::context_globs_for_session_type`]), so a Cursor session gets `.cursor/`
+/// (`tddy_daemon::context_files::context_globs_for_session_type`), so a Cursor session gets `.cursor/`
 /// and a Claude one does not, and neither gets this repo's `docs/` conventions.
 pub fn prepare_context_dir(
     worktree_path: &Path,

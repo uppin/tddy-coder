@@ -1,9 +1,9 @@
 use super::*;
 use crate::test_util::{test_service, TEST_TOKEN};
-use crate::workspace_tool_sandbox::{
+use std::sync::Mutex;
+use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
-use std::sync::Mutex;
 use tddy_sandbox::SandboxError;
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a44";

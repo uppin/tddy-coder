@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use tddy_daemon::sandbox_session::{
+use tddy_daemon_sandbox::sandbox_session::{
     build_sandbox_plan, build_sandbox_runner_env, pick_free_loopback_port, spawn_sandbox_runner,
     SandboxRunnerSpawn,
 };

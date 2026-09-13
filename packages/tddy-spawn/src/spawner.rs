@@ -5,7 +5,7 @@
 /// Derived in [`tddy_daemon_kernel::spawn_as_user`] rather than here: these are the only nine
 /// functions of this file a subsystem crate reaches, and `host_tooling`, `ssh_agent`,
 /// `host_private_key` and `remote_git_service` have all left this crate. Re-exported so every
-/// caller in the daemon keeps its `crate::spawner::…` path and there stays one definition of each.
+/// caller keeps its `spawner::…` path and there stays one definition of each.
 pub use tddy_daemon_kernel::spawn_as_user::{
     find_program_on_spawn_child_path, merge_spawn_child_path,
     resolve_relative_to_daemon_toolchain_root, resolve_tool_path, run_capture_as_user,
@@ -22,8 +22,8 @@ use uuid::Uuid;
 
 use tddy_core::{default_log_config, resolve_logger, LogConfig};
 
-use crate::config::DaemonConfig;
-use crate::tddy_user_config;
+use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_kernel::user_paths;
 
 /// Same default line format as `tddy_core` and typical `dev.desktop.yaml` `log.loggers.*.format`.
 pub const CHILD_LOG_FORMAT_FALLBACK: &str = "{timestamp} [{level}] [{target}] {message}";
@@ -241,7 +241,11 @@ pub struct LiveKitCreds {
 ///
 /// When `common_room` is set (non-empty after trim), every session uses that shared room so all
 /// daemon-spawned tools join the same room. Otherwise the room is `daemon-{session_id}`.
-pub(crate) fn resolve_livekit_room_name(common_room: Option<&str>, session_id: &str) -> String {
+///
+/// `pub` rather than `pub(crate)` since this module left `tddy-daemon`: the daemon's telegram and
+/// terminal-bridge call sites name the same room the spawn does, and two rules for one room name
+/// is exactly the disagreement this function exists to prevent.
+pub fn resolve_livekit_room_name(common_room: Option<&str>, session_id: &str) -> String {
     if let Some(cr) = common_room {
         let t = cr.trim();
         if !t.is_empty() {
@@ -517,8 +521,12 @@ pub struct StartupWatch {
 impl Default for StartupWatch {
     fn default() -> Self {
         Self {
-            grace: Duration::from_millis(crate::config::default_spawn_startup_grace_period_ms()),
-            poll: Duration::from_millis(crate::config::default_spawn_startup_poll_interval_ms()),
+            grace: Duration::from_millis(
+                tddy_daemon_kernel::config::default_spawn_startup_grace_period_ms(),
+            ),
+            poll: Duration::from_millis(
+                tddy_daemon_kernel::config::default_spawn_startup_poll_interval_ms(),
+            ),
         }
     }
 }
@@ -915,7 +923,7 @@ pub fn plan_session_child(
 
     let home = Path::new(&target.home_dir);
     let user_cfg = home.join(".tddy").join("config.yaml");
-    let path_extra = tddy_user_config::spawn_path_extra_for_home(home);
+    let path_extra = user_paths::spawn_path_extra_for_home(home);
     if let Some(ref extra) = path_extra {
         log::info!(
             "spawner: child PATH prepends spawn_path_extra from {}: {}",
@@ -1379,7 +1387,7 @@ mod livekit_server_identity_multi_host_tests {
 #[cfg(test)]
 mod livekit_spawn_instance_id_tests {
     use super::livekit_spawn_daemon_instance_id;
-    use crate::config::{DaemonConfig, LiveKitConfig};
+    use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig};
 
     #[test]
     fn without_common_room_only_yaml_instance_id_opt_in() {

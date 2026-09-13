@@ -19,7 +19,7 @@ use crate::project_storage::{self, ProjectData};
 /// Priority: `CARGO_BIN_EXE_tddy-remote-git-repo` (cargo test) → sibling of `current_exe()` (handles
 /// integration tests living in `target/debug/deps/`) → `"tddy-remote-git-repo"` (PATH lookup at
 /// runtime; `./install` ships it to `/usr/bin/tddy-remote-git-repo`). Mirrors
-/// [`crate::sandbox_session::resolve_tddy_tools_path`].
+/// `tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path`.
 pub fn resolve_remote_git_repo_path() -> String {
     if let Ok(bin) = std::env::var("CARGO_BIN_EXE_tddy-remote-git-repo") {
         if !bin.trim().is_empty() {

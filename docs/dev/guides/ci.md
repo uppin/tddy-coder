@@ -22,7 +22,7 @@ tests — they belong to a different package:
 
 | Binary | Exec'd by |
 |--------|-----------|
-| `target/debug/tddy-sandbox-runner` | `tddy-daemon` `sandbox_runner_stdio_acceptance` |
+| `target/debug/tddy-sandbox-runner` | `tddy-daemon-sandbox` `sandbox_runner_stdio_acceptance` |
 | `target/debug/tddy-acp-stub` | `tddy-integration-tests` `acp_*`, `codex_acp_*` |
 | `target/debug/examples/echo_server` | `tddy-livekit-web` Cypress specs |
 

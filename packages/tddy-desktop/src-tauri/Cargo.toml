@@ -21,6 +21,9 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 # The daemon this application is a host for: one process, one service roster.
 tddy-daemon = { path = "../../tddy-daemon" }
+# The pre-tokio spawn-worker fork, which happens here before Tauri builds its runtime for exactly
+# the reason it happens before the daemon builds its own. Extracted from `tddy-daemon`.
+tddy-spawn = { path = "../../tddy-spawn" }
 tddy-rpc = { path = "../../tddy-rpc" }
 tddy-tauri-rpc = { path = "../../tddy-tauri-rpc" }
 tddy-core = { path = "../../tddy-core" }

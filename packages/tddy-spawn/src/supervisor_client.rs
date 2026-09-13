@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use tddy_supervisor::SupervisorClient;
 
-use crate::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 
 /// Which mechanism this daemon uses to spawn processes it may not spawn itself.
 #[derive(Debug, Clone, PartialEq, Eq)]

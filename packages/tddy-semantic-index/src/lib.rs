@@ -18,6 +18,7 @@ pub mod embed;
 pub mod index_task;
 pub mod local_model;
 pub mod search;
+pub mod semantic_index;
 pub mod store;
 
 pub use chunk::{chunk_worktree, Chunk};

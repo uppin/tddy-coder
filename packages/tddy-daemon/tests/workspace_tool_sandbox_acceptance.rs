@@ -21,7 +21,7 @@ use futures_util::StreamExt;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
-use tddy_daemon::workspace_tool_sandbox::{
+use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
 use tddy_rpc::{Code, Request, Status};
