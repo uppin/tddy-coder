@@ -138,7 +138,8 @@ function mountPane(backend: ReturnType<typeof aCreateSessionBackend>) {
     withSelectedDaemon(
       <CreateSessionPane
         client={client}
-      catalogClient={catalogClient}
+        projectClient={projectClient}
+        catalogClient={catalogClient}
         sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}
         sessionToken="fake-token"

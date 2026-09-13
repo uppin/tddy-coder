@@ -14,7 +14,6 @@ pub use service::{build_project_entry, ProjectServiceImpl};
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::sync::Arc;
 
     use super::*;

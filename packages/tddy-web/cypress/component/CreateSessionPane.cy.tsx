@@ -56,6 +56,10 @@ function createTestCatalogClient() {
   return createClient(CatalogService, testTransport());
 }
 
+function createTestProjectClient() {
+  return createClient(ProjectService, testTransport());
+}
+
 function createTestWorktreeClient() {
   return createClient(WorktreeService, testTransport());
 }
@@ -103,6 +107,7 @@ function mountCreateSessionPane(overrides: {
   onCreated?: (id: string) => void;
 } = {}) {
   const client = createTestClient();
+  const projectClient = createTestProjectClient();
   const catalogClient = createTestCatalogClient();
   const sessionFilesClient = createTestSessionFilesClient();
   const worktreeClient = createTestWorktreeClient();

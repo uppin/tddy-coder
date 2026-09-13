@@ -107,7 +107,8 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={AGENT_HOST}>
       <CreateSessionPane
         client={client}
-      catalogClient={catalogClient}
+        projectClient={projectClient}
+        catalogClient={catalogClient}
         sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}
         sessionToken="fake-token"
