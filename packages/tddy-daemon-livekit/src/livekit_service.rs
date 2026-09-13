@@ -107,19 +107,21 @@ impl LiveKitService for LiveKitServiceImpl {
     }
 }
 
+/// Assembled service handle for `livekit.LiveKitService`.
+pub fn build_livekit_service(
+    room_roster: Arc<dyn RoomRoster>,
+    user_resolver: tddy_daemon_kernel::SessionUserResolver,
+) -> Arc<LiveKitServiceImpl> {
+    Arc::new(LiveKitServiceImpl::new(room_roster, user_resolver))
+}
+
 /// The `livekit.LiveKitService` entry the daemon's wiring layer registers — family T.
 ///
 /// Returned assembled, the way `tddy_model_registry::build_model_registry_entry` is: this
 /// subsystem's whole contract with the wiring layer is the entry, so the wiring never names the
 /// service type or its poll cadence.
-pub fn build_livekit_entry(
-    room_roster: Arc<dyn RoomRoster>,
-    user_resolver: tddy_daemon_kernel::SessionUserResolver,
-) -> tddy_rpc::ServiceEntry {
-    let server = tddy_service::LiveKitServiceServer::new(LiveKitServiceImpl::new(
-        room_roster,
-        user_resolver,
-    ));
+pub fn build_livekit_entry(service: Arc<LiveKitServiceImpl>) -> tddy_rpc::ServiceEntry {
+    let server = tddy_service::LiveKitServiceServer::from_arc(service);
     tddy_rpc::ServiceEntry {
         name: "livekit.LiveKitService",
         service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,

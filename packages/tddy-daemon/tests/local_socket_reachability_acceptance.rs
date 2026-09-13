@@ -10,9 +10,9 @@
 //! `runner.rs:69` and what an agent inside a jail calls, so a family that silently left the socket
 //! would fail there rather than anywhere a developer is looking.
 //!
-//! **Node 4 is already inconsistent with the policy** — it dropped family T, so there is no
-//! `livekit_tonic_adapter.rs`. That gap is a predecessor's file to close and is recorded in
-//! `docs/dev/todo/2026-09-10-family-t-was-dropped-from-the-local-socket-before-the-policy-existed.md`.
+//! **Node 4 is already inconsistent with the policy** — it dropped family T; post-stack follow-up
+//! restores `livekit.LiveKitService` on the socket (see
+//! `docs/dev/todo/2026-09-10-family-t-was-dropped-from-the-local-socket-before-the-policy-existed.md`).
 
 use std::path::{Path, PathBuf};
 
@@ -37,6 +37,8 @@ fn the_socket_serves_every_service_the_stack_moved_onto_it() {
 
     // Then
     for expected in [
+        // node 4 (restored on post-stack follow-up)
+        "LiveKitServiceServer",
         // node 7
         "SessionAgentServiceServer",
         "ActivityServiceServer",
@@ -61,6 +63,7 @@ fn the_socket_serves_every_service_the_stack_moved_onto_it() {
 #[test]
 fn nodes_seven_and_eight_add_no_hand_written_adapter() {
     for name in [
+        "livekit_tonic_adapter.rs",
         "session_agents_tonic_adapter.rs",
         "activity_tonic_adapter.rs",
         "catalog_tonic_adapter.rs",

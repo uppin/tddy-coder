@@ -218,6 +218,7 @@ type BinaryLocalSocketServices = crate::local_socket_server::LocalSocketServices
         tddy_session_lifecycle::connection_service::DaemonSessionHost,
     >,
     tddy_session_lifecycle::connection_service::DemoVmServiceImpl,
+    tddy_daemon_livekit::LiveKitServiceImpl,
     tddy_host_service::HostServiceImpl,
     tddy_worktree_service::WorktreeServiceImpl,
     tddy_terminal_rpc::TerminalSessionServiceImpl,
@@ -877,6 +878,13 @@ pub async fn build(
             Duration::from_secs(300),
         ));
 
+        let livekit_service = tddy_daemon_livekit::build_livekit_service(
+            tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config(
+                config_arc.livekit.as_ref(),
+            ),
+            vm_user_resolver.clone(),
+        );
+
         // Local Unix-domain socket transport (SO_PEERCRED peer-trust + MintLocalToken). Served by
         // the binary host only: the socket path names one daemon, and a systemd-activated listener
         // is addressed to the binary's pid.
@@ -905,6 +913,9 @@ pub async fn build(
                                 connection_arc.clone(),
                             ),
                         ),
+                    ),
+                    livekit: tddy_service::proto::livekit::LiveKitServiceTonicAdapter::new(
+                        Arc::clone(&livekit_service),
                     ),
                     local_token:
                         tddy_session_lifecycle::local_token_tonic_adapter::LocalTokenUdsTonicAdapter::new(
@@ -1023,11 +1034,8 @@ pub async fn build(
         // LiveKitService — the rooms this daemon can see on the LiveKit server and who is joined
         // to each. Family T left `the pre-unbundle monolithic RPC coordinate` in `#unbundle` node 4; the entry
         // comes from `tddy-daemon-livekit` assembled, so this wiring never names the poll cadence.
-        rpc_entries.push(tddy_daemon_livekit::livekit_service::build_livekit_entry(
-            tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config(
-                config_arc.livekit.as_ref(),
-            ),
-            vm_user_resolver.clone(),
+        rpc_entries.push(tddy_daemon_livekit::build_livekit_entry(
+            Arc::clone(&livekit_service),
         ));
 
         // WorktreeService — listing, cleaning, sizing, restoring and reading a project's checkouts.

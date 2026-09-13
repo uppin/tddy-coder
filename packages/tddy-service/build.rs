@@ -163,9 +163,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for proto in [
         "proto/host.proto",
         "proto/worktree.proto",
-        // `#unbundle` node 4 — family T, LiveKit rooms observability. Same story as the two above:
-        // its closure of 12 messages overlaps nothing that stayed, so it imports nothing.
-        "proto/livekit.proto",
         // `#unbundle` node 6 — families I, J, R and S. The first cut that needed a shared types
         // file: `HostDocumentScope` is reached by `StartSession`, which stays, so `connection.proto`
         // and `session_files.proto` both import `types.proto` and neither declares the enum.
@@ -179,6 +176,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 rpc_crate_path: "tddy_rpc".to_string(),
                 ..Default::default()
             }))
+            .compile_protos(&[proto], &["proto"])?;
+    }
+
+    // `#unbundle` node 4 — family T (LiveKit rooms observability). Node 4 registered it on HTTP and
+    // LiveKit but not on the local Unix socket; post-stack follow-up restores the socket mount with
+    // the same two-pass shape as nodes 7–9.
+    for (proto, package) in [("proto/livekit.proto", "livekit")] {
+        prost_build::Config::new()
+            .out_dir(std::env::var("OUT_DIR")?)
+            .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+                generate_rpc_server: true,
+                generate_tonic_adapter: true,
+                rpc_crate_path: "tddy_rpc".to_string(),
+                tonic_trait_path: Some(format!(
+                    "crate::proto::tonic_{package}::{}_service_server",
+                    tonic_service_module(package)
+                )),
+            }))
+            .compile_protos(&[proto], &["proto"])?;
+
+        let dir = format!("{}/tonic_{package}", std::env::var("OUT_DIR")?);
+        std::fs::create_dir_all(&dir)?;
+        tonic_build::configure()
+            .build_server(true)
+            .build_client(true)
+            .out_dir(&dir)
+            .extern_path(
+                format!(".{package}"),
+                format!("crate::proto::{}", rust_module(package)),
+            )
             .compile_protos(&[proto], &["proto"])?;
     }
 
@@ -622,6 +649,7 @@ fn tonic_service_module(package: &str) -> &'static str {
     match package {
         "session_agents" => "session_agent",
         "activity" => "activity",
+        "livekit" => "live_kit",
         "catalog" => "catalog",
         "exec_tools" => "exec_tool",
         "pr_stack" => "pr_stack",
@@ -642,6 +670,7 @@ fn rust_module(package: &str) -> &'static str {
     match package {
         "session_agents" => "session_agents_svc",
         "activity" => "activity",
+        "livekit" => "livekit",
         "catalog" => "catalog",
         "exec_tools" => "exec_tools",
         "pr_stack" => "pr_stack",

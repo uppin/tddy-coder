@@ -6,7 +6,7 @@
 //! the same service instances (via `Arc`) so work started over the socket is visible over every
 //! other transport.
 //!
-//! **Twelve services, one socket.** `#unbundle` node 9 replaced the monolithic connection
+//! **Thirteen services, one socket.** `#unbundle` node 9 replaced the monolithic connection
 //! coordinate with session, project, demo VM and local-token families; nodes 1, 6, 7 and 8 had
 //! already split hosts, worktrees, terminal, session-agent, activity, catalog, exec-tool and
 //! PR-stack. A caller that reached any method here before its split must go on reaching it here.
@@ -29,6 +29,9 @@ use tddy_service::proto::demo_vm::{DemoVmService as RpcDemoVmService, DemoVmServ
 use tddy_service::proto::exec_tools::{
     ExecToolService as RpcExecToolService, ExecToolServiceTonicAdapter,
 };
+use tddy_service::proto::livekit::{
+    LiveKitService as RpcLiveKitService, LiveKitServiceTonicAdapter,
+};
 use tddy_service::proto::host::HostService as RpcHostService;
 use tddy_service::proto::pr_stack::{
     PrStackService as RpcPrStackService, PrStackServiceTonicAdapter,
@@ -46,6 +49,7 @@ use tddy_service::proto::tonic_activity::activity_service_server::ActivityServic
 use tddy_service::proto::tonic_catalog::catalog_service_server::CatalogServiceServer;
 use tddy_service::proto::tonic_demo_vm::demo_vm_service_server::DemoVmServiceServer;
 use tddy_service::proto::tonic_exec_tools::exec_tool_service_server::ExecToolServiceServer;
+use tddy_service::proto::tonic_livekit::live_kit_service_server::LiveKitServiceServer;
 use tddy_service::proto::tonic_local_token::local_token_service_server::LocalTokenServiceServer;
 use tddy_service::proto::tonic_pr_stack::pr_stack_service_server::PrStackServiceServer;
 use tddy_service::proto::tonic_project::project_service_server::ProjectServiceServer;
@@ -100,10 +104,11 @@ pub fn resolve_socket_source(
 }
 
 /// Every adapter mounted on the one socket, passed as a bundle.
-pub struct LocalSocketServices<Sess, Proj, Dm, H, W, T, Sa, A, Cat, E, P> {
+pub struct LocalSocketServices<Sess, Proj, Dm, Lk, H, W, T, Sa, A, Cat, E, P> {
     pub session: SessionServiceTonicAdapter<Sess>,
     pub project: ProjectServiceTonicAdapter<Proj>,
     pub demo_vm: DemoVmServiceTonicAdapter<Dm>,
+    pub livekit: LiveKitServiceTonicAdapter<Lk>,
     pub local_token: LocalTokenUdsTonicAdapter,
     pub host: HostServiceTonicAdapter<H>,
     pub worktree: WorktreeServiceTonicAdapter<W>,
@@ -116,9 +121,9 @@ pub struct LocalSocketServices<Sess, Proj, Dm, H, W, T, Sa, A, Cat, E, P> {
 }
 
 /// Bind `socket_path` and serve the local-socket services until `shutdown` resolves.
-pub async fn serve_connection_uds<Sess, Proj, Dm, H, W, T, Sa, A, Cat, E, P>(
+pub async fn serve_connection_uds<Sess, Proj, Dm, Lk, H, W, T, Sa, A, Cat, E, P>(
     socket_path: &Path,
-    services: LocalSocketServices<Sess, Proj, Dm, H, W, T, Sa, A, Cat, E, P>,
+    services: LocalSocketServices<Sess, Proj, Dm, Lk, H, W, T, Sa, A, Cat, E, P>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()>
 where
@@ -126,6 +131,8 @@ where
     Sess::StreamStartSessionStream: 'static,
     Proj: RpcProjectService,
     Dm: RpcDemoVmService,
+    Lk: RpcLiveKitService,
+    Lk::StreamLiveKitRoomsStream: 'static,
     H: RpcHostService,
     H::StreamHostPromptsStream: 'static,
     H::StreamHostStatsStream: 'static,
@@ -201,6 +208,7 @@ where
         .add_service(SessionServiceServer::new(services.session))
         .add_service(ProjectServiceServer::new(services.project))
         .add_service(DemoVmServiceServer::new(services.demo_vm))
+        .add_service(LiveKitServiceServer::new(services.livekit))
         .add_service(LocalTokenServiceServer::new(services.local_token))
         .add_service(HostServiceServer::new(services.host))
         .add_service(WorktreeServiceServer::new(services.worktree))
