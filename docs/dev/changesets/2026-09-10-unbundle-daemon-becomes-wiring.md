@@ -31,4 +31,6 @@ Docs: [daemon-endpoint.md](../../../packages/tddy-daemon/docs/daemon-endpoint.md
 
 ## Verification
 
-CI on `e18357df` (scoped local: fmt, clippy on touched packages, `./test -p` for daemon, session-lifecycle, projects, service). Full workspace gates on PR checks.
+CI on `8e9e898f`: Rust **6669/6669**, web **2630/2630**; Rust lint, build, generated code green.
+Scoped local gates during implementation: fmt, clippy on touched packages, `./test -p` for daemon,
+session-lifecycle, projects, service.
