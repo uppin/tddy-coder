@@ -19,6 +19,8 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use tddy_service::proto::daemon_config::DaemonConfigServiceServer;
+use tddy_service::proto::host::HostServiceTonicAdapter;
+use tddy_service::proto::worktree::WorktreeServiceTonicAdapter;
 use teloxide::prelude::Bot;
 use tokio::sync::Mutex;
 
@@ -925,10 +927,10 @@ pub async fn build(
                         ),
                     // The same `Arc`s the entries above serve, so a host prompt raised over the
                     // socket is the one a browser answers over HTTP.
-                    host: tddy_session_lifecycle::host_tonic_adapter::HostServiceTonicAdapter::new(Arc::clone(
+                    host: HostServiceTonicAdapter::new(Arc::clone(
                         &host_service_impl,
                     )),
-                    worktree: tddy_session_lifecycle::worktree_tonic_adapter::WorktreeServiceTonicAdapter::new(
+                    worktree: WorktreeServiceTonicAdapter::new(
                         Arc::clone(&worktree_service_impl),
                     ),
                     // Built from `connection_arc` — the same `CliSessionManager` and sandbox

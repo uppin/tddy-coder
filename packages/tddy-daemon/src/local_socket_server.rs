@@ -63,9 +63,9 @@ use tddy_terminal_rpc::proto::terminal_session::{
 };
 use tddy_terminal_rpc::proto::tonic_terminal_session::terminal_session_service_server::TerminalSessionServiceServer;
 
-use tddy_session_lifecycle::host_tonic_adapter::HostServiceTonicAdapter;
+use tddy_service::proto::host::HostServiceTonicAdapter;
+use tddy_service::proto::worktree::WorktreeServiceTonicAdapter;
 use tddy_session_lifecycle::local_token_tonic_adapter::LocalTokenUdsTonicAdapter;
-use tddy_session_lifecycle::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
 
 /// First file descriptor systemd passes for socket activation (see `sd_listen_fds(3)`).
 pub const SD_LISTEN_FDS_START: RawFd = 3;

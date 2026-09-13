@@ -1,43 +1,35 @@
 # 2026-09-13 — `#unbundle` post-stack follow-ups (node 10)
 
-**Stack:** `#unbundle` — node **10 of 10**, based on node 9
-([#481](https://github.com/uppin/tddy-coder/pull/481) /
-`feature/unbundle/daemon-becomes-wiring`).
+**Stack:** `#unbundle` — node **10 of 10**, based on node 9 ([#481](https://github.com/uppin/tddy-coder/pull/481)).  
+**PR:** [#482](https://github.com/uppin/tddy-coder/pull/482) — **all post-stack milestones land here** (single node, not M2…M7 follow-up PRs).
 
-Closes stack-documented defects that could not land on frozen predecessor nodes without
-cascade-stale rewrites. Larger backlog items stay in `docs/dev/todo/` as later milestones.
+Closes stack-documented items from `docs/dev/todo/` that could not land on frozen predecessor nodes without cascade-stale rewrites.
 
 ## Responsibility
 
-**Milestone 1 (this PR):**
+One PR closes every `#unbundle`-tagged todo grouped earlier as M1–M7. Track status in the table below; remove each todo file when its row is **Done** at `/pr-wrap`.
 
-| Todo | Fix |
-|---|---|
-| [Family T dropped from local socket](2026-09-10-family-t-was-dropped-from-the-local-socket-before-the-policy-existed.md) | Two-pass `livekit.proto` codegen in `tddy-service` (`tonic_livekit` + generated adapter); mount `LiveKitServiceServer` on the local Unix socket with a shared `Arc` from `runtime` (same pattern as RPC entry). |
-| [Sandbox spawn argv grep stale path](2026-09-10-sandboxed-session-spawn-argv-greps-a-file-the-connection-service-split-emptied.md) | Point `sandbox_session_stdio_acceptance` at the three family-C spawn modules under `tddy-session-lifecycle`. |
-
-**Later milestones (not in this PR):** stdio transport switch, desktop embed verification, node-1
-changeset overclaim (#470), service.rs budget splits, in-jail suite wiring, auth/livekit file
-budget, reflection/coder dispatch hygiene — see todos citing `#unbundle` under `docs/dev/todo/`.
+| Milestone | Theme | Status |
+|-----------|--------|--------|
+| M1 | LiveKit on local UDS; sandbox spawn argv grep | **Done** |
+| M2 | Stdio transport switch; sandbox test relocation; in-jail suite; PTY relay; LiveKit test contention; supervisor spawn test split | Open |
+| M3 | Restructure tool defects; versioned protos; stub eligible daemon; move-module clusters | Partial (stub eligible **Done**; host/worktree generated adapters **Done**) |
+| M4 | Over-budget `service.rs` / spawn / auth-livekit splits; session-agent clone split | Open |
+| M5 | Reflection descriptors; coder dispatch/terminal; permission NDJSON; session-activity tests | Partial (generated host/worktree adapters **Done**) |
+| M6 | tddy-tui dep; proto crate split; boundary harness; ACP replay dedup; schema log targets; relay retire; exec-tool fixture | Partial (duplications **Done**; relay retire **Done**) |
+| M7 | Desktop embed; LiveKit deadlines; vault atomic write; roster/web/agent product gaps; buildId; log targets; VNC | Open |
 
 ## Boundaries
 
 - No edits to merged predecessor branches (nodes 1–9).
-- No behaviour change beyond restoring LiveKit on the local socket and fixing the compile-time grep.
-- Does not relocate `sandbox_session_stdio_acceptance.rs` into `tddy-daemon-sandbox` (follow-up).
+- Stack registration: 10 PRs, titles `#unbundle n/10`.
 
 ## Dependencies
 
-- Node 9 landed wiring: multi-service local socket, node 6 generator, `tddy-daemon-livekit`
-  `LiveKitServiceImpl`.
+- Node 9 wiring, node 6 `generate_tonic_adapter`, `tddy-daemon-livekit` service impl.
 
 ## Draft PR contract
 
 - Base: `feature/unbundle/daemon-becomes-wiring`.
-- Title: `fix(daemon,service,livekit): restore LiveKit on local socket and fix sandbox argv test (#unbundle 10/10)`.
-- Scoped verification: `./test -p tddy-service -p tddy-daemon-livekit -p tddy-daemon` plus
-  `--test local_socket_reachability_acceptance`, `--test local_token_uds`, and
-  `sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags` in
-  `sandbox_session_stdio_acceptance` (real-jail test remains environment-sensitive on macOS).
-- After merge: remove or archive the two M1 todo files; re-register stack as 10 nodes via
-  `gh stack link --base master`.
+- Title: `fix(unbundle): post-stack follow-ups — local socket, todos, and stack hygiene (#unbundle 10/10)`.
+- Verification: CI on PR #482; scoped local `./test -p` for touched packages during development.

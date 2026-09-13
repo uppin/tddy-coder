@@ -72,7 +72,13 @@ pub mod cursor_cli_spawn;
 /// `session_list_enrichment` and `session_notifications` are its callers and stay here; that edge
 /// is `tddy-daemon` → `tddy-telegram`, the same direction as every other facade in this file.
 pub use tddy_telegram::elicitation;
-pub mod host_tonic_adapter;
+pub mod worktree_tonic_adapter {
+    pub use tddy_service::proto::worktree::WorktreeServiceTonicAdapter;
+}
+pub mod host_tonic_adapter {
+    pub use tddy_service::proto::host::HostServiceTonicAdapter;
+}
+
 /// The five LiveKit modules, which now live in `tddy-daemon-livekit`.
 ///
 /// Named one by one for the reason the worktree and host facades above give: every module keeps
@@ -135,7 +141,6 @@ pub mod pr_stack_rpc;
 pub use pr_stack_rpc::{build_pr_stack_entry, PrStackHandler, PrStackServiceImpl};
 pub mod user_sessions_path;
 pub mod workspace_session;
-pub mod worktree_tonic_adapter;
 
 // Re-export the shared tool engine so legacy `crate::tool_engine::...` references inside the
 // daemon keep resolving after the extraction into the `tddy-tool-engine` crate.

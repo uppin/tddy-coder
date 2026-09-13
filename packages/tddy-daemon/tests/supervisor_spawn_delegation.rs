@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::DaemonSessionHost;
-use tddy_daemon::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
+use tddy_daemon::multi_host::{EligibleDaemonSource, LocalOnlyEligibleDaemonSource};
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_rpc::Request;
@@ -379,7 +379,8 @@ fn a_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> DaemonSessionHost 
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
-    let eligible: Arc<dyn EligibleDaemonSource> = Arc::new(StubEligibleDaemonSource);
+    let eligible: Arc<dyn EligibleDaemonSource> =
+        Arc::new(LocalOnlyEligibleDaemonSource::for_config(&config));
     DaemonSessionHost::new(
         config,
         sessions_base_resolver,
