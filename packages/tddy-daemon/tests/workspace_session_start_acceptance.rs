@@ -25,7 +25,9 @@ use std::process::Command;
 
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, SplitAgentPlacement, StartSessionRequest};
+use tddy_service::proto::session::{
+    SessionService as SessionServiceTrait, SplitAgentPlacement, StartSessionRequest,
+};
 use tddy_service::proto::session_agents_svc::{ListSessionAgentsRequest, SessionAgentService as _};
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a38";

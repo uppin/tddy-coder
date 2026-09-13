@@ -17,7 +17,7 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, ResumeSessionRequest};
+use tddy_service::proto::session::{ResumeSessionRequest, SessionService as SessionServiceTrait};
 use tddy_testing_commons::builders::a_session_metadata;
 use tddy_testing_commons::fs::write_session_yaml;
 

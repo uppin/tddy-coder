@@ -27,7 +27,10 @@ use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::host_documents::MAX_HOST_DOCUMENT_BYTES;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::session::{session_attachment::Source as AttachmentSource, SessionService as SessionServiceTrait, HostDocumentRef, SessionAttachment, StagedAttachmentRef, StartSessionRequest};
+use tddy_service::proto::session::{
+    session_attachment::Source as AttachmentSource, HostDocumentRef, SessionAttachment,
+    SessionService as SessionServiceTrait, StagedAttachmentRef, StartSessionRequest,
+};
 use tddy_service::proto::session_files::{
     SessionFilesService as SessionFilesServiceTrait, UploadStagedAttachmentChunkRequest,
 };

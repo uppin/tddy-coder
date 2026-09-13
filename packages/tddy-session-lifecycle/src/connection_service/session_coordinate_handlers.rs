@@ -7,16 +7,19 @@ use uuid::Uuid;
 
 use super::{service_util, AttachmentProgressSink, DaemonSessionHost, MpscResultStream};
 use crate::connection_service::hooks_and_urls;
+use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
+use crate::user_sessions_path::projects_path_for_user;
 use crate::{session_deletion, session_list_enrichment, session_reader};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_core::{read_session_metadata, Changeset};
 use tddy_rpc::{Request, Response, Status};
-use tddy_spawn::{spawn_worker, spawner};
-use tddy_spawn::spawner::SpawnOptions;
-use tddy_service::proto::session::SessionEntry as ConnSessionEntry;
-use tddy_service::proto::session::StartSessionEvent as ConnStartSessionEvent;
+use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
+use tddy_service::proto::session::ResumeSessionResponse as ConnResumeSessionResponse;
+use tddy_service::proto::session::SessionEntry as ConnSessionEntry;
+use tddy_service::proto::session::Signal;
+use tddy_service::proto::session::StartSessionEvent as ConnStartSessionEvent;
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListSessionsRequest,
@@ -24,11 +27,8 @@ use tddy_service::proto::session::{
     SignalSessionRequest, SignalSessionResponse, StartSessionEvent, StartSessionRequest,
     StartSessionResponse,
 };
-use tddy_service::proto::session::Signal;
-use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
-use crate::user_sessions_path::projects_path_for_user;
-use tddy_service::proto::exec_tools::ExecuteToolRequest;
-use tddy_service::proto::session::ResumeSessionResponse as ConnResumeSessionResponse;
+use tddy_spawn::spawner::SpawnOptions;
+use tddy_spawn::{spawn_worker, spawner};
 
 /// The coordinate a forwarded call from the legacy connection service is addressed at on the peer.
 const SESSION_SERVICE: &str = "session.SessionService";
@@ -37,14 +37,13 @@ fn bridge_conn_resume_response(
     resp: Result<Response<ConnResumeSessionResponse>, Status>,
 ) -> Result<Response<ResumeSessionResponse>, Status> {
     let resp = resp?;
-    Ok(Response::new(
-        super::family_proto_bridge::wire_same(&resp.into_inner())?,
-    ))
+    Ok(Response::new(super::family_proto_bridge::wire_same(
+        &resp.into_inner(),
+    )?))
 }
 
 impl DaemonSessionHost {
-
-pub(crate) async fn list_sessions_at_session_coordinate(
+    pub(crate) async fn list_sessions_at_session_coordinate(
         &self,
         request: Request<ListSessionsRequest>,
     ) -> Result<Response<ListSessionsResponse>, Status> {
@@ -127,8 +126,9 @@ pub(crate) async fn list_sessions_at_session_coordinate(
                             as i32,
                         last_activity: None,
                     };
-                    let mut conn_entry: ConnSessionEntry = super::family_proto_bridge::wire_same(&entry)
-                        .map_err(|s| anyhow::anyhow!(s.to_string()))?;
+                    let mut conn_entry: ConnSessionEntry =
+                        super::family_proto_bridge::wire_same(&entry)
+                            .map_err(|s| anyhow::anyhow!(s.to_string()))?;
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,
                         &mut conn_entry,
@@ -181,12 +181,12 @@ pub(crate) async fn list_sessions_at_session_coordinate(
         let conn_resp = self
             .start_session_core(conn_req, &AttachmentProgressSink::discarding())
             .await?;
-        Ok(Response::new(
-            super::family_proto_bridge::wire_same(&conn_resp.into_inner())?,
-        ))
+        Ok(Response::new(super::family_proto_bridge::wire_same(
+            &conn_resp.into_inner(),
+        )?))
     }
 
-pub(crate) async fn connect_session_at_session_coordinate(
+    pub(crate) async fn connect_session_at_session_coordinate(
         &self,
         request: Request<ConnectSessionRequest>,
     ) -> Result<Response<ConnectSessionResponse>, Status> {
@@ -271,7 +271,7 @@ pub(crate) async fn connect_session_at_session_coordinate(
         }))
     }
 
-pub(crate) async fn resume_session_at_session_coordinate(
+    pub(crate) async fn resume_session_at_session_coordinate(
         &self,
         request: Request<ResumeSessionRequest>,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
@@ -513,7 +513,7 @@ pub(crate) async fn resume_session_at_session_coordinate(
         }))
     }
 
-pub(crate) async fn signal_session_at_session_coordinate(
+    pub(crate) async fn signal_session_at_session_coordinate(
         &self,
         request: Request<SignalSessionRequest>,
     ) -> Result<Response<SignalSessionResponse>, Status> {
@@ -601,7 +601,7 @@ pub(crate) async fn signal_session_at_session_coordinate(
         }
     }
 
-pub(crate) async fn delete_session_at_session_coordinate(
+    pub(crate) async fn delete_session_at_session_coordinate(
         &self,
         request: Request<DeleteSessionRequest>,
     ) -> Result<Response<DeleteSessionResponse>, Status> {
@@ -674,7 +674,7 @@ pub(crate) async fn delete_session_at_session_coordinate(
         Ok(Response::new(DeleteSessionResponse { ok: true }))
     }
 
-pub(crate) async fn get_worktree_snapshot_at_session_coordinate(
+    pub(crate) async fn get_worktree_snapshot_at_session_coordinate(
         &self,
         request: Request<GetWorktreeSnapshotRequest>,
     ) -> Result<Response<GetWorktreeSnapshotResponse>, Status> {
@@ -745,7 +745,8 @@ pub(crate) async fn get_worktree_snapshot_at_session_coordinate(
         request: Request<StartSessionRequest>,
     ) -> Result<Response<MpscResultStream<StartSessionEvent>>, Status> {
         self.record_rpc_activity();
-        let req: tddy_service::proto::session::StartSessionRequest = super::family_proto_bridge::wire_same(&request.into_inner())?;
+        let req: tddy_service::proto::session::StartSessionRequest =
+            super::family_proto_bridge::wire_same(&request.into_inner())?;
         // Authenticate before classifying the route: forwarding opens an outbound RPC to a peer and
         // holds a pending-call slot on both hosts for the forward's whole deadline, so an
         // unauthenticated caller must never get that far. The resolved user is not used here — the
@@ -808,7 +809,8 @@ pub(crate) async fn get_worktree_snapshot_at_session_coordinate(
         tokio::spawn(async move {
             let sink = AttachmentProgressSink::streaming(conn_progress_tx);
             let event = match service.start_session_core(req, &sink).await {
-                Ok(response) => match super::family_proto_bridge::wire_same(&response.into_inner()) {
+                Ok(response) => match super::family_proto_bridge::wire_same(&response.into_inner())
+                {
                     Ok(session_result) => Ok(StartSessionEvent {
                         event: Some(StartSessionEventKind::Result(session_result)),
                     }),

@@ -422,7 +422,7 @@ impl DaemonHttp {
     ) -> Result<Vec<SessionEntry>, DaemonHttpError> {
         let response: ListSessionsResponse = self
             .unary(
-                "the pre-unbundle monolithic RPC coordinate",
+                "session.SessionService",
                 "ListSessions",
                 ListSessionsRequest {
                     session_token: session_token.to_string(),
@@ -444,7 +444,7 @@ impl DaemonHttp {
     ) -> Result<(), DaemonHttpError> {
         let _: ConnectSessionResponse = self
             .unary(
-                "the pre-unbundle monolithic RPC coordinate",
+                "session.SessionService",
                 "ConnectSession",
                 ConnectSessionRequest {
                     session_token: session_token.to_string(),

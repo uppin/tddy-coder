@@ -10,6 +10,7 @@ import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { SessionService, StartSessionRequestSchema, StartSessionResponseSchema } from "../../src/gen/session_pb";
+import { ProjectService } from "../../src/gen/project_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";

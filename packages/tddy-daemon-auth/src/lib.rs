@@ -28,10 +28,10 @@
 
 pub mod auth;
 mod codex_oauth_participant_metadata;
-mod local_token;
 pub mod codex_oauth_relay;
 pub mod github_pr_credentials;
 pub mod github_token_store;
+mod local_token;
 pub mod oauth_loopback_tunnel;
 pub mod token_provider;
 

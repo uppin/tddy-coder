@@ -25,9 +25,7 @@ use tddy_service::proto::activity::{
 use tddy_service::proto::catalog::{
     CatalogService as RpcCatalogService, CatalogServiceTonicAdapter,
 };
-use tddy_service::proto::demo_vm::{
-    DemoVmService as RpcDemoVmService, DemoVmServiceTonicAdapter,
-};
+use tddy_service::proto::demo_vm::{DemoVmService as RpcDemoVmService, DemoVmServiceTonicAdapter};
 use tddy_service::proto::exec_tools::{
     ExecToolService as RpcExecToolService, ExecToolServiceTonicAdapter,
 };

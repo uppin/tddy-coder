@@ -12,8 +12,8 @@ use crate::{
 };
 
 use tddy_sandbox_runner::ExecuteToolResponse;
-use tddy_service::proto::exec_tools::{ExecuteToolRequest};
-use tddy_service::proto::session::{SessionAttachment};
+use tddy_service::proto::exec_tools::ExecuteToolRequest;
+use tddy_service::proto::session::SessionAttachment;
 
 use super::AttachmentMaterialization;
 

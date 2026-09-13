@@ -26,6 +26,7 @@
 
 import React from "react";
 import { PrStackService } from "../../src/gen/pr_stack_pb";
+import { ProjectService } from "../../src/gen/project_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { type ProjectEntry } from "../../src/gen/project_pb";

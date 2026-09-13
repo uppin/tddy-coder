@@ -224,7 +224,10 @@ pub mod proto {
     /// Tonic-generated gRPC / Connect-HTTP server and client for `local_token.proto`.
     pub mod tonic_local_token {
         #![allow(unused_imports, clippy::all)]
-        include!(concat!(env!("OUT_DIR"), "/tonic_local_token/local_token.rs"));
+        include!(concat!(
+            env!("OUT_DIR"),
+            "/tonic_local_token/local_token.rs"
+        ));
     }
 
     /// `SessionService`: a session's whole life. Split out of [`connection`] by `#unbundle` node 9 —

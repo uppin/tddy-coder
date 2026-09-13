@@ -8,11 +8,16 @@ use async_trait::async_trait;
 use prost::Message as _;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::{Request, Response, Status};
-use tddy_service::proto::exec_tools::{ExecuteToolChunk as ConnExecuteToolChunk, ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse, ListExecToolsResponse as ConnListExecToolsResponse, ListSessionToolCallsResponse as ConnListSessionToolCallsResponse};
 use tddy_service::proto::exec_tools::{
     ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
     ListExecToolsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
     ToolCallInfo as ExecToolCallInfo, ToolDef as ExecToolDef,
+};
+use tddy_service::proto::exec_tools::{
+    ExecuteToolChunk as ConnExecuteToolChunk, ExecuteToolRequest as ConnExecuteToolRequest,
+    ExecuteToolResponse as ConnExecuteToolResponse,
+    ListExecToolsResponse as ConnListExecToolsResponse,
+    ListSessionToolCallsResponse as ConnListSessionToolCallsResponse,
 };
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
 use tddy_worktree_service::stream::MpscResultStream;

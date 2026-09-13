@@ -19,7 +19,9 @@ use tddy_core::{
     format_elapsed_compact, read_changeset, read_session_metadata, Changeset,
     SessionEntry as CsSessionEntry,
 };
-use tddy_service::proto::session::{SessionContextDocKind as ProtoContextDocKind, SessionEntry as ProtoSessionEntry};
+use tddy_service::proto::session::{
+    SessionContextDocKind as ProtoContextDocKind, SessionEntry as ProtoSessionEntry,
+};
 
 use crate::session_context_docs::ContextDocKind;
 
@@ -1412,7 +1414,9 @@ recipe: pr-stack
 
     use crate::session_attachments::copy_attachment_into_session;
     use crate::session_context_docs::ATTACHMENT_DOC_DESCRIPTION;
-    use tddy_service::proto::session::{SessionContextDoc as ProtoContextDoc, SessionContextDocKind};
+    use tddy_service::proto::session::{
+        SessionContextDoc as ProtoContextDoc, SessionContextDocKind,
+    };
     use tddy_workflow::session_attachments_root;
     use tempfile::TempDir;
 

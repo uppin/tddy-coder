@@ -29,8 +29,11 @@ use tddy_daemon::test_util::{TestDaemon, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, MultiRpcService, Request, RpcBridge, RpcService, ServiceEntry};
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, DeleteSessionRequest, ListSessionsRequest, StartSessionRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
+use tddy_service::proto::session::{
+    DeleteSessionRequest, ListSessionsRequest, SessionService as SessionServiceTrait,
+    StartSessionRequest,
+};
 use tddy_service::proto::session_agents_svc::{
     AttachSessionAgentRequest, CancelAgentConversationRequest, DetachSessionAgentRequest,
     ListSessionAgentsRequest, OpenAgentConversationRequest, PromptAgentConversationRequest,

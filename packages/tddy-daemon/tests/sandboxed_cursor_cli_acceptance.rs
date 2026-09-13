@@ -11,7 +11,9 @@ use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
-use tddy_service::proto::session::{ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_service::proto::session::{
+    ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+};
 use tddy_terminal_rpc::proto::terminal_session::{
     StreamReplayMode, StreamTerminalOutputRequest,
     TerminalSessionService as TerminalSessionServiceTrait,

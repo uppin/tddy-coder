@@ -22,12 +22,12 @@ use tddy_service::proto::daemon_config::DaemonConfigServiceServer;
 use teloxide::prelude::Bot;
 use tokio::sync::Mutex;
 
+use crate::config::DaemonConfig;
+use crate::daemon_config_service::{CommonRoomSupervisor, DaemonConfigServiceImpl};
 use tddy_session_lifecycle::common_room_supervisor::{
     cloned_entries, CommonRoomSupervisorTask, CommonRoomTarget, DaemonCommonRoomConnector,
     PeerDiscoveryHandles, SupervisedCommonRoom,
 };
-use crate::config::DaemonConfig;
-use crate::daemon_config_service::{CommonRoomSupervisor, DaemonConfigServiceImpl};
 use tddy_session_lifecycle::telegram_notifier::TelegramSender;
 
 /// Which process is hosting this runtime.
@@ -200,7 +200,10 @@ pub fn spawn_common_room_discovery_task(
     registry: Arc<tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<livekit::Room>>>>,
 ) {
-    tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(&config, room_slot.clone());
+    tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
+        &config,
+        room_slot.clone(),
+    );
     tddy_daemon_livekit::livekit_peer_discovery::spawn_common_room_discovery_loop(
         config, registry, room_slot,
     );
@@ -211,15 +214,21 @@ type BinaryLocalSocketServices = crate::local_socket_server::LocalSocketServices
     tddy_session_lifecycle::SessionServiceImpl<
         tddy_session_lifecycle::connection_service::DaemonSessionHost,
     >,
-    tddy_projects::ProjectServiceImpl<tddy_session_lifecycle::connection_service::DaemonSessionHost>,
+    tddy_projects::ProjectServiceImpl<
+        tddy_session_lifecycle::connection_service::DaemonSessionHost,
+    >,
     tddy_session_lifecycle::connection_service::DemoVmServiceImpl,
     tddy_host_service::HostServiceImpl,
     tddy_worktree_service::WorktreeServiceImpl,
     tddy_terminal_rpc::TerminalSessionServiceImpl,
     tddy_session_lifecycle::connection_service::PeerRoutedSessionAgents,
     tddy_session_lifecycle::connection_service::PeerRoutedActivity,
-    tddy_discovery::CatalogServiceImpl<tddy_session_lifecycle::connection_service::DaemonSessionHost>,
-    tddy_tool_engine::ExecToolServiceImpl<tddy_session_lifecycle::connection_service::DaemonSessionHost>,
+    tddy_discovery::CatalogServiceImpl<
+        tddy_session_lifecycle::connection_service::DaemonSessionHost,
+    >,
+    tddy_tool_engine::ExecToolServiceImpl<
+        tddy_session_lifecycle::connection_service::DaemonSessionHost,
+    >,
     tddy_session_lifecycle::pr_stack_rpc::PrStackServiceImpl<
         tddy_session_lifecycle::connection_service::DaemonSessionHost,
     >,
@@ -279,10 +288,12 @@ impl RuntimeTasks {
         let mut handles = Vec::new();
 
         if let Some(tunnel) = self.oauth_loopback_tunnel {
-            if let Some(handle) = tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
-                &tunnel.config,
-                tunnel.room_slot,
-            ) {
+            if let Some(handle) =
+                tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
+                    &tunnel.config,
+                    tunnel.room_slot,
+                )
+            {
                 handles.push(handle);
             }
         }
@@ -347,8 +358,11 @@ impl RuntimeTasks {
 
         if let Some(inbound) = self.telegram_inbound {
             handles.push(tokio::spawn(async move {
-                if let Err(e) =
-                    tddy_session_lifecycle::telegram_bot::run_telegram_bot(inbound.bot, inbound.harness).await
+                if let Err(e) = tddy_session_lifecycle::telegram_bot::run_telegram_bot(
+                    inbound.bot,
+                    inbound.harness,
+                )
+                .await
                 {
                     log::warn!(
                         target: "tddy_daemon::telegram_bot",
@@ -489,15 +503,20 @@ pub async fn build(
         }
         None => config.clone(),
     };
-    let auth_result = tddy_session_lifecycle::auth::build_auth_entries(&auth_config, web_host.as_str(), web_port)?;
+    let auth_result = tddy_session_lifecycle::auth::build_auth_entries(
+        &auth_config,
+        web_host.as_str(),
+        web_port,
+    )?;
     let mut rpc_entries = auth_result.entries;
 
     // The room-JWT mint the web UI joins rooms through. Gated on the same session token as every
     // other daemon RPC — anything that can reach `/rpc` can call it, and a JWT it minted is
     // admission to a LiveKit room. See `tddy_session_lifecycle::auth::build_token_service_entry`.
-    if let Some(entry) =
-        tddy_session_lifecycle::auth::build_token_service_entry(&config, auth_result.user_resolver.as_ref())
-    {
+    if let Some(entry) = tddy_session_lifecycle::auth::build_token_service_entry(
+        &config,
+        auth_result.user_resolver.as_ref(),
+    ) {
         rpc_entries.push(entry);
     }
 
@@ -514,7 +533,8 @@ pub async fn build(
 
     // Create one shared ClaudeCliSessionManager — injected into both the Telegram spawn path and
     // DaemonSessionHost so that Telegram-launched sessions are attachable via the terminal RPCs.
-    let shared_claude_cli_manager = Arc::new(tddy_session_lifecycle::cli_session_manager::CliSessionManager::new());
+    let shared_claude_cli_manager =
+        Arc::new(tddy_session_lifecycle::cli_session_manager::CliSessionManager::new());
 
     // One registry of hosted session rooms for the whole daemon: `StartSession` opens rooms in it
     // and both deletion paths — the `DeleteSession` RPC and Telegram's Delete button — close them
@@ -566,10 +586,11 @@ pub async fn build(
         // One registry for the whole daemon: peer discovery writes sightings into it and the
         // `ListKnownHosts` handler reads them back. Two instances over the same directory would
         // each hold their own write lock, so a sighting and an RPC-time read could disagree.
-        let host_registry: Arc<dyn tddy_session_lifecycle::host_registry::HostRegistry> =
-            Arc::new(tddy_session_lifecycle::host_registry::FileHostRegistry::new(
+        let host_registry: Arc<dyn tddy_session_lifecycle::host_registry::HostRegistry> = Arc::new(
+            tddy_session_lifecycle::host_registry::FileHostRegistry::new(
                 tddy_session_lifecycle::host_registry::host_registry_dir(&tddy_data_dir),
-            ));
+            ),
+        );
         // The local row is the daemon's own, and nothing else records it: the peer registry
         // deliberately holds only *remote* participants, and a daemon with LiveKit switched off
         // never syncs a room at all. Recorded at startup so `first_seen` for this machine means
@@ -656,10 +677,11 @@ pub async fn build(
                     .map_err(|e| tddy_rpc::Status::invalid_argument(e.message()))?;
                 let sessions_base = (sessions_base_resolver)(&os_user)
                     .ok_or_else(|| tddy_rpc::Status::internal("could not resolve sessions path"))?;
-                let repo_root = tddy_session_lifecycle::workspace_session::resolve_worktree_root_for_session(
-                    &sessions_base,
-                    session_id,
-                )?;
+                let repo_root =
+                    tddy_session_lifecycle::workspace_session::resolve_worktree_root_for_session(
+                        &sessions_base,
+                        session_id,
+                    )?;
                 let session_dir = tddy_core::session_lifecycle::unified_session_dir_path(
                     &sessions_base,
                     session_id,
@@ -705,12 +727,14 @@ pub async fn build(
                 // Every session worktree this operator has, plus every project checkout their
                 // own registry names — including per-host checkouts of the same project.
                 let mut roots = vec![sessions_base.join("sessions")];
-                let projects =
-                    tddy_session_lifecycle::project_storage::read_projects(&projects_dir).map_err(|e| {
-                        ModelRegistryError::InvalidWorkspace(format!(
-                            "could not read this operator's projects: {e}"
-                        ))
-                    })?;
+                let projects = tddy_session_lifecycle::project_storage::read_projects(
+                    &projects_dir,
+                )
+                .map_err(|e| {
+                    ModelRegistryError::InvalidWorkspace(format!(
+                        "could not read this operator's projects: {e}"
+                    ))
+                })?;
                 for project in projects {
                     roots.push(std::path::PathBuf::from(&project.main_repo_path));
                     roots.extend(
@@ -729,7 +753,9 @@ pub async fn build(
         let model_registry = Arc::new(
             tddy_model_registry::ModelRegistryStore::open(
                 &tddy_data_dir.join("models.db"),
-                &tddy_session_lifecycle::livekit_peer_discovery::local_instance_id_for_config(&config),
+                &tddy_session_lifecycle::livekit_peer_discovery::local_instance_id_for_config(
+                    &config,
+                ),
                 // The same directory `DaemonSessionHost` resolves YAML defs from, so an
                 // assistant cannot be created under a name one of them already answers to.
                 &tddy_data_dir.join("agents"),
@@ -744,7 +770,8 @@ pub async fn build(
         // `DaemonSessionHost::new` (which would build a Telegram-only bus) because the
         // stream subscriber must be the very one the RPC handler subscribes to.
         let session_notification_bus = {
-            let mut bus = tddy_session_lifecycle::session_notifications::SessionNotificationBus::new();
+            let mut bus =
+                tddy_session_lifecycle::session_notifications::SessionNotificationBus::new();
             if let Some(ref hooks) = telegram_hooks {
                 bus = bus.with_subscriber(Arc::new(
                     tddy_session_lifecycle::session_notification_subscribers::TelegramNotificationSubscriber::new(
@@ -804,19 +831,20 @@ pub async fn build(
             Arc::new(worktree_service)
         };
 
-        let mut connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
-            config.clone(),
-            sessions_base_resolver,
-            tddy_data_dir.clone(),
-            user_resolver,
-            options.spawn_client.clone(),
-            livekit_discovery,
-            telegram_hooks.clone(),
-            Arc::clone(&shared_claude_cli_manager),
-        )
-        .with_session_rooms(Arc::clone(&shared_session_rooms))
-        .with_model_registry(Arc::clone(&model_registry))
-        .with_session_notification_bus(session_notification_bus);
+        let mut connection_impl =
+            tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
+                config.clone(),
+                sessions_base_resolver,
+                tddy_data_dir.clone(),
+                user_resolver,
+                options.spawn_client.clone(),
+                livekit_discovery,
+                telegram_hooks.clone(),
+                Arc::clone(&shared_claude_cli_manager),
+            )
+            .with_session_rooms(Arc::clone(&shared_session_rooms))
+            .with_model_registry(Arc::clone(&model_registry))
+            .with_session_notification_bus(session_notification_bus);
         if let Some(ref tracker) = idle_tracker {
             connection_impl = connection_impl.with_idle_tracker(tracker.clone());
         }
@@ -1146,12 +1174,13 @@ pub async fn build(
         // to a machine, and deleting a session must not delete the host's target. The keypair is
         // the one `#hosts-screen 6/8` publishes and reads from the same directory — one key per
         // host, so a password the browser encrypted for a prompt is readable here too.
-        let ss_host_targets: Arc<dyn tddy_session_lifecycle::host_desktop_targets::HostDesktopTargetStore> =
-            Arc::new(
-                tddy_session_lifecycle::host_desktop_targets::FileHostDesktopTargetStore::new(
-                    tddy_session_lifecycle::host_registry::host_registry_dir(&tddy_data_dir),
-                ),
-            );
+        let ss_host_targets: Arc<
+            dyn tddy_session_lifecycle::host_desktop_targets::HostDesktopTargetStore,
+        > = Arc::new(
+            tddy_session_lifecycle::host_desktop_targets::FileHostDesktopTargetStore::new(
+                tddy_session_lifecycle::host_registry::host_registry_dir(&tddy_data_dir),
+            ),
+        );
         let ss_host_keypair: Arc<dyn tddy_session_lifecycle::host_keypair::HostKeypair> =
             Arc::new(tddy_session_lifecycle::host_keypair::FileHostKeypair::new(
                 tddy_session_lifecycle::host_registry::host_registry_dir(&tddy_data_dir),
@@ -1230,7 +1259,8 @@ fn build_telegram(
     };
 
     let bot = Bot::new(tg.bot_token.clone());
-    let teloxide_sender = Arc::new(tddy_session_lifecycle::telegram_notifier::TeloxideSender::new(bot.clone()));
+    let teloxide_sender =
+        Arc::new(tddy_session_lifecycle::telegram_notifier::TeloxideSender::new(bot.clone()));
     let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
     let sender: Arc<dyn TelegramSender + Send + Sync> = teloxide_sender.clone();
     let elicitation_select_options: tddy_session_lifecycle::telegram_notifier::ElicitationSelectOptionsCache =
@@ -1251,11 +1281,13 @@ fn build_telegram(
             telegram_tracked.clone(),
         ),
     ));
-    let hooks = Arc::new(tddy_session_lifecycle::telegram_session_subscriber::TelegramDaemonHooks {
-        config: config.clone(),
-        sender: sender.clone(),
-        watcher,
-    });
+    let hooks = Arc::new(
+        tddy_session_lifecycle::telegram_session_subscriber::TelegramDaemonHooks {
+            config: config.clone(),
+            sender: sender.clone(),
+            watcher,
+        },
+    );
 
     let sessions_base = match crate::user_sessions_path::tddy_data_root_matching_child(
         &user,

@@ -27,7 +27,10 @@ use tddy_daemon::test_util::{wait_until_peer_discovered, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Request, RpcMessage, RpcResult, RpcService as _};
-use tddy_service::proto::session::{session_attachment::Source as AttachmentSource, SessionService as SessionServiceTrait, HostDocumentRef, SessionAttachment, StartSessionRequest};
+use tddy_service::proto::session::{
+    session_attachment::Source as AttachmentSource, HostDocumentRef, SessionAttachment,
+    SessionService as SessionServiceTrait, StartSessionRequest,
+};
 use tddy_service::proto::session_files::UploadStagedAttachmentChunkRequest;
 use tddy_service::proto::types::HostDocumentScope;
 

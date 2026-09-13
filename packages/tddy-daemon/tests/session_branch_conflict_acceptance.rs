@@ -20,7 +20,9 @@ use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest, StartSessionResponse};
+use tddy_service::proto::session::{
+    SessionService as SessionServiceTrait, StartSessionRequest, StartSessionResponse,
+};
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
 const VALID_TOKEN: &str = "valid-token";

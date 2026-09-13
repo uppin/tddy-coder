@@ -11,8 +11,11 @@ use tddy_core::session_lifecycle::validate_session_id_segment;
 use tddy_core::Changeset;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::catalog::{ListAgentModelsResponse, ModelInfo as CatalogModelInfo};
-use tddy_service::proto::session::{start_session_event::Event as StartSessionEventKind, AttachmentMaterializationProgress, SessionAttachment, StartSessionEvent};
-use tddy_service::proto::project::{ProjectEntry as ProtoProjectEntry};
+use tddy_service::proto::project::ProjectEntry as ProtoProjectEntry;
+use tddy_service::proto::session::{
+    start_session_event::Event as StartSessionEventKind, AttachmentMaterializationProgress,
+    SessionAttachment, StartSessionEvent,
+};
 use tddy_service::proto::session::{SplitAgentPlacement, StartSessionResponse};
 use uuid::Uuid;
 
@@ -48,10 +51,10 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 #[cfg(test)]
 use tddy_rpc::Request;
 #[cfg(test)]
-use tddy_service::proto::session::SessionService as SessionServiceTrait;
+use tddy_service::proto::exec_tools::ExecuteToolRequest;
+use tddy_service::proto::project::ListProjectsRequest;
 #[cfg(test)]
-use tddy_service::proto::exec_tools::{ExecuteToolRequest};
-use tddy_service::proto::project::{ListProjectsRequest};
+use tddy_service::proto::session::SessionService as SessionServiceTrait;
 use tddy_service::proto::session::{Signal, SignalSessionRequest, StartSessionRequest};
 
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
@@ -1160,17 +1163,17 @@ mod svc_session_files_ports;
 mod svc_activity_ports;
 
 mod family_proto_bridge;
-mod session_coordinate_handlers;
-mod svc_session_lifecycle_ports;
 mod project_coordinate_handlers;
-mod svc_project_ports;
+mod session_coordinate_handlers;
 mod svc_catalog_ports;
 mod svc_exec_tool_ports;
 mod svc_family_entries;
 mod svc_pr_stack_ports;
+mod svc_project_ports;
 /// The daemon's half of `session_agents.SessionAgentService` — the host capabilities family B
 /// reads, and the routing the daemon keeps. `#unbundle` node 7.
 mod svc_session_agent_ports;
+mod svc_session_lifecycle_ports;
 
 pub use svc_session_files_ports::PeerRoutedSessionFiles;
 

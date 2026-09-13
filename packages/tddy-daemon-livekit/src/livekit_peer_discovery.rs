@@ -79,8 +79,15 @@ use livekit::DisconnectReason;
 use prost::Message;
 use serde::Deserialize;
 use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolRequest};
-use tddy_service::proto::project::{AddProjectToHostRequest, AddProjectToHostResponse, ListProjectsRequest, ListProjectsResponse, ProjectEntry as ProtoProjectEntry, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse};
-use tddy_service::proto::session::{DeleteSessionRequest, DeleteSessionResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse};
+use tddy_service::proto::project::{
+    AddProjectToHostRequest, AddProjectToHostResponse, ListProjectsRequest, ListProjectsResponse,
+    ProjectEntry as ProtoProjectEntry, SetProjectDefaultBranchRequest,
+    SetProjectDefaultBranchResponse,
+};
+use tddy_service::proto::session::{
+    DeleteSessionRequest, DeleteSessionResponse, StartSessionEvent, StartSessionRequest,
+    StartSessionResponse,
+};
 use tddy_service::proto::session_files::{
     DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse, HostDocumentChunk,
     ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, ReadHostDocumentRequest,

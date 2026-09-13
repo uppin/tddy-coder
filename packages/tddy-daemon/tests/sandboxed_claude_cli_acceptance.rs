@@ -20,7 +20,9 @@ use tddy_daemon::connection_service::DaemonSessionHost;
 #[cfg(not(target_os = "macos"))]
 use tddy_rpc::Code;
 use tddy_rpc::Request;
-use tddy_service::proto::session::{ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_service::proto::session::{
+    ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+};
 use tddy_terminal_rpc::proto::terminal_session::{
     StreamReplayMode, StreamTerminalOutputRequest,
     TerminalSessionService as TerminalSessionServiceTrait,

@@ -11,7 +11,10 @@ use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, DeleteSessionRequest, ResumeSessionRequest, StartSessionRequest};
+use tddy_service::proto::session::{
+    DeleteSessionRequest, ResumeSessionRequest, SessionService as SessionServiceTrait,
+    StartSessionRequest,
+};
 use tddy_testing_commons::process_is_alive;
 
 const VALID_TOKEN: &str = "valid-token";

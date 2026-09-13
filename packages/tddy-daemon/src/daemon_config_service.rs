@@ -199,13 +199,16 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
             // The same allowlist rows the HTTP `/api/config` snapshot carries: config entries only,
             // because assistants come and go while the daemon runs and `ListAgents` is their live
             // source.
-            allowed_agents: tddy_session_lifecycle::agent_list_mapping::agent_allowlist_rows(&config, &[])
-                .into_iter()
-                .map(|row| ClientAllowedAgent {
-                    id: row.id,
-                    label: row.display_label,
-                })
-                .collect(),
+            allowed_agents: tddy_session_lifecycle::agent_list_mapping::agent_allowlist_rows(
+                &config,
+                &[],
+            )
+            .into_iter()
+            .map(|row| ClientAllowedAgent {
+                id: row.id,
+                label: row.display_label,
+            })
+            .collect(),
             debug: config.debug.clone(),
             daemon_instance_id: Some(
                 tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&config),

@@ -22,7 +22,9 @@ use tddy_daemon::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_rpc::Request;
-use tddy_service::proto::project::{ProjectService as ProjectServiceTrait, AddProjectToHostRequest};
+use tddy_service::proto::project::{
+    AddProjectToHostRequest, ProjectService as ProjectServiceTrait,
+};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_spawn::spawner::{self, LiveKitCreds, SpawnOptions};
 use tddy_spawn::supervisor_client::{spawn_worker_for, SpawnBackendChoice};

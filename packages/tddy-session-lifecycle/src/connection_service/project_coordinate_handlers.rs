@@ -4,15 +4,14 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 
+use super::family_proto_bridge::wire_same;
 use super::hooks_and_urls;
 use super::{merge_listed_projects_with_peers, service_util, DaemonSessionHost};
-use tddy_spawn::{spawn_worker, spawner};
 use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
 use crate::project_storage::{self, ProjectData};
 use crate::user_sessions_path::{
     project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
 };
-use super::family_proto_bridge::wire_same;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::project::ProjectEntry as ConnProjectEntry;
 use tddy_service::proto::project::{
@@ -21,10 +20,10 @@ use tddy_service::proto::project::{
     ListProjectsResponse, ProjectEntry, SetProjectDefaultBranchRequest,
     SetProjectDefaultBranchResponse,
 };
+use tddy_spawn::{spawn_worker, spawner};
 
 impl DaemonSessionHost {
-
-pub(crate) async fn list_projects_at_project_coordinate(
+    pub(crate) async fn list_projects_at_project_coordinate(
         &self,
         request: Request<ListProjectsRequest>,
     ) -> Result<Response<ListProjectsResponse>, Status> {
@@ -77,7 +76,7 @@ pub(crate) async fn list_projects_at_project_coordinate(
         Ok(Response::new(ListProjectsResponse { projects }))
     }
 
-pub(crate) async fn create_project_at_project_coordinate(
+    pub(crate) async fn create_project_at_project_coordinate(
         &self,
         request: Request<CreateProjectRequest>,
     ) -> Result<Response<CreateProjectResponse>, Status> {
@@ -187,7 +186,7 @@ pub(crate) async fn create_project_at_project_coordinate(
         }))
     }
 
-pub(crate) async fn add_project_to_host_at_project_coordinate(
+    pub(crate) async fn add_project_to_host_at_project_coordinate(
         &self,
         request: Request<AddProjectToHostRequest>,
     ) -> Result<Response<AddProjectToHostResponse>, Status> {
@@ -244,8 +243,7 @@ pub(crate) async fn add_project_to_host_at_project_coordinate(
                     "cannot forward AddProjectToHost: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
                 )
             })?;
-            let conn_req: tddy_service::proto::project::AddProjectToHostRequest =
-                wire_same(&req)?;
+            let conn_req: tddy_service::proto::project::AddProjectToHostRequest = wire_same(&req)?;
             let inner = tddy_daemon_livekit::livekit_peer_discovery::forward_add_project_to_host_via_livekit(
                 slot,
                 &peer_instance_id,
@@ -273,9 +271,11 @@ pub(crate) async fn add_project_to_host_at_project_coordinate(
                 &repo_root,
             );
             return Ok(Response::new(AddProjectToHostResponse {
-                project: Some(wire_same(
-                    &hooks_and_urls::project_entry_from(&existing, local_id, default_remote),
-                )?),
+                project: Some(wire_same(&hooks_and_urls::project_entry_from(
+                    &existing,
+                    local_id,
+                    default_remote,
+                ))?),
             }));
         }
 
@@ -357,13 +357,15 @@ pub(crate) async fn add_project_to_host_at_project_coordinate(
             &repo_root,
         );
         Ok(Response::new(AddProjectToHostResponse {
-            project: Some(wire_same(
-                &hooks_and_urls::project_entry_from(&stored, local_id, default_remote),
-            )?),
+            project: Some(wire_same(&hooks_and_urls::project_entry_from(
+                &stored,
+                local_id,
+                default_remote,
+            ))?),
         }))
     }
 
-pub(crate) async fn set_project_default_branch_at_project_coordinate(
+    pub(crate) async fn set_project_default_branch_at_project_coordinate(
         &self,
         request: Request<SetProjectDefaultBranchRequest>,
     ) -> Result<Response<SetProjectDefaultBranchResponse>, Status> {
@@ -457,13 +459,15 @@ pub(crate) async fn set_project_default_branch_at_project_coordinate(
             &repo_root,
         );
         Ok(Response::new(SetProjectDefaultBranchResponse {
-            project: Some(wire_same(
-                &hooks_and_urls::project_entry_from(&stored, local_id, default_remote),
-            )?),
+            project: Some(wire_same(&hooks_and_urls::project_entry_from(
+                &stored,
+                local_id,
+                default_remote,
+            ))?),
         }))
     }
 
-pub(crate) async fn list_project_branches_at_project_coordinate(
+    pub(crate) async fn list_project_branches_at_project_coordinate(
         &self,
         request: Request<ListProjectBranchesRequest>,
     ) -> Result<Response<ListProjectBranchesResponse>, Status> {
@@ -528,5 +532,4 @@ pub(crate) async fn list_project_branches_at_project_coordinate(
             default_remote: remote,
         }))
     }
-
 }

@@ -18,8 +18,10 @@ use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon::{project_storage, user_sessions_path};
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::project::{ProjectService as ProjectServiceTrait, ListProjectsRequest, SetProjectDefaultBranchRequest};
-use tddy_service::proto::session::{SessionService as SessionServiceTrait};
+use tddy_service::proto::project::{
+    ListProjectsRequest, ProjectService as ProjectServiceTrait, SetProjectDefaultBranchRequest,
+};
+use tddy_service::proto::session::SessionService as SessionServiceTrait;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

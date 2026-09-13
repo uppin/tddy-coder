@@ -44,7 +44,7 @@ use tddy_daemon::test_util::{self, wait_until_peer_discovered};
 use tddy_github::{GitHubUser, SessionTokenSigner};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, ResumeSessionRequest};
+use tddy_service::proto::session::{ResumeSessionRequest, SessionService as SessionServiceTrait};
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_argv};
 use tddy_testing_commons::wait::eventually_blocking;
 

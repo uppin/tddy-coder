@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use tddy_projects::ProjectHandler;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::project::{
-    AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest,
-    CreateProjectResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
-    ListProjectsRequest, ListProjectsResponse, ProjectService, SetProjectDefaultBranchRequest,
+    AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ProjectService, SetProjectDefaultBranchRequest,
     SetProjectDefaultBranchResponse,
 };
 
@@ -32,21 +32,25 @@ impl ProjectHandler for DaemonSessionHost {
         &self,
         request: Request<tddy_service::proto::project::AddProjectToHostRequest>,
     ) -> Result<Response<tddy_service::proto::project::AddProjectToHostResponse>, Status> {
-        self.add_project_to_host_at_project_coordinate(request).await
+        self.add_project_to_host_at_project_coordinate(request)
+            .await
     }
 
     async fn list_project_branches(
         &self,
         request: Request<tddy_service::proto::project::ListProjectBranchesRequest>,
     ) -> Result<Response<tddy_service::proto::project::ListProjectBranchesResponse>, Status> {
-        self.list_project_branches_at_project_coordinate(request).await
+        self.list_project_branches_at_project_coordinate(request)
+            .await
     }
 
     async fn set_project_default_branch(
         &self,
         request: Request<tddy_service::proto::project::SetProjectDefaultBranchRequest>,
-    ) -> Result<Response<tddy_service::proto::project::SetProjectDefaultBranchResponse>, Status> {
-        self.set_project_default_branch_at_project_coordinate(request).await
+    ) -> Result<Response<tddy_service::proto::project::SetProjectDefaultBranchResponse>, Status>
+    {
+        self.set_project_default_branch_at_project_coordinate(request)
+            .await
     }
 }
 
@@ -90,9 +94,7 @@ impl ProjectService for DaemonSessionHost {
 
 impl DaemonSessionHost {
     #[must_use]
-    pub fn project_service(
-        self: &std::sync::Arc<Self>,
-    ) -> tddy_projects::ProjectServiceImpl<Self> {
+    pub fn project_service(self: &std::sync::Arc<Self>) -> tddy_projects::ProjectServiceImpl<Self> {
         tddy_projects::ProjectServiceImpl::new(std::sync::Arc::clone(self))
     }
 

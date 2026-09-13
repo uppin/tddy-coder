@@ -44,9 +44,14 @@ use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_sandbox::SandboxError;
-use tddy_service::proto::exec_tools::{ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse};
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, DeleteSessionRequest, ListSessionsRequest, StartSessionRequest};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
+use tddy_service::proto::exec_tools::{
+    ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse,
+};
+use tddy_service::proto::session::{
+    DeleteSessionRequest, ListSessionsRequest, SessionService as SessionServiceTrait,
+    StartSessionRequest,
+};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;

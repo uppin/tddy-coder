@@ -21,10 +21,17 @@ use tddy_service::proto::exec_tools::{
     ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
     ListSessionToolCallsResponse,
 };
+use tddy_service::proto::pr_stack::{
+    AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
+    LinkStackNodeRequest, LinkStackNodeResponse, PrStackService, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
+    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
+    ResolveStackBaseRequest, ResolveStackBaseResponse,
+};
 use tddy_service::proto::project::{
-    AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest,
-    CreateProjectResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
-    ListProjectsRequest, ListProjectsResponse, ProjectService, SetProjectDefaultBranchRequest,
+    AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ProjectService, SetProjectDefaultBranchRequest,
     SetProjectDefaultBranchResponse,
 };
 use tddy_service::proto::session::{
@@ -32,13 +39,6 @@ use tddy_service::proto::session::{
     GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListSessionsRequest,
     ListSessionsResponse, ResumeSessionRequest, ResumeSessionResponse, SessionService,
     SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
-};
-use tddy_service::proto::pr_stack::{
-    AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
-    LinkStackNodeRequest, LinkStackNodeResponse, PrStackService, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
-    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ResolveStackBaseRequest, ResolveStackBaseResponse,
 };
 use tddy_worktree_service::stream::MpscResultStream;
 
@@ -163,14 +163,20 @@ impl SessionService for TestDaemon {
         &self,
         request: Request<ListSessionsRequest>,
     ) -> Result<Response<ListSessionsResponse>, Status> {
-        self.inner.session_lifecycle_service().list_sessions(request).await
+        self.inner
+            .session_lifecycle_service()
+            .list_sessions(request)
+            .await
     }
 
     async fn start_session(
         &self,
         request: Request<StartSessionRequest>,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        self.inner.session_lifecycle_service().start_session(request).await
+        self.inner
+            .session_lifecycle_service()
+            .start_session(request)
+            .await
     }
 
     async fn stream_start_session(
@@ -197,21 +203,30 @@ impl SessionService for TestDaemon {
         &self,
         request: Request<ResumeSessionRequest>,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
-        self.inner.session_lifecycle_service().resume_session(request).await
+        self.inner
+            .session_lifecycle_service()
+            .resume_session(request)
+            .await
     }
 
     async fn signal_session(
         &self,
         request: Request<SignalSessionRequest>,
     ) -> Result<Response<SignalSessionResponse>, Status> {
-        self.inner.session_lifecycle_service().signal_session(request).await
+        self.inner
+            .session_lifecycle_service()
+            .signal_session(request)
+            .await
     }
 
     async fn delete_session(
         &self,
         request: Request<DeleteSessionRequest>,
     ) -> Result<Response<DeleteSessionResponse>, Status> {
-        self.inner.session_lifecycle_service().delete_session(request).await
+        self.inner
+            .session_lifecycle_service()
+            .delete_session(request)
+            .await
     }
 
     async fn get_worktree_snapshot(
@@ -245,7 +260,10 @@ impl ProjectService for TestDaemon {
         &self,
         request: Request<AddProjectToHostRequest>,
     ) -> Result<Response<AddProjectToHostResponse>, Status> {
-        self.inner.project_service().add_project_to_host(request).await
+        self.inner
+            .project_service()
+            .add_project_to_host(request)
+            .await
     }
 
     async fn list_project_branches(

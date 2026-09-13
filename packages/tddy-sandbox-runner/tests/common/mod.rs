@@ -16,8 +16,8 @@ use futures_util::StreamExt;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::{
-    EchoRequest, EchoResponse, EchoStreamFrame, RpcStreamFrame, SessionFrame, TunnelOpen,
-    TunnelOpenAck,
+    EchoRequest, EchoResponse, EchoStreamFrame, RpcStreamFrame, SandboxTerminalOutput,
+    SessionFrame, TunnelOpen, TunnelOpenAck,
 };
 use tddy_service::tonic_sandbox::sandbox_service_server::{SandboxService, SandboxServiceServer};
 use tokio::net::{TcpListener, UnixListener};
@@ -146,7 +146,20 @@ impl SandboxService for FakeSandboxService {
                 Mode::EchoOnly
                 | Mode::ServeInJailTools { .. }
                 | Mode::CloseOnInJailToolCall
-                | Mode::AcceptInJailToolCallsWithoutAnswering => {}
+                | Mode::AcceptInJailToolCallsWithoutAnswering => {
+                    // The host relay waits for the jail's first inbound frame before it considers
+                    // the channel attached. These modes answer only after the host sends a call,
+                    // so they still need a harmless first frame.
+                    let _ = tx
+                        .send(Ok(SessionFrame {
+                            payload: Some(SessionPayload::TerminalOutput(SandboxTerminalOutput {
+                                data: vec![],
+                                session_id: String::new(),
+                                terminal_id: "main".to_string(),
+                            })),
+                        }))
+                        .await;
+                }
             }
 
             // Whether an in-jail tool call is still unanswered. Shared with the spawned answer

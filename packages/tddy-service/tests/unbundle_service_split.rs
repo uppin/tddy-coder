@@ -615,16 +615,21 @@ fn connection_service_ends_at_exactly_the_residual() {
     let demo_vm_block = service_block(&read("demo_vm.proto"), "DemoVmService");
     let local_token_block = service_block(&read("local_token.proto"), "LocalTokenService");
 
-    let declared: Vec<String> = [session_block, project_block, demo_vm_block, local_token_block]
-        .iter()
-        .flat_map(|block| {
-            block
-                .lines()
-                .filter_map(|line| line.trim().strip_prefix("rpc "))
-                .filter_map(|rest| rest.split('(').next())
-                .map(str::to_string)
-        })
-        .collect();
+    let declared: Vec<String> = [
+        session_block,
+        project_block,
+        demo_vm_block,
+        local_token_block,
+    ]
+    .iter()
+    .flat_map(|block| {
+        block
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("rpc "))
+            .filter_map(|rest| rest.split('(').next())
+            .map(str::to_string)
+    })
+    .collect();
 
     let mut unexpected: Vec<&String> = declared
         .iter()

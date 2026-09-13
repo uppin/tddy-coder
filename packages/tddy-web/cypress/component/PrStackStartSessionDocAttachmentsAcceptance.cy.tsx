@@ -17,6 +17,7 @@
 
 import React from "react";
 import { CatalogService } from "../../src/gen/catalog_pb";
+import { ProjectService } from "../../src/gen/project_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { create } from "@bufbuild/protobuf";

@@ -151,10 +151,9 @@ impl DaemonSessionHost {
 
     /// The host-side dispatch a sandboxed session's `SessionChannel` relays family B to.
     pub fn sandbox_rpc_handler(&self) -> Arc<dyn tddy_sandbox_runner::HostRpcHandler> {
-        self.sandbox_rpc_bridge
-            .get()
-            .cloned()
-            .expect("sandbox RPC bridge not installed — runtime must call install_sandbox_rpc_bridge")
+        self.sandbox_rpc_bridge.get().cloned().expect(
+            "sandbox RPC bridge not installed — runtime must call install_sandbox_rpc_bridge",
+        )
     }
 
     /// Share this daemon's model registry (builder), so an assistant defined in it is listed by

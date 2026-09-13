@@ -40,7 +40,9 @@ use tddy_daemon::project_storage::{write_projects, ProjectData};
 use tddy_daemon::remote_git_service::{ProjectsDirResolver, RemoteGitServiceImpl, UserResolver};
 use tddy_livekit::{LiveKitParticipant, RoomOptions};
 use tddy_livekit_testkit::LiveKitTestkit;
-use tddy_service::proto::session::{ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_service::proto::session::{
+    ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+};
 use tddy_session_sync::{Credentials, DaemonToken, LiveKitCredentials};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 use tddy_testing_commons::wait::eventually;

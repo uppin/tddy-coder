@@ -33,7 +33,11 @@ use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon::test_util::{self, wait_until_peer_discovered, TEST_TOKEN};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request, Status};
-use tddy_service::proto::session::{session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent, AttachmentMaterializationProgress, SessionService as SessionServiceTrait, SessionAttachment, StagedAttachmentRef, StartSessionRequest};
+use tddy_service::proto::session::{
+    session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent,
+    AttachmentMaterializationProgress, SessionAttachment, SessionService as SessionServiceTrait,
+    StagedAttachmentRef, StartSessionRequest,
+};
 use tddy_service::proto::session_files::{
     HostDocumentChunk, ReadHostDocumentRequest, SessionFilesService as SessionFilesServiceTrait,
     UploadStagedAttachmentChunkRequest,

@@ -41,8 +41,8 @@ use tddy_daemon::test_util::TestDaemon;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_service::proto::pr_stack::{PrStackService, ResolveStackBaseRequest};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 
 /// The daemon under test: the one a child session is started on, and the one that holds the
 /// project. In the reported failure it is also the host with no orchestrator of its own.

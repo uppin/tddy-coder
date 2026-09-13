@@ -17,6 +17,7 @@
 
 import React from "react";
 import { CatalogService } from "../../src/gen/catalog_pb";
+import { ProjectService } from "../../src/gen/project_pb";
 import { Room } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";

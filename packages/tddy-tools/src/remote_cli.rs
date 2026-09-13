@@ -199,7 +199,14 @@ async fn run_list_tools(args: ListToolsArgs) -> Result<()> {
         "daemonInstanceId": ""
     });
 
-    let resp = match connect_post(&base_url, "exec_tools.ExecToolService", "ListExecTools", body).await {
+    let resp = match connect_post(
+        &base_url,
+        "exec_tools.ExecToolService",
+        "ListExecTools",
+        body,
+    )
+    .await
+    {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
@@ -268,7 +275,8 @@ async fn run_connect_session(args: ConnectSessionArgs) -> Result<()> {
         "sessionToken": token
     });
 
-    let resp = match connect_post(&base_url, "session.SessionService", "ConnectSession", body).await {
+    let resp = match connect_post(&base_url, "session.SessionService", "ConnectSession", body).await
+    {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
@@ -299,13 +307,14 @@ async fn run_sync_context(args: SyncContextArgs) -> Result<()> {
         "daemonInstanceId": ""
     });
 
-    let resp = match connect_post(&base_url, "exec_tools.ExecToolService", "ExecuteTool", body).await {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("error: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let resp =
+        match connect_post(&base_url, "exec_tools.ExecToolService", "ExecuteTool", body).await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                std::process::exit(1);
+            }
+        };
 
     // Write the result to dest directory.
     let dest = args

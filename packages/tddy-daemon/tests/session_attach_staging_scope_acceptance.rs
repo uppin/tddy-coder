@@ -31,7 +31,11 @@ use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_daemon::host_documents::MAX_HOST_DOCUMENT_BYTES;
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::{Code, Request, Status};
-use tddy_service::proto::session::{session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent, SessionService as SessionServiceTrait, SessionAttachment, StagedAttachmentRef, StartSessionEvent, StartSessionRequest};
+use tddy_service::proto::session::{
+    session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent,
+    SessionAttachment, SessionService as SessionServiceTrait, StagedAttachmentRef,
+    StartSessionEvent, StartSessionRequest,
+};
 use tddy_service::proto::session_files::{
     HostDocumentChunk, ReadHostDocumentRequest, SessionFilesService as SessionFilesServiceTrait,
     UploadStagedAttachmentChunkRequest,
@@ -651,15 +655,13 @@ async fn stream_start_session_refuses_an_invalid_token_before_it_classifies_the_
     };
 
     // When — the session is started over the streaming RPC
-    let err = match SessionServiceTrait::stream_start_session(
-        &*fixture.service,
-        Request::new(request),
-    )
-    .await
-    {
-        Err(status) => status,
-        Ok(_) => panic!("an invalid token must be refused at call time, not mid-stream"),
-    };
+    let err =
+        match SessionServiceTrait::stream_start_session(&*fixture.service, Request::new(request))
+            .await
+        {
+            Err(status) => status,
+            Ok(_) => panic!("an invalid token must be refused at call time, not mid-stream"),
+        };
 
     // Then — UNAUTHENTICATED, at call time
     assert_eq!(err.code, Code::Unauthenticated, "got {err:?}");

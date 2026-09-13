@@ -53,8 +53,9 @@ impl DaemonSessionHost {
     pub fn demo_vm_entry(self: &Arc<Self>) -> tddy_rpc::ServiceEntry {
         tddy_rpc::ServiceEntry {
             name: "demo_vm.DemoVmService",
-            service: Arc::new(DemoVmServiceServer::new(DemoVmServiceImpl::new(Arc::clone(self))))
-                as Arc<dyn tddy_rpc::RpcService>,
+            service: Arc::new(DemoVmServiceServer::new(DemoVmServiceImpl::new(
+                Arc::clone(self),
+            ))) as Arc<dyn tddy_rpc::RpcService>,
         }
     }
 }

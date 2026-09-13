@@ -10,7 +10,9 @@
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, Signal, SignalSessionRequest};
+use tddy_service::proto::session::{
+    SessionService as SessionServiceTrait, Signal, SignalSessionRequest,
+};
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
 /// Acceptance: SignalSession sends SIGINT to the session's process.

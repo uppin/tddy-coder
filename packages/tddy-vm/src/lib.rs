@@ -54,7 +54,9 @@ impl tddy_service::proto::demo_vm::DemoVmService for DemoVmServiceStub {
         tddy_rpc::Response<tddy_service::proto::demo_vm::StartDemoVmResponse>,
         tddy_rpc::Status,
     > {
-        Err(tddy_rpc::Status::unimplemented("demo_vm.DemoVmService migration in progress"))
+        Err(tddy_rpc::Status::unimplemented(
+            "demo_vm.DemoVmService migration in progress",
+        ))
     }
 
     async fn stop_demo_vm(
@@ -64,7 +66,9 @@ impl tddy_service::proto::demo_vm::DemoVmService for DemoVmServiceStub {
         tddy_rpc::Response<tddy_service::proto::demo_vm::StopDemoVmResponse>,
         tddy_rpc::Status,
     > {
-        Err(tddy_rpc::Status::unimplemented("demo_vm.DemoVmService migration in progress"))
+        Err(tddy_rpc::Status::unimplemented(
+            "demo_vm.DemoVmService migration in progress",
+        ))
     }
 
     async fn get_demo_vm_status(
@@ -74,7 +78,9 @@ impl tddy_service::proto::demo_vm::DemoVmService for DemoVmServiceStub {
         tddy_rpc::Response<tddy_service::proto::demo_vm::GetDemoVmStatusResponse>,
         tddy_rpc::Status,
     > {
-        Err(tddy_rpc::Status::unimplemented("demo_vm.DemoVmService migration in progress"))
+        Err(tddy_rpc::Status::unimplemented(
+            "demo_vm.DemoVmService migration in progress",
+        ))
     }
 }
 

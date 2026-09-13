@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use tddy_service::proto::local_token::{MintLocalTokenRequest};
-use tddy_service::proto::session::{StartSessionRequest};
+use tddy_service::proto::local_token::MintLocalTokenRequest;
+use tddy_service::proto::session::StartSessionRequest;
 use tddy_service::proto::tonic_local_token::local_token_service_client::LocalTokenServiceClient;
 use tddy_service::proto::tonic_session::session_service_client::SessionServiceClient;
 use tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput;

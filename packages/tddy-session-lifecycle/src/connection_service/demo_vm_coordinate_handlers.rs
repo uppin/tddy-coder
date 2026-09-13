@@ -238,5 +238,4 @@ impl DaemonSessionHost {
         };
         Ok(Response::new(resp))
     }
-
 }

@@ -13,7 +13,10 @@ use tddy_daemon::connection_service::{
 };
 use tddy_daemon::cursor_cli_spawn::spawn_cursor_cli_session_inner;
 use tddy_rpc::{Code, Request, Response, Status};
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, ListSessionsRequest, StartSessionRequest, StartSessionResponse};
+use tddy_service::proto::session::{
+    ListSessionsRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+    StartSessionResponse,
+};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

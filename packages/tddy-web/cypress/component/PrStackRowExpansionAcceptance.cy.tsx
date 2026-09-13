@@ -17,6 +17,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { type ProjectEntry } from "../../src/gen/project_pb";
+import { ProjectService } from "../../src/gen/project_pb";
 import { SessionService, type SessionEntry } from "../../src/gen/session_pb";
 import { PrStackService } from "../../src/gen/pr_stack_pb";
 import { CatalogService } from "../../src/gen/catalog_pb";

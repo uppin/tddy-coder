@@ -25,9 +25,13 @@ use tddy_daemon_sandbox::workspace_tool_sandbox::{
 };
 use tddy_rpc::{Code, Request, Status};
 use tddy_sandbox::SandboxError;
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, DeleteSessionRequest, StartSessionRequest};
-use tddy_service::proto::exec_tools::{ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse};
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ExecuteToolResponse};
+use tddy_service::proto::exec_tools::{
+    ExecuteToolRequest as ConnExecuteToolRequest, ExecuteToolResponse as ConnExecuteToolResponse,
+};
+use tddy_service::proto::session::{
+    DeleteSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+};
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a40";
 

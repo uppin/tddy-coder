@@ -35,7 +35,9 @@ impl SessionHandler for DaemonSessionHost {
     ) -> Result<Response<crate::SessionStartEventStream>, Status> {
         use super::family_proto_bridge::wire_same;
 
-        let response = self.stream_start_session_at_session_coordinate(request).await?;
+        let response = self
+            .stream_start_session_at_session_coordinate(request)
+            .await?;
         let rx = response.into_inner().into_receiver();
         let stream = futures_util::stream::unfold(rx, |mut rx| async {
             match rx.recv().await {
@@ -82,7 +84,8 @@ impl SessionHandler for DaemonSessionHost {
         &self,
         request: Request<tddy_service::proto::session::GetWorktreeSnapshotRequest>,
     ) -> Result<Response<tddy_service::proto::session::GetWorktreeSnapshotResponse>, Status> {
-        self.get_worktree_snapshot_at_session_coordinate(request).await
+        self.get_worktree_snapshot_at_session_coordinate(request)
+            .await
     }
 }
 

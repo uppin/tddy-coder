@@ -30,9 +30,9 @@ use std::time::{Duration, Instant};
 
 use hyper_util::rt::TokioIo;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::local_token_tonic_adapter::{LocalTokenUdsTonicAdapter, UidToUsername};
 use tddy_daemon::host_tonic_adapter::HostServiceTonicAdapter;
 use tddy_daemon::local_socket_server::{serve_connection_uds, LocalSocketServices};
+use tddy_daemon::local_token_tonic_adapter::{LocalTokenUdsTonicAdapter, UidToUsername};
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_daemon::user_sessions_path::username_for_uid;
 use tddy_daemon::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
@@ -42,20 +42,20 @@ use tddy_service::proto::activity::{ActivityServiceTonicAdapter, ReportSessionSt
 use tddy_service::proto::catalog::CatalogServiceTonicAdapter;
 use tddy_service::proto::demo_vm::DemoVmServiceTonicAdapter;
 use tddy_service::proto::exec_tools::ExecToolServiceTonicAdapter;
+use tddy_service::proto::host::{ListEligibleDaemonsRequest, StreamHostStatsRequest};
 use tddy_service::proto::local_token::MintLocalTokenRequest;
+use tddy_service::proto::pr_stack::PrStackServiceTonicAdapter;
 use tddy_service::proto::project::ProjectServiceTonicAdapter;
 use tddy_service::proto::session::SessionServiceTonicAdapter;
-use tddy_service::proto::host::{ListEligibleDaemonsRequest, StreamHostStatsRequest};
-use tddy_service::proto::pr_stack::PrStackServiceTonicAdapter;
 use tddy_service::proto::session_agents_svc::{
     ListSessionAgentsRequest, SessionAgentServiceTonicAdapter,
 };
 use tddy_service::proto::tonic_activity::activity_service_client::ActivityServiceClient;
+use tddy_service::proto::tonic_local_token::local_token_service_client::LocalTokenServiceClient;
 use tddy_service::proto::tonic_session_agents::session_agent_service_client::SessionAgentServiceClient;
 use tddy_service::proto::worktree::{
     ListWorktreesForProjectRequest, StreamWorktreeStatsRequest, WorktreeRow,
 };
-use tddy_service::proto::tonic_local_token::local_token_service_client::LocalTokenServiceClient;
 use tddy_service::tonic_host::host_service_client::HostServiceClient;
 use tddy_service::tonic_worktree::worktree_service_client::WorktreeServiceClient;
 use tddy_terminal_rpc::proto::terminal_session::{
@@ -102,19 +102,14 @@ fn start_local_socket_server(
 
     let uid_to_username: UidToUsername = Arc::new(username_for_uid);
     let connection = test_service(sessions_base).as_arc();
-    let session_adapter = SessionServiceTonicAdapter::new(Arc::new(
-        connection.session_lifecycle_service(),
-    ));
-    let project_adapter =
-        ProjectServiceTonicAdapter::new(Arc::new(connection.project_service()));
+    let session_adapter =
+        SessionServiceTonicAdapter::new(Arc::new(connection.session_lifecycle_service()));
+    let project_adapter = ProjectServiceTonicAdapter::new(Arc::new(connection.project_service()));
     let demo_vm_adapter = DemoVmServiceTonicAdapter::new(Arc::new(
         tddy_daemon::connection_service::DemoVmServiceImpl::new(Arc::clone(&connection)),
     ));
-    let local_token_adapter = LocalTokenUdsTonicAdapter::new(
-        Arc::new(config.clone()),
-        signer,
-        uid_to_username,
-    );
+    let local_token_adapter =
+        LocalTokenUdsTonicAdapter::new(Arc::new(config.clone()), signer, uid_to_username);
     // The terminal coordinate is built from the *same* `DaemonSessionHost` the socket's
     // `ConnectionService` is, so it addresses that instance's terminals and control lease — the
     // wiring `runtime::build` does, rather than a second set of managers only this suite would see.

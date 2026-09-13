@@ -23,6 +23,7 @@ import type { DescService } from "@bufbuild/protobuf";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { type ProjectEntry } from "../../src/gen/project_pb";
+import { ProjectService } from "../../src/gen/project_pb";
 import { SessionService, ListSessionsResponseSchema, SessionEntrySchema } from "../../src/gen/session_pb";
 import { ListProjectBranchesResponseSchema, ListProjectsResponseSchema, ProjectEntrySchema } from "../../src/gen/project_pb";
 import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";

@@ -25,7 +25,9 @@ use futures_util::StreamExt;
 use pretty_assertions::assert_eq;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, SplitAgentPlacement, StartSessionRequest};
+use tddy_service::proto::session::{
+    SessionService as SessionServiceTrait, SplitAgentPlacement, StartSessionRequest,
+};
 use tddy_service::proto::session_files::{
     ContextManifestRequest, ReadContextFileBatchRequest, ReadContextFileRequest,
     SessionFilesService as SessionFilesServiceTrait,

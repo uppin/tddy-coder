@@ -31,7 +31,9 @@ use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, ResumeSessionRequest, StartSessionRequest};
+use tddy_service::proto::session::{
+    ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

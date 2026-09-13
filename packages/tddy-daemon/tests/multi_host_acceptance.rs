@@ -16,7 +16,10 @@ use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::session::{SessionService as SessionServiceTrait, DeleteSessionRequest, ListSessionsRequest, StartSessionRequest};
+use tddy_service::proto::session::{
+    DeleteSessionRequest, ListSessionsRequest, SessionService as SessionServiceTrait,
+    StartSessionRequest,
+};
 use tddy_testing_commons::a_session_metadata;
 
 const REMOTE_ACCEPTANCE_ROOM: &str = "acceptance-common-room";

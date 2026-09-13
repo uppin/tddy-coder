@@ -13,7 +13,7 @@
 use prost::Message as _;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::runtime::{self, RuntimeOptions};
-use tddy_rpc::{Code, RpcMessage, RpcResult, ServiceEntry};
+use tddy_rpc::{Code, MultiRpcService, RpcMessage, RpcResult, RpcService, ServiceEntry};
 use tddy_service::proto::livekit::StreamLiveKitRoomsRequest;
 
 /// A fully configured daemon: a `github` block, because the bootstrap only reaches the block that
@@ -118,17 +118,16 @@ async fn serves_the_rooms_stream_as_its_own_service() {
 async fn no_longer_answers_the_rooms_stream_on_the_connection_service() {
     // Given the same runtime
     let entries = a_built_daemon().await;
+    let mux = MultiRpcService::new(entries);
 
-    // When the old coordinate is called
+    // When a client still calls the deleted coordinate
     let refusal = status_of(
-        entry_named(&entries, "the pre-unbundle monolithic RPC coordinate")
-            .service
-            .handle_rpc(
-                "the pre-unbundle monolithic RPC coordinate",
-                "StreamLiveKitRooms",
-                &a_rooms_subscription(),
-            )
-            .await,
+        mux.handle_rpc(
+            "connection.ConnectionService",
+            "StreamLiveKitRooms",
+            &a_rooms_subscription(),
+        )
+        .await,
     );
 
     // Then the daemon does not know the method there any more. `NOT_FOUND` rather than
@@ -137,6 +136,6 @@ async fn no_longer_answers_the_rooms_stream_on_the_connection_service() {
     assert_eq!(
         refusal.code(),
         Code::NotFound,
-        "the pre-unbundle monolithic RPC coordinate still answers StreamLiveKitRooms: {refusal:?}"
+        "connection.ConnectionService still answers StreamLiveKitRooms: {refusal:?}"
     );
 }
