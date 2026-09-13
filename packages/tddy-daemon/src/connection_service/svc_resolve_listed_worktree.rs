@@ -411,9 +411,9 @@ impl ConnectionServiceImpl {
         session_id: &str,
         session_dir: &Path,
         worktree_root: &Path,
-    ) -> Result<Option<crate::session_room::OpenedSessionRoom>, Status> {
+    ) -> Result<Option<tddy_daemon_livekit::session_room::OpenedSessionRoom>, Status> {
         let local_instance_id = local_instance_id_for_config(&self.config);
-        let hosting = crate::session_room::DaemonRoomHosting {
+        let hosting = tddy_daemon_livekit::session_room::DaemonRoomHosting {
             config: &self.config,
             instance_id: &local_instance_id,
             rooms: &self.session_rooms,

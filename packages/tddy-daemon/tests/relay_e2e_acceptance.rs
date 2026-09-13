@@ -17,11 +17,11 @@ use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::livekit_peer_discovery::{
-    spawn_common_room_discovery_task, CommonRoomPeerRegistry, LiveKitDiscoveryHandles,
-    LiveKitEligibleDaemonSource,
+    CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::multi_host::EligibleDaemonSource;
 use tddy_daemon::relay_idle::IdleTimeoutTracker;
+use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;

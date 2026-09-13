@@ -12,9 +12,9 @@
 
 use pretty_assertions::assert_eq;
 use tddy_daemon::connection_service::activity_delta_frames;
-use tddy_daemon::session_room::ActivityDelta;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
+use tddy_daemon_livekit::session_room::ActivityDelta;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::connection::{
     AgentActivityDeltaChunk, AgentActivityDeltaRequest,

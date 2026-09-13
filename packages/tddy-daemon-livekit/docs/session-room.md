@@ -1,4 +1,4 @@
-# Session room module (`tddy_daemon::session_room`)
+# Session room module (`tddy_daemon_livekit::session_room`)
 
 ## Role
 
@@ -170,12 +170,37 @@ clamp would turn `poll_interval_ms: 0` into a 1 ms loop spawning git subprocesse
 
 ## Tests
 
+**The suites are split across two crates, and the split is the crate boundary itself.** A suite that
+drives `ConnectionServiceImpl` or `tddy_daemon::test_util` stays in `tddy-daemon`, because moving it
+would put `tddy-daemon` back on this crate's dependency path — the one property the extraction
+exists to establish, pinned by `tests/dependency_boundary_unit.rs`.
+
+### In `tddy-daemon-livekit`
+
+| Suite | Covers |
+|---|---|
+| `tests/session_room_livekit_acceptance.rs` | One daemon, real LiveKit: the tick ring, the WIP ref's parentage and its release at close, a call served the patch its tick produced, and a record broadcast into the room stamped with its tick. |
+| `tests/session_room_wiring_acceptance.rs` | The registry's contract without a LiveKit deployment: what `open` and `ensure_open` promise, and what they refuse. |
+| `tests/livekit_peer_daemons_acceptance.rs` | Common-room peer discovery listing another daemon. |
+| `tests/common_room_duplicate_identity_repro.rs`, `tests/common_room_set_metadata_handshake_repro.rs` | The two common-room repros. |
+| `tests/stream_livekit_rooms_rpc.rs` | `livekit.LiveKitService.StreamLiveKitRooms` — snapshot, changes, and clean termination. |
+| `tests/dependency_boundary_unit.rs` | Neither `tddy-daemon` nor `tddy-daemon-auth` is on this crate's dependency path, walked over the transitive manifest closure. |
+
+**The four Docker-backed suites contend with one another.** They are `#[serial]` *within* a binary,
+but cargo runs binaries in parallel, and they are four of a small crate's suites rather than four of
+`tddy-daemon`'s twenty-five — so a whole-crate run starts them closer together against one shared
+LiveKit container. `--test-threads=1` across the four is the reliable invocation. And **nothing
+skips without Docker**: `LiveKitTestkit::start()` returns `Err` and every caller `.expect()`s it, so
+an absent `/var/run/docker.sock` makes these suites *fail*, loudly, naming
+`LIVEKIT_TESTKIT_WS_URL` as the alternative.
+
+### In `tddy-daemon`
+
 | Suite | Covers |
 |---|---|
 | `tests/worktree_activity.rs` | Naming, snapshotting a real checkout, every event rule, metadata shape, the log line. No LiveKit. |
 | `tests/session_room_acceptance.rs` | One daemon, real LiveKit: that a start dials LiveKit not at all, that the first connect opens the room and bridges the terminal, that a second connect reuses both and two at once produce one of each, that a connect whose room cannot be created fails naming it, plus first-joiner, file access, broadcast fan-out, idle silence, late-joiner metadata, attachments, no-credentials, and that a `workspace` session gets no room. |
 | `tests/session_room_cross_host_acceptance.rs` | Two daemons, a real split session: a forwarded read is indistinguishable from a local one, and a commit on the codebase daemon is broadcast in the facilitating daemon's room. |
-| `tests/session_room_livekit_acceptance.rs` | One daemon, real LiveKit: the tick ring, the WIP ref's parentage and its release at close, a call served the patch its tick produced, and a record broadcast into the room stamped with its tick. |
 | `tests/session_activity_delta_acceptance.rs` | Real git repositories, ticks driven explicitly, no LiveKit: staging a WIP tree without touching the agent's index, delta scoping per call, the residual, and ring eviction. |
 | `tests/session_activity_wiring_acceptance.rs` | `read_head_commit` checked against what git itself reports, and what one tick produces. |
 | `tests/session_activity_attribution_acceptance.rs` | `tick_activity` as a pure function: which tick a call belongs to, decided without a room. |
@@ -185,7 +210,9 @@ clamp would turn `poll_interval_ms: 0` into a 1 ms loop spawning git subprocesse
 ## Related
 
 - [Session rooms (product)](../../../docs/ft/daemon/session-room.md)
-- [Connection service](connection-service.md) — `GetWorktreeSnapshot` and the peer routing it reuses
+- [Connection service](../../tddy-daemon/docs/connection-service.md) — `GetWorktreeSnapshot` and the peer routing it reuses
 - [Worktrees module](../../tddy-worktree-service/docs/worktrees.md) — the shared numstat parser
 - [Session worktree sync (product)](../../../docs/ft/daemon/session-worktree-sync.md) — what the WIP ref and the delta ring are for
 - [`tddy-session-sync`](../../tddy-session-sync/docs/mirroring.md) — the client that consumes them
+- [LiveKit service (this crate)](./livekit-service.md) — the crate this module belongs to
+- [changesets/](./changesets/)

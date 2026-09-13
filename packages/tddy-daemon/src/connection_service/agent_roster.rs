@@ -32,13 +32,13 @@ pub(crate) struct DaemonSeedCloneClaimant {
 /// measurement takes exactly the path a caller's would — including the peer routing and the
 /// blocking-pool budget.
 #[async_trait::async_trait]
-impl crate::session_room::RemoteSnapshotSource for ConnectionServiceImpl {
+impl tddy_daemon_livekit::session_room::RemoteSnapshotSource for ConnectionServiceImpl {
     async fn snapshot(
         &self,
         session_token: &str,
         codebase_session_id: &str,
         codebase_instance_id: &str,
-    ) -> Result<crate::session_room::WorktreeSnapshot, Status> {
+    ) -> Result<tddy_daemon_livekit::session_room::WorktreeSnapshot, Status> {
         let answered = ConnectionServiceTrait::get_worktree_snapshot(
             self,
             Request::new(GetWorktreeSnapshotRequest {
@@ -49,7 +49,7 @@ impl crate::session_room::RemoteSnapshotSource for ConnectionServiceImpl {
         )
         .await?
         .into_inner();
-        Ok(crate::session_room::WorktreeSnapshot {
+        Ok(tddy_daemon_livekit::session_room::WorktreeSnapshot {
             head_commit: answered.head_commit,
             branch: answered.branch,
             changed_paths: answered.changed_paths,

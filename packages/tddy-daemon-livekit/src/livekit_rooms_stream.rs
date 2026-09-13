@@ -6,7 +6,7 @@
 //! timing test against a live server.
 //!
 //! Feature: `docs/ft/web/livekit-rooms-panel.md`
-//! Reference: `packages/tddy-daemon/docs/connection-service.md` § LiveKit rooms
+//! Reference: `packages/tddy-daemon-livekit/docs/livekit-service.md` § `livekit.LiveKitService`
 
 use async_trait::async_trait;
 use std::collections::BTreeMap;
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tddy_livekit::room_roster::LiveKitRoomRoster;
 use tddy_rpc::Status;
-use tddy_service::proto::connection::{
+use tddy_service::proto::livekit::{
     live_kit_rooms_change::Change, live_kit_rooms_event, LiveKitParticipantInfo,
     LiveKitParticipantJoined, LiveKitParticipantLeft, LiveKitParticipantMetadataChanged,
     LiveKitParticipantStateChanged, LiveKitRoomAdded, LiveKitRoomInfo, LiveKitRoomRemoved,
@@ -95,7 +95,7 @@ impl RoomRoster for UnconfiguredRoomRoster {
 /// than `public_url`, which is the browser-facing one. A daemon missing any of the three settings,
 /// or carrying a URL that is not a WebSocket address, gets a roster that reports exactly that.
 pub fn room_roster_from_config(
-    livekit: Option<&crate::config::LiveKitConfig>,
+    livekit: Option<&tddy_daemon_kernel::config::LiveKitConfig>,
 ) -> Arc<dyn RoomRoster> {
     match configured_roster(livekit) {
         Ok(roster) => Arc::new(roster),
@@ -105,7 +105,7 @@ pub fn room_roster_from_config(
 
 /// The configured server-API reader, or why this daemon has none.
 fn configured_roster(
-    livekit: Option<&crate::config::LiveKitConfig>,
+    livekit: Option<&tddy_daemon_kernel::config::LiveKitConfig>,
 ) -> Result<LiveKitRoomRoster, String> {
     let credentials = livekit.and_then(|lk| {
         Some((
@@ -309,7 +309,7 @@ fn as_event(change: Change) -> LiveKitRoomsChange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tddy_service::proto::connection::{live_kit_rooms_change::Change, LiveKitParticipantInfo};
+    use tddy_service::proto::livekit::{live_kit_rooms_change::Change, LiveKitParticipantInfo};
 
     const COMMON_ROOM: &str = "livekit.common_room";
     const PRESENTER_ROOM: &str = "daemon-pr-stack-presenter-room-0001";
@@ -669,8 +669,8 @@ mod tests {
                                   configured, so it cannot read the LiveKit server's rooms";
 
     /// A daemon's LiveKit block carrying everything the server API needs.
-    fn a_livekit_config() -> crate::config::LiveKitConfig {
-        crate::config::LiveKitConfig {
+    fn a_livekit_config() -> tddy_daemon_kernel::config::LiveKitConfig {
+        tddy_daemon_kernel::config::LiveKitConfig {
             url: Some("ws://127.0.0.1:7880".to_string()),
             api_key: Some("devkey".to_string()),
             api_secret: Some("secret".to_string()),
@@ -680,7 +680,7 @@ mod tests {
 
     /// Why the roster built from `livekit` cannot read the server — panicking if it turns out it
     /// can, so a test never passes on a roster that would have talked to a real server.
-    async fn refusal_of(livekit: Option<&crate::config::LiveKitConfig>) -> String {
+    async fn refusal_of(livekit: Option<&tddy_daemon_kernel::config::LiveKitConfig>) -> String {
         match room_roster_from_config(livekit).list_rooms().await {
             Err(RosterError::Unconfigured(reason)) => reason,
             other => panic!("expected an unconfigured roster, got {other:?}"),
@@ -717,7 +717,7 @@ mod tests {
     #[tokio::test]
     async fn refuses_to_read_when_the_livekit_url_is_missing() {
         // Given credentials with no server address to use them against
-        let livekit = crate::config::LiveKitConfig {
+        let livekit = tddy_daemon_kernel::config::LiveKitConfig {
             url: None,
             ..a_livekit_config()
         };
@@ -732,7 +732,7 @@ mod tests {
     #[tokio::test]
     async fn refuses_to_read_when_the_api_key_is_missing() {
         // Given a configured server address the daemon cannot authenticate to
-        let livekit = crate::config::LiveKitConfig {
+        let livekit = tddy_daemon_kernel::config::LiveKitConfig {
             api_key: None,
             ..a_livekit_config()
         };
@@ -747,7 +747,7 @@ mod tests {
     #[tokio::test]
     async fn refuses_to_read_when_the_api_secret_is_missing() {
         // Given an api key with no secret to sign with
-        let livekit = crate::config::LiveKitConfig {
+        let livekit = tddy_daemon_kernel::config::LiveKitConfig {
             api_secret: None,
             ..a_livekit_config()
         };
@@ -762,7 +762,7 @@ mod tests {
     #[tokio::test]
     async fn refuses_to_read_a_livekit_url_that_is_not_a_websocket_address() {
         // Given an operator who configured the HTTP address by mistake
-        let livekit = crate::config::LiveKitConfig {
+        let livekit = tddy_daemon_kernel::config::LiveKitConfig {
             url: Some("http://127.0.0.1:7880".to_string()),
             ..a_livekit_config()
         };

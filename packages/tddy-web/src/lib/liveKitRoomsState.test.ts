@@ -6,7 +6,7 @@ import {
   LiveKitRoomsChangeSchema,
   type LiveKitParticipantInfo,
   type LiveKitRoomInfo,
-} from "../gen/connection_pb";
+} from "../gen/livekit_pb";
 import {
   applyRoomsChange,
   roomLabelFromMetadata,

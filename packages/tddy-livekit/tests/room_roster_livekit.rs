@@ -16,7 +16,7 @@ use serial_test::serial;
 use std::time::Duration;
 use tddy_livekit::room_roster::LiveKitRoomRoster;
 use tddy_livekit_testkit::LiveKitTestkit;
-use tddy_service::proto::connection::LiveKitRoomInfo;
+use tddy_service::proto::livekit::LiveKitRoomInfo;
 
 /// The testkit server's dev credentials, as configured in `tddy-livekit-testkit`.
 const API_KEY: &str = "devkey";

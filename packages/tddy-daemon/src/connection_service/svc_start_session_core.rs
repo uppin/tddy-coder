@@ -89,20 +89,23 @@ impl ConnectionServiceImpl {
             .iter()
             .map(|e| e.instance_id.0.clone())
             .collect();
-        let route = match crate::livekit_peer_discovery::classify_start_session_peer_route(
-            &local_id,
-            requested_daemon,
-            &eligible_ids,
-        ) {
-            Ok(r) => r,
-            Err(msg) => {
-                log::info!("StartSession: rejected daemon routing: {}", msg);
-                return Err(Status::failed_precondition(msg));
-            }
-        };
+        let route =
+            match tddy_daemon_livekit::livekit_peer_discovery::classify_start_session_peer_route(
+                &local_id,
+                requested_daemon,
+                &eligible_ids,
+            ) {
+                Ok(r) => r,
+                Err(msg) => {
+                    log::info!("StartSession: rejected daemon routing: {}", msg);
+                    return Err(Status::failed_precondition(msg));
+                }
+            };
 
         match route {
-            crate::livekit_peer_discovery::StartSessionPeerRoute::Forward { peer_instance_id } => {
+            tddy_daemon_livekit::livekit_peer_discovery::StartSessionPeerRoute::Forward {
+                peer_instance_id,
+            } => {
                 log::info!(
                     "StartSession: forwarding RPC to remote daemon_instance_id={}",
                     peer_instance_id
@@ -112,12 +115,13 @@ impl ConnectionServiceImpl {
                         "cannot forward StartSession: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
                     )
                 })?;
-                let inner = crate::livekit_peer_discovery::forward_start_session_via_livekit(
-                    slot,
-                    &peer_instance_id,
-                    &req,
-                )
-                .await?;
+                let inner =
+                    tddy_daemon_livekit::livekit_peer_discovery::forward_start_session_via_livekit(
+                        slot,
+                        &peer_instance_id,
+                        &req,
+                    )
+                    .await?;
                 log::info!(
                     "StartSession: forward succeeded session_id={} livekit_server_identity={}",
                     inner.session_id,
@@ -125,7 +129,7 @@ impl ConnectionServiceImpl {
                 );
                 return Ok(Response::new(inner));
             }
-            crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
+            tddy_daemon_livekit::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
         }
 
         // The agent runs here; where its worktree goes is the second, independent placement. A

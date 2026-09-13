@@ -1,0 +1,51 @@
+[package]
+name = "tddy-daemon-livekit"
+version = "0.1.0"
+edition = "2021"
+description = "The daemon's LiveKit surface — per-worktree session rooms, common-room peer discovery, and the rooms observability service. Extracted from tddy-daemon"
+
+[lib]
+name = "tddy_daemon_livekit"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+futures-util = "0.3"
+livekit = "0.7"
+log = "0.4"
+prost = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tddy-core = { path = "../tddy-core" }
+# `DaemonConfig`, `SessionUserResolver`, the two daemon ids and the split-agent identity prefix —
+# everything this crate needs from the daemon it left, and nothing of the daemon itself.
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+# `host_registry` and `multi_host`: peer discovery files a sighting and answers with an eligible
+# daemon. The edge is one-directional — nothing in `tddy-host-service` names a LiveKit module.
+tddy-host-service = { path = "../tddy-host-service" }
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-service = { path = "../tddy-service" }
+# `list_session_attachments`, beside the `session_attachments_root` that names the directory it
+# reads: a session room publishes the basenames in its metadata.
+tddy-workflow = { path = "../tddy-workflow" }
+tddy-worktree-service = { path = "../tddy-worktree-service" }
+# `write_wip_tree_within` builds a scratch index outside the checkout, so a measurement never
+# touches the worktree's own `.git/index`.
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "process", "io-util"] }
+
+[dev-dependencies]
+futures-util = "0.3"
+prost = "0.13"
+# The inline tests build a `DaemonConfig` from the YAML an operator would write, rather than from
+# struct literals that could drift from the file format.
+serde_yaml = "0.9"
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+serial_test = "3"
+tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }

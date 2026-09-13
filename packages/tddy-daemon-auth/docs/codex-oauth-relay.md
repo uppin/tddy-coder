@@ -1,4 +1,4 @@
-# `codex_oauth_relay`
+# `codex_oauth_relay` (tddy-daemon-auth)
 
 ## Overview
 
@@ -19,18 +19,25 @@ Errors surface as **`CodexOAuthRelayError::Validation(...)`** with **`CodexOAuth
 
 **`log::debug!`** and **`log::info!`** use target **`tddy_daemon::codex_oauth`**. Logs avoid printing full authorize URLs or OAuth secrets.
 
+**The target names `tddy_daemon`, not this crate, and that is deliberate.** A log target is an operator's `RUST_LOG` filter, so renaming it to match the crate would silently stop every filter that already selects it. A fleet-wide rename of the daemon's targets is its own change with its own release note.
+
 ## Tests
 
 ```bash
-cargo test -p tddy-daemon codex_oauth_relay::tests -- --test-threads=1
+cargo test -p tddy-daemon-auth codex_oauth_relay::tests -- --test-threads=1
 cargo test -p tddy-integration-tests --test codex_oauth_web_relay_acceptance -- --test-threads=1
 ```
 
 ## Related package docs
 
-- **[oauth-loopback-tunnel.md](./oauth-loopback-tunnel.md)** — operator TCP + **`StreamBytes`** bridge in **`tddy-daemon`**
+- **[oauth-loopback-tunnel.md](./oauth-loopback-tunnel.md)** — operator TCP + **`StreamBytes`** bridge, in this crate
 
 ## Feature documentation
 
-- **[Codex OAuth web relay](../../../../docs/ft/web/codex-oauth-web-relay.md)**
-- **[Codex OAuth relay (daemon)](../../../../docs/ft/daemon/codex-oauth-relay.md)**
+- **[Codex OAuth web relay](../../../docs/ft/web/codex-oauth-web-relay.md)**
+- **[Codex OAuth relay (daemon)](../../../docs/ft/daemon/codex-oauth-relay.md)**
+
+## Related
+
+- **[auth-service.md](./auth-service.md)** — the crate this module belongs to
+- **[changesets/](./changesets/)**

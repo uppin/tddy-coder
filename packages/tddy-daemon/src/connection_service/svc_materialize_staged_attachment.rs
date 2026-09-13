@@ -150,7 +150,7 @@ impl ConnectionServiceImpl {
             relative_path: staged_relative_path.to_string(),
         };
         let mut frames =
-            crate::livekit_peer_discovery::forward_stream_read_host_document_via_livekit(
+            tddy_daemon_livekit::livekit_peer_discovery::forward_stream_read_host_document_via_livekit(
                 slot,
                 peer_instance_id,
                 &read_req,
@@ -225,7 +225,7 @@ impl ConnectionServiceImpl {
                         relative_path: host_doc.relative_path.clone(),
                     };
                     let resp =
-                        crate::livekit_peer_discovery::forward_read_host_document_via_livekit(
+                        tddy_daemon_livekit::livekit_peer_discovery::forward_read_host_document_via_livekit(
                             slot,
                             &peer_instance_id,
                             &read_req,
@@ -316,7 +316,7 @@ impl ConnectionServiceImpl {
         // facilitating daemon whether or not the repo turns out to live somewhere else.
         let livekit = crate::split_session::SplitLiveKitRoom::from_config(
             &self.config,
-            crate::session_room::session_room_name(&session_id),
+            tddy_daemon_livekit::session_room::session_room_name(&session_id),
         )?;
 
         let workspace_req = agent_roster::workspace_start_request(
@@ -325,13 +325,14 @@ impl ConnectionServiceImpl {
             &session_id,
             &codebase_session_id,
         )?;
-        let forwarded = crate::livekit_peer_discovery::forward_start_session_via_livekit_within(
-            &slot,
-            codebase_instance_id,
-            &workspace_req,
-            self.split_forward_deadline(),
-        )
-        .await;
+        let forwarded =
+            tddy_daemon_livekit::livekit_peer_discovery::forward_start_session_via_livekit_within(
+                &slot,
+                codebase_instance_id,
+                &workspace_req,
+                self.split_forward_deadline(),
+            )
+            .await;
         let workspace = match forwarded {
             Ok(workspace) => workspace,
             Err(status) => {

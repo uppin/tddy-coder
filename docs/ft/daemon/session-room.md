@@ -246,5 +246,6 @@ daemon's common-room participant behaves.
 
 - [Remote managed worktree](remote-managed-worktree.md) — the split placement this builds on
 - [LiveKit common-room peer discovery](livekit-peer-discovery.md) — the room this one sits beside
-- [Session room module](../../../packages/tddy-daemon/docs/session-room.md) — the implementation
+- [Session room module](../../../packages/tddy-daemon-livekit/docs/session-room.md) — the implementation
+- [The identity boundary and the LiveKit service](auth-livekit-services.md) — the crate that owns it, and who mints its room JWTs
 - [Daemon changelog](changelog/)

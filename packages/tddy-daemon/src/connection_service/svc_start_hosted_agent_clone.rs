@@ -48,12 +48,12 @@ impl ConnectionServiceImpl {
             ));
         }
         let (_common_room, url, api_key, api_secret) =
-            crate::livekit_peer_discovery::livekit_common_room_connect_strings(&self.config)
-                .map_err(|e| {
-                    Status::failed_precondition(format!(
-                        "this daemon cannot hold an agent clone: {e}"
-                    ))
-                })?;
+            tddy_daemon_livekit::livekit_peer_discovery::livekit_common_room_connect_strings(
+                &self.config,
+            )
+            .map_err(|e| {
+                Status::failed_precondition(format!("this daemon cannot hold an agent clone: {e}"))
+            })?;
         let worktree_path = workspace_session::resolve_worktree_root_for_session(
             sessions_base,
             codebase_session_id,

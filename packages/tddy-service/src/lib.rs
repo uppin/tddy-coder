@@ -36,6 +36,7 @@ pub use proto::auth::{AuthServiceServer, LiveKitTokenServiceServer};
 pub use proto::bsp::BspServiceServer;
 pub use proto::connection::ConnectionServiceServer;
 pub use proto::host::HostServiceServer;
+pub use proto::livekit::LiveKitServiceServer;
 pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::models::{ModelRegistryService, ModelRegistryServiceServer};
 pub use proto::reflection::ServerReflectionServer;
@@ -96,6 +97,11 @@ pub mod proto {
     /// browsing and reading the files inside one.
     pub mod worktree {
         include!(concat!(env!("OUT_DIR"), "/worktree.rs"));
+    }
+    /// `LiveKitService`: which rooms this daemon can see, and who is in them. Split out of
+    /// [`connection`] by `#unbundle` node 4; its 12 messages overlap nothing that stayed.
+    pub mod livekit {
+        include!(concat!(env!("OUT_DIR"), "/livekit.rs"));
     }
     /// `RemoteGitService`: a daemon project served as a git remote. See
     /// `docs/ft/daemon/remote-git-repo.md`.

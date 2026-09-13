@@ -1,7 +1,7 @@
 //! Acceptance tests for Codex OAuth browser capture → tddy-web → callback relay.
-//! Exercises `tddy_daemon::codex_oauth_relay` validation, `BROWSER` argv dispatch, and callback parsing.
+//! Exercises `tddy_daemon_auth::codex_oauth_relay` validation, `BROWSER` argv dispatch, and callback parsing.
 
-use tddy_daemon::codex_oauth_relay::{
+use tddy_daemon_auth::codex_oauth_relay::{
     dispatch_browser_open_capture, relay_oauth_callback_to_registered_listener,
     validate_codex_oauth_authorize_url, CodexOAuthHostAllowlist,
 };

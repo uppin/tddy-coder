@@ -2,7 +2,7 @@
 //!
 //! Spins up [`tddy_livekit_testkit::LiveKitTestkit`] (Docker container unless `LIVEKIT_TESTKIT_WS_URL`
 //! points at a running server). Uses the production `HostServiceImpl` with
-//! `LiveKitEligibleDaemonSource`, `spawn_common_room_discovery_task`,
+//! `LiveKitEligibleDaemonSource`, `spawn_common_room_discovery_loop`,
 //! and the shared room slot (same wiring as `main` when `livekit.common_room` is configured).
 //!
 //! Stays in `tddy-daemon` rather than moving to `tddy-host-service` with the RPC it drives: the
@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use livekit::prelude::{Room, RoomOptions};
 use serial_test::serial;
-use tddy_daemon::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_host_service::HostServiceImpl;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
@@ -64,15 +64,22 @@ fn host_service_with_livekit_discovery(
         }
     });
     let config_arc = Arc::new(config.clone());
-    let registry = Arc::new(tddy_daemon::livekit_peer_discovery::CommonRoomPeerRegistry::new());
+    let registry =
+        Arc::new(tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-    tddy_daemon::livekit_peer_discovery::spawn_common_room_discovery_task(
+    // The discovery loop alone. It used to be reached through `spawn_common_room_discovery_task`,
+    // which also started the OAuth loopback tunnel supervisor — a co-tenant of the room slot with
+    // nothing to do with peer discovery, and one that now lives in `tddy-daemon-auth`, which this
+    // crate deliberately cannot reach. The supervisor acts only on participants publishing pending
+    // `codex_oauth` metadata, and nothing here publishes any, so what this suite observes is
+    // unchanged.
+    tddy_daemon_livekit::livekit_peer_discovery::spawn_common_room_discovery_loop(
         config_arc.clone(),
         registry.clone(),
         room_slot.clone(),
     );
-    let eligible: Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource> = Arc::new(
-        tddy_daemon::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
+    let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
+        tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
             config_arc,
             registry,
             room_slot.clone(),

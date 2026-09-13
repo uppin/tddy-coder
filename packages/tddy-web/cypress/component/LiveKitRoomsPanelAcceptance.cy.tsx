@@ -3,7 +3,7 @@
  *
  * A second panel on `#/livekit`, below the existing connected-participants panel, listing every room
  * on the LiveKit server and the participants joined to each. Fed by
- * `ConnectionService.StreamLiveKitRooms`, whose first message is a full snapshot and whose every
+ * `LiveKitService.StreamLiveKitRooms`, whose first message is a full snapshot and whose every
  * later message is one change event. Participant metadata is revealed on pointer-hover or keyboard
  * focus; the harness drives the focus path (see `liveKitRoomsPanelPage.revealMetadata`).
  *

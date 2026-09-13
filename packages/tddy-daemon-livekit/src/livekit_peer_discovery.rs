@@ -88,9 +88,9 @@ use tddy_service::proto::connection::{
     UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
 };
 
-use crate::config::{DaemonConfig, LiveKitConfig};
-use crate::host_registry::{now_unix_ms, HostRegistry, HostSighting};
-use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
+use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig};
+use tddy_host_service::host_registry::{now_unix_ms, HostRegistry, HostSighting};
+use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 
 /// After `RoomEvent::Connected`, yield before the first `set_metadata` attempt.
 const SET_METADATA_AFTER_CONNECTED_SETTLE_MS: u64 = 400;
@@ -105,8 +105,8 @@ pub const LOG_LIVEKIT_PEER_METADATA: &str = "tddy_daemon::livekit_peer_discovery
 
 /// LiveKit-backed eligible listing plus the shared common-room [`Room`] handle for **StartSession** forwarding.
 ///
-/// Construct this in [`crate::runtime::build`] when `livekit.common_room` and credentials are
-/// set; pass [`None`] to [`crate::connection_service::ConnectionServiceImpl::new`] for
+/// Construct this in `tddy-daemon`'s `runtime::build` when `livekit.common_room` and credentials are
+/// set; pass [`None`] to `tddy-daemon`'s `connection_service::ConnectionServiceImpl::new` for
 /// single-host / discovery-disabled mode.
 pub struct LiveKitDiscoveryHandles {
     pub eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
@@ -489,8 +489,8 @@ fn peer_daemon_from_participant_fields(
     // function's only evidence is self-declared metadata — so an agent running model-authored code
     // could otherwise publish a daemon advertisement and insert a host of its choosing into every
     // daemon's eligible list and the web's host picker. Its identity prefix is reserved for exactly
-    // this refusal (`split_session::SPLIT_AGENT_IDENTITY_PREFIX`).
-    if id_trim.starts_with(crate::split_session::SPLIT_AGENT_IDENTITY_PREFIX) {
+    // this refusal (`tddy_daemon_kernel::daemon_identity::SPLIT_AGENT_IDENTITY_PREFIX`).
+    if id_trim.starts_with(tddy_daemon_kernel::daemon_identity::SPLIT_AGENT_IDENTITY_PREFIX) {
         return None;
     }
     let peer = parse_peer_daemon_json(metadata.trim()).ok()?;
@@ -560,14 +560,14 @@ impl LiveKitEligibleDaemonSource {
     }
 
     fn local_row(&self) -> EligibleDaemonInfo {
-        crate::multi_host::eligible_daemon_entry_for(DaemonInstanceId(
+        tddy_host_service::multi_host::eligible_daemon_entry_for(DaemonInstanceId(
             local_instance_id_for_config(&self.config),
         ))
     }
 
     /// The local row under the id that survives a restart, for the host registry's join.
     fn local_durable_row(&self) -> EligibleDaemonInfo {
-        crate::multi_host::eligible_daemon_entry_for(DaemonInstanceId(
+        tddy_host_service::multi_host::eligible_daemon_entry_for(DaemonInstanceId(
             local_base_instance_id_for_config(&self.config),
         ))
     }
@@ -706,44 +706,6 @@ where
         .collect()
 }
 
-/// Spawn a background task that joins `livekit.common_room`, publishes metadata, and keeps
-/// [`CommonRoomPeerRegistry`] in sync. Also stores [`Room`] in `room_slot` for **StartSession** forwarding.
-///
-/// Starts the OAuth loopback tunnel supervisor alongside it, for a caller that owns both for the
-/// lifetime of its process. The daemon itself does not: its discovery loop is owned by
-/// [`crate::common_room_supervisor`], which stops and restarts it when the configured room changes,
-/// while the tunnel supervisor follows `room_slot` across that and so is started once — see
-/// [`spawn_common_room_discovery_loop`] and [`spawn_oauth_loopback_tunnel`].
-pub fn spawn_common_room_discovery_task(
-    config: Arc<DaemonConfig>,
-    registry: Arc<CommonRoomPeerRegistry>,
-    room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
-) {
-    spawn_oauth_loopback_tunnel(&config, room_slot.clone());
-    spawn_common_room_discovery_loop(config, registry, room_slot);
-}
-
-/// The OAuth loopback TCP proxy, when this daemon is eligible to run one.
-///
-/// It follows `room_slot` rather than any one room connection, so it outlives a reconnect and is
-/// started once per process — rebinding its callback ports on every common-room change would race
-/// with itself for them.
-pub fn spawn_oauth_loopback_tunnel(
-    config: &DaemonConfig,
-    room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
-) -> Option<tokio::task::JoinHandle<()>> {
-    if !config.codex_oauth_loopback_proxy_eligible {
-        log::info!(
-            target: "tddy_daemon::oauth_tunnel",
-            "OAuth loopback TCP proxy disabled (codex_oauth_loopback_proxy_eligible=false); no bind on 127.0.0.1 callback ports from this process"
-        );
-        return None;
-    }
-    Some(tokio::spawn(async move {
-        crate::oauth_loopback_tunnel::run_oauth_tunnel_supervisor_follow_room_slot(room_slot).await;
-    }))
-}
-
 /// The discovery loop alone: join the common room, publish this daemon's advertisement, keep
 /// `registry` and `room_slot` in sync, and reconnect for ever when the room drops it.
 ///
@@ -787,7 +749,12 @@ pub fn spawn_common_room_discovery_loop(
 /// Also the source of truth for minting a **scoped** join token for a process this daemon spawns
 /// into the same room (a split session's agent), so the room it is granted is exactly the room this
 /// daemon's peer routing rides.
-pub(crate) fn livekit_common_room_connect_strings(
+///
+/// `pub` rather than `pub(crate)` because the callers that spawn such a process — `split_session`
+/// and the hosted agent clone — stayed in `tddy-daemon` when this module left. Widened as a
+/// consequence of the crate boundary, not as a new entry point: this stays the one place the
+/// common room's connect strings are validated.
+pub fn livekit_common_room_connect_strings(
     config: &DaemonConfig,
 ) -> anyhow::Result<(String, String, String, String)> {
     let livekit = config
@@ -1542,8 +1509,8 @@ pub async fn forward_stream_read_host_document_via_livekit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::multi_host::DaemonInstanceId;
     use std::time::Duration;
+    use tddy_host_service::multi_host::DaemonInstanceId;
 
     // -----------------------------------------------------------------------
     // Recording the room into the durable host registry.
@@ -1584,7 +1551,7 @@ mod tests {
             _live_roster: &[EligibleDaemonInfo],
             _local: &HostSighting,
             _now_unix_ms: i64,
-        ) -> Vec<crate::host_registry::KnownHostView> {
+        ) -> Vec<tddy_host_service::host_registry::KnownHostView> {
             Vec::new()
         }
     }

@@ -4,7 +4,7 @@
 //! A daemon is present in its common room twice — the RPC participant serving the roster under
 //! `daemon-{instance}`, and the discovery participant publishing this daemon's advertisement — and
 //! both are defined by the LiveKit block. When an operator edits that block through
-//! [`crate::daemon_config_service`], neither can stay as it was: the room they are in is no longer
+//! `tddy-daemon`'s `daemon_config_service`, neither can stay as it was: the room they are in is no longer
 //! the room the daemon is configured for.
 //!
 //! So the connection lives here, behind a [`watch`] channel. [`SupervisedCommonRoom::reconfigure`]
@@ -14,7 +14,7 @@
 //! disconnected rather than quietly on the room it was told to leave.
 //!
 //! What joining actually involves is behind [`CommonRoomConnector`], so the supervisor's lifecycle
-//! is exercised without a LiveKit server — and so [`crate::runtime`] stays assembly: it builds the
+//! is exercised without a LiveKit server — and so `tddy-daemon`'s `runtime` stays assembly: it builds the
 //! supervisor and hands the task to its host, which starts it with the rest.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,8 +25,23 @@ use async_trait::async_trait;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use crate::config::{DaemonConfig, LiveKitConfig};
-use crate::daemon_config_service::CommonRoomSupervisor;
+use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig};
+
+/// Applies a new LiveKit configuration to the running common-room connection.
+///
+/// Injected so `daemon_config.DaemonConfigService` never learns how the connection is supervised
+/// — and so a test can observe that a URL change actually reached it.
+///
+/// Declared here rather than beside that service because [`SupervisedCommonRoom`] is its one
+/// implementation and the two are now in different crates: a trait owned by the wiring layer would
+/// make this crate depend on it, closing the
+/// `common_room_supervisor → daemon_config_service → livekit_peer_discovery` loop across a crate
+/// boundary. The service re-exports it, so no caller's path changed.
+pub trait CommonRoomSupervisor: Send + Sync + 'static {
+    /// Disconnect the current common room, if any, and connect the one `livekit` describes.
+    /// `None` leaves the daemon disconnected.
+    fn reconfigure(&self, livekit: Option<LiveKitConfig>);
+}
 
 /// How long a departing RPC participant is given to leave its room before it is dropped where it
 /// stands. It checks its shutdown flag between turns of its event loop (every 100 ms), so this is
@@ -300,8 +315,8 @@ impl CommonRoomConnector for DaemonCommonRoomConnector {
         // The identity the roster is addressed at, unchanged across reconnects: it is derived from
         // this daemon's instance id, which a LiveKit edit does not touch. Peers that resolved it
         // before the reconnect still reach this daemon after it.
-        let identity = crate::livekit_peer_discovery::daemon_rpc_identity(
-            &crate::livekit_peer_discovery::local_instance_id_for_config(&config),
+        let identity = tddy_daemon_kernel::peer_forwarding::daemon_rpc_identity(
+            &tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&config),
         );
         let token_generator = tddy_livekit::TokenGenerator::new(
             target.api_key().to_string(),

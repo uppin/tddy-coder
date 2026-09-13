@@ -26,3 +26,11 @@ adjacent duplications were left in place, both out of scope for that changeset:
   `connect_client` would retire them. Note that two of these suites
   (`coder_serves_connection_service_from_participant`, `common_room_set_metadata_handshake_repro`)
   are already the workspace run's timing-flakiest, failing only under parallel load.
+
+**Unchanged by the crate split, 2026-09-10.** `#unbundle` node 4
+([#473](https://github.com/uppin/tddy-coder/pull/473)) moved the daemon's LiveKit modules into
+`packages/tddy-daemon-livekit`, which does not touch either duplication: neither streamer crate
+moved, and the test copies live in the suites that own them. One of the two flaky suites named
+above, `common_room_set_metadata_handshake_repro`, is now in `tddy-daemon-livekit` and contends
+with three sibling Docker-backed suites there — see
+[2026-09-10-the-docker-backed-livekit-suites-contend-across-binaries.md](./2026-09-10-the-docker-backed-livekit-suites-contend-across-binaries.md).

@@ -2,7 +2,7 @@
  * Streaming hook behind the LiveKit rooms panel: every room on the LiveKit server and the
  * participants joined to each.
  *
- * Sourced from a single `ConnectionService.StreamLiveKitRooms` server-stream over the shared
+ * Sourced from a single `LiveKitService.StreamLiveKitRooms` server-stream over the shared
  * common-room LiveKit connection (`useDaemonClient`), so the panel follows the daemon selector like
  * every other daemon-level readout. The daemon owns the cadence and the feed's shape: its first
  * message is a full snapshot, every message after it one change event. The fold itself lives in
@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from "react";
 import { ConnectError } from "@connectrpc/connect";
-import { ConnectionService } from "../gen/connection_pb";
+import { LiveKitService } from "../gen/livekit_pb";
 import { useDaemonClient } from "./selectedDaemon";
 import { useAuthContext } from "../hooks/authProvider";
 import {
@@ -32,7 +32,7 @@ export interface UseLiveKitRoomsResult {
 }
 
 /**
- * Subscribe once to `ConnectionService.StreamLiveKitRooms` for the selected daemon and expose the
+ * Subscribe once to `LiveKitService.StreamLiveKitRooms` for the selected daemon and expose the
  * folded room list.
  *
  * Cleanup aborts the call rather than only flagging the loop, which is what
@@ -49,7 +49,7 @@ export interface UseLiveKitRoomsResult {
  * roster plus a visible error beats an empty panel.
  */
 export function useLiveKitRooms(): UseLiveKitRoomsResult {
-  const client = useDaemonClient(ConnectionService);
+  const client = useDaemonClient(LiveKitService);
   const { sessionToken } = useAuthContext();
   const [rooms, setRooms] = useState<LiveKitRoom[]>([]);
   const [hasSnapshot, setHasSnapshot] = useState(false);

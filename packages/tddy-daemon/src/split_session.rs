@@ -61,13 +61,11 @@ pub struct SplitAgentWiring {
 
 /// Identity prefix reserved for split sessions' agent participants.
 ///
-/// Reserved, not merely conventional: peer eligibility is decided from self-declared participant
-/// metadata, so this prefix is what
-/// `livekit_peer_discovery::eligible_daemon_from_participant_fields` matches on to refuse an agent
-/// advertising itself as a daemon. A daemon whose `daemon_instance_id` began with it would not be
-/// discoverable — which is the intended trade, since the agent holds a token it can publish
-/// metadata with and the daemon's instance id is an operator's free choice.
-pub const SPLIT_AGENT_IDENTITY_PREFIX: &str = "split-agent-";
+/// Derived in [`tddy_daemon_kernel::daemon_identity`] rather than here because the module that
+/// *refuses* a participant carrying it — `livekit_peer_discovery` — now lives in
+/// `tddy-daemon-livekit`, while the one that *mints* it is this one. Re-exported so every caller's
+/// path is unchanged, and so there stays exactly one definition.
+pub use tddy_daemon_kernel::daemon_identity::SPLIT_AGENT_IDENTITY_PREFIX;
 
 /// The LiveKit participant identity a split session's agent joins the common room under.
 ///
@@ -430,7 +428,7 @@ impl RoomPollTokenMinter {
     }
 }
 
-impl crate::session_room::SessionTokenMinter for RoomPollTokenMinter {
+impl tddy_daemon_livekit::session_room::SessionTokenMinter for RoomPollTokenMinter {
     /// [`tddy_github::SESSION_TOKEN_TTL`] and no longer: a poll that outlives its own credential is
     /// the bug this exists to remove, and the next poll mints another.
     fn mint(&self) -> String {
@@ -519,13 +517,14 @@ impl SplitLiveKitRoom {
         room: impl Into<String>,
     ) -> Result<Self, Status> {
         let (_common_room, url, api_key, api_secret) =
-            crate::livekit_peer_discovery::livekit_common_room_connect_strings(config).map_err(
-                |e| {
-                    Status::failed_precondition(format!(
-                        "cannot place a session's codebase on another daemon: {e}"
-                    ))
-                },
-            )?;
+            tddy_daemon_livekit::livekit_peer_discovery::livekit_common_room_connect_strings(
+                config,
+            )
+            .map_err(|e| {
+                Status::failed_precondition(format!(
+                    "cannot place a session's codebase on another daemon: {e}"
+                ))
+            })?;
         Ok(Self {
             room: room.into(),
             url,
@@ -585,8 +584,10 @@ pub fn prepare_split_agent_wiring(
     // session's facilitating daemon. Named from `session_id`, never from `codebase_session_id`: the
     // codebase daemon hosts no room, so a room named after its session would be one nobody is in.
     // Start and resume derive it the same way, so a resumed agent rejoins the room it left.
-    let livekit =
-        SplitLiveKitRoom::from_config(config, crate::session_room::session_room_name(session_id))?;
+    let livekit = SplitLiveKitRoom::from_config(
+        config,
+        tddy_daemon_livekit::session_room::session_room_name(session_id),
+    )?;
     let remote = split_remote_tool_env(
         &livekit,
         session_id,

@@ -32,8 +32,8 @@ use prost::Message as _;
 use serial_test::serial;
 use tddy_core::agent_activity::{append_agent_activity, AgentActivityRecord, STATUS_COMPLETED};
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::session_room::{
+use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_livekit::session_room::{
     ActivityDelta, DaemonRoomHosting, DeltaScope, SessionDeltaStore, SessionRoomRegistry,
 };
 use tddy_livekit::{connect_client, BroadcastChannel, BroadcastMessage, ConnectedClient};

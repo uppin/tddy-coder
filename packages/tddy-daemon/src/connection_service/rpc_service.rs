@@ -20,16 +20,16 @@ use tddy_service::proto::connection::{
     GetPrStatusRequest, GetPrStatusResponse, GetWorktreeSnapshotRequest,
     GetWorktreeSnapshotResponse, HostDocumentChunk, HostDocumentScope, LinkStackNodeRequest,
     LinkStackNodeResponse, ListSessionUploadsRequest, ListSessionUploadsResponse,
-    ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, LiveKitRoomsEvent,
-    MintLocalTokenRequest, MintLocalTokenResponse, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReadHostDocumentRequest,
-    ReadHostDocumentResponse, ReorderPlannedPrRequest, ReorderPlannedPrResponse,
-    RepointPlannedPrRequest, RepointPlannedPrResponse, ResolveStackBaseRequest,
-    ResolveStackBaseResponse, SessionNotificationEvent as ProtoSessionNotificationEvent,
-    SessionUploadEntry, StagedAttachmentEntry, StartSessionEvent, StreamAcpReplayRequest,
-    StreamLiveKitRoomsRequest, TerminalControlEvent, UploadSessionFileChunkRequest,
-    UploadSessionFileChunkResponse, UploadStagedAttachmentChunkRequest,
-    UploadStagedAttachmentChunkResponse, WatchTerminalControlRequest,
+    ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, MintLocalTokenRequest,
+    MintLocalTokenResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    QueryBranchRequest, QueryBranchResponse, ReadHostDocumentRequest, ReadHostDocumentResponse,
+    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
+    RepointPlannedPrResponse, ResolveStackBaseRequest, ResolveStackBaseResponse,
+    SessionNotificationEvent as ProtoSessionNotificationEvent, SessionUploadEntry,
+    StagedAttachmentEntry, StartSessionEvent, StreamAcpReplayRequest, TerminalControlEvent,
+    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
+    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
+    WatchTerminalControlRequest,
 };
 use tddy_service::proto::connection::{
     AgentActivityDeltaChunk, AgentActivityDeltaRequest, ExecuteToolRequest,
@@ -60,10 +60,6 @@ use crate::{
     project_storage, session_deletion, session_list_enrichment, session_reader,
 };
 use tddy_spawn::{spawn_worker, spawner};
-
-use crate::livekit_rooms_stream::pump_rooms;
-
-use super::MpscLiveKitRoomsStream;
 
 use super::base_sync_unavailable;
 
@@ -133,9 +129,9 @@ use super::MpscTerminalOutputStream;
 
 use super::activity_delta_frames;
 
-use crate::session_room::DeltaLookupError;
+use tddy_daemon_livekit::session_room::DeltaLookupError;
 
-use crate::session_room::DeltaScope;
+use tddy_daemon_livekit::session_room::DeltaScope;
 
 use tddy_service::proto::connection::ReadContextFileBatchRequest;
 
@@ -1557,7 +1553,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     "cannot forward AddProjectToHost: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
                 )
             })?;
-            let inner = crate::livekit_peer_discovery::forward_add_project_to_host_via_livekit(
+            let inner = tddy_daemon_livekit::livekit_peer_discovery::forward_add_project_to_host_via_livekit(
                 slot,
                 &peer_instance_id,
                 &req,
@@ -1725,7 +1721,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 )
             })?;
             let inner =
-                crate::livekit_peer_discovery::forward_set_project_default_branch_via_livekit(
+                tddy_daemon_livekit::livekit_peer_discovery::forward_set_project_default_branch_via_livekit(
                     slot,
                     &peer_instance_id,
                     &req,
@@ -1816,7 +1812,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // Only for a session this daemon facilitates over a checkout it holds. A session whose
         // agent runs elsewhere has its room over there, and opening one here would put it on a
         // daemon that serves nobody.
-        if crate::session_room::session_type_is_facilitated_here(session_type) {
+        if tddy_daemon_livekit::session_room::session_type_is_facilitated_here(session_type) {
             match metadata.repo_path.as_deref() {
                 Some(worktree_root) => {
                     self.ensure_session_room(
@@ -3314,7 +3310,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             let slot = self.common_room_slot("StreamExecuteTool")?;
             // A forwarded stream that stalls terminates as an *error*, so a truncated tool result
             // can never reach the caller looking complete.
-            let rx = crate::livekit_peer_discovery::forward_stream_execute_tool_via_livekit(
+            let rx = tddy_daemon_livekit::livekit_peer_discovery::forward_stream_execute_tool_via_livekit(
                 slot,
                 &peer_instance_id,
                 &req,
@@ -4655,7 +4651,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let budget = self.config.session_room_git_timeout();
         let measured_root = worktree_root.clone();
         let snapshot = tokio::task::spawn_blocking(move || {
-            crate::session_room::snapshot_worktree_within(&measured_root, budget)
+            tddy_daemon_livekit::session_room::snapshot_worktree_within(&measured_root, budget)
         })
         .await
         .map_err(|e| Status::internal(format!("measuring {worktree_root:?} panicked: {e}")))?;
@@ -5317,36 +5313,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         ))
     }
 
-    type StreamLiveKitRoomsStream = MpscLiveKitRoomsStream;
-
-    /// Stream the LiveKit server's rooms and their participants: one full snapshot, then one change
-    /// event per delta found by polling the room service.
-    ///
-    /// Authenticates `session_token`, then spawns [`pump_rooms`], which emits the snapshot
-    /// immediately and re-reads the roster on the poll cadence, diffing each read against the state
-    /// **this** stream was last sent — a per-subscriber baseline, so two watchers cannot consume
-    /// each other's deltas. A tick with no delta emits nothing, so an idle server yields an idle
-    /// stream. The task ends when the receiver is dropped (client unsubscribe), and a roster read
-    /// that fails ends the stream with that error rather than reporting an empty server.
-    async fn stream_live_kit_rooms(
-        &self,
-        request: Request<StreamLiveKitRoomsRequest>,
-    ) -> Result<Response<Self::StreamLiveKitRoomsStream>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-        let _github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<LiveKitRoomsEvent, Status>>();
-        tokio::spawn(pump_rooms(
-            Arc::clone(&self.room_roster),
-            self.room_poll_interval,
-            tx,
-        ));
-
-        Ok(Response::new(MpscLiveKitRoomsStream { rx }))
-    }
-
     async fn upload_session_file_chunk(
         &self,
         request: Request<UploadSessionFileChunkRequest>,
@@ -5447,7 +5413,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             );
             let slot = self.common_room_slot("UploadStagedAttachmentChunk")?;
             let inner =
-                crate::livekit_peer_discovery::forward_upload_staged_attachment_chunk_via_livekit(
+                tddy_daemon_livekit::livekit_peer_discovery::forward_upload_staged_attachment_chunk_via_livekit(
                     slot,
                     &peer_instance_id,
                     &req,
@@ -5495,7 +5461,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 "ListStagedAttachments: forwarding RPC to remote daemon_instance_id={peer_instance_id}"
             );
             let slot = self.common_room_slot("ListStagedAttachments")?;
-            let inner = crate::livekit_peer_discovery::forward_list_staged_attachments_via_livekit(
+            let inner = tddy_daemon_livekit::livekit_peer_discovery::forward_list_staged_attachments_via_livekit(
                 slot,
                 &peer_instance_id,
                 &req,
@@ -5540,7 +5506,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             );
             let slot = self.common_room_slot("DeleteStagedAttachment")?;
             let inner =
-                crate::livekit_peer_discovery::forward_delete_staged_attachment_via_livekit(
+                tddy_daemon_livekit::livekit_peer_discovery::forward_delete_staged_attachment_via_livekit(
                     slot,
                     &peer_instance_id,
                     &req,
@@ -5574,7 +5540,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 "ReadHostDocument: forwarding RPC to remote daemon_instance_id={peer_instance_id}"
             );
             let slot = self.common_room_slot("ReadHostDocument")?;
-            let inner = crate::livekit_peer_discovery::forward_read_host_document_via_livekit(
+            let inner = tddy_daemon_livekit::livekit_peer_discovery::forward_read_host_document_via_livekit(
                 slot,
                 &peer_instance_id,
                 &req,
@@ -5624,7 +5590,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             // The owning host resolves the document under its own `os_user` mapping and applies
             // its own cap, so nothing is read locally here. A peer-side failure — or a stream that
             // stops without its terminator — arrives as an error item, terminating this stream.
-            let rx = crate::livekit_peer_discovery::forward_stream_read_host_document_via_livekit(
+            let rx = tddy_daemon_livekit::livekit_peer_discovery::forward_stream_read_host_document_via_livekit(
                 slot,
                 &peer_instance_id,
                 &req,
@@ -5685,7 +5651,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             // The session, its worktree and its attachments are created on the peer; only its
             // events cross back, so progress still reaches the client for the slowest case there
             // is — attachment bytes moving between two hosts.
-            let rx = crate::livekit_peer_discovery::forward_stream_start_session_via_livekit(
+            let rx = tddy_daemon_livekit::livekit_peer_discovery::forward_stream_start_session_via_livekit(
                 slot,
                 &peer_instance_id,
                 &req,

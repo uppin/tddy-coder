@@ -93,7 +93,7 @@ impl ConnectionServiceImpl {
             &livekit.api_secret,
             &req.session_token,
         )?);
-        let remote_source = Arc::new(crate::session_room::RemoteCheckout::new(
+        let remote_source = Arc::new(tddy_daemon_livekit::session_room::RemoteCheckout::new(
             Arc::new(self.clone()),
             codebase_session_id.to_string(),
             codebase_instance_id.to_string(),
@@ -104,7 +104,7 @@ impl ConnectionServiceImpl {
         match self
             .session_rooms
             .open_measured_by(
-                &crate::session_room::DaemonRoomHosting {
+                &tddy_daemon_livekit::session_room::DaemonRoomHosting {
                     config: &self.config,
                     instance_id: &local_instance_id,
                     rooms: &self.session_rooms,
@@ -294,7 +294,7 @@ impl ConnectionServiceImpl {
             session_token: session_token.to_string(),
             session_id: codebase_session_id.to_string(),
         };
-        match crate::livekit_peer_discovery::forward_delete_session_via_livekit(
+        match tddy_daemon_livekit::livekit_peer_discovery::forward_delete_session_via_livekit(
             slot,
             codebase_instance_id,
             &request,
@@ -364,7 +364,7 @@ impl ConnectionServiceImpl {
                  delete that session on {codebase_daemon} directly and retry"
             )));
         }
-        match crate::livekit_peer_discovery::forward_delete_session_via_livekit(
+        match tddy_daemon_livekit::livekit_peer_discovery::forward_delete_session_via_livekit(
             slot,
             codebase_daemon,
             &DeleteSessionRequest {

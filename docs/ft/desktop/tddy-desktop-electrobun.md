@@ -11,5 +11,5 @@ child, waited for its HTTP port, and talked to it over `127.0.0.1` — no longer
 
 What carried over unchanged: the **Codex OAuth loopback tunnel** is still `tddy-daemon`'s
 ([codex-oauth-relay.md](../daemon/codex-oauth-relay.md),
-[oauth-loopback-tunnel.md](../../../packages/tddy-daemon/docs/oauth-loopback-tunnel.md)), and the
+[oauth-loopback-tunnel.md](../../../packages/tddy-daemon-auth/docs/oauth-loopback-tunnel.md)), and the
 desktop app still neither binds OAuth TCP itself nor joins LiveKit for it.

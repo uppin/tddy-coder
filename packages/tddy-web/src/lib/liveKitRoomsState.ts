@@ -13,7 +13,7 @@ import type {
   LiveKitParticipantInfo,
   LiveKitRoomInfo,
   LiveKitRoomsChange,
-} from "../gen/connection_pb";
+} from "../gen/livekit_pb";
 import { inferParticipantRole, type ParticipantRole } from "./participantRole";
 
 export interface LiveKitRoomParticipant {

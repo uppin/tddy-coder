@@ -42,6 +42,8 @@ members = [
     "packages/tddy-screen-sharing",
     "packages/tddy-daemon-sandbox",
     "packages/tddy-spawn",
+    "packages/tddy-daemon-auth",
+    "packages/tddy-daemon-livekit",
     "packages/tddy-workflow-recipes",
     "packages/tddy-actions",
     "packages/tddy-task",

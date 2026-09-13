@@ -3,8 +3,8 @@
 pub mod artifact_paths;
 
 pub use artifact_paths::{
-    canonical_artifact_write_path, canonical_attachment_write_path, read_session_artifact_utf8,
-    read_session_artifact_utf8_or_placeholder, resolve_existing_session_artifact,
-    session_artifacts_root, session_attachments_root, SESSION_ARTIFACT_READ_PLACEHOLDER,
-    SESSION_ATTACHMENTS_SUBDIR,
+    canonical_artifact_write_path, canonical_attachment_write_path, list_session_attachments,
+    read_session_artifact_utf8, read_session_artifact_utf8_or_placeholder,
+    resolve_existing_session_artifact, session_artifacts_root, session_attachments_root,
+    SessionAttachmentFile, SESSION_ARTIFACT_READ_PLACEHOLDER, SESSION_ATTACHMENTS_SUBDIR,
 };

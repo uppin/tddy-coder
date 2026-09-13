@@ -1,0 +1,39 @@
+[package]
+name = "tddy-daemon-auth"
+version = "0.1.0"
+edition = "2021"
+description = "The daemon's identity boundary — GitHub OAuth, session tokens, the LiveKit token mint and the OAuth loopback tunnel. Extracted from tddy-daemon"
+
+[lib]
+name = "tddy_daemon_auth"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+log = "0.4"
+livekit = "0.7"
+prost = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# `write_atomic_with_mode`: the one implementation of "replace a secret without ever truncating
+# the file that is already there" (docs/dev/todo/2026-08-16-…-truncate-in-place.md).
+tddy-core = { path = "../tddy-core" }
+# `SessionUserResolver` and `DaemonConfig` — the two shapes this crate needs from the daemon, and
+# the whole of what node 1 published so the auth subsystem could leave without depending on it.
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-github = { path = "../tddy-github" }
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-service = { path = "../tddy-service" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal", "process", "io-util"] }
+url = { version = "2", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+
+[dev-dependencies]
+base64 = "0.22"
+# LiveKit's own JWT verifier. Already in the tree through `tddy-livekit`, which mints with the
+# matching `AccessToken` — so `token_service_acceptance.rs` checks the signature the way a LiveKit
+# server would rather than by re-reading the fields the daemon just wrote.
+livekit-api = "0.5"
+tempfile = "3"

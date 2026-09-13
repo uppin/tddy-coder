@@ -17,18 +17,15 @@ use tddy_service::proto::daemon_config::{
     UpdateConfigResponse,
 };
 
-use crate::config::{DaemonConfig, LiveKitConfig};
+use crate::config::DaemonConfig;
 use crate::daemon_settings::{apply_update, redacted_settings};
 
 /// Applies a new LiveKit configuration to the running common-room connection.
 ///
-/// Injected so this service never learns how the connection is supervised — and so a test can
-/// observe that a URL change actually reached it.
-pub trait CommonRoomSupervisor: Send + Sync + 'static {
-    /// Disconnect the current common room, if any, and connect the one `livekit` describes.
-    /// `None` leaves the daemon disconnected.
-    fn reconfigure(&self, livekit: Option<LiveKitConfig>);
-}
+/// Defined in `tddy-daemon-livekit` beside its one implementation, because the supervisor that
+/// implements it moved there and a trait cannot be implemented across a dependency the wrong way
+/// round. Re-exported so this service's callers name it where they always did.
+pub use crate::common_room_supervisor::CommonRoomSupervisor;
 
 /// Decides whether the caller's `session_token` may read or write the daemon's configuration.
 /// `true` admits the call; `false` refuses it with `UNAUTHENTICATED`.
@@ -210,9 +207,9 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
                 })
                 .collect(),
             debug: config.debug.clone(),
-            daemon_instance_id: Some(crate::livekit_peer_discovery::local_instance_id_for_config(
-                &config,
-            )),
+            daemon_instance_id: Some(
+                tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&config),
+            ),
             // The operator's switch, so the page joins nothing this daemon is not in: the url and
             // room above name a room it *could* join, not one it does.
             livekit_enabled: Some(crate::config::LiveKitConfig::common_room_enabled(

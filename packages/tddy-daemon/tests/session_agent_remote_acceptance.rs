@@ -262,9 +262,9 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
         );
 
-        tddy_daemon::livekit_peer_discovery::spawn_common_room_discovery_task(
+        tddy_daemon::runtime::spawn_common_room_discovery_task(
             Arc::new(config),
-            Arc::new(tddy_daemon::livekit_peer_discovery::CommonRoomPeerRegistry::new()),
+            Arc::new(tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new()),
             Arc::new(tokio::sync::RwLock::new(None)),
         );
 
@@ -342,15 +342,16 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     }));
 
     let config_arc = Arc::new(config_a.clone());
-    let registry = Arc::new(tddy_daemon::livekit_peer_discovery::CommonRoomPeerRegistry::new());
+    let registry =
+        Arc::new(tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-    tddy_daemon::livekit_peer_discovery::spawn_common_room_discovery_task(
+    tddy_daemon::runtime::spawn_common_room_discovery_task(
         config_arc.clone(),
         registry.clone(),
         room_slot.clone(),
     );
     let eligible: Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource> = Arc::new(
-        tddy_daemon::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
+        tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
             config_arc,
             registry,
             room_slot.clone(),
@@ -363,7 +364,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         user_resolver.clone(),
         None,
         Some(
-            tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles {
+            tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles {
                 eligible_daemon_source: eligible,
                 common_room_livekit_room: room_slot,
             },

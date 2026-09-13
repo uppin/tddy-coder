@@ -110,11 +110,23 @@ the card appears without a dwell delay.
 
 ## RPC surface
 
-A single server-streaming method on `ConnectionService`, addressed to the **selected daemon** over
-the shared common-room LiveKit connection (no `daemon_instance_id` payload — the transport already
-targets the daemon), exactly like `StreamHostStats`:
+A single server-streaming method on **`livekit.LiveKitService`**, addressed to the **selected
+daemon** over the shared common-room LiveKit connection (no `daemon_instance_id` payload — the
+transport already targets the daemon), exactly like `StreamHostStats`:
 
-- `StreamLiveKitRooms(StreamLiveKitRoomsRequest) returns (stream LiveKitRoomsEvent)`
+- `livekit.LiveKitService.StreamLiveKitRooms(StreamLiveKitRoomsRequest) returns (stream LiveKitRoomsEvent)`
+
+`livekit.LiveKitService` is one of the daemon's sibling gRPC services, served from
+[`packages/tddy-daemon-livekit`](../../../packages/tddy-daemon-livekit/docs/livekit-service.md) and
+registered as a `ServiceEntry` beside `connection.ConnectionService` — so it reaches a client over
+the same three transports at the same coordinates, and the web reaches it with
+`useDaemonClient(LiveKitService)`. `livekit.proto` imports nothing: the twelve messages this method
+needs overlap with nothing that stays in `connection.proto`.
+
+**A web bundle and a daemon must come from the same side of that split.** A bundle predating it asks
+`connection.ConnectionService` for this method and gets `unimplemented`; the rest of the app is
+unaffected. This is the repo's standing policy — break freely, migrate every consumer in the same
+change.
 
 ### Snapshot first, then changes
 
@@ -180,7 +192,10 @@ subscriber going away directly. Without that, every visit to this screen left a 
 poll of the LiveKit server behind it.
 
 `StreamLiveKitRoomsRequest` carries a `session_token`; an invalid token is rejected with an
-unauthenticated error, like every other `ConnectionService` method.
+unauthenticated error, like every other daemon method. The resolver that judges it is the daemon's
+single identity function, handed to `livekit.LiveKitService` by the wiring layer — the same one
+`connection.ConnectionService` authenticates with, so the two services cannot drift on who a token
+belongs to.
 
 ### Where the room facts come from
 
@@ -283,6 +298,8 @@ media and presence surfaces share.
 - **[livekit-participant-owned-projects.md](./livekit-participant-owned-projects.md)** — the `owned_project_count` metadata key and the existing Metadata column
 - **[host-stats-footer.md § RPC surface](./host-stats-footer.md#rpc-surface)** — the streaming-readout pattern this RPC follows
 - **[`participant-metadata.md`](../../../packages/tddy-livekit/docs/participant-metadata.md)** — what participant metadata carries
+- **[`livekit-service.md`](../../../packages/tddy-daemon-livekit/docs/livekit-service.md)** — the service that serves this stream, and the poller behind it
+- **[host-worktree-services.md](../daemon/host-worktree-services.md)** — why the daemon serves several services rather than one
 - **[app-shell.md](./app-shell.md)** — where the `#/livekit` screen is registered, and when its nav
   entry is offered
 - **[capability gating](../../../packages/tddy-web/docs/capability-gating.md)** — the shared rule

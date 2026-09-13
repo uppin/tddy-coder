@@ -136,7 +136,40 @@ fn connection_service_keeps_exactly_the_methods_node_one_leaves_behind() {
 
     // Then
     assert_eq!(
-        declared, 73,
-        "node 1 moves 17 of 90; later nodes take it to 21"
+        declared, 72,
+        "node 1 moved 17 of 90 and node 4 moves StreamLiveKitRooms; later nodes take it to 21"
     );
+}
+
+const LIVEKIT_METHODS: [&str; 1] = ["StreamLiveKitRooms"];
+
+#[test]
+fn livekit_service_declares_the_rooms_stream() {
+    // Given
+    let block = service_block(&read("livekit.proto"), "LiveKitService");
+
+    // Then
+    for method in LIVEKIT_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "livekit.LiveKitService is missing {method}"
+        );
+    }
+}
+
+/// Node 4 moves one method. It moves rather than staying because leaving it would keep the daemon
+/// serving a handler for a subsystem that now lives in `tddy-daemon-livekit` — the shape this stack
+/// exists to remove.
+#[test]
+fn connection_service_no_longer_declares_the_rooms_stream() {
+    // Given
+    let block = service_block(&connection_proto(), "ConnectionService");
+
+    // Then
+    for method in LIVEKIT_METHODS {
+        assert!(
+            !block.contains(&format!("rpc {method}(")),
+            "{method} moved to livekit.LiveKitService but is still on connection.ConnectionService"
+        );
+    }
 }

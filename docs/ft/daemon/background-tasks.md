@@ -151,7 +151,7 @@ New `tasks.TaskService` (5 methods):
 
 All methods carry `session_token` for auth. Non-list methods scope visibility to the `session_id`
 embedded in `TaskHandle`. Each request also carries `daemon_instance_id` for multi-host routing (unary
-methods forward via `livekit_peer_discovery::forward_to_peer`; `WatchTask` is local-only this
+methods forward via `tddy_daemon_livekit::livekit_peer_discovery::forward_to_peer`; `WatchTask` is local-only this
 changeset — returns `failed_precondition` for remote IDs).
 
 ### WatchTask replay contract
@@ -239,5 +239,5 @@ packages/tddy-web
   Compiler subprocesses spawned by `make` will not receive the signal and may continue consuming
   resources until they complete. Follow-up: add `setpgid(0, 0)` in a `pre_exec` closure on the `make`
   `Command`, then send `SIGINT` to the negative PGID (`libc::kill(-pgid, SIGINT)`).
-- **WatchTask streaming across daemons**: `forward_to_peer` in `livekit_peer_discovery` is unary-only.
+- **WatchTask streaming across daemons**: `forward_to_peer` in `tddy_daemon_livekit::livekit_peer_discovery` is unary-only.
   WatchTask on a remote task requires a streaming-forward protocol extension.

@@ -10,7 +10,7 @@ use crate::server_api_url::{http_base_from_ws_url, ServerApiUrlError};
 use livekit_api::services::room::RoomClient;
 use livekit_protocol::ParticipantInfo;
 use std::time::Duration;
-use tddy_service::proto::connection::{LiveKitParticipantInfo, LiveKitRoomInfo};
+use tddy_service::proto::livekit::{LiveKitParticipantInfo, LiveKitRoomInfo};
 
 /// Ceiling on one whole roster read — `ListRooms` plus a `ListParticipants` per room.
 ///

@@ -5,7 +5,7 @@ use tddy_spawn::spawner;
 use super::ConnectionServiceImpl;
 
 #[async_trait::async_trait]
-impl crate::session_room::SessionTerminalBridge for ConnectionServiceImpl {
+impl tddy_daemon_livekit::session_room::SessionTerminalBridge for ConnectionServiceImpl {
     /// Bridge the session's PTY into the room a remote client drives it from.
     ///
     /// The same coordinates `StartSession` reported and the Telegram attach hint hands out — the
