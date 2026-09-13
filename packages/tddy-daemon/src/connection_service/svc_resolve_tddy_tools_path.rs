@@ -167,7 +167,7 @@ impl ConnectionServiceImpl {
     /// `ListAgents` as a selectable agent.
     pub fn with_model_registry(
         mut self,
-        registry: Arc<crate::model_registry::ModelRegistryStore>,
+        registry: Arc<tddy_model_registry::ModelRegistryStore>,
     ) -> Self {
         self.model_registry = Some(registry);
         self

@@ -715,7 +715,7 @@ pub struct ConnectionServiceImpl {
     /// This daemon's model registry, whose assistants are selectable agents alongside the
     /// `allowed_agents` config entries. `None` means no registry is wired (a test fixture), in
     /// which case `ListAgents` reports the config entries alone.
-    model_registry: Option<Arc<crate::model_registry::ModelRegistryStore>>,
+    model_registry: Option<Arc<tddy_model_registry::ModelRegistryStore>>,
     /// The agent roster of every session this daemon facilitates
     /// (`docs/ft/daemon/session-agent-roster.md`). Shared across clones so an attach made on one
     /// handler is the roster the next handler — and every `StreamSessionAgents` subscriber — sees.

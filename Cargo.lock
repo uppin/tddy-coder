@@ -12038,20 +12038,16 @@ dependencies = [
 name = "tddy-daemon"
 version = "0.1.0"
 dependencies = [
- "agent-client-protocol",
  "anyhow",
- "argon2",
  "assert_cmd",
  "async-trait",
  "axum 0.8.9",
  "base64 0.22.1",
  "bytes",
- "chacha20poly1305",
  "chrono",
  "clap",
  "futures-util",
  "glob",
- "hmac 0.12.1",
  "http 1.4.2",
  "hyper-util",
  "libc",
@@ -12060,7 +12056,6 @@ dependencies = [
  "portable-pty 0.9.0",
  "pretty_assertions",
  "prost 0.13.5",
- "rand 0.8.6",
  "reqwest 0.12.28",
  "rsa 0.9.10",
  "rstest 0.24.0",
@@ -12069,10 +12064,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
- "sha2 0.10.9",
- "sqlx",
- "subtle",
- "tddy-acp",
  "tddy-actions",
  "tddy-bsp",
  "tddy-coder",
@@ -12087,6 +12078,7 @@ dependencies = [
  "tddy-livekit-testkit",
  "tddy-lsp",
  "tddy-lsp-executor",
+ "tddy-model-registry",
  "tddy-pty",
  "tddy-rpc",
  "tddy-sandbox",
@@ -12095,12 +12087,14 @@ dependencies = [
  "tddy-sandbox-qemu",
  "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
+ "tddy-screen-sharing",
  "tddy-semantic-index",
  "tddy-service",
  "tddy-session-sync",
  "tddy-stdio",
  "tddy-supervisor",
  "tddy-task",
+ "tddy-telegram",
  "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-tool-engine",
@@ -12460,6 +12454,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-model-registry"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "async-trait",
+ "futures-util",
+ "log",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sqlx",
+ "tddy-acp",
+ "tddy-coder",
+ "tddy-daemon",
+ "tddy-daemon-kernel",
+ "tddy-discovery",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-task",
+ "tddy-testing-commons",
+ "tddy-tool-engine",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-pty"
 version = "0.1.0"
 dependencies = [
@@ -12689,6 +12713,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-screen-sharing"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "async-trait",
+ "chacha20poly1305",
+ "libc",
+ "log",
+ "pretty_assertions",
+ "rand 0.8.6",
+ "rsa 0.9.10",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-host-service",
+ "tddy-livekit",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-testing-commons",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-screenshare"
 version = "0.1.0"
 dependencies = [
@@ -12835,6 +12889,31 @@ dependencies = [
  "async-trait",
  "log",
  "tddy-rpc",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-telegram"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "hmac 0.12.1",
+ "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-github",
+ "tddy-rpc",
+ "tddy-service",
+ "teloxide",
+ "tempfile",
  "tokio",
 ]
 

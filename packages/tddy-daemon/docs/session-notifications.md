@@ -113,6 +113,6 @@ hook token nor the bot token reaches a notification), `session_notifications_str
 
 ## Related
 
-- **[telegram-notifier.md](telegram-notifier.md)** — the surface this path was extracted from.
+- **[telegram-notifier.md](../../tddy-telegram/docs/telegram-notifier.md)** — the surface this path was extracted from.
 - **[connection-service.md](connection-service.md)** — the RPCs that publish.
 - **[../../../docs/ft/daemon/session-notifications.md](../../../docs/ft/daemon/session-notifications.md)** — product reference.

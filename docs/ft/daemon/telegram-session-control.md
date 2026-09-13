@@ -12,11 +12,11 @@ When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the
 
 ## Telegram user ↔ GitHub identity
 
-The library module **`tddy_daemon::telegram_github_link`** binds a **Telegram user id** to a **GitHub login** (JSON store on disk, HMAC-signed OAuth **`state`**, stub OAuth exchange for tests). **`resolved_os_user_for_telegram_workflow`** resolves **`daemon.yaml`** **`users:`** the same way as web OAuth flows.
+The library module **`tddy_telegram::telegram_github_link`** (re-exported as **`tddy_daemon::telegram_github_link`**) binds a **Telegram user id** to a **GitHub login** (JSON store on disk, HMAC-signed OAuth **`state`**, stub OAuth exchange for tests). **`resolved_os_user_for_telegram_workflow`** resolves **`daemon.yaml`** **`users:`** the same way as web OAuth flows.
 
 **`TelegramSessionControlHarness::with_telegram_github_link`** accepts a mapping file path. When that path is set, **`handle_start_workflow`** requires a stored GitHub login for the Telegram **`user_id`** before it creates a session directory. If the user is not linked, the handler fails with a message that instructs the operator to complete GitHub linking (including reference to **`/link-github`** in the error text).
 
-Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`TelegramWorkflowSpawn`** OS user from the mapping, and Telegram commands that start the browser OAuth flow) integrates with **`DaemonConfig`** and **`AuthService`** at the binary layer. Technical reference: **[telegram-github-link.md](../../../packages/tddy-daemon/docs/telegram-github-link.md)**.
+Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`TelegramWorkflowSpawn`** OS user from the mapping, and Telegram commands that start the browser OAuth flow) integrates with **`DaemonConfig`** and **`AuthService`** at the binary layer. Technical reference: **[telegram-github-link.md](../../../packages/tddy-telegram/docs/telegram-github-link.md)**.
 
 ## Commands
 
@@ -101,7 +101,7 @@ Markdown adaptation for Telegram must respect **[message entities](https://core.
 | **Presenter bridge** | **`map_elicitation_callback_to_presenter_input`** produces **`PresenterInputPayload`** bytes matching the web encoding for single- and multi-select elicitation. Live workflows use **`PresenterIntent`** gRPC for answers and document actions. |
 | **Persistence** | **`read_changeset_routing_snapshot`** reads **`recipe`**, **`demo_options`**, **`workflow.branch_worktree_intent`**, and **`run_optional_step_x`** from **`changeset.yaml`** for assertions. |
 | **Harness** | **`TelegramSessionControlHarness`** creates a session directory under a configurable base path, sends an intro message with an inline recipe keyboard (test contract includes **`tdd-small`** labeling), applies recipe and intent callbacks to **`changeset.yaml`**, can show project/branch/agent pick keyboards when **`TelegramWorkflowSpawn`** is configured, sends plan review text in chunks via **`TelegramSender`**, and returns an explicit denial message for chat ids outside an allowlist. |
-| **Test sender** | **`InMemoryTelegramSender`** (in **`telegram_notifier`**) implements **`TelegramSender`** including **`send_message_with_keyboard`** (row-major **`(label, callback_data)`** per button); **`collect_outbound_messages`** exposes structured **`CapturedTelegramMessage`** rows for tests. |
+| **Test sender** | **`InMemoryTelegramSender`** (in **`tddy_telegram::sender`**, re-exported by **`telegram_notifier`**) implements **`TelegramSender`** including **`send_message_with_keyboard`** (row-major **`(label, callback_data)`** per button); **`collect_outbound_messages`** exposes structured **`CapturedTelegramMessage`** rows for tests. |
 
 ## Configuration and security (harness)
 
