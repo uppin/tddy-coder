@@ -114,9 +114,11 @@ token for it, does not yet exist.
 
 ## File access
 
-The facilitating daemon serves `ExecuteTool`, `StreamExecuteTool`, `ListWorktreeDirectory`,
-`ReadWorktreeFile`, `ReadHostDocument` and the rest of `ConnectionService` in the room, and every
-participant addresses that one identity. When the repo is local it answers from its own filesystem;
+The facilitating daemon serves the room's file surface at one identity, and every participant
+addresses it: `ExecuteTool` and `StreamExecuteTool` on `connection.ConnectionService`,
+`ListWorktreeDirectory` and `ReadWorktreeFile` on `worktree.WorktreeService`, `ReadHostDocument` on
+`session_files.SessionFilesService`, and the terminal family on
+`terminal_session.TerminalSessionService`. When the repo is local it answers from its own filesystem;
 when the repo is remote it forwards to the codebase daemon over the peer routing that already exists
 (`classify_exec_tool_route` → `forward_to_peer`).
 
@@ -186,7 +188,8 @@ Note that `changed_paths` inherits git's presentation — C-quoted names for non
 ## Attachments
 
 A session's attachments are materialized on the facilitating daemon, in every placement, and served
-to that room's participants through `ReadHostDocument` / `StreamReadHostDocument` under
+to that room's participants through `session_files.SessionFilesService`'s `ReadHostDocument` /
+`StreamReadHostDocument` under
 `scope = SESSION_ARTIFACT`, `relative_path = "attachments/{basename}"`. Their basenames are listed in
 room metadata, so a joining agent learns what is shared with no extra round trip.
 
@@ -231,11 +234,11 @@ daemon's common-room participant behaves.
 - **The room-creation call is not bounded by a timeout.** A configured server that accepts a
   connection and then never answers makes the *connection that asked for the room* wait rather than
   fail fast. It is scoped to that connection: a session's start makes no such call, so a wait here
-  never costs anyone a session. Tracked in `docs/dev/TODO.md`.
+  never costs anyone a session. Tracked in [`docs/dev/todo/`](../../dev/todo/).
 - **A claude-cli split agent cannot read its own attachments.** They are served in its room over
-  `ReadHostDocument`, which a browser or a second agent can call, but that agent speaks only
-  `ExecuteTool` — whose tools are worktree-rooted with traversal rejected. Tracked in
-  `docs/dev/TODO.md`.
+  `session_files.SessionFilesService`'s `ReadHostDocument`, which a browser or a second agent can
+  call, but that agent speaks only `ExecuteTool` — whose tools are worktree-rooted with traversal
+  rejected. Tracked in [`docs/dev/todo/`](../../dev/todo/).
 - **Attachments added after a session starts** are written only to the agent-side session and never
   reach the room's metadata listing.
 - **`git diff --numstat HEAD` is HEAD-relative**, so committed-but-unpushed work counts as zero

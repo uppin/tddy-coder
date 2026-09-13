@@ -16,6 +16,10 @@
 # .gitkeep and nothing else.
 
 packages/tddy-web                   | src/gen | ../tddy-service/proto
+# `#unbundle` node 6 serves `terminal_session.TerminalSessionService` from tddy-terminal-rpc,
+# whose proto lives outside tddy-service's tree. A second root, the way tddy-livekit-web
+# already reaches tddy-service/proto for terminal.proto.
+packages/tddy-web                   | src/gen | ../tddy-terminal-rpc/proto
 packages/tddy-rpc-web               | src/gen | ../tddy-rpc/proto
 packages/tddy-rpc-web               | src/gen | ../tddy-livekit/proto --path ../tddy-livekit/proto/test
 packages/tddy-livekit-web           | src/gen | ../tddy-livekit/proto

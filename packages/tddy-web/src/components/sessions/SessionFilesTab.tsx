@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { ConnectionService, SessionUploadEntry } from "../../gen/connection_pb";
+import type { SessionFilesService, SessionUploadEntry } from "../../gen/session_files_pb";
 import { Button } from "../ui/button";
 import { formatBytes } from "./formatTraffic";
 import { copyToClipboard } from "../../lib/clipboard";
 import { HOST_PATH_MIME } from "../../lib/hostPathDrag";
 
 export interface SessionFilesTabProps {
-  client: Client<typeof ConnectionService> | null;
+  client: Client<typeof SessionFilesService> | null;
   sessionToken: string;
   sessionId: string;
   /** Inserts a file's host path into the focused terminal (shell-escaping is the caller's job). */

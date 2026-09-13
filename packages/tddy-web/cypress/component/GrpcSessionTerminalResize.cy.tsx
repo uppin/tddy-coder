@@ -19,10 +19,10 @@ import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
-  ConnectionService,
+  TerminalSessionService,
   SendTerminalInputResponseSchema,
   StreamTerminalOutputRequestSchema,
-} from "../../src/gen/connection_pb";
+} from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { decodeConnectStreamRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
@@ -40,7 +40,7 @@ function Harness({ containerWidth = 800, containerHeight = 400 }: { containerWid
       }),
     [],
   );
-  const client = useMemo(() => createClient(ConnectionService, transport), [transport]);
+  const client = useMemo(() => createClient(TerminalSessionService, transport), [transport]);
 
   return (
     <div style={{ width: containerWidth, height: containerHeight, position: "relative" }}>
@@ -66,14 +66,14 @@ const OK_SEND_TERMINAL_INPUT_BODY = toArrayBuffer(
 
 /** Intercept StreamTerminalOutput; accept and return an empty (no-data) stream. */
 function interceptStreamTerminalOutput() {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/StreamTerminalOutput", (req) => {
+  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/StreamTerminalOutput", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: new ArrayBuffer(0) });
   }).as("streamTerminalOutput");
 }
 
 /** Intercept SendTerminalInput (OSC resize sequences, keystrokes). */
 function interceptSendTerminalInput() {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/SendTerminalInput", (req) => {
+  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/SendTerminalInput", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: OK_SEND_TERMINAL_INPUT_BODY });
   }).as("sendTerminalInput");
 }

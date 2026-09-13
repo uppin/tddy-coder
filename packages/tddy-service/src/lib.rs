@@ -16,10 +16,12 @@ pub mod presenter_intent_service;
 pub mod reflection_service;
 pub mod service;
 pub mod service_acp;
+pub mod service_coordinates;
 pub mod session_activity;
 pub mod session_agents;
 pub mod terminal_service;
 pub mod token_service;
+pub mod tonic_status;
 pub mod worktree_activity;
 
 pub use codex_oauth_scan::{
@@ -44,6 +46,7 @@ pub use proto::remote::TddyRemoteServer;
 pub use proto::remote_git::RemoteGitServiceServer;
 pub use proto::screen_sharing::ScreenSharingServiceServer;
 pub use proto::session_admission::SessionAdmissionServiceServer;
+pub use proto::session_files::SessionFilesServiceServer;
 pub use proto::tasks::TaskServiceServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
@@ -53,6 +56,7 @@ pub use proto::worktree::WorktreeServiceServer;
 pub use reflection_service::{reflection_entry_from, ServerReflectionImpl};
 pub use service::{session_view_adapter_surface, TddyRemoteService};
 pub use service_acp::TddyAcpService;
+pub use service_coordinates::SESSION_FILES_SERVICE;
 pub use tddy_rpc::Status;
 pub use terminal_service::{
     start_virtual_tui_session, TerminalServiceVirtualTui, VirtualTuiSession,
@@ -60,6 +64,7 @@ pub use terminal_service::{
 pub use token_service::{
     SessionTokenAuthenticator, TokenProvider, TokenServiceImpl, RESERVED_DAEMON_IDENTITY_PREFIX,
 };
+pub use tonic_status::{to_rpc_status, to_tonic_status};
 
 pub mod gen {
     tonic::include_proto!("tddy.v1");
@@ -102,6 +107,18 @@ pub mod proto {
     /// [`connection`] by `#unbundle` node 4; its 12 messages overlap nothing that stayed.
     pub mod livekit {
         include!(concat!(env!("OUT_DIR"), "/livekit.rs"));
+    }
+    /// The types more than one service needs. Created by `#unbundle` node 6 for exactly one enum,
+    /// `HostDocumentScope` — see `proto/types.proto` for why it is not larger.
+    #[allow(unused_imports, unused_variables)]
+    pub mod types {
+        include!(concat!(env!("OUT_DIR"), "/types.rs"));
+    }
+    /// `SessionFilesService`: workflow files, agent context sync, uploads, staged attachments and
+    /// host documents. Split out of [`connection`] by `#unbundle` node 6.
+    #[allow(unused_imports, unused_variables)]
+    pub mod session_files {
+        include!(concat!(env!("OUT_DIR"), "/session_files.rs"));
     }
     /// `RemoteGitService`: a daemon project served as a git remote. See
     /// `docs/ft/daemon/remote-git-repo.md`.

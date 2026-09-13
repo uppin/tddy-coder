@@ -29,7 +29,7 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
 5. `StartSessionResponse` returns `session_id`; no LiveKit credentials (empty strings).
 
 ### Terminal access
-6. The web UI opens a `GhosttyTerminalSession` component connected to `StreamSessionTerminalIO` (gRPC bidirectional stream on `ConnectionService`).
+6. The web UI opens a `GhosttyTerminalSession` component connected to `StreamSessionTerminalIO` (gRPC bidirectional stream on `terminal_session.TerminalSessionService`).
 7. All keyboard input and output are relayed in real time. Terminal resize events update the PTY.
 8. No LiveKit connection is made for Claude Code CLI sessions.
 
@@ -91,7 +91,9 @@ Linux's unprivileged-userns restriction does not apply. See
     `tddy-tools sandbox-runner` inside Seatbelt; the daemon dials the in-jail **`SessionChannel`**
     for terminal I/O, MCP tool exec, and LLM egress relay.
 20. Sandboxed sessions return empty LiveKit credentials; terminal access uses the same
-    `StreamTerminalOutput` / `SendTerminalInput` RPCs as non-sandbox claude-cli.
+    `StreamTerminalOutput` / `SendTerminalInput` RPCs as non-sandbox claude-cli, resolved out of the
+    sandbox registry by the daemon's composite terminal store and served by the same bridge — so a
+    jailed terminal replays, anchors and pages like every other one.
 21. The agent reads a read-only context dir in the jail; codebase mutations flow through
     `mcp__tddy-tools__*` tool calls executed on the host worktree.
 22. On non-macOS, `sandbox = true` returns `failed_precondition` (no fallback).
@@ -123,7 +125,8 @@ sandbox: true               # optional; darwin Seatbelt jail (macOS only)
 
 ### Terminal streaming: `StreamSessionTerminalIO`
 
-A new RPC on `ConnectionService`:
+On `terminal_session.TerminalSessionService`
+(`packages/tddy-terminal-rpc/proto/terminal_session.proto`):
 
 ```proto
 rpc StreamSessionTerminalIO(stream SessionTerminalInput) returns (stream SessionTerminalOutput);
@@ -132,16 +135,18 @@ message SessionTerminalInput {
   string session_token = 1;  // sent on first message; ignored on subsequent
   string session_id    = 2;  // sent on first message; ignored on subsequent
   bytes  data          = 3;
-}
-
-message SessionTerminalOutput {
-  bytes data = 1;
+  // plus terminal_id, control_token and input_offset — see terminal-sessions.md
 }
 ```
 
-The daemon maintains a per-session `Arc<Mutex<PtyHandle>>` in an in-memory registry keyed by `session_id`. `StreamSessionTerminalIO` looks up the PTY for the session, forks a write task (client → PTY) and read task (PTY → client), and joins both until either end closes. Multiple simultaneous web clients can attach to the same PTY (shared read broadcast).
+The daemon maintains a per-session `PtyHandle` in an in-memory registry keyed by
+`(session_id, terminal_id)` and exposes it through the `TerminalSessionStore` port, so the stream
+itself — the write task, the read task, the replay and the offset arithmetic — is
+[`tddy-terminal-rpc`'s bridge](../../../packages/tddy-terminal-rpc/docs/terminal-session-service.md).
+Multiple simultaneous web clients can attach to the same PTY (shared read broadcast).
 
-No separate `TerminalService` endpoint is used for Claude CLI sessions; the existing `TerminalService`/`TerminalServiceVirtualTui` path is untouched.
+`terminal.TerminalService` / `TerminalServiceVirtualTui` is a separate surface and is not used for
+Claude CLI sessions.
 
 ### PTY management in daemon
 
@@ -180,7 +185,7 @@ response's `default_model`. The web holds no model list of its own; the catalog 
 
 ### Web: terminal component
 
-The `GhosttyTerminalSession` component wraps `GhosttyTerminal` and connects `onData`/`onResize` to a gRPC `StreamSessionTerminalIO` bidi stream via the existing Connect-Web gRPC client. It carries the connection-chrome pattern (status dot, disconnect, terminate).
+The `GhosttyTerminalSession` component wraps `GhosttyTerminal` and connects `onData`/`onResize` to a gRPC `StreamSessionTerminalIO` bidi stream on its `TerminalSessionService` client. It carries the connection-chrome pattern (status dot, disconnect, terminate).
 
 `ConnectionScreen` mounts `GhosttyTerminalSession` on the session's host-served terminal feed when the attached session's `agent` is `claude-cli`.
 
@@ -237,7 +242,9 @@ The hook has no web session token. A per-session random `hook_token` (UUID) is g
 
 Web-side rendering of `activity_status` (badge in the session list) is a follow-up; this changeset surfaces the field in the `ListSessions` response but does not yet display it in the UI.
 
-## Proto delta (connection.proto)
+## Proto delta
+
+`connection.proto`:
 
 ```proto
 message StartSessionRequest {
@@ -245,18 +252,6 @@ message StartSessionRequest {
   string session_type = 7;  // "tool" (default) or "claude-cli"
   string model        = 8;  // model id for claude-cli sessions
   bool   sandbox      = 15; // when true with session_type "claude-cli": darwin Seatbelt spawn (macOS only)
-}
-
-rpc StreamSessionTerminalIO(stream SessionTerminalInput) returns (stream SessionTerminalOutput);
-
-message SessionTerminalInput {
-  string session_token = 1;
-  string session_id    = 2;
-  bytes  data          = 3;
-}
-
-message SessionTerminalOutput {
-  bytes data = 1;
 }
 
 // --- Activity status hooks ---

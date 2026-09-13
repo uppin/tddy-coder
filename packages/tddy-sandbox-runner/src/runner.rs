@@ -15,13 +15,12 @@ use tokio_stream::StreamExt;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status, Streaming};
 
-use tddy_service::proto::connection::{
-    ExecuteToolRequest, ExecuteToolResponse, SessionTerminalOutput,
-};
+use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::{
-    EchoRequest, EchoResponse, EchoStreamFrame, EgressRequest, EgressResponse, SessionEnded,
-    SessionFrame, TunnelClose, TunnelData, TunnelOpen, TunnelOpenAck,
+    EchoRequest, EchoResponse, EchoStreamFrame, EgressRequest, EgressResponse,
+    SandboxTerminalOutput, SessionEnded, SessionFrame, TunnelClose, TunnelData, TunnelOpen,
+    TunnelOpenAck,
 };
 use tddy_service::tonic_sandbox::sandbox_service_server::{
     SandboxService as TonicSandboxService, SandboxServiceServer as TonicSandboxServiceServer,
@@ -702,12 +701,10 @@ impl SandboxSessionRelay {
                     continue;
                 }
                 let frame = SessionFrame {
-                    payload: Some(SessionPayload::TerminalOutput(SessionTerminalOutput {
+                    payload: Some(SessionPayload::TerminalOutput(SandboxTerminalOutput {
                         data: chunk.to_vec(),
-                        acked_input_offset: 0,
                         session_id: session_id.clone(),
                         terminal_id: MAIN_TERMINAL_ID.to_string(),
-                        ..Default::default()
                     })),
                 };
                 if out_tx.send(Ok(frame)).is_err() {

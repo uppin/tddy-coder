@@ -2,7 +2,7 @@
 
 ## Overview
 
-A `tddy-coder` session serves the session-scoped `ConnectionService` methods directly from its own LiveKit room participant (`daemon-{instanceId}-{sessionId}`) and publishes its session metadata on that participant. Once a web client has attached to a session, session-scoped RPCs — terminal I/O, terminal control, tools, VNC, screen-sharing — target the session participant. `DeleteSession` / `SignalSession` are **not** served by the coder: the web routes them directly to the daemon participant (`daemon-{instanceId}`), which owns process teardown and must stay reachable even when the coder participant is stuck. The daemon participant also remains the authority for attachment bootstrap (`StartSession`, `ConnectSession`, `ResumeSession`) and directory RPCs.
+A `tddy-coder` session serves its session-scoped RPCs directly from its own LiveKit room participant (`daemon-{instanceId}-{sessionId}`) and publishes its session metadata on that participant. Once a web client has attached to a session, session-scoped RPCs — terminal I/O, terminal control, tools, VNC, screen-sharing — target the session participant. `DeleteSession` / `SignalSession` are **not** served by the coder: the web routes them directly to the daemon participant (`daemon-{instanceId}`), which owns process teardown and must stay reachable even when the coder participant is stuck. The daemon participant also remains the authority for attachment bootstrap (`StartSession`, `ConnectSession`, `ResumeSession`) and directory RPCs.
 
 ## Technical Context
 
@@ -18,7 +18,7 @@ participant is stuck.
 
 ### Target Consumers
 
-- **tddy-web `SessionsDrawerScreen`** — builds a `ConnectionService` client bound to the session participant for session-scoped RPCs; reads `session` metadata from the participant for the sessions list.
+- **tddy-web `SessionsDrawerScreen`** — builds `ConnectionService` and `TerminalSessionService` clients bound to the session participant for session-scoped RPCs; reads `session` metadata from the participant for the sessions list.
 - **tddy-daemon** — remains the bootstrap/directory authority and the direct target for `DeleteSession` / `SignalSession` (called by the web, not relayed by the coder).
 
 ### Success Metrics
@@ -31,14 +31,42 @@ participant is stuck.
 
 ### Core Capabilities
 
-The coder's LiveKit participant serves the following `ConnectionService` methods (in addition to the existing `TerminalService`):
+The coder's LiveKit participant registers three service entries: `connection.ConnectionService`,
+`terminal_session.TerminalSessionService`, and `terminal.TerminalService`. All three are built from
+one session service, so they address one terminal manager and one control lease.
+
+On `connection.ConnectionService`:
 
 - `ListExecTools` — the session's executable tool catalog.
 - `ListSessionToolCalls` — the durable `~/.tddy/sessions/{sessionId}/tool-calls.jsonl` log.
 - `ExecuteTool` — invoke a tool against the session; appends to the same durable log. Dispatches through the shared **`tddy-tool-engine`** crate against the session's worktree root (`agent_working_dir`), backed by a per-session `tddy_task::TaskRegistry`; the catalog mirrors the shared engine's (`Read`/`Write`/`StrReplace`/`Delete`/`Grep`/`Glob`/`Shell`/`Await`/`ReadLints`/`SemanticSearch`). Background `Shell` jobs (`block_until_ms=0`) land in the registry; live status is reachable via `Await`. The `ToolExecutor` seam is `async`.
-- `ClaimTerminalControl` / `WatchTerminalControl` — the coder owns its own terminal, so it serves the control lease directly (the daemon's `ClaudeCliSessionManager` control registry is irrelevant for tddy-coder sessions).
-- `StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions` and `terminal_id`-addressed `StreamTerminalOutput` / `SendTerminalInput` — **bash terminal tabs.** The coder spawns interactive shell PTYs (`$SHELL`, fallback `/bin/bash`) in the session worktree via the shared **`tddy-pty`** crate and answers these RPCs addressed by `terminal_id`. The reserved `"main"` terminal remains the VirtualTui on `TerminalService` (it is not a PTY); `StopTerminalSession("main")` is rejected with `INVALID_ARGUMENT`. See [Session Terminal Tabs](../web/session-terminal-tabs.md). Because the coder already runs as the target OS user, its PTYs spawn without privilege-drop (`os_user: None`).
 - `DeleteSession` / `SignalSession` — **not served here**. The web routes them directly to the daemon participant (`daemon-{instanceId}`), which owns process teardown. This keeps lifecycle control available even when the coder participant is stuck, and avoids a relay hop.
+
+On `terminal_session.TerminalSessionService`, **seven of the nine** methods — the **bash terminal
+tabs**: `StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions`, the
+`terminal_id`-addressed `StreamTerminalOutput` / `SendTerminalInput` / `GetTerminalHistory`, and
+`ClaimTerminalControl`. The coder spawns interactive shell PTYs in the session worktree via the shared
+**`tddy-pty`** crate, and registers
+[`tddy-terminal-rpc`](../../../packages/tddy-terminal-rpc/docs/terminal-session-service.md)'s own
+entry constructor — the same one the daemon registers — supplying only the three answers that are the
+coder's: which terminals it runs, who may drive them, and which OS user they belong to. So the replay
+model, the offsets and the ACK framing are the daemon's, not a second implementation. Because the
+coder already runs as the target OS user, its PTYs spawn without privilege-drop (`os_user: None`).
+
+`StreamSessionTerminalIO` and `WatchTerminalControl` are refused here with `Unimplemented`, and each
+refusal is a judgement rather than an omission. The coder's control lease is a permanent self-grant —
+it owns its own terminal and arbitrates nothing — so a watch event from it would tell every
+subscribing screen it is the controller, including the one the owning daemon's real lease has just
+displaced, which is exactly the screen the event exists to correct. And the coder already carries a
+session's bidirectional terminal bytes on `terminal.TerminalService/StreamTerminalIO`, which is the
+wire the web opens against it; a second bidi terminal on the same participant would be two.
+
+`packages/tddy-coder/tests/two_server_parity_acceptance.rs` asserts at the wire that the seven answer
+identically to the daemon's — history offsets, stream mode, control-claim outcome.
+
+The reserved `"main"` terminal remains the VirtualTui on `terminal.TerminalService` (it is not a
+PTY); `StopTerminalSession("main")` is rejected with `INVALID_ARGUMENT`. See
+[Session Terminal Tabs](../web/session-terminal-tabs.md).
 
 ### Developer Experience (DX) Requirements
 
@@ -50,7 +78,7 @@ The coder's LiveKit participant serves the following `ConnectionService` methods
 
 ### API Contract
 
-- **Transport**: LiveKit data-channel `tddy-rpc` (same as `TerminalService` today). The coder registers a `ConnectionService` `ServiceEntry` alongside `TerminalService` on its participant.
+- **Transport**: LiveKit data-channel `tddy-rpc`, the same as `terminal.TerminalService`. The coder registers a `connection.ConnectionService` and a `terminal_session.TerminalSessionService` `ServiceEntry` alongside it on one participant. Two entries rather than one registered under two names: the connection dispatcher matches on the method alone, so a single service answering at both coordinates would serve `ListExecTools` on the terminal coordinate and `StreamTerminalOutput` on the connection one.
 - **Auth**: every method validates `session_token` exactly as the daemon does today (GitHub user → OS user → session ownership). Delete/signal are validated at the daemon (the web passes the caller's `session_token`).
 - **Method scope**: session-scoped methods only. `StartSession`, `ConnectSession`, `ResumeSession`, `ListSessions`, `ListProjects`, `ListAgents`, `ListTools`, `ListEligibleDaemons`, `ListProjectBranches`, `DeleteSession`, `SignalSession` are **not** served by the coder participant.
 
@@ -89,7 +117,7 @@ Republished on workflow state transitions (the workflow already writes `changese
 
 ### Integration Patterns
 
-- The web constructs a `ConnectionService` client via `liveKitFactory(room, sessionServerIdentity)` and calls session-scoped methods on it; bootstrap/directory RPCs **and `DeleteSession` / `SignalSession`** continue to use the daemon participant client.
+- The web constructs a `ConnectionService` and a `TerminalSessionService` client via `liveKitFactory(room, sessionServerIdentity)` and calls session-scoped methods on the matching one; bootstrap/directory RPCs **and `DeleteSession` / `SignalSession`** use the daemon participant client.
 - The web's `useRoomParticipants` parses the `session` metadata block; `SessionManager` overlays it onto sessions-list rows.
 
 ## Integration Examples
@@ -99,6 +127,9 @@ Republished on workflow state transitions (the workflow already writes `changese
 ```
 client = createClient(ConnectionService, liveKitFactory(room, "daemon-west-1-<sessionId>"))
 await client.executeTool({ sessionToken, sessionId, toolName, argsJson })
+
+terminals = createClient(TerminalSessionService, liveKitFactory(room, "daemon-west-1-<sessionId>"))
+await terminals.listTerminalSessions({ sessionToken, sessionId })
 ```
 
 ### Web reading session metadata from a participant
@@ -109,7 +140,7 @@ participant.metadata → JSON.parse → { session: { workflow_goal, workflow_sta
 
 ## Acceptance Criteria
 
-- [x] The coder's LiveKit participant answers `ListExecTools`, `ExecuteTool`, and `ClaimTerminalControl` over its identity.
+- [x] The coder's LiveKit participant answers `ListExecTools` and `ExecuteTool` on `connection.ConnectionService`, and `ClaimTerminalControl` on `terminal_session.TerminalSessionService`, over its identity.
 - [x] After a workflow state transition, the participant's metadata JSON contains a `session` block with `workflow_goal`, `workflow_state`, `agent`, and `model`.
 - [x] `DeleteSession` / `SignalSession` are **not** served by the coder participant; the web routes them to `daemon-{instanceId}` and they still terminate the session (daemon-direct).
 - [x] The `session` metadata key coexists with `owned_project_count` / `codex_oauth` (shallow merge preserves sibling keys).
@@ -117,7 +148,7 @@ participant.metadata → JSON.parse → { session: { workflow_goal, workflow_sta
 
 ## Testing Strategy
 
-- **Integration (LiveKit testkit)**: spawn a coder participant against `LIVEKIT_TESTKIT_WS_URL`; call session-scoped `ConnectionService` methods (tools, terminal control) over its identity; observe metadata after a transition. A real-executor test asserts `ListExecTools` returns the full shared catalog and `ExecuteTool("Read")` returns the worktree file's contents via `tddy-tool-engine`. Delete/signal daemon-direct behaviour is covered by the web Cypress + daemon unit tests.
+- **Integration (LiveKit testkit)**: spawn a coder participant against `LIVEKIT_TESTKIT_WS_URL`; call its session-scoped methods (tools on `ConnectionService`, terminals and control on `TerminalSessionService`) over its identity; observe metadata after a transition. A real-executor test asserts `ListExecTools` returns the full shared catalog and `ExecuteTool("Read")` returns the worktree file's contents via `tddy-tool-engine`. Delete/signal daemon-direct behaviour is covered by the web Cypress + daemon unit tests.
 - **Unit**: `connection_service_participant` handlers against an in-process harness (incl. an async `ToolExecutor` fake, catalog-mirrors-shared-engine, `CoderSessionToolExecutor` Write→Read against a tempdir); `metadata_publisher` JSON shape + merge + the workflow-state tap mapping (`apply_session_metadata_event`).
 
 ## Related Documentation

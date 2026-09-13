@@ -11,7 +11,7 @@ import React from "react";
 import { GhosttyTerminalSession } from "../../src/components/GhosttyTerminalSession";
 import type { TerminalStream } from "../../src/rpc/connections/terminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -29,7 +29,7 @@ function aCapturingStream(): TerminalStream {
 
 function anUploadBackend(): InMemoryRpcBackend {
   return anInMemoryRpcBackend().onUnary(
-    ConnectionService.method.uploadSessionFileChunk,
+    SessionFilesService.method.uploadSessionFileChunk,
     (req) => ({ hostPath: req.last ? `/srv/host/uploads/${req.fileName}` : "" }),
   );
 }
@@ -90,7 +90,7 @@ describe("Mobile terminal — upload from the Keyboard strip", () => {
     // Then — the file's exact bytes are uploaded to the host
     cy.wrap(null).should(() => {
       const chunks = backend
-        .callsTo(ConnectionService.method.uploadSessionFileChunk)
+        .callsTo(SessionFilesService.method.uploadSessionFileChunk)
         .filter((c) => c.fileName === "note.txt")
         .map((c) => c.data as Uint8Array);
       expect(reconstructUtf8(chunks)).to.equal("hello");

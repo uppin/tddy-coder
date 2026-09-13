@@ -15,7 +15,7 @@ import { randomUuid } from "../lib/randomId";
 import { joinQuotedPaths } from "../lib/shellQuote";
 import { useUploadProgressController } from "../rpc/uploadProgress";
 import { useDaemonClient } from "../rpc/selectedDaemon";
-import { ConnectionService } from "../gen/connection_pb";
+import { SessionFilesService } from "../gen/session_files_pb";
 
 /** One unary chunk upload; resolves to the file's absolute host path on the final chunk. */
 export type UploadChunkFn = (args: {
@@ -94,7 +94,7 @@ export function useSessionFileUpload({
 export const UPLOAD_CHUNK_TIMEOUT_MS = 20_000;
 
 /**
- * Builds an {@link UploadChunkFn} bound to the selected daemon's `ConnectionService`, targeting a
+ * Builds an {@link UploadChunkFn} bound to the selected daemon's `SessionFilesService`, targeting a
  * given session. Throws (rather than silently no-op'ing) if no daemon is connected, so a failed
  * upload surfaces instead of being dropped.
  */
@@ -103,7 +103,7 @@ export function useDaemonUploadChunk(
   sessionId: string,
   timeoutMs: number = UPLOAD_CHUNK_TIMEOUT_MS,
 ): UploadChunkFn {
-  const client = useDaemonClient(ConnectionService);
+  const client = useDaemonClient(SessionFilesService);
   return useCallback(
     async ({ uploadId, fileName, data, last }) => {
       if (!client) {

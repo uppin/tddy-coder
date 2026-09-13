@@ -35,7 +35,7 @@ import {
   type WebviewIpcBridge,
   type WebviewIpcHost,
 } from "tddy-tauri-web";
-import { ConnectionService } from "../../gen/connection_pb";
+import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { tddyDebug } from "../../lib/debugMask";
 import { daemonTransportFlavour, type TauriHostWindow } from "../daemonTransportFlavour";
 import type { SessionAttachmentHint, SessionConnection } from "./session";
@@ -400,7 +400,7 @@ function openIpcSession(
       wire.detach();
     },
     /**
-     * The terminal over the *host's* `ConnectionService`, not this session's connection.
+     * The terminal over the *host's* `TerminalSessionService`, not this session's connection.
      *
      * The daemon holds the capture ring, so scrollback and the offset-anchored resume come from it —
      * the same reason `openHostServedSession` and the LiveKit session connection both ask the host
@@ -409,7 +409,7 @@ function openIpcSession(
     openTerminal(options: TerminalOptions): TerminalFeed {
       refuseIfClosed();
       return openDaemonTerminalFeed({
-        client: host.clientFor(ConnectionService),
+        client: host.clientFor(TerminalSessionService),
         sessionId,
         resume: resumePointFor(options.terminalId ?? ""),
         options,

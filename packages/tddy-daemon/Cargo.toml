@@ -117,6 +117,10 @@ tddy-telegram = { path = "../tddy-telegram" }
 # three of its seven modules that something here still names.
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+# The moved session-file-I/O subsystem: the ten modules `connection_service` and eight of its
+# submodules read and write session files through. The edge runs this way round because none of the
+# ten names `connection_service` — the coupling was always daemon → session files.
+tddy-session-files = { path = "../tddy-session-files" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

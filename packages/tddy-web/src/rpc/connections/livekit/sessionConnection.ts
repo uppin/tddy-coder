@@ -21,8 +21,8 @@
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import { ConnectionState, type Room } from "livekit-client";
-import { ConnectionService } from "../../../gen/connection_pb";
 import { TerminalService } from "../../../gen/terminal_pb";
+import { TerminalSessionService } from "../../../gen/terminal_session_pb";
 import type { TokenService } from "../../../gen/token_pb";
 import { capabilitiesForHint } from "../sessionAttachment";
 import type { SessionAttachmentHint, SessionConnection } from "../session";
@@ -258,7 +258,7 @@ class LiveKitSessionConnection implements SessionConnection {
       room: this.room,
       serverIdentity: this.targetIdentity,
       terminal: this.clientFor(TerminalService),
-      host: this.support.hostClientFor(ConnectionService),
+      host: this.support.hostClientFor(TerminalSessionService),
       sessionId: this.sessionId,
       options,
     });

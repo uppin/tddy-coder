@@ -1,16 +1,24 @@
 import React from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService } from "../../gen/connection_pb";
+import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import { Button } from "../ui/button";
 import { CreateSessionPane, type CreateSessionInitialValues } from "./CreateSessionPane";
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
 
 export interface CreateSessionDialogProps {
   open: boolean;
   client: ConnectionClient;
+  /**
+   * The session-files service on the same host as `client` — the form stages its local attachments
+   * through it. Required for the reason `worktreeClient` is: without one a staged upload silently
+   * has nowhere to go.
+   */
+  sessionFilesClient: SessionFilesClient;
   /**
    * The worktree service on the same host as `client` — the host-document picker's tree scopes
    * browse through it. Required for the reason `HostDocumentPicker.worktreeClient` is: without one
@@ -32,6 +40,7 @@ export interface CreateSessionDialogProps {
 export function CreateSessionDialog({
   open,
   client,
+  sessionFilesClient,
   worktreeClient,
   sessionToken,
   onClose,
@@ -67,6 +76,7 @@ export function CreateSessionDialog({
         <div className="min-h-0 flex-1 overflow-auto">
           <CreateSessionPane
             client={client}
+            sessionFilesClient={sessionFilesClient}
             worktreeClient={worktreeClient}
             sessionToken={sessionToken}
             initialValues={initialValues}

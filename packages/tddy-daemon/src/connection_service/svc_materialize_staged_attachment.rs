@@ -16,9 +16,12 @@ use tddy_service::proto::connection::StartSessionRequest;
 
 use tddy_service::proto::connection::HostDocumentRef;
 
-use tddy_service::proto::connection::HostDocumentScope;
+/// The scope every side of this resolves against — `types.proto`'s, which `connection.proto` and
+/// `session_files.proto` both import rather than duplicating, so a `HostDocumentRef` built for a
+/// `StartSession` and the `ReadHostDocument` that fetches it name one enum.
+use tddy_service::proto::types::HostDocumentScope;
 
-use tddy_service::proto::connection::ReadHostDocumentRequest;
+use tddy_service::proto::session_files::ReadHostDocumentRequest;
 
 use crate::session_file_upload::contained_canonical_dir;
 

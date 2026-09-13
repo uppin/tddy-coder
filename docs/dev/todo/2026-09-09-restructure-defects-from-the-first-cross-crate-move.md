@@ -182,3 +182,38 @@ layered by hand.
   finished indexing after 600s"* and exits **0**. A budget overrun exiting zero is worth fixing on
   its own — a script cannot tell it from success. With layering at one index per layer, the
   budget is the dominant cost of using the operation at all.
+
+## `#unbundle` node 6 — `check --deep` and `apply` disagree about the same tree
+
+Node 6 (PR #475, `tddy-session-files`) tried the operation once, on the least-coupled of its ten
+modules, following the "try it at most once per milestone" rule this file already records.
+
+**`restructure check --deep` accepted the plan.** It completed the survey — reporting
+`3 item(s) reached from outside, 5 caller(s)` for the anchor — and finished with `no findings`.
+
+**`apply` of the same 3-module layer-1 plan then refused**, after roughly 35 minutes of indexing:
+
+    Error: plan is malformed: rust-analyzer never settled enough to answer textDocument/references
+
+This is a **new refusal reason** — distinct from the nested-module refusal (`source_crate_of`
+requiring `<crate>/src/<module>.rs`) and the origin-facade-reads-as-a-cycle refusal recorded above.
+What makes it worth its own entry is the *disagreement*: the deep check answers
+`textDocument/references` on this tree well enough to survey callers, and the apply, on the same
+tree minutes later, gives up on the same request. So the preflight cannot be trusted to predict the
+apply even when it does real reference work — which is a stronger version of the
+"`check` reported `no findings` on a plan `apply` then rejected entirely" problem already noted for
+node 2.
+
+Two consequences for whoever fixes this:
+
+- **`plan is malformed` is the wrong error class.** The plan was not malformed; the indexer did not
+  settle. A caller cannot distinguish a genuine schema problem from an indexing timeout, so the
+  advice "fix your plan" is actively misleading. This is the same shape as the budget-overrun
+  exiting zero, recorded above: the operation reports the wrong thing about its own failure.
+- **The cost is paid before the refusal.** ~35 minutes elapsed before the error, on top of the
+  ~20 minutes per plan this file already records. A node that tries the operation once and falls
+  back to `git mv` has still spent an hour.
+
+All ten of node 6's modules were moved with `git mv`, which preserved rename detection (`git status`
+reports `R` for all fifteen moved files, source and tests). That keeps the running tally at
+**0 modules moved by the operation** across nodes 2, 3 and 6.

@@ -22,6 +22,7 @@ import {
   StartSessionEventSchema,
   type StartSessionRequest,
 } from "../../src/gen/connection_pb";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
@@ -102,7 +103,7 @@ function anAttachmentBackendWithoutStart(): InMemoryRpcBackend {
       branches: ["origin/main"],
       defaultRemote: "origin",
     }))
-    .onUnary(ConnectionService.method.uploadStagedAttachmentChunk, (req) => ({
+    .onUnary(SessionFilesService.method.uploadStagedAttachmentChunk, (req) => ({
       entry: req.last
         ? {
             daemonInstanceId: req.daemonInstanceId || LOCAL_HOST,
@@ -178,6 +179,7 @@ function aBackendRefusingTheFirstStartAsABranchConflict(
 function mountCreatePane(backend: InMemoryRpcBackend, onCreated = cy.stub().as("onCreated")) {
   const client = createClient(ConnectionService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
   // Both hosts answer over the same backend: the form reads every advertised host's agent catalog
   // (`ListAgents` has no routing field, so each host is asked for itself), and a host that cannot be
@@ -186,6 +188,7 @@ function mountCreatePane(backend: InMemoryRpcBackend, onCreated = cy.stub().as("
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
+        sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}
         sessionToken="fake-token"
         onCancel={cy.stub()}
@@ -210,7 +213,7 @@ function sentStartRequest(recorder: StartRecorder): StartSessionRequest {
 
 /** Every staging chunk the form uploaded, across all of its submit attempts. */
 function stagedChunks(backend: InMemoryRpcBackend) {
-  return backend.callsTo(ConnectionService.method.uploadStagedAttachmentChunk);
+  return backend.callsTo(SessionFilesService.method.uploadStagedAttachmentChunk);
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +293,7 @@ it("uploads nothing until the form is submitted", () => {
   createSessionPage.attachmentRow("spec.md").should("exist");
   cy.wrap(null).should(() => {
     expect(
-      backend.callsTo(ConnectionService.method.uploadStagedAttachmentChunk),
+      backend.callsTo(SessionFilesService.method.uploadStagedAttachmentChunk),
       "an abandoned form must upload nothing",
     ).to.have.length(0);
   });
@@ -310,7 +313,7 @@ it("stages a picked file on submit and references it from the start request", ()
   // Then the bytes were staged, whole, under one staging id
   cy.get("@onCreated").should("have.been.calledWith", "attach-1");
   cy.wrap(null).should(() => {
-    const chunks = backend.callsTo(ConnectionService.method.uploadStagedAttachmentChunk);
+    const chunks = backend.callsTo(SessionFilesService.method.uploadStagedAttachmentChunk);
     const stagingIds = new Set(chunks.map((c) => c.stagingId));
     expect(stagingIds.size, "all chunks of one submit share a staging id").to.equal(1);
     const stagingId = [...stagingIds][0]!;
@@ -469,7 +472,7 @@ it("stamps the staged ref with the staging host even when the session runs elsew
     expect(staged.daemonInstanceId, "the staged ref names the staging host").to.equal(LOCAL_HOST);
 
     // And the upload itself went to the staging host, not the session host
-    const chunks = backend.callsTo(ConnectionService.method.uploadStagedAttachmentChunk);
+    const chunks = backend.callsTo(SessionFilesService.method.uploadStagedAttachmentChunk);
     expect(new Set(chunks.map((c) => c.daemonInstanceId))).to.deep.equal(new Set([LOCAL_HOST]));
   });
 });

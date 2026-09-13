@@ -1,6 +1,13 @@
-//! Session-participant module — the tddy-coder process serves session-scoped
-//! `ConnectionService` RPCs (tools, terminal control) from its own LiveKit participant and
-//! publishes `session` metadata.
+//! Session-participant module — the tddy-coder process serves session-scoped RPCs (tools,
+//! terminal control) from its own LiveKit participant and publishes `session` metadata.
+//!
+//! Two coordinates, registered together by [`session_service_entries`]:
+//!
+//! * `connection.ConnectionService` — the session's tools, tool calls and ACP replay, served here.
+//! * `terminal_session.TerminalSessionService` — the terminal family, served by
+//!   [`terminal_session_service`] from `tddy-terminal-rpc`'s own handlers, so this process and the
+//!   daemon answer one session identically. `#unbundle` node 6 moved the terminal streaming off
+//!   `connection.ConnectionService` here for that reason.
 //!
 //! `DeleteSession` / `SignalSession` are **not** served here: the web routes them directly to the
 //! daemon participant (`daemon-{instanceId}`), which owns process teardown and must be reachable
@@ -11,6 +18,7 @@ pub mod connection_service_participant;
 pub mod metadata_publisher;
 pub mod terminal_manager;
 pub mod terminal_session_adapter;
+pub mod terminal_session_service;
 
 pub use acp_transcript::{append_frames_for_event, frame_for_event, spawn_acp_transcript_writer};
 pub use connection_service_participant::{
@@ -20,6 +28,7 @@ pub use connection_service_participant::{
 pub use metadata_publisher::{
     session_metadata_json, spawn_session_metadata_tap, SessionMetadata, SessionMetadataSeed,
 };
+pub use terminal_session_service::coder_terminal_session_entry;
 
 use std::sync::Arc;
 
@@ -29,23 +38,12 @@ use tokio::sync::watch;
 
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, ServiceEntry, Status};
 use tddy_service::proto::connection::{
-    AcpReplayFrame, ClaimTerminalControlRequest, ClaimTerminalControlResponse, ExecuteToolRequest,
-    ExecuteToolResponse, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
-    GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetTerminalHistoryRequest,
+    AcpReplayFrame, ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest,
+    GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
     ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse, ListTerminalSessionsRequest, ListTerminalSessionsResponse,
-    SendTerminalInputResponse, SessionTerminalInput, SessionTerminalOutput,
-    StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
-    StopTerminalSessionResponse, StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
-    StreamTerminalOutputRequest, TerminalHistoryChunk, TerminalSessionInfo, ToolCallInfo,
-    ToolDef as ProtoToolDef,
+    ListSessionToolCallsResponse, StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
+    ToolCallInfo, ToolDef as ProtoToolDef,
 };
-
-use terminal_manager::MAIN_TERMINAL_ID;
-
-/// Buffer size for the `StreamTerminalOutput` server-stream bridge (replay frame + live output).
-/// Bounds memory if the client reads slower than the shell produces; overflow applies backpressure.
-const TERMINAL_OUTPUT_CHANNEL_CAPACITY: usize = 256;
 
 /// Buffer size for the `StreamSessionActivity` server-stream bridge (snapshot rows + live tail).
 const AGENT_ACTIVITY_CHANNEL_CAPACITY: usize = 256;
@@ -102,12 +100,7 @@ pub async fn spawn_session_participant(
         // (the production coder participant) wires the live presenter channel directly.
         presenter_events: None,
     });
-    let rpc = SessionConnectionServiceRpc { svc };
-
-    let mut entries = vec![ServiceEntry {
-        name: "connection.ConnectionService",
-        service: Arc::new(rpc) as Arc<dyn RpcService>,
-    }];
+    let mut entries = session_service_entries_from(svc);
     let names: Vec<&str> = entries.iter().map(|e| e.name).collect();
     entries.push(tddy_service::reflection_entry_from(&names));
     let multi = tddy_rpc::MultiRpcService::new(entries);
@@ -145,19 +138,46 @@ pub async fn spawn_session_participant(
 /// [`SessionConnectionService`]. Methods not served by the session participant (delete/signal,
 /// project listing, session start/resume, terminal streaming, …) return `Unimplemented` — the web
 /// routes them to the daemon participant instead.
+///
+/// Dispatch is on the **method** alone, which is why this is registered under exactly one name —
+/// see [`session_service_entries`].
+///
+/// **No terminal method is answered here.** The whole family left this coordinate in
+/// `#unbundle` node 6 — the streaming half first, the five unary ones with the milestone that
+/// removed family K from `connection.proto`. They are served on
+/// `terminal_session.TerminalSessionService` by [`terminal_session_service`], over the same
+/// [`terminal_manager::TerminalManager`] and the same control lease, so there is one answer rather
+/// than two that could diverge.
 struct SessionConnectionServiceRpc {
     svc: Arc<SessionConnectionService>,
 }
 
-/// Build a `connection.ConnectionService` [`ServiceEntry`] backed by `svc`, for registering on an
-/// existing LiveKit participant's `MultiRpcService` (used by `run.rs` when the coder's own
-/// participant identity is the session participant, `daemon-{instanceId}-{sessionId}`).
-pub fn session_connection_service_entry(svc: SessionConnectionService) -> ServiceEntry {
-    ServiceEntry {
-        name: "connection.ConnectionService",
-        service: Arc::new(SessionConnectionServiceRpc { svc: Arc::new(svc) })
-            as Arc<dyn RpcService>,
-    }
+/// The two [`ServiceEntry`]s a coder session participant registers, backed by one `svc`.
+///
+/// Used by `run.rs`, where the coder's own participant identity *is* the session participant
+/// (`daemon-{instanceId}-{sessionId}`), and by [`spawn_session_participant`].
+///
+/// Two entries rather than one registered under two names, because
+/// [`SessionConnectionServiceRpc`] dispatches on the method alone: a single service answering at
+/// both coordinates would serve `ListExecTools` on `terminal_session.TerminalSessionService` and
+/// `StreamTerminalOutput` on `connection.ConnectionService`, which is the opposite of moving the
+/// family. Both are built from the same `svc`, so they address one terminal manager and one lease.
+#[must_use]
+pub fn session_service_entries(svc: SessionConnectionService) -> Vec<ServiceEntry> {
+    session_service_entries_from(Arc::new(svc))
+}
+
+/// [`session_service_entries`] over a service the caller already shares.
+fn session_service_entries_from(svc: Arc<SessionConnectionService>) -> Vec<ServiceEntry> {
+    vec![
+        ServiceEntry {
+            name: "connection.ConnectionService",
+            service: Arc::new(SessionConnectionServiceRpc {
+                svc: Arc::clone(&svc),
+            }) as Arc<dyn RpcService>,
+        },
+        terminal_session_service::coder_terminal_session_entry(svc),
+    ]
 }
 
 #[async_trait]
@@ -202,23 +222,6 @@ impl RpcService for SessionConnectionServiceRpc {
                 };
                 RpcResult::Unary(Ok(resp.encode_to_vec()))
             }
-            "ClaimTerminalControl" => {
-                let req = match ClaimTerminalControlRequest::decode(&message.payload[..]) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        return RpcResult::Unary(Err(Status::invalid_argument(format!(
-                            "decode ClaimTerminalControlRequest: {e}"
-                        ))))
-                    }
-                };
-                let r = self.svc.claim_terminal_control(&req.screen_id, req.steal);
-                let resp = ClaimTerminalControlResponse {
-                    granted: r.granted,
-                    control_token: r.control_token,
-                    current_holder_screen_id: String::new(),
-                };
-                RpcResult::Unary(Ok(resp.encode_to_vec()))
-            }
             "ListSessionToolCalls" => {
                 let req = match ListSessionToolCallsRequest::decode(&message.payload[..]) {
                     Ok(r) => r,
@@ -244,238 +247,6 @@ impl RpcService for SessionConnectionServiceRpc {
                     .collect();
                 let resp = ListSessionToolCallsResponse { tool_calls };
                 RpcResult::Unary(Ok(resp.encode_to_vec()))
-            }
-            "StartTerminalSession" => {
-                if let Err(e) = StartTerminalSessionRequest::decode(&message.payload[..]) {
-                    return RpcResult::Unary(Err(Status::invalid_argument(format!(
-                        "decode StartTerminalSessionRequest: {e}"
-                    ))));
-                }
-                // Bash terminals run the user's login shell (resolved from passwd, not the
-                // possibly-Nix `$SHELL`), falling back to /bin/bash. The coder already runs as the
-                // target OS user, so no impersonation is applied.
-                let shell = terminal_manager::resolve_login_shell();
-                match self
-                    .svc
-                    .terminal_manager
-                    .start_terminal(&self.svc.session_id, self.svc.worktree.clone(), &shell)
-                    .await
-                {
-                    Ok(handle) => {
-                        let resp = StartTerminalSessionResponse {
-                            terminal_id: handle.terminal_id.clone(),
-                        };
-                        RpcResult::Unary(Ok(resp.encode_to_vec()))
-                    }
-                    Err(e) => RpcResult::Unary(Err(Status::internal(format!(
-                        "failed to start terminal: {e}"
-                    )))),
-                }
-            }
-            "StopTerminalSession" => {
-                let req = match StopTerminalSessionRequest::decode(&message.payload[..]) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        return RpcResult::Unary(Err(Status::invalid_argument(format!(
-                            "decode StopTerminalSessionRequest: {e}"
-                        ))))
-                    }
-                };
-                let terminal_id = req.terminal_id.trim();
-                // The main terminal is torn down via Delete/Signal on the daemon, never here.
-                if terminal_id == MAIN_TERMINAL_ID {
-                    return RpcResult::Unary(Err(Status::invalid_argument(
-                        "the main terminal cannot be stopped via StopTerminalSession; \
-                         use SignalSession or DeleteSession",
-                    )));
-                }
-                if self.svc.terminal_manager.stop_terminal(terminal_id).await {
-                    let resp = StopTerminalSessionResponse {
-                        ok: true,
-                        message: String::new(),
-                    };
-                    RpcResult::Unary(Ok(resp.encode_to_vec()))
-                } else {
-                    RpcResult::Unary(Err(Status::not_found("terminal not found")))
-                }
-            }
-            "ListTerminalSessions" => {
-                if let Err(e) = ListTerminalSessionsRequest::decode(&message.payload[..]) {
-                    return RpcResult::Unary(Err(Status::invalid_argument(format!(
-                        "decode ListTerminalSessionsRequest: {e}"
-                    ))));
-                }
-                let terminals: Vec<TerminalSessionInfo> = self
-                    .svc
-                    .terminal_manager
-                    .list_terminals()
-                    .await
-                    .iter()
-                    .map(|h| TerminalSessionInfo {
-                        terminal_id: h.terminal_id.clone(),
-                        kind: h.kind.clone(),
-                        pid: h.pid,
-                    })
-                    .collect();
-                let resp = ListTerminalSessionsResponse { terminals };
-                RpcResult::Unary(Ok(resp.encode_to_vec()))
-            }
-            "SendTerminalInput" => {
-                let req = match SessionTerminalInput::decode(&message.payload[..]) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        return RpcResult::Unary(Err(Status::invalid_argument(format!(
-                            "decode SessionTerminalInput: {e}"
-                        ))))
-                    }
-                };
-                let terminal_id = resolved_terminal_id(&req.terminal_id);
-                match self.svc.terminal_manager.get_terminal(terminal_id).await {
-                    Some(handle) => {
-                        if !req.data.is_empty() {
-                            let input_offset = req.input_offset;
-                            handle.send_input(tddy_pty::Bytes::from(req.data), input_offset);
-                        }
-                        RpcResult::Unary(Ok(SendTerminalInputResponse {}.encode_to_vec()))
-                    }
-                    None => RpcResult::Unary(Err(Status::not_found(
-                        "terminal not found or not running",
-                    ))),
-                }
-            }
-            "StreamTerminalOutput" => {
-                let req = match StreamTerminalOutputRequest::decode(&message.payload[..]) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        return RpcResult::ServerStream(Err(Status::invalid_argument(format!(
-                            "decode StreamTerminalOutputRequest: {e}"
-                        ))))
-                    }
-                };
-
-                // Delegate to the unified streaming bridge in `tddy-terminal-rpc`: mode prologue +
-                // current last frame first (tagged with absolute offsets), resize/drain on client
-                // dimensions, current ACK up front, then live broadcast interleaved with ACKs until
-                // the shell exits. Older history is fetched on demand via `GetTerminalHistory`.
-                let store =
-                    crate::session_participant::terminal_session_adapter::CoderTerminalSessionStore::new(
-                        Arc::clone(&self.svc.terminal_manager),
-                    );
-                let bridge_req =
-                    tddy_terminal_rpc::proto::terminal_session::StreamTerminalOutputRequest {
-                        session_token: req.session_token.clone(),
-                        session_id: req.session_id.clone(),
-                        terminal_id: req.terminal_id.clone(),
-                        initial_cols: req.initial_cols,
-                        initial_rows: req.initial_rows,
-                        mode: req.mode,
-                        from_offset: req.from_offset,
-                    };
-                let bridge_rx = match tddy_terminal_rpc::serve_stream_terminal_output_with(
-                    &store,
-                    bridge_req,
-                    tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
-                )
-                .await
-                {
-                    Ok(rx) => rx,
-                    Err(status) => return RpcResult::ServerStream(Err(status)),
-                };
-
-                let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
-                    TERMINAL_OUTPUT_CHANNEL_CAPACITY,
-                );
-                tokio::spawn(async move {
-                    let mut bridge_rx = bridge_rx;
-                    while let Some(frame) = bridge_rx.recv().await {
-                        let mapped = match frame {
-                            Ok(out) => SessionTerminalOutput {
-                                data: out.data,
-                                acked_input_offset: out.acked_input_offset,
-                                start_offset: out.start_offset,
-                                end_offset: out.end_offset,
-                                at_oldest: out.at_oldest,
-                                // The bridge stamped the frame with the session and resolved
-                                // terminal it came from; carry that identity through so the client
-                                // can drop output that is not its own.
-                                session_id: out.session_id,
-                                terminal_id: out.terminal_id,
-                            }
-                            .encode_to_vec(),
-                            Err(status) => {
-                                let _ = tx.send(Err(status)).await;
-                                break;
-                            }
-                        };
-                        if tx.send(Ok(mapped)).await.is_err() {
-                            break;
-                        }
-                    }
-                });
-
-                RpcResult::ServerStream(Ok(rx))
-            }
-            "GetTerminalHistory" => {
-                let req = match GetTerminalHistoryRequest::decode(&message.payload[..]) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        return RpcResult::ServerStream(Err(Status::invalid_argument(format!(
-                            "decode GetTerminalHistoryRequest: {e}"
-                        ))))
-                    }
-                };
-
-                let store =
-                    crate::session_participant::terminal_session_adapter::CoderTerminalSessionStore::new(
-                        Arc::clone(&self.svc.terminal_manager),
-                    );
-                let bridge_req =
-                    tddy_terminal_rpc::proto::terminal_session::GetTerminalHistoryRequest {
-                        session_token: req.session_token.clone(),
-                        session_id: req.session_id.clone(),
-                        terminal_id: req.terminal_id.clone(),
-                        from_offset: req.from_offset,
-                        until_offset: req.until_offset,
-                        max_bytes: req.max_bytes,
-                    };
-                let bridge_rx = match tddy_terminal_rpc::serve_get_terminal_history_with(
-                    &store,
-                    bridge_req,
-                    tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
-                )
-                .await
-                {
-                    Ok(rx) => rx,
-                    Err(status) => return RpcResult::ServerStream(Err(status)),
-                };
-
-                let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
-                    TERMINAL_OUTPUT_CHANNEL_CAPACITY,
-                );
-                tokio::spawn(async move {
-                    let mut bridge_rx = bridge_rx;
-                    while let Some(frame) = bridge_rx.recv().await {
-                        let mapped = match frame {
-                            Ok(chunk) => TerminalHistoryChunk {
-                                data: chunk.data,
-                                start_offset: chunk.start_offset,
-                                end_offset: chunk.end_offset,
-                                at_oldest: chunk.at_oldest,
-                                at_end: chunk.at_end,
-                            }
-                            .encode_to_vec(),
-                            Err(status) => {
-                                let _ = tx.send(Err(status)).await;
-                                break;
-                            }
-                        };
-                        if tx.send(Ok(mapped)).await.is_err() {
-                            break;
-                        }
-                    }
-                });
-
-                RpcResult::ServerStream(Ok(rx))
             }
             "StreamSessionActivity" => {
                 let req = match StreamSessionActivityRequest::decode(&message.payload[..]) {
@@ -802,16 +573,6 @@ impl RpcService for SessionConnectionServiceRpc {
                 "session participant does not serve ConnectionService/{other}"
             )))),
         }
-    }
-}
-
-/// Resolve a request's `terminal_id`, mapping an empty value to the reserved main terminal.
-fn resolved_terminal_id(terminal_id: &str) -> &str {
-    let trimmed = terminal_id.trim();
-    if trimmed.is_empty() {
-        MAIN_TERMINAL_ID
-    } else {
-        trimmed
     }
 }
 

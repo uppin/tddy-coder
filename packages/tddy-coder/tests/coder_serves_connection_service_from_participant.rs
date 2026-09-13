@@ -21,8 +21,9 @@ use tddy_coder::session_participant::{
 };
 use tddy_livekit::RpcClient;
 use tddy_livekit_testkit::LiveKitTestkit;
-use tddy_service::proto::connection::{
-    ClaimTerminalControlRequest, ExecuteToolRequest, ListExecToolsRequest,
+use tddy_service::proto::connection::{ExecuteToolRequest, ListExecToolsRequest};
+use tddy_terminal_rpc::proto::terminal_session::{
+    ClaimTerminalControlRequest, ClaimTerminalControlResponse,
 };
 
 const SESSION_IDENTITY: &str = "daemon-local-coder-session-aaaaaaaa-0000-4000-8000-000000000001";
@@ -168,11 +169,13 @@ async fn coder_serves_connection_service_from_participant() -> Result<()> {
         exec_response.error_message
     );
 
-    // And — ClaimTerminalControl answers from the session participant
+    // And — ClaimTerminalControl answers from the session participant, at the coordinate that
+    // declares it: the terminal family left `connection.ConnectionService` with `#unbundle` node 6,
+    // and the participant registers both entries off one service.
     let claim_resp = tokio::time::timeout(
         RPC_TIMEOUT,
         rpc_client.call_unary(
-            "connection.ConnectionService",
+            "terminal_session.TerminalSessionService",
             "ClaimTerminalControl",
             ClaimTerminalControlRequest {
                 session_token: "fake-token".to_string(),
@@ -186,8 +189,7 @@ async fn coder_serves_connection_service_from_participant() -> Result<()> {
     .await
     .map_err(|_| anyhow::anyhow!("ClaimTerminalControl timed out"))?
     .map_err(|e| anyhow::anyhow!("ClaimTerminalControl RPC: {}", e))?;
-    let claim_response =
-        tddy_service::proto::connection::ClaimTerminalControlResponse::decode(&claim_resp[..])?;
+    let claim_response = ClaimTerminalControlResponse::decode(&claim_resp[..])?;
     assert!(
         claim_response.granted,
         "session participant must grant terminal control for its own terminal"

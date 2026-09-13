@@ -3,7 +3,7 @@
 **Product Area**: Web (terminal)
 **Status**: Implemented
 **Updated**: 2026-07-25
-**Related**: [web-terminal.md](web-terminal.md) (§ Connected Terminal UX), [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md)
+**Related**: [web-terminal.md](web-terminal.md) (§ Connected Terminal UX), [terminal-session-service.md](../../../packages/tddy-terminal-rpc/docs/terminal-session-service.md), [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md)
 
 ## Summary
 
@@ -35,9 +35,9 @@ instead of staring at a frozen terminal.
 Today (see [web-terminal.md](web-terminal.md)) all browser terminal input — keyboard, SGR mouse
 sequences, and the synthetic `\x1b]resize;{cols};{rows}\x07` OSC — funnels through
 `GhosttyTerminal.onData` → `sendInput` → `GrpcSessionTerminal.sendTerminalInput` (a **unary**
-`ConnectionService.SendTerminalInput`). Output arrives on the separate server-streaming
-`StreamTerminalOutput`. Neither message carries any sequence number, byte offset, or
-acknowledgement:
+`terminal_session.TerminalSessionService.SendTerminalInput`). Output arrives on that service's
+separate server-streaming `StreamTerminalOutput`. Neither message carries any sequence number, byte
+offset, or acknowledgement:
 
 - `SessionTerminalInput { session_token, session_id, data, terminal_id, control_token }`
 - `SessionTerminalOutput { data }`

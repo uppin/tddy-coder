@@ -20,10 +20,10 @@ use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
 use tddy_task::{TaskChannel, TaskHandle, TaskId, TaskRegistry, TerminalCapture};
 use tokio::sync::{broadcast, mpsc, oneshot, watch, RwLock};
 
-use crate::pty_registry::PtyRegistry;
 use crate::pty_runtime::{
     PtyReady, PtyRuntime, PtySpawnSpec, DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS,
 };
+use tddy_pty::PtyRegistry;
 
 /// Reserved terminal id for the original `claude` terminal of a session.
 ///
@@ -131,13 +131,12 @@ impl PtyHandle {
     }
 }
 
-/// The outcome of a [`ClaudeCliSessionManager::claim_control`] call.
-pub enum ClaimOutcome {
-    /// The caller is now the controller. `control_token` must be presented in subsequent control RPCs.
-    Granted { control_token: String },
-    /// Another screen holds the lease. `holder_screen_id` identifies them.
-    Denied { holder_screen_id: String },
-}
+/// The outcome of a [`CliSessionManager::claim_control`] call.
+///
+/// `tddy-terminal-rpc`'s own type: it is what the `ClaimTerminalControl` handler answers with, and
+/// two structurally identical enums would need a converter between them that could only ever get
+/// the mapping wrong in one direction.
+pub use tddy_terminal_rpc::service::ControlClaim as ClaimOutcome;
 
 /// Per-session control lease snapshot.
 #[derive(Debug, Clone)]
@@ -147,11 +146,11 @@ pub struct ControlLeaseInfo {
 }
 
 /// Broadcast payload emitted when a session's control lease changes.
-#[derive(Debug, Clone)]
-pub struct ControlChangeEvent {
-    pub session_id: String,
-    pub holder_screen_id: String,
-}
+///
+/// `tddy-terminal-rpc`'s own type, for the same reason as [`ClaimOutcome`] — and here it also means
+/// the lease broadcast can be handed straight to that crate's `TerminalControl` port, rather than
+/// through a relay task that re-broadcasts every event into a second channel of the same shape.
+pub use tddy_terminal_rpc::service::ControlChange as ControlChangeEvent;
 
 /// Per-terminal metadata: maps a terminal id to its backing task.
 #[derive(Debug, Clone)]

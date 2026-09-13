@@ -13,12 +13,11 @@ use tddy_core::Changeset;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::connection::{
     start_session_event::Event as StartSessionEventKind, AttachmentMaterializationProgress,
-    HostDocumentChunk, SessionAttachment, StartSessionEvent,
+    SessionAttachment, StartSessionEvent,
 };
 use tddy_service::proto::connection::{
     AgentConversationChunk, ListAgentModelsResponse, ModelInfo, ProjectEntry as ProtoProjectEntry,
-    SessionTerminalInput, SessionTerminalOutput, SplitAgentPlacement, StartSessionResponse,
-    TerminalControlEvent,
+    SplitAgentPlacement, StartSessionResponse,
 };
 use uuid::Uuid;
 
@@ -72,176 +71,8 @@ use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 mod service_util;
 pub(crate) use service_util::*;
 
-/// Stream adapter that yields [`SessionTerminalOutput`] from a broadcast receiver.
-///
-/// Implements [`futures_util::stream::Stream`] so it can be returned from
-/// [`ConnectionServiceTrait::stream_session_terminal_io`].
-pub struct TerminalOutputStream {
-    rx: tokio::sync::broadcast::Receiver<bytes::Bytes>,
-    /// The session and terminal the broadcast belongs to — stamped on every frame this adapter
-    /// yields, since a client cannot tell whose bytes an unidentified frame carries.
-    identity: TerminalFrameIdentity,
-}
-
-impl Stream for TerminalOutputStream {
-    type Item = Result<SessionTerminalOutput, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        use tokio::sync::broadcast::error::TryRecvError;
-        loop {
-            match self.rx.try_recv() {
-                Ok(chunk) => {
-                    return std::task::Poll::Ready(Some(Ok(self
-                        .identity
-                        .data_frame(chunk.to_vec()))));
-                }
-                Err(TryRecvError::Lagged(_)) => {
-                    // Skip lagged messages and try again.
-                    continue;
-                }
-                Err(TryRecvError::Closed) => {
-                    return std::task::Poll::Ready(None);
-                }
-                Err(TryRecvError::Empty) => {
-                    // Register the waker with a new future so we get notified when data arrives.
-                    let mut rx_clone = self.rx.resubscribe();
-                    let waker = cx.waker().clone();
-                    tokio::spawn(async move {
-                        // Wait for the next message, then wake the task.
-                        let _ = rx_clone.recv().await;
-                        waker.wake();
-                    });
-                    return std::task::Poll::Pending;
-                }
-            }
-        }
-    }
-}
-
-impl Unpin for TerminalOutputStream {}
-
-/// Stream adapter backed by an mpsc channel — used for `StreamTerminalOutput` (browser-compatible
-/// server-streaming RPC).
-///
-/// Unlike `TerminalOutputStream` (broadcast-based), this correctly registers the waker via
-/// `poll_recv` so the stream is woken as soon as data arrives. A background task bridges the
-/// broadcast channel into the mpsc sender so no messages can be lost between `try_recv()` and
-/// waker registration.
-pub struct MpscTerminalOutputStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<SessionTerminalOutput>,
-}
-
-impl Stream for MpscTerminalOutputStream {
-    type Item = Result<SessionTerminalOutput, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(msg)) => std::task::Poll::Ready(Some(Ok(msg))),
-            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-/// The session and terminal a stream's frames belong to. Every frame carries it, so a client can
-/// tell its own terminal's bytes from another terminal's and drop what is not its own instead of
-/// silently painting it. `terminal_id` is always the RESOLVED id (an empty request id resolves to
-/// the reserved main terminal), matching `tddy_terminal_rpc::bridge`.
-#[derive(Clone)]
-struct TerminalFrameIdentity {
-    session_id: String,
-    terminal_id: String,
-}
-
-impl TerminalFrameIdentity {
-    fn new(session_id: &str, terminal_id: &str) -> Self {
-        Self {
-            session_id: session_id.to_string(),
-            terminal_id: service_util::resolved_terminal_id(terminal_id).to_string(),
-        }
-    }
-
-    /// A terminal output-data frame (no ACK).
-    fn data_frame(&self, data: Vec<u8>) -> SessionTerminalOutput {
-        SessionTerminalOutput {
-            data,
-            acked_input_offset: 0,
-            session_id: self.session_id.clone(),
-            terminal_id: self.terminal_id.clone(),
-            ..Default::default()
-        }
-    }
-
-    /// A replay / catch-up frame tagged with its absolute byte offsets and whether it reaches the
-    /// capture ring's oldest retained byte. Used by the sandbox path so a reconnecting client can
-    /// resume by offset (FROM_OFFSET) instead of re-receiving the whole retained buffer.
-    fn replay_frame(
-        &self,
-        data: Vec<u8>,
-        start_offset: u64,
-        end_offset: u64,
-        at_oldest: bool,
-    ) -> SessionTerminalOutput {
-        SessionTerminalOutput {
-            data,
-            acked_input_offset: 0,
-            start_offset,
-            end_offset,
-            at_oldest,
-            session_id: self.session_id.clone(),
-            terminal_id: self.terminal_id.clone(),
-        }
-    }
-}
-
-/// Convert a daemon `connection::SessionTerminalInput` (tonic ConnectionService proto) into the
-/// bridge's `terminal_session::SessionTerminalInput` so the bidi handler can route through the
-/// shared bridge helper. The two protos carry identical fields; this is a structural copy.
-fn to_bridge_terminal_input(
-    msg: &SessionTerminalInput,
-) -> tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput {
-    tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput {
-        session_token: msg.session_token.clone(),
-        session_id: msg.session_id.clone(),
-        data: msg.data.clone(),
-        terminal_id: msg.terminal_id.clone(),
-        control_token: msg.control_token.clone(),
-        input_offset: msg.input_offset,
-        mode: msg.mode,
-        from_offset: msg.from_offset,
-        initial_cols: msg.initial_cols,
-        initial_rows: msg.initial_rows,
-    }
-}
-
-/// Convert a bridge `terminal_session::SessionTerminalOutput` (carrying offset metadata) into the
-/// daemon's `connection::SessionTerminalOutput` for the tonic/RpcService stream.
-fn to_connection_output(
-    out: tddy_terminal_rpc::proto::terminal_session::SessionTerminalOutput,
-) -> SessionTerminalOutput {
-    SessionTerminalOutput {
-        data: out.data,
-        acked_input_offset: out.acked_input_offset,
-        start_offset: out.start_offset,
-        end_offset: out.end_offset,
-        at_oldest: out.at_oldest,
-        // The bridge stamped the frame with the session and resolved terminal it came from; carry
-        // that identity through so the client can drop output that is not its own.
-        session_id: out.session_id,
-        terminal_id: out.terminal_id,
-    }
-}
-
-impl Unpin for MpscTerminalOutputStream {}
-
 /// Stream adapter backed by an unbounded mpsc channel carrying `Result<T, Status>` items — used for
-/// server-streaming RPCs (e.g. `GetTerminalHistory`) whose frames may carry a mid-stream status.
+/// server-streaming RPCs (e.g. `StreamExecuteTool`) whose frames may carry a mid-stream status.
 pub struct MpscResultStream<T> {
     rx: tokio::sync::mpsc::UnboundedReceiver<Result<T, Status>>,
 }
@@ -264,60 +95,6 @@ impl<T> Unpin for MpscResultStream<T> {}
 impl<T> std::fmt::Debug for MpscResultStream<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("MpscResultStream")
-    }
-}
-
-/// Stream adapter backed by an mpsc channel for [`TerminalControlEvent`] server-streaming.
-pub struct MpscControlEventStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<TerminalControlEvent>,
-}
-
-impl Stream for MpscControlEventStream {
-    type Item = Result<TerminalControlEvent, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
-            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-impl Unpin for MpscControlEventStream {}
-
-/// Relay task for `WatchTerminalControl`: forwards `ControlChangeEvent` broadcasts scoped to
-/// `session_id` as `TerminalControlEvent` messages into `tx`, computing `you_are_controller`
-/// by re-validating the watcher's stored `control_token` on each change.
-async fn relay_control_events(
-    session_id: String,
-    control_token: String,
-    manager: Arc<crate::cli_session_manager::CliSessionManager>,
-    mut broadcast_rx: tokio::sync::broadcast::Receiver<
-        crate::cli_session_manager::ControlChangeEvent,
-    >,
-    tx: tokio::sync::mpsc::UnboundedSender<TerminalControlEvent>,
-) {
-    use tokio::sync::broadcast::error::RecvError;
-    loop {
-        match broadcast_rx.recv().await {
-            Ok(change) if change.session_id == session_id => {
-                let you = manager.verify_control(&session_id, &control_token).await;
-                let event = TerminalControlEvent {
-                    holder_screen_id: change.holder_screen_id,
-                    you_are_controller: you,
-                };
-                if tx.send(event).is_err() {
-                    break;
-                }
-            }
-            Ok(_) => {}
-            Err(RecvError::Lagged(_)) => {}
-            Err(RecvError::Closed) => break,
-        }
     }
 }
 
@@ -1362,15 +1139,6 @@ pub fn roster_replacement_pairs(
         .collect()
 }
 
-fn file_mtime_ms(path: &Path) -> i64 {
-    std::fs::metadata(path)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 fn cleanup_materialized_attachments(session_dir: &Path, written: &[SessionAttachment]) {
     let attachments_dir = tddy_workflow::session_attachments_root(session_dir);
     for basename in written.iter().map(|a| &a.basename) {
@@ -1584,7 +1352,7 @@ fn peer_has_no_such_session(status: &Status) -> bool {
 /// *for*, and a checkout cannot be both a clone's mirror and a split session's working tree.
 ///
 /// Both halves of the placement are required. A daemon named with no session on it names a host but
-/// nothing that works in the checkout — see [`crate::split_session::paired_agent`], which reads back
+/// nothing that works in the checkout — see [`tddy_core::paired_agent`], which reads back
 /// what this writes and applies the same rule.
 fn resolve_split_agent_placement(
     split_agent: Option<&SplitAgentPlacement>,
@@ -1660,6 +1428,11 @@ mod svc_materialize_staged_attachment;
 mod svc_spawn_split_agent;
 
 mod svc_start_session_core;
+
+mod svc_terminal_ports;
+
+mod svc_session_files_ports;
+pub use svc_session_files_ports::PeerRoutedSessionFiles;
 
 /// Merge local `ListProjects` rows with [`EligibleDaemonSource::peer_project_entries`].
 async fn merge_listed_projects_with_peers(
@@ -1822,62 +1595,6 @@ const _: () = assert!(
         <= tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES,
     "HOST_DOCUMENT_FRAME_BYTES must fit in one LiveKit data packet with envelope headroom"
 );
-
-/// Reads `path` in [`HOST_DOCUMENT_FRAME_BYTES`] slices into `tx`, stamping `total_byte_size` on
-/// every frame. A zero-byte document still yields exactly one (empty) frame, so a consumer never
-/// has to tell "empty document" from "stream produced nothing". A read error terminates the stream
-/// with a status rather than closing it, so a partial document is never mistaken for a whole one.
-fn stream_document_frames(
-    path: &Path,
-    total_byte_size: u64,
-    tx: &tokio::sync::mpsc::UnboundedSender<Result<HostDocumentChunk, Status>>,
-) {
-    use std::io::Read as _;
-
-    let mut file = match std::fs::File::open(path) {
-        Ok(f) => f,
-        Err(e) => {
-            log::error!("stream_read_host_document: open {path:?} failed: {e}");
-            let _ = tx.send(Err(Status::internal(format!(
-                "failed to read host document: {e}"
-            ))));
-            return;
-        }
-    };
-
-    let mut buf = vec![0u8; HOST_DOCUMENT_FRAME_BYTES];
-    let mut sent_any = false;
-    loop {
-        let read = match file.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(e) => {
-                log::error!("stream_read_host_document: read {path:?} failed: {e}");
-                let _ = tx.send(Err(Status::internal(format!(
-                    "failed to read host document: {e}"
-                ))));
-                return;
-            }
-        };
-        sent_any = true;
-        if tx
-            .send(Ok(HostDocumentChunk {
-                data: buf[..read].to_vec(),
-                total_byte_size,
-            }))
-            .is_err()
-        {
-            return;
-        }
-    }
-
-    if !sent_any {
-        let _ = tx.send(Ok(HostDocumentChunk {
-            data: Vec::new(),
-            total_byte_size,
-        }));
-    }
-}
 
 /// Split one [`ActivityDelta`]'s patch into ordered [`HOST_DOCUMENT_FRAME_BYTES`] frames.
 ///
@@ -2328,12 +2045,6 @@ mod worktree_source_tests;
 
 #[cfg(test)]
 mod sandbox_claude_passthrough_args_tests;
-
-#[cfg(test)]
-mod terminal_output_chunking_tests;
-
-#[cfg(test)]
-mod sandbox_replay_tests;
 
 #[cfg(test)]
 mod conversation_spawn_wiring_tests;

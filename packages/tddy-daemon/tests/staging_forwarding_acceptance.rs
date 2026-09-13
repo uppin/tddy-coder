@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use livekit::prelude::RoomOptions;
+use prost::Message as _;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
@@ -25,12 +26,13 @@ use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon::test_util::{wait_until_peer_discovered, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
-use tddy_rpc::Request;
+use tddy_rpc::{Request, RpcMessage, RpcResult, RpcService as _};
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource, ConnectionService as ConnectionServiceTrait,
-    HostDocumentRef, HostDocumentScope, SessionAttachment, StartSessionRequest,
-    UploadStagedAttachmentChunkRequest,
+    HostDocumentRef, SessionAttachment, StartSessionRequest,
 };
+use tddy_service::proto::session_files::UploadStagedAttachmentChunkRequest;
+use tddy_service::proto::types::HostDocumentScope;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -123,7 +125,7 @@ fn create_test_repo_with_origin(dir: &std::path::Path) {
 /// they survive for the test body — `projects.yaml` and the worktree origin must still exist when
 /// the test runs. Dropping this struct at test end tears everything down.
 struct TwoDaemons {
-    service_a: ConnectionServiceImpl,
+    service_a: Arc<ConnectionServiceImpl>,
     peer_base: PathBuf,
     /// The peer's staging base — its own root, separate from its data dir since staging moved to a
     /// restart-cleared location.
@@ -189,7 +191,18 @@ async fn two_daemons() -> TwoDaemons {
     let token_b = livekit
         .generate_token(ROOM, &rpc_identity(PEER_INSTANCE_ID))
         .expect("LiveKit token for peer");
-    let server = tddy_service::ConnectionServiceServer::new(service_b);
+    // Both coordinates, because a forward is addressed at the service that *declares* the method:
+    // `StartSession` is still `connection.ConnectionService`'s, while the staging and host-document
+    // RPCs became `session_files.SessionFilesService`'s with `#unbundle` node 6.
+    let service_b = Arc::new(service_b);
+    let server = tddy_rpc::MultiRpcService::new(vec![
+        service_b.session_files_entry(),
+        tddy_rpc::ServiceEntry {
+            name: "connection.ConnectionService",
+            service: Arc::new(tddy_service::ConnectionServiceServer::from_arc(service_b))
+                as Arc<dyn tddy_rpc::RpcService>,
+        },
+    ]);
     let participant = LiveKitParticipant::connect(
         &ws_url,
         &token_b,
@@ -242,7 +255,7 @@ async fn two_daemons() -> TwoDaemons {
     let base_a = sessions_a.path().to_path_buf();
     let peer_base = sessions_b.path().to_path_buf();
     TwoDaemons {
-        service_a,
+        service_a: Arc::new(service_a),
         peer_base,
         peer_staging_base: staging_b.path().to_path_buf(),
         local_base: base_a,
@@ -265,21 +278,38 @@ async fn two_daemons() -> TwoDaemons {
 async fn staging_rpcs_addressed_to_a_peer_daemon_forward_and_operate_on_the_peer_staging_root() {
     // Given — two daemons in a common room
     let env = two_daemons().await;
-    let service_a = &env.service_a;
     let peer_staging_base = env.peer_staging_base.clone();
+    // The registered entry, not the bare service: routing is the wrapper's, so a test about
+    // forwarding that addressed the crate's implementation directly would prove nothing.
+    let staging_on_a = env.service_a.session_files_entry();
 
     // When — A stages a file addressed to the peer
-    service_a
-        .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
-            session_token: TEST_TOKEN.to_string(),
-            daemon_instance_id: PEER_INSTANCE_ID.to_string(),
-            staging_id: STAGING_ID.to_string(),
-            file_name: "remote.md".to_string(),
-            data: b"staged on peer".to_vec(),
-            last: true,
-        }))
-        .await
-        .expect("forwarded staging upload must succeed");
+    let request = UploadStagedAttachmentChunkRequest {
+        session_token: TEST_TOKEN.to_string(),
+        daemon_instance_id: PEER_INSTANCE_ID.to_string(),
+        staging_id: STAGING_ID.to_string(),
+        file_name: "remote.md".to_string(),
+        data: b"staged on peer".to_vec(),
+        last: true,
+    };
+    let answer = staging_on_a
+        .service
+        .handle_rpc(
+            staging_on_a.name,
+            "UploadStagedAttachmentChunk",
+            &RpcMessage::new(request.encode_to_vec(), Default::default()),
+        )
+        .await;
+    match answer {
+        RpcResult::Unary(Ok(_)) => {}
+        RpcResult::Unary(Err(status)) => {
+            panic!(
+                "forwarded staging upload must succeed: {}",
+                status.message()
+            )
+        }
+        RpcResult::ServerStream(_) => panic!("UploadStagedAttachmentChunk is a unary RPC"),
+    }
 
     // Then — the file landed on the peer's staging root, not A's
     let os_user = std::env::var("USER").unwrap();

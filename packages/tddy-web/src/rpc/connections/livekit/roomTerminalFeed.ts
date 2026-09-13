@@ -18,7 +18,7 @@
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import { RoomEvent, type Room } from "livekit-client";
-import type { ConnectionService } from "../../../gen/connection_pb";
+import type { TerminalSessionService } from "../../../gen/terminal_session_pb";
 import { TerminalInputSchema, type TerminalService } from "../../../gen/terminal_pb";
 import { tddyDebug } from "../../../lib/debugMask";
 import { createForwardHistoryFetcher } from "../../../lib/terminalHistoryLoader";
@@ -66,7 +66,7 @@ export interface RoomTerminalFeedDeps extends RoomTerminalStreamDeps {
    * Scrollback lives in the host's capture ring; the room cannot serve it. This is the whole of
    * what makes history available on a LiveKit-carried session.
    */
-  readonly host: Client<typeof ConnectionService>;
+  readonly host: Client<typeof TerminalSessionService>;
 
   readonly options: TerminalOptions;
 }

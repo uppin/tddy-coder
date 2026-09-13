@@ -181,6 +181,12 @@ binary and capped rather than UTF-8 and unbounded.
 
 ## Start-session materialization
 
+Two services meet on this path. `connection.ConnectionService`'s `StartSession` consumes the
+attachments; the wire surface that puts them within reach — the three staging RPCs and the two
+host-document reads — is `session_files.SessionFilesService`
+(`packages/tddy-service/proto/session_files.proto`). `HostDocumentScope` therefore lives in
+`types.proto`, reached by both.
+
 `StartSessionRequest.attachments` (field 29, `repeated SessionAttachment`) lets a client attach documents **at start time**, before the session directory exists. The daemon materializes every attachment into `artifacts/attachments/<basename>` **before** the agent launches, so the agent sees a plain local file regardless of which source produced it. Each attachment carries a `basename` (separate from the source locator, so the UI can rename without touching the stored file) plus a `oneof source` naming the host authority that owns the bytes.
 
 ### Staging area
@@ -192,7 +198,8 @@ The base is the host's temp dir rather than the data dir so that a host restart 
 - `UploadStagedAttachmentChunk` appends ordered chunks (48 KiB client-side chunking, mirroring `UploadSessionFileChunk`), validates `staging_id` and `file_name` as basenames, and returns the completed `StagedAttachmentEntry` on the final chunk.
 - `ListStagedAttachments` returns a batch's files (or every batch for the caller when `staging_id` is empty), newest-first.
 - `DeleteStagedAttachment` removes one staged file; a delete is never a weaker gate than a write (same `validate_segment` + `contained_canonical_dir` guards as the writer).
-- All three route by `daemon_instance_id`: empty / matching the local instance = local; otherwise forwarded to the peer daemon over the LiveKit common room. The two streaming RPCs forward too, via `forward_server_stream_to_peer` — a peer-side error terminates the local stream **as an error**, and an idle deadline catches a peer that goes silent, so a stream that simply stops can never be mistaken for a clean end.
+- All three route by `daemon_instance_id`: empty / matching the local instance = local; otherwise forwarded to the peer daemon over the LiveKit common room. The two host-document reads forward too, the streaming one via `forward_server_stream_to_peer` — a peer-side error terminates the local stream **as an error**, and an idle deadline catches a peer that goes silent, so a stream that simply stops can never be mistaken for a clean end.
+- Routing sits on the served `SessionFilesService` trait rather than on the transport underneath it, so a request the daemon makes for itself — `StartSession` materialising an attachment — obeys the `daemon_instance_id` it named instead of being answered locally. It also puts authentication **before** route classification, so an unauthenticated request cannot drive an outbound forward.
 
 ### `ReadHostDocument` — unary host-document fetch
 
@@ -238,12 +245,13 @@ Streaming is added **alongside** unary rather than replacing it: `tddy-tools rem
 
 ## Constraints
 
-- `copy_attachment_into_session` is the host-side store the start-session materialization path calls; the staging RPCs and `ReadHostDocument` are the wire surface that feeds it. Nothing else reaches the wire except the `SessionContextDoc` fields and the attachment RPCs.
+- `copy_attachment_into_session` is the host-side store the start-session materialization path calls; the staging RPCs and `ReadHostDocument` are the wire surface that feeds it. Nothing else reaches the wire except the `SessionContextDoc` fields and the attachment RPCs. Implementation reference: [host-documents-and-attachments.md](../../../packages/tddy-session-files/docs/host-documents-and-attachments.md).
 - Attachment bytes are never read through the context-doc surface (see above).
 - No staging garbage collection yet: a consumed batch is not auto-deleted and abandoned batches have no TTL — the restart-cleared staging base bounds the abandoned case, but a long-running host still accumulates consumed batches. Tracked as a follow-up. Session-scoped attachments live and die with the session directory, removed by `DeleteSession` along with the rest of the tree.
 
 ## Related
 
 - [Session directory layout](session-layout.md) — the canonical session tree.
+- Implementation: [tddy-session-files § Host documents, staging and uploads](../../../packages/tddy-session-files/docs/host-documents-and-attachments.md)
 - [PR stacking § Context docs in proto](pr-stacking.md#context-docs-in-proto) — the recipe-manifest
   half of `context_docs`.

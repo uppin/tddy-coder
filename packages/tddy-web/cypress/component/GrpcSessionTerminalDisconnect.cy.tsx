@@ -19,9 +19,9 @@ import { create, toBinary } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
-  ConnectionService,
+  TerminalSessionService,
   SendTerminalInputResponseSchema,
-} from "../../src/gen/connection_pb";
+} from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { toArrayBuffer } from "../support/rpc/protoRpc";
@@ -51,7 +51,7 @@ const OK_SEND_INPUT = toArrayBuffer(
  * can never fire from the stream ending. The only way it can fire is on unmount.
  */
 function interceptPendingTerminalOutput() {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/StreamTerminalOutput", (req) => {
+  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/StreamTerminalOutput", (req) => {
     req.reply({
       delay: 100_000,
       statusCode: 200,
@@ -63,7 +63,7 @@ function interceptPendingTerminalOutput() {
 
 /** SendTerminalInput always succeeds (the initial resize sends one on mount). */
 function interceptTerminalInputOk() {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/SendTerminalInput", (req) => {
+  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/SendTerminalInput", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: OK_SEND_INPUT });
   }).as("sendTerminalInput");
 }
@@ -78,7 +78,7 @@ function SessionsTerminalHarness({ onDisconnect }: { onDisconnect: () => void })
     () => createConnectTransport({ baseUrl: `${window.location.origin}/rpc`, useBinaryFormat: true }),
     [],
   );
-  const client = useMemo(() => createClient(ConnectionService, transport), [transport]);
+  const client = useMemo(() => createClient(TerminalSessionService, transport), [transport]);
 
   return (
     <div style={{ width: 800, height: 400, position: "relative" }}>

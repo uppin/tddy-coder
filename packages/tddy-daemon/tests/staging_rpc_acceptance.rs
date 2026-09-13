@@ -29,9 +29,12 @@ use tddy_daemon::host_documents::MAX_HOST_DOCUMENT_BYTES;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource, ConnectionService as ConnectionServiceTrait,
-    HostDocumentRef, HostDocumentScope, SessionAttachment, StagedAttachmentRef,
-    StartSessionRequest, UploadStagedAttachmentChunkRequest,
+    HostDocumentRef, SessionAttachment, StagedAttachmentRef, StartSessionRequest,
 };
+use tddy_service::proto::session_files::{
+    SessionFilesService as SessionFilesServiceTrait, UploadStagedAttachmentChunkRequest,
+};
+use tddy_service::proto::types::HostDocumentScope;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -121,7 +124,7 @@ fn a_workspace_service() -> (
     tempfile::TempDir,
     tempfile::TempDir,
     tempfile::TempDir,
-    ConnectionServiceImpl,
+    Arc<ConnectionServiceImpl>,
 ) {
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
@@ -134,7 +137,7 @@ fn a_workspace_service() -> (
         sessions_tmp.path().to_path_buf(),
         staging_tmp.path().to_path_buf(),
     );
-    (repo_dir, sessions_tmp, staging_tmp, service)
+    (repo_dir, sessions_tmp, staging_tmp, Arc::new(service))
 }
 
 async fn start_workspace(
@@ -158,13 +161,14 @@ async fn start_workspace(
 
 /// Uploads one file's bytes as a single final chunk to `UploadStagedAttachmentChunk`.
 async fn stage_one_file(
-    service: &ConnectionServiceImpl,
+    service: &Arc<ConnectionServiceImpl>,
     daemon_instance_id: &str,
     staging_id: &str,
     file_name: &str,
     data: &[u8],
 ) -> Result<(), (Code, String)> {
     let resp = service
+        .session_files_service()
         .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
             session_token: VALID_TOKEN.to_string(),
             daemon_instance_id: daemon_instance_id.to_string(),
@@ -471,6 +475,7 @@ async fn start_session_refuses_a_staged_attachment_whose_upload_is_not_complete(
     // Given — a workspace project and a staged file with only a non-final chunk written
     let (_repo, sessions_tmp, _staging, service) = a_workspace_service();
     let resp = service
+        .session_files_service()
         .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
             session_token: VALID_TOKEN.to_string(),
             daemon_instance_id: String::new(),

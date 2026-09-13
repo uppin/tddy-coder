@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
 import type { BranchConflict, ConnectionService, ProjectEntry, SessionEntry, ToolInfo } from "../../gen/connection_pb";
+import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import { localBranchName } from "../../lib/branchNames";
 import { projectSelectOptions } from "../../lib/projectSelectOptions";
@@ -57,6 +58,7 @@ const WORKFLOW_RECIPES = [
 // ---------------------------------------------------------------------------
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
 
 type SessionType = "tool" | "claude-cli" | "cursor-cli";
@@ -124,6 +126,12 @@ export type CreateSessionInitialValues = Partial<{
 export interface CreateSessionPaneProps {
   client: ConnectionClient;
   /**
+   * The session-files service on the same host as `client` — the form stages its local attachments
+   * and lists the upload scope through it. Required for the reason `worktreeClient` is: without one
+   * a staged upload silently has nowhere to go.
+   */
+  sessionFilesClient: SessionFilesClient;
+  /**
    * The worktree service on the same host as `client` — the host-document picker's tree scopes
    * browse through it. Required for the reason `HostDocumentPicker.worktreeClient` is: without one
    * the tree scopes list nothing, and nothing is what an empty worktree looks like.
@@ -141,6 +149,7 @@ export interface CreateSessionPaneProps {
 
 export function CreateSessionPane({
   client,
+  sessionFilesClient,
   worktreeClient,
   sessionToken,
   onCancel,
@@ -469,6 +478,7 @@ export function CreateSessionPane({
     startSessionStreamed,
   } = useSessionAttachments({
     client,
+    sessionFilesClient,
     sessionToken,
     sessionDaemonInstanceId: daemonInstanceId,
     initialAttachments: initialValues?.attachments,
@@ -1304,6 +1314,7 @@ export function CreateSessionPane({
           // fetches it from there.
           <HostDocumentPicker
             client={client}
+            sessionFilesClient={sessionFilesClient}
             worktreeClient={worktreeClient}
             sessionToken={sessionToken}
             browsedDaemonInstanceId={stagingDaemonInstanceId}

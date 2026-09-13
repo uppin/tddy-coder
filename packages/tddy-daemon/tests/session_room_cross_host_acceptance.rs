@@ -29,9 +29,9 @@ use tddy_daemon::livekit_peer_discovery::{
 };
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
-use tddy_daemon::test_util::wait_until_peer_discovered;
+use tddy_daemon::test_util::{self, wait_until_peer_discovered};
 use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
-use tddy_livekit::{LiveKitParticipant, LiveKitRpcClientFactory, RpcClient};
+use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
@@ -229,7 +229,7 @@ livekit:
 }
 
 struct Daemon {
-    service: ConnectionServiceImpl,
+    service: Arc<ConnectionServiceImpl>,
     sessions_base: PathBuf,
     _sessions: tempfile::TempDir,
     _config: tempfile::TempDir,
@@ -274,28 +274,28 @@ async fn a_daemon(
     );
 
     Daemon {
-        service,
+        service: Arc::new(service),
         sessions_base: sessions.path().to_path_buf(),
         _sessions: sessions,
         _config: config_dir,
     }
 }
 
+/// Joins the common room as `daemon-{instance_id}` — the identity a forward addresses — serving
+/// every coordinate a forward can name. The coordinate list is
+/// [`test_util::serve_daemon_rpc_participant`]'s rather than this suite's: a split start forwards
+/// both a `connection.ConnectionService` call and the `session_files.SessionFilesService` context
+/// reads, and a suite-local list is how one of them stops being served.
 async fn serve_rpc_participant(
     livekit: &LiveKitTestkit,
     ws_url: &str,
     instance_id: &str,
-    service: ConnectionServiceImpl,
+    service: Arc<ConnectionServiceImpl>,
 ) -> tokio::task::JoinHandle<()> {
     let token = livekit
         .generate_token(COMMON_ROOM, &rpc_identity(instance_id))
         .expect("LiveKit token for a daemon's RPC participant");
-    let server = tddy_service::ConnectionServiceServer::new(service);
-    let participant =
-        LiveKitParticipant::connect(ws_url, &token, server, RoomOptions::default(), None, None)
-            .await
-            .expect("daemon joins the common room as its RPC participant");
-    tokio::spawn(async move { participant.run().await })
+    test_util::serve_daemon_rpc_participant(ws_url, &token, &service).await
 }
 
 ///

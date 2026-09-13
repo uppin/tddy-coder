@@ -13,7 +13,7 @@ import React from "react";
 import { HostStatsFooter } from "../../src/components/sessions/HostStatsFooter";
 import { TerminalFileDropZone } from "../../src/components/connection/TerminalFileDropZone";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -29,7 +29,7 @@ const HOST_DISK = { availableBytes: 42_100_000_000n, totalBytes: 100_000_000_000
  */
 function mountFooterWithDropZone(gate?: Promise<void>) {
   const backend = aConnectionServiceBackend({ hostCpuPerCore: [12], hostDisk: HOST_DISK }).onUnary(
-    ConnectionService.method.uploadSessionFileChunk,
+    SessionFilesService.method.uploadSessionFileChunk,
     async (req) => {
       if (gate) await gate;
       return { hostPath: req.last ? `/srv/host/uploads/${req.fileName}` : "" };

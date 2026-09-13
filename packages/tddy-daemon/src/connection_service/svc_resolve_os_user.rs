@@ -375,8 +375,14 @@ impl ConnectionServiceImpl {
     /// [`Self::rpc_served_by_peer`] for a **server-streaming** RPC: the peer's frames are relayed
     /// one by one, and a stream that stops without its end-of-stream marker terminates as an error
     /// rather than as a short roster the caller would take for the whole one.
+    ///
+    /// `service` is the coordinate the peer is asked at, which is not always this one: the three
+    /// context reads are `session_files.SessionFilesService`' since `#unbundle` node 6, and a
+    /// forward addressed to the coordinate the caller happened to reach would be answered by a
+    /// service that no longer declares the method.
     pub(crate) async fn stream_served_by_peer<Req, Frame>(
         &self,
+        service: &'static str,
         rpc_name: &str,
         requested_daemon: &str,
         req: &Req,
@@ -395,7 +401,7 @@ impl ConnectionServiceImpl {
         crate::livekit_peer_discovery::forward_server_stream_to_peer(
             slot,
             &peer_instance_id,
-            "connection.ConnectionService",
+            service,
             rpc_name,
             req.encode_to_vec(),
             move |bytes| {

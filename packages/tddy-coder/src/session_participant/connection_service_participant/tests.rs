@@ -159,27 +159,32 @@ async fn coder_session_tool_executor_runs_a_real_read_after_write_against_the_wo
 
 // ---------------------------------------------------------------------------
 // Multiple terminals per session — the coder participant serves the
-// terminal_id-addressed terminal RPCs (bash tabs). Exercised through the public
-// `session_connection_service_entry` → `RpcService::handle_rpc` seam.
+// terminal_id-addressed terminal RPCs (bash tabs) on
+// `terminal_session.TerminalSessionService`, the coordinate `#unbundle` node 6 moved the family
+// to. Exercised through the public `session_service_entries` → `RpcService::handle_rpc` seam.
 // ---------------------------------------------------------------------------
 
 use prost::Message as _;
 use tddy_rpc::{Code, RequestMetadata, RpcMessage, RpcResult};
-use tddy_service::proto::connection as pb;
+use tddy_terminal_rpc::proto::terminal_session as pb;
 
 const TERM_SID: &str = "sess-aaaaaaaa-0000-4000-8000-000000000001";
 const TERM_TOKEN: &str = "caller-token";
+/// A session this participant does not run — the id a misaddressed (or hostile) request names.
+const ANOTHER_SID: &str = "sess-bbbbbbbb-0000-4000-8000-000000000002";
 
-fn a_service_entry(tool_calls_path: &std::path::Path) -> tddy_rpc::ServiceEntry {
-    crate::session_participant::session_connection_service_entry(a_service(tool_calls_path))
+/// The participant's terminal coordinate, over a session whose worktree is `tool_calls_path`.
+fn a_terminal_entry(tool_calls_path: &std::path::Path) -> tddy_rpc::ServiceEntry {
+    crate::session_participant::session_service_entries(a_service(tool_calls_path))
+        .into_iter()
+        .find(|entry| entry.name == "terminal_session.TerminalSessionService")
+        .expect("the participant registers a terminal coordinate")
 }
 
+/// Dispatch `method` at `entry`'s own registered coordinate, the way a transport does.
 async fn call(entry: &tddy_rpc::ServiceEntry, method: &str, payload: Vec<u8>) -> RpcResult {
     let msg = RpcMessage::new(payload, RequestMetadata::default());
-    entry
-        .service
-        .handle_rpc("connection.ConnectionService", method, &msg)
-        .await
+    entry.service.handle_rpc(entry.name, method, &msg).await
 }
 
 /// Unwrap a unary success payload, panicking with the status when the call errored or streamed.
@@ -201,7 +206,7 @@ fn unary_ok(result: RpcResult) -> Vec<u8> {
 async fn start_terminal_session_returns_a_fresh_non_main_terminal_id() {
     // Given a session participant
     let dir = tempfile::tempdir().unwrap();
-    let entry = a_service_entry(dir.path());
+    let entry = a_terminal_entry(dir.path());
 
     // When the web opens a new terminal
     let req = pb::StartTerminalSessionRequest {
@@ -225,11 +230,69 @@ async fn start_terminal_session_returns_a_fresh_non_main_terminal_id() {
     );
 }
 
+/// The session id a started terminal is *filed under* is this participant's, never one the caller
+/// chose: it becomes the `session_id` of the PTY's registered task, the field auth scoping keys
+/// on. So a request naming another session is refused rather than quietly served as this one —
+/// which is also the answer the daemon's roster gives for a session it does not hold, and these
+/// two servers exist to answer alike.
+#[tokio::test]
+async fn start_terminal_session_refuses_a_request_naming_another_session() {
+    // Given a participant serving one session
+    let dir = tempfile::tempdir().unwrap();
+    let entry = a_terminal_entry(dir.path());
+
+    // When a caller asks it to start a terminal for a different session
+    let req = pb::StartTerminalSessionRequest {
+        session_token: TERM_TOKEN.to_string(),
+        session_id: ANOTHER_SID.to_string(),
+        control_token: String::new(),
+    };
+    let result = call(&entry, "StartTerminalSession", req.encode_to_vec()).await;
+
+    // Then it is refused, naming the session this participant does run
+    let RpcResult::Unary(Err(status)) = result else {
+        panic!("starting a terminal for another session must be refused");
+    };
+    assert_eq!(
+        (status.code(), status.message()),
+        (
+            Code::FailedPrecondition,
+            format!("this session participant runs session {TERM_SID}, not {ANOTHER_SID}").as_str()
+        )
+    );
+
+    // And nothing was started under either name
+    let listed = pb::ListTerminalSessionsResponse::decode(
+        &unary_ok(
+            call(
+                &entry,
+                "ListTerminalSessions",
+                pb::ListTerminalSessionsRequest {
+                    session_token: TERM_TOKEN.to_string(),
+                    session_id: TERM_SID.to_string(),
+                }
+                .encode_to_vec(),
+            )
+            .await,
+        )[..],
+    )
+    .expect("decode ListTerminalSessionsResponse");
+    assert_eq!(
+        listed
+            .terminals
+            .iter()
+            .map(|t| t.terminal_id.as_str())
+            .collect::<Vec<_>>(),
+        Vec::<&str>::new(),
+        "a refused start must leave the session with no terminals"
+    );
+}
+
 #[tokio::test]
 async fn list_terminal_sessions_includes_a_started_bash_terminal() {
     // Given a session participant with one started terminal
     let dir = tempfile::tempdir().unwrap();
-    let entry = a_service_entry(dir.path());
+    let entry = a_terminal_entry(dir.path());
     let start = pb::StartTerminalSessionRequest {
         session_token: TERM_TOKEN.to_string(),
         session_id: TERM_SID.to_string(),
@@ -266,7 +329,7 @@ async fn list_terminal_sessions_includes_a_started_bash_terminal() {
 async fn stop_terminal_session_rejects_the_main_terminal() {
     // Given a session participant
     let dir = tempfile::tempdir().unwrap();
-    let entry = a_service_entry(dir.path());
+    let entry = a_terminal_entry(dir.path());
 
     // When the web tries to stop the reserved main terminal
     let req = pb::StopTerminalSessionRequest {
@@ -294,7 +357,7 @@ async fn stop_terminal_session_rejects_the_main_terminal() {
 async fn send_terminal_input_is_accepted_for_a_started_terminal() {
     // Given a session participant with one started terminal
     let dir = tempfile::tempdir().unwrap();
-    let entry = a_service_entry(dir.path());
+    let entry = a_terminal_entry(dir.path());
     let start = pb::StartTerminalSessionRequest {
         session_token: TERM_TOKEN.to_string(),
         session_id: TERM_SID.to_string(),
@@ -329,7 +392,7 @@ async fn send_terminal_input_is_accepted_for_a_started_terminal() {
 async fn stream_terminal_output_is_server_streaming() {
     // Given a session participant
     let dir = tempfile::tempdir().unwrap();
-    let entry = a_service_entry(dir.path());
+    let entry = a_terminal_entry(dir.path());
 
     // When an output stream is opened for a terminal
     let req = pb::StreamTerminalOutputRequest {
@@ -354,7 +417,7 @@ async fn stream_terminal_output_is_server_streaming() {
 async fn stream_terminal_output_streams_a_started_shell_output() {
     // Given a session participant with a started bash terminal
     let dir = tempfile::tempdir().unwrap();
-    let entry = a_service_entry(dir.path());
+    let entry = a_terminal_entry(dir.path());
     let start = pb::StartTerminalSessionRequest {
         session_token: TERM_TOKEN.to_string(),
         session_id: TERM_SID.to_string(),

@@ -3,6 +3,19 @@ syntax = "proto3";
 package connection;
 
 import "google/protobuf/struct.proto";
+// `HostDocumentScope` is the one type this service shares with another served one: `StartSession`
+// reaches it through `HostDocumentRef`, and `session_files.SessionFilesService` reaches it through
+// `ReadHostDocument`. See types.proto for why nothing else lives there.
+import "types.proto";
+
+// Families I, J, K, R and S left this service for `session_files.SessionFilesService`
+// (packages/tddy-service/proto/session_files.proto, 13 rpcs) and
+// `terminal_session.TerminalSessionService`
+// (packages/tddy-terminal-rpc/proto/terminal_session.proto, 9 rpcs). Their request, response and
+// payload messages went with them; nothing that stayed referenced any of them, so no field number
+// on a surviving message was vacated and none needed reserving. Protobuf has no `reserved` for
+// service methods, so this note is the record that these 22 coordinates once answered here and
+// must not be re-declared.
 
 service ConnectionService {
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
@@ -68,45 +81,6 @@ service ConnectionService {
   rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
   rpc SignalSession(SignalSessionRequest) returns (SignalSessionResponse);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
-  rpc ListSessionWorkflowFiles(ListSessionWorkflowFilesRequest) returns (ListSessionWorkflowFilesResponse);
-  rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
-  // The agent context sync (docs/ft/daemon/agent-context-sync.md). Sibling of
-  // StreamReadWorktreeFile, sharing its traversal and containment guards and deliberately NOT its
-  // git-listing gate: agent configuration is routinely gitignored (`.claude/settings.local.json`,
-  // `**/.cursor/mcp.json`), so a sync built on the git-gated reader would omit exactly the files an
-  // agent reads. What replaces the gate is the per-backend allow-list compiled into tddy-core,
-  // selected by the SERVING daemon from the session's own persisted `session_type` — never by the
-  // request. The `agent` field a caller sends is advisory only; see ContextManifestRequest.agent.
-  //
-  // The manifest STREAMS its entries rather than returning a repeated field, so a repo with a large
-  // `.claude/` tree never produces a message that has to be chunk-framed.
-  rpc StreamContextManifest(ContextManifestRequest) returns (stream ContextManifestEntry);
-  rpc StreamReadContextFile(ReadContextFileRequest) returns (stream ContextFileChunk);
-  // The same bytes, for several paths, in ONE call. Setup sync reads every allow-listed path before
-  // the agent process exists, and doing that one round trip at a time made a 120-file
-  // `.claude/skills/` tree into 121 sequential peer calls — around eighteen seconds of dead time on
-  // a 150 ms link, and 121 separate chances to trip PEER_FORWARD_TIMEOUT, where an ordinary split
-  // start used to make no extra peer calls at all. Same auth, same allow-list gate, same per-file
-  // and aggregate size refusals and the same 48 KiB framing as the single-file read, which stays:
-  // this is an addition for the batch case, not a replacement.
-  rpc StreamReadContextFileBatch(ReadContextFileBatchRequest) returns (stream ContextFileBatchChunk);
-  rpc StreamSessionTerminalIO(stream SessionTerminalInput) returns (stream SessionTerminalOutput);
-  // Browser-compatible alternative: server-streaming output + separate unary input.
-  // (connect-web fetch transport cannot send streaming request bodies required for bidi streaming.)
-  rpc StreamTerminalOutput(StreamTerminalOutputRequest) returns (stream SessionTerminalOutput);
-  rpc SendTerminalInput(SessionTerminalInput) returns (SendTerminalInputResponse);
-  // Lazy history loading (scroll-up): one forward chunk of older output starting at the request's
-  // `from_offset`, bounded above by `until_offset` (the anchor `end_offset` from
-  // StreamTerminalOutput's initial replay frame), then the stream closes. The client advances
-  // `from_offset` to the previous chunk's `end_offset` and calls again — a progressive, append-only
-  // forward fill — until an `at_end` chunk terminates the fill. See docs/ft/daemon/terminal-sessions.md
-  // § Lazy replay.
-  rpc GetTerminalHistory(GetTerminalHistoryRequest) returns (stream TerminalHistoryChunk);
-  // Multiple terminals per session — start/stop/list login-shell terminals attached to a session.
-  // Every terminal is identified; the main `claude` terminal is the reserved id "main".
-  rpc StartTerminalSession(StartTerminalSessionRequest) returns (StartTerminalSessionResponse);
-  rpc StopTerminalSession(StopTerminalSessionRequest) returns (StopTerminalSessionResponse);
-  rpc ListTerminalSessions(ListTerminalSessionsRequest) returns (ListTerminalSessionsResponse);
   rpc ListProjectBranches(ListProjectBranchesRequest) returns (ListProjectBranchesResponse);
   // Set a project's default integration base ref (logical-project scope: forwarded to peer hosts
   // owning the same project_id). See docs/ft/coder/git-integration-base-ref.md.
@@ -170,11 +144,6 @@ service ConnectionService {
   rpc StartDemoVm(StartDemoVmRequest) returns (StartDemoVmResponse);
   rpc StopDemoVm(StopDemoVmRequest) returns (StopDemoVmResponse);
   rpc GetDemoVmStatus(GetDemoVmStatusRequest) returns (GetDemoVmStatusResponse);
-  // Single-screen terminal control mutex — at most one screen controls a session's terminals at a
-  // time. ClaimTerminalControl issues or steals the exclusive control token; WatchTerminalControl
-  // streams ownership changes so a displaced screen can render the "Claim terminal" CTA.
-  rpc ClaimTerminalControl(ClaimTerminalControlRequest) returns (ClaimTerminalControlResponse);
-  rpc WatchTerminalControl(WatchTerminalControlRequest) returns (stream TerminalControlEvent);
   // PR-Stack Chat Screen: manually append a planned PR to an orchestrator session's stack,
   // choosing its ancestors (parent node ids) from the already-planned nodes. See
   // docs/ft/coder/pr-stacking.md § Manually adding a planned PR.
@@ -231,40 +200,6 @@ service ConnectionService {
   // credential is not present on ConnectRPC-HTTP or LiveKit), and only for a peer uid mapped to a
   // configured user.
   rpc MintLocalToken(MintLocalTokenRequest) returns (MintLocalTokenResponse);
-  // Terminal file drop upload (see docs/ft/web/web-terminal.md § File drop upload). Files dropped
-  // on the web terminal are chunked client-side and uploaded to
-  // {session_dir}/uploads/{upload_id}/{file_name}; the response carries each file's absolute host
-  // path on its final chunk so the web can type that path into the terminal.
-  rpc UploadSessionFileChunk(UploadSessionFileChunkRequest) returns (UploadSessionFileChunkResponse);
-  // Session Files inspector tab (see docs/ft/web/session-files-inspector.md). Lists the files
-  // already uploaded to a session under {session_dir}/uploads/{upload_id}/{file_name} as a flat,
-  // newest-first list, and deletes a single uploaded file on demand.
-  rpc ListSessionUploads(ListSessionUploadsRequest) returns (ListSessionUploadsResponse);
-  rpc DeleteSessionUpload(DeleteSessionUploadRequest) returns (DeleteSessionUploadResponse);
-  // Start-session attachments — pre-session staging. Documents picked in the Start-Session form
-  // are uploaded like the terminal "Attach" flow (client-side 48 KiB chunks, one unary per chunk,
-  // `last` on the final one), but no session exists yet — so the bytes land in a per-host staging
-  // area keyed by `staging_id` and are referenced from StartSessionRequest.attachments. The
-  // staging root is restart-cleared (under the host's temp dir), so an abandoned batch does not
-  // outlive the host process. List/Delete back the form's attachment chips (re-open, remove
-  // before starting). See packages/tddy-daemon/docs/connection-service.md § Start-session
-  // attachments.
-  rpc UploadStagedAttachmentChunk(UploadStagedAttachmentChunkRequest) returns (UploadStagedAttachmentChunkResponse);
-  rpc ListStagedAttachments(ListStagedAttachmentsRequest) returns (ListStagedAttachmentsResponse);
-  rpc DeleteStagedAttachment(DeleteStagedAttachmentRequest) returns (DeleteStagedAttachmentResponse);
-  // Fetch the bytes of a document that already exists on a connected host, for materializing a
-  // `HostDocumentRef` during `StartSession`. Unary so it is forwardable over the LiveKit common
-  // room. The owning daemon resolves the scope root under its own os_user mapping and refuses a
-  // path that escapes; binary (attachments may be images), so it does not reuse the UTF-8 readers.
-  // Capped at the transport's message-size budget — StreamReadHostDocument carries anything
-  // larger. See docs/ft/coder/session-attachments.md and
-  // packages/tddy-daemon/docs/connection-service.md § Start-session attachments.
-  rpc ReadHostDocument(ReadHostDocumentRequest) returns (ReadHostDocumentResponse);
-  // Streaming twin of ReadHostDocument, for a document past the unary message-size ceiling. Each
-  // frame carries the next slice of bytes plus the document's total size, so a consumer can size a
-  // progress bar without a preamble frame. A document over the host's configured attachment cap is
-  // refused up front (INVALID_ARGUMENT) rather than streamed and truncated.
-  rpc StreamReadHostDocument(ReadHostDocumentRequest) returns (stream HostDocumentChunk);
   // Streaming twin of StartSession, for a request carrying attachments the host must materialize
   // before the agent launches. Emits one AttachmentMaterializationProgress per attachment, then
   // exactly one terminal StartSessionResponse. A failure terminates the stream with the error and
@@ -1009,30 +944,6 @@ message DeleteSessionResponse {
   bool ok = 1;
 }
 
-message ListSessionWorkflowFilesRequest {
-  string session_token = 1;
-  string session_id = 2;
-}
-
-message WorkflowFileEntry {
-  string basename = 1;
-}
-
-message ListSessionWorkflowFilesResponse {
-  repeated WorkflowFileEntry files = 1;
-}
-
-message ReadSessionWorkflowFileRequest {
-  string session_token = 1;
-  string session_id = 2;
-  // Allowlisted workflow file basename (server resolves under session dir only).
-  string basename = 3;
-}
-
-message ReadSessionWorkflowFileResponse {
-  string content_utf8 = 1;
-}
-
 // --- Worktrees (local daemon; see docs/ft/web/worktrees.md) ---
 
 // --- Lazy, streamed worktree disk usage (docs/ft/web/worktree-disk-usage-streaming.md) ---
@@ -1040,105 +951,6 @@ message ReadSessionWorkflowFileResponse {
 // --- Session Worktree inspector tab (docs/ft/web/session-worktree-inspector.md) ---
 
 // --- Worktree Code pane (docs/ft/web/session-code-pane.md) ---
-
-// --- Agent context sync (docs/ft/daemon/agent-context-sync.md) ---
-//
-// Addressed by session rather than by (project_id, worktree_path) the way ReadWorktreeFileRequest
-// is, because the caller is an agent host that holds no path on the codebase host: a split session
-// knows the paired `workspace` session's id and nothing else about its filesystem. Same addressing
-// as GetWorktreeSnapshot and ExecuteTool, which the same host already reaches the same checkout
-// through.
-
-message ContextManifestRequest {
-  string session_token = 1;
-  // The session whose checkout is measured — on a split session, the `workspace` session holding
-  // the codebase, never the agent's own id.
-  string session_id = 2;
-  // Routing, as on ExecuteTool: the daemon expected to answer. Empty means the one being called.
-  string daemon_instance_id = 3;
-  // Which compiled-in allow-list the caller BELIEVES it is reading, by agent name ("claude",
-  // "cursor", "codex", ...). Advisory: carried for logging, and NOT authoritative.
-  //
-  // The serving daemon derives the row it actually serves from the session it has already looked
-  // up — its persisted `session_type`, or Claude's row when the session records a paired split
-  // agent (tddy_daemon::context_files::context_agent_for_session). It has to: authorization here is
-  // per OS user rather than per session, so a caller holding a valid token for a `codex` session
-  // could otherwise name `cursor` and be served that checkout's `.claude/**`, `.cursor/**` and
-  // `.mcp.json` — the files that carry API tokens in MCP `env` blocks, and exactly the gitignored
-  // ones the git-listing gate used to refuse. Trusting the field would make the enforced bound the
-  // union of every table row instead of the session's own. When the two disagree the daemon logs at
-  // debug and serves the session's.
-  string agent = 4;
-}
-
-// One allow-listed path as the manifest advertises it.
-message ContextManifestEntry {
-  // Worktree-root-relative, forward-slash separated.
-  string rel_path = 1;
-  // Lowercase hex SHA-256 of the file's bytes. The sole authority on whether a file moved: a syncer
-  // that compared sizes would re-read on every same-length edit and miss none of them.
-  string sha256 = 2;
-  // Rides the entry so a client refuses an over-cap file *before* spending a read on it.
-  uint64 size_bytes = 3;
-}
-
-message ReadContextFileRequest {
-  string session_token = 1;
-  string session_id = 2;
-  string daemon_instance_id = 3;
-  // Advisory, exactly as ContextManifestRequest.agent is: the row served is the session's own, and
-  // this field is carried for logging. See that comment for why trusting it would widen the gate.
-  string agent = 4;
-  // The file to read, relative to the worktree root. No traversal, no absolute paths, and refused
-  // identically whether or not a file exists there when the allow-list does not name it — answering
-  // "does it exist?" before "may you see it?" would hand out the existence map.
-  string rel_path = 5;
-}
-
-// One frame of StreamReadContextFile. Mirrors WorktreeFileChunk: raw bytes with no encoding applied
-// anywhere on the path, so a `.claude/` tree holding a PNG round-trips intact, and a zero-byte file
-// yields exactly one frame with empty `data` so "the file is empty" stays distinguishable from "the
-// stream failed".
-message ContextFileChunk {
-  bytes data = 1;
-  // The file's full size, repeated on every frame so a reader knows the total from the first one.
-  uint64 total_byte_size = 2;
-}
-
-message ReadContextFileBatchRequest {
-  string session_token = 1;
-  string session_id = 2;
-  string daemon_instance_id = 3;
-  // Advisory, exactly as ContextManifestRequest.agent is.
-  string agent = 4;
-  // The files to read, each relative to the worktree root, under the same shape rules as
-  // ReadContextFileRequest.rel_path. Every path is gated individually and the WHOLE call is refused
-  // if any one of them is: a partially served batch would leave the caller unable to tell "the
-  // project does not ship that file" from "this host would not serve it", and the setup sync it
-  // exists for must fail loudly rather than start an agent against incomplete guidance. An empty
-  // list is INVALID_ARGUMENT — a caller with nothing to read must not spend a round trip.
-  repeated string rel_paths = 5;
-}
-
-// One frame of StreamReadContextFileBatch. Frames for one file arrive in order and consecutively;
-// `rel_path` says which file, so a client reassembles without tracking the request's ordering.
-//
-// Every file yields AT LEAST ONE frame, and the last frame of each file sets `end_of_file`. That is
-// what keeps a zero-byte file (one frame: empty `data`, `total_byte_size` 0, `end_of_file` true)
-// distinguishable from a file whose bytes never arrived — the rule the single-file read already
-// follows, restated here because a batch has the extra failure mode of ending early with the
-// remaining files simply absent.
-message ContextFileBatchChunk {
-  // Worktree-root-relative, forward-slash separated: the file this frame carries bytes of, spelled
-  // exactly as the request asked for it.
-  string rel_path = 1;
-  bytes data = 2;
-  // This file's full size, repeated on every one of its frames — the same contract as
-  // ContextFileChunk.total_byte_size, per file rather than per stream.
-  uint64 total_byte_size = 3;
-  // True on the last frame of this file, and on the only frame of an empty one.
-  bool end_of_file = 4;
-}
 
 // --- Project branch listing (for claude-cli branch selection dropdown) ---
 
@@ -1167,175 +979,6 @@ message SetProjectDefaultBranchRequest {
 
 message SetProjectDefaultBranchResponse {
   ProjectEntry project = 1;
-}
-
-// --- Claude Code CLI terminal I/O streaming ---
-
-message SessionTerminalInput {
-  string session_token = 1;
-  string session_id    = 2;
-  bytes  data          = 3;
-  // Target terminal; empty resolves to the reserved main ("claude") terminal.
-  string terminal_id   = 4;
-  // Control token from ClaimTerminalControl; must match the current holder token or the input is
-  // rejected with FAILED_PRECONDITION (if the session has an active controller).
-  string control_token = 5;
-  // Cumulative byte offset of this input on the terminal's input stream: the running total number
-  // of input bytes the client has sent through this terminal *including* this chunk's `data`. The
-  // daemon acks the highest applied offset on StreamTerminalOutput (see acked_input_offset), so the
-  // client can render an overlay of un-acknowledged input on slow links. Zero = unset (legacy).
-  uint64 input_offset  = 6;
-  // --- Bidi open-frame params (read only from the FIRST message of a StreamSessionTerminalIO
-  // stream; ignored on subsequent input chunks). Carry the same replay selection as
-  // StreamTerminalOutputRequest so a bidi client can replay-once-at-init / resume-by-offset on
-  // the same connection that carries its input.
-  StreamReplayMode mode         = 7;
-  // Resume offset (FROM_OFFSET only); clamped to the capture ring's `start_offset`. 0 = from the
-  // beginning. Ignored when `mode = STREAM_REPLAY_MODE_TAIL`.
-  uint64           from_offset   = 8;
-  // Terminal dimensions measured by the client before opening the stream. When non-zero, the
-  // daemon resizes the PTY before sending the initial replay frame (TAIL only).
-  uint32           initial_cols  = 9;
-  uint32           initial_rows  = 10;
-}
-
-message SessionTerminalOutput {
-  bytes data = 1;
-  // Highest input_offset (see SessionTerminalInput) the daemon has applied to the PTY. On a normal
-  // output-data frame this is 0 (unset); on an ACK frame `data` is empty and this carries the
-  // acknowledged offset. Monotonic: never regresses. The client uses it to collapse its
-  // enqueued-input overlay as the server confirms applied bytes.
-  uint64 acked_input_offset = 2;
-  // Absolute offset of the first byte in `data` within the terminal's cumulative output stream.
-  // Populated on the initial replay frame (the "current last frame"); 0 on live tail frames (which
-  // are contiguous with the stream and carry no offset metadata). Older history is fetched on
-  // demand via GetTerminalHistory as the user scrolls up, forward-filled from offset 0 toward
-  // `end_offset` (the anchor).
-  uint64 start_offset = 3;
-  // Absolute offset after the last byte in `data`. Populated on the initial replay frame; 0 on
-  // live tail frames.
-  uint64 end_offset = 4;
-  // True on the initial replay frame when the chunk reaches the capture ring's oldest retained
-  // byte — i.e. no older history exists to load by scrolling up. The client uses it to stop the
-  // infinite-loading spinner once the bottom of the retained history is reached.
-  bool at_oldest = 5;
-  // The terminal this frame belongs to, stamped on EVERY frame (data, replay, ACK, prologue).
-  // Without it a frame is untraceable to its terminal once it reaches the client, so a pane has no
-  // way to tell its own output from another terminal's and would silently paint foreign bytes.
-  // Clients drop frames whose identity does not match the terminal they are rendering.
-  string session_id = 6;
-  // Always the RESOLVED terminal id — an empty `terminal_id` in the request resolves to the reserved
-  // main ("claude"/Agent) terminal, and the frame carries that resolved value, never the empty one.
-  string terminal_id = 7;
-}
-
-// Used by StreamTerminalOutput (browser-compatible server-streaming variant).
-message StreamTerminalOutputRequest {
-  string session_token = 1;
-  string session_id    = 2;
-  // Target terminal; empty resolves to the reserved main ("claude") terminal.
-  string terminal_id   = 3;
-  // Terminal dimensions measured by the client before opening the stream.
-  // When non-zero, the daemon resizes the PTY to these dimensions before
-  // sending the replay buffer, so the TUI redraws at the correct width.
-  uint32 initial_cols  = 4;
-  uint32 initial_rows  = 5;
-  // Replay selection. TAIL (default) sends the current last-frame tail chunk (first connect /
-  // fresh terminal). FROM_OFFSET skips the tail chunk and sends a catch-up from `from_offset` to
-  // the capture tip, then live — used on reconnect so a terminal that already holds state up to
-  // `from_offset` receives only the bytes it missed, with no duplicate replay.
-  StreamReplayMode mode       = 6;
-  // Resume offset (FROM_OFFSET only); clamped to the capture ring's `start_offset` when older
-  // bytes have been evicted. 0 = from the beginning (full replay from the oldest retained byte).
-  // Ignored when `mode = STREAM_REPLAY_MODE_TAIL`.
-  uint64          from_offset = 7;
-}
-
-// Selects the replay behavior of StreamTerminalOutput (and the bidi open frame).
-enum StreamReplayMode {
-  // Default: server sends the mode prologue + the current last-frame tail chunk, then live output.
-  // Used on first connect (fresh terminal with no prior state).
-  STREAM_REPLAY_MODE_TAIL = 0;
-  // Resume: server sends the mode prologue + catch-up chunk(s) from `from_offset` to the capture
-  // tip, then live output. No tail chunk, no PTY resize/drain. Used on reconnect so a terminal
-  // that already holds state up to `from_offset` receives only the missed bytes — no duplicates.
-  STREAM_REPLAY_MODE_FROM_OFFSET = 1;
-}
-
-// Empty response for SendTerminalInput.
-message SendTerminalInputResponse {}
-
-// --- Lazy history loading (scroll-up) ---
-
-message GetTerminalHistoryRequest {
-  string session_token = 1;
-  string session_id    = 2;
-  string terminal_id   = 3;
-  // Inclusive lower bound of the chunk to return. The first call uses 0 (the server clamps it to
-  // the capture ring's `start_offset` if older bytes have been evicted); subsequent calls use the
-  // previous chunk's `end_offset` to resume a progressive, append-only forward fill.
-  uint64 from_offset = 4;
-  // Exclusive upper bound (the anchor `end_offset` learned from `StreamTerminalOutput`'s initial
-  // frame). The fill stops when a chunk's `end_offset` reaches `until_offset`. Zero means "until
-  // the capture tip" (live).
-  uint64 until_offset = 5;
-  uint32 max_bytes = 6;
-}
-
-message TerminalHistoryChunk {
-  bytes data = 1;
-  // Absolute offset of the first byte in `data`. 0 when `data` is empty.
-  uint64 start_offset = 2;
-  // Absolute offset after the last byte in `data`.
-  uint64 end_offset = 3;
-  // True when the chunk reaches the capture ring's oldest retained byte — i.e. no older history
-  // exists below it.
-  bool at_oldest = 4;
-  // True when this chunk reaches `until_offset` (or the capture tip) — terminates the forward fill.
-  bool at_end = 5;
-}
-
-// --- Multiple terminals per session ---
-
-message StartTerminalSessionRequest {
-  string session_token = 1;
-  string session_id    = 2;
-  // Control token; required when the session has an active terminal controller.
-  string control_token = 3;
-}
-
-message StartTerminalSessionResponse {
-  // Fresh identifier for the started login-shell terminal (never "main").
-  string terminal_id = 1;
-}
-
-message StopTerminalSessionRequest {
-  string session_token = 1;
-  string session_id    = 2;
-  string terminal_id   = 3;
-  // Control token; required when the session has an active terminal controller.
-  string control_token = 4;
-}
-
-message StopTerminalSessionResponse {
-  bool   ok      = 1;
-  string message = 2;
-}
-
-message ListTerminalSessionsRequest {
-  string session_token = 1;
-  string session_id    = 2;
-}
-
-message TerminalSessionInfo {
-  string terminal_id = 1;
-  // "claude-cli" for the reserved main tool, "bash" for started Bash (shell) tools.
-  string kind        = 2;
-  uint32 pid         = 3;
-}
-
-message ListTerminalSessionsResponse {
-  repeated TerminalSessionInfo terminals = 1;
 }
 
 // --- Remote-codebase mode: tool execution in session worktrees ---
@@ -1636,8 +1279,8 @@ enum DeltaScope {
   DELTA_SCOPE_TICK     = 2;
 }
 
-// One frame of a delta. The describing fields repeat on every frame, as HostDocumentChunk's
-// total_byte_size does: a reader knows what it is receiving from the first frame without a
+// One frame of a delta. The describing fields repeat on every frame, as
+// session_files.HostDocumentChunk's total_byte_size does: a reader knows what it is receiving from the first frame without a
 // separate header frame to special-case, and a single-frame delta is not a different shape from a
 // hundred-frame one.
 message AgentActivityDeltaChunk {
@@ -1706,42 +1349,6 @@ message GetDemoVmStatusResponse {
   string      message       = 3;
   // Present when state = RUNNING and an app port is configured (e.g. "http://localhost:8080").
   string      share_url     = 4;
-}
-
-// --- Single-screen terminal control mutex ---
-
-message ClaimTerminalControlRequest {
-  string session_token = 1;
-  string session_id    = 2;
-  // Stable per-browser-tab screen identity (see presenceIdentity.ts / screenId.ts).
-  string screen_id     = 3;
-  // When false, only grants if the lease is currently unheld or already held by this screen.
-  // When true, always grants — evicts the previous holder and notifies via WatchTerminalControl.
-  bool   steal         = 4;
-}
-
-message ClaimTerminalControlResponse {
-  bool   granted                  = 1;
-  // Set when granted = true; present this token in subsequent control RPCs.
-  string control_token            = 2;
-  // Set when granted = false; identifies the screen currently holding the lease.
-  string current_holder_screen_id = 3;
-}
-
-message WatchTerminalControlRequest {
-  string session_token = 1;
-  string session_id    = 2;
-  // The control token held by this screen (from ClaimTerminalControlResponse). Empty is valid for
-  // a non-controlling observer that wants to watch for when the lease becomes available.
-  string control_token = 3;
-}
-
-// Emitted once on subscribe (snapshot) and again whenever the lease changes.
-message TerminalControlEvent {
-  // Screen id of the current holder; empty when no screen holds the lease.
-  string holder_screen_id   = 1;
-  // True if the subscribing screen is the current controller (its token matches the lease).
-  bool   you_are_controller = 2;
 }
 
 // --- PR-Stack Chat Screen: manually adding a planned PR ---
@@ -2040,104 +1647,7 @@ message MintLocalTokenResponse {
 
 // --- Host Stats Footer: host-level telemetry for the selected daemon ---
 
-// --- Terminal file drop upload ---
-
-message UploadSessionFileChunkRequest {
-  string session_token = 1;
-  string session_id = 2;
-  // Per-drop UUID grouping all files of one drag gesture into uploads/<upload_id>/.
-  string upload_id = 3;
-  // Basename only — path separators, "." / ".." and empty are rejected by the daemon.
-  string file_name = 4;
-  // Next chunk of this file's bytes; chunks for a given (upload_id, file_name) arrive in order.
-  bytes data = 5;
-  // True on the final chunk of this file — response then carries the absolute host_path.
-  bool last = 6;
-}
-
-message UploadSessionFileChunkResponse {
-  // Absolute host path of the written file; populated only when the request's `last` was true.
-  string host_path = 1;
-}
-
-// --- Session Files inspector tab (list / delete uploaded files) ---
-
-message ListSessionUploadsRequest {
-  string session_token = 1;
-  string session_id = 2;
-}
-message ListSessionUploadsResponse {
-  repeated SessionUploadEntry uploads = 1;  // newest first
-}
-message SessionUploadEntry {
-  string upload_id = 1;      // per-drop UUID subfolder
-  string file_name = 2;      // basename
-  string host_path = 3;      // absolute host path
-  uint64 size_bytes = 4;
-  int64 uploaded_at_ms = 5;  // file mtime, unix milliseconds
-}
-
-message DeleteSessionUploadRequest {
-  string session_token = 1;
-  string session_id = 2;
-  string upload_id = 3;  // untrusted — validated as a basename, contained under uploads root
-  string file_name = 4;  // untrusted — validated as a basename
-}
-message DeleteSessionUploadResponse {}
-
-// --- Start-session attachments: pre-session staging upload + StartSessionRequest descriptors ---
-
-message UploadStagedAttachmentChunkRequest {
-  string session_token = 1;
-  // Host authority to stage the bytes on. Empty or matching the local instance = stage locally.
-  // A session can only consume a staged batch that lives on the host it starts on, so this is the
-  // same daemon_instance_id the subsequent StartSession is addressed to.
-  string daemon_instance_id = 2;
-  // Client-generated UUID grouping all files of one Start-Session form into
-  // {staging_root}/<staging_id>/. Untrusted — validated as a basename by the daemon.
-  string staging_id = 3;
-  // Basename only — path separators, "." / ".." and empty are rejected by the daemon.
-  string file_name = 4;
-  // Next chunk of this file's bytes; chunks for a given (staging_id, file_name) arrive in order.
-  bytes data = 5;
-  // True on the final chunk of this file — the response then carries the completed entry.
-  bool last = 6;
-}
-message UploadStagedAttachmentChunkResponse {
-  // The staged file, populated only when the request's `last` was true. Its `staging_id` /
-  // `file_name` are what a StagedAttachmentRef refers to.
-  StagedAttachmentEntry entry = 1;
-}
-
-message ListStagedAttachmentsRequest {
-  string session_token = 1;
-  // Host authority holding the staging area (see UploadStagedAttachmentChunkRequest).
-  string daemon_instance_id = 2;
-  // When set, list only this batch. Empty = every batch still staged for the caller.
-  string staging_id = 3;
-}
-message ListStagedAttachmentsResponse {
-  repeated StagedAttachmentEntry attachments = 1;  // newest first
-}
-
-message DeleteStagedAttachmentRequest {
-  string session_token = 1;
-  string daemon_instance_id = 2;
-  string staging_id = 3;  // untrusted — validated as a basename, contained under the staging root
-  string file_name = 4;   // untrusted — validated as a basename
-}
-message DeleteStagedAttachmentResponse {}
-
-// One file sitting in a host's pre-session staging area.
-message StagedAttachmentEntry {
-  // Host authority holding the bytes (the resolved daemon instance, never empty in a response).
-  string daemon_instance_id = 1;
-  string staging_id = 2;
-  string file_name = 3;  // basename
-  string host_path = 4;  // absolute host path of the staged file
-  uint64 size_bytes = 5;
-  int64 staged_at_ms = 6;  // file mtime, unix milliseconds
-}
+// --- Start-session attachments: StartSessionRequest descriptors ---
 
 // One document attached to a session at start. The daemon running the session materializes each
 // attachment under {session_dir}/artifacts/attachments/<basename> before launching the agent, so
@@ -2149,7 +1659,8 @@ message SessionAttachment {
   string basename = 1;
   // Where the bytes come from. Exactly one variant must be set; an unset source is a request error.
   oneof source {
-    // Bytes uploaded ahead of the session by UploadStagedAttachmentChunk.
+    // Bytes uploaded ahead of the session by
+    // session_files.SessionFilesService.UploadStagedAttachmentChunk.
     StagedAttachmentRef staged = 2;
     // A document that already exists on one of the connected hosts.
     HostDocumentRef host_document = 3;
@@ -2158,8 +1669,8 @@ message SessionAttachment {
 
 // Reference to a file in a host's pre-session staging area.
 message StagedAttachmentRef {
-  // Host authority holding the staged bytes — the daemon_instance_id UploadStagedAttachmentChunk
-  // was addressed to. Must be the host the session starts on; a mismatch is a request error rather
+  // Host authority holding the staged bytes — the daemon_instance_id
+  // session_files.SessionFilesService.UploadStagedAttachmentChunk was addressed to. Must be the host the session starts on; a mismatch is a request error rather
   // than a cross-host fetch. Empty = the daemon handling the call.
   string daemon_instance_id = 1;
   string staging_id = 2;
@@ -2178,7 +1689,7 @@ message HostDocumentRef {
   // Root that `relative_path` resolves against. There is deliberately no "absolute host path"
   // scope: the owning daemon resolves the root itself and refuses a path that escapes it, so a
   // caller cannot name an arbitrary file on that host.
-  HostDocumentScope scope = 2;
+  types.HostDocumentScope scope = 2;
   // Owning session for the SESSION_* scopes; ignored otherwise.
   string session_id = 3;
   // Owning project for HOST_DOCUMENT_SCOPE_PROJECT_REPO; ignored otherwise.
@@ -2187,60 +1698,8 @@ message HostDocumentRef {
   // Separators are permitted and the whole path is resolved under the root, so a nested document
   // is addressable: for SESSION_ARTIFACT this is a SessionContextDoc's `relative_path`, which may
   // be a bare basename, "attachments/<basename>" or "prs/<node_id>/<basename>". For SESSION_UPLOAD
-  // it is "<upload_id>/<file_name>" (see SessionUploadEntry).
+  // it is "<upload_id>/<file_name>" (see session_files.SessionUploadEntry).
   string relative_path = 5;
-}
-
-enum HostDocumentScope {
-  HOST_DOCUMENT_SCOPE_UNSPECIFIED = 0;
-  // {session_dir}/artifacts/ — recipe-manifest planning docs (see SessionContextDoc).
-  HOST_DOCUMENT_SCOPE_SESSION_ARTIFACT = 1;
-  // {session_dir}/uploads/ — files already uploaded to a session (see SessionUploadEntry).
-  HOST_DOCUMENT_SCOPE_SESSION_UPLOAD = 2;
-  // The session's git worktree.
-  HOST_DOCUMENT_SCOPE_SESSION_WORKTREE = 3;
-  // The project's main checkout (ProjectEntry.main_repo_path) — e.g. a checked-in docs/ft/*.md.
-  HOST_DOCUMENT_SCOPE_PROJECT_REPO = 4;
-  // The caller's pre-session staging area on the owning host — the root
-  // UploadStagedAttachmentChunk writes into. `relative_path` is "<staging_id>/<file_name>". A
-  // staged file whose upload never completed (no final chunk) is refused with
-  // FAILED_PRECONDITION, so a fetch never hands back truncated bytes.
-  HOST_DOCUMENT_SCOPE_STAGED_ATTACHMENT = 5;
-}
-
-// Request to fetch one host document's bytes. Mirrors `HostDocumentRef` plus the caller's
-// `session_token` (re-resolved to an os_user by the owning daemon, so the referencing client's
-// host grants no access). Routes by `daemon_instance_id` like the staging RPCs: empty / matching
-// the local instance = read locally; otherwise forwarded to the peer daemon.
-message ReadHostDocumentRequest {
-  string session_token = 1;
-  string daemon_instance_id = 2;
-  HostDocumentScope scope = 3;
-  // Owning session for the SESSION_* scopes; ignored otherwise.
-  string session_id = 4;
-  // Owning project for HOST_DOCUMENT_SCOPE_PROJECT_REPO; ignored otherwise.
-  string project_id = 5;
-  // Path relative to the resolved root: POSIX separators, no "." / ".." segments, not absolute.
-  string relative_path = 6;
-}
-
-// The document's bytes. `byte_size` equals `data.len()` — a file over `MAX_HOST_DOCUMENT_BYTES`
-// is refused with INVALID_ARGUMENT (not truncated, since a truncated attachment is useless; the
-// caller should stage larger docs, since staging is chunked with no single-message limit).
-message ReadHostDocumentResponse {
-  bytes data = 1;
-  uint64 byte_size = 2;
-}
-
-// One frame of a StreamReadHostDocument response. The document's bytes are the concatenation of
-// every frame's `data`, in arrival order.
-message HostDocumentChunk {
-  // Next slice of the document. A zero-byte document still yields exactly one frame, so a consumer
-  // never has to distinguish "empty" from "nothing arrived".
-  bytes data = 1;
-  // Total size of the whole document, stamped on **every** frame — a consumer can size a progress
-  // bar from the first frame without a separate preamble message.
-  uint64 total_byte_size = 2;
 }
 
 // One event of a StreamStartSession response: progress while attachments materialize, then exactly

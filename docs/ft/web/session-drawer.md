@@ -224,14 +224,14 @@ joined room plus a token-refresh timer alive for the life of the page.
 
 ### Session-participant RPC routing
 
-The `ConnectionService` client for an attached session comes from its own connection
-(`connection.clientFor(ConnectionService)`), memoised per service so an unchanged route yields one
-stable client identity. Over a room that reaches the session's own participant
-(`daemon-{instanceId}-{sessionId}`); where the host serves the session itself it is the host's own
-client. Session-scoped RPCs route through it:
+An attached session's service clients come from its own connection
+(`connection.clientFor(ConnectionService)`, `connection.clientFor(TerminalSessionService)`),
+memoised per service so an unchanged route yields one stable client identity. Over a room that
+reaches the session's own participant (`daemon-{instanceId}-{sessionId}`); where the host serves the
+session itself they are the host's own clients. Session-scoped RPCs route through them:
 
-- `ListExecTools`, `ListSessionToolCalls`, `ExecuteTool`
-- `ClaimTerminalControl`, `WatchTerminalControl`
+- `ConnectionService`: `ListExecTools`, `ListSessionToolCalls`, `ExecuteTool`
+- `TerminalSessionService`: `ClaimTerminalControl`, `WatchTerminalControl`
 - VNC and screen-sharing RPCs
 
 **Daemon-direct** RPCs stay on the daemon participant (`daemon-{instanceId}`), not the session
@@ -367,7 +367,8 @@ Adds to `src/components/ui/`:
 
 - `ListSessions` — session list with `isActive`, `createdAt`, `repoPath`, `workflowGoal`, `pendingElicitation`; fanned out per-host and merged (see [Cross-Host Active Sessions](#cross-host-active-sessions); liveness is derived client-side from common-room participants, not from this RPC)
 - `ConnectSession` / `ResumeSession` — attach to a running or paused session
-- `StreamTerminalOutput` / `SendTerminalInput` — gRPC terminal stream (claude-cli path)
+- `StreamTerminalOutput` / `SendTerminalInput` (`terminal_session.TerminalSessionService`) — gRPC
+  terminal stream (claude-cli path)
 - `DeleteSession` — delete session (two-click confirm)
 - `SignalSession` — SIGTERM for active sessions
 
@@ -1199,8 +1200,9 @@ ids, so they do not share a lease.
 
 ### New RPCs used
 
-- `ConnectionService.ClaimTerminalControl` — issued on session attach and on "Claim terminal" click.
-- `ConnectionService.WatchTerminalControl` — live stream of lease changes.
+- `TerminalSessionService.ClaimTerminalControl` — issued on session attach and on "Claim terminal"
+  click.
+- `TerminalSessionService.WatchTerminalControl` — live stream of lease changes.
 
 ---
 

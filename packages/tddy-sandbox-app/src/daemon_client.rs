@@ -11,10 +11,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use tddy_service::proto::connection::{
-    MintLocalTokenRequest, SessionTerminalInput, StartSessionRequest,
-};
+use tddy_service::proto::connection::{MintLocalTokenRequest, StartSessionRequest};
 use tddy_service::tonic_connection::connection_service_client::ConnectionServiceClient;
+use tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput;
+use tddy_terminal_rpc::proto::tonic_terminal_session::terminal_session_service_client::TerminalSessionServiceClient;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
@@ -48,7 +48,8 @@ pub struct DaemonClientParams {
 pub async fn run(params: DaemonClientParams) -> Result<()> {
     let socket = resolve_daemon_socket_path(params.daemon_socket);
     eprintln!("connecting to tddy-daemon at {}", socket.display());
-    let mut client = connect_connection_client(&socket).await?;
+    let channel = connect_daemon_channel(&socket).await?;
+    let mut client = ConnectionServiceClient::new(channel.clone());
 
     let session_token = client
         .mint_local_token(MintLocalTokenRequest {})
@@ -83,7 +84,12 @@ pub async fn run(params: DaemonClientParams) -> Result<()> {
         .session_id;
     eprintln!("session_id={session_id} (running inside tddy-daemon sandbox)");
 
-    run_daemon_terminal_bridge(client, &session_token, &session_id).await
+    run_daemon_terminal_bridge(
+        TerminalSessionServiceClient::new(channel),
+        &session_token,
+        &session_id,
+    )
+    .await
 }
 
 /// Resolve the daemon Unix-socket path: the explicit override wins; otherwise mirror
@@ -107,10 +113,15 @@ fn default_socket_path_from(xdg_runtime_dir: Option<&Path>) -> PathBuf {
         .join("tddy-daemon.sock")
 }
 
-/// Connect a tonic `ConnectionService` client over the daemon's AF_UNIX socket, reusing the shared
-/// UDS connector from `tddy-sandbox-runner`.
-async fn connect_connection_client(socket: &Path) -> Result<ConnectionServiceClient<Channel>> {
-    let channel = tddy_sandbox_runner::connect_uds_channel(socket)
+/// Connect a tonic channel to the daemon's AF_UNIX socket, reusing the shared UDS connector from
+/// `tddy-sandbox-runner`.
+///
+/// One channel carries both clients this flow needs: `connection.ConnectionService` for
+/// `MintLocalToken` / `StartSession`, and `terminal_session.TerminalSessionService` for the bidi
+/// terminal stream — two coordinates on the same socket since `#unbundle` node 6 moved the terminal
+/// family out of `connection.proto`.
+async fn connect_daemon_channel(socket: &Path) -> Result<Channel> {
+    tddy_sandbox_runner::connect_uds_channel(socket)
         .await
         .with_context(|| {
             format!(
@@ -118,8 +129,7 @@ async fn connect_connection_client(socket: &Path) -> Result<ConnectionServiceCli
                  Pass --daemon-socket to point at a different socket.",
                 socket.display()
             )
-        })?;
-    Ok(ConnectionServiceClient::new(channel))
+        })
 }
 
 /// Turn a daemon RPC `Status` into an actionable error, calling out the common local-setup failure
@@ -195,7 +205,7 @@ fn terminal_input_data(data: Bytes) -> SessionTerminalInput {
 /// [`RawMode`], [`classify_stdin_read`] (Ctrl-C is forwarded, only EOF disconnects),
 /// [`resize_frame_if_changed`] (100ms live-resize poll → in-band OSC), and [`bridge_stop_reason`].
 async fn run_daemon_terminal_bridge(
-    mut client: ConnectionServiceClient<Channel>,
+    mut client: TerminalSessionServiceClient<Channel>,
     session_token: &str,
     session_id: &str,
 ) -> Result<()> {

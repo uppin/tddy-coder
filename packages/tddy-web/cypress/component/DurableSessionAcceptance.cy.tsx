@@ -14,6 +14,7 @@ import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
 import { useDaemonClient } from "../../src/rpc/selectedDaemon";
 import { AuthService } from "../../src/gen/auth_pb";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { TerminalSessionService } from "../../src/gen/terminal_session_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -76,7 +77,7 @@ function DaemonRpcProbe() {
  * before the transport auth gate) — proves LiveKit RPC still reaches the daemon with a fresh token.
  */
 function StaleTokenTerminalInputProbe() {
-  const client = useDaemonClient(ConnectionService);
+  const client = useDaemonClient(TerminalSessionService);
   const staleTokenRef = useRef(EXPIRED_ACCESS_TOKEN);
   return (
     <button
@@ -208,7 +209,7 @@ describe("Durable web session — refresh-token + RPC token gate", () => {
 
     // Then — the daemon received the refreshed token, never the stale expired one
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.sendTerminalInput);
+      const calls = backend.callsTo(TerminalSessionService.method.sendTerminalInput);
       expect(calls.map((c) => c.sessionToken)).to.deep.equal([REFRESHED_ACCESS_TOKEN]);
     });
   });

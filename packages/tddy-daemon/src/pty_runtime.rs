@@ -5,6 +5,14 @@
 //! `os_user` to its uid/gid/home, front-loads a `setpriv` privilege drop when needed, and computes
 //! the child's `HOME`/`PATH` overrides — then hands the fully-resolved `argv`/`env` to
 //! [`tddy_pty::PtyRuntime`], which has no notion of an `os_user`.
+//!
+//! It stays in `tddy-daemon` for that reason: the impersonation it exists for is
+//! [`tddy_daemon_kernel::privilege_drop`]'s, and depending on that crate from a subsystem crate
+//! would put the whole LiveKit SDK inside `tddy-tools`' `--no-default-features` in-jail build,
+//! which carries none. What *did* leave in `#unbundle` node 6 is the passwd lookup that had no
+//! daemon state behind it: [`tddy_terminal_rpc::login_shell`] answers which shell a login terminal
+//! runs, beside the `StartTerminalSession` handler that asks. No facade is left behind for it —
+//! nothing outside this crate ever reached it through here.
 
 /// Becoming another OS user, derived in [`tddy_daemon_kernel::privilege_drop`].
 ///
@@ -24,7 +32,7 @@ use async_trait::async_trait;
 use tddy_task::{TaskBody, TaskContext, TaskHandle, TaskRegistry, TaskStatus};
 use tokio::sync::oneshot;
 
-use crate::pty_registry::PtyRegistry;
+use tddy_pty::PtyRegistry;
 
 // Re-exported from the shared core so existing daemon import paths keep working.
 pub use tddy_pty::{PtyReady, DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS};
@@ -153,46 +161,6 @@ fn resolve_final_argv_env(spec: &PtySpawnSpec) -> Result<ResolvedArgvEnv, String
         return Err("empty argv".into());
     }
     Ok((spec.argv.clone(), spec.env.clone()))
-}
-
-/// The login shell (`pw_shell`) of `os_user` from the passwd database, or `None` when the entry is
-/// missing or has no shell. Preferred over the daemon's `$SHELL` for Bash terminals, since the
-/// daemon's own `$SHELL` (systemd / nix) is not the target user's interactive shell.
-#[cfg(unix)]
-pub fn login_shell_for_os_user(os_user: &str) -> Option<String> {
-    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
-    let mut buf = vec![0u8; 16384];
-    let mut result = std::ptr::null_mut();
-    let name = std::ffi::CString::new(os_user).ok()?;
-    let ret = unsafe {
-        libc::getpwnam_r(
-            name.as_ptr(),
-            passwd.as_mut_ptr(),
-            buf.as_mut_ptr() as *mut libc::c_char,
-            buf.len(),
-            &mut result,
-        )
-    };
-    if ret != 0 || result.is_null() {
-        return None;
-    }
-    let passwd = unsafe { &*result };
-    if passwd.pw_shell.is_null() {
-        return None;
-    }
-    let shell = unsafe { std::ffi::CStr::from_ptr(passwd.pw_shell) }
-        .to_string_lossy()
-        .into_owned();
-    if shell.is_empty() || shell.ends_with("/nologin") || shell.ends_with("/false") {
-        None
-    } else {
-        Some(shell)
-    }
-}
-
-#[cfg(not(unix))]
-pub fn login_shell_for_os_user(_os_user: &str) -> Option<String> {
-    None
 }
 
 #[cfg(test)]

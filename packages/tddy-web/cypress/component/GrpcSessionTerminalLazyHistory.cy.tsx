@@ -18,12 +18,12 @@ import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
-  ConnectionService,
+  TerminalSessionService,
   GetTerminalHistoryRequestSchema,
   SendTerminalInputResponseSchema,
   SessionTerminalOutputSchema,
   TerminalHistoryChunkSchema,
-} from "../../src/gen/connection_pb";
+} from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import {
@@ -79,7 +79,7 @@ const FINAL_CHUNK = create(TerminalHistoryChunkSchema, {
 
 function interceptReplayStreamOutput() {
   const body = encodeConnectStreamFrames([toBinary(SessionTerminalOutputSchema, REPLAY_FRAME)]);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/StreamTerminalOutput", (req) => {
+  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/StreamTerminalOutput", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/connect+proto" }, body });
   }).as("streamTerminalOutput");
 }
@@ -88,7 +88,7 @@ function interceptReplayStreamOutput() {
 function interceptGetTerminalHistory() {
   const chunks = [toBinary(TerminalHistoryChunkSchema, FIRST_CHUNK), toBinary(TerminalHistoryChunkSchema, FINAL_CHUNK)];
   let call = 0;
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/GetTerminalHistory", (req) => {
+  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/GetTerminalHistory", (req) => {
     const body = encodeConnectStreamFrames([chunks[call] ?? chunks[chunks.length - 1]]);
     call += 1;
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/connect+proto" }, body });
@@ -96,7 +96,7 @@ function interceptGetTerminalHistory() {
 }
 
 function interceptSendTerminalInput() {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/SendTerminalInput", (req) => {
+  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/SendTerminalInput", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: OK_SEND_INPUT });
   }).as("sendTerminalInput");
 }
@@ -114,7 +114,7 @@ function Harness() {
       }),
     [],
   );
-  const client = useMemo(() => createClient(ConnectionService, transport), [transport]);
+  const client = useMemo(() => createClient(TerminalSessionService, transport), [transport]);
 
   return (
     <div style={{ width: 800, height: 400, position: "relative" }}>

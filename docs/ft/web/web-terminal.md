@@ -61,8 +61,8 @@ input**. The drop surface and the mobile Attach affordance belong to the one ses
    (`data-testid="terminal-drop-overlay"`, label "Drop files to upload") over the
    `[data-testid='ghostty-terminal']` region. The overlay clears on drop or drag-leave.
 2. **On drop**, the web generates one **drop id** (a UUID) for the whole gesture and, for
-   each dropped file, streams the file to the host in ordered chunks over the new
-   `ConnectionService.UploadSessionFileChunk` unary RPC (see
+   each dropped file, streams the file to the host in ordered chunks over the
+   `session_files.SessionFilesService.UploadSessionFileChunk` unary RPC (see
    [§ Upload RPC](#upload-rpc-drag-to-upload)). Files land at
    `{session_dir}/uploads/{drop_id}/{filename}` on the host, where `session_dir` is the
    session's unified session directory (`~/.tddy/sessions/<session-id>/`). A fresh
@@ -109,8 +109,8 @@ error (`data-testid="upload-progress-error"`, e.g. "⚠ upload of report.iso fai
 See [host-stats-footer.md § Upload progress](./host-stats-footer.md#upload-progress-drag-to-upload).
 
 <a id="upload-rpc-drag-to-upload"></a>
-**Upload RPC.** A new unary method on `ConnectionService` (the web drives chunking, so upload
-**progress is known client-side** and the same call works over both grpc-web and the LiveKit
+**Upload RPC.** A unary method on `session_files.SessionFilesService` (the web drives chunking, so
+upload **progress is known client-side** and the same call works over both grpc-web and the LiveKit
 data-channel — no client-streaming RPC is required):
 
 - `rpc UploadSessionFileChunk(UploadSessionFileChunkRequest) returns (UploadSessionFileChunkResponse)`
@@ -119,7 +119,7 @@ data-channel — no client-streaming RPC is required):
   chunks for a given `(upload_id, file_name)` arrive **in order** and are **appended**.
 - `UploadSessionFileChunkResponse { string host_path; }` — the file's **absolute host path**,
   populated only on the final chunk (`last = true`); empty on non-final chunks.
-- Like every `ConnectionService` method, an invalid `session_token` is rejected with an
+- Like every `SessionFilesService` method, an invalid `session_token` is rejected with an
   **unauthenticated** error. The daemon writes only under
   `{session_dir}/uploads/{upload_id}/` with a canonicalize-and-contain guard, so a crafted
   `file_name` can never escape the uploads directory.
@@ -236,14 +236,17 @@ When **Session type** is set to **Claude Code CLI** in the project start form, t
 - **Start form**: The **Session type** selector (`"tool"` | `"claude-cli"`) replaces the **Tool**, **Backend**, and **Workflow recipe** controls with a **Model** dropdown (populated from `CLAUDE_CLI_MODELS` in `constants/claudeCliModels.ts`). `StartSessionRequest` carries `session_type = "claude-cli"` and `model = <selected id>`; `tool_path`, `agent`, and `recipe` are left empty.
 - **Session table**: `ListSessions` sets `agent = "claude-cli"` and `model` from `.session.yaml` metadata for these sessions. The `workflow_goal`, `workflow_state`, and `elapsed_display` columns show em dashes (`—`).
 - **Connect / Resume**: When `agent == "claude-cli"` (detected via `isClaudeCliSession()`), the client skips LiveKit room setup and mounts **`ConnectedClaudeCliTerminal`** instead of the LiveKit-backed terminal. `connectSession` returns empty LiveKit fields for claude-cli sessions — no token RPC is needed.
-- **Terminal I/O**: `ConnectedClaudeCliTerminal` opens a bidi gRPC `StreamSessionTerminalIO` stream. The first message authenticates with `sessionToken` + `sessionId`; subsequent messages carry raw stdin bytes. Server output arrives as `SessionTerminalOutput` bytes and is written to the session terminal (`GhosttyTerminalSession`). Resize events send an OSC escape sequence (`\x1b]resize;{cols};{rows}\x07`) via the same input stream.
+- **Terminal I/O**: `ConnectedClaudeCliTerminal` opens a bidi gRPC `terminal_session.TerminalSessionService.StreamSessionTerminalIO` stream. The first message authenticates with `sessionToken` + `sessionId`; subsequent messages carry raw stdin bytes. Server output arrives as `SessionTerminalOutput` bytes and is written to the session terminal (`GhosttyTerminalSession`). Resize events send an OSC escape sequence (`\x1b]resize;{cols};{rows}\x07`) via the same input stream.
 - **`GhosttyTerminalSession`**: React component (`components/GhosttyTerminalSession.tsx`) wrapping `GhosttyTerminal` over a **terminal feed** — a `TerminalStream` (`send`, `onMessage`, `close`) plus, where the connection can serve one, a history fetcher. Buffers output received before the terminal is ready; renders an optional `ConnectionTerminalChrome` status bar when `connectionOverlay` is set. It is the same component, with the same fullscreen and overlay presentation, for every session. Implementation reference: [terminal-session.md](../../../packages/tddy-web/docs/terminal-session.md).
 - **`--session-id` flag**: The daemon passes the tddy session UUID as `--session-id` to the `claude` binary so that `resume` re-attaches to the same Claude conversation thread. The worktree path is preserved across restarts; file state is not cleared on resume.
 
 ### Session workflow files (read-only RPCs and preview components)
 
+Both RPCs belong to `session_files.SessionFilesService` (see
+[session-files-service.md](../../../packages/tddy-session-files/docs/session-files-service.md)).
+
 - **`ListSessionWorkflowFiles`**: Authenticated callers receive **`WorkflowFileEntry`** rows whose **`basename`** values identify allowlisted files present under the resolved session directory (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`). The daemon resolves **`session_id`** server-side; clients do not send filesystem paths.
-- **`ReadSessionWorkflowFile`**: Returns **`content_utf8`** for one allowlisted basename under that directory. Traversal-like **`basename`** values and symlink escapes are rejected or omitted per **`session_workflow_files`** rules in **tddy-daemon**.
+- **`ReadSessionWorkflowFile`**: Returns **`content_utf8`** for one allowlisted basename under that directory. Traversal-like **`basename`** values and symlink escapes are rejected or omitted per **`session_workflow_files`** rules in **tddy-session-files**.
 - **Web** (`packages/tddy-web/src/components/session/`): **`workflowPreviewKind`** classifies filenames for YAML vs Markdown vs plain preview. **`SessionFilesPanel`** lists files and previews content (Markdown as structured line blocks without raw HTML injection; YAML in a monospace **`pre`**). **`SessionMoreActionsMenu`** includes **Show files**, which opens **`SessionWorkflowFilesModal`** (list on open, read on selection). **Cypress** covers **`SessionWorkflowFiles.cy.tsx`**; **Bun** tests cover **`workflowPreviewKind`**. **`ConnectionScreen`** wires the menu and modal on project and **Other sessions** tables.
 
 ### Session deletion
@@ -307,7 +310,7 @@ See [LiveKit peer discovery (daemon)](../daemon/livekit-peer-discovery.md) for c
 
 ### Worktrees manager scaffolding
 
-The **Worktrees** product area includes a **`WorktreesScreen`** table component (mocked data in component tests) and a **`tddy-daemon`** **`worktrees`** library for **`git worktree list`**, on-disk stats cache, and **`git worktree remove`**. **ConnectionService** does not expose worktree RPCs yet; shell navigation from the main app to a dedicated route is follow-up work. **`WorktreesAppPage`** does not yet align project identity with composite **`project_id` + `daemon_instance_id`** rows from **`ListProjects`**. Full operator semantics, cache layout, and test commands: [worktrees.md](worktrees.md).
+The **Worktrees** product area includes a **`WorktreesScreen`** table component (mocked data in component tests) and a **`tddy-worktree-service`** **`worktrees`** library for **`git worktree list`**, on-disk stats cache, and **`git worktree remove`**. The worktree RPCs the browser calls live on **`worktree.WorktreeService`** (served by **`tddy-worktree-service`**); shell navigation from the main app to a dedicated route is follow-up work. **`WorktreesAppPage`** does not yet align project identity with composite **`project_id` + `daemon_instance_id`** rows from **`ListProjects`**. Full operator semantics, cache layout, and test commands: [worktrees.md](worktrees.md).
 
 ## See also (development)
 

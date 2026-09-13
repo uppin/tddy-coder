@@ -13,7 +13,7 @@ import { ConnectError, Code } from "@connectrpc/connect";
 import { TerminalFileDropZone } from "../../src/components/connection/TerminalFileDropZone";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { UploadProgressIndicator } from "../../src/components/sessions/UploadProgressIndicator";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -23,7 +23,7 @@ import { aFile, dropFilesOnto } from "../support/util/fileDrop";
 /** A backend that fails every chunk of `bad.txt` and echoes a host path for anything else. */
 function aPartiallyFailingBackend(): InMemoryRpcBackend {
   return anInMemoryRpcBackend().onUnary(
-    ConnectionService.method.uploadSessionFileChunk,
+    SessionFilesService.method.uploadSessionFileChunk,
     (req) => {
       if (req.fileName === "bad.txt") {
         throw new ConnectError("disk error", Code.Internal);

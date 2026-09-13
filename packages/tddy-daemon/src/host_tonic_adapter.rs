@@ -21,9 +21,9 @@ use std::sync::Arc;
 
 use futures_util::{Stream, StreamExt};
 
-use crate::connection_tonic_adapter::to_tonic_status;
 use tddy_service::proto::host::HostService as RpcService;
 use tddy_service::proto::host::*;
+use tddy_service::to_tonic_status;
 
 /// Wraps a tddy-rpc `HostService` implementation so it can be served over tonic gRPC.
 pub struct HostServiceTonicAdapter<T> {

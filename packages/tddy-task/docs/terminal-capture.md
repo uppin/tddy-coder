@@ -73,12 +73,15 @@ Every capture write flows through `TaskChannel::write`, so the sniffer cannot be
 
 ## Users outside `TaskChannel`
 
-`tddy-daemon`'s `sandbox_session.rs` holds its own `Arc<Mutex<TerminalCapture>>` (sandbox PTY output
-arrives over a stdio bridge, not through a `TaskChannel`). It calls `append` on every chunk, and the
-sandbox branch of `stream_terminal_output` replays through `sandbox_replay_frames`, so sandbox
-sessions are bounded and get the prologue like every other attach path.
+`tddy-daemon-sandbox`'s `sandbox_session.rs` holds its own `Arc<Mutex<TerminalCapture>>` (a jailed
+session's PTY output arrives over a stdio bridge, not through a `TaskChannel`). It calls `append` on
+every chunk, and `tddy-daemon`'s `terminal_session_adapter.rs` binds that capture to
+`tddy_terminal_rpc::session::TerminalSession`, so a jailed terminal replays through the same
+`tddy_terminal_rpc::bridge` arm as every other attach path — bounded, prologue first, anchored on the
+same absolute offsets.
 
 ## See also
 
-- [tddy-daemon connection-service.md § Terminal mode replay](../../tddy-daemon/docs/connection-service.md#terminal-mode-replay-mouse-tracking)
+- [tddy-terminal-rpc terminal-session-service.md § The replay contract](../../tddy-terminal-rpc/docs/terminal-session-service.md#the-replay-contract)
+- [tddy-daemon connection-service.md § Session terminals](../../tddy-daemon/docs/connection-service.md#session-terminals)
 - [Web terminal § Touch/mouse mode](../../../docs/ft/web/web-terminal.md)

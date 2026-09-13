@@ -1,11 +1,14 @@
 # ConnectionService (tddy-daemon)
 
-> **Where this code lives.** `#unbundle` node 3 moved the sandbox and spawn subsystems out of
-> `tddy-daemon`. `sandbox_session`, `workspace_tool_sandbox`, `sandbox_action`,
-> `sandbox_plan_builder` and `sandbox_runtime` are now in **`tddy-daemon-sandbox`**;
-> `spawner`, `spawn_worker`, `supervisor_spawn` and `supervisor_client` are in **`tddy-spawn`**.
-> `connection_service` itself stays here and calls into both. Module names below are qualified
-> where they refer to the moved crates.
+> **Where this code lives.** Several subsystems this service calls into are their own crates, and
+> module names below are qualified where they refer to one. `sandbox_session`,
+> `workspace_tool_sandbox`, `sandbox_action`, `sandbox_plan_builder` and `sandbox_runtime` are in
+> **`tddy-daemon-sandbox`**; `spawner`, `spawn_worker`, `supervisor_spawn` and `supervisor_client`
+> are in **`tddy-spawn`**; the session-file subsystem is in
+> **[`tddy-session-files`](../../tddy-session-files/docs/session-files-service.md)** and the terminal
+> subsystem in **[`tddy-terminal-rpc`](../../tddy-terminal-rpc/docs/terminal-session-service.md)**,
+> each serving a coordinate of its own beside this one. `connection_service` stays here and wires
+> them all.
 
 
 Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` in **daemon mode**.
@@ -19,10 +22,10 @@ else lives in `src/connection_service/`.
 | Group | Files | What is in them |
 |---|---|---|
 | `rpc_service.rs` | 1 | `impl ConnectionService for ConnectionServiceImpl` — every RPC handler, and the `type …Stream` associated types |
-| `svc_*.rs` | 17 | the inherent `impl ConnectionServiceImpl` blocks, each named after the first method it carries — `svc_start_session_core`, `svc_provision_agent_clone`, `svc_resolve_os_user`, … |
+| `svc_*.rs` | 19 | the inherent `impl ConnectionServiceImpl` blocks, each named after the first method it carries — `svc_start_session_core`, `svc_provision_agent_clone`, `svc_resolve_os_user`, … |
 | `*_handler.rs`, `*_impl.rs` | 4 | trait impls for the service's helper types: `child_spawn_handler`, `conversation_spawn_handler`, `daemon_rpc_handler`, `terminal_bridge_impl` |
 | families | 7 | free items grouped by what they serve: `service_util`, `activity_hub`, `stack_parent`, `seed_codebase`, `seeded_clone_guard`, `hooks_and_urls`, `agent_roster` |
-| `*_tests.rs` | 24 | one file per test module, declared `#[cfg(test)] mod <name>;` |
+| `*_tests.rs` | 22 | one file per test module, declared `#[cfg(test)] mod <name>;` |
 
 **Where to put new code.** A new RPC handler is a method on the trait impl in `rpc_service.rs`, with
 its body in whichever `svc_*` block owns that area — or a new one, which is a `}` / `impl
@@ -36,20 +39,24 @@ bind it in the child, or under `#[cfg(test)]` in the parent where only its test 
 
 ## Endpoints
 
-**This service is not the daemon's whole RPC surface.** Hosts and worktrees are served by two
-sibling services on the same transports, and their methods are not listed below:
+**This service is not the daemon's whole RPC surface.** Hosts, worktrees, LiveKit rooms, terminals
+and session files are served by sibling services on the same transports, and their methods are not
+listed below:
 
 | Service | Methods | Where it lives |
 |---|---|---|
 | `host.HostService` | `ListEligibleDaemons`, `ListKnownHosts`, `GetHostTooling`, `StreamHostPrompts`, `AnswerHostPrompt`, `AddHostKey`, `ListHostKeyCandidates`, `StreamHostStats` | [`packages/tddy-host-service`](../../tddy-host-service/docs/host-service.md) |
 | `worktree.WorktreeService` | `ListWorktreesForProject`, `RemoveWorktree`, `StreamWorktreeStats`, `CalculateWorktreeSize`, `CleanWorktree`, `RestoreSessionWorktree`, `ListWorktreeDirectory`, `ReadWorktreeFile`, `StreamReadWorktreeFile` | [`packages/tddy-worktree-service`](../../tddy-worktree-service/docs/worktree-service.md) |
 | `livekit.LiveKitService` | `StreamLiveKitRooms` | [`packages/tddy-daemon-livekit`](../../tddy-daemon-livekit/docs/livekit-service.md) |
+| `terminal_session.TerminalSessionService` | `StreamSessionTerminalIO`, `StreamTerminalOutput`, `SendTerminalInput`, `GetTerminalHistory`, `StartTerminalSession`, `StopTerminalSession`, `ListTerminalSessions`, `ClaimTerminalControl`, `WatchTerminalControl` | [`packages/tddy-terminal-rpc`](../../tddy-terminal-rpc/docs/terminal-session-service.md) |
+| `session_files.SessionFilesService` | `ListSessionWorkflowFiles`, `ReadSessionWorkflowFile`, `StreamContextManifest`, `StreamReadContextFile`, `StreamReadContextFileBatch`, `UploadSessionFileChunk`, `ListSessionUploads`, `DeleteSessionUpload`, `UploadStagedAttachmentChunk`, `ListStagedAttachments`, `DeleteStagedAttachment`, `ReadHostDocument`, `StreamReadHostDocument` | [`packages/tddy-session-files`](../../tddy-session-files/docs/session-files-service.md) |
 
-`connection.ConnectionService` serves the other **72**.
+`connection.ConnectionService` serves the other **50**.
 
-A client reaches all four at the same coordinates it always did — `/rpc` over Connect-HTTP, the
-LiveKit common room, and the local UDS socket — because each is a `ServiceEntry` registered beside
-this one rather than a second endpoint.
+A client reaches all six at the same coordinates — `/rpc` over Connect-HTTP, the LiveKit common room,
+and the local UDS socket — because each is a `ServiceEntry` registered beside this one rather than a
+second endpoint. The daemon's wiring builds every one of them from the same managers over the same
+`Arc`s, so two coordinates can never address two sets of state.
 
 | RPC | Purpose |
 |-----|---------|
@@ -61,12 +68,8 @@ this one rather than a second endpoint.
 | `CreateProject` | Clone (or adopt existing path) + append registry (mints a fresh `project_id`) |
 | `SetProjectDefaultBranch` | Sets a project's stored default branch (**`main_branch_ref`**) via **`project_storage::set_project_default_branch`**. Validates the ref shape (rejecting unsafe input → `INVALID_ARGUMENT`) and project existence (→ `NOT_FOUND`) before any write; returns the updated **`ProjectEntry`**. Routes by target **`daemon_instance_id`** like **`AddProjectToHost`** (empty/local = local write; a peer = forward via **`forward_set_project_default_branch_via_livekit`**), so the default is a property of the logical project across hosts. See [projects-screen-multi-host.md](../../../docs/ft/web/projects-screen-multi-host.md#default-branch). |
 | `AddProjectToHost` | Makes an existing project available on another host, **reusing its `project_id`**. Routes by target **`daemon_instance_id`** (empty/local = handle locally; a peer = forward over the LiveKit common room via **`forward_add_project_to_host_via_livekit`**, same `classify_peer_route` routing as **`StartSession`**). The handling daemon clones the repo (like **`CreateProject`**) and persists a **`projects.yaml`** row with the **given** `project_id` via **`project_storage::add_or_get_project`** — **idempotent**: if the host already registers that id, the existing row is returned with no re-clone. Rejects blank `project_id`/`name`/`git_url` (`INVALID_ARGUMENT`) and unknown/unreachable target hosts (`FAILED_PRECONDITION`). See [projects-screen-multi-host.md](../../../docs/ft/web/projects-screen-multi-host.md). |
-| `ListSessionWorkflowFiles` | Lists workflow file **basenames** present on disk under `{sessions_base}/sessions/{session_id}/` using a **fixed server allowlist** (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`). Requires the same **`session_token`** → user → **`sessions_base`** resolution as **`ListSessions`**; **`session_id`** is validated with **`validate_session_id_segment`** before path construction. Entries whose canonical path falls outside the canonical session directory (e.g. symlink escape) are omitted from the list. |
-| `ReadSessionWorkflowFile` | Returns UTF-8 text for one allowlisted **basename** under the same resolved session directory. Rejects empty, non-allowlisted, or path-segment-unsafe **`basename`** values (`..`, `/`, `\`). Uses canonical path checks so resolved file paths cannot sit outside the session root. |
 | `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). For a new-branch-from-base worktree with an empty `selected_integration_base_ref`, the base ref is the project's stored **`main_branch_ref`** when set; a legacy project (no stored default) falls through to worktree setup's live default resolution — so the project default applies to web sessions, not only Telegram. When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. When `session_type == "claude-cli"` or `"cursor-cli"`, the tool-spawn path is bypassed — see [Claude Code CLI sessions](#claude-code-cli-sessions) and [Cursor Agent CLI sessions](#cursor-agent-cli-sessions). When **`create_remote_branch`** is set (claude-cli/cursor-cli, new-branch-from-base only), the daemon **`git push -u origin <branch>`** right after worktree setup (**`tddy_core::worktree::push_new_branch_to_origin`**) and sets **`Changeset.remote_pushed`**; a push failure fails the RPC (no fallback). When **`on_branch_conflict = "reject"`** and a session already owns **`new_branch_name`**, the RPC creates nothing and answers with **`branch_conflict`** instead of a session id — see [Branch-conflict guard](#branch-conflict-guard-on-startsession). When **`pr_stack_base_session_id`** is set, the named session must be able to seed a `pr-stack` orchestrator's stack, checked before anything spawns — see [Stack-seed base session](#stack-seed-base-session-on-startsession). |
 | `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata); `session_id` is validated as a single path segment before resolving `{sessions_base}/sessions/{session_id}/`. For `session_type == "claude-cli"` or `"cursor-cli"` sessions, `ConnectSession` returns empty LiveKit fields (no token RPC) — those are the *terminal* room's coordinates and such a session has none. It still opens the session's own room `session-{id}` first, and bridges its terminal into the common room, because connecting is what creates both ([session-room.md](../../tddy-daemon-livekit/docs/session-room.md)). |
-| `StreamSessionTerminalIO` | Bidi stream for raw terminal I/O with a running CLI child (`claude` or Cursor Agent CLI). First client message must carry `session_token` + `session_id` for auth. Subsequent messages carry raw stdin bytes; the server forwards them to the child process stdin and broadcasts stdout/stderr back as `SessionTerminalOutput` messages. Resize: if the input starts with `\x1b]resize;{cols};{rows}\x07`, the daemon updates the terminal size instead of forwarding to stdin. Session must have `session_type == "claude-cli"` or `"cursor-cli"`; returns `FAILED_PRECONDITION` when no active process is found. Accepts an optional `terminal_id` on the first message (empty ⇒ the reserved `"main"` terminal); an unknown id returns `NOT_FOUND`. |
-| `StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions` | Manage the **tools** running in a session — see [Session tools](#session-tools-multiple-terminals-per-session) below. |
 | `ExecuteTool` | Runs one exec-tool (Read, Write, StrReplace, Delete, Grep, Glob, Shell, Await, ReadLints, SemanticSearch) against the session's worktree. After execution, appends a `ToolCallRecord` to the durable JSONL log `~/.tddy/sessions/{session_id}/tool-calls.jsonl` (non-fatal: a write failure is logged as a warning and never blocks the response). Authenticates via `session_token` → OS user, validates `session_id`; optional `daemon_instance_id` for peer routing. |
 | `ListExecTools` | Returns the exec-tool catalog (`ToolDef` per tool: `name`, `description`, `input_schema_json`). Auth same as `ExecuteTool`. |
 | `ListSessionToolCalls` | Returns the durable tool-call log for a session (up to 500 most-recent entries from `tool-calls.jsonl`; ordered chronologically). Each `ToolCallInfo` carries `task_id`, `tool_name`, `args_json`, `result_json`, `is_error`, `error_message`, `job_running`, `created_unix_ms`. Authenticates via `session_token`, validates `session_id` (path-segment guard), optionally routes to owning daemon via `daemon_instance_id`. |
@@ -82,18 +85,26 @@ this one rather than a second endpoint.
 | `ReorderPlannedPr` *(2026-08-01)* | Moves one planned PR up or down in the operator-visible row order of a **`"pr-stack"`** orchestrator's **`Changeset.stack`** (same `require_pr_stack_orchestrator` gate). `direction` is `"up"`/`"down"`; moving past either end is a **no-op success**, an unknown `node_id` is refused without writing. Delegates to **`tddy_workflow_recipes::pr_stack::move_planned_pr_node`**, which swaps the two nodes' persisted **`display_order`** and leaves `parents` untouched — reading order and the dependency graph are independent. Response's `stack_plan_json` reuses `stack_plan_json_for_changeset`, the same shape `AddPlannedPr` and `RepointPlannedPr` return. |
 | `PullBaseIntoBranch` *(2026-08-01)* | Brings a planned PR's branch up to date with the base it is stacked on, inside **that node's own worktree** (never the main checkout). `strategy` is `"merge"` (default, empty means merge) or `"rebase"`; delegates to **`tddy_workflow_recipes::pr_stack::pull_base_into_node_branch`**. Order is the safety design: refuse a node with no branch or no worktree, then check cleanliness **before** fetching, then a base-ref-scoped fetch, then apply, then push (plain for merge, `--force-with-lease` for rebase). A **conflict aborts** and is refused with its paths — nothing is left half-merged for an agent mid-turn. A **dirty worktree** is refused unless `dirty_worktree_action = "commit"`, which commits the tracked changes with `commit_message` and pushes them first. A **failed push is a successful call** reporting `pushed = false` + `push_error`: the local work landed, and rolling it back would be worse than saying so. Returns a freshly recomputed (uncached) **`BranchResolution`** so the row repaints without waiting for the next poll tick. |
 | `LinkStackNode` *(2026-08-30)* | Records a child session and the **branch it created** on a named planned node of a **`"pr-stack"`** orchestrator — the **write half** of `ResolveStackBase`, and routed the same way: `rpc_served_by_peer` **before** authentication, because the node lives in *that* session's `changeset.yaml` and only the daemon holding it can write it. Keyed on an explicit **`node_id`**, never re-derived from the branch (the operator can rename that in the create dialog, and a daemon that does not hold the orchestrator cannot look the node up at all). Refuses a blank `node_id`, `child_session_id` or `branch`, a session carrying no stack, and a `node_id` the plan does not hold — each **before any write**, since a link that silently lands nowhere is the bug this RPC exists to remove. Answers with the plan as it stands. See [pr-stack-live-status.md](../../../docs/ft/coder/pr-stack-live-status.md). |
-| `ListSessionUploads` | Lists the files uploaded to a session (`{session_dir}/uploads/{upload_id}/{file_name}`, written by `UploadSessionFileChunk`) as a **flat, newest-first** list across all `upload_id` folders — one `SessionUploadEntry` (`upload_id`, `file_name`, absolute `host_path`, `size_bytes`, `uploaded_at_ms` = mtime in ms) per regular file; a missing uploads root returns an **empty** list, not an error. Auth/validation like the other session-dir RPCs (`session_token` → `sessions_base`, `validate_session_id_segment`). Backs the web Inspector **Files** tab. Implementation in **`session_uploads`**. |
-| `DeleteSessionUpload` | Removes one uploaded file addressed by `upload_id` + `file_name`. Both untrusted segments are basename-validated and confirmed to resolve inside the trusted `{session_dir}/uploads` root via the shared **`session_file_upload::contained_canonical_dir`** guard (unsafe segment → `INVALID_ARGUMENT`, removing nothing); a missing file → `NOT_FOUND`; the emptied `upload_id` folder is pruned. |
-| `UploadStagedAttachmentChunk` / `ListStagedAttachments` / `DeleteStagedAttachment` | Pre-session staging for [start-session attachments](#start-session-attachments): upload a file **before** the session exists, list a caller's staged batches (newest-first; one batch when `staging_id` is set), delete one staged file. Root is per-host, per-caller and **restart-cleared**: `{staging_base}/{os_user}/{staging_id}/{file_name}`, where `staging_base` defaults to `std::env::temp_dir()/tddy-staging`. `staging_id` and `file_name` are basename-validated and the batch dir is canonicalize-and-contained under the caller's staging root (unsafe segment → `INVALID_ARGUMENT`). Chunking mirrors `UploadSessionFileChunk`; the final chunk writes a `.staged-complete` marker. Routed by `daemon_instance_id` (empty/local = local, else forwarded over the LiveKit common room). Implementation in **`session_attachment_staging`**. |
-| `ReadHostDocument` / `StreamReadHostDocument` | Binary fetch of a `HostDocumentRef`'s bytes, performed by the **owning** daemon under **its own** `session_token` → `os_user` mapping; both variants forward to a peer (the streaming one via `forward_server_stream_to_peer`). The unary variant is capped at `MAX_HOST_DOCUMENT_BYTES` (4 MiB); the streaming variant carries larger documents, bounded by `max_attachment_bytes`. `HostDocumentScope` names the root; `relative_path` is POSIX-separated, non-absolute, `.`/`..`-free, and the **full file path** (not just its parent) is canonicalized and re-checked against the canonical scope root, so a symlink inside the root pointing outside is refused. Size is checked from `metadata().len()` **before** reading, and a document over `MAX_HOST_DOCUMENT_BYTES` (4 MiB) is refused with `INVALID_ARGUMENT` rather than truncated. Implementation in **`host_documents`**. |
 
 ## Start-session attachments
 
 `StartSessionRequest.attachments` (field 29, `repeated SessionAttachment`) lets a client attach documents to a session **at start time**, before the session directory exists. The daemon materializes every attachment into `{session_dir}/artifacts/attachments/<basename>` **before** the agent launches, so the agent sees a plain local file regardless of which source produced it.
 
-> ✅ **Status: implemented, host and web.** The three staging RPCs (`UploadStagedAttachmentChunk` / `ListStagedAttachments` / `DeleteStagedAttachment`) operate on a per-host, per-caller staging root at `{staging_base}/{os_user}/{staging_id}/{file_name}`, where `staging_base` defaults to `std::env::temp_dir()/tddy-staging` (`session_attachment_staging::default_staging_base_dir`, injected as `ConnectionServiceImpl::with_staging_base_dir` so tests can point it at a `TempDir`); `ReadHostDocument` and its streaming twin `StreamReadHostDocument` fetch a `HostDocumentRef`'s bytes from the owning daemon, both forwardable; and `start_session` / `stream_start_session` materialize both sources before spawn across every session type. The web attach UI is live — see [session-attach-ui.md](../../tddy-web/docs/session-attach-ui.md).
+> ✅ **Status: implemented, host and web.** The wire surface that feeds this path is
+> `session_files.SessionFilesService`, served by
+> [`tddy-session-files`](../../tddy-session-files/docs/host-documents-and-attachments.md): the three
+> staging RPCs (`UploadStagedAttachmentChunk` / `ListStagedAttachments` / `DeleteStagedAttachment`)
+> operate on a per-host, per-caller staging root at
+> `{staging_base}/{os_user}/{staging_id}/{file_name}`, and `ReadHostDocument` with its streaming twin
+> `StreamReadHostDocument` fetches a `HostDocumentRef`'s bytes from the owning daemon, both
+> forwardable. What this service owns is the consumption: `start_session` / `stream_start_session`
+> materialize both sources before spawn across every session type. The web attach UI is live — see
+> [session-attach-ui.md](../../tddy-web/docs/session-attach-ui.md).
 
-**The staging root is restart-cleared, not durable.** It moved off `{tddy_data_dir}/staging/` deliberately: staged batches have no TTL and no garbage collection, so a Start-Session form that is filled in and abandoned used to leak its uploads forever. A root the host clears on restart bounds abandonment without a background job or TTL bookkeeping. It does **not** bound a batch that a `StartSession` actually consumed — that cleanup is still open (see [`docs/dev/todo/`](../../../docs/dev/todo/)).
+**The staging root is restart-cleared, not durable**, and it does **not** bound a batch that a
+`StartSession` actually consumed — that cleanup is still open (see
+[`docs/dev/todo/`](../../../docs/dev/todo/)). Why the root sits where it does is
+[host-documents-and-attachments.md § Staging](../../tddy-session-files/docs/host-documents-and-attachments.md#staging--before-the-session-exists).
 
 **Two attachment sources**, both naming the host authority that owns the bytes:
 
@@ -104,7 +115,8 @@ this one rather than a second endpoint.
 
 **Why the same-host rule was relaxed, and what replaced its guarantee.** The rule existed to prevent "upload to A, start on B, silently get an empty attachment". Refusing the ref was the wrong mechanism for that goal: the guarantee actually comes from the `.staged-complete` marker, which `resolve_host_document` checks on the host that **owns** the bytes, so an in-progress or aborted upload is refused with `FAILED_PRECONDITION` whether the fetch is local or forwarded. With the marker enforced at the source, a cross-host fetch cannot produce a truncated attachment, and the restriction only blocked the natural browser flow.
 
-`HostDocumentScope` is deliberately a **scope + relative path, never an absolute host path** — a raw path field would let any caller name any file the daemon's user can read. Each scope names a root the owning daemon resolves itself, and `relative_path` (POSIX separators, no `.`/`..`, not absolute) is validated against it:
+`HostDocumentScope` is deliberately a **scope + relative path, never an absolute host path** — a raw path field would let any caller name any file the daemon's user can read. Each scope names a root the owning daemon resolves itself, and `relative_path` (POSIX separators, no `.`/`..`, not absolute) is validated against it. The resolver and every guard it applies are
+[`tddy-session-files`' `host_documents`](../../tddy-session-files/docs/host-documents-and-attachments.md#host-documents--a-scope-and-a-relative-path-never-a-host-path):
 
 | Scope | Root | `relative_path` shape |
 |-------|------|-----------------------|
@@ -114,11 +126,13 @@ this one rather than a second endpoint.
 | `PROJECT_REPO` | `ProjectEntry.main_repo_path` | A checked-in path, e.g. `docs/ft/*.md` |
 | `STAGED_ATTACHMENT` | `{staging_base}/{os_user}/` | Exactly `"<staging_id>/<file_name>"`, and the file's `.staged-complete` marker must be present |
 
-Adding a source of documents means adding a scope — that is the point, so each new root is reviewed rather than reachable by construction. `STAGED_ATTACHMENT` deliberately mirrors `SESSION_UPLOAD`'s two-segment shape so it reuses that validation rather than inventing a parse (`host_documents::validate_staged_attachment_relative_path`).
+Adding a source of documents means adding a scope — that is the point, so each new root is reviewed rather than reachable by construction. `STAGED_ATTACHMENT` deliberately mirrors `SESSION_UPLOAD`'s two-segment shape so it reuses that validation rather than inventing a parse (`tddy_session_files::host_documents::validate_staged_attachment_relative_path`).
+
+`HostDocumentScope` itself is declared in `types.proto` rather than in either service's own proto, because both reach it: `StartSession` here through `HostDocumentRef`, and `ReadHostDocument` on `session_files.SessionFilesService`. A test pins that file at one declaration, so anything added to it has to be reached by two separately served services.
 
 ### Streaming twins
 
-`StreamReadHostDocument` and `StreamStartSession` sit beside their unary counterparts; the unary RPCs are unchanged and remain what every non-web caller uses (`tddy-tools remote start-session`, `tddy-sandbox-app`, recipe hooks, PR-stack chain spawns).
+`StreamStartSession` sits beside its unary counterpart here, and `StreamReadHostDocument` beside its own on `session_files.SessionFilesService`. The unary RPCs remain what every non-web caller uses (`tddy-tools remote start-session`, `tddy-sandbox-app`, recipe hooks, PR-stack chain spawns).
 
 - **`StreamReadHostDocument`** carries a document past the unary `MAX_HOST_DOCUMENT_BYTES` (4 MiB) ceiling, in `HOST_DOCUMENT_FRAME_BYTES` (48 KiB) frames with `total_byte_size` stamped on **every** frame so a consumer needs no preamble. It is bounded by the host's configured `max_attachment_bytes` instead, checked from `metadata().len()` before the first frame, so an over-cap document is refused rather than cut short. A compile-time assertion pins `HOST_DOCUMENT_FRAME_BYTES` + 8 KiB envelope headroom ≤ `tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES` — raising the frame size would otherwise silently reintroduce the chunk-framing failure described in [rpc-multi-transport.md](../../../docs/ft/coder/rpc-multi-transport.md), where one lost frame wedges a call permanently with no error.
 - **`StreamStartSession`** emits `AttachmentMaterializationProgress` per attachment and then exactly one terminal `StartSessionResponse`. It shares one core (`start_session_core`) with the unary RPC, which passes a discarding progress sink, so the unary path's behaviour is unchanged. A failure terminates the stream with its error — never as a `result` — and the request's partial `artifacts/attachments/` writes are still cleaned up. The caller's token is resolved **before** route classification, so an unauthenticated request cannot drive an outbound forward.
@@ -278,60 +292,41 @@ The directory listing and enrichment execute inside **`spawn_blocking_with_timeo
 
 Session **status** strings in metadata drive workflow display; optional Telegram notifications keyed on status transitions are documented in **[telegram-notifier.md](../../tddy-telegram/docs/telegram-notifier.md)** (product context: **[telegram-notifications.md](../../../docs/ft/daemon/telegram-notifications.md)**).
 
-## Session workflow file RPCs
+## Session files, context and attachments
 
-- **Implementation**: Filesystem policy and I/O live in **`session_workflow_files`**. **`ListSessionWorkflowFiles`** and **`ReadSessionWorkflowFile`** authenticate like other session-scoped RPCs, resolve **`unified_session_dir_path`**, and operate only on the fixed basename allowlist.
-- **Listing**: Returns only allowlisted names for paths that exist, resolve under the canonical session directory, and pass **`is_file`** checks.
-- **Reading**: Reads with **`std::fs::read_to_string`** after canonical path verification. Responses are not size-capped at the API layer; operators should keep workflow files within reasonable size for the deployment.
-- **Async handler note**: Handlers are **`async`** but perform blocking filesystem work on the runtime thread; volume is expected to stay low (dashboard use). Heavy concurrency may warrant moving work behind **`spawn_blocking`**.
-- **Tests**: Integration coverage in **`session_workflow_files_rpc`**.
+The session directory's own contents — the workflow files a recipe wrote, the agent context
+directory, terminal-drop uploads, staged attachments and host documents — are served by
+`session_files.SessionFilesService` in
+[`tddy-session-files`](../../tddy-session-files/docs/session-files-service.md), not here.
 
-## Agent context file RPCs
+What stays in this service is the seven answers only a daemon has, and the routing. `PeerRoutedSessionFiles`
+(`connection_service/svc_session_files_ports.rs`) supplies them and wraps the crate's
+implementation:
 
-Serve the target repo's **agent configuration** — whatever the session's backend reads — so a
-managed session's context directory can be built from it. Product contract:
-[agent-context-sync.md](../../../docs/ft/daemon/agent-context-sync.md).
+| This daemon answers | Used for |
+|---|---|
+| which OS user a session token belongs to | every root, resolved under that user and never the referencing client's |
+| its data directory | the `PROJECT_REPO` scope root, and a user's sessions base |
+| its staging base | the restart-cleared pre-session staging root |
+| its `max_attachment_bytes` | the cap a context read and a streamed host document are refused by before their first frame |
+| its instance id | stamped on a staged-attachment entry, so a `StagedAttachmentRef` names the host holding the bytes |
+| which checkout a session's agent guidance is read from | the context reads' allow-list row, derived from persisted state rather than from the request |
+| its `spawn_worker_request_timeout` | how long one blocking context read may take |
 
-- **A separate reader from the Code pane's, deliberately.** Policy lives in **`context_files`**, not
-  `tddy_worktree_service::worktree_files`. That crate's `ReadWorktreeFile` gates on git's listing, which exists to keep `.gitignore`d
-  paths (`.env`, a key a build wrote) unreadable — but agent config is routinely gitignored
-  (`.claude/settings.local.json`, `**/.cursor/mcp.json`), so that gate cannot serve this. The two
-  **never share a gate**; they share only the traversal and containment guards
-  (`validate_rel_path_shape`, `canonicalize_root`, both `pub` in `tddy_worktree_service::worktree_files` — a caller that stayed behind is what widened them).
-- **The gate is a compiled-in allow-list**, keyed by agent (`tddy_core::backend::context_globs_for_agent`)
-  and narrowed by **`CONTEXT_EXCLUDE_GLOBS`**. Three properties make replacing the git gate safe, and
-  all three are load-bearing: **no caller supplies globs** (a request names a table row, never a path
-  set); **no caller chooses the row** — the serving daemon derives it from persisted session state
-  via **`context_agent_for_session`**, so the bound is the session's row and not the union of every
-  row; and a resolved **symlink's target must itself be allow-listed**, or `.claude/creds -> ../.env`
-  would publish `.env`'s bytes under an allow-listed name.
-- **Row derivation** (`context_agent_for_session`): a session recording a paired split agent
-  (`split_session::paired_agent`) gets Claude's row — the codebase half of a split placement is
-  persisted as `workspace` but stands in for a `claude-cli` agent on another daemon, so
-  `session_type` alone would wrongly reduce it to the shared base. Otherwise the row comes from the
-  session's own `session_type`. `ContextManifestRequest.agent` is **advisory**, logged when it
-  disagrees.
-- **`StreamContextManifest`**: one **`ContextManifestEntry`** (`rel_path`, `sha256`, `size_bytes`) per
-  allow-listed path. Streams rather than returning a repeated field so a large manifest never needs
-  the transport's chunk codec. Hashing is streamed through a `BufReader`, and an over-cap file is
-  left **out** of the manifest — advertising something the reader would then refuse makes a session
-  unstartable.
-- **`StreamReadContextFile`**: raw bytes, no encoding applied, framed at **`CONTEXT_FILE_FRAME_BYTES`**
-  (defined *as* `HOST_DOCUMENT_FRAME_BYTES`, 48 KiB — under `MAX_CHUNK_FRAME_BYTES`, so a context read
-  never engages chunking). Over-cap is refused **before the first frame**, never truncated. A
-  non-allow-listed path is refused identically whether or not a file exists there, preserving the
-  existence-map property `resolve_listed_worktree_file` protects.
-- **`StreamReadContextFileBatch`**: several allow-listed files in one call, so a split start costs
-  **2** peer round trips rather than 1 + N. Frames carry `rel_path` and `end_of_file`, so every file
-  yields at least one frame and a zero-byte file stays distinguishable from a failure. Same gate,
-  auth, per-file cap and aggregate cap as the single-file reader — the sizing check is shared
-  (`sized_context_file`) so the two cannot drift.
-- **Consumer**: `split_context_from_codebase_host` builds a split session's context directory from
-  these at start *and* resume. A failed fetch is a **refusal, never an empty result** — a split
-  session that cannot read its project's guidance does not start.
-- **Tests**: `context_files_acceptance` (gate, caps, byte-exactness, batch), `context_file_frames_unit`
-  (framing against the chunk budget), `context_rpc_session_scope_acceptance` (row derivation over the
-  real handlers), `context_sync_acceptance` (setup and diff).
+**Eight of the thirteen route**: the three context streams, the three staging methods and both
+host-document reads. Routing sits on the generated `SessionFilesService` trait rather than on the
+transport, which is what makes an in-process caller — this service's own `StartSession` materialising
+an attachment — obey the `daemon_instance_id` it named instead of being served locally. It also puts
+authentication **before** route classification on the five staging methods, so an unauthenticated
+request cannot drive an outbound forward. Every decision is taken by a `ConnectionServiceImpl` method
+rather than re-derived in the wrapper, so a request arriving on the wire and one this daemon makes for
+itself cannot disagree about which host holds a file.
+
+The consumer that stays here is `split_context_from_codebase_host`
+(`connection_service/svc_split_context_from_codebase_host.rs`), which builds a split session's
+context directory at start *and* resume from the three context reads, through the served surface
+rather than a second read of its own. A failed fetch is a **refusal, never an empty result** — a
+split session that cannot read its project's guidance does not start.
 
 ## DeleteSession behavior
 
@@ -473,7 +468,11 @@ When `StartSessionRequest.session_type == "claude-cli"`, the standard tool-spawn
 
 A background task monitors the child with `child.wait()`; on exit the entry is removed from the registry. `resume()` calls `start()` in the same worktree — the worktree's file state is preserved.
 
-**`StreamSessionTerminalIO`**: The bidi gRPC stream calls `ClaudeCliSessionManager::get(session_id)` to look up the live `PtyHandle`. A write task reads `SessionTerminalInput` messages from the client stream and sends bytes to `stdin_tx`. A read task subscribes to `stdout_tx` and forwards chunks as `SessionTerminalOutput` to the client stream. Resize sequences (`\x1b]resize;...`) are intercepted before forwarding (no actual pty resize is performed; the sequence is dropped). Auth: `session_token` validated on the first message via the same GitHub → OS user path as other RPCs.
+**Terminal I/O**: the session's `PtyHandle` is reached through this daemon's `TerminalSessionStore`
+port, so every terminal RPC is served by `terminal_session.TerminalSessionService` over
+`tddy_terminal_rpc::bridge` — see [Session terminals](#session-terminals). The `session_token` is
+validated by that port, on the first message of a bidi stream and on every unary call, via the same
+GitHub → OS user path as the RPCs here.
 
 **`DeleteSession` for claude-cli**: After PID termination (SIGTERM / SIGKILL), the daemon also calls `remove_dir_all` on the worktree path stored in `metadata.repo_path`. The session directory is then removed as usual.
 
@@ -566,7 +565,9 @@ Outbound network from the jail is **`(deny network*)`** — the sandbox never di
 
 **In-jail runner** (`tddy-tools sandbox-runner`): binds loopback gRPC, spawns `claude` in a PTY with `mcp__tddy-tools__*` allowlist (`sandbox_claude_spawn.rs`), routes MCP `call_tool` through tool IPC → relay queue → `ExecuteToolRequest` on `HostPoll`.
 
-**Terminal I/O**: `StreamTerminalOutput` / `SendTerminalInput` on the daemon delegate to `SandboxSessionManager` when `metadata.sandbox == true`.
+**Terminal I/O**: a jailed session's PTY is resolved out of `SandboxSessionManager` by this daemon's
+composite `TerminalSessionStore` and served like any other terminal — see [Sandboxed sessions are
+ordinary terminals](#sandboxed-sessions-are-ordinary-terminals).
 
 **Lifecycle**:
 - **`DeleteSession`**: stops the `SandboxHandle` (SIGTERM → SIGKILL), removes worktree and session dir.
@@ -599,7 +600,9 @@ When `StartSessionRequest.session_type == "cursor-cli"` **and** `sandbox == true
 
 **Specialized subagents** and **managed codebase** follow the same rules as [Sandboxed Claude Code CLI sessions](#sandboxed-claude-code-cli-sessions): the jail never mounts the repo; `specialized_subagent_env` and `prepare_managed_workflow` wire `TDDY_SUBAGENTS_JSON`, `TDDY_SOCKET`, and orchestration via `.cursor/rules/tddy-managed-workflow.mdc`.
 
-**Terminal I/O**: `StreamSessionTerminalIO` / `StreamTerminalOutput` / `SendTerminalInput` delegate to `SandboxSessionManager` when `metadata.sandbox == true` (same as claude-cli).
+**Terminal I/O**: as for [sandboxed claude-cli](#sandboxed-sessions-are-ordinary-terminals) — the
+jail's PTY is resolved out of `SandboxSessionManager` by the composite `TerminalSessionStore` and
+served like any other terminal.
 
 **Lifecycle**:
 - **`DeleteSession`**: stops the `SandboxHandle`, removes worktree and session dir.
@@ -609,65 +612,65 @@ When `StartSessionRequest.session_type == "cursor-cli"` **and** `sandbox == true
 
 Feature reference: [cursor-cli-session.md](../../../docs/ft/daemon/cursor-cli-session.md#sandbox-mode).
 
-## Session tools (multiple terminals per session)
+## Session terminals
 
 A session can run multiple identified **tools**, each a `PtyHandle` in `ClaudeCliSessionManager`'s
 two-level registry `session_id → (terminal_id → PtyHandle)`. The original `claude` process is the
 tool under the reserved id `MAIN_TERMINAL_ID` (`"main"`, kind `"claude-cli"`); additional **Bash**
-tools (kind `"bash"`) run the user's `$SHELL` (fallback `/bin/bash`) in the session worktree and
-take no inputs.
+tools (kind `"bash"`) run the user's login shell in the session worktree and take no inputs.
 
-- `StartTerminalSession(session_id)` — resolves the worktree from the running `"main"` terminal
-  (`FAILED_PRECONDITION` if none), spawns a Bash tool, returns a fresh `terminal_id` (uuid v7).
-- `StopTerminalSession(session_id, terminal_id)` — SIGTERM→SIGKILL the tool's pid and deregister
-  (idempotent with the PTY exit-monitor). Rejects `terminal_id == "main"` with `INVALID_ARGUMENT`
-  (use `SignalSession`/`DeleteSession` for the session itself); unknown id → `NOT_FOUND`.
-- `ListTerminalSessions(session_id)` — `TerminalSessionInfo{terminal_id, kind, pid}` per running tool.
+The nine RPCs that reach those terminals are `terminal_session.TerminalSessionService`, served by
+[`tddy-terminal-rpc`](../../tddy-terminal-rpc/docs/terminal-session-service.md) — the replay model,
+the offset arithmetic, the acknowledgement framing and the control mutex all live there, once, for
+every host that serves a terminal.
 
-The terminal I/O RPCs (`StreamSessionTerminalIO`, `StreamTerminalOutput`, `SendTerminalInput`)
-carry an optional `terminal_id` (empty ⇒ `"main"`) and resolve the target via
-`get_terminal(session_id, terminal_id)`. All four new/extended RPCs authenticate `session_token`
-via the same GitHub → OS user path as the other endpoints.
+**What this daemon supplies is four ports** (`connection_service/svc_terminal_ports.rs`), each
+implemented once rather than as a branch repeated per handler:
 
-### Terminal mode replay (mouse tracking)
+| Port | This daemon's answer |
+|---|---|
+| `TerminalSessionStore` | which live terminal a `(session_id, terminal_id)` names, after this daemon's own `session_token` → OS-user auth |
+| `TerminalSession` | one terminal, bound to the bridge's trait by `terminal_session_adapter.rs` |
+| `TerminalRoster` | starting, stopping and listing the tools a session runs — `StopTerminalSession` rejects `"main"` with `INVALID_ARGUMENT`, since `SignalSession` / `DeleteSession` own the session itself |
+| `TerminalControl` | the single-screen control lease, which this daemon's other surfaces (session deletion, the LiveKit bridge) read and clear |
 
-A client's VT reports mouse events only after it has itself seen a mouse-tracking DECSET. An agent
-TUI emits those bytes once at startup, and the 64 KiB capture ring trims from the front — so after
-enough output they are gone, and `trigger_redraw()` (SIGWINCH) does not re-issue private modes.
+`cli_session_manager.rs` stays here. It is the PTY *session lifecycle* and the origin of the
+`TaskRegistry` several services share; the terminal surface reaches it through
+`TerminalSessionStore`, which is what that trait is for.
 
-`stream_terminal_output` therefore sends `capture.mode_prologue()` — the mouse modes still in effect,
-as `ESC[?<mode>h` — as its **own first frame**, before and independently of the replay branch below.
-That independence matters: the replay is gated on `!has_initial_dims`, and a browser always measures
-its grid before opening the stream, so on the exact path the web terminal uses the capture was never
-sent at all. The prologue is not subject to that gate.
+### Sandboxed sessions are ordinary terminals
 
-Frame order on attach is **prologue → capture replay (legacy no-dimensions path only) → initial ACK
-→ live bridge**. The legacy replay chunks `capture.buffered_bytes()` (output without the prologue),
-so a client on that path may see the DECSETs twice; DECSET is idempotent.
+A jailed session's PTY output arrives over the stdio bridge in `tddy-daemon-sandbox`'s
+`sandbox_session.rs` and is captured in `SandboxSessionState.capture`, a `TerminalCapture` of its own.
+`terminal_session_adapter.rs` binds that state to `TerminalSession` beside the claude-cli one, and
+`DaemonTerminalSessionStore` is a composite that resolves a sandbox session first and falls back to
+the CLI manager. So a jailed terminal replays, anchors, pages and acknowledges through
+`tddy_terminal_rpc::bridge` exactly like every other one — there is no sandbox arm in the terminal
+surface, and no second transcription of the offset contract.
 
-The LiveKit bidi `PtyLiveKitService` and the tddy-coder session participant send
-`capture.replay()` (prologue ++ retained output) for the same reason. Mechanics of the sniffing and
-of escape-boundary trimming live in
-[tddy-task terminal-capture.md](../../tddy-task/docs/terminal-capture.md).
+Three of the adapter's answers are synthesised, because a jail's stdio bridge does not supply them:
+the acked-offset watch is dropped immediately, so the bridge emits **no** ACK frames; `resize` is a
+no-op and `resizable()` reports `false`, which is what keeps the bridge's post-resize drain from
+discarding live bytes no replay chunk covers; and `pty_done` is derived from the stdout broadcast
+closing.
 
-Sandbox sessions take a separate branch: their PTY output arrives over the stdio bridge in
-`tddy-daemon-sandbox`'s `sandbox_session.rs` and is captured in `SandboxSessionState.capture`, a `TerminalCapture` of its
-own (it predates `TaskChannel` on this path). Attach replays through `sandbox_replay_frames`, which
-is `chunk_terminal_output(&capture.replay(), …)` — prologue first, same contract, and a named seam so
-the behaviour is unit-testable without spawning a real sandbox. Sandbox streams carry no unary
-input-offset ACK source, so they emit data frames only.
+`packages/tddy-daemon/tests/sandbox_terminal_parity_acceptance.rs` builds a real
+`SandboxSessionState` and compares served frames against literal expectations across both replay
+modes, the prologue, forward fill and drifted-offset clamping. The two full-stack suites that would
+also cover this path — `sandboxed_claude_cli_terminal_io_round_trips` and
+`sandboxed_session_streams_demo_tui_dimensions_in_terminal` — die on the
+`ConnectionServiceImpl::self_arc called before set_self_handle` harness fault before reaching any
+terminal RPC, which is why the parity suite exists at the store/adapter level.
 
-### Input-offset acknowledgement
+### The local UDS socket
 
-`SendTerminalInput` carries a cumulative byte `input_offset` (0 = unset). After the bytes reach the
-PTY, `send_terminal_input` records the applied offset (monotonic max) and `stream_terminal_output`
-emits an ACK frame — `SessionTerminalOutput { data: [], acked_input_offset: N }` — interleaved with
-output data (a fresh subscriber gets the current offset up front). The web terminal uses this to
-render an [enqueued-input overlay](../../../docs/ft/web/enqueued-input-overlay.md) on slow links.
-Because `get_terminal` **rebuilds a `PtyHandle` per RPC**, the offset accumulator and the ack
-`watch` channel live on the shared `tddy_task::TaskChannel` (`acknowledge_input` /
-`subscribe_acked_offset`), not on the handle — so an ACK from the input path reaches an already-open
-output stream. The tddy-coder session participant serves the same contract for its bash terminals.
+`local_socket_server.rs` mounts four tonic services on one `Server::builder()`:
+`connection.ConnectionService`, `host.HostService`, `worktree.WorktreeService` and
+`terminal_session.TerminalSessionService`. The fourth is what `tddy-sandbox-app` — the binary running
+inside every jail — dials to open its terminal stream, and its adapter is
+[generated](../../tddy-codegen/docs/tonic-adapter.md) rather than hand-written, including the
+bidirectional method. Both that mount and the Connect-HTTP entry are built from the same ports over
+the same `Arc`s, so the socket and the room address one set of PTYs and one control lease.
 
 ## Spawn worker
 
@@ -744,6 +747,9 @@ so every host writes the same format; see [tddy-core architecture § Agent activ
 - **Hosts**: the eight methods, the pre-authentication peer routing five of them need, and the registry, probe and prompt machinery behind them: [`tddy-host-service`](../../tddy-host-service/docs/host-service.md).
 - **Worktrees**: the nine methods, the lazy size stream, the code-pane file gate and the git-remote service: [`tddy-worktree-service`](../../tddy-worktree-service/docs/worktree-service.md).
 - **LiveKit**: `StreamLiveKitRooms`, the session room, and common-room peer discovery: [`tddy-daemon-livekit`](../../tddy-daemon-livekit/docs/livekit-service.md).
+- **Terminals**: the nine methods, the four ports this daemon supplies, the replay and offset contract, and the control mutex: [`tddy-terminal-rpc`](../../tddy-terminal-rpc/docs/terminal-session-service.md).
+- **Session files**: the thirteen methods, the scopes, staging, uploads and the agent context reads: [`tddy-session-files`](../../tddy-session-files/docs/session-files-service.md).
+- **Generated tonic adapters**: how a service written once reaches both `tddy-rpc` and gRPC: [`tddy-codegen`](../../tddy-codegen/docs/tonic-adapter.md).
 - **Identity and credentials**: `auth.AuthService`, `auth.LiveKitTokenService`, `token.TokenService`, `loopback_tunnel.LoopbackTunnelService`, and the `SessionUserResolver` every service here authenticates with: [`tddy-daemon-auth`](../../tddy-daemon-auth/docs/auth-service.md).
 - Feature: [Session directory layout](../../../docs/ft/coder/session-layout.md)
 - Feature: [docs/ft/daemon/project-concept.md](../../../docs/ft/daemon/project-concept.md)

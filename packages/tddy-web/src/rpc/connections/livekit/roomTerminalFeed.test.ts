@@ -22,7 +22,10 @@ import { describe, expect, it } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import { RoomEvent, type Room } from "livekit-client";
-import { type ConnectionService, TerminalHistoryChunkSchema } from "../../../gen/connection_pb";
+import {
+  TerminalHistoryChunkSchema,
+  type TerminalSessionService,
+} from "../../../gen/terminal_session_pb";
 import { TerminalOutputSchema, type TerminalService } from "../../../gen/terminal_pb";
 import type { HistoryChunk } from "../../../lib/terminalHistoryLoader";
 import type { TerminalFeed, TerminalHistoryFetcher, TerminalOptions } from "../terminal";
@@ -221,7 +224,7 @@ function aHostDaemon() {
       });
     },
   };
-  return { client: client as unknown as Client<typeof ConnectionService>, historyRequests };
+  return { client: client as unknown as Client<typeof TerminalSessionService>, historyRequests };
 }
 
 /** A feed on a room the session's process has already joined. */

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Minimize2 } from "lucide-react";
 import type { Client } from "@connectrpc/connect";
 import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
+import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 import { useSessionTerminalFeed } from "./useSessionTerminalFeed";
@@ -28,6 +29,7 @@ import { safeTestIdPart } from "../../lib/testId";
 import { cn } from "../../lib/utils";
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type TerminalClient = Client<typeof TerminalSessionService>;
 
 export interface SessionRuntimeProps {
   /** This runtime's attached-session state (connection params + status). */
@@ -36,9 +38,14 @@ export interface SessionRuntimeProps {
    *  shortcut overlay; backgrounded runtimes stay mounted but `display:none`. */
   focused: boolean;
   sessionToken: string;
-  /** Owning daemon `ConnectionService` client — used for host-served terminal I/O and as the
-   *  fallback for the auto-claim-on-attach. Pass `null`/`undefined` until the daemon is reachable. */
+  /** Owning daemon `ConnectionService` client — the agent-conversation panes read their transcript
+   *  over it, and a spawned child runtime inherits it. Pass `null`/`undefined` until the daemon is
+   *  reachable. */
   client?: ConnectionClient | null;
+  /** Owning daemon `TerminalSessionService` client — the auto-claim-on-attach target, and the
+   *  fallback wire for host-served terminal I/O. Pass `null`/`undefined` until the daemon is
+   *  reachable. */
+  terminalClient?: TerminalClient | null;
   /** The connection to the session's owning daemon — a spawned child conversation attaches its own
    *  session over it. `null` until a host is reachable, which is when no child can be attached. */
   host?: HostConnection | null;
@@ -92,6 +99,7 @@ export function SessionRuntime({
   focused,
   sessionToken,
   client,
+  terminalClient,
   host = null,
   mobileShortcuts,
   onSessionRegisterInsert,
@@ -115,41 +123,41 @@ export function SessionRuntime({
   // — the configuration that works — showed no connection state at all.
   const connectionStatus = useConnectionStatus(connection);
 
-  // The session-scoped `ConnectionService` client, used by the explicit steal-claim so "Claim
+  // The session-scoped `TerminalSessionService` client, used by the explicit steal-claim so "Claim
   // terminal" routes to the session's own process rather than to the daemon. The connection
   // memoises it per service, so an unchanged route yields one stable client identity: this callback
   // is invoked inline while rendering, and consumers key stream effects on the client.
-  const buildSessionClient = useCallback(
-    (): ConnectionClient | null => connection?.clientFor(ConnectionService) ?? null,
+  const buildSessionTerminalClient = useCallback(
+    (): TerminalClient | null => connection?.clientFor(TerminalSessionService) ?? null,
     [connection],
   );
 
   // The runtime owns its own control lease. The `Session` reference (sessionId + owning daemon
-  // client) is passed to `useTerminalControl`, which converts it into a `ConnectedSession` (lease
-  // token in hand) once the auto-claim resolves — `connected` stays `null` until then, gating
+  // terminal client) is passed to `useTerminalControl`, which converts it into a `ConnectedSession`
+  // (lease token in hand) once the auto-claim resolves — `connected` stays `null` until then, gating
   // `sendTerminalInput`. The explicit "Claim terminal" steal-claim routes through
-  // `buildSessionClient`.
+  // `buildSessionTerminalClient`.
   const session: Session | null =
-    client != null ? { sessionId: runtime.sessionId, client } : null;
+    terminalClient != null ? { sessionId: runtime.sessionId, client: terminalClient } : null;
   const { controlState, connected, claim: claimControl } = useTerminalControl(
     session,
     sessionToken,
-    buildSessionClient,
+    buildSessionTerminalClient,
   );
 
   // The client that carries this session's terminal RPCs. One expression for every wire: the
   // connection routes to the session's own process where it has one, and to the host that serves it
   // where it does not — which is the daemon client, exactly what the gRPC branch used to reach for
   // by hand.
-  const terminalClient: ConnectionClient | null = useMemo(
-    () => buildSessionClient(),
-    [buildSessionClient],
+  const sessionTerminalClient: TerminalClient | null = useMemo(
+    () => buildSessionTerminalClient(),
+    [buildSessionTerminalClient],
   );
 
   const { terminals, activeTerminalId, setActive, open, close, dropEnded } = useSessionTerminals({
     sessionId: runtime.sessionId,
     sessionToken,
-    client: terminalClient,
+    client: sessionTerminalClient,
     controlToken: connected?.controlToken,
   });
 
@@ -394,7 +402,7 @@ export function SessionRuntime({
             <GrpcSessionTerminal
               sessionId={runtime.sessionId}
               sessionToken={sessionToken}
-              client={terminalClient}
+              client={sessionTerminalClient}
               connected={connected}
               onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
               mobileShortcuts={focused && activeTerminalId === AGENT_TERMINAL_ID ? mobileShortcuts : undefined}
@@ -407,11 +415,11 @@ export function SessionRuntime({
             terminal's output stream ending removes only its own tab (never the session). */}
         {terminals.map((id) => (
           <div key={id} data-testid={`sessions-terminal-pane-${id}`} className={paneClass(id)}>
-            {terminalClient && (
+            {sessionTerminalClient && (
               <GrpcSessionTerminal
                 sessionId={runtime.sessionId}
                 sessionToken={sessionToken}
-                client={terminalClient}
+                client={sessionTerminalClient}
                 connected={connected}
                 terminalId={id}
                 onDisconnect={() => dropEnded(id)}
@@ -442,6 +450,7 @@ export function SessionRuntime({
               focused={focused && activeChildSessionId === childId}
               sessionToken={sessionToken}
               client={client}
+              terminalClient={terminalClient}
               mobileShortcuts={mobileShortcuts}
               onSessionRegisterInsert={onSessionRegisterInsert}
               onSessionBytes={onSessionBytes}
@@ -488,8 +497,8 @@ export function SessionRuntime({
         {focused && (
           // The focused runtime carries the terminal-control mutex overlay and the
           // `sessions-detail-terminal-container` marker (existing acceptance contract). The overlay
-          // is only rendered when a control client is available — without one the lease is not being
-          // managed, so the terminal stays interactive (no spurious "Claim terminal" CTA).
+          // is only rendered when a terminal-control client is available — without one the lease is
+          // not being managed, so the terminal stays interactive (no spurious "Claim terminal" CTA).
           // `pointer-events-none` lets clicks reach the terminal below when no overlay is showing;
           // the overlay itself re-enables pointer events.
           //
@@ -506,7 +515,7 @@ export function SessionRuntime({
             className="absolute inset-0 pointer-events-none"
             style={{ position: "absolute", inset: 0, zIndex: 3 }}
           >
-            {client && (
+            {terminalClient && (
               <TerminalControlOverlay
                 isController={controlState.isController}
                 holderScreenId={controlState.holderScreenId}
@@ -550,6 +559,9 @@ interface SessionChildRuntimeProps {
   focused: boolean;
   sessionToken: string;
   client?: ConnectionClient | null;
+  /** Owning daemon `TerminalSessionService` client, inherited from the parent runtime (see
+   *  `SessionRuntimeProps.terminalClient`). */
+  terminalClient?: TerminalClient | null;
   /** The connection to the daemon that owns this child — the child attaches its own session over it. */
   host?: HostConnection | null;
   mobileShortcuts?: ToolShortcutDef[];
@@ -573,6 +585,7 @@ function SessionChildRuntime({
   focused,
   sessionToken,
   client,
+  terminalClient,
   host = null,
   mobileShortcuts,
   onSessionRegisterInsert,
@@ -620,6 +633,7 @@ function SessionChildRuntime({
       focused={focused}
       sessionToken={sessionToken}
       client={client}
+      terminalClient={terminalClient}
       host={host}
       mobileShortcuts={mobileShortcuts}
       onSessionRegisterInsert={onSessionRegisterInsert}

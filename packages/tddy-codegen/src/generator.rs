@@ -38,7 +38,15 @@ impl ServiceGenerator for TddyServiceGenerator {
         }
 
         if self.generate_tonic_adapter {
-            generate_tonic_adapter(&service, buf, rpc);
+            match self.tonic_trait_path.as_deref() {
+                Some(trait_module) => {
+                    // The impl reaches the trait through tonic-build's `<service>_server` module,
+                    // whose name is the path's final segment.
+                    import_once(buf, &format!("use {trait_module};"));
+                    generate_tonic_adapter(&service, buf, rpc);
+                }
+                None => generate_tonic_adapter_without_trait_impl(&service, buf),
+            }
         }
     }
 
@@ -867,11 +875,87 @@ fn to_pascal_case(s: &str) -> String {
     result
 }
 
-/// Generate tonic adapter struct (feature-gated).
-/// Wraps a service impl for use with tonic gRPC server.
-/// TODO: Full impl of tonic server trait requires consumer to compile proto with tonic-build.
-#[cfg(feature = "tonic")]
-fn generate_tonic_adapter(service: &Service, buf: &mut String, _rpc: &str) {
+/// Where the `Status` conversions every tonic adapter needs are published.
+///
+/// Emitted adapters land in the `OUT_DIR` of `tddy-service` and its dependents, and convert a
+/// refusal through the same pair as the hand-written adapters in `tddy-daemon`, so a given refusal
+/// cannot reach two transports as two different gRPC codes. Not configurable: there is one such
+/// pair in the workspace, and an adapter that used a second one would be the drift this avoids.
+const TONIC_STATUS_PATH: &str = "tddy_service";
+
+/// Emit the adapter wrapper struct alone: a `.proto` with no tonic-build pass has no server trait
+/// to implement, so there is nothing to delegate to.
+///
+/// The *other* branch of the choice [`TddyServiceGenerator::tonic_trait_path`] makes, not a step of
+/// it — [`generate_tonic_adapter`] emits the same wrapper plus the trait impl. What the two share is
+/// [`write_tonic_adapter_wrapper`].
+fn generate_tonic_adapter_without_trait_impl(service: &Service, buf: &mut String) {
+    write_tonic_adapter_wrapper(service, buf, false);
+}
+
+/// Emit the adapter: the wrapper struct plus a full impl of the tonic server trait, every method
+/// delegating to the wrapped tddy-rpc implementation.
+///
+/// The trait is reached through tonic-build's own `<service>_server` module, which the caller must
+/// bring into scope (see [`TddyServiceGenerator::tonic_trait_path`]) — the trait itself cannot be
+/// imported unqualified, because it shares its name with the tddy-rpc flavor generated above.
+fn generate_tonic_adapter(service: &Service, buf: &mut String, rpc: &str) {
+    let adapter_name = format!("{}TonicAdapter", service.name);
+    let server_module = format!("{}_server", to_snake_case(&service.name));
+
+    let needs_stream_ext = service
+        .methods
+        .iter()
+        .any(|m| m.client_streaming || m.server_streaming);
+    if needs_stream_ext {
+        import_once(buf, "use futures_util::StreamExt;");
+    }
+    import_once(buf, &format!("use {TONIC_STATUS_PATH}::to_tonic_status;"));
+    if service.methods.iter().any(|m| m.client_streaming) {
+        import_once(buf, &format!("use {TONIC_STATUS_PATH}::to_rpc_status;"));
+    }
+
+    write_tonic_adapter_wrapper(service, buf, true);
+
+    writeln!(buf, "#[tonic::async_trait]").unwrap();
+    writeln!(
+        buf,
+        "impl<T> {}::{} for {}<T>",
+        server_module, service.name, adapter_name
+    )
+    .unwrap();
+    writeln!(buf, "where").unwrap();
+    writeln!(buf, "    T: {},", service.name).unwrap();
+    // The tddy-rpc trait bounds its stream associated types `Send + Unpin` but not `'static`, which
+    // boxing them into the tonic trait's `Pin<Box<dyn Stream + Send>>` requires.
+    for method in &service.methods {
+        if method.server_streaming {
+            writeln!(
+                buf,
+                "    T::{}Stream: 'static,",
+                to_pascal_case(&method.name)
+            )
+            .unwrap();
+        }
+    }
+    writeln!(buf, "{{").unwrap();
+
+    for (i, method) in service.methods.iter().enumerate() {
+        if i > 0 {
+            writeln!(buf).unwrap();
+        }
+        generate_tonic_adapter_method(service, method, buf, rpc);
+    }
+
+    writeln!(buf, "}}").unwrap();
+}
+
+/// Emit the wrapper struct and its constructor, shared by both adapter flavors.
+///
+/// `T` is unbounded so the struct can be named without the service trait in scope; the trait bound
+/// rides on the impl instead. `inner` is an `Arc` so one implementation instance can be served over
+/// more than one transport at once (gRPC and LiveKit, say) rather than being moved into the adapter.
+fn write_tonic_adapter_wrapper(service: &Service, buf: &mut String, has_trait_impl: bool) {
     let adapter_name = format!("{}TonicAdapter", service.name);
 
     writeln!(buf).unwrap();
@@ -881,22 +965,397 @@ fn generate_tonic_adapter(service: &Service, buf: &mut String, _rpc: &str) {
         service.name
     )
     .unwrap();
-    writeln!(
-        buf,
-        "/// Requires tddy-rpc with `tonic` feature for type conversions.",
-    )
-    .unwrap();
-    writeln!(buf, "#[allow(dead_code)]").unwrap();
-    writeln!(buf, "pub struct {}<T: {}> {{", adapter_name, service.name).unwrap();
+    if !has_trait_impl {
+        // Nothing reads `inner` without a trait impl to delegate through.
+        writeln!(buf, "#[allow(dead_code)]").unwrap();
+    }
+    writeln!(buf, "pub struct {}<T> {{", adapter_name).unwrap();
     writeln!(buf, "    inner: std::sync::Arc<T>,").unwrap();
     writeln!(buf, "}}").unwrap();
     writeln!(buf).unwrap();
-    writeln!(buf, "impl<T: {}> {}<T> {{", service.name, adapter_name).unwrap();
-    writeln!(buf, "    pub fn new(inner: T) -> Self {{",).unwrap();
-    writeln!(buf, "        Self {{ inner: std::sync::Arc::new(inner) }}",).unwrap();
+
+    writeln!(buf, "impl<T> {}<T> {{", adapter_name).unwrap();
+    writeln!(buf, "    pub fn new(inner: std::sync::Arc<T>) -> Self {{").unwrap();
+    writeln!(buf, "        Self {{ inner }}").unwrap();
     writeln!(buf, "    }}").unwrap();
     writeln!(buf, "}}").unwrap();
+    if has_trait_impl {
+        writeln!(buf).unwrap();
+    }
 }
 
-#[cfg(not(feature = "tonic"))]
-fn generate_tonic_adapter(_service: &Service, _buf: &mut String, _rpc: &str) {}
+/// Emit one tonic trait method — and, for a server-streaming rpc, the associated stream type the
+/// tonic trait declares alongside it.
+///
+/// Both names come from what tonic-build itself uses, which is *not* the same field twice:
+///
+/// * the method name is prost's [`Method::name`] verbatim — tonic-build declares its trait method
+///   as `format_ident!("{}", method.name())`, so prost's `sanitize_identifier(to_snake_case(..))`
+///   is already applied: `StreamSessionTerminalIO` arrives as `stream_session_terminal_io`, and an
+///   rpc named `Type` arrives as `r#type`, which is what the trait declares and therefore what the
+///   impl must spell. Re-deriving it here would have to reproduce both halves of that rule, and a
+///   derivation that got the keyword half wrong would emit `async fn type(` — uncompilable.
+/// * the associated stream type comes from the *proto* name, because tonic-build builds it from
+///   `method.identifier()`: `StreamSessionTerminalIOStream`.
+///
+/// The delegation target is the tddy-rpc trait's method, named the same way the trait emitted above
+/// it names it.
+fn generate_tonic_adapter_method(service: &Service, method: &Method, buf: &mut String, rpc: &str) {
+    let tonic_method = &method.name;
+    let stream_assoc = format!("{}Stream", method_proto_name(method));
+    let input = &method.input_type;
+    let output = &method.output_type;
+
+    write_stream_assoc_type(method, &stream_assoc, output, buf);
+
+    let request_type = if method.client_streaming {
+        format!("tonic::Streaming<{}>", input)
+    } else {
+        input.to_string()
+    };
+    let response_type = if method.server_streaming {
+        format!("Self::{}", stream_assoc)
+    } else {
+        output.to_string()
+    };
+
+    writeln!(buf, "    async fn {}(", tonic_method).unwrap();
+    writeln!(buf, "        &self,").unwrap();
+    writeln!(buf, "        request: tonic::Request<{}>,", request_type).unwrap();
+    writeln!(
+        buf,
+        "    ) -> Result<tonic::Response<{}>, tonic::Status> {{",
+        response_type
+    )
+    .unwrap();
+
+    write_delegation(service, method, buf, rpc);
+    write_response(method, buf);
+
+    writeln!(buf, "    }}").unwrap();
+}
+
+/// Emit what a **server-streaming** rpc needs above its signature, and nothing for the other three
+/// shapes: the associated stream type the tonic trait declares beside the method, and the lint
+/// waiver the method's return type needs.
+///
+/// A tonic `Status` is large enough to trip `result_large_err`, and the size is tonic's choice, not
+/// this signature's: the trait being implemented dictates the return type.
+fn write_stream_assoc_type(method: &Method, stream_assoc: &str, output: &str, buf: &mut String) {
+    if !method.server_streaming {
+        return;
+    }
+    writeln!(
+        buf,
+        "    type {} = std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<{}, tonic::Status>> + Send>>;",
+        stream_assoc, output
+    )
+    .unwrap();
+    writeln!(buf).unwrap();
+    writeln!(buf, "    #[allow(clippy::result_large_err)]").unwrap();
+}
+
+/// Emit the body's call into the wrapped tddy-rpc implementation, up to and including the `?` on
+/// its refusal.
+///
+/// A **client-streaming** rpc arrives as a `tonic::Streaming`, so the inbound half is re-wrapped as
+/// a tddy-rpc `Streaming` (its per-item failures converted inward) before the call; every other
+/// shape hands the decoded message straight through. Either way the refusal is converted outward
+/// through the one shared pair, so a given refusal cannot reach two transports as two different
+/// gRPC codes.
+fn write_delegation(service: &Service, method: &Method, buf: &mut String, rpc: &str) {
+    let svc = &service.name;
+    let rpc_method = to_snake_case(&method.name);
+
+    if method.client_streaming {
+        writeln!(
+            buf,
+            "        let inbound = request.into_inner().map(|item| item.map_err(to_rpc_status));"
+        )
+        .unwrap();
+        writeln!(
+            buf,
+            "        let rpc_request = {}::Request::new({}::Streaming::new(inbound));",
+            rpc, rpc
+        )
+        .unwrap();
+        writeln!(
+            buf,
+            "        let resp = {}::{}(&*self.inner, rpc_request)",
+            svc, rpc_method
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            buf,
+            "        let resp = {}::{}(&*self.inner, {}::Request::new(request.into_inner()))",
+            svc, rpc_method, rpc
+        )
+        .unwrap();
+    }
+    writeln!(buf, "            .await").unwrap();
+    writeln!(buf, "            .map_err(to_tonic_status)?;").unwrap();
+}
+
+/// Emit the body's last statement: the answer, in the shape the tonic trait declared.
+///
+/// A **server-streaming** rpc's frames are converted and boxed into the associated type
+/// [`write_stream_assoc_type`] declared; every other shape returns the message as it came back.
+fn write_response(method: &Method, buf: &mut String) {
+    if method.server_streaming {
+        writeln!(
+            buf,
+            "        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));"
+        )
+        .unwrap();
+        writeln!(buf, "        Ok(tonic::Response::new(Box::pin(outbound)))").unwrap();
+    } else {
+        writeln!(buf, "        Ok(tonic::Response::new(resp.into_inner()))").unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tonic_adapter_tests {
+    use super::*;
+
+    /// A method as `prost-build` hands it to a generator: the name the rpc was declared with in the
+    /// `.proto`, and the Rust name prost derived from it.
+    ///
+    /// Both are spelled out at every call site, because keeping them apart is the generator's job and
+    /// a fixture that derived the second from the first would derive it *its* way rather than prost's.
+    /// prost's way is `sanitize_identifier(heck::to_snake_case(..))`: it collapses an acronym run
+    /// (`StreamSessionTerminalIO` -> `stream_session_terminal_io`, never `..._i_o`) and raw-escapes a
+    /// keyword (`Type` -> `r#type`).
+    fn a_method(
+        proto_name: &str,
+        prost_name: &str,
+        client_streaming: bool,
+        server_streaming: bool,
+    ) -> Method {
+        Method {
+            name: prost_name.to_string(),
+            proto_name: proto_name.to_string(),
+            comments: Default::default(),
+            input_type: format!("{proto_name}Request"),
+            output_type: format!("{proto_name}Response"),
+            input_proto_type: format!(".session_files.{proto_name}Request"),
+            output_proto_type: format!(".session_files.{proto_name}Response"),
+            options: Default::default(),
+            client_streaming,
+            server_streaming,
+        }
+    }
+
+    fn a_service_with(methods: Vec<Method>) -> Service {
+        Service {
+            name: "SessionFilesService".to_string(),
+            proto_name: "SessionFilesService".to_string(),
+            package: "session_files".to_string(),
+            comments: Default::default(),
+            methods,
+            options: Default::default(),
+        }
+    }
+
+    fn generated_for(methods: Vec<Method>) -> String {
+        let mut buf = String::new();
+        generate_tonic_adapter(&a_service_with(methods), &mut buf, "tddy_rpc");
+        buf
+    }
+
+    /// The whole point of the generator: a delegating body, not just a struct.
+    ///
+    /// The stub emitted an adapter struct and a `new()` and stopped, which is why node 1 hand-wrote
+    /// 17 `async fn`s and node 6 would have written 22.
+    #[test]
+    fn generates_a_delegating_body_for_a_unary_method() {
+        // Given
+        let generated = generated_for(vec![a_method(
+            "ReadHostDocument",
+            "read_host_document",
+            false,
+            false,
+        )]);
+
+        // Then
+        assert!(
+            generated.contains("async fn read_host_document"),
+            "the adapter must implement the method, not merely declare a struct:\n{generated}"
+        );
+        assert!(
+            generated.contains("self.inner"),
+            "the body must delegate to the wrapped Connect-RPC impl:\n{generated}"
+        );
+    }
+
+    /// A server-streaming method needs the associated stream type as well as the method, because the
+    /// tonic trait declares one per streaming rpc.
+    #[test]
+    fn generates_the_associated_stream_type_for_a_server_streaming_method() {
+        // Given
+        let generated = generated_for(vec![a_method(
+            "StreamReadHostDocument",
+            "stream_read_host_document",
+            false,
+            true,
+        )]);
+
+        // Then
+        assert!(
+            generated.contains("type StreamReadHostDocumentStream"),
+            "a server-streaming rpc needs its associated Stream type:\n{generated}"
+        );
+        assert!(
+            generated.contains("async fn stream_read_host_document"),
+            "and its method:\n{generated}"
+        );
+    }
+
+    /// **The case only family K has.** `StreamSessionTerminalIO` is the one bidirectional method in
+    /// the entire 90-method surface, so a generator built in any other node would have handled unary
+    /// and server-streaming and been found incomplete here.
+    ///
+    /// A bidi method takes `tonic::Streaming<In>` rather than `tonic::Request<In>` and answers with a
+    /// stream, so both halves differ from every other shape.
+    #[test]
+    fn generates_both_halves_of_a_bidirectional_method() {
+        // Given
+        let generated = generated_for(vec![a_method(
+            "StreamSessionTerminalIO",
+            "stream_session_terminal_io",
+            true,
+            true,
+        )]);
+
+        // Then
+        assert!(
+            generated.contains("Streaming"),
+            "a bidi rpc's request is a Streaming, not a Request:\n{generated}"
+        );
+        assert!(
+            generated.contains("type StreamSessionTerminalIOStream"),
+            "and its response is still a stream:\n{generated}"
+        );
+        assert!(
+            generated.contains("SessionFilesService::stream_session_terminal_io(&*self.inner"),
+            "and it must delegate to the trait method under the name prost gave it — the delegation \
+             target is the half no assertion used to cover:\n{generated}"
+        );
+    }
+
+    /// **The fourth shape, which no rpc in the surface has yet** — which is why it is the branch
+    /// that would be wrong. A client-streaming rpc that answers with a single message takes
+    /// `tonic::Streaming<In>` like the bidi one but returns a plain message like the unary one, so
+    /// neither of the three tests above constrains it: the bidi test would pass on a body that
+    /// boxed a stream into the answer, and the unary test on a body that took a decoded request.
+    #[test]
+    fn generates_a_streaming_request_with_a_unary_answer_for_a_client_streaming_method() {
+        // Given
+        let generated = generated_for(vec![a_method(
+            "UploadSessionFileChunk",
+            "upload_session_file_chunk",
+            true,
+            false,
+        )]);
+
+        // Then
+        assert!(
+            generated.contains(
+                "request: tonic::Request<tonic::Streaming<UploadSessionFileChunkRequest>>"
+            ),
+            "a client-streaming rpc's request is a Streaming of its input type:\n{generated}"
+        );
+        assert!(
+            generated.contains("        Ok(tonic::Response::new(resp.into_inner()))"),
+            "but its answer is the one message it came back with, not a boxed stream:\n{generated}"
+        );
+        assert!(
+            !generated.contains("type UploadSessionFileChunkStream"),
+            "and it declares no associated stream type, which the tonic trait does not have for \
+             this shape:\n{generated}"
+        );
+    }
+
+    /// prost raw-escapes an rpc whose snake_case name is a Rust keyword, and tonic-build declares the
+    /// trait method with that exact string: `async fn r#type`. An adapter that re-derived the name
+    /// from the proto name instead would emit `async fn type(`, which is not a legal signature — and
+    /// nothing in the 90-method surface would catch it, because no rpc there is keyword-named yet.
+    #[test]
+    fn spells_a_keyword_named_rpc_the_way_prost_escaped_it() {
+        // Given
+        let generated = generated_for(vec![a_method("Type", "r#type", false, false)]);
+
+        // Then
+        assert!(
+            generated.contains("async fn r#type("),
+            "the impl must declare the escaped name tonic-build's trait declares:\n{generated}"
+        );
+        assert!(
+            !generated.contains("async fn type("),
+            "a bare keyword cannot name a fn, so this adapter would not compile:\n{generated}"
+        );
+        assert!(
+            generated.contains("SessionFilesService::r#type(&*self.inner"),
+            "and it must delegate through the same escaped name:\n{generated}"
+        );
+    }
+
+    /// Three hand-written adapters already share `to_tonic_status` so they cannot drift on how a
+    /// refusal maps to a tonic code. A generator that built its own `tonic::Status` would reintroduce
+    /// exactly that drift — between generated and hand-written adapters.
+    #[test]
+    fn delegates_status_conversion_rather_than_constructing_its_own() {
+        // Given
+        let generated = generated_for(vec![a_method(
+            "ReadHostDocument",
+            "read_host_document",
+            false,
+            false,
+        )]);
+
+        // Then
+        assert!(
+            generated.contains("to_tonic_status"),
+            "the generated body must call the shared conversion:\n{generated}"
+        );
+        assert!(
+            !generated.contains("tonic::Status::internal")
+                && !generated.contains("tonic::Status::unknown"),
+            "it must not construct a status itself, or generated and hand-written adapters drift:\n{generated}"
+        );
+    }
+
+    /// A service with every shape at once generates one impl block carrying all of them — the shape
+    /// node 6 actually needs, since `terminal_session.TerminalSessionService` mixes all three.
+    #[test]
+    fn generates_one_impl_carrying_every_method_shape() {
+        // Given
+        let generated = generated_for(vec![
+            a_method("SendTerminalInput", "send_terminal_input", false, false),
+            a_method(
+                "StreamTerminalOutput",
+                "stream_terminal_output",
+                false,
+                true,
+            ),
+            a_method(
+                "StreamSessionTerminalIO",
+                "stream_session_terminal_io",
+                true,
+                true,
+            ),
+        ]);
+
+        // Then
+        for expected in [
+            "async fn send_terminal_input",
+            "async fn stream_terminal_output",
+            "async fn stream_session_terminal_io",
+        ] {
+            assert!(
+                generated.contains(expected),
+                "missing {expected}:\n{generated}"
+            );
+        }
+    }
+}

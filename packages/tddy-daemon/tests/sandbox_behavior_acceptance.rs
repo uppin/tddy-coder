@@ -17,8 +17,11 @@ use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::Request;
 use tddy_sandbox::SANDBOX_SPAWN_MANIFEST;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StartSessionRequest, StreamReplayMode,
-    StreamTerminalOutputRequest,
+    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
+};
+use tddy_terminal_rpc::proto::terminal_session::{
+    StreamReplayMode, StreamTerminalOutputRequest,
+    TerminalSessionService as TerminalSessionServiceTrait,
 };
 use tddy_testing_commons::{
     process_is_alive, write_egress_probe_claude_script, EGRESS_PROBE_DIRECT_DENIED,
@@ -162,6 +165,7 @@ async fn collect_terminal_text_until(
     needle: &str,
 ) -> String {
     let resp = service
+        .terminal_session_service()
         .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: session_id.to_string(),

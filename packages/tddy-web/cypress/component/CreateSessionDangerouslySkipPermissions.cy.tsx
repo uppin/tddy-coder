@@ -11,6 +11,7 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import { TEST_IDS, byTestId } from "../support/testIds";
 
@@ -33,10 +34,12 @@ function aCreateSessionBackend() {
 function mountCreatePane(backend: ReturnType<typeof aCreateSessionBackend>) {
   const client = createClient(ConnectionService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
   cy.mount(
     <CreateSessionPane
       client={client}
+      sessionFilesClient={sessionFilesClient}
       worktreeClient={worktreeClient}
       sessionToken="tok"
       onCancel={cy.stub()}

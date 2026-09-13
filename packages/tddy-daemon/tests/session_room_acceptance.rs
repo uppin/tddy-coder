@@ -38,11 +38,12 @@ use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource, ConnectSessionRequest,
     ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ExecuteToolResponse,
-    HostDocumentScope, ReadHostDocumentRequest, ReadHostDocumentResponse, SessionAttachment,
-    StagedAttachmentRef, StartSessionRequest, StartSessionResponse,
+    SessionAttachment, StagedAttachmentRef, StartSessionRequest, StartSessionResponse,
 };
 use tddy_service::proto::livekit::LiveKitRoomInfo;
+use tddy_service::proto::session_files::{ReadHostDocumentRequest, ReadHostDocumentResponse};
 use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
+use tddy_service::proto::types::HostDocumentScope;
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 use tddy_testing_commons::wait::eventually_awaiting;
@@ -641,7 +642,9 @@ async fn read_host_document_in_room(
     let bytes = tokio::time::timeout(
         CALL_TIMEOUT,
         client.call_unary(
-            "connection.ConnectionService",
+            // The coordinate that declares it since `#unbundle` node 6. A session room serves it
+            // beside `connection.ConnectionService`, so an in-room agent reaches it unchanged.
+            "session_files.SessionFilesService",
             "ReadHostDocument",
             ReadHostDocumentRequest {
                 session_token: TEST_TOKEN.to_string(),

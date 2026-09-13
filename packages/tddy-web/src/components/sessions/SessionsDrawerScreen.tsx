@@ -8,6 +8,8 @@ import {
   type SessionEntry,
   type ProjectEntry,
 } from "../../gen/connection_pb";
+import { SessionFilesService } from "../../gen/session_files_pb";
+import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { WorktreeService } from "../../gen/worktree_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { useHostConnection, useHostConnector } from "../../rpc/connections/registry";
@@ -87,6 +89,14 @@ export function SessionsDrawerScreen({
   // `activeWorktreeClient` below) so the pane and its worktree reads cannot disagree about which
   // host they are talking to.
   const worktreeClient = useDaemonClient(WorktreeService);
+  // Likewise for the nine terminal RPCs, which left `ConnectionService` for
+  // `terminal_session.TerminalSessionService`. Same daemon, same wire, and the same routing as
+  // `client` — a runtime's control lease and its terminal I/O must reach the host the session's
+  // PTY actually lives on.
+  const terminalClient = useDaemonClient(TerminalSessionService);
+  // And for the thirteen file RPCs, which left it for `session_files.SessionFilesService`: the
+  // inspector's Files tab and the create form's attachment staging.
+  const sessionFilesClient = useDaemonClient(SessionFilesService);
 
   // One daemon-level notification feed for the whole drawer, however many rows it has (NFR1). The
   // hook's only output is the write into `sessionNotificationRegistry`, which each row reads for
@@ -255,8 +265,10 @@ export function SessionsDrawerScreen({
 
   // Session-scoped ConnectionService client — the one that reaches the session's own process rather
   // than the daemon that hosts it. Built LAZILY, only when the user actually invokes a session-scoped
-  // RPC (ExecuteTool, ClaimTerminalControl), so that lifecycle RPCs (Delete/Signal/Resume/Connect)
-  // and the auto-claim-on-attach stay daemon-direct. The connection memoises the client per service,
+  // RPC (ExecuteTool), so that lifecycle RPCs (Delete/Signal/Resume/Connect) stay daemon-direct.
+  // `ClaimTerminalControl` is no longer one of them: the terminal RPCs left `ConnectionService` for
+  // `terminal_session.TerminalSessionService`, and each runtime builds that client off its own
+  // connection. The connection memoises the client per service,
   // so an unchanged route yields one stable client identity: this callback is invoked inline while
   // rendering, and consumers key stream effects on the client.
   //
@@ -437,6 +449,8 @@ export function SessionsDrawerScreen({
   );
   const activeClient = useDaemonClientFor(ConnectionService, selectedOwningHost);
   const activeWorktreeClient = useDaemonClientFor(WorktreeService, selectedOwningHost);
+  const activeTerminalClient = useDaemonClientFor(TerminalSessionService, selectedOwningHost);
+  const activeSessionFilesClient = useDaemonClientFor(SessionFilesService, selectedOwningHost);
   // The same daemon as a connection rather than as a client: attaching a session opens a connection
   // on its host, and the spawned-child runtimes attach theirs on the same one.
   const activeHost = useHostConnection(selectedOwningHost);
@@ -844,6 +858,16 @@ export function SessionsDrawerScreen({
                 mode === "creating"
                   ? (worktreeClient ?? undefined)
                   : (activeWorktreeClient ?? worktreeClient ?? undefined)
+              }
+              terminalClient={
+                mode === "creating"
+                  ? (terminalClient ?? undefined)
+                  : (activeTerminalClient ?? terminalClient ?? undefined)
+              }
+              sessionFilesClient={
+                mode === "creating"
+                  ? (sessionFilesClient ?? undefined)
+                  : (activeSessionFilesClient ?? sessionFilesClient ?? undefined)
               }
               host={activeHost}
               sessionToken={sessionToken}

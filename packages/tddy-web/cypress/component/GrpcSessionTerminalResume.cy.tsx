@@ -19,13 +19,13 @@ import React, { useMemo, useState } from "react";
 import { create, type MessageShape } from "@bufbuild/protobuf";
 import { type Client } from "@connectrpc/connect";
 import {
-  ConnectionService,
+  TerminalSessionService,
   SendTerminalInputResponseSchema,
   SessionTerminalOutputSchema,
   type SessionTerminalOutput,
   type StreamTerminalOutputRequest,
   StreamReplayMode,
-} from "../../src/gen/connection_pb";
+} from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS } from "../support/testIds";
@@ -40,7 +40,7 @@ const FIRST_TIP_OFFSET = 10n;
 const BLIP_BTN = "resume-test-blip";
 const RESTORE_BTN = "resume-test-restore";
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type TerminalClient = Client<typeof TerminalSessionService>;
 
 // ---------------------------------------------------------------------------
 // In-memory backend doubles
@@ -53,7 +53,7 @@ interface CapturedStream {
   end(): void;
 }
 
-/** A fake ConnectionService client that records each `streamTerminalOutput` open and lets the
+/** A fake TerminalSessionService client that records each `streamTerminalOutput` open and lets the
  *  test push frames into the async iterable it returns. `sendTerminalInput` resolves OK. */
 function makeFakeClient() {
   const opens: CapturedStream[] = [];
@@ -123,7 +123,7 @@ function makeFakeClient() {
     sendTerminalInput,
     // Unused by this test but present so the cast is shape-compatible.
     getTerminalHistory: () => asyncIterableEmpty(),
-  } as unknown as ConnectionClient;
+  } as unknown as TerminalClient;
 
   return { client, opens };
 }
@@ -141,7 +141,7 @@ function aResumeTerminal() {
   const onDisconnect = cy.stub().as("onDisconnect");
 
   function ResumeHarness() {
-    const [client, setClient] = useState<ConnectionClient | null>(fake.client);
+    const [client, setClient] = useState<TerminalClient | null>(fake.client);
     // Keep the same fake client reference across blip/restore so the second open is recorded
     // against the same in-memory backend.
     const stableFake = useMemo(() => fake, [fake]);

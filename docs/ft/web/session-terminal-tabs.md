@@ -13,13 +13,13 @@ already uses across sessions).
 This works for **both** session transports:
 
 - **Host-served sessions** (claude-cli, cursor-cli, workspace) — a session connection carrying
-  `{rpc}` only: served by the daemon's existing multi-terminal `ConnectionService` RPCs
-  (`StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions`, and
+  `{rpc}` only: served by the daemon's multi-terminal `terminal_session.TerminalSessionService`
+  RPCs (`StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions`, and
   `terminal_id`-addressed `StreamTerminalOutput` / `SendTerminalInput`).
 - **Room-backed sessions** (tddy-coder recipe/tool) — a connection whose capabilities include
   `media`: the Agent tab is the existing
   VirtualTui over `terminal.TerminalService`; bash tabs are served by the coder's own participant,
-  which now spawns shell PTYs and answers the same `terminal_id`-addressed `ConnectionService`
+  which spawns shell PTYs and answers the same `terminal_id`-addressed `TerminalSessionService`
   terminal RPCs (see [Session Participant RPC & Metadata](../coder/session-participant-rpc.md) and
   [Terminal Sessions](../daemon/terminal-sessions.md)).
 
@@ -38,7 +38,7 @@ styled like the existing inspector tab strip (`InspectorTabs`).
 - **Agent tab** (`data-testid="sessions-terminal-tab-agent"`): always present, first, selected by
   default, **no close control**. Renders the session's coding-agent terminal — one
   `GhosttyTerminalSession` either way. What is chosen from the session connection's capabilities is
-  the **feed** behind it: `GrpcSessionTerminal`'s own `ConnectionService` stream with
+  the **feed** behind it: `GrpcSessionTerminal`'s own `TerminalSessionService` stream with
   `terminal_id="main"` for a host-served session, the connection's room feed for a media-capable
   one. See [terminal-session.md](../../../packages/tddy-web/docs/terminal-session.md).
 - **Bash tabs** (`data-testid="sessions-terminal-tab-<terminalId>"`): one per shell terminal, each

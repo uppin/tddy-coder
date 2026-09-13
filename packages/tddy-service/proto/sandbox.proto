@@ -27,7 +27,7 @@ message SessionFrame {
     TunnelOpenAck tunnel_open_ack = 9;
     // Sandbox → host (server stream; only after host inbound)
     connection.ExecuteToolRequest tool_request = 5;
-    connection.SessionTerminalOutput terminal_output = 6;
+    SandboxTerminalOutput terminal_output = 6;
     EgressRequest egress_request = 8;
     TunnelOpen tunnel_open = 10;
     // Bidirectional: TunnelData/TunnelClose flow in both directions (direction by context).
@@ -95,6 +95,27 @@ message SandboxInput {
   string session_id = 1;
   string terminal_id = 2;
   bytes data = 3;
+}
+
+// Terminal bytes read off the in-jail pty, sandbox -> host. The mirror of `SandboxInput`, which
+// this channel has always owned: only the output side borrowed a message from the client-facing
+// terminal family, and that family now lives in `tddy-terminal-rpc`'s `terminal_session.proto`,
+// which this file cannot import (`tddy-terminal-rpc` depends on `tddy-service`, so naming its
+// message here would be a dependency cycle).
+//
+// Carries only what crosses this hop. `connection.SessionTerminalOutput` also had
+// `acked_input_offset`, `start_offset`, `end_offset` and `at_oldest` — capture-ring and
+// input-acknowledgement metadata the jail has no knowledge of, never set by the runner and never
+// read by the host relay, which takes `data` and nothing else. Those four numbers stay `reserved`
+// so a later field cannot claim one and collide with what an older runner still encodes there.
+//
+// The three surviving fields keep the numbers they were encoded under, so the bytes on this hop
+// are unchanged.
+message SandboxTerminalOutput {
+  bytes data = 1;
+  reserved 2, 3, 4, 5;
+  string session_id = 6;
+  string terminal_id = 7;
 }
 
 message EchoRequest {

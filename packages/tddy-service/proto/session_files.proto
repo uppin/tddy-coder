@@ -1,0 +1,328 @@
+syntax = "proto3";
+
+package session_files;
+
+import "types.proto";
+
+// Session file I/O: the workflow files a recipe wrote, agent context sync, uploads, and the staged
+// attachments and host documents a session start draws on.
+//
+// Split out of `connection.ConnectionService` by `#unbundle` node 6 — families I, J, R and S. Four
+// families in one service rather than four services because they are all *session file I/O*, they
+// share `SessionAttachment`, `StagedAttachmentRef` and `HostDocumentRef` among themselves, and four
+// services of two to five methods each would multiply the hand-written tonic adapters (one per
+// gRPC-served service, because `tddy-codegen`'s adapter generator is a documented stub) for no
+// reviewer benefit.
+//
+// Imports `types.proto` for `HostDocumentScope`, the one type that genuinely crosses to a service
+// that stays. `connection.proto` imports it from there too and declares no copy of its own, so the
+// enum has exactly one definition and `StartSession`'s `HostDocumentRef` and `ReadHostDocument`
+// name the same values.
+
+service SessionFilesService {
+  rpc ListSessionWorkflowFiles(ListSessionWorkflowFilesRequest) returns (ListSessionWorkflowFilesResponse);
+  rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
+  // The agent context sync (docs/ft/daemon/agent-context-sync.md). Sibling of
+  // StreamReadWorktreeFile, sharing its traversal and containment guards and deliberately NOT its
+  // git-listing gate: agent configuration is routinely gitignored (`.claude/settings.local.json`,
+  // `**/.cursor/mcp.json`), so a sync built on the git-gated reader would omit exactly the files an
+  // agent reads. What replaces the gate is the per-backend allow-list compiled into tddy-core,
+  // selected by the SERVING daemon from the session's own persisted `session_type` — never by the
+  // request. The `agent` field a caller sends is advisory only; see ContextManifestRequest.agent.
+  //
+  // The manifest STREAMS its entries rather than returning a repeated field, so a repo with a large
+  // `.claude/` tree never produces a message that has to be chunk-framed.
+  rpc StreamContextManifest(ContextManifestRequest) returns (stream ContextManifestEntry);
+  rpc StreamReadContextFile(ReadContextFileRequest) returns (stream ContextFileChunk);
+  // The same bytes, for several paths, in ONE call. Setup sync reads every allow-listed path before
+  // the agent process exists, and doing that one round trip at a time made a 120-file
+  // `.claude/skills/` tree into 121 sequential peer calls — around eighteen seconds of dead time on
+  // a 150 ms link, and 121 separate chances to trip PEER_FORWARD_TIMEOUT, where an ordinary split
+  // start used to make no extra peer calls at all. Same auth, same allow-list gate, same per-file
+  // and aggregate size refusals and the same 48 KiB framing as the single-file read, which stays:
+  // this is an addition for the batch case, not a replacement.
+  rpc StreamReadContextFileBatch(ReadContextFileBatchRequest) returns (stream ContextFileBatchChunk);
+  // Terminal file drop upload (see docs/ft/web/web-terminal.md § File drop upload). Files dropped
+  // on the web terminal are chunked client-side and uploaded to
+  // {session_dir}/uploads/{upload_id}/{file_name}; the response carries each file's absolute host
+  // path on its final chunk so the web can type that path into the terminal.
+  rpc UploadSessionFileChunk(UploadSessionFileChunkRequest) returns (UploadSessionFileChunkResponse);
+  // Session Files inspector tab (see docs/ft/web/session-files-inspector.md). Lists the files
+  // already uploaded to a session under {session_dir}/uploads/{upload_id}/{file_name} as a flat,
+  // newest-first list, and deletes a single uploaded file on demand.
+  rpc ListSessionUploads(ListSessionUploadsRequest) returns (ListSessionUploadsResponse);
+  rpc DeleteSessionUpload(DeleteSessionUploadRequest) returns (DeleteSessionUploadResponse);
+  // Start-session attachments — pre-session staging. Documents picked in the Start-Session form
+  // are uploaded like the terminal "Attach" flow (client-side 48 KiB chunks, one unary per chunk,
+  // `last` on the final one), but no session exists yet — so the bytes land in a per-host staging
+  // area keyed by `staging_id` and are referenced from StartSessionRequest.attachments. The
+  // staging root is restart-cleared (under the host's temp dir), so an abandoned batch does not
+  // outlive the host process. List/Delete back the form's attachment chips (re-open, remove
+  // before starting). See packages/tddy-daemon/docs/connection-service.md § Start-session
+  // attachments.
+  rpc UploadStagedAttachmentChunk(UploadStagedAttachmentChunkRequest) returns (UploadStagedAttachmentChunkResponse);
+  rpc ListStagedAttachments(ListStagedAttachmentsRequest) returns (ListStagedAttachmentsResponse);
+  rpc DeleteStagedAttachment(DeleteStagedAttachmentRequest) returns (DeleteStagedAttachmentResponse);
+  // Fetch the bytes of a document that already exists on a connected host, for materializing a
+  // `HostDocumentRef` during `StartSession`. Unary so it is forwardable over the LiveKit common
+  // room. The owning daemon resolves the scope root under its own os_user mapping and refuses a
+  // path that escapes; binary (attachments may be images), so it does not reuse the UTF-8 readers.
+  // Capped at the transport's message-size budget — StreamReadHostDocument carries anything
+  // larger. See docs/ft/coder/session-attachments.md and
+  // packages/tddy-daemon/docs/connection-service.md § Start-session attachments.
+  rpc ReadHostDocument(ReadHostDocumentRequest) returns (ReadHostDocumentResponse);
+  // Streaming twin of ReadHostDocument, for a document past the unary message-size ceiling. Each
+  // frame carries the next slice of bytes plus the document's total size, so a consumer can size a
+  // progress bar without a preamble frame. A document over the host's configured attachment cap is
+  // refused up front (INVALID_ARGUMENT) rather than streamed and truncated.
+  rpc StreamReadHostDocument(ReadHostDocumentRequest) returns (stream HostDocumentChunk);
+}
+
+// One frame of StreamReadContextFileBatch. Frames for one file arrive in order and consecutively;
+// `rel_path` says which file, so a client reassembles without tracking the request's ordering.
+//
+// Every file yields AT LEAST ONE frame, and the last frame of each file sets `end_of_file`. That is
+// what keeps a zero-byte file (one frame: empty `data`, `total_byte_size` 0, `end_of_file` true)
+// distinguishable from a file whose bytes never arrived — the rule the single-file read already
+// follows, restated here because a batch has the extra failure mode of ending early with the
+// remaining files simply absent.
+message ContextFileBatchChunk {
+  // Worktree-root-relative, forward-slash separated: the file this frame carries bytes of, spelled
+  // exactly as the request asked for it.
+  string rel_path = 1;
+  bytes data = 2;
+  // This file's full size, repeated on every one of its frames — the same contract as
+  // ContextFileChunk.total_byte_size, per file rather than per stream.
+  uint64 total_byte_size = 3;
+  // True on the last frame of this file, and on the only frame of an empty one.
+  bool end_of_file = 4;
+}
+
+// One frame of StreamReadContextFile. Mirrors WorktreeFileChunk: raw bytes with no encoding applied
+// anywhere on the path, so a `.claude/` tree holding a PNG round-trips intact, and a zero-byte file
+// yields exactly one frame with empty `data` so "the file is empty" stays distinguishable from "the
+// stream failed".
+message ContextFileChunk {
+  bytes data = 1;
+  // The file's full size, repeated on every frame so a reader knows the total from the first one.
+  uint64 total_byte_size = 2;
+}
+
+// One allow-listed path as the manifest advertises it.
+message ContextManifestEntry {
+  // Worktree-root-relative, forward-slash separated.
+  string rel_path = 1;
+  // Lowercase hex SHA-256 of the file's bytes. The sole authority on whether a file moved: a syncer
+  // that compared sizes would re-read on every same-length edit and miss none of them.
+  string sha256 = 2;
+  // Rides the entry so a client refuses an over-cap file *before* spending a read on it.
+  uint64 size_bytes = 3;
+}
+
+message ContextManifestRequest {
+  string session_token = 1;
+  // The session whose checkout is measured — on a split session, the `workspace` session holding
+  // the codebase, never the agent's own id.
+  string session_id = 2;
+  // Routing, as on ExecuteTool: the daemon expected to answer. Empty means the one being called.
+  string daemon_instance_id = 3;
+  // Which compiled-in allow-list the caller BELIEVES it is reading, by agent name ("claude",
+  // "cursor", "codex", ...). Advisory: carried for logging, and NOT authoritative.
+  //
+  // The serving daemon derives the row it actually serves from the session it has already looked
+  // up — its persisted `session_type`, or Claude's row when the session records a paired split
+  // agent (tddy_daemon::context_files::context_agent_for_session). It has to: authorization here is
+  // per OS user rather than per session, so a caller holding a valid token for a `codex` session
+  // could otherwise name `cursor` and be served that checkout's `.claude/**`, `.cursor/**` and
+  // `.mcp.json` — the files that carry API tokens in MCP `env` blocks, and exactly the gitignored
+  // ones the git-listing gate used to refuse. Trusting the field would make the enforced bound the
+  // union of every table row instead of the session's own. When the two disagree the daemon logs at
+  // debug and serves the session's.
+  string agent = 4;
+}
+
+message DeleteSessionUploadRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string upload_id = 3;  // untrusted — validated as a basename, contained under uploads root
+  string file_name = 4;  // untrusted — validated as a basename
+}
+
+message DeleteSessionUploadResponse {}
+
+message DeleteStagedAttachmentRequest {
+  string session_token = 1;
+  string daemon_instance_id = 2;
+  string staging_id = 3;  // untrusted — validated as a basename, contained under the staging root
+  string file_name = 4;   // untrusted — validated as a basename
+}
+
+message DeleteStagedAttachmentResponse {}
+
+// One frame of a StreamReadHostDocument response. The document's bytes are the concatenation of
+// every frame's `data`, in arrival order.
+message HostDocumentChunk {
+  // Next slice of the document. A zero-byte document still yields exactly one frame, so a consumer
+  // never has to distinguish "empty" from "nothing arrived".
+  bytes data = 1;
+  // Total size of the whole document, stamped on **every** frame — a consumer can size a progress
+  // bar from the first frame without a separate preamble message.
+  uint64 total_byte_size = 2;
+}
+
+message ListSessionUploadsRequest {
+  string session_token = 1;
+  string session_id = 2;
+}
+
+message ListSessionUploadsResponse {
+  repeated SessionUploadEntry uploads = 1;  // newest first
+}
+
+message ListSessionWorkflowFilesRequest {
+  string session_token = 1;
+  string session_id = 2;
+}
+
+message ListSessionWorkflowFilesResponse {
+  repeated WorkflowFileEntry files = 1;
+}
+
+message ListStagedAttachmentsRequest {
+  string session_token = 1;
+  // Host authority holding the staging area (see UploadStagedAttachmentChunkRequest).
+  string daemon_instance_id = 2;
+  // When set, list only this batch. Empty = every batch still staged for the caller.
+  string staging_id = 3;
+}
+
+message ListStagedAttachmentsResponse {
+  repeated StagedAttachmentEntry attachments = 1;  // newest first
+}
+
+message ReadContextFileBatchRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+  // Advisory, exactly as ContextManifestRequest.agent is.
+  string agent = 4;
+  // The files to read, each relative to the worktree root, under the same shape rules as
+  // ReadContextFileRequest.rel_path. Every path is gated individually and the WHOLE call is refused
+  // if any one of them is: a partially served batch would leave the caller unable to tell "the
+  // project does not ship that file" from "this host would not serve it", and the setup sync it
+  // exists for must fail loudly rather than start an agent against incomplete guidance. An empty
+  // list is INVALID_ARGUMENT — a caller with nothing to read must not spend a round trip.
+  repeated string rel_paths = 5;
+}
+
+message ReadContextFileRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+  // Advisory, exactly as ContextManifestRequest.agent is: the row served is the session's own, and
+  // this field is carried for logging. See that comment for why trusting it would widen the gate.
+  string agent = 4;
+  // The file to read, relative to the worktree root. No traversal, no absolute paths, and refused
+  // identically whether or not a file exists there when the allow-list does not name it — answering
+  // "does it exist?" before "may you see it?" would hand out the existence map.
+  string rel_path = 5;
+}
+
+// Request to fetch one host document's bytes. Mirrors `HostDocumentRef` plus the caller's
+// `session_token` (re-resolved to an os_user by the owning daemon, so the referencing client's
+// host grants no access). Routes by `daemon_instance_id` like the staging RPCs: empty / matching
+// the local instance = read locally; otherwise forwarded to the peer daemon.
+message ReadHostDocumentRequest {
+  string session_token = 1;
+  string daemon_instance_id = 2;
+  types.HostDocumentScope scope = 3;
+  // Owning session for the SESSION_* scopes; ignored otherwise.
+  string session_id = 4;
+  // Owning project for HOST_DOCUMENT_SCOPE_PROJECT_REPO; ignored otherwise.
+  string project_id = 5;
+  // Path relative to the resolved root: POSIX separators, no "." / ".." segments, not absolute.
+  string relative_path = 6;
+}
+
+// The document's bytes. `byte_size` equals `data.len()` — a file over `MAX_HOST_DOCUMENT_BYTES`
+// is refused with INVALID_ARGUMENT (not truncated, since a truncated attachment is useless; the
+// caller should stage larger docs, since staging is chunked with no single-message limit).
+message ReadHostDocumentResponse {
+  bytes data = 1;
+  uint64 byte_size = 2;
+}
+
+message ReadSessionWorkflowFileRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Allowlisted workflow file basename (server resolves under session dir only).
+  string basename = 3;
+}
+
+message ReadSessionWorkflowFileResponse {
+  string content_utf8 = 1;
+}
+
+message SessionUploadEntry {
+  string upload_id = 1;      // per-drop UUID subfolder
+  string file_name = 2;      // basename
+  string host_path = 3;      // absolute host path
+  uint64 size_bytes = 4;
+  int64 uploaded_at_ms = 5;  // file mtime, unix milliseconds
+}
+
+// One file sitting in a host's pre-session staging area.
+message StagedAttachmentEntry {
+  // Host authority holding the bytes (the resolved daemon instance, never empty in a response).
+  string daemon_instance_id = 1;
+  string staging_id = 2;
+  string file_name = 3;  // basename
+  string host_path = 4;  // absolute host path of the staged file
+  uint64 size_bytes = 5;
+  int64 staged_at_ms = 6;  // file mtime, unix milliseconds
+}
+
+message UploadSessionFileChunkRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Per-drop UUID grouping all files of one drag gesture into uploads/<upload_id>/.
+  string upload_id = 3;
+  // Basename only — path separators, "." / ".." and empty are rejected by the daemon.
+  string file_name = 4;
+  // Next chunk of this file's bytes; chunks for a given (upload_id, file_name) arrive in order.
+  bytes data = 5;
+  // True on the final chunk of this file — response then carries the absolute host_path.
+  bool last = 6;
+}
+
+message UploadSessionFileChunkResponse {
+  // Absolute host path of the written file; populated only when the request's `last` was true.
+  string host_path = 1;
+}
+
+message UploadStagedAttachmentChunkRequest {
+  string session_token = 1;
+  // Host authority to stage the bytes on. Empty or matching the local instance = stage locally.
+  // A session can only consume a staged batch that lives on the host it starts on, so this is the
+  // same daemon_instance_id the subsequent StartSession is addressed to.
+  string daemon_instance_id = 2;
+  // Client-generated UUID grouping all files of one Start-Session form into
+  // {staging_root}/<staging_id>/. Untrusted — validated as a basename by the daemon.
+  string staging_id = 3;
+  // Basename only — path separators, "." / ".." and empty are rejected by the daemon.
+  string file_name = 4;
+  // Next chunk of this file's bytes; chunks for a given (staging_id, file_name) arrive in order.
+  bytes data = 5;
+  // True on the final chunk of this file — the response then carries the completed entry.
+  bool last = 6;
+}
+
+message UploadStagedAttachmentChunkResponse {
+  // The staged file, populated only when the request's `last` was true. Its `staging_id` /
+  // `file_name` are what a StagedAttachmentRef refers to.
+  StagedAttachmentEntry entry = 1;
+}
+
+message WorkflowFileEntry {
+  string basename = 1;
+}

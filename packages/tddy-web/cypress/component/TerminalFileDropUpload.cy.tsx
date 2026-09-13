@@ -12,7 +12,7 @@
 import React from "react";
 import { TerminalFileDropZone } from "../../src/components/connection/TerminalFileDropZone";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -25,7 +25,7 @@ const SESSION_TOKEN = "tok-1";
 /** A backend that echoes each file's chosen host path on the final chunk. */
 function anUploadBackend(): InMemoryRpcBackend {
   return anInMemoryRpcBackend().onUnary(
-    ConnectionService.method.uploadSessionFileChunk,
+    SessionFilesService.method.uploadSessionFileChunk,
     (req) => ({ hostPath: req.last ? `/srv/host/uploads/${req.fileName}` : "" }),
   );
 }
@@ -50,7 +50,7 @@ function mountDropZone(backend: InMemoryRpcBackend, insertInput: Cypress.Agent<s
 /** Bytes recorded for `fileName`, ordered by call sequence, reassembled to a string. */
 function uploadedContents(backend: InMemoryRpcBackend, fileName: string): string {
   const chunks = backend
-    .callsTo(ConnectionService.method.uploadSessionFileChunk)
+    .callsTo(SessionFilesService.method.uploadSessionFileChunk)
     .filter((c) => c.fileName === fileName)
     .map((c) => c.data as Uint8Array);
   return reconstructUtf8(chunks);
@@ -83,7 +83,7 @@ describe("Terminal file drop — upload and type the host path", () => {
 
     // Then — the daemon received each file's exact bytes, grouped under a single upload id
     cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.uploadSessionFileChunk);
+      const calls = backend.callsTo(SessionFilesService.method.uploadSessionFileChunk);
       const uploadIds = new Set(calls.map((c) => c.uploadId));
       expect(uploadIds.size, "all chunks share one drop/upload id").to.equal(1);
       // The upload id is a UUID generated at runtime, so only its presence can be asserted.
@@ -102,7 +102,7 @@ describe("Terminal file drop — upload and type the host path", () => {
 
     cy.wrap(null).should(() => {
       const finals = backend
-        .callsTo(ConnectionService.method.uploadSessionFileChunk)
+        .callsTo(SessionFilesService.method.uploadSessionFileChunk)
         .filter((c) => c.fileName === "solo.txt" && c.last);
       expect(finals, "exactly one final chunk per file").to.have.length(1);
     });

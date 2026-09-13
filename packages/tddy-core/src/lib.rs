@@ -118,7 +118,7 @@ pub use session_lifecycle::{
     UnifiedSessionTreeBootstrap,
 };
 pub use session_metadata::{
-    read_session_metadata, repo_root_for_session, update_activity_status,
+    paired_agent, read_session_metadata, repo_root_for_session, update_activity_status,
     write_initial_tool_session_metadata, write_session_metadata, InitialToolSessionMetadataOpts,
     SessionMetadata, SESSION_METADATA_FILENAME,
 };

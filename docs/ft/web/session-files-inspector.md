@@ -36,11 +36,12 @@ cares about — sorted **newest first** by file modification time.
 
 An empty uploads directory (or none yet created) renders an empty state, not an error.
 
-## Listing — new `ListSessionUploads` RPC
+## Listing — `ListSessionUploads`
 
 Uploaded files live on the host filesystem, so the list is read server-side (chosen over a
 browser-local registry so it survives reloads and is consistent across devices/tabs viewing the same
-session). A new unary RPC mirrors the auth + session-dir resolution of `UploadSessionFileChunk`:
+session). `ListSessionUploads` on `session_files.SessionFilesService` is a unary RPC mirroring the
+auth + session-dir resolution of its `UploadSessionFileChunk` sibling:
 
 - Validates `session_token` and resolves the session's uploads root exactly as the upload path does.
 - Walks each `uploads/{upload_id}/` subfolder one level deep, emitting one entry per regular file.
@@ -52,9 +53,10 @@ The tab loads on mount and reloads after a successful delete. No streaming or po
 change only in response to user action (a drop, or a delete), and a drop already runs in the same
 app, so an explicit reload after those events is sufficient.
 
-## Delete — new `DeleteSessionUpload` RPC
+## Delete — `DeleteSessionUpload`
 
-A second unary RPC removes a single uploaded file, addressed by its `upload_id` + `file_name`:
+A second unary RPC on the same service removes a single uploaded file, addressed by its `upload_id` +
+`file_name`:
 
 - Both segments are untrusted client input and are validated as safe basenames, then a
   canonicalize-and-contain guard confirms the target resolves inside the session's uploads root —
@@ -128,8 +130,9 @@ empty state:
 ## Protocol
 
 ```protobuf
-service ConnectionService {
-  // … existing …
+// packages/tddy-service/proto/session_files.proto
+service SessionFilesService {
+  // … the other session-file methods …
   rpc ListSessionUploads(ListSessionUploadsRequest) returns (ListSessionUploadsResponse);
   rpc DeleteSessionUpload(DeleteSessionUploadRequest) returns (DeleteSessionUploadResponse);
 }
@@ -160,15 +163,18 @@ message DeleteSessionUploadResponse {}
 
 ## Backend
 
-- New daemon module `session_uploads.rs` (sibling of `session_file_upload.rs`), reusing that
-  module's segment-validation + canonicalize-and-contain guard (extracted to a shared helper):
+- `tddy-session-files`'s `session_uploads` module (sibling of `session_file_upload`), reusing that
+  module's segment-validation + canonicalize-and-contain guard (a shared helper):
   - `list_uploads(sessions_base, session_id) -> Result<Vec<UploadEntry>, Status>` — walks
     `uploads/*/*`, one level deep per `upload_id`; missing root ⇒ empty vec; sorted newest-first.
   - `delete_upload(sessions_base, session_id, upload_id, file_name) -> Result<(), Status>` —
     validates both segments, removes the file, prunes the emptied `upload_id` folder; `NotFound` for
     a missing file; `InvalidArgument` for an unsafe segment (writing/removing nothing outside root).
-- `ConnectionServiceImpl` gains `list_session_uploads` / `delete_session_upload` handlers mirroring
-  `upload_session_file_chunk`'s auth + `sessions_base` resolution.
+- `SessionFilesServiceImpl` (`packages/tddy-session-files/src/service.rs`) serves the
+  `list_session_uploads` / `delete_session_upload` handlers, mirroring `upload_session_file_chunk`'s
+  auth + `sessions_base` resolution. The daemon registers that service entry through its
+  peer-routing wrapper, beside `connection.ConnectionService`, so both RPCs answer on `/rpc`, the
+  LiveKit common room and the local socket like every other session-file method.
 
 ## Frontend
 
@@ -187,11 +193,12 @@ message DeleteSessionUploadResponse {}
 
 ## Scope
 
-- **In scope:** Files tab; `ListSessionUploads` + `DeleteSessionUpload` RPCs and the
-  `session_uploads` daemon module; flat newest-first listing across `upload_id` folders; drag
-  (desktop) + tap/Insert (mobile) reuse routing the host path into the focused terminal; Inspector
-  auto-close on drag/insert; Copy path; two-step Delete; extending `TerminalFileDropZone` to insert
-  an already-uploaded host path without re-uploading.
+- **In scope:** Files tab; `ListSessionUploads` + `DeleteSessionUpload` on
+  `session_files.SessionFilesService` and the `session_uploads` module behind them; flat
+  newest-first listing across `upload_id` folders; drag (desktop) + tap/Insert (mobile) reuse
+  routing the host path into the focused terminal; Inspector auto-close on drag/insert; Copy path;
+  two-step Delete; extending `TerminalFileDropZone` to insert an already-uploaded host path without
+  re-uploading.
 - **Out of scope:** file **preview**/download in the tab; renaming; multi-select bulk actions;
   grouping the list by drag gesture; a streaming/polling live-refresh of the list; uploads for
   **remote** sessions beyond what the existing upload flow already supports (local daemon parity);
@@ -205,5 +212,7 @@ message DeleteSessionUploadResponse {}
   confirm pattern reused by Delete.
 - [Session drawer](session-drawer.md) — Inspector host, overlay/docked layout, and
   `inspectorState` close semantics reused for auto-close.
-- Daemon module: [`session_file_upload`](../../../packages/tddy-daemon/src/session_file_upload.rs)
+- Host service: [session-files-service.md](../../../packages/tddy-session-files/docs/session-files-service.md)
+  — the service both RPCs belong to.
+- Host module: [`session_file_upload`](../../../packages/tddy-session-files/src/session_file_upload.rs)
   — the upload writer whose validation guard `session_uploads` shares.

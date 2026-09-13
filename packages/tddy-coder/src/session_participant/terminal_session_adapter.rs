@@ -12,6 +12,12 @@ use tokio::sync::{broadcast, watch};
 use crate::session_participant::terminal_manager::{PtyHandle, TerminalManager};
 
 /// A live coder shell terminal exposed to the unified bridge.
+///
+/// [`TerminalSession::resizable`](tddy_terminal_rpc::session::TerminalSession::resizable) is left
+/// at its default `true`, which is the truth here: this is a real PTY whose `resize` reaches
+/// `tddy_pty::PtyRegistry` and delivers a `SIGWINCH`, so the bridge's post-resize drain discards
+/// only bytes the redraw replaces. (The daemon's *sandbox* terminals are the ones that had to
+/// answer `false` — their resize is a no-op, so a drain there would eat live output.)
 pub struct CoderTerminalSession {
     handle: Arc<PtyHandle>,
 }

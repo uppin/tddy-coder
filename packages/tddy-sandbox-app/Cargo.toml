@@ -42,6 +42,10 @@ tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-service = { path = "../tddy-service" }
 tddy-task = { path = "../tddy-task" }
+# The in-jail terminal bridge dials `terminal_session.TerminalSessionService` on the daemon's local
+# socket; the tonic client and its messages are this crate's. Default features only — its
+# `tddy-livekit` is behind the optional `livekit` feature, and this binary runs inside every jail.
+tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
 # Reached directly; `tddy_daemon::tool_engine` was only a re-export of this crate.
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 tonic = { version = "0.12", default-features = false, features = ["transport"] }
