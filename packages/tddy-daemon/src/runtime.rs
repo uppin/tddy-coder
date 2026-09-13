@@ -1222,7 +1222,10 @@ pub async fn build(
     });
 
     let service_name_strs: Vec<&str> = rpc_entries.iter().map(|e| e.name).collect();
-    rpc_entries.push(tddy_service::reflection_entry_from(&service_name_strs));
+    rpc_entries.push(tddy_service::reflection_entry_from_with_supplements(
+        &service_name_strs,
+        &[tddy_terminal_rpc::TERMINAL_SESSION_DESCRIPTOR_BYTES],
+    ));
 
     // Serve the daemon's RPC services on the LiveKit common room, so a client that can join the
     // room can invoke every service without an HTTP origin — and keep serving them on whatever

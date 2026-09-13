@@ -67,7 +67,9 @@ pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
 pub use proto::vm::VmServiceServer;
 pub use proto::worktree::WorktreeServiceServer;
-pub use reflection_service::{reflection_entry_from, ServerReflectionImpl};
+pub use reflection_service::{
+    reflection_entry_from, reflection_entry_from_with_supplements, ServerReflectionImpl,
+};
 pub use service::{session_view_adapter_surface, TddyRemoteService};
 pub use service_acp::TddyAcpService;
 pub use service_coordinates::SESSION_FILES_SERVICE;

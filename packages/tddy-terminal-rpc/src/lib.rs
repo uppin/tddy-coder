@@ -59,4 +59,11 @@ pub use service::{
     build_terminal_session_entry, ControlChange, ControlClaim, TerminalControl, TerminalDescriptor,
     TerminalRoster, TerminalSessionPorts, TerminalSessionServiceImpl, TERMINAL_SESSION_SERVICE,
 };
+
+/// Serialized `FileDescriptorSet` for gRPC reflection (merged at the daemon host with
+/// `tddy-service`'s set).
+pub static TERMINAL_SESSION_DESCRIPTOR_BYTES: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/terminal_session_descriptors.bin"
+));
 pub use session::{TerminalSession, TerminalSessionStore};

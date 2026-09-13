@@ -41,7 +41,7 @@ impl ServerReflectionImpl {
     /// # Panics
     /// Panics if `descriptor_bytes` is not a valid `FileDescriptorSet`. This is a build-time
     /// invariant: the bytes come from the `prost-build` descriptor pass embedded at compile time.
-    pub fn new(registered_names: Vec<String>, descriptor_bytes: &'static [u8]) -> Self {
+    pub fn new(registered_names: Vec<String>, descriptor_bytes: &[u8]) -> Self {
         let fds = FileDescriptorSet::decode(descriptor_bytes)
             .expect("SERVICE_DESCRIPTOR_BYTES must be a valid FileDescriptorSet");
 
@@ -221,6 +221,15 @@ impl ServerReflection for ServerReflectionImpl {
 /// easily do it themselves: they collect the names of the entries they already have,
 /// which by construction cannot include the entry this function is about to return.
 pub fn reflection_entry_from(registered_names: &[&str]) -> tddy_rpc::ServiceEntry {
+    reflection_entry_from_with_supplements(registered_names, &[])
+}
+
+/// Like [`reflection_entry_from`], merging extra build-time `FileDescriptorSet` blobs (e.g.
+/// `tddy-terminal-rpc`'s `terminal_session.proto`) into the reflection index.
+pub fn reflection_entry_from_with_supplements(
+    registered_names: &[&str],
+    supplements: &[&[u8]],
+) -> tddy_rpc::ServiceEntry {
     use crate::proto::reflection::ServerReflectionServer;
     let own_name = ServerReflectionServer::<ServerReflectionImpl>::NAME;
     let names: Vec<String> = registered_names
@@ -228,11 +237,35 @@ pub fn reflection_entry_from(registered_names: &[&str]) -> tddy_rpc::ServiceEntr
         .map(|s| s.to_string())
         .chain((!registered_names.contains(&own_name)).then(|| own_name.to_string()))
         .collect();
-    let impl_ = ServerReflectionImpl::new(names, crate::SERVICE_DESCRIPTOR_BYTES);
+    let merged = merge_descriptor_sets(crate::SERVICE_DESCRIPTOR_BYTES, supplements);
+    let descriptor_bytes: &'static [u8] = Box::leak(merged.into_boxed_slice());
+    let impl_ = ServerReflectionImpl::new(names, descriptor_bytes);
     tddy_rpc::ServiceEntry {
         name: ServerReflectionServer::<ServerReflectionImpl>::NAME,
         service: Arc::new(ServerReflectionServer::new(impl_)),
     }
+}
+
+/// Merge a base embedded descriptor set with supplemental sets, deduplicating by file name.
+fn merge_descriptor_sets(base: &[u8], supplements: &[&[u8]]) -> Vec<u8> {
+    let mut merged = FileDescriptorSet::decode(base)
+        .expect("SERVICE_DESCRIPTOR_BYTES must be a valid FileDescriptorSet");
+    for extra in supplements {
+        let mut fds = FileDescriptorSet::decode(*extra)
+            .expect("supplemental descriptor bytes must be a valid FileDescriptorSet");
+        for file in fds.file.drain(..) {
+            let name = file.name.clone().unwrap_or_default();
+            if merged
+                .file
+                .iter()
+                .any(|existing| existing.name.as_deref() == Some(name.as_str()))
+            {
+                continue;
+            }
+            merged.file.push(file);
+        }
+    }
+    merged.encode_to_vec()
 }
 
 #[cfg(test)]

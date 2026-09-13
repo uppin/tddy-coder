@@ -182,10 +182,8 @@ pub async fn bridge_sandbox_stdio<S: tddy_rpc::RpcService>(
         .map_err(|e| format!("wrap sandbox stdout as async pipe: {e}"))?;
     let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(receiver, sender, service);
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-    let run_handle = tokio::spawn(async move {
-        let _ = ready_tx.send(());
-        endpoint.run().await
-    });
+    let endpoint = endpoint.signal_start_ready(ready_tx);
+    let run_handle = tokio::spawn(async move { endpoint.run().await });
     ready_rx
         .await
         .map_err(|_| "sandbox stdio endpoint exited before its read loop started".to_string())?;
