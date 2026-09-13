@@ -1034,9 +1034,9 @@ pub async fn build(
         // LiveKitService — the rooms this daemon can see on the LiveKit server and who is joined
         // to each. Family T left `the pre-unbundle monolithic RPC coordinate` in `#unbundle` node 4; the entry
         // comes from `tddy-daemon-livekit` assembled, so this wiring never names the poll cadence.
-        rpc_entries.push(tddy_daemon_livekit::build_livekit_entry(
-            Arc::clone(&livekit_service),
-        ));
+        rpc_entries.push(tddy_daemon_livekit::build_livekit_entry(Arc::clone(
+            &livekit_service,
+        )));
 
         // WorktreeService — listing, cleaning, sizing, restoring and reading a project's checkouts.
         let worktree_server =

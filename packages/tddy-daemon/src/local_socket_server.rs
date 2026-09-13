@@ -29,10 +29,10 @@ use tddy_service::proto::demo_vm::{DemoVmService as RpcDemoVmService, DemoVmServ
 use tddy_service::proto::exec_tools::{
     ExecToolService as RpcExecToolService, ExecToolServiceTonicAdapter,
 };
+use tddy_service::proto::host::HostService as RpcHostService;
 use tddy_service::proto::livekit::{
     LiveKitService as RpcLiveKitService, LiveKitServiceTonicAdapter,
 };
-use tddy_service::proto::host::HostService as RpcHostService;
 use tddy_service::proto::pr_stack::{
     PrStackService as RpcPrStackService, PrStackServiceTonicAdapter,
 };
