@@ -23,9 +23,9 @@ use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::session_notification_subscribers::SessionNotificationStreamSubscriber;
 use tddy_daemon::session_notifications::SessionNotificationBus;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ReportSessionStatusRequest,
-    SessionNotificationEvent, SessionNotificationKind as ProtoSessionNotificationKind,
+use tddy_service::proto::activity::{
+    ActivityService, ReportSessionStatusRequest, SessionNotificationEvent,
+    SessionNotificationKind as ProtoSessionNotificationKind,
     SessionNotificationSource as ProtoSessionNotificationSource, StreamSessionNotificationsRequest,
 };
 
@@ -161,11 +161,12 @@ fn a_service_with_a_notification_stream(sessions_base: PathBuf) -> ConnectionSer
     .with_session_notification_bus(Arc::new(bus))
 }
 
-type NotificationStream =
-    <ConnectionServiceImpl as ConnectionServiceTrait>::StreamSessionNotificationsStream;
+type NotificationStream = <tddy_daemon::connection_service::PeerRoutedActivity
+    as ActivityService>::StreamSessionNotificationsStream;
 
 async fn a_subscribed_client(service: &ConnectionServiceImpl) -> NotificationStream {
     service
+        .activity_service()
         .stream_session_notifications(Request::new(StreamSessionNotificationsRequest {
             session_token: SESSION_TOKEN.to_string(),
         }))
@@ -187,6 +188,7 @@ async fn report_status_owned_by(
     status: &str,
 ) {
     service
+        .activity_service()
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: session_id.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
@@ -299,13 +301,14 @@ async fn rejects_a_notification_stream_opened_without_a_valid_session_token() {
 
     // When
     let result = service
+        .activity_service()
         .stream_session_notifications(Request::new(StreamSessionNotificationsRequest {
             session_token: "not-a-token".to_string(),
         }))
         .await;
 
     // Then
-    let status = result.err().expect("an invalid token must be rejected");
+    let status = result.expect_err("an invalid token must be rejected");
     assert_eq!(status.code(), tddy_rpc::Code::Unauthenticated);
 }
 
@@ -432,14 +435,13 @@ async fn rejects_a_notification_stream_opened_by_a_user_mapped_to_no_os_user() {
 
     // When
     let result = service
+        .activity_service()
         .stream_session_notifications(Request::new(StreamSessionNotificationsRequest {
             session_token: UNMAPPED_SESSION_TOKEN.to_string(),
         }))
         .await;
 
     // Then
-    let status = result
-        .err()
-        .expect("a token mapped to no OS user must be rejected");
+    let status = result.expect_err("a token mapped to no OS user must be rejected");
     assert_eq!(status.code(), tddy_rpc::Code::PermissionDenied);
 }

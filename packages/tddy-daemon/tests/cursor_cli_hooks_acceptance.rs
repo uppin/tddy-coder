@@ -11,9 +11,7 @@ use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ReportSessionStatusRequest,
-};
+use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 
@@ -101,6 +99,7 @@ async fn cursor_cli_report_session_status_writes_activity_status() {
 
     // When
     let response = service
+        .activity_service()
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: session_id.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
@@ -129,6 +128,7 @@ async fn cursor_cli_report_session_status_rejects_bad_hook_token() {
 
     // When
     let err = service
+        .activity_service()
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: session_id.to_string(),
             hook_token: "wrong-token".to_string(),
@@ -183,6 +183,7 @@ async fn cursor_cli_report_session_status_rejects_tool_session_type() {
 
     // When
     let err = service
+        .activity_service()
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: session_id.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),

@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use prost::Message;
 use tddy_discovery::subagent::{StopReason, SubagentSession};
 use tddy_rpc::{RpcClientTransport, Status};
-use tddy_service::proto::connection::{
+use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, CancelAgentConversationRequest, OpenAgentConversationRequest,
     OpenAgentConversationResponse, PromptAgentConversationRequest,
 };
@@ -509,8 +509,8 @@ async fn a_remote_conversation_prompts_over_the_link_it_was_opened_on() {
     assert_eq!(
         daemon.methods_called(),
         vec![
-            "connection.ConnectionService/OpenAgentConversation",
-            "connection.ConnectionService/PromptAgentConversation",
+            "session_agents.SessionAgentService/OpenAgentConversation",
+            "session_agents.SessionAgentService/PromptAgentConversation",
         ]
     );
 }

@@ -16,9 +16,8 @@ use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_daemon_livekit::session_room::ActivityDelta;
 use tddy_rpc::{Code, Request, Status};
-use tddy_service::proto::connection::{
-    AgentActivityDeltaChunk, AgentActivityDeltaRequest,
-    ConnectionService as ConnectionServiceTrait, DeltaScope,
+use tddy_service::proto::activity::{
+    ActivityService as _, AgentActivityDeltaChunk, AgentActivityDeltaRequest, DeltaScope,
 };
 
 const A_SESSION: &str = "1780828020298-delta";
@@ -98,6 +97,7 @@ async fn a_refused_lookup(request: AgentActivityDeltaRequest) -> Status {
     let sessions = tempfile::tempdir().expect("sessions tempdir");
     let service = test_service(sessions.path().to_path_buf());
     service
+        .activity_service()
         .stream_agent_activity_delta(Request::new(request))
         .await
         .expect_err("expected the lookup to be refused rather than streamed")

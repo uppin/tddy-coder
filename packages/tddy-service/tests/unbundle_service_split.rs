@@ -136,8 +136,9 @@ fn connection_service_keeps_exactly_the_methods_node_one_leaves_behind() {
 
     // Then
     assert_eq!(
-        declared, 50,
-        "of the original 90: node 1 moved 17, node 4 moved StreamLiveKitRooms, node 6 moved 22. \
+        declared, 33,
+        "of the original 90: node 1 moved 17, node 4 moved StreamLiveKitRooms, node 6 moved 22, \
+         node 7 moved 17 (family B's 9 to session_agents, families M and N's 8 to activity). \
          Every node updates this number — a node that lands and leaves it alone turns this test red \
          for the next one, who will read a passing assertion as a promise rather than as the \
          arithmetic its own change owes. Recount, do not compute: restating the proto's own count \
@@ -229,6 +230,7 @@ fn the_shared_types_file_holds_only_what_two_served_services_both_need() {
     let types = read("types.proto");
     let connection = read("connection.proto");
     let session_files = read("session_files.proto");
+    let session_agents = read("session_agents.proto");
 
     // Then it holds the one enum that crosses
     assert!(
@@ -249,12 +251,33 @@ fn the_shared_types_file_holds_only_what_two_served_services_both_need() {
          session_files.proto must import types.proto"
     );
 
+    // Then it holds the two types node 7 added, and both of those cross too
+    assert!(
+        types.contains("message SessionAgentActivity") && types.contains("enum SessionAgentStatus"),
+        "types.proto holds the two types ListSessions and the session-agent roster both reach"
+    );
+    assert!(
+        connection.contains("types.SessionAgentStatus")
+            && connection.contains("types.SessionAgentActivity"),
+        "connection.ConnectionService keeps ListSessions, whose SessionEntry carries both, so \
+         connection.proto must reach them rather than redeclaring them"
+    );
+    assert!(
+        session_agents.contains("import \"types.proto\"")
+            && session_agents.contains("types.SessionAgentStatus"),
+        "session_agents.SessionAgentService owns the roster rows carrying both, so \
+         session_agents.proto must reach the shared types"
+    );
+
     // Then nothing else has been parked there
     let declared = types.matches("\nenum ").count() + types.matches("\nmessage ").count();
     assert_eq!(
-        declared, 1,
+        declared, 3,
         "types.proto must hold only what genuinely crosses; anything added needs two really-served \
-         services reaching it"
+         services reaching it. Node 7 added SessionAgentStatus and SessionAgentActivity, and both \
+         clear that bar: connection.ConnectionService keeps ListSessions, whose SessionEntry \
+         carries an agent_status and a last_activity, while session_agents.SessionAgentService \
+         reaches both through the SessionAgentEntry rows of the roster it owns"
     );
 }
 
@@ -426,4 +449,65 @@ impl RustSources {
         );
         self
     }
+}
+
+const SESSION_AGENT_METHODS: [&str; 9] = [
+    "AttachSessionAgent",
+    "DetachSessionAgent",
+    "ListSessionAgents",
+    "StreamSessionAgents",
+    "OpenAgentConversation",
+    "PromptAgentConversation",
+    "CancelAgentConversation",
+    "ReportAgentCloneState",
+    "ReportAgentConversationState",
+];
+
+const ACTIVITY_METHODS: [&str; 8] = [
+    "ReportSessionStatus",
+    "StreamSessionActivity",
+    "ReportAgentActivity",
+    "StreamSessionNotifications",
+    "StreamAgentActivityDelta",
+    "StreamAcpReplay",
+    "GetAcpToolCallDetail",
+    "GetAcpReplayPage",
+];
+
+#[test]
+fn session_agent_service_declares_every_roster_and_conversation_method() {
+    let block = service_block(&read("session_agents.proto"), "SessionAgentService");
+    for method in SESSION_AGENT_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "session_agents.SessionAgentService is missing {method}"
+        );
+    }
+}
+
+#[test]
+fn activity_service_declares_every_activity_and_replay_method() {
+    let block = service_block(&read("activity.proto"), "ActivityService");
+    for method in ACTIVITY_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "activity.ActivityService is missing {method}"
+        );
+    }
+}
+
+#[test]
+fn connection_service_no_longer_declares_the_agent_or_activity_methods() {
+    let block = service_block(&connection_proto(), "ConnectionService");
+    let still_there: Vec<&str> = SESSION_AGENT_METHODS
+        .into_iter()
+        .chain(ACTIVITY_METHODS)
+        .filter(|method| block.contains(&format!("rpc {method}(")))
+        .collect();
+
+    assert!(
+        still_there.is_empty(),
+        "these moved to session_agents / activity but are still on connection.ConnectionService: \
+         {still_there:?}"
+    );
 }

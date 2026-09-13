@@ -93,6 +93,14 @@ tddy-testing-commons = { path = "../tddy-testing-commons" }
 tddy-core = { path = "../tddy-core" }
 # subagent_mcp_acceptance.rs: mocks the FastContext /v1/chat/completions endpoint.
 wiremock = "0.6"
+# session_hook_cli.rs: the `/rpc/{service}/{method}` router the daemon itself serves `session-hook`'s
+# two reports on. Serving the real router — rather than a hand-rolled listener that answers any path
+# — is what makes the suite able to tell the coordinate the hook posts to from the one the daemon
+# mounts: an unmounted service is refused by `MultiRpcService`, so a hook addressing the wrong one
+# records nothing. `axum` is only the `serve` call for that router, and is already a workspace-wide
+# dependency, so no new crate enters the tree.
+tddy-connectrpc = { path = "../tddy-connectrpc" }
+axum = "0.8"
 # subagent_status_wait_acceptance.rs: `#[tokio::test(start_paused = true)]`, so a wait's deadline
 # and the frame that beats it are ordered by virtual time rather than by a real sleep whose length
 # the test would have to guess.

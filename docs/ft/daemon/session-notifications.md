@@ -63,7 +63,7 @@ the dot stays fully opaque — a dot frozen mid-fade would read as a different s
 
 ## Delivery
 
-One daemon-level **`ConnectionService.StreamSessionNotifications`** subscription serves the whole
+One daemon-level **`ActivityService.StreamSessionNotifications`** subscription serves the whole
 drawer, however many rows it shows — the request names no session. It is **live-only**: a replayed
 backlog would raise indicators for turns that finished while the tab was closed.
 
@@ -88,4 +88,4 @@ Tracked in `docs/dev/TODO.md`.
 
 - **[telegram-notifications.md](telegram-notifications.md)** — the Telegram surface in full.
 - **[../web/session-drawer.md](../web/session-drawer.md)** — where the indicator is rendered.
-- **[../../../packages/tddy-daemon/docs/session-notifications.md](../../../packages/tddy-daemon/docs/session-notifications.md)** — implementation reference.
+- **[../../../packages/tddy-session-activity/docs/session-notifications.md](../../../packages/tddy-session-activity/docs/session-notifications.md)** — implementation reference.

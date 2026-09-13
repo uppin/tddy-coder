@@ -37,7 +37,10 @@ registry — but its `file_containing_symbol` lookup answers `not_found`, and th
 without composing a request for it. `terminal_session.TerminalSessionService`
 (`packages/tddy-terminal-rpc/proto/`) is in that position: `tddy-terminal-rpc` depends on
 `tddy-service`, so `tddy-service` cannot compile its proto without a cycle. Tracked in
-[`docs/dev/todo/`](../../dev/todo/).
+[`docs/dev/todo/`](../../dev/todo/). `session_agents.SessionAgentService` and
+`activity.ActivityService` are **not** in that position: their protos live in
+`packages/tddy-service/proto/`, so the playground composes requests for them like any other
+service.
 
 ## Dynamic invocation
 
@@ -45,9 +48,9 @@ Because `LiveKitTransport` derives `service`, `method`, and `methodKind` at runt
 
 ## Registration
 
-`reflection_entry_from(service_names, DESCRIPTOR_BYTES) -> ServiceEntry` is a helper (name `"grpc.reflection.v1.ServerReflection"`) that any participant assembling a `MultiRpcService` can push. Registered in:
+`reflection_entry_from(service_names) -> ServiceEntry` is a helper (name `"grpc.reflection.v1.ServerReflection"`) that any participant assembling a `MultiRpcService` can push. Registered in:
 
-- `packages/tddy-daemon/src/main.rs` — after `rpc_entries` is assembled.
+- `packages/tddy-daemon/src/runtime.rs` — after `rpc_entries` is assembled.
 - `packages/tddy-coder/src/run.rs` — at every `MultiRpcService` assembly site.
 
 ## Transport note

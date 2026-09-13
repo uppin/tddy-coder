@@ -19,6 +19,7 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { createClient, type Transport } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { ActivityService } from "../../src/gen/activity_pb";
 import { ConnectionService } from "../../src/gen/connection_pb";
 import {
   ClaimTerminalControlResponseSchema,
@@ -133,11 +134,8 @@ const noopHandlers = {
 
 /** A client serving the recorded transcript and nothing else — enough for the Activities view. */
 function aReplayClient(scenario = RECORDED_TRANSCRIPT) {
-  const backend = anInMemoryRpcBackend().implement(
-    ConnectionService,
-    acpReplayHandlers(scenario),
-  );
-  return createClient(ConnectionService, backend.transport());
+  const backend = anInMemoryRpcBackend().implement(ActivityService, acpReplayHandlers(scenario));
+  return createClient(ActivityService, backend.transport());
 }
 
 const OTHER_SCREEN = "screen-held-by-another-9999";
@@ -145,11 +143,11 @@ const OTHER_SCREEN = "screen-held-by-another-9999";
 /** A client serving the transcript AND a terminal whose control lease is held elsewhere, so a
  *  mounted runtime would show its "Claim terminal" CTA if it were rendered in the foreground. */
 function aReplayTransportWithHeldTerminal() {
-  // Two services, because the terminal family lives at its own coordinate: the transcript is
-  // `connection.ConnectionService`'s, the lease and the output stream are
+  // Two services, because both families live at their own coordinate: the transcript is
+  // `activity.ActivityService`'s, the lease and the output stream are
   // `terminal_session.TerminalSessionService`'s.
   const backend = anInMemoryRpcBackend()
-    .implement(ConnectionService, acpReplayHandlers(RECORDED_TRANSCRIPT))
+    .implement(ActivityService, acpReplayHandlers(RECORDED_TRANSCRIPT))
     .implement(TerminalSessionService, {
       claimTerminalControl: async () =>
         create(ClaimTerminalControlResponseSchema, {
@@ -495,7 +493,7 @@ describe("InactiveSessionActivities — workflow views keep precedence", () => {
         selectedSession={DORMANT_PR_STACK as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
         inspectorState="closed"
-        client={client}
+        activityClient={client}
       />,
       anInMemoryRpcBackend(),
     );
@@ -517,7 +515,7 @@ describe("InactiveSessionActivities — workflow views keep precedence", () => {
         selectedSession={DORMANT_PR_STACK as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
         inspectorState="closed"
-        client={client}
+        activityClient={client}
       />,
       anInMemoryRpcBackend(),
     );
@@ -538,7 +536,7 @@ describe("InactiveSessionActivities — workflow views keep precedence", () => {
         selectedSession={DORMANT_WORKFLOW as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
         inspectorState="closed"
-        client={client}
+        activityClient={client}
       />,
       anInMemoryRpcBackend(),
     );
@@ -570,7 +568,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
         selectedSession={DORMANT as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
         inspectorState="closed"
-        client={client}
+        activityClient={client}
       />,
       anInMemoryRpcBackend(),
     );
@@ -595,7 +593,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
         selectedSession={DORMANT_PR_STACK as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
         inspectorState="closed"
-        client={client}
+        activityClient={client}
       />,
       anInMemoryRpcBackend(),
     );
@@ -616,7 +614,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
         selectedSession={DORMANT as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
         inspectorState="closed"
-        client={client}
+        activityClient={client}
       />,
       anInMemoryRpcBackend(),
     );
@@ -641,6 +639,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
         inspectorState="closed"
         client={createClient(ConnectionService, transport)}
         terminalClient={createClient(TerminalSessionService, transport)}
+        activityClient={createClient(ActivityService, transport)}
         runtimes={[aHostServedRuntimeFor(DORMANT.sessionId, transport)]}
         focusedRuntimeId={DORMANT.sessionId}
       />,

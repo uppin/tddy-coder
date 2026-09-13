@@ -20,7 +20,7 @@
 import React from "react";
 import { createClient, type Transport } from "@connectrpc/connect";
 import { Room } from "livekit-client";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { ActivityService } from "../../src/gen/activity_pb";
 import { AgentActivityOverlay } from "../../src/components/sessions/AgentActivityOverlay";
 import { LiveKitConnectionProvider } from "../../src/rpc/connections/liveKit";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -50,7 +50,7 @@ function CachedClientHost({ transport }: { transport: Transport }) {
     if (!host) throw new Error("the provider must claim the host its own room reaches");
     return host.openSession("cached-session", { sessionId: "cached-session" });
   }, [transport]);
-  const client = session.clientFor(ConnectionService);
+  const client = session.clientFor(ActivityService);
   return (
     <div>
       <button data-testid="host-rerender" onClick={() => setRenders((n) => n + 1)}>
@@ -77,7 +77,7 @@ function UpgradingHost({
 }) {
   const [upgraded, setUpgraded] = React.useState(false);
   const transport = upgraded ? sessionScoped : daemonDirect;
-  const client = React.useMemo(() => createClient(ConnectionService, transport), [transport]);
+  const client = React.useMemo(() => createClient(ActivityService, transport), [transport]);
   return (
     <div>
       <button data-testid="host-upgrade-transport" onClick={() => setUpgraded(true)}>

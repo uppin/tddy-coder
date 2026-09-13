@@ -1,6 +1,6 @@
-// `list_session_agents` is a `ConnectionService` trait method, so the trait has to be in scope.
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
-use tddy_service::proto::connection::ListSessionAgentsRequest;
+// `list_session_agents` is a `SessionAgentService` trait method, so the trait has to be in scope.
+use tddy_service::proto::session_agents_svc::ListSessionAgentsRequest;
+use tddy_service::proto::session_agents_svc::SessionAgentService as _;
 
 use tddy_rpc::Request;
 
@@ -220,6 +220,7 @@ impl ConnectionServiceImpl {
         codebase_daemon: &str,
     ) -> Result<Vec<(String, Vec<String>)>, Status> {
         let roster = self
+            .session_agents_service()
             .list_session_agents(Request::new(ListSessionAgentsRequest {
                 session_token: session_token.to_string(),
                 session_id: codebase_session.to_string(),

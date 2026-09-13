@@ -39,7 +39,7 @@ use tddy_daemon_livekit::session_room::{
 use tddy_livekit::{connect_client, BroadcastChannel, BroadcastMessage, ConnectedClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::MultiRpcService;
-use tddy_service::proto::connection::AgentActivityRecord as AgentActivityRecordMessage;
+use tddy_service::proto::activity::AgentActivityRecord as AgentActivityRecordMessage;
 use tddy_service::session_activity::SESSION_ACTIVITY_TOPIC;
 use tddy_testing_commons::wait::eventually;
 

@@ -3,7 +3,7 @@ import type { Client } from "@connectrpc/connect";
 import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import json from "react-syntax-highlighter/dist/esm/languages/prism/json";
-import type { ConnectionService } from "../../gen/connection_pb";
+import type { ActivityService } from "../../gen/activity_pb";
 import type { ChatMessage } from "../chat/useAgentChat";
 import { useAcpToolCallDetail, type ToolCallDetailErrorKind } from "../chat/useAcpToolCallDetail";
 
@@ -83,7 +83,7 @@ export interface AgentActivityDetailDialogProps {
   sessionId: string;
   sessionToken: string;
   /** The same client the transcript stream uses, so the body lookup is routed identically. */
-  client: Client<typeof ConnectionService>;
+  client: Client<typeof ActivityService>;
   onClose: () => void;
 }
 

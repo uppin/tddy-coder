@@ -13,3 +13,16 @@ The one design question it raises and `"ready"` does not: `unknown` (`SESSION_AG
 counts as *ready* deliberately — a restored roster has nothing to say about an agent that is
 nonetheless promptable — but it must **not** count as *idle*. A wait treating "nothing to say" as
 "the turn finished" would report a turn complete that may still be running.
+
+## Re-read at `#unbundle` node 7's wrap (2026-09-12)
+
+Open and unchanged. `#unbundle` node 7 moved the whole conversation path into
+`tddy-session-agents` and the changeset made a point of not making the missing wait harder to add:
+`subagent_status`'s readiness plumbing keeps its shape, the status vocabulary
+(`SessionAgentStatus`, `ManagedAgentState`) is unchanged, and `SESSION_AGENT_STATUS_UNSPECIFIED`
+still maps the way this entry's design question depends on.
+
+What changed is where the predicate would go: `packages/tddy-session-agents/src/session_agent_status.rs`
+for the mapping, and `packages/tddy-tools`' `session_agents/` client for the wait itself — the wait
+machinery did not move. The `unknown`-is-ready-but-not-idle distinction is now pinned by the unit
+tests that travelled with `session_agent_status.rs`.

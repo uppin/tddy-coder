@@ -2,6 +2,8 @@ import React from "react";
 import { ConnectError, type Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry, ProjectEntry } from "../../gen/connection_pb";
+import type { ActivityService } from "../../gen/activity_pb";
+import type { SessionAgentService } from "../../gen/session_agents_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { TerminalSessionService } from "../../gen/terminal_session_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
@@ -36,6 +38,8 @@ import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
+type SessionAgentClient = Client<typeof SessionAgentService>;
+type ActivityClient = Client<typeof ActivityService>;
 type TerminalClient = Client<typeof TerminalSessionService>;
 type WorktreeClient = Client<typeof WorktreeService>;
 
@@ -75,6 +79,18 @@ interface SessionMainPaneProps {
    * can be: no daemon is reachable yet.
    */
   sessionFilesClient?: SessionFilesClient;
+  /**
+   * The session-agent service on the same host as `client` — the Add-agent flow attaches through
+   * it and each runtime's conversation panes talk to their agent over it. `#unbundle` node 7 took
+   * the roster and conversation RPCs out of `connection.ConnectionService`, so they need their own
+   * client; absent for the same reason `client` can be.
+   */
+  sessionAgentClient?: SessionAgentClient;
+  /**
+   * The activity service on the same host as `client` — the ACP-replay overlay and the Activities
+   * view read their transcript through it. Node 7 took those RPCs out too.
+   */
+  activityClient?: ActivityClient;
   /** The connection to the daemon that owns the selected session — a runtime attaches its spawned
    *  child conversations over it, and the inspector's media tabs are gated on it. `null` until a
    *  host is reachable.
@@ -126,6 +142,11 @@ interface SessionMainPaneProps {
   /** Lazy builder for a session-scoped `ConnectionService` client (session-participant routing) —
    *  used by the inspector's session-scoped RPCs (e.g. ExecuteTool). */
   buildSessionClient?: () => ConnectionClient | null;
+  /** Lazy builder for a session-scoped `activity.ActivityService` client. Separate from
+   *  `buildSessionClient` because `tddy-coder`'s session participant serves the replay and activity
+   *  families at their own coordinate since `#unbundle` node 7 — one builder could only return one
+   *  service's client, and the transcript must come off the session's own process when it has one. */
+  buildSessionActivityClient?: () => ActivityClient | null;
   /** The `session` metadata block each live participant publishes, keyed by session id — passed to
    *  the custom workflow view, where the PR-Stack screen joins planned nodes to cross-host child
    *  sessions with it (D37, D38). */
@@ -149,6 +170,8 @@ export function SessionMainPane({
   worktreeClient,
   terminalClient,
   sessionFilesClient,
+  sessionAgentClient,
+  activityClient,
   host,
   sessionToken = "",
   onCancelCreate,
@@ -167,6 +190,7 @@ export function SessionMainPane({
   onSessionDisconnect,
   onSessionBytes,
   buildSessionClient,
+  buildSessionActivityClient,
   sessionMetadataBySessionId,
 }: SessionMainPaneProps) {
   const isConnected = attachment.status === "connected";
@@ -222,10 +246,12 @@ export function SessionMainPane({
   const attachAgent = async (agent: AvailableAgent): Promise<string | null> => {
     // The picker is only rendered with both in hand; a refusal names what is missing rather than
     // reporting an attach that was never sent as a success.
-    if (!client || !selectedSession) return "Not connected to this session's daemon.";
+    if (!sessionAgentClient || !selectedSession) {
+      return "Not connected to this session's daemon.";
+    }
     const { sessionId, daemonInstanceId } = selectedSession;
     try {
-      await client.attachSessionAgent({
+      await sessionAgentClient.attachSessionAgent({
         sessionToken,
         sessionId,
         daemonInstanceId,
@@ -347,7 +373,7 @@ export function SessionMainPane({
           }
           focused={!dormant && r.sessionId === focusedRuntimeId}
           sessionToken={sessionToken}
-          client={client}
+          client={sessionAgentClient}
           terminalClient={terminalClient}
           mobileShortcuts={mobileShortcuts}
           onSessionRegisterInsert={onSessionRegisterInsert}
@@ -371,7 +397,7 @@ export function SessionMainPane({
       <SessionActivitiesPane
         sessionId={selectedSession.sessionId}
         sessionToken={sessionToken}
-        client={buildSessionClient?.() ?? client}
+        client={buildSessionActivityClient?.() ?? activityClient}
       />
     ) : null);
 
@@ -444,7 +470,7 @@ export function SessionMainPane({
                   sessionId={selectedSession.sessionId}
                   sessionToken={sessionToken}
                   sessionType={selectedSession.sessionType}
-                  client={buildSessionClient?.() ?? client}
+                  client={buildSessionActivityClient?.() ?? activityClient}
                 />
               )}
               {/* Resume is keyed on liveness alone, so every dormant session offers it from the same
@@ -500,7 +526,7 @@ export function SessionMainPane({
             </div>
           )}
 
-          {selectedSession && pickerOpen && client && (
+          {selectedSession && pickerOpen && sessionAgentClient && (
             <div className="flex-shrink-0 border-b border-border px-2 py-2">
               <AgentPicker
                 testIdPrefix="session-agent-picker"

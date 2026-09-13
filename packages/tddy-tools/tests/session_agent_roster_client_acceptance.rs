@@ -16,9 +16,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
-use tddy_service::proto::connection::{
-    SessionAgentActivity, SessionAgentEntry, SessionAgentRoster, SessionAgentStatus,
-};
+use tddy_service::proto::session_agents_svc::{SessionAgentEntry, SessionAgentRoster};
+use tddy_service::proto::types::{SessionAgentActivity, SessionAgentStatus};
 use tddy_tools::session_agents::{
     decide_roster_subscription, ConversationState, LiveAgentRoster, ReconnectPacing, RosterError,
     RosterMutability, RosterStreamOutcome,

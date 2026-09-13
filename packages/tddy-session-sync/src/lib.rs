@@ -32,5 +32,5 @@ pub use sync::{
     decide_record, decide_worktree, delta_request, first_attach_commands, reassemble,
     reconcile_commands, remote_url, run, wip_ref, DeltaError, GitInvocation, GitTransport,
     IgnoreReason, RecordDecision, SyncError, WorktreeDecision, LOCAL_WIP_REF, MIRROR_DELTA_SCOPE,
-    REMOTE_GIT_SSH_COMMAND,
+    REMOTE_GIT_SSH_COMMAND, STREAM_DELTA_METHOD,
 };

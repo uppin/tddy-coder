@@ -156,7 +156,8 @@ of being limited to the single hardcoded FastContext discovery agent and CLI fla
    `subagent_new_session { agent: "<name>" }` selects among the multiple registered defs.
 10. ~~Back-compat: `TDDY_SUBAGENT=fastcontext` … still works~~ **Superseded.** `TDDY_SUBAGENT` is
     gone from `tddy-tools` entirely; `TDDY_SUBAGENTS_JSON` is the spawn **seed** and the live roster
-    (`StreamSessionAgents`) is the source of truth. `subagent_new_session` without an `agent` field
+    (`StreamSessionAgents`, served at `session_agents.SessionAgentService` by `tddy-session-agents`
+    since `#unbundle` node 7) is the source of truth. `subagent_new_session` without an `agent` field
     is an error listing the attached ids — with an unbounded roster there is no defensible default,
     and picking the first entry would make the choice depend on attach order. The conversation tools
     are advertised only while the roster is non-empty.

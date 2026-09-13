@@ -18,9 +18,7 @@ use tddy_daemon::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ReportSessionStatusRequest,
-};
+use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -160,6 +158,7 @@ async fn waiting_for_input_transition_alerts_tracked_chat() {
 
     // When
     let response = service
+        .activity_service()
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
@@ -208,6 +207,7 @@ async fn done_transition_alerts_tracked_chat() {
 
     // When
     service
+        .activity_service()
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
@@ -250,6 +250,7 @@ async fn repeated_same_status_does_not_realert() {
     // When
     for _ in 0..2 {
         service
+            .activity_service()
             .report_session_status(Request::new(ReportSessionStatusRequest {
                 session_id: SESSION_ID.to_string(),
                 hook_token: TEST_HOOK_TOKEN.to_string(),
@@ -293,6 +294,7 @@ async fn untracked_session_falls_back_to_configured_chat_ids() {
 
     // When
     let resp = service
+        .activity_service()
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
@@ -335,6 +337,7 @@ async fn running_status_does_not_alert() {
 
     // When
     service
+        .activity_service()
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),

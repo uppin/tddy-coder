@@ -1,5 +1,5 @@
 /**
- * Test helpers for the read-only **ACP replay** stream (`ConnectionService.StreamAcpReplay`) that
+ * Test helpers for the read-only **ACP replay** stream (`ActivityService.StreamAcpReplay`) that
  * backs the Agent Activity overlay's transcript. The server-streaming RPC emits ACP-format
  * `AcpAgentMessage` frames (only the `session_update` variant), each carrying a wall-clock
  * `timestamp_unix_ms` on the `SessionNotification` wrapper so the transcript can render its
@@ -10,7 +10,8 @@
 import { create, toBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ConnectionService, AcpReplayFrameSchema, StreamMode } from "../../../src/gen/connection_pb";
+import { ActivityService } from "../../../src/gen/activity_pb";
+import { AcpReplayFrameSchema, StreamMode } from "../../../src/gen/activity_pb";
 import {
   AcpAgentMessageSchema,
   ToolCallStatus,
@@ -129,7 +130,7 @@ export interface ReplayOpens {
 export function aReplayBackend(config: AcpReplayScenario) {
   const opens: ReplayOpens = { count: 0, snapshot: 0 };
   const backend = anInMemoryRpcBackend().implement(
-    ConnectionService,
+    ActivityService,
     acpReplayHandlers(config, opens),
   );
   return { backend, opens };
@@ -168,7 +169,7 @@ export function aHeldCountReplay(config: AcpReplayScenario) {
 
 /**
  * The `StreamAcpReplay` + `GetAcpToolCallDetail` handlers for a fixed transcript, as a spreadable
- * `ConnectionService` partial. Extracted so the two-phase protocol has ONE implementation shared by
+ * `ActivityService` partial. Extracted so the two-phase protocol has ONE implementation shared by
  * the focused {@link aReplayBackend} and the full-screen `aConnectionServiceBackend` — a spec that
  * drives `SessionsDrawerScreen` needs both the session list and the replay on one backend, and a
  * second copy of the mode branching would be free to drift from this one.
@@ -210,7 +211,7 @@ export function aReplayBackendWithHeldDetail(config: {
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+  const backend = anInMemoryRpcBackend().implement(ActivityService, {
     async *streamAcpReplay(req: { mode: StreamMode }) {
       if (req.mode === StreamMode.COUNT_THEN_LIVE) {
         opens.count += 1;
@@ -240,7 +241,7 @@ export function aReplayBackendWithFailingDetail(config: {
   code?: Code;
 }) {
   const opens: ReplayOpens = { count: 0, snapshot: 0 };
-  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+  const backend = anInMemoryRpcBackend().implement(ActivityService, {
     async *streamAcpReplay(req: { mode: StreamMode }) {
       if (req.mode === StreamMode.COUNT_THEN_LIVE) {
         opens.count += 1;
@@ -263,7 +264,7 @@ export function aReplayBackendWithFailingDetail(config: {
  *  without reaching into the RPC plumbing. */
 export function requestedToolCallIds(backend: InMemoryRpcBackend): string[] {
   return backend
-    .callsTo(ConnectionService.method.getAcpToolCallDetail)
+    .callsTo(ActivityService.method.getAcpToolCallDetail)
     .map((req) => req.toolCallId);
 }
 
@@ -300,7 +301,7 @@ export function aReplayBackendWithHeldSnapshot(config: {
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+  const backend = anInMemoryRpcBackend().implement(ActivityService, {
     async *streamAcpReplay(req: { mode: StreamMode }) {
       if (req.mode === StreamMode.COUNT_THEN_LIVE) {
         opens.count += 1;
@@ -458,7 +459,7 @@ export function aTailReplayBackend(config: TailReplayScenario): TailReplayBacken
     getAcpToolCallDetail: (req: { toolCallId: string }) => detailOrNotFound(config.details, req),
   };
 
-  const backend = anInMemoryRpcBackend().implement(ConnectionService, handlers);
+  const backend = anInMemoryRpcBackend().implement(ActivityService, handlers);
 
   return {
     backend,

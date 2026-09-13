@@ -14,18 +14,20 @@ their own:
 |---|---|---|
 | `host.HostService` | `ListEligibleDaemons`, `ListKnownHosts`, `GetHostTooling`, `StreamHostPrompts`, `AnswerHostPrompt`, `AddHostKey`, `ListHostKeyCandidates`, `StreamHostStats` | [`packages/tddy-host-service`](../../../packages/tddy-host-service/docs/host-service.md) |
 | `worktree.WorktreeService` | `ListWorktreesForProject`, `RemoveWorktree`, `StreamWorktreeStats`, `CalculateWorktreeSize`, `CleanWorktree`, `RestoreSessionWorktree`, `ListWorktreeDirectory`, `ReadWorktreeFile`, `StreamReadWorktreeFile` | [`packages/tddy-worktree-service`](../../../packages/tddy-worktree-service/docs/worktree-service.md) |
-| `connection.ConnectionService` | the other 73 | [`packages/tddy-daemon`](../../../packages/tddy-daemon/docs/connection-service.md) |
+| `connection.ConnectionService` | the 33 that remain after this split and the later `#unbundle` nodes, which moved further families to services of their own — `session_agents.SessionAgentService` and `activity.ActivityService` among them | [`packages/tddy-daemon`](../../../packages/tddy-daemon/docs/connection-service.md) |
 
 ## What a client sees
 
 **The coordinates are the only thing that changed.** No behaviour differs: the same handler code
 answers the same request and returns the same response, at a new service name.
 
-**Every transport carries all three.** A new service is a `ServiceEntry` registered beside the
-others, so it reaches clients over Connect-HTTP `/rpc`, over the LiveKit common room and over the
-local UDS socket — where all three are mounted by one `Server::builder()`, so a caller that reached
-`GetHostTooling` on that socket before still does. The RPC Playground lists them without any change,
-because it discovers services through gRPC ServerReflection.
+**Every transport carries every one of them.** A new service is a `ServiceEntry` registered beside
+the others, so it reaches clients over Connect-HTTP `/rpc`, over the LiveKit common room and over
+the local UDS socket — where they are mounted together by one `Server::builder()` (six
+`add_service` calls as of `#unbundle` node 7), so a caller that reached `GetHostTooling` on that
+socket before still does. That is the rule for the whole split: a family reachable on that socket
+as part of `connection.ConnectionService` stays reachable there after it moves. The RPC Playground
+lists them without any change, because it discovers services through gRPC ServerReflection.
 
 **A web bundle and a daemon must be from the same side of the split.** 17 method coordinates moved,
 so an older bundle calling a newer daemon gets `unimplemented` on those methods. This is the repo's

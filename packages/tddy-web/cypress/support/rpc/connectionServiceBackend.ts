@@ -46,7 +46,9 @@ import {
   type SessionEntry,
   type StartSessionResponse,
 } from "../../../src/gen/connection_pb";
+import { ActivityService } from "../../../src/gen/activity_pb";
 import { HostService } from "../../../src/gen/host_pb";
+import { SessionAgentService } from "../../../src/gen/session_agents_pb";
 import { SessionFilesService } from "../../../src/gen/session_files_pb";
 import { TerminalSessionService } from "../../../src/gen/terminal_session_pb";
 import { WorktreeService } from "../../../src/gen/worktree_pb";
@@ -251,6 +253,21 @@ export function aConnectionServiceBackend(
     .implement(WorktreeService, worktreeHandlers)
     .implement(TerminalSessionService, terminalHandlers)
     .implement(SessionFilesService, sessionFilesHandlers)
+    // `#unbundle` node 7's two coordinates. One `.implement` each, for the same reason the spreads
+    // below give: Connect's router fills every omitted method of a registered service with an
+    // `Unimplemented` handler, so a second registration of the same service shadows the first.
+    .implement(SessionAgentService, {
+      // The session's agent roster, and the conversations held with the agents on it.
+      ...(rosterFake ? rosterFake.handlers : {}),
+      ...(conversationFake ? conversationFake.handlers : {}),
+    })
+    .implement(ActivityService, {
+      // The session's recorded ACP transcript. Spread (rather than re-implemented) so the two-phase
+      // replay protocol has one definition shared with `aReplayBackend` — see `./acpReplay`.
+      ...(scenario.acpReplay ? acpReplayHandlers(scenario.acpReplay) : {}),
+      // The daemon's session-notification feed.
+      ...(scenario.sessionNotifications ? scenario.sessionNotifications.handlers : {}),
+    })
     .implement(AuthService, {
       getAuthStatus: async () => ({ authenticated: true, user: aGitHubUser() }),
     })
@@ -295,18 +312,11 @@ export function aConnectionServiceBackend(
           ...overrides,
         });
       },
-      // The session's recorded ACP transcript. Spread (rather than re-implemented) so the two-phase
-      // replay protocol has one definition shared with `aReplayBackend` — see `./acpReplay`.
-      ...(scenario.acpReplay ? acpReplayHandlers(scenario.acpReplay) : {}),
-      // The session's agent roster. Spread for the same reason as the replay handlers: one
+      // `ListSubagents` — the agent *catalogue* the picker fans out over, which stayed on this
+      // service when node 7 took the roster. Spread for the same reason as everything above: one
       // `.implement(ConnectionService, …)` per backend, since Connect's router fills every omitted
       // method of a registered service with an `Unimplemented` handler.
-      ...(rosterFake ? rosterFake.handlers : {}),
-      // The agent conversations behind the session's agent tabs, spread for the same reason.
-      ...(conversationFake ? conversationFake.handlers : {}),
-      // The daemon's session-notification feed. Spread for the same reason as the two above: one
-      // `.implement(ConnectionService, …)` per backend.
-      ...(scenario.sessionNotifications ? scenario.sessionNotifications.handlers : {}),
+      ...(rosterFake ? rosterFake.connectionHandlers : {}),
       resumeSession: async (req) => {
         const overrides =
           typeof scenario.resumeSession === "function"

@@ -6,14 +6,22 @@
 //! the same service instances (via `Arc`) so work started over the socket is visible over every
 //! other transport.
 //!
-//! **Four services, one socket.** `#unbundle` node 1 split hosts and worktrees out of
-//! `connection.ConnectionService` and node 6 split the terminal family out after them; a caller
-//! that reached any of them over this socket must go on reaching it over this socket. One
-//! `Server::builder()` with four `add_service` calls is what keeps that true — a second socket
-//! would be a second address to configure, and a service left off this builder would answer on
-//! every transport except the local one. The in-jail `tddy-sandbox-app` is the caller that proves
-//! it for `terminal_session.TerminalSessionService`: its whole terminal bridge is the bidi
-//! `StreamSessionTerminalIO`, dialled here and nowhere else.
+//! **Six services, one socket.** `#unbundle` node 1 split hosts and worktrees out of
+//! `connection.ConnectionService`, node 6 split the terminal family out after them, and node 7 the
+//! session-agent and activity families after that; a caller that reached any of them over this
+//! socket must go on reaching it over this socket. One `Server::builder()` with six `add_service`
+//! calls is what keeps that true — a second socket would be a second address to configure, and a
+//! service left off this builder would answer on every transport except the local one. The in-jail
+//! `tddy-sandbox-app` is the caller that proves it for `terminal_session.TerminalSessionService`:
+//! its whole terminal bridge is the bidi `StreamSessionTerminalIO`, dialled here and nowhere else.
+//!
+//! Node 7's two are the reason this list is worth stating rather than assuming. Five of
+//! `session_agents.SessionAgentService`'s nine methods are what `tddy-sandbox-runner`'s relay
+//! allowlist lets an in-jail agent reach on its host, so a coordinate missing from this builder is
+//! not a lost feature but a capability disabled inside a jail — and it fails closed, silently, at
+//! runtime. All 17 of their adapter methods are **generated** by `tddy-codegen`'s
+//! `generate_tonic_adapter`, the same way the terminal family's nine are; nothing here is
+//! hand-written.
 
 use std::future::Future;
 use std::os::unix::io::{FromRawFd, RawFd};
@@ -23,8 +31,16 @@ use anyhow::Context;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::Server;
 
+use tddy_service::proto::activity::{
+    ActivityService as RpcActivityService, ActivityServiceTonicAdapter,
+};
 use tddy_service::proto::connection::ConnectionService as RpcConnectionService;
 use tddy_service::proto::host::HostService as RpcHostService;
+use tddy_service::proto::session_agents_svc::{
+    SessionAgentService as RpcSessionAgentService, SessionAgentServiceTonicAdapter,
+};
+use tddy_service::proto::tonic_activity::activity_service_server::ActivityServiceServer;
+use tddy_service::proto::tonic_session_agents::session_agent_service_server::SessionAgentServiceServer;
 use tddy_service::proto::worktree::WorktreeService as RpcWorktreeService;
 use tddy_service::tonic_connection::connection_service_server::ConnectionServiceServer;
 use tddy_service::tonic_host::host_service_server::HostServiceServer;
@@ -79,19 +95,38 @@ pub fn resolve_socket_source(
     SocketSource::Activated(SD_LISTEN_FDS_START)
 }
 
-/// Bind `socket_path` and serve the four local-socket services until `shutdown` resolves.
+/// The six adapters mounted on the one socket, passed as a bundle.
+///
+/// A bundle rather than six positional parameters because the list only grows: every `#unbundle`
+/// node that takes a family out of `connection.ConnectionService` adds one, and a caller that has
+/// to get six same-shaped arguments in the right order is a caller that can silently swap two.
+pub struct LocalSocketServices<C, H, W, T, S, A> {
+    /// Reads the caller's SO_PEERCRED credentials in `MintLocalToken`; the reason this transport
+    /// exists at all.
+    pub connection: ConnectionServiceTonicAdapter<C>,
+    /// The two families `#unbundle` node 1 split out.
+    pub host: HostServiceTonicAdapter<H>,
+    pub worktree: WorktreeServiceTonicAdapter<W>,
+    /// Node 6's terminal family — the in-jail `tddy-sandbox-app` dials its bidi
+    /// `StreamSessionTerminalIO` here and nowhere else.
+    pub terminal: TerminalSessionServiceTonicAdapter<T>,
+    /// Node 7's roster and conversations. Five of its nine methods are what `tddy-sandbox-runner`'s
+    /// relay allowlist permits an in-jail agent to reach, so this one is a security boundary.
+    pub session_agents: SessionAgentServiceTonicAdapter<S>,
+    /// Node 7's activity, status, notifications and ACP replay.
+    pub activity: ActivityServiceTonicAdapter<A>,
+}
+
+/// Bind `socket_path` and serve the six local-socket services until `shutdown` resolves.
 ///
 /// When launched via systemd socket activation (`LISTEN_PID`/`LISTEN_FDS` addressed to this
 /// process), the inherited listener is adopted instead — systemd owns the socket node and its
 /// permissions, so no directory is created, no stale file is unlinked, and no chmod is applied.
 /// Otherwise a stale socket left by a previous run is unlinked first so the bind does not fail
 /// with `EADDRINUSE`, and the parent directory is created if missing.
-pub async fn serve_connection_uds<C, H, W, T>(
+pub async fn serve_connection_uds<C, H, W, T, S, A>(
     socket_path: &Path,
-    adapter: ConnectionServiceTonicAdapter<C>,
-    host_adapter: HostServiceTonicAdapter<H>,
-    worktree_adapter: WorktreeServiceTonicAdapter<W>,
-    terminal_adapter: TerminalSessionServiceTonicAdapter<T>,
+    services: LocalSocketServices<C, H, W, T, S, A>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()>
 where
@@ -107,6 +142,14 @@ where
     T::StreamTerminalOutputStream: 'static,
     T::GetTerminalHistoryStream: 'static,
     T::WatchTerminalControlStream: 'static,
+    S: RpcSessionAgentService,
+    S::StreamSessionAgentsStream: 'static,
+    S::PromptAgentConversationStream: 'static,
+    A: RpcActivityService,
+    A::StreamSessionActivityStream: 'static,
+    A::StreamSessionNotificationsStream: 'static,
+    A::StreamAgentActivityDeltaStream: 'static,
+    A::StreamAcpReplayStream: 'static,
 {
     let listen_pid = std::env::var("LISTEN_PID").ok();
     let listen_fds = std::env::var("LISTEN_FDS").ok();
@@ -158,10 +201,12 @@ where
     };
 
     Server::builder()
-        .add_service(ConnectionServiceServer::new(adapter))
-        .add_service(HostServiceServer::new(host_adapter))
-        .add_service(WorktreeServiceServer::new(worktree_adapter))
-        .add_service(TerminalSessionServiceServer::new(terminal_adapter))
+        .add_service(ConnectionServiceServer::new(services.connection))
+        .add_service(HostServiceServer::new(services.host))
+        .add_service(WorktreeServiceServer::new(services.worktree))
+        .add_service(TerminalSessionServiceServer::new(services.terminal))
+        .add_service(SessionAgentServiceServer::new(services.session_agents))
+        .add_service(ActivityServiceServer::new(services.activity))
         .serve_with_incoming_shutdown(UnixListenerStream::new(listener), shutdown)
         .await
         .context("serve the local-socket services")?;

@@ -1,4 +1,4 @@
-# Session agent roster modules (`tddy_daemon::session_agent_roster`, `::session_agent_clone`)
+# Session agent roster modules (`tddy_session_agents::session_agent_roster`, `::session_agent_clone`)
 
 ## Role
 
@@ -6,7 +6,8 @@ Two modules implement a session's **agent roster** — the set of specialized ag
 session, addressable as `name@daemon_instance_id`, seeded at start or mutated while the session
 runs. See
 [docs/ft/daemon/session-agent-roster.md](../../../docs/ft/daemon/session-agent-roster.md) for the
-feature and its acceptance criteria.
+feature and its acceptance criteria, and [session-agent-service.md](./session-agent-service.md) for
+the nine RPCs served in front of them.
 
 | Module | Owns |
 |---|---|
@@ -16,12 +17,17 @@ feature and its acceptance criteria.
 A start-time seed (`StartSessionRequest.specialized_agents[]`) is a caller of these same two
 modules, not a parallel path: it resolves each reference through `roster_record_for`, claims a clone
 through `session_agent_clone` for every agent not co-located with the authoritative worktree, and
-writes the entries before the agent is spawned. See
-[connection-service.md § Seeding the roster at start](connection-service.md).
+writes the entries before the agent is spawned. `StartSession` is family C and stays in the daemon,
+so that caller is still `tddy-daemon`'s — see
+[connection-service.md § Seeding the roster at start](../../tddy-daemon/docs/connection-service.md).
 
-The RPCs, the conversation routing and the room wiring live in `connection_service.rs` — there is
-deliberately no `session_agent_conversation.rs`, because routing a conversation needs the peer
-plumbing, the room handle and the roster in one place.
+The nine RPCs are `session_agents.SessionAgentService`, served from
+[`crate::service`](../src/service.rs); the map of open conversations is
+[`crate::agent_conversations`](../src/agent_conversations.rs); the status write-and-republish pair is
+[`crate::status_reporting`](../src/status_reporting.rs). What is **not** here is the peer plumbing
+and the room handle: `tddy-daemon` supplies those through [`crate::ports`](../src/ports.rs) and wraps
+the implementation in `PeerRoutedSessionAgents`, which is where the `daemon_instance_id` fork that
+seven of the nine make lives.
 
 ## `session_agent_roster::SessionAgentRosterStore`
 
@@ -118,10 +124,13 @@ chunk-framed, where one lost frame wedges the call with no error.
 
 ### Who writes to it
 
-`connection_service.rs` — `note_agent_activity` records and republishes together, because a status
+`status_reporting.rs` — `note_agent_activity` records and republishes together, because a status
 change does not move `rev` and a subscriber that heard only about `rev` changes would show the state
-an agent was in when it was attached. It republishes through `republish` alone, **not**
-`publish_roster_change`: both consumers that act on a status follow `StreamSessionAgents`, and a
+an agent was in when it was attached. It is a free function rather than a method on the service
+because it has two callers in two crates: the nine handlers here, and `tddy-daemon`'s local-agent
+tool dispatch — the only place this host sees an agent's own loop *enter* a tool call, which is the
+only place `EXECUTING_TOOL` can be told from `RUNNING`. It republishes through `republish` alone,
+**not** `publish_roster_change`: both consumers that act on a status follow `StreamSessionAgents`, and a
 status ticks on every tool call, so putting a whole roster on the session room for each one would
 spend the room's bandwidth on a badge.
 
@@ -215,8 +224,10 @@ trip; mutations (`WRITE`/`STR_REPLACE`/`DELETE`/`SHELL`/`AWAIT`) proxy to A and 
 **authoritative** worktree. A mutation applied to the clone would be overwritten by the next sync
 tick and would never reach the session's branch.
 
-`connection_service.rs` runs the hosted-clone branch of `execute_tool` / `stream_execute_tool`
-**after** `authorize_exec_tool_caller` and before local worktree resolution. That ordering is not
+`tddy-daemon`'s `connection_service/rpc_service.rs` runs the hosted-clone branch of `execute_tool` /
+`stream_execute_tool` **after** `authorize_exec_tool_caller` and before local worktree resolution.
+Those two are family A and stay on `connection.ConnectionService`, so the branch reads this crate's
+`HostedAgentClones` from the other side of the crate boundary. That ordering is not
 cosmetic: the branch selects a worktree that is not this daemon's and proxies its mutations under
 the clone's own credential, so authenticating after it would let an unauthenticated caller write to
 another host's tree.
@@ -236,8 +247,14 @@ identifies a clone but does not authorize a claim about it.
 
 A managed-codebase session's agent runs in a jail, and its tool calls reach the
 facilitating daemon over the sandbox `SessionChannel`. The roster and conversation
-RPCs (`StreamSessionAgents`, `OpenAgentConversation`, `PromptAgentConversation`,
-`CancelAgentConversation`) ride that same channel rather than a second transport:
+RPCs ride that same channel rather than a second transport, addressed at
+`session_agents.SessionAgentService`. Which of them a jail may relay is not a literal list in the
+runner: [`tddy_service::session_agents::IN_JAIL_RELAYABLE`](../../tddy-service/src/session_agents.rs)
+holds the five `(service, method)` pairs — `StreamSessionAgents`, `OpenAgentConversation`,
+`PromptAgentConversation`, `CancelAgentConversation` and `ReportAgentConversationState` — and both
+`tddy-sandbox-runner` and this crate read that one constant. An allowlist that no longer matches the
+served coordinate fails **closed**, silently, at runtime, which is why the pairs live in one place
+and why the acceptance test drives a real jail rather than reading them.
 
 - **`SessionFrame` carries two new payload variants** — `RpcRequest` (jail → host) and
   `RpcStreamFrame` (host → jail), multiplexed by `request_id` the way tunnels already are, so a
@@ -250,8 +267,9 @@ RPCs (`StreamSessionAgents`, `OpenAgentConversation`, `PromptAgentConversation`,
   a standalone app or test that wires no daemon stays honest.
 - **`tddy-daemon`** implements `HostRpcHandler` as `DaemonRpcHandler`, which recovers the
   `Arc<ConnectionServiceImpl>` through a self-handle (`Arc<OnceLock<Weak<Self>>>` set once in
-  `main.rs`) so a `&self` tonic trait method can dispatch to the roster/conversation handlers
-  without the call site threading the Arc through.
+  `main.rs`) so a `&self` tonic trait method can dispatch to the roster/conversation handlers —
+  now `PeerRoutedSessionAgents` in front of this crate — without the call site threading the Arc
+  through.
 
 The in-jail `tddy-tools` roster stream client opens `StreamSessionAgents` over this bridge; it
 reconnects with backoff on drop, and a roster that never receives a frame (`RosterCurrency::Unreachable`) does not enforce tool withdrawal, while one that was current and went stale still does.
@@ -260,12 +278,20 @@ reconnects with backoff on drop, and a roster that never receives a frame (`Rost
 
 | File | Covers |
 |---|---|
-| `tests/session_agent_roster_acceptance.rs` | attach/detach/list/stream, revisioning, persistence, auth, traversal refusal |
-| `tests/session_agent_replacement_acceptance.rs` | what the roster withdraws, through `roster_replacement_pairs` — the function the spawn paths actually call |
-| `tests/session_agent_conversation_acceptance.rs` | cancelling a turn that is still in flight; conversation frame bounding |
-| `tests/session_agent_remote_acceptance.rs` | two real daemons in a LiveKit room: resolution, room membership, clone sharing, the read/write split driven through a real turn loop, teardown |
+| `tddy-daemon/tests/session_agent_roster_acceptance.rs` | attach/detach/list/stream, revisioning, persistence, auth, traversal refusal |
+| `tddy-daemon/tests/session_agent_replacement_acceptance.rs` | what the roster withdraws, through `roster_replacement_pairs` — the function the spawn paths actually call |
+| `tddy-daemon/tests/session_agent_conversation_acceptance.rs` | cancelling a turn that is still in flight; conversation frame bounding |
+| `tddy-daemon/tests/session_agent_remote_acceptance.rs` | two real daemons in a LiveKit room: resolution, room membership, clone sharing, the read/write split driven through a real turn loop, teardown |
+| `tddy-daemon/tests/in_jail_conversation_acceptance.rs` | a jailed agent opening, prompting and cancelling a conversation at the new coordinate through the relay allowlist — **macOS-only and currently failing in setup**, see [session-agent-service.md § Known gaps](./session-agent-service.md) |
 | `src/session_agent_status.rs` (unit) | the status mapping, the reporter clamp, the guarded turn end, per-pair keying, summary truncation |
 | `src/session_agent_roster.rs` (unit) | `roster_entry` populating `status`/`last_activity`, and the clone outranking the conversation |
+| `src/lib.rs` (unit) | the relayable set is the same five operations, and every tuple names the new service |
+
+The four acceptance suites stayed in `tddy-daemon` when the modules left: each is pinned by
+`ConnectionServiceImpl` or `test_util::{test_service, TEST_TOKEN}`, and moving either would put
+`tddy-daemon` back on this crate's dependency path and defeat the extraction. They all pass where
+they are. **This crate's own `tests/` directory does not exist**; its 47 tests are the three unit
+modules above.
 
 The remote suite needs Docker. Run it with `--test-threads=1`, and prefer a shared testkit
 (`./run-livekit-testkit-server`, then `LIVEKIT_TESTKIT_WS_URL=…`) — per-test containers collide on
@@ -277,4 +303,5 @@ host ports and produce failures that move between runs.
 - [Session rooms](../../../docs/ft/daemon/session-room.md) — the room an owning daemon joins
 - [Session worktree sync](../../../docs/ft/daemon/session-worktree-sync.md) — the mirror algorithm
 - [Remote managed worktree](../../../docs/ft/daemon/remote-managed-worktree.md) — the workspace-session and tool-proxy primitives reused here
-- [Connection service](connection-service.md) — the RPCs and conversation routing
+- [Session agent service](./session-agent-service.md) — the nine RPCs, the ports and the routing split
+- [Connection service](../../tddy-daemon/docs/connection-service.md) — the 33 methods that stayed

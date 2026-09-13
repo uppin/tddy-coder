@@ -29,11 +29,10 @@ use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    AttachSessionAgentRequest, CancelAgentConversationRequest,
-    ConnectionService as ConnectionServiceTrait, DetachSessionAgentRequest,
+use tddy_service::proto::session_agents_svc::{
+    AttachSessionAgentRequest, CancelAgentConversationRequest, DetachSessionAgentRequest,
     ListSessionAgentsRequest, OpenAgentConversationRequest, PromptAgentConversationRequest,
-    StreamSessionAgentsRequest,
+    SessionAgentService as _, StreamSessionAgentsRequest,
 };
 
 /// This daemon: where the agent's loop runs.
@@ -93,6 +92,7 @@ struct ADaemonInTheCommonRoom {
 impl ADaemonInTheCommonRoom {
     async fn stream_roster_from(&self, daemon: &str) -> Result<(), tddy_rpc::Status> {
         self.service
+            .session_agents_service()
             .stream_session_agents(Request::new(StreamSessionAgentsRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: SESSION_ON_THE_CODEBASE_HOST.to_string(),
@@ -105,8 +105,9 @@ impl ADaemonInTheCommonRoom {
     async fn list_roster_from(
         &self,
         daemon: &str,
-    ) -> Result<tddy_service::proto::connection::SessionAgentRoster, tddy_rpc::Status> {
+    ) -> Result<tddy_service::proto::session_agents_svc::SessionAgentRoster, tddy_rpc::Status> {
         self.service
+            .session_agents_service()
             .list_session_agents(Request::new(ListSessionAgentsRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: SESSION_ON_THE_CODEBASE_HOST.to_string(),
@@ -118,6 +119,7 @@ impl ADaemonInTheCommonRoom {
 
     async fn attach_on(&self, daemon: &str, agent_id: &str) -> Result<(), tddy_rpc::Status> {
         self.service
+            .session_agents_service()
             .attach_session_agent(Request::new(AttachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: SESSION_ON_THE_CODEBASE_HOST.to_string(),
@@ -130,6 +132,7 @@ impl ADaemonInTheCommonRoom {
 
     async fn detach_on(&self, daemon: &str, agent_id: &str) -> Result<(), tddy_rpc::Status> {
         self.service
+            .session_agents_service()
             .detach_session_agent(Request::new(DetachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: SESSION_ON_THE_CODEBASE_HOST.to_string(),
@@ -146,6 +149,7 @@ impl ADaemonInTheCommonRoom {
         agent_id: &str,
     ) -> Result<(), tddy_rpc::Status> {
         self.service
+            .session_agents_service()
             .open_agent_conversation(Request::new(OpenAgentConversationRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: SESSION_ON_THE_CODEBASE_HOST.to_string(),
@@ -159,6 +163,7 @@ impl ADaemonInTheCommonRoom {
 
     async fn prompt_conversation_on(&self, daemon: &str) -> Result<(), tddy_rpc::Status> {
         self.service
+            .session_agents_service()
             .prompt_agent_conversation(Request::new(PromptAgentConversationRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: SESSION_ON_THE_CODEBASE_HOST.to_string(),
@@ -172,6 +177,7 @@ impl ADaemonInTheCommonRoom {
 
     async fn cancel_conversation_on(&self, daemon: &str) -> Result<(), tddy_rpc::Status> {
         self.service
+            .session_agents_service()
             .cancel_agent_conversation(Request::new(CancelAgentConversationRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: SESSION_ON_THE_CODEBASE_HOST.to_string(),

@@ -1664,7 +1664,7 @@ impl SessionRoomRegistry {
                 previous_wip_tree: String::new(),
                 previous_attachments: measured.attachments,
                 next_seq: 0,
-                next_delta_seq: 0,
+                last_delta_seq: None,
                 stopped: Arc::clone(&stopped),
             }
             .run(),
@@ -2367,8 +2367,10 @@ struct SessionRoomPoll {
     /// attachment invisible until some unrelated edit happened to fire.
     previous_attachments: Vec<String>,
     next_seq: u64,
-    /// The number the next delta this room produces will carry — its **own** sequence, not the one
-    /// [`Self::next_seq`] numbers activity events with.
+    /// The tick the last delta this room produced carried — its **own** sequence, not the one
+    /// [`Self::next_seq`] numbers activity events with. `None` until it has produced one, and
+    /// [`tddy_service::session_activity::next_tick`] is what turns either answer into the next
+    /// number.
     ///
     /// Two counters because the two streams are de-duplicated separately and a gap means the same
     /// thing in both: "one was lost". A delta numbered out of the event space would inherit the
@@ -2376,8 +2378,13 @@ struct SessionRoomPoll {
     /// every one of them would read to a client as a delta that never arrived, sending it to fetch
     /// the WIP ref for nothing. It advances only when a delta was actually produced, so an idle
     /// tick, an unmeasurable one, and a tick whose tree did not change all cost nothing: what a
-    /// client sees is `0, 1, 2, …` with a gap only where a delta really was lost.
-    next_delta_seq: u64,
+    /// client sees is `1, 2, 3, …` with a gap only where a delta really was lost.
+    ///
+    /// Numbered from [`tddy_service::session_activity::FIRST_TICK`] (1) rather than 0, because 0 is
+    /// the wire's [`tddy_service::session_activity::NO_TICK`] — an `AgentActivityRecord` no tick
+    /// has covered yet carries it — so a first delta numbered 0 could not be told from "no delta
+    /// yet". Held as the *last* rather than the next so there is one place the rule lives.
+    last_delta_seq: Option<u64>,
     /// Set when this room stops being hosted, by `close`/`Drop` or by the serving task noticing the
     /// connection ended. Polling past that point measures a checkout to broadcast into a connection
     /// that is gone.
@@ -2559,7 +2566,7 @@ impl SessionRoomPoll {
     ///
     /// Returns the seq of the delta this tick recorded, or `None` when it produced none — which is
     /// where the tick's tool calls are attributed, so it is answered here rather than inferred from
-    /// [`Self::next_delta_seq`] by arithmetic.
+    /// [`Self::last_delta_seq`] by arithmetic.
     /// Publish the checkout's uncommitted state once, so a participant has something to restore
     /// from before the session has moved at all.
     ///
@@ -2628,7 +2635,7 @@ impl SessionRoomPoll {
             ..self.previous.clone()
         };
         let next = measured.clone();
-        let seq = self.next_delta_seq;
+        let seq = tddy_service::session_activity::next_tick(self.last_delta_seq);
         let session_id = self.session_id.clone();
         let room_name = self.room_name.clone();
         let git_timeout = self.git_timeout;
@@ -2677,8 +2684,8 @@ impl SessionRoomPoll {
         let delta = delta?;
         let recorded_seq = delta.seq;
         // Advanced only for a delta that exists, so the numbers a client de-duplicates by have a
-        // gap exactly where one was lost. See [`Self::next_delta_seq`].
-        self.next_delta_seq += 1;
+        // gap exactly where one was lost. See [`Self::last_delta_seq`].
+        self.last_delta_seq = Some(recorded_seq);
         // Poisoned by a panic in some other holder means one call's slice of one tick was left
         // half-computed; the ring itself is a queue of finished deltas, and refusing to record any
         // more of them would cost every client every remaining tick of the session.
@@ -2751,7 +2758,10 @@ impl SessionRoomPoll {
         if decided.broadcast.is_empty() {
             return;
         }
-        let numbered_a_delta = decided.empty_delta.is_some();
+        // The seq the empty delta this tick had to record carries, when it recorded one — read
+        // before the delta is moved into the ring, because that is the tick this room has now
+        // produced and the next one follows it.
+        let numbered_a_delta = decided.empty_delta.as_ref().map(|delta| delta.seq);
         {
             // Recorded before the calls are attributed to it, so no lookup can find a call whose
             // tick is not in the ring yet. One lock for both, and never held across the publish
@@ -2764,8 +2774,8 @@ impl SessionRoomPoll {
                 store.attribute(&record.call_id, record.activity_seq, &record.changed_paths);
             }
         }
-        if numbered_a_delta {
-            self.next_delta_seq += 1;
+        if let Some(numbered) = numbered_a_delta {
+            self.last_delta_seq = Some(numbered);
         }
 
         for record in decided.broadcast {
@@ -2798,7 +2808,7 @@ impl SessionRoomPoll {
         match recorded_delta_seq {
             Some(seq) => TickAttributionTarget::ThisTicksDelta { seq },
             None => TickAttributionTarget::AnEmptyDelta {
-                next_seq: self.next_delta_seq,
+                next_seq: tddy_service::session_activity::next_tick(self.last_delta_seq),
                 base_commit: head_commit.to_string(),
             },
         }

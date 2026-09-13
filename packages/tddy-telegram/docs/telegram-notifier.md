@@ -35,7 +35,7 @@ The **`telegram_notifier`** module implements session status notifications using
 
 | Item | Role |
 |------|------|
-| **`session_telegram_label(session_id)`** | Returns **`Some("seg0-seg1")`** when **`session_id`** splits on **`-`** into at least two parts; otherwise **`None`**. Used by the metadata tick, presenter elicitation, the **`/sessions`** list and chain-parent buttons. **Activity alerts do not use it** — those name a session with **`tddy_core::session_label::session_display_label`**, the rule the web drawer applies, so a chat message and a drawer row agree (**[session-notifications.md](../../tddy-daemon/docs/session-notifications.md)**). |
+| **`session_telegram_label(session_id)`** | Returns **`Some("seg0-seg1")`** when **`session_id`** splits on **`-`** into at least two parts; otherwise **`None`**. Used by the metadata tick, presenter elicitation, the **`/sessions`** list and chain-parent buttons. **Activity alerts do not use it** — those name a session with **`tddy_core::session_label::session_display_label`**, the rule the web drawer applies, so a chat message and a drawer row agree (**[session-notifications.md](../../tddy-session-activity/docs/session-notifications.md)**). |
 | **`TelegramSessionWatcher::chats_tracking_session(session_id)`** | **`Option<Vec<i64>>`** — the chats that have Enter-tracked the session, or **`None`** when the tracking map cannot be read. **`Some(vec![])`** ("nobody claimed it", so the caller may broadcast) and **`None`** ("unknown") are deliberately different: treating the second as the first would announce a session one operator had claimed to every configured chat. |
 | **`is_terminal_session_status(status)`** | **`true`** for **`completed`** and **`failed`** (ASCII case-insensitive); used for classification and logging. |
 | **`mask_bot_token_for_logs(token)`** | Returns a fixed-format string that does not embed the token (length-only metadata). |
@@ -48,7 +48,7 @@ The **`telegram_notifier`** module implements session status notifications using
 
 ## Activity alerts moved to the notification bus
 
-The **`WaitingForInput`** / **`Done`** alert path no longer lives in this module. **`ReportSessionStatus`** publishes onto **`SessionNotificationBus`**, and **`TelegramNotificationSubscriber`** is one subscriber on it — see **[session-notifications.md](../../tddy-daemon/docs/session-notifications.md)**. This module keeps the metadata tick, the presenter **`ServerMessage`** surface, and everything keyboard-bearing.
+The **`WaitingForInput`** / **`Done`** alert path no longer lives in this module. **`ReportSessionStatus`** — served on **`activity.ActivityService`** by **`tddy-session-activity`** since `#unbundle` node 7, not on **`connection.ConnectionService`** — publishes onto **`SessionNotificationBus`** (**`tddy_session_activity::session_notifications`**), and **`TelegramNotificationSubscriber`** is one subscriber on it, kept in **`tddy-daemon`** because it delivers through the daemon's bot hooks and reads its **`telegram:`** config block — see **[session-notifications.md](../../tddy-session-activity/docs/session-notifications.md)**. This module keeps the metadata tick, the presenter **`ServerMessage`** surface, and everything keyboard-bearing.
 
 ## Telegram-tracked session gate (`telegram_tracked_session`)
 

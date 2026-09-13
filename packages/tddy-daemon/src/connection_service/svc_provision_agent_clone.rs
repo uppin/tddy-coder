@@ -10,7 +10,7 @@ use std::{path::Path, sync::Arc};
 
 use std::path::PathBuf;
 
-use tddy_service::proto::connection::SessionAgentRoster;
+use tddy_service::proto::session_agents_svc::SessionAgentRoster;
 
 use super::peer_has_no_such_session;
 

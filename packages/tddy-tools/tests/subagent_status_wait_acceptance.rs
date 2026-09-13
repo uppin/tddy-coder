@@ -22,9 +22,10 @@ use std::sync::Mutex;
 use pretty_assertions::assert_eq;
 use serde_json::{json, Value};
 use serial_test::serial;
-use tddy_service::proto::connection::{
-    AgentCloneState, SessionAgentEntry, SessionAgentRoster, SessionAgentStatus,
+use tddy_service::proto::session_agents_svc::{
+    AgentCloneState, SessionAgentEntry, SessionAgentRoster,
 };
+use tddy_service::proto::types::SessionAgentStatus;
 use tddy_tools::server::PermissionServer;
 use tddy_tools::session_agents::session_agent_roster;
 

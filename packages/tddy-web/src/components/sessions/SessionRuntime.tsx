@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Minimize2 } from "lucide-react";
 import type { Client } from "@connectrpc/connect";
-import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
+import { type SessionEntry } from "../../gen/connection_pb";
+import { type SessionAgentService } from "../../gen/session_agents_pb";
 import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
@@ -28,7 +29,7 @@ import {
 import { safeTestIdPart } from "../../lib/testId";
 import { cn } from "../../lib/utils";
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type SessionAgentClient = Client<typeof SessionAgentService>;
 type TerminalClient = Client<typeof TerminalSessionService>;
 
 export interface SessionRuntimeProps {
@@ -38,10 +39,10 @@ export interface SessionRuntimeProps {
    *  shortcut overlay; backgrounded runtimes stay mounted but `display:none`. */
   focused: boolean;
   sessionToken: string;
-  /** Owning daemon `ConnectionService` client — the agent-conversation panes read their transcript
-   *  over it, and a spawned child runtime inherits it. Pass `null`/`undefined` until the daemon is
-   *  reachable. */
-  client?: ConnectionClient | null;
+  /** Owning daemon `session_agents.SessionAgentService` client — the agent-conversation panes hold
+   *  their conversation over it, and a spawned child runtime inherits it. Pass `null`/`undefined`
+   *  until the daemon is reachable. */
+  client?: SessionAgentClient | null;
   /** Owning daemon `TerminalSessionService` client — the auto-claim-on-attach target, and the
    *  fallback wire for host-served terminal I/O. Pass `null`/`undefined` until the daemon is
    *  reachable. */
@@ -558,7 +559,7 @@ interface SessionChildRuntimeProps {
   /** True when this child pane is the visible/interactive one. */
   focused: boolean;
   sessionToken: string;
-  client?: ConnectionClient | null;
+  client?: SessionAgentClient | null;
   /** Owning daemon `TerminalSessionService` client, inherited from the parent runtime (see
    *  `SessionRuntimeProps.terminalClient`). */
   terminalClient?: TerminalClient | null;

@@ -27,11 +27,8 @@
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
-import {
-  SessionAgentStatus,
-  SessionEntrySchema,
-  type SessionEntry,
-} from "../../src/gen/connection_pb";
+import { SessionEntrySchema, type SessionEntry } from "../../src/gen/connection_pb";
+import { SessionAgentStatus } from "../../src/gen/types_pb";
 import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
 import {
   aSessionAgentRosterBackend,

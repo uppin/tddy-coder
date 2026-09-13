@@ -99,11 +99,11 @@ impl ConnectionServiceImpl {
             log::info!("{rpc_name}: rejected daemon routing: {msg}");
             Status::invalid_argument(msg)
         })?;
-        if let PeerRoute::Forward { peer_instance_id } = &route {
-            log::info!(
-                "{rpc_name}: forwarding RPC to remote daemon_instance_id={peer_instance_id}"
-            );
-        }
+        // A `Forward` classification is **not** a forward. One caller refuses instead of
+        // forwarding — `refuse_if_addressed_at_a_peer`, which answers the two long-lived activity
+        // streams `unimplemented` — so a line logged here would report a forward the daemon never
+        // makes, and would double up wherever the caller logs its own. Each caller that actually
+        // forwards logs it at the point it does.
         Ok(route)
     }
 
@@ -336,6 +336,12 @@ impl ConnectionServiceImpl {
     /// `Ok(None)` means the call is this daemon's own to serve — an empty id, or this daemon's id.
     /// `rpc_name` is the proto method name, so a forwarded call lands on the same handler there.
     ///
+    /// `service` is the coordinate the peer is asked at, for the reason
+    /// [`Self::stream_served_by_peer`] takes one: it is not always this one. Family B's four routed
+    /// unaries are `session_agents.SessionAgentService`' since `#unbundle` node 7, and a forward
+    /// addressed to the coordinate the caller happened to reach would be answered by a service that
+    /// no longer declares the method.
+    ///
     /// Called **before** the session is looked up, and before the caller is authenticated: a relay
     /// holds neither the session nor, necessarily, an answer about its caller, and the daemon that
     /// serves the call checks the token itself. A split session's roster and files live on the
@@ -345,6 +351,7 @@ impl ConnectionServiceImpl {
     /// tool (PRD AC12, AC28).
     pub(crate) async fn rpc_served_by_peer<Req, Resp>(
         &self,
+        service: &'static str,
         rpc_name: &str,
         requested_daemon: &str,
         req: &Req,
@@ -358,11 +365,12 @@ impl ConnectionServiceImpl {
         else {
             return Ok(None);
         };
+        log::info!("{rpc_name}: forwarding RPC to remote daemon_instance_id={peer_instance_id}");
         let slot = self.common_room_slot(rpc_name)?;
         let answered = crate::livekit_peer_discovery::forward_to_peer(
             slot,
             &peer_instance_id,
-            "connection.ConnectionService",
+            service,
             rpc_name,
             req.encode_to_vec(),
         )
@@ -396,6 +404,7 @@ impl ConnectionServiceImpl {
         else {
             return Ok(None);
         };
+        log::info!("{rpc_name}: forwarding stream to remote daemon_instance_id={peer_instance_id}");
         let slot = self.common_room_slot(rpc_name)?;
         let decoding = rpc_name.to_string();
         crate::livekit_peer_discovery::forward_server_stream_to_peer(

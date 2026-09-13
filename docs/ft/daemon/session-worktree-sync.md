@@ -49,9 +49,10 @@ Three gaps, each of which makes a mirror silently wrong rather than loudly broke
 ### The room is the whole interface
 
 The syncer joins exactly one room, `session-{session_id}`, and everything it needs is there: the
-activity broadcast, the commit broadcast, room metadata, and the `ConnectionService` RPCs the
-facilitating daemon already serves in that room. The one exception is the git transport itself,
-which lives on the daemon's common room and is reached through the existing
+activity broadcast, the commit broadcast, room metadata, and the RPCs the facilitating daemon
+already serves in that room — `StreamAgentActivityDelta` on `activity.ActivityService`,
+`StreamReadWorktreeFile` on `worktree.WorktreeService`. The one exception is the git transport
+itself, which lives on the daemon's common room and is reached through the existing
 `tddy-remote-git-repo` shim.
 
 Getting into that room takes two calls to the daemon over HTTP first: `ListSessions` to resolve which
@@ -172,14 +173,15 @@ it, and log at `error` naming what diverged. Self-healing, never quiet.
    subprocess. A record whose HEAD could not be read carries an empty `head_commit` and is never
    given a fabricated one.
 2. **`AgentActivityRecord` carries `activity_seq` and `changed_paths`** — the poll tick its delta
-   belongs to (`0` when no tick has covered it yet), and the worktree paths the call is credited
+   belongs to (`0` when no tick has covered it yet; a session's first tick is **1**, so "the first
+   delta" and "no delta yet" are distinguishable), and the worktree paths the call is credited
    with. The paths are plain and relative, **not** git's C-quoted display form: they are used to
    open files and to build pathspecs, and a quoted name would select nothing.
 3. All three fields are `#[serde(default)]` on the persisted JSONL row, so an `agent-activity.jsonl`
    written before this change still reads rather than every historical row being skipped as
    malformed.
 4. **Activity records are broadcast in the session room** on a new `session.activity` data-channel
-   topic, binary `connection.AgentActivityRecord`, published once with no
+   topic, binary `activity.AgentActivityRecord`, published once with no
    `destination_identities` — the same broadcast discipline as `worktree.activity`. The topic is a
    named constant beside the payload's schema, for the reason `WORKTREE_ACTIVITY_TOPIC` already
    documents: publisher and receiver live in different crates, and a topic each spelled for itself
@@ -217,9 +219,9 @@ it, and log at `error` naming what diverged. Self-healing, never quiet.
     tree, parented on `HEAD`, so "which commit does this apply to" is answered by the object graph.
     It lives under `refs/tddy/` and therefore never appears in `git branch`. It is **deleted when
     the session's room closes**, so its objects stop being pinned.
-14. Same authorization as every other `ConnectionService` RPC: `session_token` resolved by the same
-    resolver, `UNAUTHENTICATED` / `PERMISSION_DENIED` as usual, and refused **before** any git
-    subprocess runs.
+14. Same authorization as every other session-scoped RPC the daemon serves: `session_token`
+    resolved by the same resolver, `UNAUTHENTICATED` / `PERMISSION_DENIED` as usual, and refused
+    **before** any git subprocess runs.
 
 ### Wire — streaming worktree reads
 
@@ -301,7 +303,7 @@ it, and log at `error` naming what diverged. Self-healing, never quiet.
 ## Wire contract
 
 ```proto
-// connection.proto — additions
+// activity.proto — the record, the delta RPC and their messages
 
 message AgentActivityRecord {
   // … existing fields 1-9 …
@@ -310,8 +312,9 @@ message AgentActivityRecord {
   // it was cut from, so a record that cannot name its base is a record a mirror must not act on.
   string head_commit = 10;
 
-  // The poll tick whose delta covers this call; 0 when no tick has covered it yet. Several calls
-  // in one window share a seq but NOT a patch — changed_paths is what separates them.
+  // The poll tick whose delta covers this call; 0 when no tick has covered it yet. Ticks start at
+  // 1, so 0 is only ever "no tick". Several calls in one window share a seq but NOT a patch —
+  // changed_paths is what separates them.
   uint64 activity_seq = 11;
 
   // The paths this call is credited with. The delta served for it is the tick's diff limited to
@@ -320,17 +323,13 @@ message AgentActivityRecord {
   repeated string changed_paths = 12;
 }
 
-service ConnectionService {
+service ActivityService {
   // … existing …
 
   // The patch a call produced, scoped to that call's own files. The INCREMENTAL path only —
   // reconciling is a git fetch of the WIP ref. Streamed, because a patch has no useful upper
   // bound and an oversized frame wedges silently rather than failing.
   rpc StreamAgentActivityDelta(AgentActivityDeltaRequest) returns (stream AgentActivityDeltaChunk);
-
-  // The streaming, byte-exact sibling of ReadWorktreeFile. Same addressing, same gates; bytes
-  // rather than a UTF-8 string, and refused rather than truncated when oversized.
-  rpc StreamReadWorktreeFile(ReadWorktreeFileRequest) returns (stream WorktreeFileChunk);
 }
 
 message AgentActivityDeltaRequest {
@@ -353,12 +352,21 @@ enum DeltaScope {
 // reader knows what it is receiving from the first frame, with no header frame to special-case.
 message AgentActivityDeltaChunk {
   bytes  patch           = 1;  // one slice of `git diff --binary` output
-  uint64 seq             = 2;  // the tick this patch belongs to
+  uint64 seq             = 2;  // the tick this patch belongs to; ticks start at 1, 0 is unset
   uint64 prev_seq        = 3;  // the tick it follows; a gap means a lost broadcast
   string base_commit     = 4;  // the commit the patch applies onto
   reserved 5;                  // was `cumulative`, before reconciling became a git fetch
   uint64 total_byte_size = 6;  // the patch's full size; 0 when nothing changed
   repeated string scoped_paths = 7;  // what the patch was limited to, resolved
+}
+
+// worktree.proto — the streaming read, on worktree.WorktreeService
+service WorktreeService {
+  // … existing …
+
+  // The streaming, byte-exact sibling of ReadWorktreeFile. Same addressing, same gates; bytes
+  // rather than a UTF-8 string, and refused rather than truncated when oversized.
+  rpc StreamReadWorktreeFile(ReadWorktreeFileRequest) returns (stream WorktreeFileChunk);
 }
 
 message WorktreeFileChunk {
@@ -370,7 +378,7 @@ message WorktreeFileChunk {
 Broadcast topic, beside `worktree.activity`:
 
 ```
-session.activity  →  binary connection.AgentActivityRecord
+session.activity  →  binary activity.AgentActivityRecord
 ```
 
 And one git ref per session, which is the whole reconcile surface:

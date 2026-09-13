@@ -13,9 +13,10 @@ false and no `daemon-<instanceId>-<sessionId>` participant is present in the com
 
 An inactive session has no terminal to show, but it does have a **recorded history**: the daemon
 persists every ACP transcript frame and tool call to disk (`acp-transcript.jsonl`,
-`agent-activity.jsonl`) and replays them over `ConnectionService.StreamAcpReplay` without needing
-LiveKit or a live process. That recording — not an empty pane, and not the Inspector — is what the
-operator wants to read when they open a dormant session, together with one control to bring it back.
+`agent-activity.jsonl`) and replays them over `activity.ActivityService.StreamAcpReplay` without
+needing LiveKit or a live process. That recording — not an empty pane, and not the Inspector — is
+what the operator wants to read when they open a dormant session, together with one control to
+bring it back.
 
 An inactive session therefore presents:
 

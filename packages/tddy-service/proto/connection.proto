@@ -3,9 +3,11 @@ syntax = "proto3";
 package connection;
 
 import "google/protobuf/struct.proto";
-// `HostDocumentScope` is the one type this service shares with another served one: `StartSession`
-// reaches it through `HostDocumentRef`, and `session_files.SessionFilesService` reaches it through
-// `ReadHostDocument`. See types.proto for why nothing else lives there.
+// The types this service shares with another served one. `StartSession` reaches
+// `HostDocumentScope` through `HostDocumentRef`, and `session_files.SessionFilesService` reaches it
+// through `ReadHostDocument`; `ListSessions` reaches `SessionAgentStatus` and
+// `SessionAgentActivity` through `SessionEntry`, and `session_agents.SessionAgentService` reaches
+// both through `SessionAgentEntry`. See types.proto for why nothing else lives there.
 import "types.proto";
 
 // Families I, J, K, R and S left this service for `session_files.SessionFilesService`
@@ -16,6 +18,16 @@ import "types.proto";
 // on a surviving message was vacated and none needed reserving. Protobuf has no `reserved` for
 // service methods, so this note is the record that these 22 coordinates once answered here and
 // must not be re-declared.
+//
+// Family B left for `session_agents.SessionAgentService`
+// (packages/tddy-service/proto/session_agents.proto, 9 rpcs) and families M and N for
+// `activity.ActivityService` (packages/tddy-service/proto/activity.proto, 8 rpcs) in `#unbundle`
+// node 7, taking this service from 50 rpcs to 33. Their request, response and payload messages went
+// with them. Two of those messages are reached by what stayed: `ListSessions` reaches
+// `SessionAgentStatus` and `SessionAgentActivity` through `SessionEntry`, so both moved to
+// types.proto and `SessionEntry` reaches them there rather than keeping a second copy. No field
+// number on a surviving message was vacated, so none needed reserving — `SessionEntry` keeps 31 and
+// 32, pointing at the shared declarations.
 
 service ConnectionService {
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
@@ -28,46 +40,6 @@ service ConnectionService {
   // Specialized subagents (YAML-defined; see docs/ft/coder/specialized-subagents.md) available to
   // wire into a managed-codebase session — builtin defs plus <tddyhome>/agents/*.yaml.
   rpc ListSubagents(ListSubagentsRequest) returns (ListSubagentsResponse);
-  // A session's agent roster (docs/ft/daemon/session-agent-roster.md) — the agents attached to a
-  // LIVE session, mutated while it runs. Every call is served by the facilitating daemon, which
-  // owns the roster; an agent owned by another daemon is resolved from that daemon and routed to it
-  // off the qualified `agent_id` the entry stores.
-  //
-  // Attach is idempotent on (session, agent_id): re-attaching an already attached agent returns the
-  // roster unchanged and does not bump `rev`. Detaching an agent that is not attached is NOT_FOUND,
-  // not a silent success — a roster nobody can trust is worse than an error.
-  rpc AttachSessionAgent(AttachSessionAgentRequest) returns (SessionAgentRoster);
-  rpc DetachSessionAgent(DetachSessionAgentRequest) returns (SessionAgentRoster);
-  rpc ListSessionAgents(ListSessionAgentsRequest) returns (SessionAgentRoster);
-  // The roster, now and on every change. The first frame is always the current snapshot, so a late
-  // subscriber needs no separate priming read, and a no-op attach emits nothing.
-  rpc StreamSessionAgents(StreamSessionAgentsRequest) returns (stream SessionAgentRoster);
-  // Conversation routing — the in-jail `tddy-tools` calls these on its facilitating daemon for
-  // every roster agent, local or remote, so the main agent cannot tell which host answered. The
-  // daemon runs a local entry in-process and forwards a remote entry to its owning daemon in the
-  // session room.
-  rpc OpenAgentConversation(OpenAgentConversationRequest) returns (OpenAgentConversationResponse);
-  // Server-streaming for the same reason StreamExecuteTool is: an agent's answer has no useful
-  // upper bound, and a payload over tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES is chunk-framed,
-  // where one lost frame wedges the call with no error rather than failing it. Frames are bounded
-  // below that budget instead.
-  rpc PromptAgentConversation(PromptAgentConversationRequest) returns (stream AgentConversationChunk);
-  rpc CancelAgentConversation(CancelAgentConversationRequest) returns (CancelAgentConversationResponse);
-  // The owning daemon tells the facilitating daemon how its clone is doing: whether it is ready to
-  // serve reads, where the checkout landed, and every reconcile it had to perform. The facilitating
-  // daemon owns the roster and answers every read of it, but only the daemon holding the checkout
-  // can say any of this — so it is pushed rather than polled, and a reconcile is reported rather
-  // than absorbed (docs/ft/daemon/session-agent-roster.md § Kept current from the room).
-  rpc ReportAgentCloneState(ReportAgentCloneStateRequest) returns (ReportAgentCloneStateResponse);
-  // A conversation whose turn loop runs OUTSIDE the daemon telling it what that loop is doing.
-  //
-  // The daemon infers a roster agent's `status` from the conversation RPCs above, which works for
-  // every agent whose loop it runs. An agent the in-jail `tddy-tools` was *seeded* with runs its
-  // loop in the jail instead: the daemon is never asked to open anything, so it has nothing to
-  // infer from and the row would report UNSPECIFIED for an agent that is demonstrably working.
-  // This is that agent's own report, and the only possible source for it
-  // (docs/ft/daemon/session-agent-roster.md § What an agent is doing).
-  rpc ReportAgentConversationState(ReportAgentConversationStateRequest) returns (ReportAgentConversationStateResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
   rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
@@ -95,51 +67,6 @@ service ConnectionService {
   rpc StreamExecuteTool(ExecuteToolRequest) returns (stream ExecuteToolChunk);
   rpc ListExecTools(ListExecToolsRequest) returns (ListExecToolsResponse);
   rpc ListSessionToolCalls(ListSessionToolCallsRequest) returns (ListSessionToolCallsResponse);
-  // Per-worktree hooks (claude-cli sessions only) report granular activity status.
-  // Auth: `hook_token` is a per-session random token written to .session.yaml at session start.
-  rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);
-  // Agent Activity pane — the agent's own tool calls (see docs/ft/web/agent-activity.md).
-  // StreamSessionActivity replays the persisted agent-activity.jsonl snapshot then streams live
-  // records for the session. ReportAgentActivity is called by per-worktree claude-cli hooks to
-  // report a PreToolUse (running) / PostToolUse (terminal) pair; bearer is the hook_token.
-  rpc StreamSessionActivity(StreamSessionActivityRequest) returns (stream AgentActivityRecord);
-  rpc ReportAgentActivity(ReportAgentActivityRequest) returns (ReportAgentActivityResponse);
-  // Session notifications — everything that happened in ANY of this daemon's sessions that an
-  // operator should know about (docs/ft/daemon/session-notifications.md).
-  // One subscription serves the whole session drawer: the events name the session they belong to,
-  // so a drawer of twelve rows opens one stream, not twelve. Live-only by construction — a
-  // notification describes a moment, and a replayed one would claim an agent is working now
-  // because it was working when the tab was last open.
-  rpc StreamSessionNotifications(StreamSessionNotificationsRequest) returns (stream SessionNotificationEvent);
-  // The patch a call produced, scoped to that call's own files, so a participant can apply an
-  // edit rather than merely learn that the checkout moved
-  // (docs/ft/daemon/session-worktree-sync.md). This is the INCREMENTAL path only: a client that
-  // has fallen behind resyncs by fetching the session's WIP ref over git, not by asking for an
-  // ever-larger patch here. Streamed, not unary: a patch has no useful upper bound, and a payload
-  // over tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES is chunk-framed, where a lost chunk wedges
-  // the call with no error rather than failing it.
-  rpc StreamAgentActivityDelta(AgentActivityDeltaRequest) returns (stream AgentActivityDeltaChunk);
-  // Read-only ACP transcript for the activity pane (see docs/ft/web/agent-activity-pane.md
-  // § Read-only ACP transcript). Replays the session's persisted acp-transcript.jsonl as ACP
-  // session/update frames, then (SNAPSHOT_THEN_LIVE) tails the live presenter. Each AcpReplayFrame
-  // wraps one AcpAgentMessage (only its session_update / error variants). Served over HTTP for any
-  // session (live or dormant) — unlike the bidi, LiveKit-only AcpService.Session. The frame is
-  // wrapped in a connection-local message so the cross-package reference is a field (prost
-  // extern_path) rather than a service return type.
-  rpc StreamAcpReplay(StreamAcpReplayRequest) returns (stream AcpReplayFrame);
-  // On-demand tool-call body lookup for the Agent Activity detail dialog. StreamAcpReplay's
-  // SNAPSHOT_THEN_LIVE / LIVE_ONLY frames carry a tool call's metadata only (title/status/kind/id) —
-  // its raw_input/raw_output are stripped so the stream's size tracks the number of tool calls, not
-  // the volume of their I/O. This unary returns one call's full raw_input/raw_output, resolved from
-  // the same coalesced transcript the stream replays (acp-transcript.jsonl + agent-activity.jsonl
-  // fallback). See docs/ft/coder/acp-replay-lazy-tool-bodies.md.
-  rpc GetAcpToolCallDetail(GetAcpToolCallDetailRequest) returns (GetAcpToolCallDetailResponse);
-  // The transcript's reverse cursor: one page of frames strictly OLDER than `before_seq`. A
-  // TAIL_THEN_LIVE replay opens on the newest page, so reading further back is paging backwards from
-  // the first delivered frame's `seq`. Unary (unlike the replay stream) so it peer-forwards on
-  // daemon_instance_id exactly as GetAcpToolCallDetail does. See
-  // docs/ft/web/agent-activity-pane.md § Read-only ACP transcript.
-  rpc GetAcpReplayPage(GetAcpReplayPageRequest) returns (GetAcpReplayPageResponse);
   // Demo VM lifecycle — UI-driven QEMU boot/shutdown for the demo goal.
   rpc StartDemoVm(StartDemoVmRequest) returns (StartDemoVmResponse);
   rpc StopDemoVm(StopDemoVmRequest) returns (StopDemoVmResponse);
@@ -268,183 +195,6 @@ message SubagentInfo {
   repeated string tools = 7;
 }
 
-// ── Session agent roster (docs/ft/daemon/session-agent-roster.md) ──────────────────────────────
-
-// Every roster read is a WHOLE snapshot. A consumer rebuilds its registry from it and never applies
-// a delta, so a missed frame costs staleness until the next one rather than a registry that
-// silently disagrees with the daemon's — which is the failure that matters here, because a
-// disagreeing registry answers `subagent_new_session` for a detached agent and refuses an attached
-// one. `rev` exists to detect staleness, not to reconstruct state.
-message SessionAgentRoster {
-  string session_id = 1;
-  // Bumped on every attach and every detach that changed something. Starts at 1 for a session
-  // started with a non-empty seed, 0 for one started with none.
-  uint64 rev = 2;
-  // In attach order. Detaching one leaves the rest where they were.
-  repeated SessionAgentEntry agents = 3;
-}
-
-message SessionAgentEntry {
-  // "explorer@ws-01" — the id the main agent addresses and the entry's identity.
-  string agent_id = 1;
-  string name = 2;
-  string daemon_instance_id = 3;
-  // Display only; from the def.
-  string label = 4;
-  // Display only; from the def.
-  string model = 5;
-  // Exec-catalog tools this agent takes over from the main agent, snapshotted at attach rather than
-  // re-read from the def — otherwise editing a YAML def would silently change what a running
-  // session's main agent may call. The union across the roster is what the main agent loses.
-  repeated string replaces = 6;
-  // Exec-catalog tools the agent's own loop may call. Snapshotted at attach for the same reason.
-  repeated string tools = 7;
-  // The `workspace` session on `daemon_instance_id` holding that daemon's clone. Empty when the
-  // owning daemon is the facilitating daemon — a local agent works the real worktree.
-  string codebase_session_id = 8;
-  // An agent is attachable before its clone finishes provisioning; a prompt sent meanwhile is
-  // refused naming this state, never queued and never served from an empty checkout.
-  AgentCloneState clone_state = 9;
-  // Why the clone failed, when `clone_state` is ERROR. Empty otherwise.
-  string clone_error = 10;
-  // What the agent is doing right now, as the facilitating daemon sees it. Rides the whole-snapshot
-  // roster rather than a status RPC of its own: a reader that rebuilt its registry from a snapshot
-  // and then had to correlate a second stream to learn what each row was doing is a reader that can
-  // show a status for a row it no longer holds.
-  //
-  // UNSPECIFIED is not "idle" — it is "this daemon has nothing to say", which is what a roster
-  // restored from `.session.yaml` after a restart honestly reports. Nothing that keeps a status is
-  // persisted: what an agent is doing is a fact about a running loop, and a status restored from
-  // disk would claim a turn is in flight in a process that never started one.
-  SessionAgentStatus status = 11;
-  // The agent's most recent observed activity, or unset when this daemon has observed none. Carried
-  // beside `status` rather than folded into it because the two answer different questions: the
-  // status is what the agent is doing *now*, and this is the last thing it was seen doing — which is
-  // the only useful thing to show for an agent that is idle.
-  SessionAgentActivity last_activity = 12;
-}
-
-// What a roster agent is doing, in the vocabulary the session activity hooks already use
-// (tddy_core::session_activity::SessionActivityStatus), plus the two states only an agent whose
-// codebase lives on another host can be in.
-enum SessionAgentStatus {
-  // This daemon has nothing to say about the agent — not a claim that it is idle. The state of a
-  // roster read back from disk after a restart, and of any entry no signal has reached yet.
-  SESSION_AGENT_STATUS_UNSPECIFIED = 0;
-  // Attached and ready, with no turn in flight. An agent with no conversation open at all is IDLE
-  // too: from the operator's side "nobody has asked it anything" and "it has answered everything
-  // asked" are the same state, and splitting them would show a distinction nothing acts on.
-  SESSION_AGENT_STATUS_IDLE = 1;
-  // A turn is in flight: the agent has a prompt and has not produced its stop reason yet.
-  SESSION_AGENT_STATUS_RUNNING = 2;
-  // The agent's own loop is inside a tool call. A refinement of RUNNING, not a separate lifecycle:
-  // every EXECUTING_TOOL is also a turn in flight.
-  SESSION_AGENT_STATUS_EXECUTING_TOOL = 3;
-  // The agent is blocked on an answer only a human can give.
-  SESSION_AGENT_STATUS_WAITING_FOR_INPUT = 4;
-  // The agent cannot serve a prompt yet because the checkout behind it is still being built. Takes
-  // precedence over anything the conversation state would say: an agent whose clone is not ready
-  // refuses prompts, so reporting it IDLE would offer an agent that cannot answer.
-  SESSION_AGENT_STATUS_CONNECTING = 5;
-  // The agent cannot serve prompts at all. `clone_error` on the same entry says why.
-  SESSION_AGENT_STATUS_ERROR = 6;
-}
-
-// The last thing an agent was observed doing.
-message SessionAgentActivity {
-  // Unix milliseconds. Never 0 on a populated activity — a summary with no time behind it reads as
-  // current forever, which is exactly wrong for the row it is shown on.
-  uint64 at_unix_ms = 1;
-  // One short human-readable line, already truncated for display ("Read src/main.rs", "prompted:
-  // summarise the diff"). Not a structured record: the consumers are a roster pane and an MCP tool
-  // that both render it verbatim, and the structured account of a call is StreamSessionActivity's.
-  string summary = 2;
-}
-
-enum AgentCloneState {
-  AGENT_CLONE_STATE_UNSPECIFIED = 0;
-  // The owning daemon is the facilitating daemon: there is no clone, and there is nothing to wait
-  // for. A distinct value from READY so a UI can say "local" rather than implying a checkout exists.
-  AGENT_CLONE_STATE_LOCAL = 1;
-  AGENT_CLONE_STATE_PROVISIONING = 2;
-  AGENT_CLONE_STATE_READY = 3;
-  AGENT_CLONE_STATE_ERROR = 4;
-}
-
-message AttachSessionAgentRequest {
-  string session_token = 1;
-  string session_id = 2;
-  // Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
-  string daemon_instance_id = 3;
-  // "name@daemon_instance_id" — required, and required to be qualified. An id with no `@` is
-  // INVALID_ARGUMENT; there is no "assume the local daemon" reading, because that reading silently
-  // picks the wrong host once two daemons offer the same name.
-  string agent_id = 4;
-}
-
-message DetachSessionAgentRequest {
-  string session_token = 1;
-  string session_id = 2;
-  string daemon_instance_id = 3;
-  string agent_id = 4;
-}
-
-message ListSessionAgentsRequest {
-  string session_token = 1;
-  string session_id = 2;
-  string daemon_instance_id = 3;
-}
-
-message StreamSessionAgentsRequest {
-  string session_token = 1;
-  string session_id = 2;
-  string daemon_instance_id = 3;
-}
-
-message OpenAgentConversationRequest {
-  string session_token = 1;
-  string session_id = 2;
-  string daemon_instance_id = 3;
-  // The roster entry to talk to. Resolved against the LIVE roster, so an id that was valid at spawn
-  // and has since been detached is refused rather than served from a stale registry.
-  string agent_id = 4;
-  // Caller-chosen conversation id, so an open that times out still leaves the caller able to name —
-  // and therefore cancel — whatever the daemon built. Empty = the daemon mints one.
-  string conversation_id = 5;
-}
-
-message OpenAgentConversationResponse {
-  string conversation_id = 1;
-}
-
-message PromptAgentConversationRequest {
-  string session_token = 1;
-  string session_id = 2;
-  string daemon_instance_id = 3;
-  string conversation_id = 4;
-  string prompt = 5;
-}
-
-message AgentConversationChunk {
-  // Next slice of the agent's answer. An empty answer still yields exactly one frame, so a consumer
-  // never has to distinguish "said nothing" from "nothing arrived".
-  string content_chunk = 1;
-  // Why the agent's turn ended ("EndTurn", "MaxTurns", …), carried on the final frame only.
-  string stop_reason = 2;
-  // Final-frame marker. A stream that ends without it was truncated, not completed — a partial
-  // answer returned as if complete is exactly what a wedged chunk-framed payload looks like.
-  bool last = 3;
-}
-
-message CancelAgentConversationRequest {
-  string session_token = 1;
-  string session_id = 2;
-  string daemon_instance_id = 3;
-  string conversation_id = 4;
-}
-
-message CancelAgentConversationResponse {}
-
 // What makes a `workspace` session an agent clone. See StartSessionRequest.agent_clone.
 // The agent half of a split placement, as the codebase daemon is told about it when it is asked to
 // create the `workspace` session holding that agent's worktree
@@ -487,50 +237,6 @@ message AgentClonePlacement {
   string first_admission_url = 5;
   string first_admission_room = 6;
 }
-
-message ReportAgentCloneStateRequest {
-  string session_token = 1;
-  // The facilitating daemon's session whose roster this clone serves.
-  string session_id = 2;
-  // The owning daemon reporting — the one holding the checkout.
-  string daemon_instance_id = 3;
-  // The `workspace` session on it that holds the checkout.
-  string codebase_session_id = 4;
-  AgentCloneState clone_state = 5;
-  string clone_error = 6;
-  // Where the checkout is, on the owning daemon's filesystem. The facilitating daemon never opens
-  // it — it holds it so an operator (and the roster pane) can be told where a clone actually landed.
-  string worktree_path = 7;
-  // Reconciles performed since the previous report. Appended rather than replacing what the
-  // facilitating daemon already holds: a mirror that repairs itself without saying so hides a real
-  // fault, and a report that overwrote the history would hide it one report later instead.
-  repeated string divergences = 8;
-}
-
-message ReportAgentCloneStateResponse {}
-
-// Authenticated exactly as the conversation RPCs are, and that is not ceremony: the (session,
-// agent) pair this names is published in the session's `session.agents` broadcast, so on the pair
-// alone any participant that saw a roster frame could park an agent at RUNNING for ever.
-message ReportAgentConversationStateRequest {
-  string session_token = 1;
-  string session_id = 2;
-  // Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
-  string daemon_instance_id = 3;
-  // The roster agent whose loop is being reported on. An id the roster does not hold is refused
-  // rather than recorded — a stale in-jail registry must not be able to invent a row.
-  string agent_id = 4;
-  // What that loop is doing. Only the four states a *conversation* can be in are accepted:
-  // CONNECTING and ERROR belong to the checkout, which the daemon measures itself, and a reporter
-  // allowed to send them could hide a broken clone behind a cheerful conversation.
-  SessionAgentStatus status = 5;
-  // One short line for `last_activity.summary`. Truncated by the daemon rather than trusted at the
-  // length it arrives: the summary rides a whole-roster broadcast, where an oversized frame is
-  // chunk-framed and one lost chunk wedges the call with no error.
-  string summary = 6;
-}
-
-message ReportAgentConversationStateResponse {}
 
 message ListSessionsRequest {
   string session_token = 1;
@@ -642,11 +348,11 @@ message SessionEntry {
   // different subjects — one is the session, one is the agent inside it. Distinct from
   // `activity_status` (15) too: that is the raw hook word a claude-cli or cursor worktree reports,
   // and this is an inference built partly on top of it.
-  SessionAgentStatus agent_status = 31;
+  types.SessionAgentStatus agent_status = 31;
   // The last thing this session's agent was observed doing; unset when nothing has been observed,
   // and unset when the status came from the hook word alone (a bare timestamp with no summary
   // renders as an agent that did something unnameable just now).
-  SessionAgentActivity last_activity = 32;
+  types.SessionAgentActivity last_activity = 32;
 }
 
 message ProjectEntry {
@@ -1051,261 +757,7 @@ message ListSessionToolCallsResponse {
 
 // --- Session activity status reporting from per-worktree hooks ---
 
-/// Sent by `tddy-tools session-hook`; bearer is the per-session hook_token.
-message ReportSessionStatusRequest {
-  // Daemon session id (baked into the hook command at worktree-prep time).
-  string session_id = 1;
-  // Per-session random token — validated against .session.yaml hook_token field.
-  string hook_token = 2;
-  // OS user (resolves the sessions_base path on the daemon).
-  string os_user = 3;
-  // Wire status string: one of Started, Running, ExecutingTool, WaitingForInput, Done, Ended.
-  string status = 4;
-}
-
-message ReportSessionStatusResponse {
-  bool ok = 1;
-}
-
 // --- Agent Activity: the agent's own tool calls, streamed to the web pane ---
-
-// One recorded state of an agent tool call. Mirrors tddy_core::agent_activity::AgentActivityRecord.
-// The same call_id appears on the running row and the terminal row; the read side coalesces them.
-message AgentActivityRecord {
-  string call_id                     = 1;
-  string tool_name                   = 2;
-  google.protobuf.Value input        = 3;
-  string status                      = 4;  // "running" | "completed" | "error"
-  google.protobuf.Value result       = 5;
-  string error_message               = 6;
-  uint64 started_unix_ms             = 7;
-  uint64 completed_unix_ms           = 8;
-  string source                      = 9;  // "coder" | "cursor-cli" | "claude-cli" | "sandbox"
-
-  // The worktree HEAD when this call was recorded. A patch is only applicable against the commit
-  // it was cut from, so a record that cannot name its base is a record a mirror must not act on.
-  // Empty when HEAD could not be read — never a fabricated sha.
-  string head_commit                 = 10;
-  // The session-room poll tick whose delta covers this call; 0 when no tick has covered it yet.
-  // Several calls in one window share a seq, but NOT the same patch — see changed_paths.
-  uint64 activity_seq                = 11;
-  // The worktree paths this call is credited with, relative to the worktree root and NOT
-  // git-C-quoted (unlike GetWorktreeSnapshot.changed_paths, which is display-only). The delta
-  // served for this call is the tick's diff limited to exactly these paths, so two calls in one
-  // poll window get two different patches rather than one shared whole-tree diff.
-  //
-  // Populated from what the call declared it would touch — an Edit's or Write's file_path. A call
-  // that declared nothing (a Bash running a formatter, a codegen step) is credited with nothing
-  // here, and whatever it changed is delivered by the tick's RESIDUAL delta instead, so no change
-  // is ever attributed away into silence.
-  repeated string changed_paths      = 12;
-}
-
-// Whether the stream replays the persisted history before tailing live records.
-enum StreamMode {
-  SNAPSHOT_THEN_LIVE = 0;   // default: replay the coalesced history, then tail live records
-  LIVE_ONLY          = 1;   // skip the snapshot; deliver only records that arrive after subscribe
-  // Count-first (StreamAcpReplay only): emit the current activity count as the first frame, then a
-  // new count for each frame appended live. Carries no transcript payload — the cheap "minimal
-  // activity data" that drives the Agent Activity icon/badge before the pane is opened.
-  COUNT_THEN_LIVE    = 2;
-  // Tail-first (StreamAcpReplay only): replay only the NEWEST `page_size` persisted frames — in
-  // recorded order, oldest-first within the page — then tail live. Older frames are reached by
-  // paging backwards with GetAcpReplayPage from the first delivered frame's `seq`.
-  TAIL_THEN_LIVE     = 3;
-}
-
-// Whether a notification asks the operator for something, or merely reports progress.
-enum SessionNotificationKind {
-  // The daemon said nothing about the kind — not a claim that either applies.
-  SESSION_NOTIFICATION_KIND_UNSPECIFIED = 0;
-  // The agent is working. Drives the drawer's blinking green dot; reaches no chat.
-  SESSION_NOTIFICATION_KIND_ACTIVITY = 1;
-  // The session is blocked on the operator, or has finished a turn and is waiting for them.
-  // Drives the yellow dot, and is the only kind Telegram sends.
-  SESSION_NOTIFICATION_KIND_ATTENTION_REQUIRED = 2;
-}
-
-// Which of the daemon's inbound paths raised a notification.
-enum SessionNotificationSource {
-  SESSION_NOTIFICATION_SOURCE_UNSPECIFIED = 0;
-  // ReportSessionStatus — the per-worktree claude-cli / cursor-cli hooks.
-  SESSION_NOTIFICATION_SOURCE_ACTIVITY_STATUS = 1;
-  // ReportAgentActivity — the agent's own tool loop.
-  SESSION_NOTIFICATION_SOURCE_AGENT_TOOL_CALL = 2;
-  // PresenterObserver.ObserveEvents — a tddy-coder workflow session's presenter.
-  SESSION_NOTIFICATION_SOURCE_PRESENTER = 3;
-}
-
-message StreamSessionNotificationsRequest {
-  // The web session token. No session id: the stream is daemon-level by design (NFR1).
-  string session_token = 1;
-}
-
-// One thing that happened in one session.
-message SessionNotificationEvent {
-  string                    session_id = 1;
-  // The session's display label, derived by the one rule every surface uses
-  // (tddy_core::session_label::session_display_label), so this event and the drawer row it belongs
-  // to name the same session identically.
-  string                    label      = 2;
-  SessionNotificationKind   kind       = 3;
-  SessionNotificationSource source     = 4;
-  // Operator-facing copy, rendered verbatim (it is what Telegram sends). Never carries a secret.
-  string                    text       = 5;
-  // Unix milliseconds, stamped when the event happened. The web ages activity out of its blink
-  // window against this, so a 0 here would leave a dot blinking for as long as the tab stayed open.
-  uint64                    at_unix_ms = 6;
-}
-
-message StreamSessionActivityRequest {
-  string     session_token      = 1;
-  string     session_id         = 2;
-  string     daemon_instance_id = 3;
-  StreamMode mode               = 4;   // snapshot-then-live (default) vs live-only
-}
-
-// Request for the read-only ACP transcript replay. Mirrors StreamSessionActivityRequest — same
-// peer-forward routing and StreamMode semantics.
-message StreamAcpReplayRequest {
-  string     session_token      = 1;
-  string     session_id         = 2;
-  string     daemon_instance_id = 3;
-  StreamMode mode               = 4;   // snapshot-then-live (default) vs live-only
-  // TAIL_THEN_LIVE only: how many newest frames to replay. 0 ⇒ the server's default page size.
-  uint32     page_size          = 5;
-}
-
-// One replay frame: a connection-local wrapper carrying an ACP `tddy.acp.v1.AcpAgentMessage`
-// (session_update / error variant) as its protobuf-encoded bytes. Bytes (rather than a direct
-// cross-package field) keep connection.proto self-contained — no import, no cross-package codegen —
-// while preserving the exact ACP data model: the web decodes the bytes with the AcpAgentMessage
-// schema and reuses the same session/update switch as the live ACP stream.
-message AcpReplayFrame {
-  bytes acp_agent_message = 1;
-  // Set only in COUNT_THEN_LIVE frames (the current number of persisted transcript frames); the
-  // SNAPSHOT_THEN_LIVE / LIVE_ONLY modes leave this 0 and carry acp_agent_message instead.
-  uint64 activity_count = 2;
-  // The frame's absolute 0-based position in the session's resolved transcript, oldest = 0. Carried
-  // by every transcript frame (snapshot, tail page, and live tail). On the FIRST frame of a tail
-  // page it doubles as the reverse cursor: `seq == 0` means the page reaches the transcript head.
-  // COUNT_THEN_LIVE frames carry no transcript payload and leave it 0.
-  uint64 seq = 3;
-}
-
-// Request for one tool call's full body. Mirrors StreamAcpReplayRequest's routing (same
-// peer-forward semantics on daemon_instance_id) plus the tool_call_id to look up.
-message GetAcpToolCallDetailRequest {
-  string session_token      = 1;
-  string session_id         = 2;
-  string daemon_instance_id = 3;   // same peer-forward routing as StreamAcpReplay
-  string tool_call_id       = 4;   // the ToolCall.tool_call_id from a streamed frame
-}
-
-// One tool call's stripped-out bodies: the exact JSON strings the stream used to inline. Either may
-// be absent (e.g. a still-running call has raw_input but no raw_output yet). A tool_call_id absent
-// from the transcript is a NOT_FOUND error, not an empty success.
-message GetAcpToolCallDetailResponse {
-  optional string raw_input  = 1;
-  optional string raw_output = 2;
-}
-
-// One page of transcript frames strictly OLDER than `before_seq` — the reverse cursor behind the
-// Activities transcript's scroll-up. Mirrors GetAcpToolCallDetail's routing (peer-forwarding on
-// daemon_instance_id) and StreamAcpReplay's auth.
-message GetAcpReplayPageRequest {
-  string session_token      = 1;
-  string session_id         = 2;
-  string daemon_instance_id = 3;
-  uint64 before_seq         = 4;   // exclusive upper bound; frames with seq < before_seq
-  uint32 page_size          = 5;   // 0 ⇒ the server's default page size
-}
-
-// One page of the resolved transcript, oldest-first. `at_oldest` is an explicit field rather than
-// `first_seq == 0` because an EMPTY page (the cursor is already at the head) would otherwise be
-// indistinguishable from a one-frame page at the head.
-message GetAcpReplayPageResponse {
-  // Protobuf-encoded `tddy.acp.v1.AcpAgentMessage` frames, oldest-first, tool bodies stripped —
-  // byte-identical in shape to AcpReplayFrame.acp_agent_message.
-  repeated bytes frames    = 1;
-  uint64         first_seq = 2;   // absolute seq of frames[0]; meaningless when `frames` is empty
-  bool           at_oldest = 3;   // true when this page reaches the transcript head
-}
-
-/// Sent by `tddy-tools session-hook`; bearer is the per-session hook_token.
-message ReportAgentActivityRequest {
-  string session_id    = 1;
-  string hook_token    = 2;
-  string os_user       = 3;
-  string event         = 4;  // "PreToolUse" | "PostToolUse"
-  string tool_name     = 5;
-  string input_json    = 6;
-  string result_json   = 7;
-  bool   is_error      = 8;
-  string error_message = 9;
-}
-
-message ReportAgentActivityResponse {
-  bool ok = 1;
-}
-
-message AgentActivityDeltaRequest {
-  string session_token      = 1;
-  string session_id         = 2;
-  // Routing, as on ExecuteTool: the daemon expected to answer. Empty means the one being called.
-  string daemon_instance_id = 3;
-  // The call whose delta is wanted: the tick's diff limited to that call's changed_paths.
-  // Required — there is no whole-worktree mode here on purpose. Reconciling is a git fetch of the
-  // session's WIP ref (see the feature doc), which is incremental and delta-compressed; a
-  // cumulative patch would re-send the entire dirty tree over a data channel every time a client
-  // fell one tick behind.
-  string call_id            = 4;
-  // What to serve when call_id is set. A client replaying a window asks for each call's scope and
-  // then the residual, and the three together reconstruct the tick exactly.
-  DeltaScope scope          = 5;
-}
-
-// Which slice of a tick's diff to serve.
-enum DeltaScope {
-  // The paths the named call is credited with. The default, because a client reacting to one
-  // activity record wants that record's change and not its neighbours'.
-  DELTA_SCOPE_CALL     = 0;
-  // The paths of that tick claimed by NO call — what an undeclared writer (a Bash running a
-  // formatter, a codegen step) changed. Without this a tick's diff would be lossy the moment any
-  // change was not declared by the tool that made it, and a mirror would drift with nothing
-  // reporting it.
-  DELTA_SCOPE_RESIDUAL = 1;
-  // The whole tick, unscoped. The union of every call scope and the residual.
-  DELTA_SCOPE_TICK     = 2;
-}
-
-// One frame of a delta. The describing fields repeat on every frame, as
-// session_files.HostDocumentChunk's total_byte_size does: a reader knows what it is receiving from the first frame without a
-// separate header frame to special-case, and a single-frame delta is not a different shape from a
-// hundred-frame one.
-message AgentActivityDeltaChunk {
-  // One slice of `git diff --binary` output — an ordinary git patch, which is why it carries
-  // deletions, renames, file modes and binary content without any of them being a field here.
-  // A call that changed nothing is one frame with empty `patch` and total_byte_size 0, so
-  // "nothing changed" stays distinguishable from "the stream failed".
-  bytes  patch           = 1;
-  // The poll tick this patch belongs to. A client de-duplicates by this: several calls sharing a
-  // tick must apply its patch once, not once each.
-  uint64 seq             = 2;
-  // The tick this one follows. A gap between a client's last applied seq and this means a lost
-  // broadcast, and is a reconcile rather than something to apply out of order.
-  uint64 prev_seq        = 3;
-  // The commit the patch applies onto.
-  string base_commit     = 4;
-  // Reserved: this field carried a `cumulative` flag while reconciliation was a whole-worktree
-  // patch. It is a git fetch of the WIP ref now, so no delta is ever cumulative.
-  reserved 5;
-  // The patch's full size, so a reader can size a buffer and detect a truncated stream.
-  uint64 total_byte_size = 6;
-  // The paths this patch is limited to — the request's scope, resolved. A client compares it
-  // against what it expected rather than trusting that the server scoped the way it asked.
-  repeated string scoped_paths = 7;
-}
 
 // --- Demo VM lifecycle (UI-driven QEMU boot/shutdown for the demo goal) ---
 

@@ -1,10 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ConnectError } from "@connectrpc/connect";
-import {
-  ConnectionService,
-  type SessionAgentEntry,
-  type SessionEntry,
-} from "../../gen/connection_pb";
+import { type SessionEntry } from "../../gen/connection_pb";
+import { SessionAgentService, type SessionAgentEntry } from "../../gen/session_agents_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { Button } from "../ui/button";
 import { AgentPicker } from "./AgentPicker";
@@ -88,7 +85,7 @@ export function SessionAgentRosterPane({
   // Addressed over the shared transport with the facilitating daemon named in the request, the way
   // every other session-scoped call in the inspector is routed (see `ExecuteTool`'s
   // `daemon_instance_id`) — the roster is served by the daemon that owns the session.
-  const client = useHttpClient(ConnectionService);
+  const client = useHttpClient(SessionAgentService);
   const { sessionId, daemonInstanceId } = rosterHalfOf(session);
   const { agents, hasSnapshot, error } = useSessionAgentRoster({
     client,

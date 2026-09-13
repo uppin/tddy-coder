@@ -1,13 +1,12 @@
 import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
+import { type SessionEntry } from "../../gen/connection_pb";
 import {
   AgentCloneState,
-  type ConnectionService,
-  type SessionAgentActivity,
   type SessionAgentEntry,
-  type SessionAgentStatus,
-  type SessionEntry,
-} from "../../gen/connection_pb";
+  type SessionAgentService,
+} from "../../gen/session_agents_pb";
+import { type SessionAgentActivity, type SessionAgentStatus } from "../../gen/types_pb";
 import { safeTestIdPart } from "../../lib/testId";
 import { Button } from "../ui/button";
 import {
@@ -140,7 +139,7 @@ export interface RosterDetachRequest {
 
 /** What every row in the tree needs to render itself and to reach the daemon holding its roster. */
 interface TreeContext {
-  readonly client: Client<typeof ConnectionService>;
+  readonly client: Client<typeof SessionAgentService>;
   readonly sessionToken: string;
   /** Whether the daemon behind this tree is reachable. A collapsed-open node respects it too. */
   readonly daemonConnected: boolean;

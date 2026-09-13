@@ -50,7 +50,7 @@ The session directory `~/.tddy/sessions/<session-id>/` contains `.session.yaml` 
 
 ## Activity status hooks (`.cursor/hooks.json`)
 
-At session start the daemon writes `<worktree>/.cursor/hooks.json`. Each hook invokes `tddy-tools session-hook`, which reads Cursor's stdin JSON `hook_event_name`, maps to `SessionActivityStatus`, and calls `ReportSessionStatus`. The daemon validates `hook_token`, writes `activity_status` to `.session.yaml`, and surfaces it via `ListSessions`.
+At session start the daemon writes `<worktree>/.cursor/hooks.json`. Each hook invokes `tddy-tools session-hook`, which reads Cursor's stdin JSON `hook_event_name`, maps to `SessionActivityStatus`, and calls `ReportSessionStatus` on `activity.ActivityService`. The daemon validates `hook_token`, writes `activity_status` to `.session.yaml`, and surfaces it via `ListSessions`.
 
 | Cursor hook event | `activity_status` |
 |---|---|
@@ -91,7 +91,7 @@ Optional `cursor_cli:` block in `daemon.yaml`:
 
 - `binary_path` — Cursor Agent CLI binary (default `"agent"`)
 - `tddy_tools_path` — path to `tddy-tools` for hook commands
-- `daemon_url` — base URL for `ReportSessionStatus` (defaults to `http://127.0.0.1:{web_port}`)
+- `daemon_url` — base URL the hook posts `ReportSessionStatus` to, at `/rpc/activity.ActivityService/…` (defaults to `http://127.0.0.1:{web_port}`)
 
 ### Web UI
 

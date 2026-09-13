@@ -4,6 +4,12 @@
 //! clients send UserIntent, receive PresenterView events.
 //! Also provides EchoServiceImpl and TerminalServiceVirtualTui for LiveKit/gRPC terminal streaming.
 
+// The tonic adapters `tddy-codegen` emits convert a refusal through `to_tonic_status` /
+// `to_rpc_status` reached as `tddy_service::…`, which is the one such pair in the workspace and
+// deliberately not configurable. Adapters generated *into this crate* — node 7's two — therefore
+// need the crate to be nameable from inside itself.
+extern crate self as tddy_service;
+
 pub mod acp_replay;
 pub mod codex_oauth_scan;
 pub mod codex_oauth_validate;
@@ -34,6 +40,7 @@ pub use observer_service::PresenterObserverService;
 pub use presenter_intent_service::PresenterIntentService;
 pub use proto::acp::{AcpService, AcpServiceServer};
 pub use proto::actions::ActionServiceServer;
+pub use proto::activity::ActivityServiceServer;
 pub use proto::auth::{AuthServiceServer, LiveKitTokenServiceServer};
 pub use proto::bsp::BspServiceServer;
 pub use proto::connection::ConnectionServiceServer;
@@ -46,6 +53,7 @@ pub use proto::remote::TddyRemoteServer;
 pub use proto::remote_git::RemoteGitServiceServer;
 pub use proto::screen_sharing::ScreenSharingServiceServer;
 pub use proto::session_admission::SessionAdmissionServiceServer;
+pub use proto::session_agents_svc::SessionAgentServiceServer;
 pub use proto::session_files::SessionFilesServiceServer;
 pub use proto::tasks::TaskServiceServer;
 pub use proto::terminal::TerminalServiceServer;
@@ -119,6 +127,40 @@ pub mod proto {
     #[allow(unused_imports, unused_variables)]
     pub mod session_files {
         include!(concat!(env!("OUT_DIR"), "/session_files.rs"));
+    }
+    /// `SessionAgentService`: the roster of agents attached to a session, and the conversations held
+    /// with them. Split out of [`connection`] by `#unbundle` node 7.
+    #[allow(unused_imports, unused_variables)]
+    pub mod session_agents_svc {
+        include!(concat!(env!("OUT_DIR"), "/session_agents.rs"));
+    }
+    /// `ActivityService`: agent activity, session status, notifications and ACP transcript replay.
+    #[allow(unused_imports, unused_variables)]
+    pub mod activity {
+        include!(concat!(env!("OUT_DIR"), "/activity.rs"));
+    }
+
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `session_agents.proto`, sharing
+    /// [`session_agents_svc`]'s message types via `extern_path`.
+    ///
+    /// In its own module because tonic-build emits a `SessionAgentService` trait of its own: the
+    /// two flavors share the proto's name and would collide in one namespace. The generated
+    /// `SessionAgentServiceTonicAdapter` beside the tddy-rpc trait reaches this one through
+    /// `session_agent_service_server::SessionAgentService`, which is what lets the daemon serve one
+    /// implementation on its local Unix socket and on every other transport at once.
+    pub mod tonic_session_agents {
+        #![allow(unused_imports, clippy::all)]
+        include!(concat!(
+            env!("OUT_DIR"),
+            "/tonic_session_agents/session_agents.rs"
+        ));
+    }
+
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `activity.proto`. Same shape and
+    /// same reason as [`tonic_session_agents`].
+    pub mod tonic_activity {
+        #![allow(unused_imports, clippy::all)]
+        include!(concat!(env!("OUT_DIR"), "/tonic_activity/activity.rs"));
     }
     /// `RemoteGitService`: a daemon project served as a git remote. See
     /// `docs/ft/daemon/remote-git-repo.md`.
@@ -245,15 +287,19 @@ fn json_to_prost_value(value: &serde_json::Value) -> prost_types::Value {
 }
 
 /// Map a durable [`tddy_core::agent_activity::AgentActivityRecord`] onto its protobuf wire form
-/// [`proto::connection::AgentActivityRecord`].
+/// [`proto::activity::AgentActivityRecord`].
+///
+/// `activity.ActivityService` is the record's one coordinate since `#unbundle` node 7 moved
+/// `StreamSessionActivity` there, so there is one such mapping again rather than two carrying
+/// identical fields onto two generated types.
 ///
 /// The structured `input` / `result` JSON values are carried as `google.protobuf.Value` via
 /// [`json_to_proto_value`], so a top-level `Null` leaves the corresponding proto field unset.
 /// All scalar fields are copied through verbatim.
 pub fn agent_activity_to_proto(
     record: tddy_core::agent_activity::AgentActivityRecord,
-) -> proto::connection::AgentActivityRecord {
-    proto::connection::AgentActivityRecord {
+) -> proto::activity::AgentActivityRecord {
+    proto::activity::AgentActivityRecord {
         call_id: record.call_id,
         tool_name: record.tool_name,
         input: json_to_proto_value(&record.input),

@@ -171,7 +171,7 @@ pub fn build_split_context_dir(
 /// catalog spells it, or the allowlist this feeds would filter on a name that is not in it and drop
 /// nothing.
 pub fn wire_roster_withdrawals(
-    agents: &[tddy_service::proto::connection::SessionAgentEntry],
+    agents: &[tddy_service::proto::session_agents_svc::SessionAgentEntry],
 ) -> Vec<(String, Vec<String>)> {
     agents
         .iter()
@@ -1069,8 +1069,8 @@ mod tests {
     fn an_agent_on_the_roster(
         name: &str,
         replaces: &[&str],
-    ) -> tddy_service::proto::connection::SessionAgentEntry {
-        tddy_service::proto::connection::SessionAgentEntry {
+    ) -> tddy_service::proto::session_agents_svc::SessionAgentEntry {
+        tddy_service::proto::session_agents_svc::SessionAgentEntry {
             agent_id: format!("{name}@codebase-host"),
             name: name.to_string(),
             daemon_instance_id: "codebase-host".to_string(),
@@ -1094,7 +1094,7 @@ mod tests {
     /// The flags a split session spawns with, given the roster its codebase daemon holds.
     fn split_args_for_roster(
         session_dir: &Path,
-        agents: &[tddy_service::proto::connection::SessionAgentEntry],
+        agents: &[tddy_service::proto::session_agents_svc::SessionAgentEntry],
     ) -> Vec<String> {
         split_claude_extra_args(
             session_dir,

@@ -1,7 +1,7 @@
 # Agent session status — what a claude-cli / cursor session is doing
 
 **Status:** ✅ Implemented (daemon); web display separate
-**Product area:** Daemon (spans `tddy-service`, `tddy-daemon`)
+**Product area:** Daemon (spans `tddy-service`, `tddy-daemon`, `tddy-session-agents`)
 **Date:** 2026-08-29
 
 ## Summary

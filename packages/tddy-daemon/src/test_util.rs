@@ -135,6 +135,8 @@ pub async fn serve_daemon_rpc_participant(
 ) -> tokio::task::JoinHandle<()> {
     let roster = tddy_rpc::MultiRpcService::new(vec![
         service.session_files_entry(),
+        service.session_agents_entry(),
+        service.activity_entry(),
         tddy_rpc::ServiceEntry {
             name: "connection.ConnectionService",
             service: Arc::new(tddy_service::ConnectionServiceServer::from_arc(Arc::clone(

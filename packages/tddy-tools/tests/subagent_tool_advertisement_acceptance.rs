@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use pretty_assertions::assert_eq;
 use serial_test::serial;
-use tddy_service::proto::connection::{SessionAgentEntry, SessionAgentRoster};
+use tddy_service::proto::session_agents_svc::{SessionAgentEntry, SessionAgentRoster};
 use tddy_tools::server::{exec_tool_catalog, PermissionServer};
 use tddy_tools::session_agents::session_agent_roster;
 

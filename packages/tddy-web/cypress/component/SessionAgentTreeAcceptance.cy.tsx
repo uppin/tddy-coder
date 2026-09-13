@@ -21,7 +21,7 @@
  */
 
 import React from "react";
-import { SessionAgentStatus } from "../../src/gen/connection_pb";
+import { SessionAgentStatus } from "../../src/gen/types_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";

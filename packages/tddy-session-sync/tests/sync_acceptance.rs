@@ -13,7 +13,7 @@ use std::path::Path;
 use std::process::Command;
 
 use pretty_assertions::assert_eq;
-use tddy_service::proto::connection::{AgentActivityDeltaChunk, AgentActivityRecord, DeltaScope};
+use tddy_service::proto::activity::{AgentActivityDeltaChunk, AgentActivityRecord, DeltaScope};
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
 use tddy_session_sync::{
     decide_record, decide_worktree, delta_request, first_attach_commands, reassemble,

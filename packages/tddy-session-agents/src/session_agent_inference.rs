@@ -31,7 +31,8 @@ use tddy_core::session_activity::SessionActivityStatus;
 use tddy_service::acp_replay;
 use tddy_service::proto::acp::{acp_agent_message, content_block, session_update};
 use tddy_service::proto::acp::{AcpAgentMessage, ToolCallStatus};
-use tddy_service::proto::connection::{AgentCloneState, SessionAgentStatus};
+use tddy_service::proto::session_agents_svc::AgentCloneState;
+use tddy_service::proto::types::SessionAgentStatus;
 
 use tddy_daemon_kernel::{now_unix_ms, AgentActivityHub};
 

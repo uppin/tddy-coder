@@ -24,9 +24,12 @@ use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
-    AttachSessionAgentRequest, ConnectionService as ConnectionServiceTrait,
-    DetachSessionAgentRequest, ListSessionAgentsRequest, ListSubagentsRequest,
-    ReportAgentCloneStateRequest, SessionAgentRoster, StreamSessionAgentsRequest,
+    ConnectionService as ConnectionServiceTrait, ListSubagentsRequest,
+};
+use tddy_service::proto::session_agents_svc::{
+    AttachSessionAgentRequest, DetachSessionAgentRequest, ListSessionAgentsRequest,
+    ReportAgentCloneStateRequest, SessionAgentRoster, SessionAgentService as _,
+    StreamSessionAgentsRequest,
 };
 
 /// `AgentCloneState::READY`, as the proto numbers it.
@@ -52,6 +55,7 @@ struct RosteredSession {
 impl RosteredSession {
     async fn attach(&self, agent_id: &str) -> Result<SessionAgentRoster, tddy_rpc::Status> {
         self.service
+            .session_agents_service()
             .attach_session_agent(Request::new(AttachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
@@ -64,6 +68,7 @@ impl RosteredSession {
 
     async fn detach(&self, agent_id: &str) -> Result<SessionAgentRoster, tddy_rpc::Status> {
         self.service
+            .session_agents_service()
             .detach_session_agent(Request::new(DetachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
@@ -76,6 +81,7 @@ impl RosteredSession {
 
     async fn list(&self) -> SessionAgentRoster {
         self.service
+            .session_agents_service()
             .list_session_agents(Request::new(ListSessionAgentsRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
@@ -624,6 +630,7 @@ async fn restores_the_roster_and_its_revision_after_the_daemon_restarts() {
     // When
     let restarted = session.after_restart();
     let roster = restarted
+        .session_agents_service()
         .list_session_agents(Request::new(ListSessionAgentsRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session.session_id.clone(),
@@ -663,6 +670,7 @@ async fn reads_a_session_written_before_rosters_existed_as_having_no_agents() {
 
     // When
     let roster = service
+        .session_agents_service()
         .list_session_agents(Request::new(ListSessionAgentsRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.clone(),
@@ -692,6 +700,7 @@ async fn refuses_an_unauthenticated_roster_call_before_contacting_any_peer() {
     // When
     let result = session
         .service
+        .session_agents_service()
         .attach_session_agent(Request::new(AttachSessionAgentRequest {
             session_token: "not-a-valid-token".to_string(),
             session_id: session.session_id.clone(),
@@ -717,6 +726,7 @@ async fn refuses_an_unauthenticated_read_of_the_roster() {
     // When
     let result = session
         .service
+        .session_agents_service()
         .list_session_agents(Request::new(ListSessionAgentsRequest {
             session_token: "not-a-valid-token".to_string(),
             session_id: session.session_id.clone(),
@@ -746,6 +756,7 @@ async fn refuses_a_session_id_that_climbs_out_of_the_sessions_directory() {
     // When
     let result = session
         .service
+        .session_agents_service()
         .attach_session_agent(Request::new(AttachSessionAgentRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: "../victim".to_string(),
@@ -778,6 +789,7 @@ async fn refuses_an_unauthenticated_clone_state_report() {
     // When
     let result = session
         .service
+        .session_agents_service()
         .report_agent_clone_state(Request::new(ReportAgentCloneStateRequest {
             session_token: "not-a-valid-token".to_string(),
             session_id: session.session_id.clone(),
@@ -805,6 +817,7 @@ async fn roster_stream(
 ) -> impl futures_util::Stream<Item = Result<SessionAgentRoster, tddy_rpc::Status>> + Unpin {
     session
         .service
+        .session_agents_service()
         .stream_session_agents(Request::new(StreamSessionAgentsRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session.session_id.clone(),

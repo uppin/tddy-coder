@@ -1,7 +1,7 @@
 /**
  * Streaming hook behind the Agent roster pane: the specialized agents attached to one session.
  *
- * Sourced from `ConnectionService.StreamSessionAgents`, which the facilitating daemon holds open for
+ * Sourced from `SessionAgentService.StreamSessionAgents`, which the facilitating daemon holds open for
  * the session's life and answers in **whole snapshots** — the first frame immediately, one more per
  * `rev` change. So the fold is an assignment, not a diff: a frame replaces the roster outright, and
  * an attach made in another browser tab lands here without anyone asking for a refresh.
@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from "react";
 import { ConnectError, type Client } from "@connectrpc/connect";
-import { ConnectionService, type SessionAgentEntry } from "../../gen/connection_pb";
+import { SessionAgentService, type SessionAgentEntry } from "../../gen/session_agents_pb";
 
 export interface SessionAgentRosterState {
   /** The roster as of the last frame. Empty until the first one arrives. */
@@ -30,7 +30,7 @@ export interface SessionAgentRosterState {
 }
 
 export interface SessionAgentRosterParams {
-  readonly client: Client<typeof ConnectionService>;
+  readonly client: Client<typeof SessionAgentService>;
   readonly sessionToken: string;
   readonly sessionId: string;
   /** The daemon facilitating the session; empty addresses the daemon serving this call. */

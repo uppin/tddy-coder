@@ -42,11 +42,12 @@ const MAIN_TERMINAL_ID: &str = "main";
 ///
 /// Also forwards the roster and conversation RPCs — `StreamSessionAgents`,
 /// `OpenAgentConversation`, `PromptAgentConversation`, `CancelAgentConversation` and
-/// `ReportAgentConversationState` — to the
+/// `ReportAgentConversationState`, the five
+/// `tddy_service::session_agents::IN_JAIL_RELAYABLE` names — to the
 /// facilitating daemon over the `SessionChannel`, multiplexed by `request_id` so a
 /// lifetime-long `StreamSessionAgents` shares the channel with the tool calls behind it. The
 /// host side (`run_host_relay_with_rpc`) dispatches them to its `HostRpcHandler`, which the
-/// daemon implements over its `ConnectionServiceImpl`. `ExecuteTool` still rides the
+/// daemon implements over its family-B surface. `ExecuteTool` still rides the
 /// poll-gated `ToolRequest`/`ToolResponse` pair (one at a time, as it was built for); the new
 /// RPCs ride `RpcRequest`/`RpcStreamFrame` on the outbound stream directly, the way tunnel
 /// frames do, so they never block a tool call.
@@ -78,22 +79,17 @@ impl tddy_rpc::RpcService for ToolExecService {
             return tddy_rpc::RpcResult::Unary(Ok(resp.encode_to_vec()));
         }
         // The roster and conversation RPCs live on the facilitating daemon's
-        // `ConnectionService`, not on the runner — forward them over the `SessionChannel` as a
-        // multiplexed `RpcRequest` and hand the caller the response stream. `StreamSessionAgents`
-        // and `PromptAgentConversation` are server streams (held for the turn / the process
-        // lifetime); `OpenAgentConversation` and `CancelAgentConversation` are unary. The runner
-        // does not know which is which, and does not need to: a unary RPC is a stream that ends
-        // after one frame, and the caller drains the receiver the same way either way.
-        const FORWARDED_RPCS: &[(&str, &str)] = &[
-            ("connection.ConnectionService", "StreamSessionAgents"),
-            ("connection.ConnectionService", "OpenAgentConversation"),
-            ("connection.ConnectionService", "PromptAgentConversation"),
-            ("connection.ConnectionService", "CancelAgentConversation"),
-            (
-                "connection.ConnectionService",
-                "ReportAgentConversationState",
-            ),
-        ];
+        // `session_agents.SessionAgentService`, not on the runner — forward them over the
+        // `SessionChannel` as a multiplexed `RpcRequest` and hand the caller the response stream.
+        // `StreamSessionAgents` and `PromptAgentConversation` are server streams (held for the turn
+        // / the process lifetime); `OpenAgentConversation` and `CancelAgentConversation` are unary.
+        // The runner does not know which is which, and does not need to: a unary RPC is a stream
+        // that ends after one frame, and the caller drains the receiver the same way either way.
+        //
+        // Read from `tddy-service` rather than spelled out here, so this allowlist and the
+        // coordinate the daemon actually serves cannot drift: a tuple naming a service nobody
+        // answers fails *closed*, silently, at runtime.
+        const FORWARDED_RPCS: &[(&str, &str)] = &tddy_service::session_agents::IN_JAIL_RELAYABLE;
         if !FORWARDED_RPCS
             .iter()
             .any(|(s, m)| (*s == service) && (*m == method))
@@ -3418,6 +3414,114 @@ mod tests {
             "an unrecognized request must 404; got: {:?}",
             String::from_utf8_lossy(&response)
         );
+    }
+
+    // ─── The relay allowlist's refusal half ─────────────────────────────────────
+    //
+    // Feature: docs/ft/daemon/session-agent-roster.md (§ Prompting an agent)
+    // Changeset: docs/dev/changesets/2026-09-09-unbundle-session-agent-services.md
+    //
+    // `tddy_service::session_agents::IN_JAIL_RELAYABLE` is the list of operations an in-jail agent
+    // may perform against its host, and `tddy-session-agents` already pins what is *on* it. What
+    // nothing pinned is the boundary itself: that a tuple which is not on the list gets no further
+    // than this function. `in_jail_conversation_acceptance.rs` drives the permitting half through a
+    // real Seatbelt jail and so runs on macOS only; the refusal needs no jail and runs everywhere.
+
+    use tddy_rpc::RpcService as _;
+
+    /// Attach a host end to `relay` and hand back the frames it receives, so a call that got past
+    /// the allowlist is visible as an `RpcRequest` on the wire rather than merely inferred from a
+    /// status code.
+    fn a_relay_with_a_host_attached() -> (
+        Arc<SandboxSessionRelay>,
+        tokio::sync::mpsc::UnboundedReceiver<Result<SessionFrame, Status>>,
+    ) {
+        let relay = Arc::new(SandboxSessionRelay::default());
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        relay.set_outbound(tx);
+        (relay, rx)
+    }
+
+    /// A `(service, method)` the allowlist does not carry is refused here, and never reaches
+    /// [`SandboxSessionRelay::call_rpc`].
+    ///
+    /// The host end is attached deliberately: with no `SessionChannel` open, `call_rpc` fails on
+    /// its own and `unavailable` would be indistinguishable from a refusal. Connected, anything the
+    /// allowlist let through appears as an `RpcRequest` frame — so an empty channel is the proof
+    /// that the boundary held rather than that the transport was missing.
+    #[tokio::test]
+    async fn refuses_an_rpc_the_jail_allowlist_does_not_carry_without_reaching_the_host() {
+        // Given a connected relay, so a forwarded call would succeed
+        let (relay, mut from_jail) = a_relay_with_a_host_attached();
+        let service = ToolExecService {
+            relay: Arc::clone(&relay),
+        };
+
+        // When an in-jail caller asks for a method that is not relayable — a real RPC the daemon
+        // serves, addressed at the service family the jail may reach, but not one of the five
+        let result = service
+            .handle_rpc(
+                tddy_service::session_agents::SESSION_AGENT_SERVICE,
+                "AttachSessionAgent",
+                &tddy_rpc::RpcMessage {
+                    payload: Vec::new(),
+                    metadata: tddy_rpc::RequestMetadata::default(),
+                },
+            )
+            .await;
+
+        // Then it is refused NOT_FOUND, naming what was asked for
+        let tddy_rpc::RpcResult::Unary(Err(status)) = result else {
+            panic!("a non-relayable RPC must be refused, not answered or streamed");
+        };
+        assert_eq!(status.code(), tddy_rpc::Code::NotFound);
+        assert!(
+            status.message().contains("AttachSessionAgent"),
+            "the refusal must name the method it refused; message was: {}",
+            status.message()
+        );
+
+        // …and nothing was forwarded to the host
+        assert!(
+            from_jail.try_recv().is_err(),
+            "a refused RPC must not reach the host: the relay sent a frame anyway"
+        );
+    }
+
+    /// The permitting half of the same boundary, as far as it can be taken without a jail: a tuple
+    /// the allowlist *does* carry is forwarded, arriving at the host as an `RpcRequest` naming it.
+    /// Without this, the refusal above would also pass if the allowlist rejected everything.
+    #[tokio::test]
+    async fn forwards_an_allowlisted_rpc_to_the_host_as_an_rpc_request() {
+        // Given
+        let (relay, mut from_jail) = a_relay_with_a_host_attached();
+        let service = ToolExecService {
+            relay: Arc::clone(&relay),
+        };
+        let (allowed_service, allowed_method) = tddy_service::session_agents::IN_JAIL_RELAYABLE[0];
+
+        // When
+        let _stream = service
+            .handle_rpc(
+                allowed_service,
+                allowed_method,
+                &tddy_rpc::RpcMessage {
+                    payload: Vec::new(),
+                    metadata: tddy_rpc::RequestMetadata::default(),
+                },
+            )
+            .await;
+
+        // Then the host was asked, at the coordinate the jail named
+        let frame = from_jail
+            .try_recv()
+            .expect("an allowlisted RPC must be forwarded to the host")
+            .expect("the forwarded frame must not be an error");
+        let Some(SessionPayload::RpcRequest(request)) = frame.payload else {
+            panic!("a forwarded RPC must travel as an RpcRequest frame");
+        };
+        assert_eq!(request.service, allowed_service);
+        assert_eq!(request.method, allowed_method);
     }
 }
 

@@ -6,7 +6,7 @@
 //! different crates, so a topic each of them spelled for itself would fail as *silence* — every
 //! receiver filters by topic, and a mismatch delivers nothing and reports nothing.
 //!
-//! The payload is [`crate::proto::connection::SessionAgentRoster`], the same message
+//! The payload is [`crate::proto::session_agents_svc::SessionAgentRoster`], the same message
 //! `ListSessionAgents` returns and `StreamSessionAgents` streams. One schema however it is
 //! delivered: a broadcast that drifted from the stream would give two participants two different
 //! accounts of which agents a session has, and a consumer rebuilding a registry from the wrong one
@@ -36,3 +36,38 @@ pub const SESSION_AGENTS_TOPIC: &str = "session.agents";
 /// waiting for its first frame — so a pass that spent its whole life waiting never reads as
 /// service.
 pub const PASS_LONG_ENOUGH_TO_BE_SERVICE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The coordinate `session_agents.SessionAgentService` is served at, named once.
+///
+/// Here, beside the two constants above, and for the same reason: every party that has to agree on
+/// it lives in a different crate — the `ServiceEntry` the daemon mounts, the host-side bridge that
+/// answers a call relayed out of a jail, the peer a routed call is forwarded to, and
+/// [`IN_JAIL_RELAYABLE`] below. A name spelled out in four places is a name three of them can be
+/// wrong about, and every one of those mistakes fails as `not_found` at runtime.
+pub const SESSION_AGENT_SERVICE: &str = "session_agents.SessionAgentService";
+
+/// The `(service, method)` pairs an in-jail agent may relay to its host, for family B.
+///
+/// `packages/tddy-sandbox-runner/src/runner.rs` holds the jail side of this: what an in-jail agent
+/// may ask its host to dispatch. Exposed as data so that allowlist and the served coordinate cannot
+/// drift — the runner reads this rather than repeating the strings. An allowlist that no longer
+/// matches the served coordinate fails **closed**, silently, at runtime, which is the one failure
+/// mode worth a shared constant.
+///
+/// In this crate rather than in `tddy-session-agents`, which serves the coordinate and re-exports
+/// these two, because `tddy-sandbox-runner` is the other reader and it runs *inside every jail*:
+/// `tddy-session-agents` depends on `livekit`, `tddy-livekit` and `tddy-daemon-livekit`, none of
+/// which the runner links today. Reaching the allowlist through it would put a WebRTC stack in
+/// every jail to share five string pairs. `tddy-service` is a dependency of both already, and it
+/// owns `session_agents.proto` — the file that declares the coordinate these name.
+///
+/// The permitted operation *set* is not this constant's to change. It is exactly the five family-B
+/// operations the jail allowed before `#unbundle` node 7 moved them; only the service name each
+/// tuple carries moved with them.
+pub const IN_JAIL_RELAYABLE: [(&str, &str); 5] = [
+    (SESSION_AGENT_SERVICE, "StreamSessionAgents"),
+    (SESSION_AGENT_SERVICE, "OpenAgentConversation"),
+    (SESSION_AGENT_SERVICE, "PromptAgentConversation"),
+    (SESSION_AGENT_SERVICE, "CancelAgentConversation"),
+    (SESSION_AGENT_SERVICE, "ReportAgentConversationState"),
+];

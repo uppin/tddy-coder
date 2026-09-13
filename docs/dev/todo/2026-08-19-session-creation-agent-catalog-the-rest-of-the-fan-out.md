@@ -54,3 +54,22 @@ the host that offers it. These gaps were scoped out of that changeset deliberate
   what an assistant is. Assistants carry `replaces: Vec::new()` by design
   (`model_registry/assistant_def.rs`), so listing them in the subagent picker is the wrong fix; the
   question is whether the start path should refuse them there instead. A design call, not a one-liner.
+
+## Re-read at `#unbundle` node 7's wrap (2026-09-12)
+
+Every bullet stands, and the one thing that could have moved did not: `ListAgents`,
+`ListAgentModels`, `ListSubagents` and `ListSessions` are all still on
+`connection.ConnectionService` (`connection.proto:34, 39, 42, 43`), and `AgentInfo` is still declared
+there (`:151`). `#unbundle` node 7 took family B — the *roster*, which is what an attached agent is —
+and left the *catalog*, which is what an agent may be attached from.
+
+Two references drifted:
+
+- `resolve_specialized_agent_defs`'s disagreement with `list_subagents` is now a disagreement across
+  a crate boundary: the roster side resolves in `packages/tddy-session-agents/src/service.rs`
+  through the `AgentCatalog` port, while `list_subagents` stays in `tddy-daemon`. The design call the
+  bullet describes is unchanged; the two implementations are now further apart, which makes the
+  "quietly disagree" failure mode likelier rather than less.
+- `CreateSessionPane.tsx`'s line count is untouched by this node. Its sibling
+  `SessionMainPane.tsx` picked up a related problem — a 42-prop interface — recorded separately in
+  [2026-09-12-the-acp-replay-framing-is-written-twice.md](./2026-09-12-the-acp-replay-framing-is-written-twice.md).

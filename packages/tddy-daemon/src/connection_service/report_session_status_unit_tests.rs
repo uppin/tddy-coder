@@ -2,7 +2,7 @@ use super::*;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
-use tddy_service::proto::connection::ReportSessionStatusRequest;
+use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 
 const TEST_HOOK_TOKEN: &str = "tok-unit-hook-abc123";
 const TEST_OS_USER: &str = "u";
@@ -100,7 +100,11 @@ async fn report_session_status_writes_activity_status_to_session_yaml() {
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
     });
-    let response = service.report_session_status(request).await.unwrap();
+    let response = service
+        .activity_service()
+        .report_session_status(request)
+        .await
+        .unwrap();
     assert!(response.into_inner().ok, "ok must be true on success");
 
     let meta = tddy_core::read_session_metadata(&session_dir).unwrap();
@@ -122,7 +126,11 @@ async fn report_session_status_rejects_unknown_session() {
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
     });
-    let err = service.report_session_status(request).await.unwrap_err();
+    let err = service
+        .activity_service()
+        .report_session_status(request)
+        .await
+        .unwrap_err();
     assert_eq!(err.code, tddy_rpc::Code::NotFound);
 }
 
@@ -143,7 +151,11 @@ async fn report_session_status_rejects_bad_hook_token() {
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
     });
-    let err = service.report_session_status(request).await.unwrap_err();
+    let err = service
+        .activity_service()
+        .report_session_status(request)
+        .await
+        .unwrap_err();
     assert_eq!(err.code, tddy_rpc::Code::PermissionDenied);
 }
 
@@ -194,7 +206,11 @@ async fn report_session_status_rejects_non_claude_cli_session() {
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
     });
-    let err = service.report_session_status(request).await.unwrap_err();
+    let err = service
+        .activity_service()
+        .report_session_status(request)
+        .await
+        .unwrap_err();
     assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
 }
 
@@ -215,7 +231,11 @@ async fn report_session_status_rejects_unknown_status_string() {
         os_user: TEST_OS_USER.to_string(),
         status: "UnknownBadStatus".to_string(),
     });
-    let err = service.report_session_status(request).await.unwrap_err();
+    let err = service
+        .activity_service()
+        .report_session_status(request)
+        .await
+        .unwrap_err();
     assert_eq!(err.code, tddy_rpc::Code::InvalidArgument);
 }
 
@@ -230,6 +250,10 @@ async fn report_session_status_rejects_session_id_path_traversal() {
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
     });
-    let err = service.report_session_status(request).await.unwrap_err();
+    let err = service
+        .activity_service()
+        .report_session_status(request)
+        .await
+        .unwrap_err();
     assert_eq!(err.code, tddy_rpc::Code::InvalidArgument);
 }

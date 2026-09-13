@@ -19,9 +19,7 @@ use tddy_core::SessionMetadata;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::test_util::{test_service, TEST_USER};
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ReportAgentActivityRequest,
-};
+use tddy_service::proto::activity::{ActivityService as _, ReportAgentActivityRequest};
 
 /// The per-session secret the hook authenticates with. Any value works; it only has to match what
 /// the session's metadata holds.
@@ -121,6 +119,7 @@ async fn a_recorded_call(
 ) -> AgentActivityRecord {
     session
         .service
+        .activity_service()
         .report_agent_activity(Request::new(ReportAgentActivityRequest {
             session_id: session.session_id.clone(),
             hook_token: HOOK_TOKEN.to_string(),

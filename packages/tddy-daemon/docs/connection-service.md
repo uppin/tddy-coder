@@ -5,10 +5,13 @@
 > `workspace_tool_sandbox`, `sandbox_action`, `sandbox_plan_builder` and `sandbox_runtime` are in
 > **`tddy-daemon-sandbox`**; `spawner`, `spawn_worker`, `supervisor_spawn` and `supervisor_client`
 > are in **`tddy-spawn`**; the session-file subsystem is in
-> **[`tddy-session-files`](../../tddy-session-files/docs/session-files-service.md)** and the terminal
+> **[`tddy-session-files`](../../tddy-session-files/docs/session-files-service.md)**, the terminal
 > subsystem in **[`tddy-terminal-rpc`](../../tddy-terminal-rpc/docs/terminal-session-service.md)**,
-> each serving a coordinate of its own beside this one. `connection_service` stays here and wires
-> them all.
+> the session-agent roster and conversations in
+> **[`tddy-session-agents`](../../tddy-session-agents/docs/session-agent-service.md)**, and agent
+> activity, notifications and ACP replay in
+> **[`tddy-session-activity`](../../tddy-session-activity/docs/activity-service.md)** — each serving
+> a coordinate of its own beside this one. `connection_service` stays here and wires them all.
 
 
 Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` in **daemon mode**.
@@ -22,7 +25,7 @@ else lives in `src/connection_service/`.
 | Group | Files | What is in them |
 |---|---|---|
 | `rpc_service.rs` | 1 | `impl ConnectionService for ConnectionServiceImpl` — every RPC handler, and the `type …Stream` associated types |
-| `svc_*.rs` | 19 | the inherent `impl ConnectionServiceImpl` blocks, each named after the first method it carries — `svc_start_session_core`, `svc_provision_agent_clone`, `svc_resolve_os_user`, … |
+| `svc_*.rs` | 21 | the inherent `impl ConnectionServiceImpl` blocks, each named after the first method it carries — `svc_start_session_core`, `svc_provision_agent_clone`, `svc_resolve_os_user`, … **Four of them no longer serve this service at all**: `svc_terminal_ports`, `svc_session_files_ports`, `svc_session_agent_ports` and `svc_activity_ports` build the ports a sibling crate is constructed from and hold the peer routing that crate may not reach for. The `svc_` prefix is a location now, not a claim about the coordinate — recorded in [`docs/dev/todo/`](../../../docs/dev/todo/2026-09-12-the-acp-replay-framing-is-written-twice.md) |
 | `*_handler.rs`, `*_impl.rs` | 4 | trait impls for the service's helper types: `child_spawn_handler`, `conversation_spawn_handler`, `daemon_rpc_handler`, `terminal_bridge_impl` |
 | families | 7 | free items grouped by what they serve: `service_util`, `activity_hub`, `stack_parent`, `seed_codebase`, `seeded_clone_guard`, `hooks_and_urls`, `agent_roster` |
 | `*_tests.rs` | 22 | one file per test module, declared `#[cfg(test)] mod <name>;` |
@@ -50,12 +53,14 @@ listed below:
 | `livekit.LiveKitService` | `StreamLiveKitRooms` | [`packages/tddy-daemon-livekit`](../../tddy-daemon-livekit/docs/livekit-service.md) |
 | `terminal_session.TerminalSessionService` | `StreamSessionTerminalIO`, `StreamTerminalOutput`, `SendTerminalInput`, `GetTerminalHistory`, `StartTerminalSession`, `StopTerminalSession`, `ListTerminalSessions`, `ClaimTerminalControl`, `WatchTerminalControl` | [`packages/tddy-terminal-rpc`](../../tddy-terminal-rpc/docs/terminal-session-service.md) |
 | `session_files.SessionFilesService` | `ListSessionWorkflowFiles`, `ReadSessionWorkflowFile`, `StreamContextManifest`, `StreamReadContextFile`, `StreamReadContextFileBatch`, `UploadSessionFileChunk`, `ListSessionUploads`, `DeleteSessionUpload`, `UploadStagedAttachmentChunk`, `ListStagedAttachments`, `DeleteStagedAttachment`, `ReadHostDocument`, `StreamReadHostDocument` | [`packages/tddy-session-files`](../../tddy-session-files/docs/session-files-service.md) |
+| `session_agents.SessionAgentService` | `AttachSessionAgent`, `DetachSessionAgent`, `ListSessionAgents`, `StreamSessionAgents`, `OpenAgentConversation`, `PromptAgentConversation`, `CancelAgentConversation`, `ReportAgentCloneState`, `ReportAgentConversationState` | [`packages/tddy-session-agents`](../../tddy-session-agents/docs/session-agent-service.md) |
+| `activity.ActivityService` | `ReportSessionStatus`, `StreamSessionActivity`, `ReportAgentActivity`, `StreamSessionNotifications`, `StreamAgentActivityDelta`, `StreamAcpReplay`, `GetAcpToolCallDetail`, `GetAcpReplayPage` | [`packages/tddy-session-activity`](../../tddy-session-activity/docs/activity-service.md) |
 
-`connection.ConnectionService` serves the other **50**.
+`connection.ConnectionService` serves the other **33**.
 
-A client reaches all six at the same coordinates — `/rpc` over Connect-HTTP, the LiveKit common room,
-and the local UDS socket — because each is a `ServiceEntry` registered beside this one rather than a
-second endpoint. The daemon's wiring builds every one of them from the same managers over the same
+A client reaches all eight at the same coordinates — `/rpc` over Connect-HTTP, the LiveKit common
+room, and the local UDS socket — because each is a `ServiceEntry` registered beside this one rather
+than a second endpoint. The daemon's wiring builds every one of them from the same managers over the same
 `Arc`s, so two coordinates can never address two sets of state.
 
 | RPC | Purpose |
@@ -73,11 +78,6 @@ second endpoint. The daemon's wiring builds every one of them from the same mana
 | `ExecuteTool` | Runs one exec-tool (Read, Write, StrReplace, Delete, Grep, Glob, Shell, Await, ReadLints, SemanticSearch) against the session's worktree. After execution, appends a `ToolCallRecord` to the durable JSONL log `~/.tddy/sessions/{session_id}/tool-calls.jsonl` (non-fatal: a write failure is logged as a warning and never blocks the response). Authenticates via `session_token` → OS user, validates `session_id`; optional `daemon_instance_id` for peer routing. |
 | `ListExecTools` | Returns the exec-tool catalog (`ToolDef` per tool: `name`, `description`, `input_schema_json`). Auth same as `ExecuteTool`. |
 | `ListSessionToolCalls` | Returns the durable tool-call log for a session (up to 500 most-recent entries from `tool-calls.jsonl`; ordered chronologically). Each `ToolCallInfo` carries `task_id`, `tool_name`, `args_json`, `result_json`, `is_error`, `error_message`, `job_running`, `created_unix_ms`. Authenticates via `session_token`, validates `session_id` (path-segment guard), optionally routes to owning daemon via `daemon_instance_id`. |
-| `StreamSessionActivity` | Server-streaming feed of the **agent's own** tool calls (distinct from the human-triggered `ExecuteTool` log). On connect it replays the coalesced snapshot from `agent-activity.jsonl` then tails live `AgentActivityRecord`s from the in-process per-session `AgentActivityHub` — unless the request's `mode` is `LIVE_ONLY` (`StreamMode`, field 4; default `SNAPSHOT_THEN_LIVE`), which skips the snapshot and delivers only records arriving after subscribe. Each record's `input`/`result` are structured `google.protobuf.Value`. Auth/validation like `ListSessionToolCalls`. **Local** routes only — `PeerRoute::Forward` returns `unimplemented` (streaming peer-forward is a follow-up; `forward_to_peer` is unary-only) rather than serving wrong-host data. See [Agent-activity log & stream](#agent-activity-log--stream). |
-| `ReportAgentActivity` | Unary; the `tddy-tools session-hook` POSTs one record per Claude Code `PreToolUse`/`PostToolUse` (no shared id across hook processes, so the daemon pairs Pre→Post per session). Appends to `agent-activity.jsonl` and publishes to the hub. Auth like `report_session_status`; bad tokens rejected. |
-| `StreamAcpReplay` | Server-streaming **read-only ACP transcript** backing the web activity overlay. Emits `AcpReplayFrame`s (each wraps an ACP `tddy.acp.v1.AcpAgentMessage` as protobuf bytes) — replays the session's persisted `acp-transcript.jsonl` snapshot then tails live agent-activity from the hub (mapped to ACP frames), honouring `StreamMode` like `StreamSessionActivity`. Carries agent text interleaved with enriched tool calls (`Read main.rs L10-49`) + per-frame `timestamp_unix_ms` for the `+Ns` badge; works for live and dormant sessions. In `SNAPSHOT_THEN_LIVE`/`LIVE_ONLY` the tool frames are **body-less** — `raw_input`/`raw_output` are stripped (`tddy_service::acp_replay::strip_tool_body` at the frame-wrap seam) so the stream's size tracks the number of tool calls, not the volume of their I/O; the bodies are fetched on demand via `GetAcpToolCallDetail`. Same auth/routing; `PeerRoute::Forward` returns `unimplemented`. **`TAIL_THEN_LIVE`** (added 2026-08-02) replays only the newest `page_size` frames (default 100) via `acp_replay::tail_page`, then tails; older history is reached backwards through `GetAcpReplayPage`. Every transcript frame carries `seq`, its absolute 0-based position in the resolved transcript — including `LIVE_ONLY`, which now reads the transcript solely to establish that base, and excluding `COUNT_THEN_LIVE`, which carries no transcript payload. The live tail maps `tool_call_id → seq` (pre-seeded from the snapshot) so a call's terminal record reuses the position its running record was given, rather than consuming one of its own. See [Agent-activity log & stream](#agent-activity-log--stream). |
-| `GetAcpReplayPage` | Unary; one page of transcript frames strictly **older** than `before_seq`, oldest-first — the reverse cursor behind the transcript's scroll-up. Returns `first_seq` (the page's absolute start, the client's next cursor) and an explicit `at_oldest`, which is a field rather than `first_seq == 0` because an **empty** page at the head would otherwise be indistinguishable from a one-frame page at the head. A `before_seq` past the transcript end clamps to its length, so a stale cursor resolves to a real page rather than nothing. Applies the same `strip_tool_body` seam as the stream — a paged frame is not a back door to the bodies. Unary precisely so it **peer-forwards** (mirroring `GetAcpToolCallDetail`), which the replay streams still cannot. |
-| `GetAcpToolCallDetail` | Unary; returns one tool call's full `raw_input`/`raw_output` (the bodies `StreamAcpReplay` strips), resolved from the same coalesced transcript view (`read_session_transcript`) by `tool_call_id`. `NOT_FOUND` when no frame carries that id. Same auth (`session_token` → OS user) and `daemon_instance_id` peer-forward routing as the unary session RPCs (mirrors `ExecuteTool`; unary `forward_to_peer`). Backs the web Agent Activity detail dialog. |
 | `DeleteSession` | Removes **`{sessions_base}/sessions/{session_id}/`**. If **`.session.yaml`** records a live PID, the daemon sends **SIGTERM**, waits, then **SIGKILL** as needed (Linux zombie sessions are treated as stopped), then removes the directory. Directories without readable metadata are still removed when the path resolves safely. Rejects unknown ids and path-unsafe ids (implementation in **`session_deletion`**) |
 | `SignalSession` | Send Unix signal to recorded PID for an active session; `session_id` validated before path resolution |
 | `AddPlannedPr` | Manually appends one planned PR to a **`"pr-stack"`** orchestrator session's **`Changeset.stack`**, with caller-chosen ancestors (**`StackNode.parents`**). Rejects (`FAILED_PRECONDITION`, via **`require_pr_stack_orchestrator`**) when **`session_id`**'s changeset `recipe` doesn't resolve to `"pr-stack"` (legacy aliases included); rejects a blank `title` or a dangling parent ref (`INVALID_ARGUMENT`). Delegates the actual DAG mutation to **`tddy_workflow_recipes::pr_stack::add_planned_pr_node`** (server-assigns `node_id`, cycle-checks, atomic append via `update_stack_atomic`). Response's `stack_plan_json` reuses the same serializer as `ListSessions` enrichment (`stack_plan_json_for_changeset`), and **`node_id`** (field 2) names the node this call appended, taken from the `StackNode` `add_planned_pr_node` returns — the client cannot identify it by diffing the plan, because the orchestrator agent appends to the same stack and one response can carry several ids the caller has never seen. See [pr-stacking.md § Manually adding a planned PR](../../../docs/ft/coder/pr-stacking.md#manually-adding-a-planned-pr) and [§ Add and start in one step](../../../docs/ft/coder/pr-stacking.md#add-and-start-in-one-step-added-2026-08-13). |
@@ -161,7 +161,7 @@ The staging upload mirrors the terminal **"Attach"** flow (`UploadSessionFileChu
 - **Nothing on this path has been exercised against a real daemon from a browser.** The daemon suites drive `ConnectionServiceImpl` directly and the web's Cypress specs stub every RPC, so the browser→daemon leg — real chunk uploads over the LiveKit data channel, a real streamed `StartSession`, a real cross-host fetch — has only ever run in tests that mock one side. A manual two-daemon `./web-dev` run is outstanding.
 - Consumed-batch staging cleanup after a `StartSession` consumes a batch. The restart-cleared root bounds *abandoned* batches only.
 - `RpcRequest.abort` is never read by `ServerEngine`, so dropping a stream receiver does not stop the producer, and a peer keeps producing frames nobody drains. Both new streams are short-lived, so a deadline bounds them — this is not a fix for the long-lived ones.
-- `StreamSessionActivity` / `StreamAcpReplay` / `WatchTask` / `WatchTaskList` still refuse `PeerRoute::Forward`. The primitive they were waiting for now exists, but their streams are open-ended and `forward_server_stream_to_peer`'s idle deadline is sized for a short-lived stream, so migrating them needs a keepalive frame first.
+- `WatchTask` / `WatchTaskList` still refuse `PeerRoute::Forward`. The primitive they were waiting for now exists, but their streams are open-ended and `forward_server_stream_to_peer`'s idle deadline is sized for a short-lived stream, so migrating them needs a keepalive frame first. `StreamSessionActivity` and `StreamAcpReplay` carry the same refusal at `activity.ActivityService`, where it now lives in this daemon's `PeerRoutedActivity` wrapper rather than in the serving crate — see [activity-service.md](../../tddy-session-activity/docs/activity-service.md).
 
 ## Branch-conflict guard on StartSession
 
@@ -476,7 +476,10 @@ GitHub → OS user path as the RPCs here.
 
 **`DeleteSession` for claude-cli**: After PID termination (SIGTERM / SIGKILL), the daemon also calls `remove_dir_all` on the worktree path stored in `metadata.repo_path`. The session directory is then removed as usual.
 
-**`ReportSessionStatus`**: Hook-driven RPC. `tddy-tools session-hook` calls this after mapping a Claude Code or Cursor Agent CLI lifecycle event to a `SessionActivityStatus`. The handler validates `session_id` (path traversal guard), resolves `sessions_base` from `os_user` directly (no web-token path), reads `.session.yaml`, requires `session_type == "claude-cli"` or `"cursor-cli"`, constant-time-compares `hook_token`, then calls `update_activity_status(session_dir, status)`. See [claude-cli-session.md](../../../docs/ft/daemon/claude-cli-session.md#session-activity-status-via-per-worktree-hooks) and [cursor-cli-session.md](../../../docs/ft/daemon/cursor-cli-session.md#activity-status-hooks-cursorhooksjson) for hook flows.
+**`ReportSessionStatus`**: Hook-driven RPC, and since `#unbundle` node 7 it is served at
+`activity.ActivityService`, not here — see [activity-service.md](../../tddy-session-activity/docs/activity-service.md).
+It is described in this section because the hooks that call it are installed by *this* service's
+claude-cli and cursor-cli start paths. `tddy-tools session-hook` calls it after mapping a Claude Code or Cursor Agent CLI lifecycle event to a `SessionActivityStatus`. The handler validates `session_id` (path traversal guard), resolves `sessions_base` from `os_user` directly (no web-token path), reads `.session.yaml`, requires `session_type == "claude-cli"` or `"cursor-cli"`, constant-time-compares `hook_token`, then calls `update_activity_status(session_dir, status)`. See [claude-cli-session.md](../../../docs/ft/daemon/claude-cli-session.md#session-activity-status-via-per-worktree-hooks) and [cursor-cli-session.md](../../../docs/ft/daemon/cursor-cli-session.md#activity-status-hooks-cursorhooksjson) for hook flows.
 
 ## Cursor Agent CLI sessions
 
@@ -664,13 +667,29 @@ terminal RPC, which is why the parity suite exists at the store/adapter level.
 
 ### The local UDS socket
 
-`local_socket_server.rs` mounts four tonic services on one `Server::builder()`:
-`connection.ConnectionService`, `host.HostService`, `worktree.WorktreeService` and
-`terminal_session.TerminalSessionService`. The fourth is what `tddy-sandbox-app` — the binary running
-inside every jail — dials to open its terminal stream, and its adapter is
+`local_socket_server.rs` mounts **six** tonic services on one `Server::builder()`:
+`connection.ConnectionService`, `host.HostService`, `worktree.WorktreeService`,
+`terminal_session.TerminalSessionService`, `session_agents.SessionAgentService` and
+`activity.ActivityService`.
+
+The policy behind that list is set for the whole `#unbundle` stack: **every family that was reachable
+here as part of `connection.ConnectionService` stays reachable here after it moves.** That service
+carried all 90 methods on this socket, so any local caller could reach any of them, and dropping a
+family is a silent capability removal on a privileged local interface — whose failure mode is a
+caller that used to work receiving `unimplemented` with no announcement.
+
+`terminal_session` is what `tddy-sandbox-app` — the binary running inside every jail — dials to open
+its terminal stream. The last three adapters are
 [generated](../../tddy-codegen/docs/tonic-adapter.md) rather than hand-written, including the
-bidirectional method. Both that mount and the Connect-HTTP entry are built from the same ports over
-the same `Arc`s, so the socket and the room address one set of PTYs and one control lease.
+bidirectional method; `connection`, `host` and `worktree` still carry hand-written ones, tracked in
+[`docs/dev/todo/2026-09-11-node-ones-two-tonic-adapters-are-still-hand-written.md`](../../../docs/dev/todo/2026-09-11-node-ones-two-tonic-adapters-are-still-hand-written.md).
+
+Every mount and the Connect-HTTP entry are built from the same ports over the same `Arc`s, so the
+socket and the room address one set of PTYs, one control lease and one roster.
+
+⚠ One family is **not** on this list and should be: family T (`livekit.LiveKitService`) was dropped
+from the socket by node 4, before the policy existed. Recorded in
+[`docs/dev/todo/2026-09-10-family-t-was-dropped-from-the-local-socket-before-the-policy-existed.md`](../../../docs/dev/todo/2026-09-10-family-t-was-dropped-from-the-local-socket-before-the-policy-existed.md).
 
 ## Spawn worker
 
@@ -697,50 +716,29 @@ Every `ExecuteTool` invocation appends a JSON line to **`~/.tddy/sessions/{sessi
 
 ## Agent-activity log & stream
 
-A **separate** per-session log — **`~/.tddy/sessions/{session_id}/agent-activity.jsonl`** — records the
-**agent's own** tool loop (Read, Shell/Bash, Edit, `tddy-tools` verbs), as opposed to the
-human-triggered `ExecuteTool` invocations captured in `tool-calls.jsonl`. The record shape
-(`AgentActivityRecord`) and the append/coalesce/500-cap read logic live in **`tddy-core::agent_activity`**
-so every host writes the same format; see [tddy-core architecture § Agent activity](../../tddy-core/docs/architecture.md#agent-activity-agent_activity).
+`~/.tddy/sessions/{session_id}/agent-activity.jsonl` records the **agent's own** tool loop, as
+opposed to the human-triggered `ExecuteTool` invocations in `tool-calls.jsonl`. Since `#unbundle`
+node 7, the five RPCs that write and read it — `ReportAgentActivity`, `StreamSessionActivity`,
+`StreamAcpReplay`, `GetAcpReplayPage` and `GetAcpToolCallDetail` — are served at
+`activity.ActivityService` by [`tddy-session-activity`](../../tddy-session-activity/docs/activity-service.md),
+and the log's format, the hub, the stream modes and the lazy-tool-body seam are documented with them
+in [agent-activity.md](../../tddy-session-activity/docs/agent-activity.md).
 
-- **Capture (one seam per session type):**
-  - **sandbox** — the host-side executor `DaemonToolHandler::execute` appends a `running` row then a
-    terminal `completed`/`error` row around `tool_engine::execute_tool_with_env`, publishing each to the hub.
-  - **claude-cli** — the `PreToolUse`/`PostToolUse` hooks (`tddy-tools session-hook`) POST `ReportAgentActivity`;
-    the daemon pairs Pre→Post per session.
-  - **tool / cursor-cli** — served by the **coder participant** over LiveKit while the session is live
-    (its presenter appends rows and broadcasts `PresenterEvent::AgentActivity`); the daemon serves the file
-    snapshot over `/rpc` as fallback.
-- **`AgentActivityHub`** — `Mutex<HashMap<sessionId, broadcast::Sender<AgentActivityRecord>>>`, one broadcast
-  channel per session. `StreamSessionActivity` mirrors the snapshot-then-live `StreamTerminalOutput` /
-  `WatchTerminalControl` pattern (snapshot via `read_agent_activity`, then relay hub events with `Lagged`
-  handling); `ReportAgentActivity` and the sandbox executor are the publishers.
-- **Stream mode & payload:** `StreamSessionActivityRequest.mode` (`StreamMode`) selects `SNAPSHOT_THEN_LIVE`
-  (default — replay then tail) or `LIVE_ONLY` (skip the snapshot, tail only records arriving after
-  subscribe); an unknown/omitted value falls back to `SNAPSHOT_THEN_LIVE`. Record `input`/`result` are
-  structured `google.protobuf.Value` on the wire (`serde_json::Value` in `tddy-core`), mapped by
-  `tddy_service::agent_activity_to_proto` + `json_to_proto_value`. The claude-cli hook still sends
-  `input_json`/`result_json` **strings**, parsed server-side (empty → unset, else parse-or-string) via
-  `tddy_core::agent_activity::parse_activity_json`.
-- **Cross-host limitation:** `StreamSessionActivity` serves Local routes only and rejects `PeerRoute::Forward`
-  with `unimplemented` — a streaming peer-forward primitive is a tracked follow-up (`forward_to_peer` is
-  unary-only). Single-host (the common case) works fully. Feature: [agent-activity-pane.md](../../../docs/ft/web/agent-activity-pane.md).
-- **Persisted ACP transcript & `StreamAcpReplay`:** the session persists its own ACP-mapped conversation
-  to `acp-transcript.jsonl` (sibling of `agent-activity.jsonl`), written at event time by the coder
-  participant's `spawn_acp_transcript_writer` (consumes `presenter_events`: `AgentOutput` → agent-text
-  frame, `AgentActivity` → enriched tool frame via `tddy_service::acp_replay::frame_for_agent_activity`).
-  `StreamAcpReplay` re-emits that self-contained log (snapshot via `read_acp_transcript`) then tails the
-  hub — so the read-only web transcript renders for both live and dormant sessions without depending on
-  the agent-CLI-owned `conversation.jsonl`. Same `StreamMode` + Local-only routing as `StreamSessionActivity`.
-- **Lazy tool bodies (`StreamAcpReplay` strip + `GetAcpToolCallDetail`):** streamed tool frames carry
-  only metadata (`title`/`status`/`kind`/`tool_call_id`); `raw_input`/`raw_output` are cleared by
-  `tddy_service::acp_replay::strip_tool_body` in `acp_replay_frame` (covering the snapshot loop **and**
-  the live `relay_acp_replay` tail, both `SNAPSHOT_THEN_LIVE` and `LIVE_ONLY`; `COUNT_THEN_LIVE`
-  unchanged). The unary `GetAcpToolCallDetail` returns one call's bodies on demand via
-  `tddy_service::acp_replay::tool_call_detail(session_dir, tool_call_id)` (same `read_session_transcript`
-  view), `NOT_FOUND` for an unknown id, with the same peer-forward routing as `ExecuteTool`. The coder
-  participant host applies the identical strip in `replay_frame_bytes` and serves a `GetAcpToolCallDetail`
-  arm. Feature: [acp-replay-lazy-tool-bodies.md](../../../docs/ft/coder/acp-replay-lazy-tool-bodies.md).
+Two of the three **capture** seams are still this service's, which is why the subject appears here at
+all:
+
+- **sandbox** — the host-side executor `DaemonToolHandler::execute` appends a `running` row then a
+  terminal `completed`/`error` row around `tool_engine::execute_tool_with_env`, publishing each to
+  the `AgentActivityHub`.
+- **claude-cli** — the `PreToolUse`/`PostToolUse` hooks this service installs at session start
+  (`tddy-tools session-hook`) POST `ReportAgentActivity` at the new coordinate.
+
+The third, **tool / cursor-cli**, is the coder participant's over LiveKit; the daemon serves the file
+snapshot over `/rpc` as fallback.
+
+`AgentActivityHub` itself is `tddy-daemon-kernel`'s, shared unchanged between this service's sandbox
+executor and the crate that serves the streams — a second hub would leave an in-jail tool call
+invisible to every stream.
 
 ## See also
 
@@ -749,6 +747,8 @@ so every host writes the same format; see [tddy-core architecture § Agent activ
 - **LiveKit**: `StreamLiveKitRooms`, the session room, and common-room peer discovery: [`tddy-daemon-livekit`](../../tddy-daemon-livekit/docs/livekit-service.md).
 - **Terminals**: the nine methods, the four ports this daemon supplies, the replay and offset contract, and the control mutex: [`tddy-terminal-rpc`](../../tddy-terminal-rpc/docs/terminal-session-service.md).
 - **Session files**: the thirteen methods, the scopes, staging, uploads and the agent context reads: [`tddy-session-files`](../../tddy-session-files/docs/session-files-service.md).
+- **Session agents**: the nine roster and conversation methods, the ports this daemon supplies, the peer-routing split and the in-jail relay allowlist: [`tddy-session-agents`](../../tddy-session-agents/docs/session-agent-service.md).
+- **Agent activity**: the eight activity, notification and ACP-replay methods, the delta tick rule and the notification bus: [`tddy-session-activity`](../../tddy-session-activity/docs/activity-service.md).
 - **Generated tonic adapters**: how a service written once reaches both `tddy-rpc` and gRPC: [`tddy-codegen`](../../tddy-codegen/docs/tonic-adapter.md).
 - **Identity and credentials**: `auth.AuthService`, `auth.LiveKitTokenService`, `token.TokenService`, `loopback_tunnel.LoopbackTunnelService`, and the `SessionUserResolver` every service here authenticates with: [`tddy-daemon-auth`](../../tddy-daemon-auth/docs/auth-service.md).
 - Feature: [Session directory layout](../../../docs/ft/coder/session-layout.md)

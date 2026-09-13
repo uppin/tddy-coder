@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use tddy_core::spawn_env::env_non_empty;
-use tddy_service::proto::connection::SessionAgentStatus;
+use tddy_service::proto::types::SessionAgentStatus;
 
 use crate::subagent::{PromptOutcome, SubagentError, SubagentSession};
 

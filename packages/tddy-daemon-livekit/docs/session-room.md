@@ -108,9 +108,12 @@ Both observe one `stopped` flag, so the poll loop can never outlive the connecti
 `SessionRoomHosting::worktree_root` is `Option<&Path>`: a split room has no local checkout, so no
 local path names it and `close_for_worktree` correctly never matches one.
 
-The registry holds `Arc`s and each serving task owns a clone of `ConnectionServiceImpl`, which holds
-the registry. That cycle is deliberate and is broken by `close` — called from `DeleteSession`, from
-the Telegram delete path, and from `RemoveWorktree` (by path).
+The registry holds `Arc`s and each serving task owns the `MultiRpcService` the daemon built for the
+room — five coordinates (`session_files.SessionFilesService`, `session_agents.SessionAgentService`,
+`activity.ActivityService`, `terminal_session.TerminalSessionService` and
+`connection.ConnectionService`), every entry of it an `Arc` of the one `ConnectionServiceImpl`,
+which holds the registry. That cycle is deliberate and is broken by `close` — called from
+`DeleteSession`, from the Telegram delete path, and from `RemoveWorktree` (by path).
 
 ## Reconstructing the checkout
 

@@ -1,0 +1,244 @@
+syntax = "proto3";
+
+package session_agents;
+
+import "types.proto";
+
+// The agents attached to a session, and the conversations held with them.
+//
+// Split out of `connection.ConnectionService` by `#unbundle` node 7 — family B.
+//
+// Five of these nine methods are named in a **security boundary**:
+// `packages/tddy-sandbox-runner/src/runner.rs`'s `(service, method)` tuple allowlist is what an
+// in-jail agent may relay to its host, and `StreamSessionAgents`, `OpenAgentConversation`,
+// `PromptAgentConversation`, `CancelAgentConversation` and `ReportAgentConversationState` are all
+// in it. Moving the coordinate without moving the allowlist makes every in-jail conversation fail
+// *closed* — the safe direction, but silently and at runtime.
+//
+// Imports `types.proto` for `SessionAgentStatus` and `SessionAgentActivity`, which `ListSessions`
+// reaches too.
+
+service SessionAgentService {
+  // A session's agent roster (docs/ft/daemon/session-agent-roster.md) — the agents attached to a
+  // LIVE session, mutated while it runs. Every call is served by the facilitating daemon, which
+  // owns the roster; an agent owned by another daemon is resolved from that daemon and routed to it
+  // off the qualified `agent_id` the entry stores.
+  //
+  // Attach is idempotent on (session, agent_id): re-attaching an already attached agent returns the
+  // roster unchanged and does not bump `rev`. Detaching an agent that is not attached is NOT_FOUND,
+  // not a silent success — a roster nobody can trust is worse than an error.
+  rpc AttachSessionAgent(AttachSessionAgentRequest) returns (SessionAgentRoster);
+  rpc DetachSessionAgent(DetachSessionAgentRequest) returns (SessionAgentRoster);
+  rpc ListSessionAgents(ListSessionAgentsRequest) returns (SessionAgentRoster);
+  // The roster, now and on every change. The first frame is always the current snapshot, so a late
+  // subscriber needs no separate priming read, and a no-op attach emits nothing.
+  rpc StreamSessionAgents(StreamSessionAgentsRequest) returns (stream SessionAgentRoster);
+  // Conversation routing — the in-jail `tddy-tools` calls these on its facilitating daemon for
+  // every roster agent, local or remote, so the main agent cannot tell which host answered. The
+  // daemon runs a local entry in-process and forwards a remote entry to its owning daemon in the
+  // session room.
+  rpc OpenAgentConversation(OpenAgentConversationRequest) returns (OpenAgentConversationResponse);
+  // Server-streaming for the same reason StreamExecuteTool is: an agent's answer has no useful
+  // upper bound, and a payload over tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES is chunk-framed,
+  // where one lost frame wedges the call with no error rather than failing it. Frames are bounded
+  // below that budget instead.
+  rpc PromptAgentConversation(PromptAgentConversationRequest) returns (stream AgentConversationChunk);
+  rpc CancelAgentConversation(CancelAgentConversationRequest) returns (CancelAgentConversationResponse);
+  // The owning daemon tells the facilitating daemon how its clone is doing: whether it is ready to
+  // serve reads, where the checkout landed, and every reconcile it had to perform. The facilitating
+  // daemon owns the roster and answers every read of it, but only the daemon holding the checkout
+  // can say any of this — so it is pushed rather than polled, and a reconcile is reported rather
+  // than absorbed (docs/ft/daemon/session-agent-roster.md § Kept current from the room).
+  rpc ReportAgentCloneState(ReportAgentCloneStateRequest) returns (ReportAgentCloneStateResponse);
+  // A conversation whose turn loop runs OUTSIDE the daemon telling it what that loop is doing.
+  //
+  // The daemon infers a roster agent's `status` from the conversation RPCs above, which works for
+  // every agent whose loop it runs. An agent the in-jail `tddy-tools` was *seeded* with runs its
+  // loop in the jail instead: the daemon is never asked to open anything, so it has nothing to
+  // infer from and the row would report UNSPECIFIED for an agent that is demonstrably working.
+  // This is that agent's own report, and the only possible source for it
+  // (docs/ft/daemon/session-agent-roster.md § What an agent is doing).
+  rpc ReportAgentConversationState(ReportAgentConversationStateRequest) returns (ReportAgentConversationStateResponse);
+}
+
+enum AgentCloneState {
+  AGENT_CLONE_STATE_UNSPECIFIED = 0;
+  // The owning daemon is the facilitating daemon: there is no clone, and there is nothing to wait
+  // for. A distinct value from READY so a UI can say "local" rather than implying a checkout exists.
+  AGENT_CLONE_STATE_LOCAL = 1;
+  AGENT_CLONE_STATE_PROVISIONING = 2;
+  AGENT_CLONE_STATE_READY = 3;
+  AGENT_CLONE_STATE_ERROR = 4;
+}
+
+message AgentConversationChunk {
+  // Next slice of the agent's answer. An empty answer still yields exactly one frame, so a consumer
+  // never has to distinguish "said nothing" from "nothing arrived".
+  string content_chunk = 1;
+  // Why the agent's turn ended ("EndTurn", "MaxTurns", …), carried on the final frame only.
+  string stop_reason = 2;
+  // Final-frame marker. A stream that ends without it was truncated, not completed — a partial
+  // answer returned as if complete is exactly what a wedged chunk-framed payload looks like.
+  bool last = 3;
+}
+
+message AttachSessionAgentRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
+  string daemon_instance_id = 3;
+  // "name@daemon_instance_id" — required, and required to be qualified. An id with no `@` is
+  // INVALID_ARGUMENT; there is no "assume the local daemon" reading, because that reading silently
+  // picks the wrong host once two daemons offer the same name.
+  string agent_id = 4;
+}
+
+message CancelAgentConversationRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+  string conversation_id = 4;
+}
+
+message CancelAgentConversationResponse {}
+
+message DetachSessionAgentRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+  string agent_id = 4;
+}
+
+message ListSessionAgentsRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+}
+
+message OpenAgentConversationRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+  // The roster entry to talk to. Resolved against the LIVE roster, so an id that was valid at spawn
+  // and has since been detached is refused rather than served from a stale registry.
+  string agent_id = 4;
+  // Caller-chosen conversation id, so an open that times out still leaves the caller able to name —
+  // and therefore cancel — whatever the daemon built. Empty = the daemon mints one.
+  string conversation_id = 5;
+}
+
+message OpenAgentConversationResponse {
+  string conversation_id = 1;
+}
+
+message PromptAgentConversationRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+  string conversation_id = 4;
+  string prompt = 5;
+}
+
+message ReportAgentCloneStateRequest {
+  string session_token = 1;
+  // The facilitating daemon's session whose roster this clone serves.
+  string session_id = 2;
+  // The owning daemon reporting — the one holding the checkout.
+  string daemon_instance_id = 3;
+  // The `workspace` session on it that holds the checkout.
+  string codebase_session_id = 4;
+  AgentCloneState clone_state = 5;
+  string clone_error = 6;
+  // Where the checkout is, on the owning daemon's filesystem. The facilitating daemon never opens
+  // it — it holds it so an operator (and the roster pane) can be told where a clone actually landed.
+  string worktree_path = 7;
+  // Reconciles performed since the previous report. Appended rather than replacing what the
+  // facilitating daemon already holds: a mirror that repairs itself without saying so hides a real
+  // fault, and a report that overwrote the history would hide it one report later instead.
+  repeated string divergences = 8;
+}
+
+message ReportAgentCloneStateResponse {}
+
+// Authenticated exactly as the conversation RPCs are, and that is not ceremony: the (session,
+// agent) pair this names is published in the session's `session.agents` broadcast, so on the pair
+// alone any participant that saw a roster frame could park an agent at RUNNING for ever.
+message ReportAgentConversationStateRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
+  string daemon_instance_id = 3;
+  // The roster agent whose loop is being reported on. An id the roster does not hold is refused
+  // rather than recorded — a stale in-jail registry must not be able to invent a row.
+  string agent_id = 4;
+  // What that loop is doing. Only the four states a *conversation* can be in are accepted:
+  // CONNECTING and ERROR belong to the checkout, which the daemon measures itself, and a reporter
+  // allowed to send them could hide a broken clone behind a cheerful conversation.
+  types.SessionAgentStatus status = 5;
+  // One short line for `last_activity.summary`. Truncated by the daemon rather than trusted at the
+  // length it arrives: the summary rides a whole-roster broadcast, where an oversized frame is
+  // chunk-framed and one lost chunk wedges the call with no error.
+  string summary = 6;
+}
+
+message ReportAgentConversationStateResponse {}
+
+message SessionAgentEntry {
+  // "explorer@ws-01" — the id the main agent addresses and the entry's identity.
+  string agent_id = 1;
+  string name = 2;
+  string daemon_instance_id = 3;
+  // Display only; from the def.
+  string label = 4;
+  // Display only; from the def.
+  string model = 5;
+  // Exec-catalog tools this agent takes over from the main agent, snapshotted at attach rather than
+  // re-read from the def — otherwise editing a YAML def would silently change what a running
+  // session's main agent may call. The union across the roster is what the main agent loses.
+  repeated string replaces = 6;
+  // Exec-catalog tools the agent's own loop may call. Snapshotted at attach for the same reason.
+  repeated string tools = 7;
+  // The `workspace` session on `daemon_instance_id` holding that daemon's clone. Empty when the
+  // owning daemon is the facilitating daemon — a local agent works the real worktree.
+  string codebase_session_id = 8;
+  // An agent is attachable before its clone finishes provisioning; a prompt sent meanwhile is
+  // refused naming this state, never queued and never served from an empty checkout.
+  AgentCloneState clone_state = 9;
+  // Why the clone failed, when `clone_state` is ERROR. Empty otherwise.
+  string clone_error = 10;
+  // What the agent is doing right now, as the facilitating daemon sees it. Rides the whole-snapshot
+  // roster rather than a status RPC of its own: a reader that rebuilt its registry from a snapshot
+  // and then had to correlate a second stream to learn what each row was doing is a reader that can
+  // show a status for a row it no longer holds.
+  //
+  // UNSPECIFIED is not "idle" — it is "this daemon has nothing to say", which is what a roster
+  // restored from `.session.yaml` after a restart honestly reports. Nothing that keeps a status is
+  // persisted: what an agent is doing is a fact about a running loop, and a status restored from
+  // disk would claim a turn is in flight in a process that never started one.
+  types.SessionAgentStatus status = 11;
+  // The agent's most recent observed activity, or unset when this daemon has observed none. Carried
+  // beside `status` rather than folded into it because the two answer different questions: the
+  // status is what the agent is doing *now*, and this is the last thing it was seen doing — which is
+  // the only useful thing to show for an agent that is idle.
+  types.SessionAgentActivity last_activity = 12;
+}
+
+// Every roster read is a WHOLE snapshot. A consumer rebuilds its registry from it and never applies
+// a delta, so a missed frame costs staleness until the next one rather than a registry that
+// silently disagrees with the daemon's — which is the failure that matters here, because a
+// disagreeing registry answers `subagent_new_session` for a detached agent and refuses an attached
+// one. `rev` exists to detect staleness, not to reconstruct state.
+message SessionAgentRoster {
+  string session_id = 1;
+  // Bumped on every attach and every detach that changed something. Starts at 1 for a session
+  // started with a non-empty seed, 0 for one started with none.
+  uint64 rev = 2;
+  // In attach order. Detaching one leaves the rest where they were.
+  repeated SessionAgentEntry agents = 3;
+}
+
+message StreamSessionAgentsRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+}

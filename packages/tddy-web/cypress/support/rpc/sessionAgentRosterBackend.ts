@@ -15,15 +15,10 @@
 import { Code, ConnectError, type ServiceImpl } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import {
-  AgentCloneState,
-  ConnectionService,
-  ListSubagentsResponseSchema,
-  SessionAgentRosterSchema,
-  SessionAgentStatus,
-  type SessionAgentActivity,
-  type SessionAgentEntry,
-} from "../../../src/gen/connection_pb";
+import { ConnectionService, ListSubagentsResponseSchema } from "../../../src/gen/connection_pb";
+import { SessionAgentService } from "../../../src/gen/session_agents_pb";
+import { AgentCloneState, SessionAgentRosterSchema, type SessionAgentEntry } from "../../../src/gen/session_agents_pb";
+import { SessionAgentStatus, type SessionAgentActivity } from "../../../src/gen/types_pb";
 
 /** A roster entry with sensible defaults; tests override only what the scenario is about. */
 export function anAttachedAgent(
@@ -169,12 +164,19 @@ export interface RosterBackend extends RosterControls {
 /** The roster fake as handlers, so a screen's own backend can serve it too. */
 export interface SessionAgentRosterFake extends RosterControls {
   /**
-   * The `ConnectionService` methods that serve the roster, to be spread into the **one**
-   * `.implement(ConnectionService, …)` call a backend makes: Connect's router fills every method a
-   * service implementation omits with an `Unimplemented` handler, so a second registration of the
-   * same service would shadow the first one's methods.
+   * The `session_agents.SessionAgentService` methods that serve the roster, to be spread into the
+   * **one** `.implement(SessionAgentService, …)` call a backend makes: Connect's router fills every
+   * method a service implementation omits with an `Unimplemented` handler, so a second registration
+   * of the same service would shadow the first one's methods.
    */
-  handlers: Partial<ServiceImpl<typeof ConnectionService>>;
+  handlers: Partial<ServiceImpl<typeof SessionAgentService>>;
+  /**
+   * `ListSubagents`, which is the *picker's* fan-out and stayed on
+   * `connection.ConnectionService` when `#unbundle` node 7 moved the roster. Two bags rather than
+   * one because a bag is spread per service: the roster and the catalogue of what could be attached
+   * to it are now two coordinates, and a scenario still describes both.
+   */
+  connectionHandlers: Partial<ServiceImpl<typeof ConnectionService>>;
 }
 
 export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentRosterFake {
@@ -184,13 +186,16 @@ export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentR
   const rosterReads: RosterAddress[] = [];
   const attaches: RosterAddress[] = [];
 
-  const handlers: Partial<ServiceImpl<typeof ConnectionService>> = {
+  const connectionHandlers: Partial<ServiceImpl<typeof ConnectionService>> = {
     async listSubagents() {
       if (scenario.offersUnavailable !== undefined) {
         throw new ConnectError(scenario.offersUnavailable, Code.Unavailable);
       }
       return create(ListSubagentsResponseSchema, { subagents: scenario.offers ?? [] });
     },
+  };
+
+  const handlers: Partial<ServiceImpl<typeof SessionAgentService>> = {
     async *streamSessionAgents(req) {
       rosterReads.push({ sessionId: req.sessionId, daemonInstanceId: req.daemonInstanceId });
       if (scenario.failBeforeSnapshot !== undefined) {
@@ -252,6 +257,7 @@ export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentR
 
   return {
     handlers,
+    connectionHandlers,
     pushRoster: (agents, rev) => tail.push(agents, rev),
     detachedAgentIds: () => [...detached],
     attachedAgentIds: () => [...attached],
@@ -262,9 +268,11 @@ export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentR
 
 /** The roster fake on a backend of its own — all a spec mounting the pane alone needs. */
 export function aSessionAgentRosterBackend(scenario: RosterScenario): RosterBackend {
-  const { handlers, ...controls } = aSessionAgentRosterFake(scenario);
+  const { handlers, connectionHandlers, ...controls } = aSessionAgentRosterFake(scenario);
   return {
-    backend: anInMemoryRpcBackend().implement(ConnectionService, handlers),
+    backend: anInMemoryRpcBackend()
+      .implement(SessionAgentService, handlers)
+      .implement(ConnectionService, connectionHandlers),
     ...controls,
   };
 }

@@ -1,7 +1,7 @@
 /**
  * The session drawer's one notification feed.
  *
- * Subscribes to `ConnectionService.StreamSessionNotifications` for the selected daemon over the
+ * Subscribes to `ActivityService.StreamSessionNotifications` for the selected daemon over the
  * shared common-room LiveKit connection (`useDaemonClient`, like `useHostStats`) and folds every
  * event into `sessionNotificationRegistry`, which the drawer's rows read through
  * `useSyncExternalStore`.
@@ -15,13 +15,13 @@
  */
 
 import { useEffect } from "react";
-import { ConnectionService, SessionNotificationKind } from "../gen/connection_pb";
+import { ActivityService, SessionNotificationKind } from "../gen/activity_pb";
 import { useDaemonClient } from "./selectedDaemon";
 import { useAuthContext } from "../hooks/authProvider";
 import { sessionNotificationRegistry } from "../components/sessions/sessionNotificationRegistry";
 
 export function useSessionNotifications(): void {
-  const client = useDaemonClient(ConnectionService);
+  const client = useDaemonClient(ActivityService);
   const { sessionToken } = useAuthContext();
   const token = sessionToken ?? "";
 

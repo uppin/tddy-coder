@@ -24,7 +24,7 @@
 
 import React from "react";
 import { createClient, type Transport } from "@connectrpc/connect";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import { ActivityService } from "../../src/gen/activity_pb";
 import { AgentActivityOverlay } from "../../src/components/sessions/AgentActivityOverlay";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
@@ -41,12 +41,12 @@ const hostPage = {
 };
 
 /**
- * Harness mirroring `SessionMainPane`: the session-scoped `ConnectionService` client is built inline
+ * Harness mirroring `SessionMainPane`: the session-scoped `ActivityService` client is built inline
  * during render, so every host render hands the overlay a brand-new client reference.
  */
 function RerenderingHost({ transport }: { transport: Transport }) {
   const [renders, setRenders] = React.useState(0);
-  const client = createClient(ConnectionService, transport);
+  const client = createClient(ActivityService, transport);
   return (
     <div>
       <button data-testid="host-rerender" onClick={() => setRenders((n) => n + 1)}>

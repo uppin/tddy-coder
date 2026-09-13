@@ -30,11 +30,13 @@ use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, MultiRpcService, Request, RpcBridge, RpcService, ServiceEntry};
 use tddy_service::proto::connection::{
-    AttachSessionAgentRequest, CancelAgentConversationRequest,
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, DetachSessionAgentRequest,
-    ExecuteToolRequest, ListSessionAgentsRequest, ListSessionsRequest,
-    OpenAgentConversationRequest, PromptAgentConversationRequest, SessionAgentRoster,
-    StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
+    ListSessionsRequest, StartSessionRequest,
+};
+use tddy_service::proto::session_agents_svc::{
+    AttachSessionAgentRequest, CancelAgentConversationRequest, DetachSessionAgentRequest,
+    ListSessionAgentsRequest, OpenAgentConversationRequest, PromptAgentConversationRequest,
+    SessionAgentRoster, SessionAgentService as _,
 };
 use tddy_service::{
     LiveKitTokenServiceServer, RemoteGitServiceServer, SessionAdmissionServiceServer,
@@ -101,6 +103,7 @@ struct PeerDaemon {
 impl Fleet {
     async fn attach(&self, agent_id: &str) -> Result<SessionAgentRoster, tddy_rpc::Status> {
         self.a
+            .session_agents_service()
             .attach_session_agent(Request::new(AttachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
@@ -113,6 +116,7 @@ impl Fleet {
 
     async fn detach(&self, agent_id: &str) -> Result<SessionAgentRoster, tddy_rpc::Status> {
         self.a
+            .session_agents_service()
             .detach_session_agent(Request::new(DetachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
@@ -125,6 +129,7 @@ impl Fleet {
 
     async fn roster(&self) -> SessionAgentRoster {
         self.a
+            .session_agents_service()
             .list_session_agents(Request::new(ListSessionAgentsRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
@@ -174,6 +179,7 @@ impl Fleet {
     /// An open conversation with `agent_id`, ready to be prompted.
     async fn a_conversation_with(&self, agent_id: &str) -> String {
         self.a
+            .session_agents_service()
             .open_agent_conversation(Request::new(OpenAgentConversationRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
@@ -271,19 +277,18 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         let token = livekit
             .generate_token(ROOM, &format!("daemon-{instance_id}"))
             .expect("LiveKit token for peer daemon");
-        let participant = LiveKitParticipant::connect(
+        // Every coordinate a peer answers a *forwarded* call on, not `connection.ConnectionService`
+        // alone: `#unbundle` node 7 moved the roster and conversation RPCs onto
+        // `session_agents.SessionAgentService`, and a peer that mounts only the old service answers
+        // a forward to the new one with `Unknown service`. Served through
+        // `test_util::serve_daemon_rpc_participant` so this list lives in one place — which is the
+        // whole reason that helper exists.
+        let run = tddy_daemon::test_util::serve_daemon_rpc_participant(
             &ws_url,
             &token,
-            tddy_service::ConnectionServiceServer::new(service.clone()),
-            RoomOptions::default(),
-            None,
-            None,
+            &Arc::new(service.clone()),
         )
-        .await
-        .expect("peer daemon joins the common room");
-        let run = tokio::spawn(async move {
-            let _ = participant.run().await;
-        });
+        .await;
 
         running_peers.push(PeerDaemon {
             instance_id: instance_id.to_string(),
@@ -886,11 +891,11 @@ fn content_length(headers: &[u8]) -> usize {
 // ---------------------------------------------------------------------------
 
 trait RosterAssertions {
-    fn entry(&self, agent_id: &str) -> &tddy_service::proto::connection::SessionAgentEntry;
+    fn entry(&self, agent_id: &str) -> &tddy_service::proto::session_agents_svc::SessionAgentEntry;
 }
 
 impl RosterAssertions for SessionAgentRoster {
-    fn entry(&self, agent_id: &str) -> &tddy_service::proto::connection::SessionAgentEntry {
+    fn entry(&self, agent_id: &str) -> &tddy_service::proto::session_agents_svc::SessionAgentEntry {
         self.agents
             .iter()
             .find(|a| a.agent_id == agent_id)
@@ -1068,6 +1073,7 @@ async fn cancels_a_remote_agents_conversation_on_the_daemon_that_owns_it() {
     // When
     fleet
         .a
+        .session_agents_service()
         .cancel_agent_conversation(Request::new(CancelAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
@@ -1081,6 +1087,7 @@ async fn cancels_a_remote_agents_conversation_on_the_daemon_that_owns_it() {
     // conversation the caller was told was cancelled
     let status = fleet
         .a
+        .session_agents_service()
         .prompt_agent_conversation(Request::new(PromptAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
@@ -1102,6 +1109,7 @@ struct PromptAnswer {
 async fn open_conversation_with(fleet: &Fleet, agent_id: &str) -> String {
     fleet
         .a
+        .session_agents_service()
         .open_agent_conversation(Request::new(OpenAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
@@ -1119,6 +1127,7 @@ async fn collect_prompt(fleet: &Fleet, conversation_id: &str, prompt: &str) -> P
     use futures_util::StreamExt;
     let mut stream = fleet
         .a
+        .session_agents_service()
         .prompt_agent_conversation(Request::new(PromptAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
@@ -1381,6 +1390,7 @@ async fn refuses_a_prompt_while_the_clone_is_still_being_built() {
     let entry_state = roster.entry(&explorer).clone_state;
     let result = fleet
         .a
+        .session_agents_service()
         .open_agent_conversation(Request::new(OpenAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
@@ -1464,6 +1474,7 @@ async fn fails_only_the_agents_of_a_daemon_that_goes_away() {
     // Then — B's agent still answers
     let conversation = fleet
         .a
+        .session_agents_service()
         .open_agent_conversation(Request::new(OpenAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
@@ -1481,6 +1492,7 @@ async fn fails_only_the_agents_of_a_daemon_that_goes_away() {
     // and C's agent fails naming the daemon
     let status = fleet
         .a
+        .session_agents_service()
         .open_agent_conversation(Request::new(OpenAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),

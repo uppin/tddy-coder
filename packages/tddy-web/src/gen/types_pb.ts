@@ -2,14 +2,46 @@
 // @generated from file types.proto (package types, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenFile } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, fileDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file types.proto.
  */
 export const file_types: GenFile = /*@__PURE__*/
-  fileDesc("Cgt0eXBlcy5wcm90bxIFdHlwZXMqhQIKEUhvc3REb2N1bWVudFNjb3BlEiMKH0hPU1RfRE9DVU1FTlRfU0NPUEVfVU5TUEVDSUZJRUQQABIoCiRIT1NUX0RPQ1VNRU5UX1NDT1BFX1NFU1NJT05fQVJUSUZBQ1QQARImCiJIT1NUX0RPQ1VNRU5UX1NDT1BFX1NFU1NJT05fVVBMT0FEEAISKAokSE9TVF9ET0NVTUVOVF9TQ09QRV9TRVNTSU9OX1dPUktUUkVFEAMSJAogSE9TVF9ET0NVTUVOVF9TQ09QRV9QUk9KRUNUX1JFUE8QBBIpCiVIT1NUX0RPQ1VNRU5UX1NDT1BFX1NUQUdFRF9BVFRBQ0hNRU5UEAViBnByb3RvMw");
+  fileDesc("Cgt0eXBlcy5wcm90bxIFdHlwZXMiOwoUU2Vzc2lvbkFnZW50QWN0aXZpdHkSEgoKYXRfdW5peF9tcxgBIAEoBBIPCgdzdW1tYXJ5GAIgASgJKoUCChFIb3N0RG9jdW1lbnRTY29wZRIjCh9IT1NUX0RPQ1VNRU5UX1NDT1BFX1VOU1BFQ0lGSUVEEAASKAokSE9TVF9ET0NVTUVOVF9TQ09QRV9TRVNTSU9OX0FSVElGQUNUEAESJgoiSE9TVF9ET0NVTUVOVF9TQ09QRV9TRVNTSU9OX1VQTE9BRBACEigKJEhPU1RfRE9DVU1FTlRfU0NPUEVfU0VTU0lPTl9XT1JLVFJFRRADEiQKIEhPU1RfRE9DVU1FTlRfU0NPUEVfUFJPSkVDVF9SRVBPEAQSKQolSE9TVF9ET0NVTUVOVF9TQ09QRV9TVEFHRURfQVRUQUNITUVOVBAFKpUCChJTZXNzaW9uQWdlbnRTdGF0dXMSJAogU0VTU0lPTl9BR0VOVF9TVEFUVVNfVU5TUEVDSUZJRUQQABIdChlTRVNTSU9OX0FHRU5UX1NUQVRVU19JRExFEAESIAocU0VTU0lPTl9BR0VOVF9TVEFUVVNfUlVOTklORxACEicKI1NFU1NJT05fQUdFTlRfU1RBVFVTX0VYRUNVVElOR19UT09MEAMSKgomU0VTU0lPTl9BR0VOVF9TVEFUVVNfV0FJVElOR19GT1JfSU5QVVQQBBIjCh9TRVNTSU9OX0FHRU5UX1NUQVRVU19DT05ORUNUSU5HEAUSHgoaU0VTU0lPTl9BR0VOVF9TVEFUVVNfRVJST1IQBmIGcHJvdG8z");
+
+/**
+ * The last thing an agent was observed doing.
+ *
+ * @generated from message types.SessionAgentActivity
+ */
+export type SessionAgentActivity = Message<"types.SessionAgentActivity"> & {
+  /**
+   * Unix milliseconds. Never 0 on a populated activity — a summary with no time behind it reads as
+   * current forever, which is exactly wrong for the row it is shown on.
+   *
+   * @generated from field: uint64 at_unix_ms = 1;
+   */
+  atUnixMs: bigint;
+
+  /**
+   * One short human-readable line, already truncated for display ("Read src/main.rs", "prompted:
+   * summarise the diff"). Not a structured record: the consumers are a roster pane and an MCP tool
+   * that both render it verbatim, and the structured account of a call is StreamSessionActivity's.
+   *
+   * @generated from field: string summary = 2;
+   */
+  summary: string;
+};
+
+/**
+ * Describes the message types.SessionAgentActivity.
+ * Use `create(SessionAgentActivitySchema)` to create a new message.
+ */
+export const SessionAgentActivitySchema: GenMessage<SessionAgentActivity> = /*@__PURE__*/
+  messageDesc(file_types, 0);
 
 /**
  * @generated from enum types.HostDocumentScope
@@ -64,4 +96,74 @@ export enum HostDocumentScope {
  */
 export const HostDocumentScopeSchema: GenEnum<HostDocumentScope> = /*@__PURE__*/
   enumDesc(file_types, 0);
+
+/**
+ * What a roster agent is doing, in the vocabulary the session activity hooks already use
+ * (tddy_core::session_activity::SessionActivityStatus), plus the two states only an agent whose
+ * codebase lives on another host can be in.
+ *
+ * @generated from enum types.SessionAgentStatus
+ */
+export enum SessionAgentStatus {
+  /**
+   * This daemon has nothing to say about the agent — not a claim that it is idle. The state of a
+   * roster read back from disk after a restart, and of any entry no signal has reached yet.
+   *
+   * @generated from enum value: SESSION_AGENT_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Attached and ready, with no turn in flight. An agent with no conversation open at all is IDLE
+   * too: from the operator's side "nobody has asked it anything" and "it has answered everything
+   * asked" are the same state, and splitting them would show a distinction nothing acts on.
+   *
+   * @generated from enum value: SESSION_AGENT_STATUS_IDLE = 1;
+   */
+  IDLE = 1,
+
+  /**
+   * A turn is in flight: the agent has a prompt and has not produced its stop reason yet.
+   *
+   * @generated from enum value: SESSION_AGENT_STATUS_RUNNING = 2;
+   */
+  RUNNING = 2,
+
+  /**
+   * The agent's own loop is inside a tool call. A refinement of RUNNING, not a separate lifecycle:
+   * every EXECUTING_TOOL is also a turn in flight.
+   *
+   * @generated from enum value: SESSION_AGENT_STATUS_EXECUTING_TOOL = 3;
+   */
+  EXECUTING_TOOL = 3,
+
+  /**
+   * The agent is blocked on an answer only a human can give.
+   *
+   * @generated from enum value: SESSION_AGENT_STATUS_WAITING_FOR_INPUT = 4;
+   */
+  WAITING_FOR_INPUT = 4,
+
+  /**
+   * The agent cannot serve a prompt yet because the checkout behind it is still being built. Takes
+   * precedence over anything the conversation state would say: an agent whose clone is not ready
+   * refuses prompts, so reporting it IDLE would offer an agent that cannot answer.
+   *
+   * @generated from enum value: SESSION_AGENT_STATUS_CONNECTING = 5;
+   */
+  CONNECTING = 5,
+
+  /**
+   * The agent cannot serve prompts at all. `clone_error` on the same entry says why.
+   *
+   * @generated from enum value: SESSION_AGENT_STATUS_ERROR = 6;
+   */
+  ERROR = 6,
+}
+
+/**
+ * Describes the enum types.SessionAgentStatus.
+ */
+export const SessionAgentStatusSchema: GenEnum<SessionAgentStatus> = /*@__PURE__*/
+  enumDesc(file_types, 1);
 

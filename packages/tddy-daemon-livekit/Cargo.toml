@@ -26,6 +26,10 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-host-service = { path = "../tddy-host-service" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-rpc = { path = "../tddy-rpc" }
+# Beside the proto surface: `session_activity::next_tick`, `FIRST_TICK` and `NO_TICK` — the rule
+# that numbers a session's activity deltas. Imported rather than restated because
+# `tddy-session-sync` reads the same constants from the other end of the same wire: a first delta
+# numbered 0 there would be indistinguishable from "no tick".
 tddy-service = { path = "../tddy-service" }
 # `list_session_attachments`, beside the `session_attachments_root` that names the directory it
 # reads: a session room publishes the basenames in its metadata.

@@ -20,7 +20,7 @@ use tddy_daemon::session_agent_status::{AgentActivity, ManagedAgentState};
 use tddy_daemon_kernel::AgentActivityHub;
 use tddy_service::acp_replay::{agent_text_frame, append_acp_frame, tool_use_frame};
 use tddy_service::proto::acp::{AcpAgentMessage, ToolCallStatus};
-use tddy_service::proto::connection::SessionAgentStatus;
+use tddy_service::proto::types::SessionAgentStatus;
 
 // ─── builders ───────────────────────────────────────────────────────────────────────────────────
 
