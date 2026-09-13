@@ -72,22 +72,35 @@ pub async fn run(argv: Vec<String>, cwd: PathBuf, env: Vec<(String, String)>) ->
         }
     });
 
-    // Input: local stdin → PTY. Stops when stdin closes so the writer thread (inside the runtime)
-    // releases the master fd promptly.
-    let stdin_pump = tokio::spawn({
+    // Input: local stdin → PTY. Stops when stdin closes or the child has exited, so a blocked stdin
+    // read cannot keep a sender clone alive after the command finishes.
+    let mut stdin_status = task.status_watch();
+    let mut stdin_pump = tokio::spawn({
         let stdin_sender = stdin_sender.clone();
         async move {
             let mut stdin = tokio::io::stdin();
             let mut buf = vec![0u8; 4096];
             loop {
-                match stdin.read(&mut buf).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        if stdin_sender
-                            .send(Bytes::copy_from_slice(&buf[..n]))
-                            .is_err()
-                        {
+                if stdin_status.borrow().is_terminal() {
+                    break;
+                }
+                tokio::select! {
+                    changed = stdin_status.changed() => {
+                        if changed.is_err() || stdin_status.borrow().is_terminal() {
                             break;
+                        }
+                    }
+                    res = stdin.read(&mut buf) => {
+                        match res {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => {
+                                if stdin_sender
+                                    .send(Bytes::copy_from_slice(&buf[..n]))
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -120,18 +133,20 @@ pub async fn run(argv: Vec<String>, cwd: PathBuf, env: Vec<(String, String)>) ->
         }
     });
 
-    // Wait for the child to exit. The runtime's task reaches a terminal status then.
     let mut status_watch = task.status_watch();
-    while !status_watch.borrow().is_terminal() {
-        if status_watch.changed().await.is_err() {
-            break;
+    let wait_for_child = async {
+        while !status_watch.borrow().is_terminal() {
+            if status_watch.changed().await.is_err() {
+                break;
+            }
         }
+    };
+
+    tokio::select! {
+        _ = wait_for_child => {}
+        _ = &mut stdin_pump => {}
     }
 
-    // Tear down: drop the stdin sender so the runtime's writer thread exits, then abort the
-    // pumps. The stdin pump is blocked on a blocking stdin read (no input will arrive), so it is
-    // aborted rather than awaited; the output pump is aborted once the child is gone. The
-    // registry ages the task out via its TTL.
     drop(stdin_sender);
     stdin_pump.abort();
     stdout_pump.abort();

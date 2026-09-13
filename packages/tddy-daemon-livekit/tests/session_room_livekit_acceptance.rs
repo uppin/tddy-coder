@@ -16,7 +16,7 @@
 //! starts (or reuses) a LiveKit container, opens a room in it, and then waits for a poll tick that
 //! shells out to git — seconds each, where an integration test is budgeted milliseconds. There is
 //! no cheaper way to observe the wiring: the thing under test *is* the task the room spawns.
-//! `#[serial]`, because the container is shared, and every wait is bounded by a condition rather
+//! `#[serial(livekit_docker)]`, because the container is shared, and every wait is bounded by a condition rather
 //! than a sleep.
 //!
 //! Requires a LiveKit server: Docker, or `LIVEKIT_TESTKIT_WS_URL` pointing at a running one.
@@ -435,7 +435,7 @@ fn applying(patch: &[u8], path: &str, before: &str) -> String {
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial]
+#[serial(livekit_docker)]
 async fn a_hosted_room_gives_its_session_a_ring_of_tick_deltas() {
     // Given a room this daemon opened for a checkout of its own
     let room = an_open_session_room("has-a-ring").await;
@@ -453,7 +453,7 @@ async fn a_hosted_room_gives_its_session_a_ring_of_tick_deltas() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial]
+#[serial(livekit_docker)]
 async fn a_hosted_room_gives_no_ring_to_a_session_it_is_not_the_room_of() {
     // Given a daemon hosting a room for one session
     let room = an_open_session_room("ring-is-per-session").await;
@@ -474,7 +474,7 @@ async fn a_hosted_room_gives_no_ring_to_a_session_it_is_not_the_room_of() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial]
+#[serial(livekit_docker)]
 async fn a_tick_publishes_the_uncommitted_checkout_as_a_commit_parented_on_head() {
     // Given a hosted room whose checkout the agent has just dirtied
     let room = an_open_session_room("wip-ref").await;
@@ -493,7 +493,7 @@ async fn a_tick_publishes_the_uncommitted_checkout_as_a_commit_parented_on_head(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial]
+#[serial(livekit_docker)]
 async fn closing_a_room_stops_pinning_the_uncommitted_state_it_published() {
     // Given a hosted room that has published its checkout's uncommitted state
     let room = an_open_session_room("wip-ref-release").await;
@@ -514,7 +514,7 @@ async fn closing_a_room_stops_pinning_the_uncommitted_state_it_published() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial]
+#[serial(livekit_docker)]
 async fn a_call_recorded_during_a_tick_is_served_the_patch_that_tick_produced() {
     // Given a hosted room that has already written one WIP tree, so the tick that follows has
     // something to diff against — the first tick of a room produces no delta by design
@@ -554,7 +554,7 @@ async fn a_call_recorded_during_a_tick_is_served_the_patch_that_tick_produced() 
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial]
+#[serial(livekit_docker)]
 async fn a_recorded_call_is_broadcast_into_the_room_stamped_with_the_tick_it_ran_in() {
     // Given a participant listening on `session.activity`, and a session already past its first
     // recorded tick: seq 0 is both the first delta's number and the wire's "no tick has covered

@@ -116,7 +116,7 @@ fn build_update_pull_request_json(params: &UpdatePullRequestParams) -> Value {
 /// Names of GitHub PR MCP tools exposed by `tddy-tools --mcp`.
 pub fn registered_github_pr_mcp_tool_names() -> Vec<&'static str> {
     log::debug!(
-        target: "tddy_tools::github_pr",
+        target: "tddy_workflow_recipes::github_pr",
         "registered_github_pr_mcp_tool_names: {} + {}",
         GITHUB_CREATE_PULL_REQUEST_MCP_NAME,
         GITHUB_UPDATE_PULL_REQUEST_MCP_NAME
@@ -133,14 +133,14 @@ pub fn create_pull_request(
     params: &CreatePullRequestParams,
 ) -> Result<u64, GithubPrError> {
     log::debug!(
-        target: "tddy_tools::github_pr",
+        target: "tddy_workflow_recipes::github_pr",
         "create_pull_request (mock transport) owner={} repo={}",
         params.owner,
         params.repo
     );
     let Some(token) = github_token_from_env() else {
         log::info!(
-            target: "tddy_tools::github_pr",
+            target: "tddy_workflow_recipes::github_pr",
             "create_pull_request: no GITHUB_TOKEN/GH_TOKEN — rejecting before HTTP"
         );
         return Err(GithubPrError::AuthenticationRequired);
@@ -149,7 +149,7 @@ pub fn create_pull_request(
     let headers = github_rest_headers(&token);
     let body = build_create_pull_request_json(params);
     log::debug!(
-        target: "tddy_tools::github_pr",
+        target: "tddy_workflow_recipes::github_pr",
         "create_pull_request: recording POST /repos/{}/{}/pulls header_keys={:?}",
         params.owner,
         params.repo,
@@ -171,7 +171,7 @@ pub fn update_pull_request(
     params: &UpdatePullRequestParams,
 ) -> Result<(), GithubPrError> {
     log::debug!(
-        target: "tddy_tools::github_pr",
+        target: "tddy_workflow_recipes::github_pr",
         "update_pull_request (mock transport) owner={} repo={} pr={}",
         params.owner,
         params.repo,
@@ -179,7 +179,7 @@ pub fn update_pull_request(
     );
     let Some(token) = github_token_from_env() else {
         log::info!(
-            target: "tddy_tools::github_pr",
+            target: "tddy_workflow_recipes::github_pr",
             "update_pull_request: no GITHUB_TOKEN/GH_TOKEN — rejecting before HTTP"
         );
         return Err(GithubPrError::AuthenticationRequired);
@@ -188,7 +188,7 @@ pub fn update_pull_request(
     let headers = github_rest_headers(&token);
     let body = build_update_pull_request_json(params);
     log::debug!(
-        target: "tddy_tools::github_pr",
+        target: "tddy_workflow_recipes::github_pr",
         "update_pull_request: recording PATCH pulls/{} header_keys={:?}",
         params.pull_number,
         headers.keys().collect::<Vec<_>>()
@@ -211,7 +211,7 @@ pub fn create_pull_request_via_rest_api(
     params: &CreatePullRequestParams,
 ) -> Result<u64, GithubPrError> {
     log::info!(
-        target: "tddy_tools::github_pr",
+        target: "tddy_workflow_recipes::github_pr",
         "create_pull_request_via_rest_api owner={} repo={}",
         params.owner,
         params.repo
@@ -225,7 +225,7 @@ pub fn create_pull_request_via_rest_api(
     let (status, raw) = curl_github_json("POST", &url, &body, &token)?;
     if !(200..300).contains(&status) {
         log::debug!(
-            target: "tddy_tools::github_pr",
+            target: "tddy_workflow_recipes::github_pr",
             "create_pull_request_via_rest_api: HTTP {} body_len={}",
             status,
             raw.len()
@@ -244,7 +244,7 @@ pub fn create_pull_request_via_rest_api(
         .and_then(|n| n.as_u64())
         .ok_or_else(|| GithubPrError::Rest("GitHub create pull response missing number".into()))?;
     log::debug!(
-        target: "tddy_tools::github_pr",
+        target: "tddy_workflow_recipes::github_pr",
         "create_pull_request_via_rest_api: created pull #{}",
         number
     );
@@ -256,7 +256,7 @@ pub fn update_pull_request_via_rest_api(
     params: &UpdatePullRequestParams,
 ) -> Result<(), GithubPrError> {
     log::info!(
-        target: "tddy_tools::github_pr",
+        target: "tddy_workflow_recipes::github_pr",
         "update_pull_request_via_rest_api owner={} repo={} pr={}",
         params.owner,
         params.repo,
@@ -271,7 +271,7 @@ pub fn update_pull_request_via_rest_api(
     let (status, raw) = curl_github_json("PATCH", &url, &body, &token)?;
     if !(200..300).contains(&status) {
         log::debug!(
-            target: "tddy_tools::github_pr",
+            target: "tddy_workflow_recipes::github_pr",
             "update_pull_request_via_rest_api: HTTP {} body_len={}",
             status,
             raw.len()
@@ -281,7 +281,7 @@ pub fn update_pull_request_via_rest_api(
         )));
     }
     log::debug!(
-        target: "tddy_tools::github_pr",
+        target: "tddy_workflow_recipes::github_pr",
         "update_pull_request_via_rest_api: success pr={}",
         params.pull_number
     );

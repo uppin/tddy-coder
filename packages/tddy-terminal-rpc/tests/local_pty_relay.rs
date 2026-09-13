@@ -13,9 +13,14 @@ async fn runs_a_fast_exiting_command_to_completion() {
     let cwd = std::env::temp_dir();
 
     // When the local relay runs it
-    let result = tddy_terminal_rpc::local_pty_relay::run(argv, cwd, Vec::new()).await;
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        tddy_terminal_rpc::local_pty_relay::run(argv, cwd, Vec::new()),
+    )
+    .await;
 
     // Then the relay returns Ok once the child has exited
+    let result = result.expect("local relay should finish within 30s when stdin is an open pipe");
     assert!(
         result.is_ok(),
         "local relay should return Ok after the child exits, got: {:?}",

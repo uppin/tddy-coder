@@ -1869,18 +1869,27 @@ async fn create_room(
     room_name: &str,
     measured: &MeasuredWorktree,
 ) -> Result<RoomMetadataClient, Status> {
+    const CREATE_ROOM_TIMEOUT: Duration = Duration::from_secs(30);
     let metadata = RoomMetadataClient::with_api_key(
         &credentials.url,
         &credentials.api_key,
         &credentials.api_secret,
     );
-    metadata
-        .create_with_metadata(
+    tokio::time::timeout(
+        CREATE_ROOM_TIMEOUT,
+        metadata.create_with_metadata(
             room_name,
             &room_metadata_json(&measured.snapshot, &measured.attachments, unix_ms()),
-        )
-        .await
-        .map_err(|e| Status::internal(format!("creating session room {room_name}: {e}")))?;
+        ),
+    )
+    .await
+    .map_err(|_| {
+        Status::deadline_exceeded(format!(
+            "creating session room {room_name} timed out after {}s",
+            CREATE_ROOM_TIMEOUT.as_secs()
+        ))
+    })?
+    .map_err(|e| Status::internal(format!("creating session room {room_name}: {e}")))?;
     Ok(metadata)
 }
 
