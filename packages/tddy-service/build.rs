@@ -182,7 +182,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // `#unbundle` node 4 — family T (LiveKit rooms observability). Node 4 registered it on HTTP and
     // LiveKit but not on the local Unix socket; post-stack follow-up restores the socket mount with
     // the same two-pass shape as nodes 7–9.
-    for (proto, package) in [("proto/livekit.proto", "livekit")] {
+    {
+        let proto = "proto/livekit.proto";
+        let package = "livekit";
         prost_build::Config::new()
             .out_dir(std::env::var("OUT_DIR")?)
             .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
