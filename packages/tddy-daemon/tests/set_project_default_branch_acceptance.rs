@@ -21,7 +21,6 @@ use tddy_rpc::{Code, Request};
 use tddy_service::proto::project::{
     ListProjectsRequest, ProjectService as ProjectServiceTrait, SetProjectDefaultBranchRequest,
 };
-use tddy_service::proto::session::SessionService as SessionServiceTrait;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
