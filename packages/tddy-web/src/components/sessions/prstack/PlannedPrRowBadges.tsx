@@ -1,5 +1,5 @@
 import React from "react";
-import type { BranchResolution } from "../../../gen/connection_pb";
+import type { BranchResolution } from "../../../gen/pr_stack_pb";
 import type { BaseSyncView } from "./baseSyncStatus";
 import type { StackNode } from "./stackPlan";
 

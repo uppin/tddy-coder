@@ -41,7 +41,7 @@ const SESSION_TOKEN: &str = "caller-session-token";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-/// A fake `ConnectionService/ExecuteTool` peer that echoes the decoded request back, so a test can
+/// A fake `ExecToolService/ExecuteTool` peer that echoes the decoded request back, so a test can
 /// assert on the envelope the client actually put on the wire.
 struct EnvelopeEchoingExecuteTool;
 
@@ -49,9 +49,9 @@ struct EnvelopeEchoingExecuteTool;
 impl RpcService for EnvelopeEchoingExecuteTool {
     async fn handle_rpc(&self, service: &str, method: &str, message: &RpcMessage) -> RpcResult {
         use prost::Message as _;
-        use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
+        use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 
-        assert_eq!(service, "connection.ConnectionService");
+        assert_eq!(service, "exec_tools.ExecToolService");
         assert_eq!(method, "ExecuteTool");
         let request = ExecuteToolRequest::decode(message.payload.as_ref())
             .expect("decode ExecuteToolRequest");

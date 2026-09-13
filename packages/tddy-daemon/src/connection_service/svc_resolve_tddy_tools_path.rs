@@ -260,8 +260,12 @@ impl ConnectionServiceImpl {
     /// staging at a `TempDir` it owns and assert *where* staged bytes land, instead of sharing the
     /// process temp dir with every other test run.
     pub fn with_staging_base_dir(mut self, staging_base_dir: PathBuf) -> Self {
-        self.staging_base_dir = staging_base_dir;
+        self.set_staging_base_dir(staging_base_dir);
         self
+    }
+
+    pub(crate) fn set_staging_base_dir(&mut self, staging_base_dir: PathBuf) {
+        self.staging_base_dir = staging_base_dir;
     }
 
     /// Act on the operator's own GitHub credential for PR-status reads (builder). The store is the
@@ -320,8 +324,15 @@ impl ConnectionServiceImpl {
         mut self,
         eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     ) -> Self {
-        self.eligible_daemon_source = eligible_daemon_source;
+        self.set_eligible_daemon_source(eligible_daemon_source);
         self
+    }
+
+    pub(crate) fn set_eligible_daemon_source(
+        &mut self,
+        eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
+    ) {
+        self.eligible_daemon_source = eligible_daemon_source;
     }
 
     /// Substitute what builds a sandboxed workspace session's jail (builder pattern) — lets a test
@@ -333,8 +344,17 @@ impl ConnectionServiceImpl {
             dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner,
         >,
     ) -> Self {
-        self.workspace_sandbox_provisioner = provisioner;
+        self.set_workspace_sandbox_provisioner(provisioner);
         self
+    }
+
+    pub(crate) fn set_workspace_sandbox_provisioner(
+        &mut self,
+        provisioner: Arc<
+            dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner,
+        >,
+    ) {
+        self.workspace_sandbox_provisioner = provisioner;
     }
 
     /// Substitute the LiveKit rooms reader (builder pattern) — lets tests drive a scripted roster
@@ -347,8 +367,12 @@ impl ConnectionServiceImpl {
     /// Override the `StreamSessionAgents` keepalive cadence (builder pattern) — lets tests observe a
     /// re-sent roster without waiting the production eight seconds for it.
     pub fn with_roster_keepalive_interval(mut self, interval: Duration) -> Self {
-        self.roster_keepalive_interval = interval;
+        self.set_roster_keepalive_interval(interval);
         self
+    }
+
+    pub(crate) fn set_roster_keepalive_interval(&mut self, interval: Duration) {
+        self.roster_keepalive_interval = interval;
     }
 
     /// The three things every routing decision here is made from: the configuration that says which

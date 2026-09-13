@@ -21,6 +21,8 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { ConnectionService, type ProjectEntry, type SessionEntry } from "../../src/gen/connection_pb";
+import { PrStackService } from "../../src/gen/pr_stack_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -89,13 +91,13 @@ function aPrStackBackend(opts: MountOptions) {
   return aSessionsDrawerBackend([
     anOrchestratorSession(aStackPlanJson(1, opts.nodes ?? aTwoNodeStack())),
   ])
-    .onUnary(ConnectionService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(
         opts.resolutionByBranch?.[req.branch] ?? { branch: req.branch },
       ),
     )
     .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
-    .onUnary(ConnectionService.method.listTools, () => ({ tools: [] }));
+    .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 }
 
 function openPrStackScreen(opts: MountOptions = {}) {
@@ -110,9 +112,9 @@ function openPrStackScreenWithUnansweredResolution() {
   const backend = aSessionsDrawerBackend([
     anOrchestratorSession(aStackPlanJson(1, aTwoNodeStack())),
   ])
-    .onUnary(ConnectionService.method.queryBranch, () => new Promise<never>(() => undefined))
+    .onUnary(PrStackService.method.queryBranch, () => new Promise<never>(() => undefined))
     .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
-    .onUnary(ConnectionService.method.listTools, () => ({ tools: [] }));
+    .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
@@ -338,7 +340,7 @@ it("asks QueryBranch to compare a stacked node's branch against its predecessor'
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.queryBranch);
+    const calls = b.callsTo(PrStackService.method.queryBranch);
     const forChild = calls.find((c: { branch: string }) => c.branch === CHILD_BRANCH);
     expect(forChild, `a QueryBranch call for ${CHILD_BRANCH}`).to.exist;
     expect(forChild.baseBranch).to.equal(ROOT_BRANCH);
@@ -352,7 +354,7 @@ it("asks QueryBranch to compare a root node's branch against the project's defau
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.queryBranch);
+    const calls = b.callsTo(PrStackService.method.queryBranch);
     const forRoot = calls.find((c: { branch: string }) => c.branch === ROOT_BRANCH);
     expect(forRoot, `a QueryBranch call for ${ROOT_BRANCH}`).to.exist;
     expect(forRoot.baseBranch).to.equal(DEFAULT_BRANCH);

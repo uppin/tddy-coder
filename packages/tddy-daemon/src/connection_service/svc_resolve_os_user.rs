@@ -296,7 +296,7 @@ impl ConnectionServiceImpl {
 
         // Durably record the tool call (non-fatal on failure). One log for both routes: which side
         // of the jail boundary a call ran on does not change that it is the session's tool call.
-        let record = crate::tool_call_log::ToolCallRecord {
+        let record = tddy_tool_engine::tool_call_log::ToolCallRecord {
             task_id: response.job_id.clone(),
             tool_name: req.tool_name.clone(),
             args_json: req.args_json.clone(),
@@ -309,7 +309,7 @@ impl ConnectionServiceImpl {
                 .unwrap_or_default()
                 .as_millis() as u64,
         };
-        if let Err(e) = crate::tool_call_log::append_tool_call(&session_dir, &record) {
+        if let Err(e) = tddy_tool_engine::tool_call_log::append_tool_call(&session_dir, &record) {
             log::warn!(
                 "tool_call_log: failed to persist tool call for session {}: {}",
                 req.session_id,

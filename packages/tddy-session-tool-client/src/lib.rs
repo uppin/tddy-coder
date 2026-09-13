@@ -33,14 +33,14 @@ pub use tddy_sandbox::session_id_from_env;
 pub enum SessionToolTransport {
     /// In-jail MCP → unix socket → sandbox-runner → SessionChannel → host daemon.
     SandboxIpc { socket_path: PathBuf },
-    /// Direct HTTP Connect POST to `ConnectionService/ExecuteTool`.
+    /// Direct HTTP Connect POST to `ExecToolService/ExecuteTool`.
     DaemonHttp {
         session_id: String,
         daemon_url: String,
         session_token: String,
         daemon_instance_id: String,
     },
-    /// Direct LiveKit RPC to a *remote* daemon's `ConnectionService` — a split session, where the
+    /// Direct LiveKit RPC to a *remote* daemon's `ExecToolService` — a split session, where the
     /// agent runs on one host and its worktree lives on another
     /// (docs/ft/daemon/remote-managed-worktree.md).
     LiveKit {
@@ -669,7 +669,7 @@ impl tddy_rpc::RpcService for NoCallbackToolService {
 }
 
 /// Forward a tool call over the sandbox unix IPC socket, using `tddy-rpc`'s length-prefixed
-/// framing (`connection.ConnectionService/ExecuteTool`) rather than the socket path itself
+/// framing (`exec_tools.ExecToolService/ExecuteTool`) rather than the socket path itself
 /// carrying any particular wire format — the socket is just a duplex byte stream `tddy-stdio`'s
 /// `StdioEndpoint` can wrap like any other (see `StdioEndpoint::from_duplex`).
 pub async fn dispatch_via_sandbox_ipc(
@@ -717,7 +717,7 @@ pub async fn livekit_session(key: &LiveKitRoomKey) -> Result<Arc<LiveKitSession>
         .await
 }
 
-/// Forward a tool call via HTTP to `ConnectionService/ExecuteTool`.
+/// Forward a tool call via HTTP to `ExecToolService/ExecuteTool`.
 pub async fn dispatch_via_daemon_http(
     daemon_url: &str,
     session_id: &str,
@@ -735,7 +735,7 @@ pub async fn dispatch_via_daemon_http(
     });
 
     let url = format!(
-        "{}/connection.ConnectionService/ExecuteTool",
+        "{}/exec_tools.ExecToolService/ExecuteTool",
         daemon_url.trim_end_matches('/')
     );
 
@@ -768,8 +768,8 @@ fn execute_tool_request(
     envelope: &SessionToolEnvelope,
     tool_name: &str,
     args: &serde_json::Value,
-) -> tddy_service::proto::connection::ExecuteToolRequest {
-    tddy_service::proto::connection::ExecuteToolRequest {
+) -> tddy_service::proto::exec_tools::ExecuteToolRequest {
+    tddy_service::proto::exec_tools::ExecuteToolRequest {
         session_token: envelope.session_token.clone(),
         session_id: envelope.session_id.clone(),
         tool_name: tool_name.to_string(),
@@ -780,7 +780,7 @@ fn execute_tool_request(
 
 /// Forward a tool call over an already-connected RPC transport (`tddy-stdio`'s `StdioRpcClient`
 /// over the sandbox socket, `tddy-livekit`'s `RpcClient` to a remote daemon), calling
-/// `connection.ConnectionService/ExecuteTool`.
+/// `exec_tools.ExecToolService/ExecuteTool`.
 ///
 /// Transport-agnostic by construction: what differs between the two is the request envelope, not
 /// the call.
@@ -791,12 +791,12 @@ pub async fn dispatch_via_rpc_transport(
     args: &serde_json::Value,
 ) -> String {
     use prost::Message;
-    use tddy_service::proto::connection::ExecuteToolResponse;
+    use tddy_service::proto::exec_tools::ExecuteToolResponse;
 
     let request = execute_tool_request(envelope, tool_name, args);
     let response_bytes = match client
         .call_unary(
-            "connection.ConnectionService",
+            "exec_tools.ExecToolService",
             "ExecuteTool",
             request.encode_to_vec(),
         )
@@ -826,7 +826,7 @@ pub async fn dispatch_via_rpc_transport(
 }
 
 /// Forward a tool call over an already-connected RPC transport, calling
-/// `connection.ConnectionService/StreamExecuteTool` and reassembling its frames.
+/// `exec_tools.ExecToolService/StreamExecuteTool` and reassembling its frames.
 ///
 /// The unary sibling returns `result_json` as one string, which over LiveKit is chunk-framed past
 /// `MAX_CHUNK_FRAME_BYTES` — and that reassembly is index-keyed and best-effort, so a lost frame
@@ -851,7 +851,7 @@ pub async fn dispatch_via_streaming_rpc(
     args: &serde_json::Value,
 ) -> String {
     use prost::Message;
-    use tddy_service::proto::connection::ExecuteToolChunk;
+    use tddy_service::proto::exec_tools::ExecuteToolChunk;
 
     let SessionToolEnvelope {
         session_id,
@@ -861,7 +861,7 @@ pub async fn dispatch_via_streaming_rpc(
     let request = execute_tool_request(envelope, tool_name, args);
     let mut frames = match client
         .call_server_stream(
-            "connection.ConnectionService",
+            "exec_tools.ExecToolService",
             "StreamExecuteTool",
             request.encode_to_vec(),
         )

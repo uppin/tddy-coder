@@ -16,6 +16,7 @@
  */
 
 import React from "react";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { create } from "@bufbuild/protobuf";
@@ -101,17 +102,17 @@ function anOrchestratorBackend(
   };
   return aSessionsDrawerBackend([orchestrator])
     .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
-    .onUnary(ConnectionService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => ({
       agents: [{ id: "claude", label: "Claude" }],
     }))
-    .onUnary(ConnectionService.method.listAgentModels, () => ({
+    .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",
     }))
-    .onUnary(ConnectionService.method.listTools, () => ({
+    .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
-    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }))
+    .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
     .onUnary(ConnectionService.method.listProjectBranches, () => ({
       branches: [],
       defaultRemote: "origin",

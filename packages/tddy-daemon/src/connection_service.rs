@@ -10,13 +10,13 @@ use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::validate_session_id_segment;
 use tddy_core::Changeset;
 use tddy_rpc::{Response, Status};
+use tddy_service::proto::catalog::{ListAgentModelsResponse, ModelInfo as CatalogModelInfo};
 use tddy_service::proto::connection::{
     start_session_event::Event as StartSessionEventKind, AttachmentMaterializationProgress,
     SessionAttachment, StartSessionEvent,
 };
 use tddy_service::proto::connection::{
-    ListAgentModelsResponse, ModelInfo, ProjectEntry as ProtoProjectEntry, SplitAgentPlacement,
-    StartSessionResponse,
+    ProjectEntry as ProtoProjectEntry, SplitAgentPlacement, StartSessionResponse,
 };
 use uuid::Uuid;
 
@@ -55,8 +55,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 #[cfg(test)]
 use tddy_service::proto::connection::{
-    AddPlannedPrRequest, ExecuteToolRequest, ListProjectsRequest, Signal, SignalSessionRequest,
-    StartSessionRequest,
+    ExecuteToolRequest, ListProjectsRequest, Signal, SignalSessionRequest, StartSessionRequest,
 };
 
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
@@ -1163,6 +1162,11 @@ mod svc_session_files_ports;
 /// and the routing the daemon keeps. `#unbundle` node 7.
 mod svc_activity_ports;
 
+mod family_proto_bridge;
+mod svc_catalog_ports;
+mod svc_exec_tool_ports;
+mod svc_family_entries;
+mod svc_pr_stack_ports;
 /// The daemon's half of `session_agents.SessionAgentService` — the host capabilities family B
 /// reads, and the routing the daemon keeps. `#unbundle` node 7.
 mod svc_session_agent_ports;
@@ -1646,7 +1650,7 @@ fn parse_agent_models_json(stdout: &str) -> Result<ListAgentModelsResponse, Stat
         models: parsed
             .models
             .into_iter()
-            .map(|m| ModelInfo {
+            .map(|m| CatalogModelInfo {
                 id: m.id,
                 label: m.label,
             })

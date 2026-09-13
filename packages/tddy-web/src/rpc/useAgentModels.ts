@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { ConnectionService, ModelInfo } from "../gen/connection_pb";
+import { CatalogService, type ModelInfo } from "../gen/catalog_pb";
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type CatalogClient = Client<typeof CatalogService>;
 
 /**
  * State of an on-demand model probe for one agent. The model list for a backend is enumerated from
@@ -25,7 +25,7 @@ const EMPTY: AgentModelsState = { models: [], defaultModel: "", loading: false, 
  * An empty `agent` yields an idle (empty) state without a request.
  */
 export function useAgentModels(
-  client: ConnectionClient,
+  client: CatalogClient,
   sessionToken: string,
   agent: string,
   daemonInstanceId: string,

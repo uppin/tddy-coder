@@ -21,11 +21,11 @@ use std::sync::Arc;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::test_util::TestDaemon;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    BranchResolution, ConnectionService as ConnectionServiceTrait, GetPrStatusRequest,
-    PrStatusView, QueryBranchRequest,
+use tddy_service::proto::pr_stack::{
+    BranchResolution, GetPrStatusRequest, PrStackService, PrStatusView, QueryBranchRequest,
 };
 use tddy_testing_commons::{a_changeset, a_session_metadata, fs::write_session_yaml};
 
@@ -117,14 +117,14 @@ fn a_config() -> (tddy_daemon::config::DaemonConfig, tempfile::TempDir) {
 
 /// A service rooted at `sessions_base`, holding **no** GitHub token store — so a PR lookup that is
 /// actually attempted stops at the missing credential and never reaches the network.
-fn a_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn a_service(sessions_base: PathBuf) -> TestDaemon {
     let (config, _config_dir) = a_config();
     // The config file's own temp dir may drop here; `DaemonConfig` is fully parsed by now.
     let base = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     let user_resolver: SessionUserResolver =
         Arc::new(|token| (token == TOKEN).then(|| "u".to_string()));
-    ConnectionServiceImpl::new(
+    TestDaemon::from_arc(Arc::new(ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
         sessions_base,
@@ -133,7 +133,7 @@ fn a_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
         None,
         None,
         Arc::new(CliSessionManager::new()),
-    )
+    )))
 }
 
 /// A pr-stack orchestrator exactly as the daemon writes one: a recipe in `changeset.yaml` with no
@@ -174,7 +174,7 @@ fn an_orchestrator_dir(sessions_base: &Path) -> PathBuf {
     dir
 }
 
-async fn query(service: &ConnectionServiceImpl) -> BranchResolution {
+async fn query(service: &TestDaemon) -> BranchResolution {
     service
         .query_branch(Request::new(QueryBranchRequest {
             session_token: TOKEN.to_string(),
@@ -190,7 +190,7 @@ async fn query(service: &ConnectionServiceImpl) -> BranchResolution {
         .expect("a resolution must be returned")
 }
 
-async fn pr_status(service: &ConnectionServiceImpl) -> PrStatusView {
+async fn pr_status(service: &TestDaemon) -> PrStatusView {
     service
         .get_pr_status(Request::new(GetPrStatusRequest {
             session_token: TOKEN.to_string(),

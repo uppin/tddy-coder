@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { BranchBaseSyncSchema } from "../../../gen/connection_pb";
+import { BranchBaseSyncSchema } from "../../../gen/pr_stack_pb";
 import { aBranchResolution } from "../../../test-utils";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 

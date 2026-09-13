@@ -37,9 +37,10 @@ use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource, ConnectSessionRequest,
-    ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ExecuteToolResponse,
-    SessionAttachment, StagedAttachmentRef, StartSessionRequest, StartSessionResponse,
+    ConnectionService as ConnectionServiceTrait, SessionAttachment, StagedAttachmentRef,
+    StartSessionRequest, StartSessionResponse,
 };
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::livekit::LiveKitRoomInfo;
 use tddy_service::proto::session_files::{ReadHostDocumentRequest, ReadHostDocumentResponse};
 use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
@@ -616,7 +617,7 @@ async fn execute_tool_in_room(
     let bytes = tokio::time::timeout(
         CALL_TIMEOUT,
         client.call_unary(
-            "connection.ConnectionService",
+            "exec_tools.ExecToolService",
             "ExecuteTool",
             ExecuteToolRequest {
                 session_token: TEST_TOKEN.to_string(),

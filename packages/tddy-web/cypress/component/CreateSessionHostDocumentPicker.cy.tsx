@@ -16,6 +16,7 @@
  */
 
 import React from "react";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { Room } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
@@ -101,20 +102,20 @@ function aHostWithDocuments(recorder: StartRecorder): InMemoryRpcBackend {
         },
       ],
     }))
-    .onUnary(ConnectionService.method.listAgentModels, () => ({
+    .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",
     }))
     .onUnary(ConnectionService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(ConnectionService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => ({
       agents: [{ id: "claude", label: "Claude" }],
     }))
-    .onUnary(ConnectionService.method.listTools, () => ({
+    .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
-    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }))
+    .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
     .onUnary(ConnectionService.method.listProjectBranches, () => ({
       branches: ["origin/main"],
       defaultRemote: "origin",
@@ -146,6 +147,7 @@ function aHostWithDocuments(recorder: StartRecorder): InMemoryRpcBackend {
 function mountCreatePane(backend: InMemoryRpcBackend) {
   const transport = backend.transport();
   const client = createClient(ConnectionService, transport);
+  const catalogClient = createClient(CatalogService, transport);
   // The same host over the same wire, under the services that now serve the file and worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, transport);
   const worktreeClient = createClient(WorktreeService, transport);
@@ -153,6 +155,7 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
+        catalogClient={catalogClient}
         sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}
         sessionToken="fake-token"

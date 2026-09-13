@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use std::process::Stdio;
 use std::time::Duration;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService};
-use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 
@@ -118,7 +118,7 @@ async fn mcp_tools_list_over_stdio_includes_dynamic_tools_when_sandbox_ipc_confi
     );
 }
 
-/// Fake `connection.ConnectionService/ExecuteTool` handler, standing in for the real
+/// Fake `exec_tools.ExecToolService/ExecuteTool` handler, standing in for the real
 /// `ToolExecService` `tddy-sandbox-runner` hosts on the tool-IPC socket. Echoes back a fixed
 /// marker plus the requested tool name — enough to prove the call actually reached this fake
 /// listener over the RPC-framed wire, not the old raw-JSON protocol.
@@ -130,7 +130,7 @@ impl RpcService for FakeToolExecService {
         // Anything but `ExecuteTool` is refused exactly as the runner refuses it — the socket now
         // carries more than tool calls (`tddy-tools` also subscribes to the session's agent roster
         // over it), and this fake stands in for the runner, not for the whole daemon.
-        if service != "connection.ConnectionService" || method != "ExecuteTool" {
+        if service != "exec_tools.ExecToolService" || method != "ExecuteTool" {
             return RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
                 "unknown {service}/{method}"
             ))));

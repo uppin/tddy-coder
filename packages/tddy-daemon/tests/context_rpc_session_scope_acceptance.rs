@@ -138,7 +138,7 @@ async fn a_session_paired_with(split_agent: Option<SplitAgentPlacement>) -> ASes
     );
 
     ASession {
-        service: service.session_files_service(),
+        service: service.as_arc().session_files_service(),
         session_id: started.session_id,
         session_dir,
         worktree,

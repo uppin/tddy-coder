@@ -21,6 +21,8 @@ import React from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { ConnectionService, type ProjectEntry, type SessionEntry } from "../../src/gen/connection_pb";
+import { PrStackService } from "../../src/gen/pr_stack_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -106,13 +108,13 @@ function aPrStackBackend(opts: MountOptions) {
   return aSessionsDrawerBackend([
     anOrchestratorSession(aStackPlanJson(1, opts.nodes ?? aTwoNodeStack())),
   ])
-    .onUnary(ConnectionService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(
         opts.resolutionByBranch?.[req.branch] ?? { branch: req.branch },
       ),
     )
     .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
-    .onUnary(ConnectionService.method.listTools, () => ({ tools: [] }));
+    .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 }
 
 function mountAndOpen(backend: ReturnType<typeof aPrStackBackend>) {
@@ -130,7 +132,7 @@ const PULLED_IN: BranchResolutionFixture = {
 /** Open the screen with a `PullBaseIntoBranch` that succeeds and returns a fresh resolution. */
 function openPrStackScreen(opts: MountOptions) {
   return mountAndOpen(
-    aPrStackBackend(opts).onUnary(ConnectionService.method.pullBaseIntoBranch, () =>
+    aPrStackBackend(opts).onUnary(PrStackService.method.pullBaseIntoBranch, () =>
       aPullBaseIntoBranchResponse({ resolution: opts.afterPull ?? PULLED_IN }),
     ),
   );
@@ -142,7 +144,7 @@ function openPrStackScreen(opts: MountOptions) {
  */
 function openPrStackScreenWithUnpushedPull(pushError: string, opts: MountOptions) {
   return mountAndOpen(
-    aPrStackBackend(opts).onUnary(ConnectionService.method.pullBaseIntoBranch, () =>
+    aPrStackBackend(opts).onUnary(PrStackService.method.pullBaseIntoBranch, () =>
       aPullBaseIntoBranchResponse({ resolution: PULLED_IN, pushed: false, pushError }),
     ),
   );
@@ -151,7 +153,7 @@ function openPrStackScreenWithUnpushedPull(pushError: string, opts: MountOptions
 /** Open the screen with a `PullBaseIntoBranch` the daemon refuses, carrying `message` as its reason. */
 function openPrStackScreenWithRefusedPull(message: string, opts: MountOptions) {
   return mountAndOpen(
-    aPrStackBackend(opts).onUnary(ConnectionService.method.pullBaseIntoBranch, () => {
+    aPrStackBackend(opts).onUnary(PrStackService.method.pullBaseIntoBranch, () => {
       throw new ConnectError(message, Code.FailedPrecondition);
     }),
   );
@@ -161,7 +163,7 @@ function openPrStackScreenWithRefusedPull(message: string, opts: MountOptions) {
 function openPrStackScreenWithPullInFlight(opts: MountOptions) {
   return mountAndOpen(
     aPrStackBackend(opts).onUnary(
-      ConnectionService.method.pullBaseIntoBranch,
+      PrStackService.method.pullBaseIntoBranch,
       () => new Promise<never>(() => undefined),
     ),
   );
@@ -232,7 +234,7 @@ it("merges the base into the branch when the merge control is clicked", () => {
 
   // Then — the daemon is asked for exactly the base the control named, by the default strategy
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.pullBaseIntoBranch);
+    const calls = b.callsTo(PrStackService.method.pullBaseIntoBranch);
     expect(calls).to.have.length(1);
     expect(calls[0].sessionId).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].nodeId).to.equal("n2");
@@ -251,7 +253,7 @@ it("rebases the branch onto the base when the rebase control is clicked", () => 
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.pullBaseIntoBranch);
+    const calls = b.callsTo(PrStackService.method.pullBaseIntoBranch);
     expect(calls).to.have.length(1);
     expect(calls[0].strategy).to.equal("rebase");
   });
@@ -418,7 +420,7 @@ it("commits and pushes the outstanding work before pulling when the operator con
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.pullBaseIntoBranch);
+    const calls = b.callsTo(PrStackService.method.pullBaseIntoBranch);
     expect(calls).to.have.length(1);
     expect(calls[0].dirtyWorktreeAction).to.equal("commit");
     expect(calls[0].commitMessage).to.equal("wip: auth middleware");
@@ -442,7 +444,7 @@ it("leaves the worktree alone when the operator cancels the prompt", () => {
   // Then
   prStackScreenPage.dirtyWorktreeDialog().should("not.exist");
   cy.wrap(backend).should((b) => {
-    expect(b.callsTo(ConnectionService.method.pullBaseIntoBranch)).to.have.length(0);
+    expect(b.callsTo(PrStackService.method.pullBaseIntoBranch)).to.have.length(0);
   });
 });
 
@@ -471,7 +473,7 @@ it("clears a previous failure when a new pull is started", () => {
   const backend = aPrStackBackend({ resolutionByBranch: { [CHILD_BRANCH]: behindBy(3) } });
   let attempt = 0;
   mountAndOpen(
-    backend.onUnary(ConnectionService.method.pullBaseIntoBranch, () => {
+    backend.onUnary(PrStackService.method.pullBaseIntoBranch, () => {
       attempt += 1;
       if (attempt === 1) throw new ConnectError("git fetch failed", Code.Internal);
       return aPullBaseIntoBranchResponse({ resolution: PULLED_IN });

@@ -20,12 +20,9 @@ use futures_util::StreamExt;
 use pretty_assertions::assert_eq;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::test_util::{test_service, TEST_TOKEN};
+use tddy_daemon::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListSubagentsRequest,
-};
+use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 use tddy_service::proto::session_agents_svc::{
     AttachSessionAgentRequest, DetachSessionAgentRequest, ListSessionAgentsRequest,
     ReportAgentCloneStateRequest, SessionAgentRoster, SessionAgentService as _,
@@ -47,7 +44,7 @@ const A_BRISK_KEEPALIVE: Duration = Duration::from_millis(50);
 
 /// A daemon serving one session, with an `<tddyhome>/agents/` directory the test seeds.
 struct RosteredSession {
-    service: ConnectionServiceImpl,
+    service: TestDaemon,
     session_id: String,
     _sessions: tempfile::TempDir,
 }
@@ -127,7 +124,7 @@ impl RosteredSession {
 
     /// Re-read the roster from disk through a *fresh* service over the same sessions base — what a
     /// daemon restart sees.
-    fn after_restart(&self) -> ConnectionServiceImpl {
+    fn after_restart(&self) -> TestDaemon {
         test_service(self._sessions.path().to_path_buf())
     }
 }

@@ -36,7 +36,7 @@ use tddy_sandbox_recipes::{append_claude_mcp_args, claude_scratch_mcp_dir};
 /// `tddy_terminal_rpc::MAIN_TERMINAL_ID`, which this in-jail crate does not depend on.
 const MAIN_TERMINAL_ID: &str = "main";
 
-/// Hosts `connection.ConnectionService/ExecuteTool` over the tool-IPC socket, using `tddy-rpc`'s
+/// Hosts `exec_tools.ExecToolService/ExecuteTool` over the tool-IPC socket, using `tddy-rpc`'s
 /// length-prefixed framing instead of the old unframed single-`read()`/`write_all()` JSON
 /// protocol (which silently truncated payloads that didn't arrive in one syscall).
 ///
@@ -66,7 +66,7 @@ impl tddy_rpc::RpcService for ToolExecService {
         use prost::Message;
         // `ExecuteTool` rides the poll-gated `ToolRequest`/`ToolResponse` pair, unchanged — the
         // one call at a time it was built for.
-        if service == "connection.ConnectionService" && method == "ExecuteTool" {
+        if service == tddy_tool_engine::EXEC_TOOL_SERVICE && method == "ExecuteTool" {
             let req = match ExecuteToolRequest::decode(message.payload.as_ref()) {
                 Ok(r) => r,
                 Err(e) => {

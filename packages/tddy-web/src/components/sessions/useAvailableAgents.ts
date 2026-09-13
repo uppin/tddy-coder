@@ -13,10 +13,10 @@
  */
 
 import { createClient, type Client } from "@connectrpc/connect";
-import { ConnectionService, type SubagentInfo } from "../../gen/connection_pb";
+import { CatalogService, type SubagentInfo } from "../../gen/catalog_pb";
 import { useHostFanOut, type HostReadFailure, type HostReader } from "../../rpc/useHostFanOut";
 
-type ConnectionClient = Client<typeof ConnectionService>;
+type CatalogClient = Client<typeof CatalogService>;
 
 /** One agent a host offers, as a picker renders and submits it. */
 export interface AvailableAgent {
@@ -47,8 +47,8 @@ function availableAgentOf(info: SubagentInfo): AvailableAgent {
   };
 }
 
-const SUBAGENT_READER: HostReader<ConnectionClient, AvailableAgent> = {
-  clientFor: (transport) => createClient(ConnectionService, transport),
+const SUBAGENT_READER: HostReader<CatalogClient, AvailableAgent> = {
+  clientFor: (transport) => createClient(CatalogService, transport),
   read: async (client, _daemonInstanceId, signal) => {
     // The host is on the wire here: the serving daemon mints the qualified `agent_id` and stamps
     // `daemon_instance_id` on every def it answers with.
@@ -63,7 +63,7 @@ const SUBAGENT_READER: HostReader<ConnectionClient, AvailableAgent> = {
  * common room. See {@link useHostFanOut} for what `homeClient` and `homeInstanceId` are.
  */
 export function useAvailableAgents(
-  homeClient: ConnectionClient,
+  homeClient: CatalogClient,
   homeInstanceId: string,
 ): AvailableAgents {
   const { rows, failures } = useHostFanOut(homeClient, homeInstanceId, SUBAGENT_READER);

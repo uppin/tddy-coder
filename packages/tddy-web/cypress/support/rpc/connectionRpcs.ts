@@ -106,7 +106,7 @@ export function interceptConnectionRpcs(
 
   // Tools
   const toolsBody = toArrayBuffer(listTools());
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
+  cy.intercept("POST", "**/rpc/catalog.CatalogService/ListTools", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: toolsBody });
   }).as("listTools");
 
@@ -114,7 +114,7 @@ export function interceptConnectionRpcs(
   const agentsBody = toArrayBuffer(
     opts.agents === undefined ? listDefaultAgents() : listAgents(opts.agents),
   );
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
+  cy.intercept("POST", "**/rpc/catalog.CatalogService/ListAgents", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: agentsBody });
   }).as("listAgents");
 

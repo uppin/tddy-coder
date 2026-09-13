@@ -76,3 +76,16 @@ enum SessionAgentStatus {
   // The agent cannot serve prompts at all. `clone_error` on the same entry says why.
   SESSION_AGENT_STATUS_ERROR = 6;
 }
+
+// Added by `#unbundle` node 8. `ListSessions` reaches this through the branch views it reports, and
+// `pr_stack.PrStackService.QueryBranch` reports it too. Third and last type to cross, and found the
+// same way as the two above.
+
+message BranchSession {
+  // False when no session owns the branch.
+  bool exists = 1;
+  string session_id = 2;
+  bool is_active = 3;
+  // e.g. "active" | "idle".
+  string status = 4;
+}

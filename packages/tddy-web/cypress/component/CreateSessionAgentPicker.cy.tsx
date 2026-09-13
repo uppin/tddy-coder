@@ -16,6 +16,7 @@ import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
@@ -53,15 +54,15 @@ const LINTER_ON_B = "linter@server-2";
 function aCreateSessionBackend() {
   return anInMemoryRpcBackend()
     .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
-    .onUnary(ConnectionService.method.listAgentModels, () => ({
+    .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-5", label: "Claude Opus 5" }],
       defaultModel: "claude-opus-5",
     }))
     .onUnary(ConnectionService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))
-    .onUnary(ConnectionService.method.listAgents, () => ({ agents: [] }))
-    .onUnary(ConnectionService.method.listTools, () => ({ tools: [] }))
+    .onUnary(CatalogService.method.listAgents, () => ({ agents: [] }))
+    .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
     .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "new-1" }));
 }
 
@@ -71,13 +72,14 @@ function aCreateSessionBackend() {
  */
 function mountPicker(hostB: InMemoryRpcBackend): InMemoryRpcBackend {
   const hostABackend = aCreateSessionBackend().onUnary(
-    ConnectionService.method.listSubagents,
+    CatalogService.method.listSubagents,
     () => ({ subagents: [anAvailableAgent("explorer", HOST_A.instanceId, ["Grep"])] }),
   );
   mountWithPerDaemonLiveKitRpc(
     withSelectedDaemon(
       <CreateSessionPane
         client={createClient(ConnectionService, hostABackend.transport())}
+        catalogClient={createClient(CatalogService, hostABackend.transport())}
         sessionFilesClient={createClient(SessionFilesService, hostABackend.transport())}
         worktreeClient={createClient(WorktreeService, hostABackend.transport())}
         sessionToken="tok"

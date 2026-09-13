@@ -303,7 +303,8 @@ async fn cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available() {
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let stub = write_echo_argv_script(repo_dir.path());
     let (_cfg_dir, config) = write_config_with_cursor_cli_binary(stub.to_str().unwrap());
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let service = Arc::new(minimal_service(config, sessions_tmp.path().to_path_buf()));
+    tddy_daemon::test_util::install_self_handle(&service);
 
     let mut req = start_cursor_cli_request();
     req.sandbox = true;

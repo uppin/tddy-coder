@@ -27,6 +27,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { ConnectionService, type SessionEntry } from "../../src/gen/connection_pb";
+import { PrStackService } from "../../src/gen/pr_stack_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -83,7 +84,7 @@ function openPrStackScreen(
   resolutionByBranch: Record<string, BranchResolutionFixture>,
 ) {
   const backend = aSessionsDrawerBackend([anOrchestratorSession(nodes)]).onUnary(
-    ConnectionService.method.queryBranch,
+    PrStackService.method.queryBranch,
     (req: { branch: string }) =>
       aBranchResolutionResponse(resolutionByBranch[req.branch] ?? { branch: req.branch }),
   );
@@ -94,7 +95,7 @@ function openPrStackScreen(
 /** Open the screen with a `QueryBranch` call that never answers. */
 function openPrStackScreenWithUnansweredResolution(nodes: StackNodeFixture[]) {
   const backend = aSessionsDrawerBackend([anOrchestratorSession(nodes)]).onUnary(
-    ConnectionService.method.queryBranch,
+    PrStackService.method.queryBranch,
     () => new Promise<never>(() => undefined),
   );
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);

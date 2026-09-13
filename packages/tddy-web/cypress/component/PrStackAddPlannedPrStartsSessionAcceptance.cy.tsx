@@ -23,6 +23,7 @@ import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { PrStackService } from "../../src/gen/pr_stack_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
@@ -109,7 +110,7 @@ function openPrStackScreen(answer: AddPlannedPrAnswer = {}) {
   const nodeId = answer.createdNodeId ?? ADDED_NODE.nodeId;
   const backend = aSessionsDrawerBackend([
     anOrchestratorSession(aStackPlanJson(1, [BASE_NODE])),
-  ]).onUnary(ConnectionService.method.addPlannedPr, () => ({
+  ]).onUnary(PrStackService.method.addPlannedPr, () => ({
     stackPlanJson: aStackPlanJson(1, nodes),
     nodeId,
   }));
@@ -174,7 +175,7 @@ it("still calls AddPlannedPr exactly once with the entered fields", () => {
 
   // Then the one-step action adds the node the same way "Add" does — it only continues further
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.addPlannedPr);
+    const calls = b.callsTo(PrStackService.method.addPlannedPr);
     expect(calls).to.have.length(1);
     expect(calls[0].sessionId).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].title).to.equal("Add auth middleware");

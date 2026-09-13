@@ -53,3 +53,5 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "proce
 # The exec-tool server the jailed runner relays to, mounted directly by
 # `sandbox_stdio_seatbelt_acceptance.rs`.
 tddy-tools = { path = "../tddy-tools" }
+# `dispatch_via_sandbox_ipc` in the seatbelt acceptance — same client the in-jail MCP path uses.
+tddy-session-tool-client = { path = "../tddy-session-tool-client" }

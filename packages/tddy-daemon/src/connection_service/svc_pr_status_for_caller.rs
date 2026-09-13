@@ -1,5 +1,5 @@
+use crate::pr_stack_rpc::PrStackHandler;
 use std::path::PathBuf;
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 
 use crate::{
     connection_service::{service_util, stack_parent},
@@ -19,9 +19,9 @@ use super::ManagedLaunch;
 
 use std::sync::Arc;
 
-use tddy_service::proto::connection::LinkStackNodeRequest;
+use tddy_service::proto::pr_stack::LinkStackNodeRequest;
 
-use tddy_service::proto::connection::ResolveStackBaseRequest;
+use tddy_service::proto::pr_stack::ResolveStackBaseRequest;
 
 use tddy_rpc::Request;
 
@@ -219,7 +219,7 @@ impl ConnectionServiceImpl {
             )
             .map_err(Status::failed_precondition),
             tddy_core::StackParentRoute::OwnedByPeer { daemon_instance_id } => {
-                let base_ref = ConnectionServiceTrait::resolve_stack_base(
+                let base_ref = PrStackHandler::resolve_stack_base(
                     self,
                     Request::new(ResolveStackBaseRequest {
                         session_token: lookup.session_token.to_string(),
@@ -324,7 +324,7 @@ impl ConnectionServiceImpl {
                 link.child_session_id,
             );
         }
-        ConnectionServiceTrait::link_stack_node(
+        PrStackHandler::link_stack_node(
             self,
             Request::new(LinkStackNodeRequest {
                 session_token: link.session_token.to_string(),

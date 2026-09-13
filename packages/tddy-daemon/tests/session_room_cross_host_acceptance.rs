@@ -35,9 +35,9 @@ use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ExecuteToolResponse,
-    StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
 };
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_env};
 use tddy_testing_commons::wait::eventually_awaiting;
@@ -577,7 +577,7 @@ async fn read_file_in_room(
     let bytes = tokio::time::timeout(
         CALL_TIMEOUT,
         client.call_unary(
-            "connection.ConnectionService",
+            "exec_tools.ExecToolService",
             "ExecuteTool",
             ExecuteToolRequest {
                 session_token: a_caller_token().to_string(),

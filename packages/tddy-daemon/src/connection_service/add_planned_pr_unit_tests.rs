@@ -4,9 +4,13 @@
 //! PRD: docs/ft/coder/pr-stacking.md § Manually adding a planned PR.
 //! Changeset: docs/dev/1-WIP/pr-stack-manual-add-planned-pr.md.
 
+use std::sync::Arc;
+
 use super::*;
+use crate::pr_stack_rpc::PrStackServiceImpl;
 use tddy_core::changeset::{read_changeset, write_changeset};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
+use tddy_service::proto::pr_stack::{AddPlannedPrRequest, PrStackService};
 
 fn make_unit_config() -> crate::config::DaemonConfig {
     let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
@@ -16,7 +20,13 @@ fn make_unit_config() -> crate::config::DaemonConfig {
     crate::config::DaemonConfig::load(&path).unwrap()
 }
 
-fn make_unit_service(sessions_base: std::path::PathBuf) -> ConnectionServiceImpl {
+fn make_unit_stack_service(
+    sessions_base: std::path::PathBuf,
+) -> PrStackServiceImpl<ConnectionServiceImpl> {
+    PrStackServiceImpl::new(Arc::new(make_unit_connection(sessions_base)))
+}
+
+fn make_unit_connection(sessions_base: std::path::PathBuf) -> ConnectionServiceImpl {
     let config = make_unit_config();
     let base = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
@@ -66,7 +76,7 @@ fn a_request(session_id: &str, title: &str) -> Request<AddPlannedPrRequest> {
 async fn add_planned_pr_rejects_a_session_whose_recipe_is_not_pr_stack() {
     // Given — a plain "tdd" session, not a pr-stack orchestrator
     let temp = tempfile::tempdir().unwrap();
-    let service = make_unit_service(temp.path().to_path_buf());
+    let service = make_unit_stack_service(temp.path().to_path_buf());
     let session_dir = unified_session_dir_path(temp.path(), "tdd-session-1");
     write_unit_changeset(&session_dir, Some("tdd"));
 
@@ -91,7 +101,7 @@ async fn add_planned_pr_rejects_a_session_whose_recipe_is_not_pr_stack() {
 async fn add_planned_pr_rejects_a_session_with_no_recipe_set() {
     // Given
     let temp = tempfile::tempdir().unwrap();
-    let service = make_unit_service(temp.path().to_path_buf());
+    let service = make_unit_stack_service(temp.path().to_path_buf());
     let session_dir = unified_session_dir_path(temp.path(), "no-recipe-session");
     write_unit_changeset(&session_dir, None);
 
@@ -110,7 +120,7 @@ async fn add_planned_pr_rejects_a_session_with_no_recipe_set() {
 async fn add_planned_pr_succeeds_for_a_pr_stack_orchestrator_session() {
     // Given
     let temp = tempfile::tempdir().unwrap();
-    let service = make_unit_service(temp.path().to_path_buf());
+    let service = make_unit_stack_service(temp.path().to_path_buf());
     let session_dir = unified_session_dir_path(temp.path(), "pr-stack-session-1");
     write_unit_changeset(&session_dir, Some("pr-stack"));
 
@@ -138,7 +148,7 @@ async fn add_planned_pr_succeeds_for_a_pr_stack_orchestrator_session() {
 async fn add_planned_pr_succeeds_for_a_legacy_orchestrate_pr_stack_alias_session() {
     // Given
     let temp = tempfile::tempdir().unwrap();
-    let service = make_unit_service(temp.path().to_path_buf());
+    let service = make_unit_stack_service(temp.path().to_path_buf());
     let session_dir = unified_session_dir_path(temp.path(), "legacy-orchestrator-session");
     write_unit_changeset(&session_dir, Some("orchestrate-pr-stack"));
 

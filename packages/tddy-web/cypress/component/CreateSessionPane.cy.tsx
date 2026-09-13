@@ -14,6 +14,7 @@ import {
   StartSessionRequestSchema,
   StartSessionResponseSchema,
 } from "../../src/gen/connection_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
@@ -54,6 +55,10 @@ function createTestClient() {
   return createClient(ConnectionService, testTransport());
 }
 
+function createTestCatalogClient() {
+  return createClient(CatalogService, testTransport());
+}
+
 function createTestWorktreeClient() {
   return createClient(WorktreeService, testTransport());
 }
@@ -77,17 +82,17 @@ function interceptBaseline() {
   }).as("listProjects");
 
   const agentsBody = toArrayBuffer(listAgents([TEST_AGENT]));
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
+  cy.intercept("POST", "**/rpc/catalog.CatalogService/ListAgents", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: agentsBody });
   }).as("listAgents");
 
   const toolsBody = toArrayBuffer(listTools([{ path: TEST_TOOL_PATH, label: "tddy-coder" }]));
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
+  cy.intercept("POST", "**/rpc/catalog.CatalogService/ListTools", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: toolsBody });
   }).as("listTools");
 
   const modelsBody = toArrayBuffer(listAgentModels(AGENT_MODELS, DEFAULT_MODEL));
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgentModels", (req) => {
+  cy.intercept("POST", "**/rpc/catalog.CatalogService/ListAgentModels", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: modelsBody });
   }).as("listAgentModels");
 }
@@ -101,6 +106,7 @@ function mountCreateSessionPane(overrides: {
   onCreated?: (id: string) => void;
 } = {}) {
   const client = createTestClient();
+  const catalogClient = createTestCatalogClient();
   const sessionFilesClient = createTestSessionFilesClient();
   const worktreeClient = createTestWorktreeClient();
   const onCancel = overrides.onCancel ?? cy.stub().as("onCancel");
@@ -108,6 +114,7 @@ function mountCreateSessionPane(overrides: {
   cy.mount(
     <CreateSessionPane
       client={client}
+      catalogClient={catalogClient}
       sessionFilesClient={sessionFilesClient}
       worktreeClient={worktreeClient}
       sessionToken="fake-token"
@@ -224,12 +231,12 @@ describe("CreateSessionPane — create button enabled state", () => {
     }).as("listProjects");
 
     const agentsBody = toArrayBuffer(listAgents([TEST_AGENT]));
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
+    cy.intercept("POST", "**/rpc/catalog.CatalogService/ListAgents", (req) => {
       req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: agentsBody });
     }).as("listAgents");
 
     const toolsBody = toArrayBuffer(listTools([{ path: TEST_TOOL_PATH, label: "tddy-coder" }]));
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
+    cy.intercept("POST", "**/rpc/catalog.CatalogService/ListTools", (req) => {
       req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: toolsBody });
     }).as("listTools");
 

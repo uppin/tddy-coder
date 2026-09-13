@@ -33,24 +33,16 @@ use tonic::transport::server::UdsConnectInfo;
 use crate::config::DaemonConfig;
 use tddy_service::proto::connection::ConnectionService as RpcConnectionService;
 use tddy_service::proto::connection::{
-    AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
-    ConnectSessionRequest, ConnectSessionResponse, CreateProjectRequest, CreateProjectResponse,
-    DeleteSessionRequest, DeleteSessionResponse, ExecuteToolChunk, ExecuteToolRequest,
-    ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse, GetPrStatusRequest,
-    GetPrStatusResponse, GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse,
-    LinkStackNodeRequest, LinkStackNodeResponse, ListAgentModelsRequest, ListAgentModelsResponse,
-    ListAgentsRequest, ListAgentsResponse, ListExecToolsRequest, ListExecToolsResponse,
-    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
-    ListSessionsRequest, ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse,
-    ListToolsRequest, ListToolsResponse, MintLocalTokenRequest, MintLocalTokenResponse,
-    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
-    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
-    RepointPlannedPrResponse, ResolveStackBaseRequest, ResolveStackBaseResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse, SignalSessionRequest, SignalSessionResponse,
-    StartDemoVmRequest, StartDemoVmResponse, StartSessionEvent, StartSessionRequest,
-    StartSessionResponse, StopDemoVmRequest, StopDemoVmResponse,
+    AddProjectToHostRequest, AddProjectToHostResponse, ConnectSessionRequest,
+    ConnectSessionResponse, CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest,
+    DeleteSessionResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
+    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListProjectBranchesRequest,
+    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse, ListSessionsRequest,
+    ListSessionsResponse, MintLocalTokenRequest, MintLocalTokenResponse, ResumeSessionRequest,
+    ResumeSessionResponse, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
+    SignalSessionRequest, SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse,
+    StartSessionEvent, StartSessionRequest, StartSessionResponse, StopDemoVmRequest,
+    StopDemoVmResponse,
 };
 use tddy_service::tonic_connection::connection_service_server::ConnectionService as TonicConnectionService;
 
@@ -102,58 +94,6 @@ impl<T> TonicConnectionService for ConnectionServiceTonicAdapter<T>
 where
     T: RpcConnectionService,
 {
-    async fn list_tools(
-        &self,
-        request: tonic::Request<ListToolsRequest>,
-    ) -> Result<tonic::Response<ListToolsResponse>, tonic::Status> {
-        let resp = RpcConnectionService::list_tools(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn list_agents(
-        &self,
-        request: tonic::Request<ListAgentsRequest>,
-    ) -> Result<tonic::Response<ListAgentsResponse>, tonic::Status> {
-        let resp = RpcConnectionService::list_agents(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn list_agent_models(
-        &self,
-        request: tonic::Request<ListAgentModelsRequest>,
-    ) -> Result<tonic::Response<ListAgentModelsResponse>, tonic::Status> {
-        let resp = RpcConnectionService::list_agent_models(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn list_subagents(
-        &self,
-        request: tonic::Request<ListSubagentsRequest>,
-    ) -> Result<tonic::Response<ListSubagentsResponse>, tonic::Status> {
-        let resp = RpcConnectionService::list_subagents(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
     // `result_large_err`: the `Err` is `tonic::Status`, mandated by the generated tonic trait — it
     // cannot be boxed, so the lint's suggested fix does not apply. Every other `#[allow]` of this
     // lint in this file is for the same reason.
@@ -301,65 +241,6 @@ where
         Ok(tonic::Response::new(resp.into_inner()))
     }
 
-    async fn execute_tool(
-        &self,
-        request: tonic::Request<ExecuteToolRequest>,
-    ) -> Result<tonic::Response<ExecuteToolResponse>, tonic::Status> {
-        let resp = RpcConnectionService::execute_tool(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    /// Server streaming: a tool result past the unary message-size ceiling.
-    type StreamExecuteToolStream =
-        Pin<Box<dyn Stream<Item = Result<ExecuteToolChunk, tonic::Status>> + Send>>;
-
-    // `result_large_err`: see `list_sessions`.
-    #[allow(clippy::result_large_err)]
-    async fn stream_execute_tool(
-        &self,
-        request: tonic::Request<ExecuteToolRequest>,
-    ) -> Result<tonic::Response<Self::StreamExecuteToolStream>, tonic::Status> {
-        let resp = RpcConnectionService::stream_execute_tool(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
-        Ok(tonic::Response::new(Box::pin(outbound)))
-    }
-
-    async fn list_exec_tools(
-        &self,
-        request: tonic::Request<ListExecToolsRequest>,
-    ) -> Result<tonic::Response<ListExecToolsResponse>, tonic::Status> {
-        let resp = RpcConnectionService::list_exec_tools(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn list_session_tool_calls(
-        &self,
-        request: tonic::Request<ListSessionToolCallsRequest>,
-    ) -> Result<tonic::Response<ListSessionToolCallsResponse>, tonic::Status> {
-        let resp = RpcConnectionService::list_session_tool_calls(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
     // `result_large_err`: see `list_sessions`.
     #[allow(clippy::result_large_err)]
     async fn start_demo_vm(
@@ -401,115 +282,11 @@ where
         Ok(tonic::Response::new(resp.into_inner()))
     }
 
-    async fn add_planned_pr(
-        &self,
-        request: tonic::Request<AddPlannedPrRequest>,
-    ) -> Result<tonic::Response<AddPlannedPrResponse>, tonic::Status> {
-        let resp = RpcConnectionService::add_planned_pr(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn get_pr_status(
-        &self,
-        request: tonic::Request<GetPrStatusRequest>,
-    ) -> Result<tonic::Response<GetPrStatusResponse>, tonic::Status> {
-        let resp = RpcConnectionService::get_pr_status(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn query_branch(
-        &self,
-        request: tonic::Request<QueryBranchRequest>,
-    ) -> Result<tonic::Response<QueryBranchResponse>, tonic::Status> {
-        let resp = RpcConnectionService::query_branch(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn resolve_stack_base(
-        &self,
-        request: tonic::Request<ResolveStackBaseRequest>,
-    ) -> Result<tonic::Response<ResolveStackBaseResponse>, tonic::Status> {
-        let resp = RpcConnectionService::resolve_stack_base(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn link_stack_node(
-        &self,
-        request: tonic::Request<LinkStackNodeRequest>,
-    ) -> Result<tonic::Response<LinkStackNodeResponse>, tonic::Status> {
-        let resp = RpcConnectionService::link_stack_node(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
     async fn get_worktree_snapshot(
         &self,
         request: tonic::Request<GetWorktreeSnapshotRequest>,
     ) -> Result<tonic::Response<GetWorktreeSnapshotResponse>, tonic::Status> {
         let resp = RpcConnectionService::get_worktree_snapshot(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn repoint_planned_pr(
-        &self,
-        request: tonic::Request<RepointPlannedPrRequest>,
-    ) -> Result<tonic::Response<RepointPlannedPrResponse>, tonic::Status> {
-        let resp = RpcConnectionService::repoint_planned_pr(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn reorder_planned_pr(
-        &self,
-        request: tonic::Request<ReorderPlannedPrRequest>,
-    ) -> Result<tonic::Response<ReorderPlannedPrResponse>, tonic::Status> {
-        let resp = RpcConnectionService::reorder_planned_pr(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
-
-    async fn pull_base_into_branch(
-        &self,
-        request: tonic::Request<PullBaseIntoBranchRequest>,
-    ) -> Result<tonic::Response<PullBaseIntoBranchResponse>, tonic::Status> {
-        let resp = RpcConnectionService::pull_base_into_branch(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

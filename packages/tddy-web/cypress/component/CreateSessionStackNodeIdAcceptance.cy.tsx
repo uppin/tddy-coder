@@ -25,6 +25,7 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -75,21 +76,21 @@ function aCreateSessionBackend() {
         },
       ],
     }))
-    .onUnary(ConnectionService.method.listAgents, () => ({
+    .onUnary(CatalogService.method.listAgents, () => ({
       agents: [{ id: "claude", name: "Claude" }],
     }))
-    .onUnary(ConnectionService.method.listTools, () => ({
+    .onUnary(CatalogService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", version: "0.1.0" }],
     }))
     .onUnary(ConnectionService.method.listSessions, () => ({
       sessions: [anOrchestratorSession(ORCHESTRATOR), anOrchestratorSession(ANOTHER_ORCHESTRATOR)],
     }))
-    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }))
+    .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
     .onUnary(ConnectionService.method.listProjectBranches, () => ({
       branches: [],
       defaultRemote: "origin",
     }))
-    .onUnary(ConnectionService.method.listAgentModels, () => ({
+    .onUnary(CatalogService.method.listAgentModels, () => ({
       models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
       defaultModel: "claude-opus-4-8",
     }))
@@ -104,6 +105,7 @@ function aCreateSessionBackend() {
 /** The form as the PR-Stack row opens it: stacked on `ORCHESTRATOR`, materializing `NODE_ID`. */
 function mountPaneForPlannedNode(backend: ReturnType<typeof aCreateSessionBackend>) {
   const client = createClient(ConnectionService, backend.transport());
+  const catalogClient = createClient(CatalogService, backend.transport());
   // The same host over the same wire, under the service that now serves the worktree RPCs.
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
@@ -111,6 +113,7 @@ function mountPaneForPlannedNode(backend: ReturnType<typeof aCreateSessionBacken
     withSelectedDaemon(
       <CreateSessionPane
         client={client}
+      catalogClient={catalogClient}
         sessionFilesClient={sessionFilesClient}
         worktreeClient={worktreeClient}
         sessionToken="fake-token"

@@ -1,6 +1,6 @@
 import React from "react";
 import { Button } from "../../ui/button";
-import type { BranchResolution } from "../../../gen/connection_pb";
+import type { BranchResolution } from "../../../gen/pr_stack_pb";
 import type { BaseSyncView, BehindBaseSyncView } from "./baseSyncStatus";
 import type { StackNode } from "./stackPlan";
 

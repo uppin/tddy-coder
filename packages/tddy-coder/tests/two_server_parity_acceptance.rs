@@ -89,8 +89,8 @@ use tokio::sync::broadcast;
 
 /// The coordinate both wirings are dispatched at, as the crate that serves it publishes it.
 const TERMINAL_SERVICE: &str = tddy_terminal_rpc::TERMINAL_SESSION_SERVICE;
-/// The coordinate the session's tools stay on.
-const CONNECTION_SERVICE: &str = "connection.ConnectionService";
+/// The coordinate the session's tools stay on (`#unbundle` node 8).
+const EXEC_TOOL_SERVICE: &str = tddy_tool_engine::EXEC_TOOL_SERVICE;
 
 const SESSION_ID: &str = "sess-aaaaaaaa-0000-4000-8000-000000000001";
 const SESSION_TOKEN: &str = "caller-token";
@@ -838,13 +838,14 @@ async fn the_terminal_coordinate_does_not_answer_under_the_connection_service_na
     let refusal = session
         .coder_participant
         .refusal_at(
-            CONNECTION_SERVICE,
+            "connection.ConnectionService",
             "StreamTerminalOutput",
             session.a_tail_open(),
         )
         .await;
 
-    // Then — it is refused as an unknown service: this entry answers at one name only
+    // Then — it is refused as an unknown service: the participant no longer registers
+    // `connection.ConnectionService` at all
     assert_eq!(
         (refusal.code(), refusal.message()),
         (
@@ -855,26 +856,25 @@ async fn the_terminal_coordinate_does_not_answer_under_the_connection_service_na
 }
 
 #[tokio::test]
-async fn the_connection_coordinate_no_longer_streams_a_terminal() {
-    // Given — a session participant's connection coordinate
+async fn the_exec_tool_coordinate_does_not_stream_a_terminal() {
+    // Given — a session participant's exec-tool coordinate
     let worktree = tempfile::tempdir().expect("a worktree for the session");
     let manager = Arc::new(TerminalManager::new());
-    let connection = Wiring::new(a_registered_entry(
+    let exec_tools = Wiring::new(a_registered_entry(
         session_service_entries(a_session_service(&manager, worktree.path())),
-        CONNECTION_SERVICE,
+        EXEC_TOOL_SERVICE,
     ));
 
-    // When — a client opens a terminal output stream where the family used to live
-    let refusal = connection
+    // When — a client opens a terminal output stream on the wrong coordinate
+    let refusal = exec_tools
         .refusal_at(
-            CONNECTION_SERVICE,
+            EXEC_TOOL_SERVICE,
             "StreamTerminalOutput",
             a_terminal_open_request(),
         )
         .await;
 
-    // Then — it is refused: `#unbundle` node 6 moved the streaming half to
-    // `terminal_session.TerminalSessionService`, which is where both servers now answer it
+    // Then — it is refused: terminal streaming lives on `terminal_session.TerminalSessionService`
     assert_eq!(refusal.code(), Code::Unimplemented);
 }
 
@@ -941,26 +941,26 @@ async fn the_terminal_coordinate_refuses_to_report_a_control_lease_it_does_not_a
 }
 
 #[tokio::test]
-async fn the_connection_coordinate_still_answers_the_sessions_tool_catalog() {
+async fn the_exec_tool_coordinate_answers_the_sessions_tool_catalog() {
     // Given — a session participant's registered coordinates
     let worktree = tempfile::tempdir().expect("a worktree for the session");
     let manager = Arc::new(TerminalManager::new());
-    let connection = Wiring::new(a_registered_entry(
+    let exec_tools = Wiring::new(a_registered_entry(
         session_service_entries(a_session_service(&manager, worktree.path())),
-        CONNECTION_SERVICE,
+        EXEC_TOOL_SERVICE,
     ));
 
-    // When — the session's tool catalog is asked for at the connection coordinate
-    let listed = match connection
+    // When — the session's tool catalog is asked for at the exec-tool coordinate
+    let listed = match exec_tools
         .dispatch(
-            CONNECTION_SERVICE,
+            EXEC_TOOL_SERVICE,
             "ListExecTools",
             a_list_exec_tools_request(),
         )
         .await
     {
         RpcResult::Unary(Ok(bytes)) => {
-            tddy_service::proto::connection::ListExecToolsResponse::decode(&bytes[..])
+            tddy_service::proto::exec_tools::ListExecToolsResponse::decode(&bytes[..])
                 .expect("a decodable catalog")
         }
         RpcResult::Unary(Err(status)) => panic!("ListExecTools was refused: {status:?}"),
@@ -978,9 +978,9 @@ async fn the_connection_coordinate_still_answers_the_sessions_tool_catalog() {
     );
 }
 
-/// The session's tool-catalog request, which belongs to `connection.ConnectionService`.
-fn a_list_exec_tools_request() -> tddy_service::proto::connection::ListExecToolsRequest {
-    tddy_service::proto::connection::ListExecToolsRequest {
+/// The session's tool-catalog request, which belongs to `exec_tools.ExecToolService`.
+fn a_list_exec_tools_request() -> tddy_service::proto::exec_tools::ListExecToolsRequest {
+    tddy_service::proto::exec_tools::ListExecToolsRequest {
         session_token: SESSION_TOKEN.to_string(),
         daemon_instance_id: "local".to_string(),
     }

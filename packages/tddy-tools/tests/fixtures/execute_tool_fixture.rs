@@ -1,4 +1,4 @@
-//! Test fixture: hosts a fake `connection.ConnectionService/ExecuteTool` handler over its own
+//! Test fixture: hosts a fake `exec_tools.ExecToolService/ExecuteTool` handler over its own
 //! stdin/stdout, exercised by `tests/session_tool_stdio_rpc_dispatch.rs`. Not test code itself —
 //! support for that test, in the spirit of `tddy-stdio`'s own `stdio-echo-fixture`
 //! (`tddy-stdio/tests/fixtures/echo_child.rs`).
@@ -16,14 +16,14 @@
 use async_trait::async_trait;
 use prost::Message;
 use tddy_rpc::{RpcClientTransport, RpcMessage, RpcResult, RpcService};
-use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 
 struct FakeExecuteToolService;
 
 #[async_trait]
 impl RpcService for FakeExecuteToolService {
     async fn handle_rpc(&self, service: &str, method: &str, message: &RpcMessage) -> RpcResult {
-        assert_eq!(service, "connection.ConnectionService");
+        assert_eq!(service, "exec_tools.ExecToolService");
         assert_eq!(method, "ExecuteTool");
         let request = ExecuteToolRequest::decode(message.payload.as_ref())
             .expect("decode ExecuteToolRequest");

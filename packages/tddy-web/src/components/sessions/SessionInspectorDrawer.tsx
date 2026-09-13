@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
+import type { ExecToolService } from "../../gen/exec_tools_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import { VncService } from "../../gen/vnc_pb";
@@ -45,6 +46,8 @@ interface SessionInspectorDrawerProps {
   onDelete: (sessionId: string) => void;
   onTerminate: (sessionId: string) => void;
   client?: Client<typeof ConnectionService>;
+  /** `exec_tools.ExecToolService` on the same host as `client` — the Tools tab. */
+  execToolClient?: Client<typeof ExecToolService>;
   /**
    * The worktree service on the same host as `client` — what the Worktree tab reads its size,
    * diff summary and clear/delete/restore actions through.
@@ -83,11 +86,10 @@ interface SessionInspectorDrawerProps {
   /** Inspector I/O traffic (req 5): byte counters + last-received. Live runtime for active
    *  sessions; daemon-sourced `SessionEntry` fields for inactive / non-LiveKit sessions. */
   traffic?: { bytesIn: number; bytesOut: number; lastDataReceivedAt: number | null } | null;
-  /** Lazy builder for a session-scoped `ConnectionService` client (targets the coder participant
-   *  for an attached LiveKit session). The Tools tab routes `ListExecTools` / `ListSessionToolCalls`
-   *  / `ExecuteTool` through it when available, falling back to the daemon `client` for inactive /
-   *  non-LiveKit sessions. */
-  buildSessionClient?: () => Client<typeof ConnectionService> | null;
+  /** Lazy builder for a session-scoped `exec_tools.ExecToolService` client (targets the coder
+   *  participant for an attached LiveKit session). The Tools tab routes through it when available,
+   *  falling back to the daemon `execToolClient` for inactive / non-LiveKit sessions. */
+  buildSessionExecToolClient?: () => Client<typeof ExecToolService> | null;
   /** Inserts an uploaded file's host path into the focused session's terminal (Files tab → Insert
    *  / tap). Defaults to a no-op when the host does not route terminal input. */
   onInsertPathIntoTerminal?: (hostPath: string) => void;
@@ -125,6 +127,7 @@ export function SessionInspectorDrawer({
   onDelete,
   onTerminate,
   client,
+  execToolClient,
   worktreeClient,
   sessionFilesClient,
   sessionToken,
@@ -132,7 +135,7 @@ export function SessionInspectorDrawer({
   room = null,
   serverIdentity = "server",
   traffic = null,
-  buildSessionClient,
+  buildSessionExecToolClient,
   onInsertPathIntoTerminal,
   onSwitchPeer,
 }: SessionInspectorDrawerProps) {
@@ -386,7 +389,7 @@ export function SessionInspectorDrawer({
             <SessionToolsTab
               sessionId={session.sessionId}
               onListExecTools={() => {
-                const c = buildSessionClient?.() ?? client;
+                const c = buildSessionExecToolClient?.() ?? execToolClient;
                 return c
                   ? c
                       .listExecTools({ sessionToken: sessionToken ?? "", daemonInstanceId: "" })
@@ -394,7 +397,7 @@ export function SessionInspectorDrawer({
                   : Promise.resolve([]);
               }}
               onListSessionToolCalls={() => {
-                const c = buildSessionClient?.() ?? client;
+                const c = buildSessionExecToolClient?.() ?? execToolClient;
                 return c
                   ? c
                       .listSessionToolCalls({
@@ -406,7 +409,7 @@ export function SessionInspectorDrawer({
                   : Promise.resolve([]);
               }}
               onExecuteTool={({ toolName, argsJson }) => {
-                const c = buildSessionClient?.() ?? client;
+                const c = buildSessionExecToolClient?.() ?? execToolClient;
                 return c
                   ? c.executeTool({
                       sessionToken: sessionToken ?? "",

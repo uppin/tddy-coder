@@ -9,6 +9,9 @@ import {
   type ProjectEntry,
 } from "../../gen/connection_pb";
 import { ActivityService } from "../../gen/activity_pb";
+import { CatalogService } from "../../gen/catalog_pb";
+import { ExecToolService } from "../../gen/exec_tools_pb";
+import { PrStackService } from "../../gen/pr_stack_pb";
 import { SessionAgentService } from "../../gen/session_agents_pb";
 import { SessionFilesService } from "../../gen/session_files_pb";
 import { TerminalSessionService } from "../../gen/terminal_session_pb";
@@ -105,6 +108,10 @@ export function SessionsDrawerScreen({
   // and the same routing as `client`, for the same reason the three above follow it.
   const sessionAgentClient = useDaemonClient(SessionAgentService);
   const activityClient = useDaemonClient(ActivityService);
+  // `#unbundle` node 8 took families A, L and P to their own services on the same daemon and wire.
+  const catalogClient = useDaemonClient(CatalogService);
+  const execToolClient = useDaemonClient(ExecToolService);
+  const prStackClient = useDaemonClient(PrStackService);
 
   // One daemon-level notification feed for the whole drawer, however many rows it has (NFR1). The
   // hook's only output is the write into `sessionNotificationRegistry`, which each row reads for
@@ -284,10 +291,10 @@ export function SessionsDrawerScreen({
   // connections that are still open, so a session whose runtime has been evicted yields `null` here
   // — the answer the inspector's `buildSessionClient?.() ?? client` fallback already expects — in
   // place of a released connection that would refuse the call.
-  const buildSessionClient = useCallback(
-    (): Client<typeof ConnectionService> | null =>
+  const buildSessionExecToolClient = useCallback(
+    (): Client<typeof ExecToolService> | null =>
       connectedSessionId
-        ? (runtimeRegistry.get(connectedSessionId)?.connection?.clientFor(ConnectionService) ?? null)
+        ? (runtimeRegistry.get(connectedSessionId)?.connection?.clientFor(ExecToolService) ?? null)
         : null,
     [connectedSessionId, runtimeRegistry],
   );
@@ -474,6 +481,9 @@ export function SessionsDrawerScreen({
   const activeSessionFilesClient = useDaemonClientFor(SessionFilesService, selectedOwningHost);
   const activeSessionAgentClient = useDaemonClientFor(SessionAgentService, selectedOwningHost);
   const activeActivityClient = useDaemonClientFor(ActivityService, selectedOwningHost);
+  const activeCatalogClient = useDaemonClientFor(CatalogService, selectedOwningHost);
+  const activeExecToolClient = useDaemonClientFor(ExecToolService, selectedOwningHost);
+  const activePrStackClient = useDaemonClientFor(PrStackService, selectedOwningHost);
   // The same daemon as a connection rather than as a client: attaching a session opens a connection
   // on its host, and the spawned-child runtimes attach theirs on the same one.
   const activeHost = useHostConnection(selectedOwningHost);
@@ -902,6 +912,21 @@ export function SessionsDrawerScreen({
                   ? (activityClient ?? undefined)
                   : (activeActivityClient ?? activityClient ?? undefined)
               }
+              catalogClient={
+                mode === "creating"
+                  ? (catalogClient ?? undefined)
+                  : (activeCatalogClient ?? catalogClient ?? undefined)
+              }
+              execToolClient={
+                mode === "creating"
+                  ? (execToolClient ?? undefined)
+                  : (activeExecToolClient ?? execToolClient ?? undefined)
+              }
+              prStackClient={
+                mode === "creating"
+                  ? (prStackClient ?? undefined)
+                  : (activePrStackClient ?? prStackClient ?? undefined)
+              }
               host={activeHost}
               sessionToken={sessionToken}
               onCancelCreate={handleCancelCreate}
@@ -919,7 +944,7 @@ export function SessionsDrawerScreen({
               onInsertPathIntoTerminal={handleInsertPathIntoTerminal}
               onSessionDisconnect={onSessionDisconnect}
               onSessionBytes={onSessionBytes}
-              buildSessionClient={buildSessionClient}
+              buildSessionExecToolClient={buildSessionExecToolClient}
               buildSessionActivityClient={buildSessionActivityClient}
               sessionMetadataBySessionId={sessionMetadataBySessionId}
             />

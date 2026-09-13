@@ -11,6 +11,7 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { ConnectionService, type SessionEntry } from "../../src/gen/connection_pb";
+import { PrStackService } from "../../src/gen/pr_stack_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -55,7 +56,7 @@ interface MountOptions {
 
 function openPrStackScreen(opts: MountOptions) {
   const backend = aSessionsDrawerBackend(opts.sessions).onUnary(
-    ConnectionService.method.queryBranch,
+    PrStackService.method.queryBranch,
     (req: { branch: string }) => {
       const fx = opts.resolutionFactory
         ? opts.resolutionFactory(req.branch)

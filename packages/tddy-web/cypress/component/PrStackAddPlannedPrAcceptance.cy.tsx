@@ -11,6 +11,7 @@ import { Code } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { PrStackService } from "../../src/gen/pr_stack_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
@@ -43,7 +44,7 @@ function anOrchestratorSession(stackPlanJson: string) {
 
 function openPrStackScreen(session: ReturnType<typeof anOrchestratorSession>) {
   const backend = aSessionsDrawerBackend([session]).onUnary(
-    ConnectionService.method.addPlannedPr,
+    PrStackService.method.addPlannedPr,
     () => ({
       stackPlanJson: aStackPlanJson(1, [
         aPlannedNode({ nodeId: "n1", title: "Add token store" }),
@@ -122,7 +123,7 @@ it("calls AddPlannedPr with the entered title and no parents when no ancestor is
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.addPlannedPr);
+    const calls = b.callsTo(PrStackService.method.addPlannedPr);
     expect(calls).to.have.length(1);
     expect(calls[0].sessionId).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].title).to.equal("Add auth middleware");
@@ -147,7 +148,7 @@ it("calls AddPlannedPr with the checked ancestor node ids as parents", () => {
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.addPlannedPr);
+    const calls = b.callsTo(PrStackService.method.addPlannedPr);
     expect(calls).to.have.length(1);
     expect(calls[0].parents).to.deep.equal(["n1", "n2"]);
   });
@@ -169,7 +170,7 @@ it("passes the optional description and branch suggestion through to AddPlannedP
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(ConnectionService.method.addPlannedPr);
+    const calls = b.callsTo(PrStackService.method.addPlannedPr);
     expect(calls[0].description).to.equal("Validates the bearer token on every request.");
     expect(calls[0].branchSuggestion).to.equal("feature/auth-middleware");
   });
@@ -215,7 +216,7 @@ it("does not call AddPlannedPr when the title is left blank", () => {
 
   // Then
   cy.wrap(backend).should((b) => {
-    expect(b.callsTo(ConnectionService.method.addPlannedPr)).to.have.length(0);
+    expect(b.callsTo(PrStackService.method.addPlannedPr)).to.have.length(0);
   });
   prStackScreenPage.addPlannedPrForm().should("exist");
 });
@@ -224,7 +225,7 @@ it("shows an inline error and keeps the form open when AddPlannedPr fails", () =
   // Given
   const plan = aStackPlanJson(1, [aPlannedNode({ nodeId: "n1", title: "Add token store" })]);
   const backend = aSessionsDrawerBackend([anOrchestratorSession(plan)]).failWith(
-    ConnectionService.method.addPlannedPr,
+    PrStackService.method.addPlannedPr,
     Code.InvalidArgument,
     "dangling parent ref",
   );
@@ -252,6 +253,6 @@ it("closes the form without adding a planned PR when Cancel is clicked", () => {
   // Then
   prStackScreenPage.addPlannedPrForm().should("not.exist");
   cy.wrap(backend).should((b) => {
-    expect(b.callsTo(ConnectionService.method.addPlannedPr)).to.have.length(0);
+    expect(b.callsTo(PrStackService.method.addPlannedPr)).to.have.length(0);
   });
 });

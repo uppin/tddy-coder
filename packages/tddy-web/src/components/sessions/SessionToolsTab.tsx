@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import type { ToolDef } from "../../gen/connection_pb";
+import type { ToolDef } from "../../gen/exec_tools_pb";
 import { defaultArgsFromSchema } from "./toolSchema";
 
 interface ToolCallInfo {

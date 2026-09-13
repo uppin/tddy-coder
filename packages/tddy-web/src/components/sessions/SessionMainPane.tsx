@@ -2,6 +2,9 @@ import React from "react";
 import { ConnectError, type Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry, ProjectEntry } from "../../gen/connection_pb";
+import type { CatalogService } from "../../gen/catalog_pb";
+import type { ExecToolService } from "../../gen/exec_tools_pb";
+import type { PrStackService } from "../../gen/pr_stack_pb";
 import type { ActivityService } from "../../gen/activity_pb";
 import type { SessionAgentService } from "../../gen/session_agents_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
@@ -37,6 +40,9 @@ import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type CatalogClient = Client<typeof CatalogService>;
+type ExecToolClient = Client<typeof ExecToolService>;
+type PrStackClient = Client<typeof PrStackService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 type SessionAgentClient = Client<typeof SessionAgentService>;
 type ActivityClient = Client<typeof ActivityService>;
@@ -91,6 +97,12 @@ interface SessionMainPaneProps {
    * view read their transcript through it. Node 7 took those RPCs out too.
    */
   activityClient?: ActivityClient;
+  /** `catalog.CatalogService` on the same host as `client` — create form and agent pickers. */
+  catalogClient?: CatalogClient;
+  /** `exec_tools.ExecToolService` on the same host as `client` — inspector Tools tab. */
+  execToolClient?: ExecToolClient;
+  /** `pr_stack.PrStackService` on the same host as `client` — PR-stack workflow view. */
+  prStackClient?: PrStackClient;
   /** The connection to the daemon that owns the selected session — a runtime attaches its spawned
    *  child conversations over it, and the inspector's media tabs are gated on it. `null` until a
    *  host is reachable.
@@ -139,11 +151,11 @@ interface SessionMainPaneProps {
   onSessionDisconnect?: (sessionId: string) => void;
   /** Fold a session's terminal I/O bytes into its runtime counters (inspector I/O meter). */
   onSessionBytes?: (sessionId: string, delta: ByteDelta) => void;
-  /** Lazy builder for a session-scoped `ConnectionService` client (session-participant routing) —
-   *  used by the inspector's session-scoped RPCs (e.g. ExecuteTool). */
-  buildSessionClient?: () => ConnectionClient | null;
+  /** Lazy builder for a session-scoped `exec_tools.ExecToolService` client (session-participant
+   *  routing) — used by the inspector's Tools tab. */
+  buildSessionExecToolClient?: () => ExecToolClient | null;
   /** Lazy builder for a session-scoped `activity.ActivityService` client. Separate from
-   *  `buildSessionClient` because `tddy-coder`'s session participant serves the replay and activity
+   *  `buildSessionExecToolClient` because `tddy-coder`'s session participant serves the replay and activity
    *  families at their own coordinate since `#unbundle` node 7 — one builder could only return one
    *  service's client, and the transcript must come off the session's own process when it has one. */
   buildSessionActivityClient?: () => ActivityClient | null;
@@ -172,6 +184,9 @@ export function SessionMainPane({
   sessionFilesClient,
   sessionAgentClient,
   activityClient,
+  catalogClient,
+  execToolClient,
+  prStackClient,
   host,
   sessionToken = "",
   onCancelCreate,
@@ -189,7 +204,7 @@ export function SessionMainPane({
   onInsertPathIntoTerminal,
   onSessionDisconnect,
   onSessionBytes,
-  buildSessionClient,
+  buildSessionExecToolClient,
   buildSessionActivityClient,
   sessionMetadataBySessionId,
 }: SessionMainPaneProps) {
@@ -321,6 +336,8 @@ export function SessionMainPane({
   const customView = !isCreating
     ? resolveWorkflowView(selectedSession, {
         client,
+        catalogClient,
+        prStackClient,
         sessionFilesClient,
         worktreeClient,
         sessionToken,
@@ -445,9 +462,10 @@ export function SessionMainPane({
       data-testid="sessions-detail-pane"
       className="flex-1 min-w-0 flex flex-col h-full overflow-hidden relative"
     >
-      {isCreating && client && sessionFilesClient && worktreeClient && (
+      {isCreating && client && catalogClient && sessionFilesClient && worktreeClient && (
         <CreateSessionPane
           client={client}
+          catalogClient={catalogClient}
           sessionFilesClient={sessionFilesClient}
           worktreeClient={worktreeClient}
           sessionToken={sessionToken}
@@ -596,6 +614,7 @@ export function SessionMainPane({
                 onDelete={onDelete}
                 onTerminate={onTerminate}
                 client={client}
+                execToolClient={execToolClient}
                 worktreeClient={worktreeClient}
                 sessionFilesClient={sessionFilesClient}
                 sessionToken={sessionToken}
@@ -618,7 +637,7 @@ export function SessionMainPane({
                 room={room}
                 serverIdentity={attachmentHint?.serverIdentity}
                 traffic={traffic}
-                buildSessionClient={buildSessionClient}
+                buildSessionExecToolClient={buildSessionExecToolClient}
                 onInsertPathIntoTerminal={onInsertPathIntoTerminal}
                 onSwitchPeer={onSwitchPeer}
               />

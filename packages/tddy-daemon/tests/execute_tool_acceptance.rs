@@ -7,9 +7,7 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::SessionMetadata;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ListExecToolsRequest,
-};
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ListExecToolsRequest};
 use tddy_testing_commons::a_session_metadata;
 
 /// Seed a session directory with a `.session.yaml` pointing at a given worktree path.

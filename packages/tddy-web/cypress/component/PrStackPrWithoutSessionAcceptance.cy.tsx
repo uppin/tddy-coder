@@ -18,6 +18,8 @@
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { ConnectionService, type ProjectEntry, type SessionEntry } from "../../src/gen/connection_pb";
+import { PrStackService } from "../../src/gen/pr_stack_pb";
+import { CatalogService } from "../../src/gen/catalog_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -109,12 +111,12 @@ function openPrStackScreen(
 ): string[] {
   const queriedBranches: string[] = [];
   const backend = aSessionsDrawerBackend([anOrchestratorSession(nodes)])
-    .onUnary(ConnectionService.method.queryBranch, (req: { branch: string }) => {
+    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) => {
       queriedBranches.push(req.branch);
       return aBranchResolutionResponse(resolutionByBranch[req.branch] ?? { branch: req.branch });
     })
     .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
-    .onUnary(ConnectionService.method.listTools, () => ({ tools: [] }));
+    .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
