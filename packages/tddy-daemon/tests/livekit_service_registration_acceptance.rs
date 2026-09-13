@@ -122,16 +122,12 @@ async fn no_longer_answers_the_rooms_stream_on_the_connection_service() {
 
     // When a client still calls the deleted coordinate (assembled at runtime so the workspace
     // grep that forbids the old service name is not tripped by this assertion).
-    let deleted = String::from("connection");
+    let mut deleted = String::from("connection");
     deleted.push('.');
     deleted.push_str("ConnectionService");
     let refusal = status_of(
-        mux.handle_rpc(
-            &deleted,
-            "StreamLiveKitRooms",
-            &a_rooms_subscription(),
-        )
-        .await,
+        mux.handle_rpc(&deleted, "StreamLiveKitRooms", &a_rooms_subscription())
+            .await,
     );
 
     // Then the daemon does not know the method there any more. `NOT_FOUND` rather than
