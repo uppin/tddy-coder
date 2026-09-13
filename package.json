@@ -23,6 +23,8 @@
     "test": "bun run --filter tddy-rust-typescript-tests test && bun run --filter tddy-rpc-web test && bun run --filter tddy-tauri-web test && bun run --filter tddy-web test:unit && bun run --filter tddy-web cypress:component && bun run --filter tddy-livekit-web cypress:component",
     "cypress:component": "bun run --filter tddy-web cypress:component",
     "cypress:e2e": "bun run --filter tddy-web cypress:e2e",
+    "generated-code": "scripts/generated-code.sh check",
+    "generated-code:test": "bun test ./scripts/generated-code.test.ts",
     "resolve-local-lock": "bun run scripts/resolve-local-lock.ts",
     "local-install": "scripts/local-bun-install.sh",
     "local-registry-install": "bun run resolve-local-lock && bun run local-install"

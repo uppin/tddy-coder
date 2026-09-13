@@ -15,8 +15,9 @@ use futures_util::StreamExt;
 use pretty_assertions::assert_eq;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
-use tddy_daemon::connection_service::{ConnectionServiceImpl, HOST_DOCUMENT_FRAME_BYTES};
+use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
+use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
     AgentConversationChunk, AttachSessionAgentRequest, CancelAgentConversationRequest,

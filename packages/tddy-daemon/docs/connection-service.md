@@ -13,8 +13,8 @@ else lives in `src/connection_service/`.
 | `rpc_service.rs` | 1 | `impl ConnectionService for ConnectionServiceImpl` — every RPC handler, and the `type …Stream` associated types |
 | `svc_*.rs` | 17 | the inherent `impl ConnectionServiceImpl` blocks, each named after the first method it carries — `svc_start_session_core`, `svc_provision_agent_clone`, `svc_resolve_os_user`, … |
 | `*_handler.rs`, `*_impl.rs` | 4 | trait impls for the service's helper types: `child_spawn_handler`, `conversation_spawn_handler`, `daemon_rpc_handler`, `terminal_bridge_impl` |
-| families | 8 | free items grouped by what they serve: `service_util`, `host_messages`, `activity_hub`, `stack_parent`, `seed_codebase`, `seeded_clone_guard`, `hooks_and_urls`, `agent_roster` |
-| `*_tests.rs` | 29 | one file per test module, declared `#[cfg(test)] mod <name>;` |
+| families | 7 | free items grouped by what they serve: `service_util`, `activity_hub`, `stack_parent`, `seed_codebase`, `seeded_clone_guard`, `hooks_and_urls`, `agent_roster` |
+| `*_tests.rs` | 24 | one file per test module, declared `#[cfg(test)] mod <name>;` |
 
 **Where to put new code.** A new RPC handler is a method on the trait impl in `rpc_service.rs`, with
 its body in whichever `svc_*` block owns that area — or a new one, which is a `}` / `impl
@@ -28,6 +28,18 @@ bind it in the child, or under `#[cfg(test)]` in the parent where only its test 
 
 ## Endpoints
 
+**This service is not the daemon's whole RPC surface.** Hosts and worktrees are served by two
+sibling services on the same transports, and their methods are not listed below:
+
+| Service | Methods | Where it lives |
+|---|---|---|
+| `host.HostService` | `ListEligibleDaemons`, `ListKnownHosts`, `GetHostTooling`, `StreamHostPrompts`, `AnswerHostPrompt`, `AddHostKey`, `ListHostKeyCandidates`, `StreamHostStats` | [`packages/tddy-host-service`](../../tddy-host-service/docs/host-service.md) |
+| `worktree.WorktreeService` | `ListWorktreesForProject`, `RemoveWorktree`, `StreamWorktreeStats`, `CalculateWorktreeSize`, `CleanWorktree`, `RestoreSessionWorktree`, `ListWorktreeDirectory`, `ReadWorktreeFile`, `StreamReadWorktreeFile` | [`packages/tddy-worktree-service`](../../tddy-worktree-service/docs/worktree-service.md) |
+
+A client reaches all three at the same coordinates it always did — `/rpc` over Connect-HTTP, the
+LiveKit common room, and the local UDS socket — because each is a `ServiceEntry` registered beside
+this one rather than a second endpoint.
+
 | RPC | Purpose |
 |-----|---------|
 | `ListTools` | Allowed `tddy-*` binaries from config (`allowed_tools`) |
@@ -38,13 +50,6 @@ bind it in the child, or under `#[cfg(test)]` in the parent where only its test 
 | `CreateProject` | Clone (or adopt existing path) + append registry (mints a fresh `project_id`) |
 | `SetProjectDefaultBranch` | Sets a project's stored default branch (**`main_branch_ref`**) via **`project_storage::set_project_default_branch`**. Validates the ref shape (rejecting unsafe input → `INVALID_ARGUMENT`) and project existence (→ `NOT_FOUND`) before any write; returns the updated **`ProjectEntry`**. Routes by target **`daemon_instance_id`** like **`AddProjectToHost`** (empty/local = local write; a peer = forward via **`forward_set_project_default_branch_via_livekit`**), so the default is a property of the logical project across hosts. See [projects-screen-multi-host.md](../../../docs/ft/web/projects-screen-multi-host.md#default-branch). |
 | `AddProjectToHost` | Makes an existing project available on another host, **reusing its `project_id`**. Routes by target **`daemon_instance_id`** (empty/local = handle locally; a peer = forward over the LiveKit common room via **`forward_add_project_to_host_via_livekit`**, same `classify_peer_route` routing as **`StartSession`**). The handling daemon clones the repo (like **`CreateProject`**) and persists a **`projects.yaml`** row with the **given** `project_id` via **`project_storage::add_or_get_project`** — **idempotent**: if the host already registers that id, the existing row is returned with no re-clone. Rejects blank `project_id`/`name`/`git_url` (`INVALID_ARGUMENT`) and unknown/unreachable target hosts (`FAILED_PRECONDITION`). See [projects-screen-multi-host.md](../../../docs/ft/web/projects-screen-multi-host.md). |
-| `ListEligibleDaemons` | Eligible daemon instances for host selection (`instance_id`, `label`, `is_local`); sourced from `EligibleDaemonSource`. `is_local` compares against `local_instance_id_for_config`, the **routing** id, so it holds for a daemon carrying a configured `daemon_instance_id` or the startup-timestamp suffix |
-| `ListKnownHosts` | Every host this daemon has a record of, live or not — one `KnownHostEntry` per host (`instance_id`, `label`, `online`, `first_seen_unix_ms`, `last_seen_unix_ms`, `repos_base_path`, `max_attachment_bytes`, `is_local`). Where `ListEligibleDaemons` answers "who can I route to now" and forgets a host the moment it leaves the room, this answers "what machines does tddy know about". **`online` is computed per call** by intersecting the durable registry with `EligibleDaemonSource::live_known_hosts()` (the roster keyed by **durable** host id, never the routing id) — it is never read from disk — and the serving daemon always has a row, flagged `is_local`. The registry is injected via `ConnectionServiceImpl::with_host_registry`; the whole join, including that local-row guarantee, belongs to `HostRegistry::known_hosts`. Details: [host-registry.md](host-registry.md). |
-| `GetHostTooling` | What one host has installed and configured: the git identity its commits would carry, the state of the GitHub CLI there, and whether an ssh-agent is reachable for the host's OS user and what it is holding. Addressed by `daemon_instance_id` (empty = the daemon serving the call) and **routed before the caller is authenticated** — see [Host tooling](#host-tooling) below. Each part of the answer carries a `ProbeOutcome` ahead of its findings, so "could not check" is never rendered as a negative finding. Backed by `host_tooling.rs`, injected via `ConnectionServiceImpl::with_host_tooling`. Details: [host-tooling-probe.md](host-tooling-probe.md). |
-| `StreamHostPrompts` | Server-streaming feed of the questions one host is waiting on **this operator** to answer. Each `HostPromptEvent` carries `prompt_id`, `daemon_instance_id`, `kind` (`HostPromptKind`), `subject` (what is being unlocked — never a secret), `host_public_key` (SPKI DER), `host_public_key_fingerprint` and `expires_at_unix_ms`. Filtered by the operator who raised the prompt, replays whatever is still outstanding to a late subscriber, and **watches `tx.closed()`** because the feed is silent by design. Backed by `host_prompt_stream.rs`. Details: [Host add-key](#host-add-key). |
-| `AnswerHostPrompt` | Unary; answers one prompt with `encrypted_answer` — **RSA-OAEP(SHA-256) ciphertext under that event's `host_public_key`**, never a plaintext. Answerable once, and only by the operator who raised it; a prompt id that was never issued and one belonging to somebody else get the *same* rejection. Response is `{accepted, rejection_reason}`. |
-| `AddHostKey` | Unary, and **blocks for as long as the add takes**: it raises a passphrase prompt on `StreamHostPrompts`, waits for the ciphertext on `AnswerHostPrompt`, decrypts it, unlocks the OpenSSH key named by `subject` — read as the mapped OS user, out of their own home — and hands the identity to that user's ssh-agent. `subject` must be an **absolute** path; nothing expands `~`. Answers with `{added, outcome (AddHostKeyOutcome), fingerprint, failure_reason}` and never with anything derived from the passphrase. Details: [Host add-key](#host-add-key). |
-| `ListHostKeyCandidates` | Unary; the private keys the caller's own OS user could load, out of their own `~/.ssh` — one `HostKeyCandidate` (`path`, `key_type`, `fingerprint`) per key **whose `.pub` sits beside it**, ordered by path. Every field comes from the public half, so no private key is opened to build the list, and every path offered is one `AddHostKey` accepts. Returns a list and never a failure: an absent, unreadable and empty `~/.ssh` are one answer. Details: [Host add-key](#host-add-key). |
 | `ListSessionWorkflowFiles` | Lists workflow file **basenames** present on disk under `{sessions_base}/sessions/{session_id}/` using a **fixed server allowlist** (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`). Requires the same **`session_token`** → user → **`sessions_base`** resolution as **`ListSessions`**; **`session_id`** is validated with **`validate_session_id_segment`** before path construction. Entries whose canonical path falls outside the canonical session directory (e.g. symlink escape) are omitted from the list. |
 | `ReadSessionWorkflowFile` | Returns UTF-8 text for one allowlisted **basename** under the same resolved session directory. Rejects empty, non-allowlisted, or path-segment-unsafe **`basename`** values (`..`, `/`, `\`). Uses canonical path checks so resolved file paths cannot sit outside the session root. |
 | `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). For a new-branch-from-base worktree with an empty `selected_integration_base_ref`, the base ref is the project's stored **`main_branch_ref`** when set; a legacy project (no stored default) falls through to worktree setup's live default resolution — so the project default applies to web sessions, not only Telegram. When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. When `session_type == "claude-cli"` or `"cursor-cli"`, the tool-spawn path is bypassed — see [Claude Code CLI sessions](#claude-code-cli-sessions) and [Cursor Agent CLI sessions](#cursor-agent-cli-sessions). When **`create_remote_branch`** is set (claude-cli/cursor-cli, new-branch-from-base only), the daemon **`git push -u origin <branch>`** right after worktree setup (**`tddy_core::worktree::push_new_branch_to_origin`**) and sets **`Changeset.remote_pushed`**; a push failure fails the RPC (no fallback). When **`on_branch_conflict = "reject"`** and a session already owns **`new_branch_name`**, the RPC creates nothing and answers with **`branch_conflict`** instead of a session id — see [Branch-conflict guard](#branch-conflict-guard-on-startsession). When **`pr_stack_base_session_id`** is set, the named session must be able to seed a `pr-stack` orchestrator's stack, checked before anything spawns — see [Stack-seed base session](#stack-seed-base-session-on-startsession). |
@@ -77,7 +82,7 @@ bind it in the child, or under `#[cfg(test)]` in the parent where only its test 
 
 > ✅ **Status: implemented, host and web.** The three staging RPCs (`UploadStagedAttachmentChunk` / `ListStagedAttachments` / `DeleteStagedAttachment`) operate on a per-host, per-caller staging root at `{staging_base}/{os_user}/{staging_id}/{file_name}`, where `staging_base` defaults to `std::env::temp_dir()/tddy-staging` (`session_attachment_staging::default_staging_base_dir`, injected as `ConnectionServiceImpl::with_staging_base_dir` so tests can point it at a `TempDir`); `ReadHostDocument` and its streaming twin `StreamReadHostDocument` fetch a `HostDocumentRef`'s bytes from the owning daemon, both forwardable; and `start_session` / `stream_start_session` materialize both sources before spawn across every session type. The web attach UI is live — see [session-attach-ui.md](../../tddy-web/docs/session-attach-ui.md).
 
-**The staging root is restart-cleared, not durable.** It moved off `{tddy_data_dir}/staging/` deliberately: staged batches have no TTL and no garbage collection, so a Start-Session form that is filled in and abandoned used to leak its uploads forever. A root the host clears on restart bounds abandonment without a background job or TTL bookkeeping. It does **not** bound a batch that a `StartSession` actually consumed — that cleanup is still open (see [TODO.md](../../../docs/dev/TODO.md)).
+**The staging root is restart-cleared, not durable.** It moved off `{tddy_data_dir}/staging/` deliberately: staged batches have no TTL and no garbage collection, so a Start-Session form that is filled in and abandoned used to leak its uploads forever. A root the host clears on restart bounds abandonment without a background job or TTL bookkeeping. It does **not** bound a batch that a `StartSession` actually consumed — that cleanup is still open (see [`docs/dev/todo/`](../../../docs/dev/todo/)).
 
 **Two attachment sources**, both naming the host authority that owns the bytes:
 
@@ -94,7 +99,7 @@ bind it in the child, or under `#[cfg(test)]` in the parent where only its test 
 |-------|------|-----------------------|
 | `SESSION_ARTIFACT` | `{session_dir}/artifacts/` | A `SessionContextDoc`'s **`relative_path`** — its basename for a stack-level `MANIFEST` doc, **`prs/<node_id>/<basename>`** for a per-PR one, **`attachments/<basename>`** for an `ATTACHMENT`. The scope resolves a full relative path (`resolve_host_document` joins it behind a canonicalize-and-contain guard), so a nested source is legal; only the final segment is name-validated |
 | `SESSION_UPLOAD` | `{session_dir}/uploads/` | Exactly `"<upload_id>/<file_name>"` (see `SessionUploadEntry`) |
-| `SESSION_WORKTREE` | The session's git worktree | A path surfaced by `ListWorktreeDirectory`, re-gated against `git_listed_files` on read |
+| `SESSION_WORKTREE` | The session's git worktree | A path surfaced by `worktree.WorktreeService`'s `ListWorktreeDirectory`, re-gated against `tddy_worktree_service::worktree_files::git_listed_files` on read |
 | `PROJECT_REPO` | `ProjectEntry.main_repo_path` | A checked-in path, e.g. `docs/ft/*.md` |
 | `STAGED_ATTACHMENT` | `{staging_base}/{os_user}/` | Exactly `"<staging_id>/<file_name>"`, and the file's `.staged-complete` marker must be present |
 
@@ -126,7 +131,7 @@ Adding a source of documents means adding a scope — that is the point, so each
 
 The staging upload mirrors the terminal **"Attach"** flow (`UploadSessionFileChunk`) with `session_id` replaced by `daemon_instance_id` and `upload_id` by `staging_id`: same client-side 48 KiB chunking, one unary per chunk, `last` on the final one, and the completed `StagedAttachmentEntry` returned on the last response. That keeps `tddy-web`'s `lib/fileUploadChunks.ts` reusable unchanged and each chunk inside a single LiveKit data packet — see [terminal-file-upload.md](../../tddy-web/docs/terminal-file-upload.md).
 
-**Known limitations** — all tracked in [TODO.md](../../../docs/dev/TODO.md):
+**Known limitations** — all tracked in [`docs/dev/todo/`](../../../docs/dev/todo/):
 
 - **Nothing on this path has been exercised against a real daemon from a browser.** The daemon suites drive `ConnectionServiceImpl` directly and the web's Cypress specs stub every RPC, so the browser→daemon leg — real chunk uploads over the LiveKit data channel, a real streamed `StartSession`, a real cross-host fetch — has only ever run in tests that mock one side. A manual two-daemon `./web-dev` run is outstanding.
 - Consumed-batch staging cleanup after a `StartSession` consumes a batch. The restart-cleared root bounds *abandoned* batches only.
@@ -142,7 +147,7 @@ refused rather than silently turned into `<branch>-1` by the worktree layer's su
 
 **Opt-in.** `StartSessionRequest.on_branch_conflict` (field 30) is `""` (suffix — what every existing
 caller gets) or `"reject"`. Only a surface that can prompt an operator asks to be rejected; recipe
-hooks, PR-stack chain spawns and `RestoreSessionWorktree` keep suffixing. `tddy-sandbox-app` and
+hooks, PR-stack chain spawns and `worktree.WorktreeService`'s `RestoreSessionWorktree` keep suffixing. `tddy-sandbox-app` and
 `tddy-tools remote start-session` send no `new_branch_name` at all, so their uuid-derived
 `claude-cli/<short-id>` / `workspace/<short-id>` names cannot collide.
 
@@ -168,13 +173,18 @@ no session to switch to and no second agent to add.
 
 ### `branch_owner` — one ownership rule, three callers
 
-`branch_owner::find_session_owning_branch(sessions_base, branch)` is the single answer to "which
-session owns this branch": scan the user's sessions root for a `Changeset.branch` match, prefer an
-**active** session, tie-break on the most recent `updated_at`, skip a session whose changeset cannot
-be read. It is shared by `QueryBranch` (which keeps its `require_pr_stack_orchestrator` gate — only
-the scan is shared), the `StartSession` guard, and the Telegram spawn flow, so the rule cannot drift
-between them. Synchronous (reads changesets and `.session.yaml`); async callers wrap it in
-`spawn_blocking_with_timeout`.
+`tddy_worktree_service::branch_owner::find_session_owning_branch(listing, sessions_base, branch)` is
+the single answer to "which session owns this branch": scan the user's sessions root for a
+`Changeset.branch` match, prefer an **active** session, tie-break on the most recent `updated_at`,
+skip a session whose changeset cannot be read. It is shared by `QueryBranch` (which keeps its
+`require_pr_stack_orchestrator` gate — only the scan is shared), the `StartSession` guard, and the
+Telegram spawn flow, so the rule cannot drift between them. Synchronous (reads changesets and
+`.session.yaml`); async callers wrap it in `spawn_blocking_with_timeout`.
+
+A branch belongs to a worktree, so the rule lives in `tddy-worktree-service`; what *claims* one is a
+session, which stays here. `session_reader::DaemonSessionListing` implements the crate's
+`SessionListing` port, and what crosses it is a `SessionClaim` — the four fields the rule judges on —
+rather than everything a session is.
 
 ### Telegram
 
@@ -265,16 +275,6 @@ Session **status** strings in metadata drive workflow display; optional Telegram
 - **Async handler note**: Handlers are **`async`** but perform blocking filesystem work on the runtime thread; volume is expected to stay low (dashboard use). Heavy concurrency may warrant moving work behind **`spawn_blocking`**.
 - **Tests**: Integration coverage in **`session_workflow_files_rpc`**.
 
-## Worktree Code pane file RPCs
-
-Browse a session's **worktree** (the git checkout at `SessionEntry.repo_path`), not the session
-metadata dir — powers the web [Code pane](../../../docs/ft/web/session-code-pane.md).
-
-- **Implementation**: Filesystem/git policy lives in **`worktree_files`**. **`ListWorktreeDirectory`** and **`ReadWorktreeFile`** reuse the **`RemoveWorktree`** preamble (token → GitHub user → mapped OS user → project → **`main_repo_path_for_host`**), then gate on **`worktrees::worktree_path_is_listed`** so the `worktree_path` must appear in the project's `git worktree list`. The git/fs work runs inside **`spawn_blocking`** with `spawn_worker_request_timeout()`.
-- **Listing** (`ListWorktreeDirectory`): one directory level at `rel_path` (empty = root). `.gitignore`-aware and `.git`-excluded via `git ls-files --cached --others --exclude-standard -z`; a linked worktree's private `<gitdir>/info/exclude` is fed in explicitly via `--exclude-from` (git treats `info/` as shared, so `--exclude-standard` alone would miss it). Entries are directories-first then files, each alphabetical.
-- **Reading** (`ReadWorktreeFile`): refuses any path not surfaced by the listing (so `.git` and ignored files, e.g. `.env`, cannot be read), applies traversal rejection (`..`/absolute) plus canonicalize-and-contain under the worktree root, and caps content at **`MAX_WORKTREE_FILE_BYTES`** (1 MiB) with a `truncated` flag and full `byte_size`.
-- **Tests**: unit coverage in **`worktree_files`** (`#[cfg(test)]`); integration coverage in **`worktree_files_rpc`**.
-
 ## Agent context file RPCs
 
 Serve the target repo's **agent configuration** — whatever the session's backend reads — so a
@@ -282,11 +282,11 @@ managed session's context directory can be built from it. Product contract:
 [agent-context-sync.md](../../../docs/ft/daemon/agent-context-sync.md).
 
 - **A separate reader from the Code pane's, deliberately.** Policy lives in **`context_files`**, not
-  `worktree_files`. `ReadWorktreeFile` gates on git's listing, which exists to keep `.gitignore`d
+  `tddy_worktree_service::worktree_files`. That crate's `ReadWorktreeFile` gates on git's listing, which exists to keep `.gitignore`d
   paths (`.env`, a key a build wrote) unreadable — but agent config is routinely gitignored
   (`.claude/settings.local.json`, `**/.cursor/mcp.json`), so that gate cannot serve this. The two
   **never share a gate**; they share only the traversal and containment guards
-  (`validate_rel_path_shape`, `canonicalize_root`, both `pub(crate)` in `worktree_files`).
+  (`validate_rel_path_shape`, `canonicalize_root`, both `pub` in `tddy_worktree_service::worktree_files` — a caller that stayed behind is what widened them).
 - **The gate is a compiled-in allow-list**, keyed by agent (`tddy_core::backend::context_globs_for_agent`)
   and narrowed by **`CONTEXT_EXCLUDE_GLOBS`**. Three properties make replacing the git gate safe, and
   all three are load-bearing: **no caller supplies globs** (a request names a table row, never a path
@@ -329,7 +329,7 @@ managed session's context directory can be built from it. Product contract:
 - **Process termination**: When **`metadata.pid`** is set and the process is still running on Unix, the daemon terminates it (**SIGTERM**, then **SIGKILL** if needed) before **`remove_dir_all`**. Zombies on Linux are detected so delete can finish even when the parent has not reaped the child.
 - **Metadata gaps**: If **`.session.yaml`** is missing or unreadable, the directory is still removed when present (no PID termination step).
 - **Errors**: Invalid id → `INVALID_ARGUMENT`; missing directory on this daemon → `FAILED_PRECONDITION` (routing); process still running after signals → `FAILED_PRECONDITION`; filesystem removal failure → `INTERNAL` with a generic client message; details are logged server-side.
-- **Worktree removal** applies to `claude-cli` **and `workspace`** sessions (`worktree_removal_applies_to`). It previously covered only `claude-cli`, so a `workspace` session kept both its directory and its `git worktree` registration. `cursor-cli` still leaks the same way — tracked in `docs/dev/TODO.md`.
+- **Worktree removal** applies to `claude-cli` **and `workspace`** sessions (`worktree_removal_applies_to`). It previously covered only `claude-cli`, so a `workspace` session kept both its directory and its `git worktree` registration. `cursor-cli` still leaks the same way — tracked in `docs/dev/todo/`.
 - **Split sessions delete their paired workspace session first** on the codebase host; see § Split placement for why "the peer does not have it" is success and everything else refuses.
 
 ## Paths (per mapped OS user)
@@ -341,18 +341,18 @@ managed session's context directory can be built from it. Product contract:
 | Clone default | `~/{repos_base_path}/{name}/` where `repos_base_path` comes from config (default `repos`) |
 | `CreateProject.user_relative_path` | Optional: clone/adopt at `~/<path>` instead (e.g. `Code/foo` or `~/Code/foo`); must stay under home |
 
-Project rows in **`projects.yaml`** may include optional **`main_branch_ref`** (`<remote>/<path>`, any remote name and any remote branch — validated with **`validate_chain_pr_integration_base_ref`**, so multi-segment names like `upstream/release/2025` are allowed) and optional **`remote_name`** (the default remote when the main worktree's upstream cannot be detected). **`effective_remote_name_for_project`** in **`project_storage`** resolves the project's remote as main-worktree upstream → stored `remote_name` → `origin` (last resort). **`effective_integration_base_ref_for_project`** returns a stored `main_branch_ref` verbatim, or — for a legacy row with no stored ref — resolves the default **live** against the repository via **`resolve_default_integration_base_ref_with_remote`** using the resolved remote (`<remote>/master` → `<remote>/main` → `<remote>/HEAD`); the live probe is legacy-only and loses effect once a default is stored. **`set_project_default_branch`** updates the stored ref (validated before any write); invalid values fail it (and **`add_project`**) before the file is written. See [git-integration-base-ref.md](../../../../docs/ft/coder/git-integration-base-ref.md) and [project-concept.md](../../../../docs/ft/daemon/project-concept.md).
+Project rows in **`projects.yaml`** may include optional **`main_branch_ref`** (`<remote>/<path>`, any remote name and any remote branch — validated with **`validate_chain_pr_integration_base_ref`**, so multi-segment names like `upstream/release/2025` are allowed) and optional **`remote_name`** (the default remote when the main worktree's upstream cannot be detected). **`effective_remote_name_for_project`** in **`project_storage`** resolves the project's remote as main-worktree upstream → stored `remote_name` → `origin` (last resort). **`effective_integration_base_ref_for_project`** returns a stored `main_branch_ref` verbatim, or — for a legacy row with no stored ref — resolves the default **live** against the repository via **`resolve_default_integration_base_ref_with_remote`** using the resolved remote (`<remote>/master` → `<remote>/main` → `<remote>/HEAD`); the live probe is legacy-only and loses effect once a default is stored. **`set_project_default_branch`** updates the stored ref (validated before any write); invalid values fail it (and **`add_project`**) before the file is written. See [git-integration-base-ref.md](../../../docs/ft/coder/git-integration-base-ref.md) and [project-concept.md](../../../docs/ft/daemon/project-concept.md).
 
 ## Multi-host projects
 
-A "host" is a daemon instance; the selectable set is the connected `tddy-daemon` LiveKit participants (`ListEligibleDaemons`, backed by common-room discovery). Discovery classifies each common-room participant and lists **only genuine daemons** — mirroring the web UI's `inferParticipantRole`, a participant with a browser identity (`web-`/`browser-`) or a coder/session identity (`server…`, `daemon-<uuid>`) is excluded even if it publishes advertisement-shaped metadata, and a daemon must publish a valid advertisement (no identity fallback). This keeps coder/session participants out of host selection and out of project fan-out (only daemons own projects). The same logical project can live on several hosts under **one shared `project_id`**:
+A "host" is a daemon instance; the selectable set is the connected `tddy-daemon` LiveKit participants (`host.HostService`'s `ListEligibleDaemons`, backed by common-room discovery). Discovery classifies each common-room participant and lists **only genuine daemons** — mirroring the web UI's `inferParticipantRole`, a participant with a browser identity (`web-`/`browser-`) or a coder/session identity (`server…`, `daemon-<uuid>`) is excluded even if it publishes advertisement-shaped metadata, and a daemon must publish a valid advertisement (no identity fallback). This keeps coder/session participants out of host selection and out of project fan-out (only daemons own projects). The same logical project can live on several hosts under **one shared `project_id`**:
 
 - **Registry is per-daemon-per-user.** Each host keeps its own `~/.tddy/projects/projects.yaml`; a project "on" multiple hosts is one row per host, all sharing the `project_id`. Aggregated `ListProjects` returns one `ProjectEntry` per (`project_id`, hosting `daemon_instance_id`).
 - **Adding to a host** (`AddProjectToHost`) routes to the target daemon (local, or forwarded over LiveKit) which clones the repo and writes a row reusing the `project_id`. **`project_storage::add_or_get_project`** makes this idempotent (append only when the id is absent; otherwise return the existing row).
 - **Cross-host visibility** relies on `peer_project_entries` fanning out to peers' `ListProjects` with **`local_only = true`** — the flag is what stops a fanned-out call from recursing back into peers. `EligibleDaemonSource::peer_project_entries` is an `async` trait method (`#[async_trait]`), so the `ListProjects` handler awaits the fan-out directly on its runtime — no worker thread is parked and no multi-threaded runtime is required. `aggregate_peer_project_entries` fans out to all peers **concurrently** (`join_all`), so the aggregate is bounded by the slowest responsive peer (or the per-peer `PEER_PROJECT_FANOUT_TIMEOUT`), not the serial sum across peers; a peer that errors or times out contributes no rows.
 - `ProjectData.host_repo_paths` / `project_storage::main_repo_path_for_host` resolve the per-host checkout path for a shared `project_id`.
 - **Each daemon advertises its base clone location** (`repos_base_path`) on the `DaemonAdvertisement` published to the common room (`livekit_peer_discovery.rs`, populated from `config.repos_base_path_or_default()`, parsed back by `parse_daemon_advertisement_json`). The web reads the same `repos_base_path` JSON key into `DaemonHost.reposBasePath`.
-- **A daemon also publishes its durable `host_id`** as a separate key beside the advertisement's own (`PublishedDaemonMetadata`, `parse_peer_daemon_json` → `PeerDaemon`). It is the id without the per-run startup-timestamp suffix, so anything that must outlive a peer's restart — the host registry above all — keys on it while routing keys on `instance_id`. Metadata carrying no `host_id` falls back to `instance_id`. See [host-registry.md](host-registry.md).
+- **A daemon also publishes its durable `host_id`** as a separate key beside the advertisement's own (`PublishedDaemonMetadata`, `parse_peer_daemon_json` → `PeerDaemon`). It is the id without the per-run startup-timestamp suffix, so anything that must outlive a peer's restart — the host registry above all — keys on it while routing keys on `instance_id`. Metadata carrying no `host_id` falls back to `instance_id`. See [host-registry.md](../../tddy-host-service/docs/host-registry.md).
 
 ### Auto-provisioning on session start
 
@@ -563,7 +563,7 @@ Outbound network from the jail is **`(deny network*)`** — the sandbox never di
 
 **Non-macOS**: `tddy-sandbox` returns `Unsupported`; the RPC maps to `failed_precondition` (no fallback).
 
-**Seatbelt troubleshooting**: [tddy-sandbox-darwin troubleshooting](../../../packages/tddy-sandbox-darwin/docs/troubleshooting.md). Agent skill: [.agents/skills/darwin-sandbox/SKILL.md](../../../../.agents/skills/darwin-sandbox/SKILL.md).
+**Seatbelt troubleshooting**: [tddy-sandbox-darwin troubleshooting](../../../packages/tddy-sandbox-darwin/docs/troubleshooting.md). Agent skill: [.agents/skills/darwin-sandbox/SKILL.md](../../../.agents/skills/darwin-sandbox/SKILL.md).
 
 **`config.rs`**: Optional `claude_cli:` block:
 
@@ -658,175 +658,10 @@ Because `get_terminal` **rebuilds a `PtyHandle` per RPC**, the offset accumulato
 `subscribe_acked_offset`), not on the handle — so an ACK from the input path reaches an already-open
 output stream. The tddy-coder session participant serves the same contract for its bash terminals.
 
-## Host stats
-
-One server-streaming RPC feeds the web's **Host Stats Footer**
-([docs/ft/web/host-stats-footer.md](../../../../docs/ft/web/host-stats-footer.md)) and the per-row
-telemetry on the Hosts screen
-([docs/ft/web/hosts-screen-telemetry.md](../../../../docs/ft/web/hosts-screen-telemetry.md)) with
-host-level readings for the daemon the client is addressing:
-
-- `StreamHostStats(session_token)` → `stream HostStatsEvent`, carrying `cpu`, `disk`, `memory` and,
-  where the platform provides one, `load`.
-
-It authenticates `session_token` via the same GitHub → OS user path as the other endpoints, and is
-addressed to the daemon participant directly (no `daemon_instance_id` payload — the LiveKit transport
-already targets `daemon-{instanceId}`).
-
-**Two cadences, one event.** The handler emits a full snapshot on subscribe, then runs two timers:
-a fast tick (5 s) refreshing CPU, memory and load, and a slow tick (60 s) refreshing disk. Every
-event carries the latest of all four, so a consumer never folds partial events together. Memory and
-load ride the fast tick because they move on CPU's timescale; disk stays on the slow one because
-enumerating mounts is the expensive read.
-
-**A missing load average is reported as missing.** `sysinfo` implements `load_average()` only for
-macOS, iOS, Linux, Android and FreeBSD, and returns an all-zero `LoadAvg` on every other target.
-Forwarding those zeros would make an unsupported platform indistinguishable from an idle machine, so
-`SysinfoHostStats::load_average` resolves the platform at compile time and returns `None` elsewhere;
-the `load` block is then absent from the event rather than zeroed. Consumers render "no reading".
-
-Backed by **`host_stats.rs`**: the `HostStats` trait — injected via
-`ConnectionServiceImpl::with_host_stats` so tests substitute a deterministic fake — with a
-`sysinfo`-backed `SysinfoHostStats`. It reports:
-
-| Method | Reading |
-|---|---|
-| `cpu_per_core_percent()` | utilization (0..100) of each logical core, core 0 first |
-| `logical_cores()` | the core count, reported explicitly so a reader never infers it from a `per_core_percent` that is empty before the first sample |
-| `memory()` | total and available physical memory, in bytes |
-| `load_average()` | 1/5/15-minute averages, or `None` where the platform has none |
-| `disk_for_project_dir()` | free/total capacity of the filesystem holding the default project directory |
-
-A single long-lived `sysinfo::System` (constructed once with the service) backs CPU, memory and the
-core list, so successive ~5 s-apart refreshes report real per-core deltas; the first sample reads ~0.
-Disk resolution enumerates mounts and picks the filesystem whose mount point is the longest
-**path-component** prefix of the project directory (`select_mount_for_path`), falling back to the
-largest mount by capacity if none is a prefix. The default project directory resolves to
-`$HOME/<repos_base_path_or_default>` (`DaemonConfig` has no explicit project-dir override today).
-
-## Host tooling
-
-One unary RPC reports what a host has **installed and configured**, as opposed to how busy it is —
-backing the tooling cells on each Hosts row
-([docs/ft/web/hosts-screen-tooling.md](../../../docs/ft/web/hosts-screen-tooling.md)):
-
-- `GetHostTooling({session_token, daemon_instance_id})` →
-  `{daemon_instance_id, git, github_cli, ssh_agent}`.
-  `HostGitIdentity` carries `outcome`, `configured`, `user_name`, `user_email`, `failure_reason`;
-  `HostGithubCli` carries `outcome`, `installed`, `authenticated`, `login`, `failure_reason`;
-  `HostSshAgent` carries `outcome`, `reachable`, `keys` (`repeated SshAgentKey`) and
-  `failure_reason`.
-
-**Every outcome is distinguishable on the wire.** `ProbeOutcome` (`OK` / `FAILED` / `UNSUPPORTED`)
-sits ahead of the findings in every block, so a probe that could not run is never collapsed into
-"not configured" or "not installed". Collapsing them would put a fabricated fact in front of an
-operator, and the two states send them to two different places. The enum is proto3, therefore open:
-nodes extending this message add outcomes, and a consumer must treat only `OK` as licensing a
-finding rather than listing the outcomes that do not.
-
-**`login` is the host's `gh` login**, not the web session's user and not a `GITHUB_TOKEN` in some
-environment. Three identities that can disagree, and the field's meaning is the narrow one.
-
-**`reachable` is what separates an empty agent from an absent one.** Both arrive with an empty
-`keys`, and they send an operator to two different fixes — load a key, or start an agent — so
-whether anything answered is its own field rather than an inference from emptiness. `false` with
-`OK` means no agent answered; `true` with an empty `keys` means one did, holding nothing.
-
-**No `SshAgentKey` carries a path.** The agent knows a public key blob and a free-text `comment`,
-commonly `user@host`, and does not know which file an identity came from. `fingerprint` is the
-`SHA256:`-prefixed form `ssh-add -l` prints. Details, including what a supervised daemon can and
-cannot reach: [host-tooling-probe.md § The ssh-agent](host-tooling-probe.md#the-ssh-agent).
-
-**Routing precedes authentication.** `rpc_served_by_peer` runs before the `session_token` is
-resolved, as it does for the roster RPCs and `ResolveStackBase`. Two reasons, and both matter:
-
-- *A relay must not judge a peer's user mapping.* The token is verified by the daemon that **serves**
-  the call. Authenticating first would refuse an operator whose GitHub user maps to an OS user on the
-  host being probed but not on whichever host their browser happens to be talking to — the relaying
-  daemon would be deciding a question that is not its to answer.
-- *A question about another host, answered locally, comes back wrong in a way that reads right.* The
-  serving daemon's own git identity under the addressed host's name is indistinguishable from a
-  correct answer.
-
-Once local, the handler resolves `session_token` → GitHub user → OS user by the same path as every
-other endpoint, and runs the probe on the **blocking pool**: two of the three parts shell out and
-wait, the third blocks on a Unix socket, and `gh auth status` can reach the network, so a runtime
-worker is not parked for its duration. The
-response stamps `local_instance_id_for_config`, so a relayed answer names the host that produced it.
-
-Backed by **`host_tooling.rs`** — the `HostToolingProbe` trait, injected via
-`ConnectionServiceImpl::with_host_tooling` so tests substitute a deterministic double, with a
-`SubprocessHostToolingProbe` that runs `git config --global --get` and `gh auth status` as the
-host's OS user under one 5 s deadline. Program resolution, the deadline's kill-and-reap, and the rule
-that unrecognised output is a probe failure are in
-[host-tooling-probe.md](host-tooling-probe.md).
-
-## Host add-key
-
-Four RPCs let an operator **load a key into a host's ssh-agent from the browser**, with the key's
-passphrase carried **encrypted end to end** — see
-[docs/ft/web/hosts-screen-add-key.md](../../../docs/ft/web/hosts-screen-add-key.md). The mechanism,
-and every decision behind it, is [host-add-key.md](host-add-key.md); what belongs here is the RPC
-surface.
-
-**The daemon asks and waits.** `StreamHostPrompts` (server-streaming) carries the question,
-`AnswerHostPrompt` (unary) carries the answer, and `AddHostKey` (unary) is the operation that raises
-one and consumes it. A server stream plus a unary reply rather than the ACP bidi stream: it mirrors
-`StreamWorktreeStats` + `CalculateWorktreeSize`, correlation is an explicit `prompt_id` rather than
-an envelope sequence, and the reply stays a unary call that can be transport-restricted the way
-`mint_local_token` is.
-
-**A prompt belongs to one operator.** Both the feed and the answer filter on the GitHub user whose
-session raised it — not the mapped OS user, because `config.users[]` can map two GitHub users to one
-OS user and they would then see and burn each other's prompts. Replayed to every subscriber the feed
-would disclose the private-key path one operator named to every other operator watching.
-Cross-operator answers get the `UnknownPrompt` rejection an unissued id gets, and are refused
-*before* the prompt's one answer is spent.
-
-**A prompt expires (120 s) and is answerable once.** An unanswered prompt cannot pin an `AddHostKey`
-call forever, and a repeatable answer would turn the endpoint into a passphrase-guessing oracle
-against one prompt.
-
-**Only ciphertext crosses the wire.** `HostPromptEvent.host_public_key` is the host's published SPKI
-DER; the browser encrypts under it with `SubtleCrypto` and `AnswerHostPrompt.encrypted_answer` is the
-RSA-OAEP(SHA-256) result. The registry keeps no copy — the ciphertext moves through a `oneshot` to
-the waiting `AddHostKey` — and the plaintext exists only inside the decrypt, in process.
-
-**Two `AddHostKey` failures are deliberately indistinguishable.** "This host cannot decrypt your
-answer" and "that passphrase did not unlock the key" share one arm and one message string. Told
-apart, they are an adaptive RSA-OAEP decryption oracle — one clean bit per query against the host's
-long-lived key, from any authenticated session. The real cause goes to the host's log only.
-
-**The key is read as the operator, from inside their own home.** `subject` is free text from a
-browser, so `host_private_key.rs` confines it lexically to the mapped user's home and reads the bytes
-with that user's own privileges through `spawner::run_capture_as_user`. There is no `canonicalize`:
-statting a caller-chosen path would restore the file-existence oracle the single `KEY_UNREADABLE`
-refusal closes, and the privilege drop is the real boundary anyway. Absent, unreadable and malformed
-share that one refusal; `KEY_OUTSIDE_HOME` stays distinct because it is decided by the caller's own
-input and account and discloses nothing.
-
-**`daemon_instance_id` is honoured on all four**, mirroring `GetHostTooling`: empty means the daemon
-serving the call, and a request addressed to a host this daemon is not gets `invalid_argument` rather
-than a locally served answer. A key silently loaded into the wrong host's agent is a worse version of
-the failure that handler's own comment warns about. Note the caveat these RPCs share with
-`GetHostTooling` and ~20 others: `classify_peer_route` compares the **routing** instance id while
-`ListKnownHosts` publishes the **durable** one, equal only while
-`daemon_instance_id_append_startup_timestamp` is false.
-
-**The pump's teardown is not optional.** A prompt feed emits only while an operator is adding a key,
-so the send failure a handler normally learns from is never attempted; the pump `tokio::select!`s on
-`tx.closed()`, as `packages/tddy-codegen/docs/server-streaming.md` requires, or it leaks one task per
-subscription. `pending_prompt_pump_count()` exists on the service so a wire-level test can see a leak
-that is otherwise unobservable.
-
-Injected for tests via `ConnectionServiceImpl::with_host_prompts`, `with_host_keypair`,
-`with_ssh_agent_key_adder` and `with_host_user_files` — the OS seams only. The prompt, the
-encryption, the decrypt and the key unlock run for real.
-
 ## LiveKit rooms (Rooms panel)
 
 One server-streaming RPC feeds the web's **LiveKit rooms panel** (see
-[docs/ft/web/livekit-rooms-panel.md](../../../../docs/ft/web/livekit-rooms-panel.md)) with every room
+[docs/ft/web/livekit-rooms-panel.md](../../../docs/ft/web/livekit-rooms-panel.md)) with every room
 on the LiveKit server and the participants joined to each:
 
 - `StreamLiveKitRooms(session_token)` → `stream LiveKitRoomsEvent`. Authenticated like every other
@@ -945,11 +780,9 @@ so every host writes the same format; see [tddy-core architecture § Agent activ
 
 ## See also
 
-- **Worktrees**: **`ListWorktreesForProject`** (cached rows; **`refresh`** runs **`WorktreeStatsCache::refresh_stats_for_project`** in a blocking worker), **`RemoveWorktree`** ( **`remove_worktree_under_repo`**, then **`invalidate_project`**). Project checkout: **`main_repo_path_for_host`** with the local **`daemon_instance_id`**. Details: [worktrees.md](./worktrees.md), [docs/ft/web/worktrees.md](../../../../docs/ft/web/worktrees.md).
-- **Known hosts**: the durable registry behind `ListKnownHosts`, the routing-id/durable-id split it is keyed on, and its write policy: [host-registry.md](./host-registry.md).
-- **Host tooling**: the probe behind `GetHostTooling` — the injectable seam, the `PATH` resolution `resolve_tool_path` deliberately does not do, the shared deadline, and why an unrecognised answer is a failure rather than a negative finding: [host-tooling-probe.md](./host-tooling-probe.md).
-- **Host add-key**: the prompt registry, the host RSA keypair and its `0600` persistence, the pump's `tx.closed()` teardown, per-user private-key reading, the `.pub`-beside-it listing rule, and the two refusals that are deliberately identical: [host-add-key.md](./host-add-key.md).
-- Feature: [Session directory layout](../../../../docs/ft/coder/session-layout.md)
-- Feature: [docs/ft/daemon/project-concept.md](../../../../docs/ft/daemon/project-concept.md)
-- Feature: [Cursor Agent CLI session](../../../../docs/ft/daemon/cursor-cli-session.md)
+- **Hosts**: the eight methods, the pre-authentication peer routing five of them need, and the registry, probe and prompt machinery behind them: [`tddy-host-service`](../../tddy-host-service/docs/host-service.md).
+- **Worktrees**: the nine methods, the lazy size stream, the code-pane file gate and the git-remote service: [`tddy-worktree-service`](../../tddy-worktree-service/docs/worktree-service.md).
+- Feature: [Session directory layout](../../../docs/ft/coder/session-layout.md)
+- Feature: [docs/ft/daemon/project-concept.md](../../../docs/ft/daemon/project-concept.md)
+- Feature: [Cursor Agent CLI session](../../../docs/ft/daemon/cursor-cli-session.md)
 - [changesets/](./changesets/)

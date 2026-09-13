@@ -13,11 +13,11 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import {
-  ConnectionService,
   ListWorktreeDirectoryResponseSchema,
   ReadWorktreeFileResponseSchema,
   WorktreeDirEntrySchema,
-} from "../../src/gen/connection_pb";
+  WorktreeService,
+} from "../../src/gen/worktree_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -54,12 +54,12 @@ function aBackendWithWorktree() {
     { name: "src", isDir: true },
   ];
   return aSessionsDrawerBackend([SESSION])
-    .onUnary(ConnectionService.method.listWorktreeDirectory, (req) =>
+    .onUnary(WorktreeService.method.listWorktreeDirectory, (req) =>
       create(ListWorktreeDirectoryResponseSchema, {
         entries: req.relPath === "" ? entries.map((e) => create(WorktreeDirEntrySchema, e)) : [],
       }),
     )
-    .onUnary(ConnectionService.method.readWorktreeFile, () =>
+    .onUnary(WorktreeService.method.readWorktreeFile, () =>
       create(ReadWorktreeFileResponseSchema, {
         contentUtf8: "# URL state\n",
         truncated: false,

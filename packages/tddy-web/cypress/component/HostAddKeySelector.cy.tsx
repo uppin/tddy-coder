@@ -24,11 +24,11 @@ import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-t
 import { Code } from "@connectrpc/connect";
 import {
   AddHostKeyOutcome,
-  ConnectionService,
+  HostService,
   HostSshAgentSchema,
   ProbeOutcome,
   type HostSshAgent,
-} from "../../src/gen/connection_pb";
+} from "../../src/gen/host_pb";
 import { HostAddKeyAction } from "../../src/components/hosts/HostAddKeyAction";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -72,7 +72,7 @@ function noAgent(): HostSshAgent {
 function aBackendOffering(
   candidates: Array<{ path: string; keyType: string; fingerprint: string }>,
 ): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().implement(ConnectionService, {
+  return anInMemoryRpcBackend().implement(HostService, {
     ...aHostPromptFeed().handlers,
     listHostKeyCandidates: async () => ({ candidates }),
     addHostKey: async () => ({
@@ -125,7 +125,7 @@ describe("The keys a host offers to load", () => {
     // Then nothing was asked: a row that cannot take a key must not enumerate one's keys either
     cy.wrap(unreachable).should((b: InMemoryRpcBackend) => {
       expect(
-        b.callsTo(ConnectionService.method.listHostKeyCandidates),
+        b.callsTo(HostService.method.listHostKeyCandidates),
         "a host with no agent was asked for its keys",
       ).to.have.length(0);
     });
@@ -137,7 +137,7 @@ describe("The keys a host offers to load", () => {
     // Then the listing names the host in this row. The keys are files on one machine, so a listing
     // addressed to nobody in particular would offer paths from whichever daemon took the call.
     cy.wrap(reachable).should((b: InMemoryRpcBackend) => {
-      const calls = b.callsTo(ConnectionService.method.listHostKeyCandidates);
+      const calls = b.callsTo(HostService.method.listHostKeyCandidates);
       expect(calls, "the row asks its own host what keys it has").to.have.length(1);
       expect(calls[0].daemonInstanceId).to.equal(HOST);
     });
@@ -156,7 +156,7 @@ describe("The keys a host offers to load", () => {
     // under a confinement this browser cannot see, so a path this UI adorned or abbreviated would
     // be refused with a message that names no path.
     cy.wrap(backend).should((b: InMemoryRpcBackend) => {
-      const calls = b.callsTo(ConnectionService.method.addHostKey);
+      const calls = b.callsTo(HostService.method.addHostKey);
       expect(calls, "exactly one add is sent for one picked key").to.have.length(1);
       expect(calls[0].subject).to.equal(AN_RSA_KEY.path);
       expect(calls[0].daemonInstanceId).to.equal(HOST);
@@ -175,7 +175,7 @@ describe("The keys a host offers to load", () => {
     // Then it is added like any other. The list is a convenience over ~/.ssh, not the boundary of
     // what may be loaded, so removing the field would make those keys unloadable from here.
     cy.wrap(backend).should((b: InMemoryRpcBackend) => {
-      const calls = b.callsTo(ConnectionService.method.addHostKey);
+      const calls = b.callsTo(HostService.method.addHostKey);
       expect(calls, "a typed path is still an add").to.have.length(1);
       expect(calls[0].subject).to.equal(AN_UNLISTED_KEY_PATH);
     });
@@ -184,7 +184,7 @@ describe("The keys a host offers to load", () => {
   it("treats a host that will not list its keys as one with no keys to offer", () => {
     // Given a host whose daemon is too old to know this call, or refused it
     const backend = anInMemoryRpcBackend()
-      .implement(ConnectionService, {
+      .implement(HostService, {
         ...aHostPromptFeed().handlers,
         addHostKey: async () => ({
           added: true,
@@ -193,7 +193,7 @@ describe("The keys a host offers to load", () => {
           failureReason: "",
         }),
       })
-      .failWith(ConnectionService.method.listHostKeyCandidates, Code.Unimplemented);
+      .failWith(HostService.method.listHostKeyCandidates, Code.Unimplemented);
     mountAction(backend);
 
     // When the operator names a key themselves
@@ -203,7 +203,7 @@ describe("The keys a host offers to load", () => {
     // what keys it has is not a host that cannot take one, and an error here would put a
     // never-before-seen call in front of an operator whose next action is unaffected by it.
     cy.wrap(backend).should((b: InMemoryRpcBackend) => {
-      expect(b.callsTo(ConnectionService.method.addHostKey)).to.have.length(1);
+      expect(b.callsTo(HostService.method.addHostKey)).to.have.length(1);
     });
     hostAddKeyOutcome.notSaying(HOST, /list|candidate|unimplemented/i);
   });

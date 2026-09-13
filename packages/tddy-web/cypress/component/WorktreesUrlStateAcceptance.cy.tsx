@@ -10,7 +10,7 @@
 
 import React from "react";
 import { WorktreesAppPage } from "../../src/components/worktrees/WorktreesAppPage";
-import { WorktreeSizeStatus } from "../../src/gen/connection_pb";
+import { WorktreeSizeStatus } from "../../src/gen/worktree_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {

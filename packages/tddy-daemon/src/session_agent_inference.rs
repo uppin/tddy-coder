@@ -33,9 +33,10 @@ use tddy_service::proto::acp::{acp_agent_message, content_block, session_update}
 use tddy_service::proto::acp::{AcpAgentMessage, ToolCallStatus};
 use tddy_service::proto::connection::{AgentCloneState, SessionAgentStatus};
 
-use crate::connection_service::AgentActivityHub;
+use tddy_daemon_kernel::{now_unix_ms, AgentActivityHub};
+
 use crate::session_agent_status::{
-    agent_status, now_unix_ms, truncate_summary, AgentActivity, ManagedAgentState,
+    agent_status, truncate_summary, AgentActivity, ManagedAgentState,
 };
 
 /// One transcript frame as an observed signal, or `None` when the frame says nothing about what the

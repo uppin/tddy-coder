@@ -42,7 +42,7 @@ Three gaps, each of which makes a mirror silently wrong rather than loudly broke
 3. **`ReadWorktreeFile` cannot carry the files.** It returns `string content_utf8` and hard-fails on
    any non-UTF-8 byte (`worktree_files.rs:165`), truncates at 1 MiB, and the `changed_paths` a
    consumer would feed it are git-C-quoted with `{old => new}` rename syntax — documented as
-   display-only, "not for opening a file with" (`worktrees.rs:745`).
+   display-only, "not for opening a file with" (`tddy-worktree-service`'s `worktrees.rs`).
 
 ## Design
 

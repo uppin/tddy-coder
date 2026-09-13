@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../../gen/connection_pb";
+import type { WorktreeService } from "../../../gen/worktree_pb";
 import type { SessionAttachmentHint } from "../../../rpc/connections/session";
 import { Button } from "../../ui/button";
 import { detectIsMobile, useIsMobile } from "../../../hooks/useIsMobile";
@@ -26,6 +27,7 @@ import { remoteTrackingName } from "../../../lib/branchNames";
 import type { SessionMetadata } from "../../../lib/sessionParticipantMetadata";
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type WorktreeClient = Client<typeof WorktreeService>;
 
 /**
  * The default for a caller that parses no participant metadata.
@@ -74,6 +76,12 @@ function unpushedPullReason(baseBranch: string, branch: string, pushError: strin
 export interface PrStackScreenProps {
   session: SessionEntry;
   client?: ConnectionClient;
+  /**
+   * The worktree service on the same host as `client` — the Start-session dialog's host-document
+   * picker browses worktrees through it. Absent for the same reason `client` can be: no daemon is
+   * reachable yet, and the dialog is not offered at all without both.
+   */
+  worktreeClient?: WorktreeClient;
   sessionToken?: string;
   /**
    * The full session list (all hosts). Used to resolve each planned node's in-progress child
@@ -141,6 +149,7 @@ export interface PrStackScreenProps {
 export function PrStackScreen({
   session,
   client,
+  worktreeClient,
   sessionToken = "",
   sessions = [],
   attachmentHint = null,
@@ -645,10 +654,11 @@ export function PrStackScreen({
         onCommitAndPull={handleCommitDirtyWorktreeAndPull}
         onCancel={() => setDirtyWorktreePrompt(null)}
       />
-      {client && (
+      {client && worktreeClient && (
         <CreateSessionDialog
           open={startSessionNode !== null}
           client={client}
+          worktreeClient={worktreeClient}
           sessionToken={sessionToken}
           initialValues={startSessionInitialValues}
           onClose={() => setStartSessionNode(null)}

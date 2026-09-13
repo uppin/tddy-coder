@@ -25,7 +25,7 @@ use tddy_livekit::{
 };
 use tddy_rpc::Status;
 
-use crate::config::DaemonConfig;
+use crate::config::{DaemonConfig, DEFAULT_SESSION_ROOM_GIT_TIMEOUT};
 use crate::livekit_peer_discovery::daemon_rpc_identity;
 use crate::worktrees::{parse_git_diff_numstat, WorktreeNumstat};
 
@@ -122,7 +122,7 @@ impl WorktreeSnapshot {
     }
 }
 
-/// Measure `worktree_root` as it stands right now, within [`DEFAULT_GIT_TIMEOUT`].
+/// Measure `worktree_root` as it stands right now, within [`DEFAULT_SESSION_ROOM_GIT_TIMEOUT`].
 ///
 /// The counts come from the same `git diff --numstat HEAD` the Worktrees screen reads, parsed by
 /// the same [`parse_git_diff_numstat`], so a room and the screen can never quote different totals
@@ -133,7 +133,7 @@ impl WorktreeSnapshot {
 /// A checkout git cannot read snapshots as empty rather than failing — this feeds a periodic poll
 /// whose only recourse is to try again on the next tick.
 pub fn snapshot_worktree(worktree_root: &Path) -> WorktreeSnapshot {
-    snapshot_worktree_within(worktree_root, DEFAULT_GIT_TIMEOUT)
+    snapshot_worktree_within(worktree_root, DEFAULT_SESSION_ROOM_GIT_TIMEOUT)
 }
 
 /// [`snapshot_worktree`] with the whole measurement — every `git` it runs — bounded by `budget`.
@@ -320,7 +320,7 @@ pub fn publish_wip_ref(
     head_commit: &str,
     wip_tree: &str,
 ) -> Result<String, String> {
-    let deadline = Instant::now() + DEFAULT_GIT_TIMEOUT;
+    let deadline = Instant::now() + DEFAULT_SESSION_ROOM_GIT_TIMEOUT;
     let mut args = vec!["commit-tree", wip_tree];
     // Parentless only when the checkout has no HEAD to parent on — an unborn branch, or a HEAD the
     // measurement could not read. A commit-tree given an empty parent fails outright, and a WIP ref
@@ -374,7 +374,7 @@ const WIP_COMMIT_IDENTITY_EMAIL: &str = "tddy-daemon@tddy.invalid";
 /// A ref that was never published deletes without complaint — `git update-ref -d` treats an absent
 /// ref as already gone — so closing a room that never got as far as publishing one is not an error.
 pub fn delete_wip_ref(worktree_root: &Path, session_id: &str) -> Result<(), String> {
-    let deadline = Instant::now() + DEFAULT_GIT_TIMEOUT;
+    let deadline = Instant::now() + DEFAULT_SESSION_ROOM_GIT_TIMEOUT;
     git_output(
         worktree_root,
         &["update-ref", "-d", &wip_ref_name(session_id)],
@@ -934,7 +934,7 @@ pub fn diff_between(
     to: &str,
     paths: &[String],
 ) -> Result<Vec<u8>, String> {
-    let deadline = Instant::now() + DEFAULT_GIT_TIMEOUT;
+    let deadline = Instant::now() + DEFAULT_SESSION_ROOM_GIT_TIMEOUT;
     // `--no-ext-diff` and `--no-textconv` because a repository may configure either, and both
     // replace the patch with something for a human to read: a client would receive a rendering
     // `git apply` cannot apply, and would have no way to tell that from a patch that simply failed.
@@ -962,7 +962,7 @@ pub fn changed_paths_between(
     from: &str,
     to: &str,
 ) -> Result<Vec<String>, String> {
-    let deadline = Instant::now() + DEFAULT_GIT_TIMEOUT;
+    let deadline = Instant::now() + DEFAULT_SESSION_ROOM_GIT_TIMEOUT;
     let listed = git_output(
         worktree_root,
         &["diff", "--name-only", "-z", "--no-ext-diff", from, to],
@@ -1102,10 +1102,6 @@ fn untracked_file_count(worktree_root: &Path, deadline: Instant) -> u32 {
         .filter(|line| line.starts_with("??"))
         .count() as u32
 }
-
-/// The budget one measurement of a checkout gets when the caller names none: the shipped
-/// `session_room.git_timeout_ms`, which [`crate::config`] reads from here so the two cannot drift.
-pub const DEFAULT_GIT_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 /// Trimmed stdout of a git command in `worktree_root`, or the empty string when git could not
 /// answer before `deadline`.

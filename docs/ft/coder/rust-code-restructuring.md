@@ -2,13 +2,13 @@
 
 **Product area:** Coder / tddy-tools  
 **Status:** Active  
-**Updated:** 2026-08-31
+**Updated:** 2026-09-09
 
 ## Summary
 
 `tddy-tools restructure` replays a JSONL **plan of named intents** (never source text) against rust-analyzer through `tddy-lsp`. The library crate is `tddy-code-restructuring`; there is no separate binary.
 
-**v1 scope:** Rust only — seven operations, five subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
+**v1 scope:** Rust only — eight operations, five subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
 
 A green baseline is required; a red tree is a stop.
 
@@ -18,7 +18,7 @@ A green baseline is required; a red tree is a stop.
 tddy-tools restructure apply <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N]
                                        [--indexing-budget SECONDS]
 tddy-tools restructure status <plan.jsonl>
-tddy-tools restructure check <plan.jsonl> [--deep] [--indexing-budget SECONDS]
+tddy-tools restructure check <plan.jsonl> [--deep] [--budget LINES] [--indexing-budget SECONDS]
 tddy-tools restructure anchors <file.rs> --items A,B,C [--indexing-budget SECONDS]
 tddy-tools restructure verify --against <git-ref>
 ```
@@ -27,7 +27,7 @@ tddy-tools restructure verify --against <git-ref>
 |---|---|
 | `apply` | Execute the plan; `--dry-run` rehearses in an overlay; `--resume` continues from the journal |
 | `status` | completed / in_flight / pending / failed |
-| `check` | All findings, no writes; `--deep` resolves through the same path as apply |
+| `check` | All findings, no writes; `--deep` resolves through the same path as apply; `--budget LINES` additionally reports which of the files the plan's **anchors** name exceed that many lines — a report, never a gate |
 | `anchors` | Emit a correct range covering named items (including trivia) |
 | `verify` | Statement-multiset comparison against a git ref |
 
@@ -45,11 +45,12 @@ See [`.agents/skills/code-restructuring/references/plan-schema.md`](../../../.ag
 |---|---|
 | `extract_method` | Range → new function |
 | `extract_variable` | Subexpression → binding |
-| `rename_symbol` | LSP rename |
+| `rename_symbol` | LSP rename, applied to **every** document rust-analyzer returns edits for, not only the anchor's own file |
 | `extract_module` | `reexport`: glob / named / none; optional `to_file` |
 | `extract_module_to_file` | Move items to new file |
 | `extract_trait` | Extract trait from impl |
 | `inline_method` | Inline callee |
+| `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite its own `use crate::…` / `use super::…` header, re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves `pub use <dest_crate>::*;` in the origin, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
 
 Invariants: moves that need history use `git mv`; visibility widenings are reviewable output (journal/stdout), not silent; progress goes to an injected sink, never mixed into library stdout.
 
@@ -137,5 +138,35 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
   imports, so a child module reaching names through `use super::*` loses any name that was a parent
   *import* consumed by moved code. Bind those in the child, or under `#[cfg(test)]` in the parent when
   only its test modules need them.
+- **A cross-crate move is planned one op at a time, against the pre-move tree.** Each
+  `move_module_to_crate` op is evaluated as if none of its siblings had run, so a multi-op plan is
+  never seen as a whole: a plan that moves `host_registry` and `multi_host` to the same destination
+  is refused on the first, because `host_registry` still names `tddy_daemon::multi_host::…`. Layer
+  the plan by dependency depth and run it once per layer — and budget for a full rust-analyzer index
+  per layer.
+- **A cyclic module group cannot be moved at any layering.** The operation moves one module per op,
+  so a mutually-dependent pair (`host_tooling ⇄ ssh_agent`) is unreachable: each op sees the other
+  module still in the origin crate. Cut the cycle by hand first, or move the group by hand.
+- **Only `<crate>/src/<module>.rs` moves.** A nested module and a crate root are **refused, not
+  guessed** — a nested module's `mod` line lives in a file the operation would have to guess at.
+- **Registry dependencies are not carried, only path ones.** The destination manifest gains the
+  `path` dependencies the moved file needs and nothing else; a moved file that uses `chrono` or
+  `futures-util` leaves the destination short of it, and the build says so.
+- **The moved file's `use` header is re-pointed; its function bodies are not.** A `crate::` qualifier
+  at the head of a `use` declaration changed meaning by definition when the file changed crates, and
+  that is what the mechanical pass can prove. A `crate::` path inside a body is left alone, and the
+  build after the move is what surfaces it.
+- **A caller that imports the module rather than the item is not re-pointed.** The survey asks
+  rust-analyzer for references per *item*, so a caller written `use crate::host_registry;` and then
+  `host_registry::X` is outside the reference set. Covering it needs a second engine call on the
+  `mod` declaration.
+- **A rewritten caller path keeps the module segment**: `crate::host_registry::HostRegistry` becomes
+  `tddy_host_service::host_registry::HostRegistry`, never `tddy_host_service::HostRegistry`. That is
+  what makes the glob facade free — it re-exports the module, so the origin's own paths keep
+  resolving.
+- **A move that would make the workspace cyclic is refused up front**, on both the facade and the
+  no-facade path: a facade makes the origin depend on the destination, and a re-pointed caller does
+  the same, so if the moved code still names the origin, cargo would reject the pair with an error
+  naming neither the module nor the operation. The refusal names every path that forced it.
 - Restructuring tests that start rust-analyzer are load-sensitive; run affected suites with `--test-threads=1` when binding a server.
 - Typed `tddy-lsp` assist methods are not yet first-class; restructuring uses `request_raw` / `notify_raw`.

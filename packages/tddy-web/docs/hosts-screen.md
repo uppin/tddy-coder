@@ -9,7 +9,7 @@ room disappears from every other surface in tddy, which is exactly the moment an
 look at it.
 
 The rows come from the daemon's durable registry
-([host-registry.md](../../tddy-daemon/docs/host-registry.md)), not from the directory, so an offline
+([host-registry.md](../../tddy-host-service/docs/host-registry.md)), not from the directory, so an offline
 host is listed with its last-seen time rather than omitted.
 
 ## Route and entry point
@@ -480,12 +480,12 @@ those unit tests run in CI.
 
 ## See also
 
-- Daemon: [host-registry.md](../../tddy-daemon/docs/host-registry.md),
-  [connection-service.md](../../tddy-daemon/docs/connection-service.md)
+- Daemon: [host-registry.md](../../tddy-host-service/docs/host-registry.md),
+  [host-service.md](../../tddy-host-service/docs/host-service.md)
 - Web: [host-directory.md](host-directory.md), [host-connections.md](host-connections.md)
-- Daemon: [host-tooling-probe.md](../../tddy-daemon/docs/host-tooling-probe.md) — the probe behind
+- Daemon: [host-tooling-probe.md](../../tddy-host-service/docs/host-tooling-probe.md) — the probe behind
   `GetHostTooling`
-- Daemon: [host-add-key.md](../../tddy-daemon/docs/host-add-key.md) — the prompt registry, the host
+- Daemon: [host-add-key.md](../../tddy-host-service/docs/host-add-key.md) — the prompt registry, the host
   keypair and the per-user key read behind the add
 - Web: [insecure-origin-constraints.md](insecure-origin-constraints.md) — why `crypto.subtle` has no
   fallback here
@@ -494,4 +494,4 @@ those unit tests run in CI.
 - Feature: [docs/ft/web/hosts-screen-tooling.md](../../../docs/ft/web/hosts-screen-tooling.md)
 - Feature: [docs/ft/web/screen-sharing-sessions.md](../../../docs/ft/web/screen-sharing-sessions.md)
   — both scopes of the remote-desktop feature
-- Daemon: [host-registry.md § Host-scoped desktop targets](../../tddy-daemon/docs/host-registry.md#host-scoped-desktop-targets)
+- Daemon: [host-registry.md § Host-scoped desktop targets](../../tddy-host-service/docs/host-registry.md#host-scoped-desktop-targets)

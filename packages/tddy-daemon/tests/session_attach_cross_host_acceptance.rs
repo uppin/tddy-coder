@@ -31,16 +31,15 @@ use tddy_daemon::livekit_peer_discovery::{
     spawn_common_room_discovery_task, CommonRoomPeerRegistry, LiveKitDiscoveryHandles,
     LiveKitEligibleDaemonSource,
 };
-use tddy_daemon::test_util::TEST_TOKEN;
+use tddy_daemon::test_util::{wait_until_peer_discovered, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent,
     AttachmentMaterializationProgress, ConnectionService as ConnectionServiceTrait,
-    HostDocumentChunk, HostDocumentScope, ListEligibleDaemonsRequest, ReadHostDocumentRequest,
-    SessionAttachment, StagedAttachmentRef, StartSessionRequest,
-    UploadStagedAttachmentChunkRequest,
+    HostDocumentChunk, HostDocumentScope, ReadHostDocumentRequest, SessionAttachment,
+    StagedAttachmentRef, StartSessionRequest, UploadStagedAttachmentChunkRequest,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -216,25 +215,17 @@ async fn serve_rpc_participant(
 ///
 /// 45s: two daemons publish their advertisement on the common room's own metadata cadence, and a
 /// cold LiveKit container has to accept both participants first.
+///
+/// Asked through `host.HostService`, which is where `ListEligibleDaemons` lives since `#unbundle`
+/// node 1, and against this service's own roster — see [`wait_until_peer_discovered`].
 async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id: &str) {
-    tokio::time::timeout(Duration::from_secs(45), async {
-        loop {
-            let daemons = service
-                .list_eligible_daemons(Request::new(ListEligibleDaemonsRequest {
-                    session_token: TEST_TOKEN.to_string(),
-                }))
-                .await
-                .expect("ListEligibleDaemons")
-                .into_inner()
-                .daemons;
-            if daemons.iter().any(|d| d.instance_id == peer_instance_id) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(400)).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("timeout waiting for daemon {peer_instance_id} to be discovered"));
+    wait_until_peer_discovered(
+        service,
+        TEST_TOKEN,
+        peer_instance_id,
+        Duration::from_secs(45),
+    )
+    .await;
 }
 
 /// Local daemon A plus peer daemon B, each serving RPC on its own `daemon-{id}` identity and each
@@ -813,7 +804,7 @@ async fn stream_start_session_on_the_peer_reports_progress_while_staged_bytes_cr
     // `tests/session_attach_staging_scope_acceptance.rs`; what only a cross-host start can show is
     // `bytes_done` moving while the bytes are still in flight.
     let total = document.len() as u64;
-    let frame = tddy_daemon::connection_service::HOST_DOCUMENT_FRAME_BYTES as u64;
+    let frame = tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES as u64;
     let expected: Vec<(String, u64, u64)> = (1..=total.div_ceil(frame))
         .map(|nth| (nth * frame).min(total))
         .chain(std::iter::once(total))

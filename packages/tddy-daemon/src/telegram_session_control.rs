@@ -1966,11 +1966,15 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     async fn session_owning_branch(
         &self,
         branch: &str,
-    ) -> anyhow::Result<Option<crate::session_reader::SessionEntry>> {
+    ) -> anyhow::Result<Option<crate::branch_owner::SessionClaim>> {
         let sessions_base = self.sessions_base.clone();
         let branch = branch.to_string();
         tokio::task::spawn_blocking(move || {
-            crate::branch_owner::find_session_owning_branch(&sessions_base, &branch)
+            crate::branch_owner::find_session_owning_branch(
+                &crate::session_reader::DaemonSessionListing,
+                &sessions_base,
+                &branch,
+            )
         })
         .await
         .map_err(|e| anyhow::anyhow!("branch owner scan join: {e}"))?

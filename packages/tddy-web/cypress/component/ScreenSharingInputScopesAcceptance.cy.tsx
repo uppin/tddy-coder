@@ -15,7 +15,7 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { HostRemoteDesktopSchema, ProbeOutcome } from "../../src/gen/connection_pb";
+import { HostRemoteDesktopSchema, ProbeOutcome } from "../../src/gen/host_pb";
 import { Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";

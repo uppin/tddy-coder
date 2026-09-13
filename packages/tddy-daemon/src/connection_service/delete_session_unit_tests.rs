@@ -1,4 +1,5 @@
 use super::*;
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_service::proto::connection::DeleteSessionRequest;
 
 fn make_unit_config() -> crate::config::DaemonConfig {

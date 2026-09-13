@@ -19,8 +19,8 @@
  * present it as a location.
  */
 
-import type { HostSshAgent, SshAgentKey } from "../../gen/connection_pb";
-import { ProbeOutcome } from "../../gen/connection_pb";
+import type { HostSshAgent, SshAgentKey } from "../../gen/host_pb";
+import { ProbeOutcome } from "../../gen/host_pb";
 import { HostAddKeyAction } from "./HostAddKeyAction";
 
 export interface HostRowSshAgentProps {

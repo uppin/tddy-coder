@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 
-import type { ConnectionService } from "../../gen/connection_pb";
+import type { WorktreeService } from "../../gen/worktree_pb";
 import { WorktreeFileTree } from "./WorktreeFileTree";
 import { createWorktreeFilesApi } from "./worktreeFilesApi";
 import { workflowPreviewKind } from "./sessionWorkflowPreview";
@@ -9,7 +9,7 @@ import { renderSimpleMarkdown } from "./renderSimpleMarkdown";
 import { CodeBlock } from "./CodeBlock";
 
 export type WorktreeCodePaneProps = {
-  client: Client<typeof ConnectionService>;
+  client: Client<typeof WorktreeService>;
   sessionToken: string;
   projectId: string;
   /** The session's worktree root (`SessionEntry.repo_path`). */

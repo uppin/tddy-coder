@@ -1,0 +1,36 @@
+[package]
+name = "tddy-worktree-service"
+version = "0.1.0"
+edition = "2021"
+description = "The git worktrees a daemon serves — listing, cleaning, sizing, restoring and reading them — served as worktree.WorktreeService"
+
+[lib]
+name = "tddy_worktree_service"
+path = "src/lib.rs"
+
+[dependencies]
+# `test_util` is ungated, as `tddy-daemon`'s is, so the integration suites can reach it.
+tempfile = "3"
+anyhow = "1"
+async-trait = "0.1"
+futures-util = "0.3"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "process", "io-util"] }
+tddy-core = { path = "../tddy-core" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-task = { path = "../tddy-task" }
+tokio-stream = "0.1"
+tddy-service = { path = "../tddy-service" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4", "v7"] }
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }

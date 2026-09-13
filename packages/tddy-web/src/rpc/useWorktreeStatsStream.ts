@@ -1,7 +1,7 @@
 /**
  * Streaming hook for the Worktrees manager screen's lazy, per-worktree disk usage.
  *
- * Subscribes once to `ConnectionService.StreamWorktreeStats` for a project over the shared
+ * Subscribes once to `WorktreeService.StreamWorktreeStats` for a project over the shared
  * common-room LiveKit connection (`useDaemonClient`, like `useHostStats`). The daemon emits a first
  * snapshot frame carrying every worktree with its size status, then one frame per worktree as its
  * size finishes (Calculating → Cached). Each frame is folded into a stable row list via
@@ -17,10 +17,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  ConnectionService,
+  WorktreeService,
   WorktreeSizeStatus,
   type WorktreeRow,
-} from "../gen/connection_pb";
+} from "../gen/worktree_pb";
 import { useDaemonClient } from "./selectedDaemon";
 import { useAuthContext } from "../hooks/authProvider";
 import { formatDiskBytes } from "../components/sessions/worktreeStatsFormat";
@@ -86,7 +86,7 @@ function eventFromRpc(event: {
  * or the requested subscription (recalculate flag + nonce) changes.
  */
 export function useWorktreeStatsStream(projectId: string): UseWorktreeStatsStreamResult {
-  const client = useDaemonClient(ConnectionService);
+  const client = useDaemonClient(WorktreeService);
   const { sessionToken } = useAuthContext();
   const [rows, setRows] = useState<WorktreeStatsRow[]>([]);
   const [subscription, setSubscription] = useState({ recalculateAll: false, nonce: 0 });

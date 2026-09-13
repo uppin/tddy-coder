@@ -9,6 +9,7 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { WorktreeService } from "../../src/gen/worktree_pb";
 import { createSessionPage } from "../support/pages/createSessionPage";
 import { TEST_IDS, byTestId, createSessionAgentOption } from "../support/testIds";
 
@@ -65,9 +66,12 @@ function aBackendForCursorCliSession() {
 
 function mountCreateSessionPane(backend: InMemoryRpcBackend) {
   const client = createClient(ConnectionService, backend.transport());
+  // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const worktreeClient = createClient(WorktreeService, backend.transport());
   cy.mount(
     <CreateSessionPane
       client={client}
+      worktreeClient={worktreeClient}
       sessionToken="tok-cursor"
       onCancel={cy.stub()}
       onCreated={cy.stub().as("onCreated")}

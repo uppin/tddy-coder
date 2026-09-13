@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "bunx buf generate ../tddy-service/proto",
+    "generate": "../../scripts/generated-code.sh write packages/tddy-web",
     "prebuild": "bun run --cwd ../tddy-livekit-web build && node scripts/gen-build-id.mjs",
     "build": "vite build",
     "dev": "vite --port ${VITE_PORT:-5173}",

@@ -2,6 +2,7 @@ use super::*;
 use std::fs;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::{write_session_metadata, SessionMetadata};
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_service::proto::connection::ListSessionsRequest;
 
 fn make_unit_config() -> crate::config::DaemonConfig {

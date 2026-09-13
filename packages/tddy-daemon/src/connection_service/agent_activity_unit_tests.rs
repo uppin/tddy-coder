@@ -7,6 +7,7 @@ use tddy_core::agent_activity::{
 };
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
 const TEST_HOOK_TOKEN: &str = "tok-activity-hook-xyz789";
 const TEST_OS_USER: &str = "u";

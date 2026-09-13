@@ -3,14 +3,16 @@
 CI runs on **GitHub Actions** (`.github/workflows/ci.yml`). The repo is public, so
 Actions is free with unlimited minutes on 4-vCPU / 16 GB Linux runners.
 
-Every pull request gets four checks. The test checks publish a **test count**,
-not just a colour, so a red check names the tests that failed.
+Every pull request gets five checks, plus the arm64 build described below. The
+test checks publish a **test count**, not just a colour, so a red check names the
+tests that failed.
 
 | Check | What it runs | Cold-cache time |
 |-------|--------------|-----------------|
 | `Rust lint` | `cargo fmt --all --check`, then `cargo clippy --workspace --all-targets -- -D warnings` | ~8 min |
 | `Rust build` | `cargo build --workspace --bins --examples` | ~10 min |
 | `Rust tests` | `cargo nextest run --workspace --profile ci` | ~15 min |
+| `Generated code` | `bun install --frozen-lockfile`, then `scripts/generated-code.sh check` | ~3 min |
 | `Web tests` | `bun install --frozen-lockfile`, `bun run build`, `tddy-web` unit tests, `tddy-web` + `tddy-livekit-web` Cypress component tests | ~10 min |
 
 `Rust lint` runs on its own. **`Rust build` runs first, and both test checks
@@ -42,6 +44,63 @@ All three run in the **nix dev shell** via `./dev`, against the pinned
 `flake.lock`. CI therefore uses the same rustc, clippy, bun and system libraries
 you get locally — no second dependency list to keep in sync, and no class of
 failure that only reproduces on a runner.
+
+## Generated code
+
+`Generated code` regenerates every committed `*_pb.ts` and fails if the result
+differs from what is committed. Before it existed, nothing did: a proto could
+change and the TypeScript describing the same wire contract could stay behind
+indefinitely, so a package could silently describe a different contract than the
+daemon serves.
+
+The directories it covers and the `buf generate` invocations that produce them
+are listed in [`scripts/generated-code.manifest`](../../../scripts/generated-code.manifest).
+Several of them are generated from **more than one proto root**, which the
+per-package `bun run generate` scripts used to get wrong — each named a single
+root and therefore could not reproduce its own directory.
+
+| Directory | Generated from |
+|-----------|----------------|
+| `packages/tddy-web/src/gen` | `tddy-service/proto` |
+| `packages/tddy-rpc-web/src/gen` | `tddy-rpc/proto`, `tddy-livekit/proto/test` |
+| `packages/tddy-livekit-web/src/gen` | `tddy-livekit/proto`, `tddy-rpc/proto`, `tddy-service/proto/terminal.proto` |
+| `packages/tddy-rust-typescript-tests/gen` | `tddy-service/proto` |
+
+**Only TypeScript is listed, because only TypeScript is committed.** The Rust
+bindings come from the `build.rs` passes in `packages/tddy-service`, which write
+into `OUT_DIR` on every build — they cannot drift, and
+`packages/tddy-service/src/gen` holds a `.gitkeep` and nothing else.
+
+The check is a full directory comparison, not a per-file diff, so it catches all
+three shapes of drift:
+
+| Report | Meaning |
+|--------|---------|
+| `~ file` | committed, but the proto has moved on — regenerate |
+| `+ file` | the protos generate it and it was never committed |
+| `- file` | committed, but no proto generates it any more — the `.proto` was deleted and the generated file outlived it |
+
+The same script is what a developer runs to fix a failure, so there is one
+answer to "what should be committed":
+
+```bash
+scripts/generated-code.sh check                 # what CI runs
+scripts/generated-code.sh check --show-diff     # + the full diff of each stale file
+scripts/generated-code.sh write packages/tddy-web   # regenerate one package in place
+bun run --filter tddy-web generate              # the same thing, from the package
+```
+
+`buf` and `protoc-gen-es` come from `node_modules/.bin`, pinned by `bun.lock`.
+The nix shell also carries a `buf`, deliberately not used: a second version would
+be a second answer to what should be committed. (They currently agree — 1.67.0
+and 1.66.1 produce byte-identical output for this repo's protos — but nothing
+would report it if a future bump made them disagree.)
+
+The gate has a **self-test**, `scripts/generated-code.test.ts`, run as its own
+step before the check. It builds a throwaway repo with one proto, regenerates it
+through the gate's own `write` mode, and asserts the gate passes on that and
+fails on each of the three drift shapes. Without it, a gate that stopped
+comparing would report "no drift" forever.
 
 ## Reading results
 
@@ -85,7 +144,7 @@ deliberately, and each exclusion is coverage you still have to get locally:
 | One `tddy-sandbox-recipes` path test | Asserts a macOS-only path layout |
 | `sandbox_runner_stdio_acceptance::echoes_a_message_over_sandbox_service_served_over_stdio` | Fails unprivileged with "tool ipc server exited before bind" even with the runner binary staged; survived two retries. Only this one test is skipped — the other two in the binary pass. Tracked in `docs/dev/todo/`; the intended fix is a VM-backed job, not a permanent exclusion |
 | Cypress **e2e** specs | Storybook build plus a real ghostty WebGL context; not yet verified on a runner |
-| `tddy-desktop`, `tddy-rust-typescript-tests` | Need Electron and cross-language fixtures respectively |
+| `tddy-desktop`, `tddy-rust-typescript-tests` | Need Electron and cross-language fixtures respectively. Their *tests* are excluded; `tddy-rust-typescript-tests`' committed `gen/` is covered by `Generated code` |
 
 The Rust exclusions live in `.config/nextest.toml` under `[profile.ci]`
 `default-filter`, each with its reason. Keep that list short — every entry is a
@@ -266,6 +325,18 @@ CI reports status but does not block merges until a ruleset says so. The
 Do **not** add `VM boot control` or `Cloudinit VM boot` to that list yet — they
 are still being proven out, and a required check that flakes on QEMU would block
 every merge.
+
+`Generated code` is **green as of this change, and is a candidate to become
+required.** It was red the moment it was added, on inherited drift no PR
+introduced: `packages/tddy-rust-typescript-tests/gen` was a subset frozen at some
+past point — 19 files the protos generate had never been committed and four more
+were stale, `connection_pb.ts` among them — and `codex_oauth_pb.ts` had outlived
+the `.proto` that produced it in two packages. Both were settled here rather than
+excluded: the stale directories were regenerated through this script's own `write`
+mode, and the two orphans deleted. `packages/tddy-web/src/gen/sandbox_pb.ts` was
+the find that justified the gate — `sandbox.proto` gained `in_jail_tool_request`
+and `in_jail_tool_response` and the committed TypeScript predated them, silently.
+Adding it to the ruleset above is a separate, admin-only step.
 
 Creating it needs **repository admin**, so it lives here as a command rather
 than as a file the repo can apply itself:

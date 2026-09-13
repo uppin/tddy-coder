@@ -3,6 +3,7 @@
 //! Adding a language is one [`LanguageBackend`] implementation plus one registration. The
 //! executor, ledger, journal, and plan parser never change — that is the open-closed boundary.
 
+use crate::crate_move::ModuleReferences;
 use crate::edit::Resolution;
 use crate::overlay::Overlay;
 use crate::plan::{RefactorKind, RefactorOp};
@@ -61,6 +62,16 @@ pub trait LanguageBackend {
     fn check(&mut self, op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Vec<String>> {
         let _ = (op, workspace);
         Ok(Vec::new())
+    }
+
+    /// The reference engine a cross-crate move's survey asks, where this backend can answer it.
+    ///
+    /// Default `None`, and deliberately not a default empty reference set: a survey is only worth
+    /// what the engine behind it knows, and one answered by a backend that cannot ask
+    /// `textDocument/references` would report a blast radius of nobody — indistinguishable from a
+    /// move that really touches nobody.
+    fn module_references(&mut self) -> Option<&mut dyn ModuleReferences> {
+        None
     }
 
     /// The range anchor covering a named, adjacent run of items, trivia included.

@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
+import type { WorktreeService } from "../../gen/worktree_pb";
 import { VncService } from "../../gen/vnc_pb";
 import { ScreenSharingService } from "../../gen/screen_sharing_pb";
 import { Button } from "../ui/button";
@@ -43,6 +44,11 @@ interface SessionInspectorDrawerProps {
   onDelete: (sessionId: string) => void;
   onTerminate: (sessionId: string) => void;
   client?: Client<typeof ConnectionService>;
+  /**
+   * The worktree service on the same host as `client` — what the Worktree tab reads its size,
+   * diff summary and clear/delete/restore actions through.
+   */
+  worktreeClient?: Client<typeof WorktreeService>;
   sessionToken?: string;
   /**
    * The connection to the host that owns this session, or `null` when nothing can reach it.
@@ -113,6 +119,7 @@ export function SessionInspectorDrawer({
   onDelete,
   onTerminate,
   client,
+  worktreeClient,
   sessionToken,
   hostConnection,
   room = null,
@@ -425,7 +432,7 @@ export function SessionInspectorDrawer({
         ) : tab === "worktree" ? (
           <ScrollArea className="flex-1 min-h-0">
             <SessionWorktreeTab
-              client={client ?? null}
+              client={worktreeClient ?? null}
               sessionToken={sessionToken ?? ""}
               projectId={session.projectId}
               sessionId={session.sessionId}

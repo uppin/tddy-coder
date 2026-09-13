@@ -14,6 +14,7 @@ import {
   StartSessionRequestSchema,
   StartSessionResponseSchema,
 } from "../../src/gen/connection_pb";
+import { WorktreeService } from "../../src/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import {
   interceptListProjectBranches,
@@ -41,12 +42,19 @@ const DEFAULT_MODEL = "claude-opus-4-8";
 // Test client (uses cy.intercept network layer)
 // ---------------------------------------------------------------------------
 
-function createTestClient() {
-  const transport = createConnectTransport({
+function testTransport() {
+  return createConnectTransport({
     baseUrl: `${window.location.origin}/rpc`,
     useBinaryFormat: true,
   });
-  return createClient(ConnectionService, transport);
+}
+
+function createTestClient() {
+  return createClient(ConnectionService, testTransport());
+}
+
+function createTestWorktreeClient() {
+  return createClient(WorktreeService, testTransport());
 }
 
 // ---------------------------------------------------------------------------
@@ -88,11 +96,13 @@ function mountCreateSessionPane(overrides: {
   onCreated?: (id: string) => void;
 } = {}) {
   const client = createTestClient();
+  const worktreeClient = createTestWorktreeClient();
   const onCancel = overrides.onCancel ?? cy.stub().as("onCancel");
   const onCreated = overrides.onCreated ?? cy.stub().as("onCreated");
   cy.mount(
     <CreateSessionPane
       client={client}
+      worktreeClient={worktreeClient}
       sessionToken="fake-token"
       onCancel={onCancel}
       onCreated={onCreated}

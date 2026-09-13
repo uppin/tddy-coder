@@ -1,6 +1,7 @@
 use super::*;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
 fn make_unit_config() -> crate::config::DaemonConfig {
     let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";

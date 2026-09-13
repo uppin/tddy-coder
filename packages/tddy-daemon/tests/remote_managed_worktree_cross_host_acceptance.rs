@@ -37,6 +37,7 @@ use tddy_daemon::livekit_peer_discovery::{
     spawn_common_room_discovery_task, CommonRoomPeerRegistry, LiveKitDiscoveryHandles,
     LiveKitEligibleDaemonSource,
 };
+use tddy_daemon::test_util::wait_until_peer_discovered;
 use tddy_daemon::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
@@ -47,10 +48,9 @@ use tddy_rpc::Request;
 use tddy_sandbox::SandboxError;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
-    ExecuteToolResponse, ListEligibleDaemonsRequest, ListSessionsRequest, StartSessionRequest,
+    ExecuteToolResponse, ListSessionsRequest, StartSessionRequest,
 };
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
-use tddy_testing_commons::wait::eventually_awaiting;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -274,27 +274,15 @@ async fn serve_rpc_participant(
 /// `eventually_awaiting` rather than a hand-rolled poll: when the peer never shows up it panics
 /// with the list that *was* returned, which is the difference between "timed out" and "these three
 /// daemons were visible and yours was not".
+///
+/// Asked through `host.HostService`, which is where `ListEligibleDaemons` lives since `#unbundle`
+/// node 1, and against this service's own roster — see [`wait_until_peer_discovered`].
 async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id: &str) {
-    eventually_awaiting(
-        &format!("daemon {peer_instance_id} to be discovered in the common room"),
+    wait_until_peer_discovered(
+        service,
+        a_caller_token(),
+        peer_instance_id,
         Duration::from_secs(45),
-        || async {
-            let daemons = service
-                .list_eligible_daemons(Request::new(ListEligibleDaemonsRequest {
-                    session_token: a_caller_token().to_string(),
-                }))
-                .await
-                .map_err(|e| format!("ListEligibleDaemons failed: {e}"))?
-                .into_inner()
-                .daemons;
-            if daemons.iter().any(|d| d.instance_id == peer_instance_id) {
-                return Ok(());
-            }
-            Err(format!(
-                "eligible daemons so far: {:?}",
-                daemons.iter().map(|d| &d.instance_id).collect::<Vec<_>>()
-            ))
-        },
     )
     .await;
 }

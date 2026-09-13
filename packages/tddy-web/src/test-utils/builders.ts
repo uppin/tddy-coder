@@ -21,15 +21,14 @@ import type { DescMethod } from "@bufbuild/protobuf";
 import {
   AgentInfoSchema,
   BranchResolutionSchema,
-  EligibleDaemonEntrySchema,
   ProjectEntrySchema,
   SessionEntrySchema,
   type AgentInfo,
   type BranchResolution,
-  type EligibleDaemonEntry,
   type ProjectEntry,
   type SessionEntry,
 } from "../gen/connection_pb";
+import { EligibleDaemonEntrySchema, type EligibleDaemonEntry } from "../gen/host_pb";
 import type { StackChildSession } from "../components/sessions/prstack/stackChildSessions";
 import type { StackNode } from "../components/sessions/prstack/stackPlan";
 import type { ViewRect } from "../lib/terminalStatusBarLayout";

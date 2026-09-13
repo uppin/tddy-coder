@@ -26,7 +26,7 @@ use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListEligibleDaemonsRequest, ListExecToolsRequest,
+    ConnectionService as ConnectionServiceTrait, ListExecToolsRequest,
 };
 
 const RELAY_ROOM: &str = "relay-e2e-common-room";
@@ -84,6 +84,27 @@ livekit:
 
 // ── Idle-timeout integration (non-LiveKit) ───────────────────────────────────────────────────────
 
+/// Options for a relay-mode server that `shutdown` stops: no bundle, no RPC services and no
+/// common room, because a relay serves no page — the shutdown channel is the wiring under test.
+fn a_relay_server_stopped_by(
+    shutdown: tokio::sync::oneshot::Receiver<()>,
+) -> tddy_daemon::server::RunServerOptions {
+    tddy_daemon::server::RunServerOptions {
+        host: "127.0.0.1".to_string(),
+        port: 0, // ephemeral
+        bundle_path: PathBuf::new(),
+        rpc_entries: vec![],
+        livekit_url: None,
+        common_room: None,
+        livekit_enabled: false, // relay mode joins no common room
+        daemon_instance_id: "test-instance".to_string(),
+        allowed_agents: vec![],
+        debug: None,
+        lifecycle_telegram: None,
+        shutdown_rx: Some(shutdown),
+    }
+}
+
 /// Phase 6 AC: relay idle monitor fires the external shutdown channel when the tracker expires,
 /// causing `run_server` to exit cleanly — the full chain mirrors what `main.rs` wires in relay mode.
 #[tokio::test]
@@ -105,21 +126,7 @@ async fn relay_idle_monitor_triggers_server_shutdown() {
     });
 
     // When
-    let result = tddy_daemon::server::run_server(
-        "127.0.0.1",
-        0,              // ephemeral port
-        PathBuf::new(), // no bundle (relay mode)
-        vec![],
-        None,
-        None,
-        false,                       // relay mode joins no common room
-        "test-instance".to_string(), // serving daemon instance id (relay mode has no real one)
-        vec![],
-        None, // web_debug mask
-        None,
-        Some(rx), // external idle-timeout shutdown channel
-    )
-    .await;
+    let result = tddy_daemon::server::run_server(a_relay_server_stopped_by(rx)).await;
 
     // Then
     assert!(
@@ -237,6 +244,14 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         room_slot.clone(),
     ));
     let sessions_a = tempfile::tempdir().unwrap();
+    // "Who can I see?" is `host.HostService`'s question since `#unbundle` node 1. Built over the
+    // same eligible source A routes on, so discovery readiness and routability are one fact.
+    let hosts_a = tddy_host_service::HostServiceImpl::new(
+        config_a.clone(),
+        sessions_a.path(),
+        valid_user_resolver(),
+    )
+    .with_eligible_daemon_source(Arc::clone(&eligible));
     let service_a = ConnectionServiceImpl::new(
         config_a,
         sessions_resolver(sessions_a.path().to_path_buf()),
@@ -255,14 +270,16 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     // Wait until A's discovery sees B in the common room.
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            let rows = service_a
-                .list_eligible_daemons(Request::new(ListEligibleDaemonsRequest {
+            let rows = tddy_service::proto::host::HostService::list_eligible_daemons(
+                &hosts_a,
+                Request::new(tddy_service::proto::host::ListEligibleDaemonsRequest {
                     session_token: "valid-token".to_string(),
-                }))
-                .await
-                .expect("ListEligibleDaemons")
-                .into_inner()
-                .daemons;
+                }),
+            )
+            .await
+            .expect("ListEligibleDaemons")
+            .into_inner()
+            .daemons;
             if rows.iter().any(|d| d.instance_id == RELAY_PEER_ID) {
                 break;
             }

@@ -22,7 +22,7 @@ use tddy_service::proto::token::{
 use tddy_service::{AuthServiceServer, LiveKitTokenServiceServer};
 
 use crate::config::{DaemonConfig, LiveKitConfig};
-use crate::connection_service::SessionUserResolver;
+use tddy_daemon_kernel::SessionUserResolver;
 
 /// Result of building auth: RPC entries, a resolver for session token -> GitHub login, and the
 /// GitHub access tokens logins granted (the credential `ConnectionService` reads PRs with).

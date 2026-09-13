@@ -6,6 +6,7 @@
 
 use crate::apply::{apply_workspace_edit, ensure_git_worktree, git_output, hash_touched_files};
 use crate::backends::RustBackend;
+use crate::crate_move::{self, Survey};
 use crate::journal::{Journal, JournalRecord, OpStatus, ResumeDecision};
 use crate::plan::RefactorKind;
 use crate::registry::{BackendRegistry, Workspace};
@@ -20,7 +21,7 @@ usage:
   restructure apply  <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N]
                                   [--indexing-budget SECONDS]
   restructure status <plan.jsonl>
-  restructure check  <plan.jsonl> [--deep] [--indexing-budget SECONDS]
+  restructure check  <plan.jsonl> [--deep] [--budget LINES] [--indexing-budget SECONDS]
   restructure anchors <file.rs> --items A,B,C [--indexing-budget SECONDS]
   restructure verify --against <git-ref>
 
@@ -29,7 +30,11 @@ usage:
   --from N      replay the journal, then begin executing at operation N
   --stop-after N  apply only the first N operations and stop
   --deep        also resolve every operation through the language server, reporting the refusals an
-                apply would give. Writes nothing either way
+                apply would give, and the blast radius of every cross-crate move. Writes nothing
+                either way
+  --budget LINES
+                report every file the plan names that is longer than LINES. A record of where the
+                tree stands, not a gate: the check's verdict is what its findings say either way
   --items A,B,C the items an emitted range anchor must cover, in any order
   --against REF the git ref to compare the working tree's statements against
   --indexing-budget SECONDS
@@ -59,6 +64,8 @@ pub struct Options {
     pub indexing_budget: Option<u64>,
     /// Whether `check` resolves each operation through the language server as well as reading text.
     pub deep: bool,
+    /// The line count above which `check` reports a file the plan names.
+    pub budget: Option<usize>,
     /// The items `anchors` must cover.
     pub items: Vec<String>,
     /// The git ref `verify` compares against.
@@ -76,6 +83,7 @@ impl Default for Options {
             stop_after: None,
             indexing_budget: None,
             deep: false,
+            budget: None,
             items: Vec::new(),
             against: None,
         }
@@ -143,6 +151,7 @@ impl Options {
             "--indexing-budget" => {
                 self.indexing_budget = Some(numeric_value(rest.next(), "--indexing-budget")?)
             }
+            "--budget" => self.budget = Some(numeric_value(rest.next(), "--budget")?),
             "--items" => self.items = comma_separated(rest.next())?,
             "--against" => {
                 self.against = Some(
@@ -367,9 +376,21 @@ pub fn check(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
             continue;
         }
 
-        if let Some(refusal) = rehearsal.rehearse(&root, &mut registry, op)? {
+        let rehearsed = rehearsal.rehearse(&root, &mut registry, op)?;
+        if let Some(survey) = &rehearsed.survey {
+            for line in survey_lines(index, survey) {
+                println!("{line}");
+            }
+        }
+        if let Some(refusal) = rehearsed.refusal {
             println!("{index}: {refusal}");
             findings += 1;
+        }
+    }
+
+    if let Some(budget) = options.budget {
+        for line in budget_report(&measured(&root, &files_named_by(&plan))?, budget) {
+            println!("{line}");
         }
     }
 
@@ -497,18 +518,41 @@ struct Rehearsal {
     overlay: Overlay,
 }
 
+/// What rehearsing one operation against the language server found.
+struct Rehearsed {
+    /// The blast radius, for the one operation that has one to report before it is performed.
+    survey: Option<Survey>,
+    /// The refusal an apply would give, where it would give one.
+    refusal: Option<String>,
+}
+
 impl Rehearsal {
     fn rehearse(
         &mut self,
         root: &Path,
         registry: &mut BackendRegistry,
         op: &crate::plan::RefactorOp,
-    ) -> Result<Option<String>> {
+    ) -> Result<Rehearsed> {
         let anchor = self.ledger.translate_anchor(&op.anchor)?;
+        let at = op.with_anchor(anchor);
+
+        // Surveyed before it is resolved, because the two answer different questions: a refusal says
+        // the move cannot happen, and the survey says what it would cost if it can. A plan author
+        // who gets only the first has to run an apply to learn the second.
+        let survey = match self.survey(root, registry, &at) {
+            Ok(survey) => survey,
+            Err(refusal) => {
+                return Ok(Rehearsed {
+                    survey: None,
+                    refusal: Some(refusal.to_string()),
+                })
+            }
+        };
+
         let resolved = registry
-            .backend_for(Path::new(anchor.file()), op.op)?
+            .backend_for(Path::new(at.anchor.file()), at.op)?
             .resolve(
-                &op.with_anchor(anchor),
+                &at,
                 &Workspace {
                     root,
                     overlay: &self.overlay,
@@ -519,11 +563,162 @@ impl Rehearsal {
             Ok(resolved) => {
                 self.ledger.record(&resolved.edit);
                 self.overlay.record(root, &resolved.edit)?;
-                Ok(None)
+                Ok(Rehearsed {
+                    survey,
+                    refusal: None,
+                })
             }
-            Err(refusal) => Ok(Some(refusal.to_string())),
+            Err(refusal) => Ok(Rehearsed {
+                survey,
+                refusal: Some(refusal.to_string()),
+            }),
         }
     }
+
+    /// The blast radius of a cross-crate move, asked of the backend's own reference engine.
+    ///
+    /// Only `move_module_to_crate` has one worth reporting separately: every other operation's edits
+    /// are whatever its assist returns, so a survey of one would be a second name for the resolution
+    /// the rehearsal is about to take anyway. This costs the move a second `textDocument/references`
+    /// pass on top of the one its resolution makes — which is the price of reporting the radius and
+    /// the refusals in a run that writes nothing either way.
+    fn survey(
+        &self,
+        root: &Path,
+        registry: &mut BackendRegistry,
+        op: &crate::plan::RefactorOp,
+    ) -> Result<Option<Survey>> {
+        if op.op != RefactorKind::MoveModuleToCrate {
+            return Ok(None);
+        }
+
+        let workspace = Workspace {
+            root,
+            overlay: &self.overlay,
+        };
+        let backend = registry.backend_for(Path::new(op.anchor.file()), op.op)?;
+        let Some(engine) = backend.module_references() else {
+            return Ok(None);
+        };
+
+        crate_move::survey(engine, &workspace, op).map(Some)
+    }
+}
+
+/// A surveyed cross-crate move, as `check --deep` reports it: where the module is going, what
+/// reaches it, and the path every caller would need.
+///
+/// Indented and prefixed rather than numbered like a finding, because a survey is not one — a move
+/// with ninety callers is expensive, not defective, and a check that returned non-zero for it would
+/// make the report unusable for deciding whether to write the plan that way.
+fn survey_lines(index: usize, survey: &Survey) -> Vec<String> {
+    let mut lines = vec![format!(
+        "   op {index} survey: {} -> {} ({}), {} item(s) reached from outside, {} caller(s)",
+        survey.source,
+        survey.destination.package,
+        survey.destination.extern_name,
+        survey.reached_from_outside.len(),
+        survey.callers.len()
+    )];
+
+    if !survey.reached_from_outside.is_empty() {
+        lines.push(format!(
+            "      reached from outside: {}",
+            survey.reached_from_outside.join(", ")
+        ));
+    }
+
+    lines.extend(
+        survey
+            .callers
+            .iter()
+            .map(|caller| format!("      {}: {} -> {}", caller.path, caller.from, caller.to)),
+    );
+    lines
+}
+
+/// One file a plan names, and how long it is in the tree as it stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileSize {
+    path: String,
+    lines: usize,
+}
+
+/// Every file a plan operates on, once each, in the order it first names one.
+///
+/// The anchors are the plan's own statement of what it touches, so this is the set the budget is
+/// reported over — not the whole tree, which would bury this plan's outcome in the repository's.
+fn files_named_by(plan: &Plan) -> Vec<String> {
+    let mut named: Vec<String> = Vec::new();
+    for op in &plan.ops {
+        let file = op.anchor.file();
+        if !named.iter().any(|seen| seen == file) {
+            named.push(file.to_string());
+        }
+    }
+    named
+}
+
+/// How long each named file is, read from the tree the check is running against.
+fn measured(root: &Path, paths: &[String]) -> Result<Vec<FileSize>> {
+    paths
+        .iter()
+        .map(|path| {
+            let text = std::fs::read_to_string(root.join(path)).map_err(|error| {
+                RestructureError::MalformedPlan(format!(
+                    "`{path}` cannot be measured against the budget: {error}"
+                ))
+            })?;
+            Ok(FileSize {
+                path: path.clone(),
+                lines: text.lines().count(),
+            })
+        })
+        .collect()
+}
+
+/// The files longer than `budget` lines, longest first — the order a plan author splits them in.
+///
+/// A file *at* the budget is within it: the budget is a length a file may reach, and the agreed
+/// policy is that seams are cut where they are cohesive rather than to hit a number.
+fn over_budget(sizes: &[FileSize], budget: usize) -> Vec<FileSize> {
+    let mut over: Vec<FileSize> = sizes
+        .iter()
+        .filter(|file| file.lines > budget)
+        .cloned()
+        .collect();
+    over.sort_by(|left, right| {
+        right
+            .lines
+            .cmp(&left.lines)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    over
+}
+
+/// The file-budget report, as `check --budget LINES` prints it.
+fn budget_report(sizes: &[FileSize], budget: usize) -> Vec<String> {
+    let over = over_budget(sizes, budget);
+    if over.is_empty() {
+        return vec![format!(
+            "budget: every file the plan names is within {budget} lines"
+        )];
+    }
+
+    let mut lines = vec![format!(
+        "budget: {} of {} file(s) over {budget} lines",
+        over.len(),
+        sizes.len()
+    )];
+    lines.extend(over.iter().map(|file| {
+        format!(
+            "budget: {} is {} lines, {} over",
+            file.path,
+            file.lines,
+            file.lines - budget
+        )
+    }));
+    lines
 }
 
 fn sources_at(root: &Path, git_ref: &str) -> Result<BTreeMap<String, String>> {
@@ -674,6 +869,8 @@ fn report_visibility(resolved: &crate::Resolution) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crate_move::{CallerRewrite, Destination};
+    use crate::plan::{Anchor, RefactorOp};
 
     fn args(flags: &[&str]) -> Vec<String> {
         let mut all = vec!["apply".to_string(), "plan.jsonl".to_string()];
@@ -811,5 +1008,247 @@ mod tests {
         assert!(options.dry_run);
         assert_eq!(options.from, Some(3));
         assert_eq!(options.stop_after, Some(2));
+    }
+
+    // ---- the file-budget report ----
+
+    fn a_file_of(path: &str, lines: usize) -> FileSize {
+        FileSize {
+            path: path.to_string(),
+            lines,
+        }
+    }
+
+    fn paths_of(sizes: &[FileSize]) -> Vec<&str> {
+        sizes.iter().map(|size| size.path.as_str()).collect()
+    }
+
+    fn a_plan_operating_on(files: &[&str]) -> Plan {
+        Plan {
+            version: 1,
+            snapshot: BTreeMap::new(),
+            ops: files
+                .iter()
+                .map(|file| RefactorOp {
+                    op: RefactorKind::ExtractModuleToFile,
+                    anchor: Anchor::Symbol {
+                        file: file.to_string(),
+                        path: "an_item".to_string(),
+                    },
+                    name: None,
+                    to: None,
+                    variant: None,
+                    with_private_deps: false,
+                    reexport: None,
+                    to_file: false,
+                })
+                .collect(),
+        }
+    }
+
+    /// The report a plan author reads to decide what still has to be split: the files over the
+    /// budget and only those, longest first, because the longest is the one worth splitting next.
+    #[test]
+    fn lists_exactly_the_files_over_the_budget_longest_first() {
+        // Given three files a plan names, two of them longer than 500 lines
+        let named = vec![
+            a_file_of("packages/tddy-daemon/src/host_registry.rs", 612),
+            a_file_of("packages/tddy-daemon/src/config.rs", 85),
+            a_file_of("packages/tddy-daemon/src/connection_service.rs", 2416),
+        ];
+
+        // When the budget report is taken at 500 lines
+        let over = over_budget(&named, 500);
+
+        // Then
+        assert_eq!(
+            paths_of(&over),
+            [
+                "packages/tddy-daemon/src/connection_service.rs",
+                "packages/tddy-daemon/src/host_registry.rs",
+            ]
+        );
+    }
+
+    /// The budget is a length a file may reach: 500 lines is within a 500-line budget. Reporting it
+    /// as over would ask for a split the agreed policy does not.
+    #[test]
+    fn keeps_a_file_exactly_at_the_budget_within_it() {
+        // Given one file exactly at the budget and one a single line over it
+        let named = vec![a_file_of("src/at.rs", 500), a_file_of("src/over.rs", 501)];
+
+        // When
+        let over = over_budget(&named, 500);
+
+        // Then
+        assert_eq!(paths_of(&over), ["src/over.rs"]);
+    }
+
+    /// How far over matters as much as being over: it is the difference between a file to watch and
+    /// one to split.
+    #[test]
+    fn reports_how_far_over_the_budget_each_file_is() {
+        // Given a plan naming two files, one of them 112 lines over budget
+        let named = vec![a_file_of("src/at.rs", 500), a_file_of("src/over.rs", 612)];
+
+        // When
+        let report = budget_report(&named, 500);
+
+        // Then
+        assert_eq!(
+            report,
+            [
+                "budget: 1 of 2 file(s) over 500 lines",
+                "budget: src/over.rs is 612 lines, 112 over",
+            ]
+        );
+    }
+
+    /// A clean budget is a result, not silence — the report is how the outcome gets recorded.
+    #[test]
+    fn reports_that_every_file_a_plan_names_is_within_the_budget() {
+        // Given two files a plan names, both within a 500-line budget
+        let named = vec![a_file_of("src/at.rs", 500), a_file_of("src/small.rs", 12)];
+
+        // When
+        let report = budget_report(&named, 500);
+
+        // Then
+        assert_eq!(
+            report,
+            ["budget: every file the plan names is within 500 lines"]
+        );
+    }
+
+    /// A split plan names the file it is carving up once per operation — 29 times for a
+    /// 29-operation plan — and measuring it 29 times would report it 29 times.
+    #[test]
+    fn names_each_file_a_plan_operates_on_once() {
+        // Given a plan with two operations on one file and one on another
+        let plan = a_plan_operating_on(&["src/big.rs", "src/big.rs", "src/other.rs"]);
+
+        // When
+        let named = files_named_by(&plan);
+
+        // Then
+        assert_eq!(named, ["src/big.rs", "src/other.rs"]);
+    }
+
+    #[test]
+    fn reads_the_file_budget_a_run_was_given() {
+        // Given a file-budget flag
+        let options = parse_options(&args(&["--budget", "500"])).unwrap();
+
+        // Then the budget is parsed
+        assert_eq!(options.budget, Some(500));
+    }
+
+    #[test]
+    fn leaves_the_file_budget_unset_when_none_was_given() {
+        // Given no file-budget flag
+        let options = parse_options(&args(&[])).unwrap();
+
+        // Then no budget is reported on
+        assert_eq!(options.budget, None);
+    }
+
+    #[test]
+    fn refuses_a_file_budget_that_is_not_a_number() {
+        // Given a non-numeric budget
+        let outcome = parse_options(&args(&["--budget", "short"]));
+
+        // Then parsing fails
+        assert!(outcome.is_err());
+    }
+
+    // ---- the cross-crate move's blast radius ----
+
+    fn a_survey_of_the_host_registry(
+        reached_from_outside: &[&str],
+        callers: Vec<CallerRewrite>,
+    ) -> Survey {
+        Survey {
+            source: "packages/tddy-daemon/src/host_registry.rs".to_string(),
+            destination: Destination {
+                dir: "packages/tddy-daemon-kernel".to_string(),
+                package: "tddy-daemon-kernel".to_string(),
+                extern_name: "tddy_daemon_kernel".to_string(),
+            },
+            reached_from_outside: reached_from_outside.iter().map(|s| s.to_string()).collect(),
+            callers,
+        }
+    }
+
+    /// `check --deep` exists to answer "what would this cost" before an apply pays for it, and for a
+    /// cross-crate move the reference set *is* the cost.
+    #[test]
+    fn reports_the_blast_radius_of_a_cross_crate_move() {
+        // Given a surveyed move of one item, reached from one caller
+        let survey = a_survey_of_the_host_registry(
+            &["HostRegistry"],
+            vec![CallerRewrite {
+                path: "packages/tddy-daemon/src/runtime.rs".to_string(),
+                from: "crate::host_registry::HostRegistry".to_string(),
+                to: "tddy_daemon_kernel::host_registry::HostRegistry".to_string(),
+            }],
+        );
+
+        // When the eighth operation of a plan is surveyed
+        let lines = survey_lines(7, &survey);
+
+        // Then the destination, the reached items and each caller's new path are all reported
+        assert_eq!(
+            lines,
+            [
+                "   op 7 survey: packages/tddy-daemon/src/host_registry.rs -> tddy-daemon-kernel \
+                 (tddy_daemon_kernel), 1 item(s) reached from outside, 1 caller(s)",
+                "      reached from outside: HostRegistry",
+                "      packages/tddy-daemon/src/runtime.rs: crate::host_registry::HostRegistry -> \
+                 tddy_daemon_kernel::host_registry::HostRegistry",
+            ]
+        );
+    }
+
+    /// A module nothing outside reaches is the move a reviewer can wave through, and the report says
+    /// so in the same shape rather than by staying quiet.
+    #[test]
+    fn reports_a_cross_crate_move_no_caller_reaches() {
+        // Given a surveyed move nothing outside the module names
+        let survey = a_survey_of_the_host_registry(&[], Vec::new());
+
+        // When
+        let lines = survey_lines(0, &survey);
+
+        // Then the header stands alone, with nothing claimed about callers
+        assert_eq!(
+            lines,
+            [
+                "   op 0 survey: packages/tddy-daemon/src/host_registry.rs -> tddy-daemon-kernel \
+              (tddy_daemon_kernel), 0 item(s) reached from outside, 0 caller(s)"
+            ]
+        );
+    }
+
+    /// The survey is engine-informed: it asks `textDocument/references` which callers exist. The
+    /// backend a check builds has to offer that seam, or a deep check would rehearse the move
+    /// without ever reporting its blast radius.
+    #[test]
+    fn offers_the_reference_engine_a_cross_crate_move_survey_needs() {
+        // Given the registry a check builds
+        let mut registry = registry_for_static();
+
+        // When the backend for a Rust module is asked for its reference engine
+        let backend = registry
+            .backend_for(
+                Path::new("packages/tddy-daemon/src/host_registry.rs"),
+                RefactorKind::MoveModuleToCrate,
+            )
+            .unwrap();
+
+        // Then it offers one
+        assert!(
+            backend.module_references().is_some(),
+            "the Rust backend answers references and must offer the seam a survey needs"
+        );
     }
 }

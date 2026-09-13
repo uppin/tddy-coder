@@ -462,20 +462,28 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
 impl Fleet {
     /// Block until A has discovered every peer, so an attach is not racing discovery.
     async fn await_peers_discovered(&self, expected: usize) {
-        // 45s: matches the discovery wait the existing multi-host suite uses.
+        // 45s: matches the discovery wait the existing multi-host suite uses. Asked through
+        // `host.HostService` against A's own roster, so what this waits on is what the attach then
+        // routes against.
+        let (config, eligible, user_resolver) = self.a.routing_view();
+        let hosts_a = tddy_host_service::HostServiceImpl::new(
+            config,
+            std::path::Path::new("/nonexistent-list-eligible-daemons-reads-no-files"),
+            user_resolver,
+        )
+        .with_eligible_daemon_source(eligible);
         tokio::time::timeout(Duration::from_secs(45), async {
             loop {
-                let daemons = self
-                    .a
-                    .list_eligible_daemons(Request::new(
-                        tddy_service::proto::connection::ListEligibleDaemonsRequest {
-                            session_token: TEST_TOKEN.to_string(),
-                        },
-                    ))
-                    .await
-                    .expect("ListEligibleDaemons")
-                    .into_inner()
-                    .daemons;
+                let daemons = tddy_service::proto::host::HostService::list_eligible_daemons(
+                    &hosts_a,
+                    Request::new(tddy_service::proto::host::ListEligibleDaemonsRequest {
+                        session_token: TEST_TOKEN.to_string(),
+                    }),
+                )
+                .await
+                .expect("ListEligibleDaemons")
+                .into_inner()
+                .daemons;
                 let discovered = self
                     .peers
                     .iter()

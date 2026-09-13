@@ -13,11 +13,11 @@ import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   AddHostKeyOutcome,
-  ConnectionService,
+  HostService,
   HostSshAgentSchema,
   ProbeOutcome,
   type HostSshAgent,
-} from "../../src/gen/connection_pb";
+} from "../../src/gen/host_pb";
 import { HostAddKeyAction } from "../../src/components/hosts/HostAddKeyAction";
 import { HostPassphraseDialog } from "../../src/components/hosts/HostPassphraseDialog";
 import type { KeyPinVerdict } from "../../src/lib/hostKeyPinning";
@@ -282,7 +282,7 @@ function aBackendReporting(
   outcome: AddHostKeyOutcome,
   failureReason: string,
 ): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().implement(ConnectionService, {
+  return anInMemoryRpcBackend().implement(HostService, {
     ...aHostPromptFeed().handlers,
     addHostKey: async () => ({ added: false, outcome, fingerprint: "", failureReason }),
   });
@@ -361,7 +361,7 @@ describe("Host add-key outcomes", () => {
  * this one, and `AnswerHostPrompt` is unary, so the in-memory backend records exactly what left.
  */
 function aBackendAwaitingAnAnswer(feed: HostPromptFeed): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().implement(ConnectionService, {
+  return anInMemoryRpcBackend().implement(HostService, {
     ...feed.handlers,
     // Never settles: the host is blocked on the passphrase, which is why the prompt exists.
     addHostKey: () => new Promise(() => undefined),
@@ -410,7 +410,7 @@ describe("The answer AnswerHostPrompt carries", () => {
     // Then the passphrase is nowhere in the payload that left, and what did leave is an RSA-OAEP
     // block under this host's published 2048-bit key — the entire reason this node exists
     cy.wrap(backend).should((b: InMemoryRpcBackend) => {
-      const calls = b.callsTo(ConnectionService.method.answerHostPrompt);
+      const calls = b.callsTo(HostService.method.answerHostPrompt);
       expect(calls, "exactly one answer is sent for one prompt").to.have.length(1);
       expect(calls[0].promptId).to.equal("prompt-1");
       expect(
@@ -424,7 +424,7 @@ describe("The answer AnswerHostPrompt carries", () => {
     // published, the answer is exactly the passphrase. Everything above holds for a digest, or for
     // 256 random bytes — neither of which is an answer this host could ever unlock a key with.
     cy.then(() => {
-      const [answer] = backend.callsTo(ConnectionService.method.answerHostPrompt);
+      const [answer] = backend.callsTo(HostService.method.answerHostPrompt);
       return hostKeypair.decrypt(answer.encryptedAnswer);
     }).should("equal", PASSPHRASE);
   });
@@ -632,7 +632,7 @@ describe("The key path the add-key field invites", () => {
     // which is knowledge only this side has: the daemon's refusal is deliberately silent about it
     cy.wrap(backend).should((b: InMemoryRpcBackend) => {
       expect(
-        b.callsTo(ConnectionService.method.addHostKey),
+        b.callsTo(HostService.method.addHostKey),
         "a path the host cannot accept was sent anyway",
       ).to.have.length(0);
     });

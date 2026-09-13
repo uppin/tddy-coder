@@ -1,6 +1,7 @@
 import React from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
+import type { WorktreeService } from "../../gen/worktree_pb";
 import type { SessionAttachmentHint } from "../../rpc/connections/session";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import { sessionPaneIsWorkflowView } from "./attachClaim";
@@ -8,10 +9,16 @@ import { PrStackScreen } from "./prstack/PrStackScreen";
 import { WorkflowChatScreen } from "./WorkflowChatScreen";
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type WorktreeClient = Client<typeof WorktreeService>;
 
 /** Extra context a custom workflow view may need beyond the selected session itself. */
 export interface WorkflowViewContext {
   client?: ConnectionClient;
+  /**
+   * The worktree service on the same host as `client`. Only the PR-Stack view uses it, to browse
+   * worktrees from its Start-session dialog's host-document picker.
+   */
+  worktreeClient?: WorktreeClient;
   sessionToken?: string;
   /**
    * How the attached session is reached. Custom views that need a LiveKit room (e.g. the PR-Stack
@@ -80,6 +87,7 @@ export function resolveWorkflowView(
         key={session.sessionId}
         session={session}
         client={context.client}
+        worktreeClient={context.worktreeClient}
         sessionToken={context.sessionToken}
         sessions={context.sessions}
         attachmentHint={context.attachmentHint}

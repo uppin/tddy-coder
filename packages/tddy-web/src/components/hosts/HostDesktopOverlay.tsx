@@ -20,7 +20,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Client } from "@connectrpc/connect";
-import { ConnectionService, HostPromptKind } from "../../gen/connection_pb";
+import { HostPromptKind, HostService } from "../../gen/host_pb";
 import {
   Protocol,
   ScreenSharingService,
@@ -96,7 +96,7 @@ async function targetForProbedEndpoint(
 
 export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesktopOverlayProps) {
   const client = useHostClient(ScreenSharingService, hostId);
-  const connection = useHostClient(ConnectionService, hostId);
+  const hostService = useHostClient(HostService, hostId);
   const { user, sessionToken } = useAuthContext();
   const [stream, setStream] = useState<StartStreamResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -213,9 +213,9 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
 
   /** Send the ciphertext the dialog produced. The password itself never reaches this component. */
   const answerWithPassword = async (encryptedAnswer: Uint8Array) => {
-    if (question === null || !connection) return;
+    if (question === null || !hostService) return;
     try {
-      const reply = await connection.answerHostPrompt({
+      const reply = await hostService.answerHostPrompt({
         sessionToken: sessionToken ?? "",
         daemonInstanceId: hostId,
         promptId: question.promptId,

@@ -101,4 +101,4 @@ daemon that was asked.
 - [hosts-screen-add-key.md](./hosts-screen-add-key.md) — loading a key into a host's ssh-agent
   from a row
 - Technical: [hosts-screen.md](../../../packages/tddy-web/docs/hosts-screen.md),
-  [host-registry.md](../../../packages/tddy-daemon/docs/host-registry.md)
+  [host-registry.md](../../../packages/tddy-host-service/docs/host-registry.md)

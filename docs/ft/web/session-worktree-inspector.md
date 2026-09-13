@@ -19,7 +19,7 @@ worktrees manager), plus three lifecycle actions scoped to that one worktree:
 This is the per-session counterpart to the project-wide [Worktrees manager](worktrees.md): the
 manager lists every worktree of a project; this tab focuses on the one worktree the inspected
 session owns and adds the clear / restore actions. It reuses the daemon
-[`worktrees`](../../../packages/tddy-daemon/docs/worktrees.md) module and the
+[`worktrees`](../../../packages/tddy-worktree-service/docs/worktrees.md) module and the
 [`tddy-core::worktree`](../../../packages/tddy-coder/docs/) setup helpers — no new git plumbing is
 invented.
 
@@ -170,4 +170,4 @@ missing state:
   `RemoveWorktree`, `WorktreeStatsCache`.
 - [Session Usage inspector](session-usage-inspector.md) — sibling Inspector tab (streaming variant).
 - [Session drawer](session-drawer.md) — inspector host + docked mode.
-- Daemon package: [worktrees module](../../../packages/tddy-daemon/docs/worktrees.md).
+- Daemon package: [worktrees module](../../../packages/tddy-worktree-service/docs/worktrees.md).

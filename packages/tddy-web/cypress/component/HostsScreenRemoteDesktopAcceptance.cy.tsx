@@ -11,7 +11,7 @@
 
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { HostRemoteDesktopSchema, ProbeOutcome } from "../../src/gen/connection_pb";
+import { HostRemoteDesktopSchema, ProbeOutcome } from "../../src/gen/host_pb";
 import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";

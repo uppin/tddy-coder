@@ -11,13 +11,13 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { ConnectionService, type ProjectEntry } from "../../src/gen/connection_pb";
 import {
-  ConnectionService,
   ListWorktreeDirectoryResponseSchema,
   ReadWorktreeFileResponseSchema,
   WorktreeDirEntrySchema,
-  type ProjectEntry,
-} from "../../src/gen/connection_pb";
+  WorktreeService,
+} from "../../src/gen/worktree_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -116,12 +116,12 @@ function aWorktreeBackend(sessions: Record<string, unknown>[]) {
   };
 
   return aSessionsDrawerBackend(sessions)
-    .onUnary(ConnectionService.method.listWorktreeDirectory, (req) =>
+    .onUnary(WorktreeService.method.listWorktreeDirectory, (req) =>
       create(ListWorktreeDirectoryResponseSchema, {
         entries: (directories[req.relPath] ?? []).map((e) => create(WorktreeDirEntrySchema, e)),
       }),
     )
-    .onUnary(ConnectionService.method.readWorktreeFile, (req) =>
+    .onUnary(WorktreeService.method.readWorktreeFile, (req) =>
       create(ReadWorktreeFileResponseSchema, {
         contentUtf8: files[req.relPath] ?? "",
         truncated: false,
@@ -162,13 +162,13 @@ function aProjectScopedWorktreeBackend(
 
   return aSessionsDrawerBackend(sessions)
     .onUnary(ConnectionService.method.listProjects, () => ({ projects }))
-    .onUnary(ConnectionService.method.listWorktreeDirectory, (req) => {
+    .onUnary(WorktreeService.method.listWorktreeDirectory, (req) => {
       requireResolvedProject(req.projectId);
       return create(ListWorktreeDirectoryResponseSchema, {
         entries: (directories[req.relPath] ?? []).map((e) => create(WorktreeDirEntrySchema, e)),
       });
     })
-    .onUnary(ConnectionService.method.readWorktreeFile, (req) => {
+    .onUnary(WorktreeService.method.readWorktreeFile, (req) => {
       requireResolvedProject(req.projectId);
       return create(ReadWorktreeFileResponseSchema, {
         contentUtf8: files[req.relPath] ?? "",
@@ -360,7 +360,7 @@ it("sends the resolved project id on the worktree directory RPC for an unscoped 
 
   // Then — the directory RPC carried the resolved project id, not the session's empty one.
   cy.then(() => {
-    const calls = backend.callsTo(ConnectionService.method.listWorktreeDirectory);
+    const calls = backend.callsTo(WorktreeService.method.listWorktreeDirectory);
     expect(calls[0].projectId).to.equal(CODE_PANE_PROJECT.projectId);
   });
 });

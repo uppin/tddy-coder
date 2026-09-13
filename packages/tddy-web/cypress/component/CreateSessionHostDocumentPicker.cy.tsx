@@ -28,6 +28,7 @@ import {
   StartSessionEventSchema,
   type StartSessionRequest,
 } from "../../src/gen/connection_pb";
+import { WorktreeService } from "../../src/gen/worktree_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { createSessionPage } from "../support/pages/createSessionPage";
@@ -138,11 +139,15 @@ function aHostWithDocuments(recorder: StartRecorder): InMemoryRpcBackend {
 }
 
 function mountCreatePane(backend: InMemoryRpcBackend) {
-  const client = createClient(ConnectionService, backend.transport());
+  const transport = backend.transport();
+  const client = createClient(ConnectionService, transport);
+  // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const worktreeClient = createClient(WorktreeService, transport);
   cy.mount(
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
+        worktreeClient={worktreeClient}
         sessionToken="fake-token"
         onCancel={cy.stub()}
         onCreated={cy.stub().as("onCreated")}
@@ -277,7 +282,7 @@ it("attaches an uploaded file by its upload id and file name", () => {
  */
 function aHostWithATree(recorder: StartRecorder): InMemoryRpcBackend {
   return aHostWithDocuments(recorder).onUnary(
-    ConnectionService.method.listWorktreeDirectory,
+    WorktreeService.method.listWorktreeDirectory,
     (req) =>
       req.relPath === ""
         ? {

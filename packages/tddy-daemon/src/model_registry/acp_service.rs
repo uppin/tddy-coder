@@ -43,7 +43,7 @@ use super::provider_http::ProviderHttp;
 use super::store::ModelRegistryStore;
 use super::tool_dispatcher::EngineToolDispatcher;
 use super::workspace::{resolve_chat_workspace, ChatWorkspaceRoots};
-use crate::task_service::SessionUserResolver;
+use tddy_daemon_kernel::SessionUserResolver;
 
 /// Outbound frames for one stream. Unbounded because the agent's update sink is a plain `Fn` with
 /// nowhere to await back-pressure, and dropping an update would silently truncate the transcript.

@@ -12,11 +12,9 @@ import { create, toBinary } from "@bufbuild/protobuf";
 import {
   AgentInfoSchema,
   ConnectSessionResponseSchema,
-  EligibleDaemonEntrySchema,
   ListAgentModelsResponseSchema,
   ModelInfoSchema,
   ListAgentsResponseSchema,
-  ListEligibleDaemonsResponseSchema,
   ListProjectBranchesResponseSchema,
   ListProjectsResponseSchema,
   ListSessionsResponseSchema,
@@ -28,12 +26,16 @@ import {
   ToolInfoSchema,
   type AgentInfo,
   type ConnectSessionResponse,
-  type EligibleDaemonEntry,
   type ProjectEntry,
   type ResumeSessionResponse,
   type SessionEntry,
   type StartSessionResponse,
 } from "../../../src/gen/connection_pb";
+import {
+  EligibleDaemonEntrySchema,
+  ListEligibleDaemonsResponseSchema,
+  type EligibleDaemonEntry,
+} from "../../../src/gen/host_pb";
 import { GetAuthStatusResponseSchema, GitHubUserSchema, type GitHubUser } from "../../../src/gen/auth_pb";
 import {
   GenerateTokenResponseSchema,

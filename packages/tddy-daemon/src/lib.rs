@@ -4,16 +4,23 @@ pub mod action_service;
 pub mod active_elicitation;
 pub mod agent_list_mapping;
 pub mod auth;
-pub mod base_sync_cache;
-pub mod branch_intent;
-pub mod branch_owner;
+/// The eight git/worktree modules, which now live in `tddy-worktree-service`.
+///
+/// Named one by one rather than globbed: both new crates carry a `service` and a `stream`
+/// module, and two globs would re-export each name twice under one path. Every module keeps its
+/// own name in the crate it moved to, so `crate::worktrees::X` goes on resolving here and no
+/// caller in this crate changed.
+pub use tddy_worktree_service::{
+    base_sync_cache, branch_intent, branch_owner, project_provision, project_storage,
+    remote_git_service, worktree_files, worktrees,
+};
 pub mod bsp_service;
 pub mod claude_cli_session;
 pub mod cli_session_manager;
 mod codex_oauth_participant_metadata;
 pub mod codex_oauth_relay;
 pub mod common_room_supervisor;
-pub mod config;
+pub use tddy_daemon_kernel::config;
 pub mod connection_service;
 pub mod connection_tonic_adapter;
 pub mod context_files;
@@ -24,30 +31,25 @@ pub mod daemon_settings;
 pub mod elicitation;
 pub mod github_pr_credentials;
 pub mod github_token_store;
-pub mod host_desktop_targets;
+pub mod host_tonic_adapter;
+/// The nine host modules and the four host-key ones, which now live in `tddy-host-service`.
+///
+/// Named one by one for the reason above; see `tddy_worktree_service`'s facade.
+pub use tddy_host_service::{
+    host_desktop_targets, host_keypair, host_messages, host_private_key, host_prompt_stream,
+    host_prompts, host_registry, host_session_service, host_stats, host_tooling, multi_host,
+    remote_desktop_probe, ssh_agent, ssh_agent_add,
+};
 pub mod host_documents;
-pub mod host_keypair;
-pub mod host_private_key;
-pub mod host_prompt_stream;
-pub mod host_prompts;
-pub mod host_registry;
-pub mod host_session_service;
-pub mod host_stats;
-pub mod host_tooling;
 pub mod livekit_peer_discovery;
 pub mod livekit_rooms_stream;
 pub mod local_socket_server;
 pub mod model_registry;
-pub mod multi_host;
 mod oauth_loopback_tunnel;
 pub mod presenter_intent_client;
-pub mod project_provision;
-pub mod project_storage;
 pub mod pty_registry;
 pub mod pty_runtime;
 pub mod relay_idle;
-pub mod remote_desktop_probe;
-pub mod remote_git_service;
 pub mod runtime;
 pub mod semantic_index;
 pub mod server;
@@ -72,8 +74,6 @@ pub mod session_workflow_files;
 pub mod spawn_worker;
 pub mod spawner;
 pub mod split_session;
-pub mod ssh_agent;
-pub mod ssh_agent_add;
 pub mod stack_doc_attachments;
 pub mod startup;
 pub mod supervisor_client;
@@ -94,8 +94,7 @@ pub mod tool_catalog_sync;
 pub mod user_sessions_path;
 pub mod workspace_session;
 pub mod workspace_tool_sandbox;
-pub mod worktree_files;
-pub mod worktrees;
+pub mod worktree_tonic_adapter;
 
 // Re-export the shared tool engine so legacy `crate::tool_engine::...` references inside the
 // daemon keep resolving after the extraction into the `tddy-tool-engine` crate.

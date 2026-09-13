@@ -1,5 +1,5 @@
 /**
- * Test double for **`ConnectionService.StreamHostPrompts`** — the one channel on which a host asks
+ * Test double for **`HostService.StreamHostPrompts`** — the one channel on which a host asks
  * the browser a question (feature: `docs/ft/web/hosts-screen-add-key.md`).
  *
  * The real stream stays open for the life of the screen and is **silent almost all of the time**;
@@ -16,7 +16,7 @@ import {
   HostPromptEventSchema,
   HostPromptKind,
   type HostPromptEvent,
-} from "../../../src/gen/connection_pb";
+} from "../../../src/gen/host_pb";
 
 /** One question a host is waiting on, as a spec states it. */
 export interface HostPromptFrame {
@@ -38,7 +38,7 @@ export interface HostPromptFrame {
 }
 
 export interface HostPromptFeed {
-  /** The `StreamHostPrompts` handler, spreadable into a `ConnectionService` backend. */
+  /** The `StreamHostPrompts` handler, spreadable into a `HostService` backend. */
   readonly handlers: Record<string, unknown>;
   /** Deliver one prompt to every subscribed client, now. */
   readonly raise: (frame: HostPromptFrame) => void;

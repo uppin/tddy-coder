@@ -119,7 +119,7 @@ async fn run_presenter_observer_loop(
                         os_user,
                         label,
                         &result,
-                        crate::connection_service::now_unix_ms(),
+                        tddy_daemon_kernel::now_unix_ms(),
                     )
                 })
                 .await;

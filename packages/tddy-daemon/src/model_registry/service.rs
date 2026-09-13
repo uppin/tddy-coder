@@ -22,7 +22,7 @@ use super::error::ModelRegistryError;
 use super::labels::UNDETERMINABLE_LABEL;
 use super::provider_client::{ProviderClient, ProviderClientFactory};
 use super::store::{ModelRegistryStore, NewAssistant, NewProvider};
-use crate::task_service::SessionUserResolver;
+use tddy_daemon_kernel::SessionUserResolver;
 
 pub struct ModelRegistryServiceImpl {
     store: Arc<ModelRegistryStore>,

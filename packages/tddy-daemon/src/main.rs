@@ -163,20 +163,20 @@ fn main() -> anyhow::Result<()> {
             }
         });
 
-        let res = tddy_daemon::server::run_server(
-            host.as_str(),
+        let res = tddy_daemon::server::run_server(tddy_daemon::server::RunServerOptions {
+            host,
             port,
             bundle_path,
-            daemon.entries,
+            rpc_entries: daemon.entries,
             livekit_url,
             common_room,
             livekit_enabled,
             daemon_instance_id,
             allowed_agents,
-            web_debug,
-            daemon.lifecycle_telegram,
-            daemon.relay_shutdown, // Some(rx) in relay mode; None otherwise
-        )
+            debug: web_debug,
+            lifecycle_telegram: daemon.lifecycle_telegram,
+            shutdown_rx: daemon.relay_shutdown, // Some(rx) in relay mode; None otherwise
+        })
         .await;
 
         // Also call kill_all after the server finishes (covers graceful ctrl-c shutdown

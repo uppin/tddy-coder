@@ -192,6 +192,22 @@ struct LocalSocketTransport {
     adapter: crate::connection_tonic_adapter::ConnectionServiceTonicAdapter<
         crate::connection_service::ConnectionServiceImpl,
     >,
+    /// The two services `#unbundle` node 1 split out, served on the **same** socket. A caller that
+    /// reached `GetHostTooling` here before the split must go on reaching it here after.
+    host_adapter:
+        crate::host_tonic_adapter::HostServiceTonicAdapter<tddy_host_service::HostServiceImpl>,
+    worktree_adapter: crate::worktree_tonic_adapter::WorktreeServiceTonicAdapter<
+        tddy_worktree_service::WorktreeServiceImpl,
+    >,
+}
+
+/// This daemon's session rooms, as the closer `tddy-worktree-service` asks for before a removal.
+struct SessionRoomWorktreeCloser(Arc<crate::session_room::SessionRoomRegistry>);
+
+impl tddy_worktree_service::WorktreeRoomCloser for SessionRoomWorktreeCloser {
+    fn close_for_worktree(&self, worktree_path: &std::path::Path) {
+        self.0.close_for_worktree(worktree_path);
+    }
 }
 
 /// The Telegram bot's inbound dispatcher: the buttons an operator presses in a chat.
@@ -265,6 +281,8 @@ impl RuntimeTasks {
                 if let Err(e) = crate::local_socket_server::serve_connection_uds(
                     &local_socket.socket_path,
                     local_socket.adapter,
+                    local_socket.host_adapter,
+                    local_socket.worktree_adapter,
                     shutdown,
                 )
                 .await
@@ -565,7 +583,7 @@ pub async fn build(
             };
         // Clone before moving into ConnectionServiceImpl — VmService and ScreenSharingService need the same resolver.
         let vm_user_resolver = user_resolver.clone();
-        let sessions_base_resolver: crate::connection_service::SessionsBaseResolver = {
+        let sessions_base_resolver: tddy_daemon_kernel::SessionsBaseResolver = {
             let dd = tddy_data_dir.clone();
             Arc::new(move |user: &str| {
                 crate::user_sessions_path::sessions_base_for_user(user, Some(&dd))
@@ -710,6 +728,46 @@ pub async fn build(
         let host_prompts: Arc<dyn crate::host_prompts::HostPromptRegistry> =
             Arc::new(crate::host_prompts::InMemoryHostPromptRegistry::new());
 
+        // Built before `ConnectionServiceImpl` consumes `livekit_discovery`: the host service
+        // routes on the same live roster and forwards over the same common room, so both take a
+        // handle on the one set of discovery handles rather than each deriving its own.
+        let host_service_impl = {
+            let mut host_service = tddy_host_service::HostServiceImpl::new(
+                config.clone(),
+                &tddy_data_dir,
+                Arc::clone(&user_resolver),
+            )
+            .with_host_registry(Arc::clone(&host_registry))
+            .with_host_prompts(Arc::clone(&host_prompts));
+            if let Some(ref handles) = livekit_discovery {
+                host_service = host_service
+                    .with_eligible_daemon_source(Arc::clone(&handles.eligible_daemon_source))
+                    .with_common_room(Arc::clone(&handles.common_room_livekit_room));
+            }
+            if let Some(ref tracker) = idle_tracker {
+                host_service = host_service.with_idle_tracker(tracker.clone());
+            }
+            Arc::new(host_service)
+        };
+
+        // The rooms this daemon hosts per worktree, closed by path before a checkout is removed.
+        // Injected as the port `tddy-worktree-service` declares rather than the registry itself:
+        // a session room is family C and stays in this crate.
+        let worktree_service_impl = {
+            let mut worktree_service = tddy_worktree_service::WorktreeServiceImpl::new(
+                config.clone(),
+                tddy_data_dir.clone(),
+                Arc::clone(&user_resolver),
+            )
+            .with_session_rooms(Arc::new(SessionRoomWorktreeCloser(Arc::clone(
+                &shared_session_rooms,
+            ))));
+            if let Some(ref tracker) = idle_tracker {
+                worktree_service = worktree_service.with_idle_tracker(tracker.clone());
+            }
+            Arc::new(worktree_service)
+        };
+
         let mut connection_impl = crate::connection_service::ConnectionServiceImpl::new(
             config.clone(),
             sessions_base_resolver,
@@ -722,8 +780,6 @@ pub async fn build(
         )
         .with_session_rooms(Arc::clone(&shared_session_rooms))
         .with_model_registry(Arc::clone(&model_registry))
-        .with_host_registry(host_registry)
-        .with_host_prompts(Arc::clone(&host_prompts))
         .with_session_notification_bus(session_notification_bus);
         if let Some(ref tracker) = idle_tracker {
             connection_impl = connection_impl.with_idle_tracker(tracker.clone());
@@ -781,6 +837,14 @@ pub async fn build(
                     signer,
                     uid_to_username,
                 ),
+                // The same `Arc`s the entries above serve, so a host prompt raised over the socket
+                // is the one a browser answers over HTTP.
+                host_adapter: crate::host_tonic_adapter::HostServiceTonicAdapter::new(Arc::clone(
+                    &host_service_impl,
+                )),
+                worktree_adapter: crate::worktree_tonic_adapter::WorktreeServiceTonicAdapter::new(
+                    Arc::clone(&worktree_service_impl),
+                ),
             });
         }
 
@@ -788,6 +852,25 @@ pub async fn build(
         rpc_entries.push(tddy_rpc::ServiceEntry {
             name: "connection.ConnectionService",
             service: Arc::new(connection_server) as Arc<dyn tddy_rpc::RpcService>,
+        });
+
+        // HostService — the durable host registry, each host's tooling probe, its telemetry, the
+        // prompts it raises and the keys it can be given. Registered here rather than beside the
+        // local socket above so it rides the same entries as every other service: reachable over
+        // HTTP `/rpc` and over the LiveKit common room, which is also how a *peer* daemon answers a
+        // forwarded `GetHostTooling`.
+        let host_server = tddy_service::HostServiceServer::from_arc(Arc::clone(&host_service_impl));
+        rpc_entries.push(tddy_rpc::ServiceEntry {
+            name: "host.HostService",
+            service: Arc::new(host_server) as Arc<dyn tddy_rpc::RpcService>,
+        });
+
+        // WorktreeService — listing, cleaning, sizing, restoring and reading a project's checkouts.
+        let worktree_server =
+            tddy_service::WorktreeServiceServer::from_arc(Arc::clone(&worktree_service_impl));
+        rpc_entries.push(tddy_rpc::ServiceEntry {
+            name: "worktree.WorktreeService",
+            service: Arc::new(worktree_server) as Arc<dyn tddy_rpc::RpcService>,
         });
 
         // ModelRegistryService — this daemon's providers, models and assistants. Rides the same

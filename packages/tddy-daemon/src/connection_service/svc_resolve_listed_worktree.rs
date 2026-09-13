@@ -6,12 +6,10 @@ use std::path::Path;
 
 use crate::{
     connection_service::agent_roster, project_storage, spawn_worker, spawner,
-    user_sessions_path::repos_base_for_user, worktrees,
+    user_sessions_path::repos_base_for_user,
 };
 
 use crate::livekit_peer_discovery::local_instance_id_for_config;
-
-use crate::user_sessions_path::projects_path_for_user;
 
 use tddy_rpc::Status;
 
@@ -20,65 +18,6 @@ use std::path::PathBuf;
 use super::ConnectionServiceImpl;
 
 impl ConnectionServiceImpl {
-    /// Authenticates the caller, resolves the project's main repo on this host, and confirms
-    /// `worktree_path` appears in that repo's `git worktree list`, returning the validated worktree
-    /// root. Mirrors the `remove_worktree` preamble: authenticate first (invalid session →
-    /// `Unauthenticated`), resolve the project (unknown → `NotFound`), then gate on git's worktree
-    /// membership so filesystem access never escapes a real worktree.
-    pub(crate) fn resolve_listed_worktree(
-        &self,
-        session_token: &str,
-        project_id: &str,
-        worktree_path: &str,
-    ) -> Result<PathBuf, Status> {
-        let github_user = (self.user_resolver)(session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        let project_id = project_id.trim();
-        if project_id.is_empty() {
-            return Err(Status::invalid_argument("project_id is required"));
-        }
-        let worktree_path_raw = worktree_path.trim();
-        if worktree_path_raw.is_empty() {
-            return Err(Status::invalid_argument("worktree_path is required"));
-        }
-
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let local_id = local_instance_id_for_config(&self.config);
-        let main_repo_str =
-            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
-                .map_err(|e| Status::internal(e.to_string()))?
-                .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let main_repo = PathBuf::from(&main_repo_str);
-        if !main_repo.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
-
-        let worktree_path = PathBuf::from(worktree_path_raw);
-        if !worktrees::worktree_path_is_listed(&main_repo, &worktree_path) {
-            log::warn!(
-                "resolve_listed_worktree: worktree_path not in git worktree list: {:?}",
-                worktree_path
-            );
-            return Err(Status::failed_precondition(
-                "worktree_path is not a worktree of this project",
-            ));
-        }
-        Ok(worktree_path)
-    }
-
     /// Ensure the project's working copy exists on this (local) host before a session starts,
     /// auto-cloning it when missing: from the local registry's `git_url` if the project is already
     /// registered here, otherwise from a peer daemon that hosts it (reusing the logical

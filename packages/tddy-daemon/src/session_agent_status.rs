@@ -20,7 +20,8 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use tddy_daemon_kernel::now_unix_ms;
 
 use tddy_core::session_activity::SessionActivityStatus;
 use tddy_service::proto::connection::{AgentCloneState, SessionAgentActivity, SessionAgentStatus};
@@ -298,13 +299,6 @@ pub(crate) fn truncate_summary(raw: &str) -> String {
             format!("{kept}…")
         }
     }
-}
-
-pub(crate) fn now_unix_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

@@ -35,11 +35,10 @@ use tddy_core::changeset::{write_changeset, Changeset, Stack, StackNode};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::{
-    ConnectionServiceImpl, SessionUserResolver, SessionsBaseResolver,
-};
+use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ResolveStackBaseRequest, StartSessionRequest,

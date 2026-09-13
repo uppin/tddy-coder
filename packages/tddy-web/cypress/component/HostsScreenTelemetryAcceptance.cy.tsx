@@ -29,7 +29,7 @@ import {
   type ConnectionServiceScenario,
 } from "../support/rpc/connectionServiceBackend";
 import { HostsAppPage } from "../../src/components/hosts/HostsAppPage";
-import { ConnectionService, type KnownHostEntry } from "../../src/gen/connection_pb";
+import { HostService, type KnownHostEntry } from "../../src/gen/host_pb";
 import { HostRowTelemetry } from "../../src/components/hosts/HostRowTelemetry";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -247,7 +247,7 @@ describe("Hosts screen telemetry", () => {
      * about it from this node would collide with the PR that owns it.
      */
     function aDaemonListing(hosts: KnownHostEntry[]): InMemoryRpcBackend {
-      return anInMemoryRpcBackend().implement(ConnectionService, {
+      return anInMemoryRpcBackend().implement(HostService, {
         listKnownHosts: () => ({ hosts }),
         streamHostStats: async function* () {
           yield { cpu: { perCorePercent: CPU_PER_CORE }, disk: DISK };

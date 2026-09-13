@@ -2,6 +2,7 @@ import React from "react";
 import { ConnectError, type Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry, ProjectEntry } from "../../gen/connection_pb";
+import type { WorktreeService } from "../../gen/worktree_pb";
 import { projectForUnscopedSession } from "../../utils/sessionProjectTable";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { SessionAttachmentHint } from "../../rpc/connections/session";
@@ -32,6 +33,7 @@ import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type WorktreeClient = Client<typeof WorktreeService>;
 
 interface SessionMainPaneProps {
   selectedSession: SessionEntry | null;
@@ -51,6 +53,12 @@ interface SessionMainPaneProps {
   // Create session mode
   isCreating?: boolean;
   client?: ConnectionClient;
+  /**
+   * The worktree service on the same host as `client` — the Code pane, the inspector's Worktree tab
+   * and the create form's host-document picker all read worktrees through it. Absent for the same
+   * reason `client` can be: no daemon is reachable yet.
+   */
+  worktreeClient?: WorktreeClient;
   /** The connection to the daemon that owns the selected session — a runtime attaches its spawned
    *  child conversations over it, and the inspector's media tabs are gated on it. `null` until a
    *  host is reachable.
@@ -122,6 +130,7 @@ export function SessionMainPane({
   onTerminate,
   isCreating = false,
   client,
+  worktreeClient,
   host,
   sessionToken = "",
   onCancelCreate,
@@ -153,7 +162,7 @@ export function SessionMainPane({
     () => setParams({ [PARAM_CODE]: codeOpen ? null : "1" }),
     [codeOpen, setParams],
   );
-  const codePaneEnabled = Boolean(client && selectedSession);
+  const codePaneEnabled = Boolean(worktreeClient && selectedSession);
 
   // The worktree RPCs require a non-empty `project_id`. Scoped sessions carry their own; unscoped
   // sessions (empty `projectId`) resolve to the registered project whose main repo is the longest
@@ -268,6 +277,7 @@ export function SessionMainPane({
   const customView = !isCreating
     ? resolveWorkflowView(selectedSession, {
         client,
+        worktreeClient,
         sessionToken,
         attachmentHint,
         sessions: [...sessions],
@@ -389,9 +399,10 @@ export function SessionMainPane({
       data-testid="sessions-detail-pane"
       className="flex-1 min-w-0 flex flex-col h-full overflow-hidden relative"
     >
-      {isCreating && client && (
+      {isCreating && client && worktreeClient && (
         <CreateSessionPane
           client={client}
+          worktreeClient={worktreeClient}
           sessionToken={sessionToken}
           onCancel={onCancelCreate ?? (() => undefined)}
           onCreated={onSessionCreated ?? (() => undefined)}
@@ -502,7 +513,7 @@ export function SessionMainPane({
                 >
                   {baseView}
                 </Panel>
-                {codeOpen && codePaneEnabled && client && (
+                {codeOpen && codePaneEnabled && worktreeClient && (
                   <>
                     <PanelResizeHandle className="w-1 bg-border transition-colors hover:bg-primary/40" />
                     <Panel
@@ -513,7 +524,7 @@ export function SessionMainPane({
                       className="flex min-h-0 flex-col overflow-hidden"
                     >
                       <WorktreeCodePane
-                        client={client}
+                        client={worktreeClient}
                         sessionToken={sessionToken}
                         projectId={resolvedProjectId}
                         worktreePath={selectedSession.repoPath}
@@ -538,6 +549,7 @@ export function SessionMainPane({
                 onDelete={onDelete}
                 onTerminate={onTerminate}
                 client={client}
+                worktreeClient={worktreeClient}
                 sessionToken={sessionToken}
                 /* The media tabs are gated on the connection to the host that owns this session —
                    `host`, the same connection the screen already resolved for every other

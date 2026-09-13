@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { ConnectionService, type KnownHostEntry } from "../../gen/connection_pb";
+import { HostService, type KnownHostEntry } from "../../gen/host_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { AppShell } from "../shell/AppShell";
@@ -26,7 +26,7 @@ function rowFromRpc(host: KnownHostEntry): HostRow {
 
 export function HostsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { sessionToken } = useAuthContext();
-  const client = useDaemonClient(ConnectionService);
+  const client = useDaemonClient(HostService);
 
   const [rows, setRows] = useState<HostRow[]>([]);
   const [error, setError] = useState<string | null>(null);

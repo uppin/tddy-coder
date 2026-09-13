@@ -11,6 +11,7 @@ use std::path::Path;
 use tddy_core::changeset::Changeset;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon::branch_owner::find_session_owning_branch;
+use tddy_daemon::session_reader::DaemonSessionListing;
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
 const BRANCH: &str = "feat/auth";
@@ -76,7 +77,7 @@ fn finds_the_session_whose_changeset_names_the_branch() {
     );
 
     // When
-    let owner = find_session_owning_branch(temp.path(), BRANCH).unwrap();
+    let owner = find_session_owning_branch(&DaemonSessionListing, temp.path(), BRANCH).unwrap();
 
     // Then
     assert_eq!(owner.map(|s| s.session_id), Some(FIRST_SESSION.to_string()));
@@ -95,7 +96,7 @@ fn finds_no_owner_when_no_session_names_the_branch() {
     );
 
     // When
-    let owner = find_session_owning_branch(temp.path(), BRANCH).unwrap();
+    let owner = find_session_owning_branch(&DaemonSessionListing, temp.path(), BRANCH).unwrap();
 
     // Then — a branch nobody claims has no owner, so nothing is there to switch to
     assert_eq!(owner.map(|s| s.session_id), None);
@@ -121,7 +122,7 @@ fn prefers_the_active_owner_over_a_more_recently_updated_idle_one() {
     );
 
     // When
-    let owner = find_session_owning_branch(temp.path(), BRANCH).unwrap();
+    let owner = find_session_owning_branch(&DaemonSessionListing, temp.path(), BRANCH).unwrap();
 
     // Then — a running agent is the one an operator would switch to, however stale its metadata
     assert_eq!(owner.map(|s| s.session_id), Some(FIRST_SESSION.to_string()));
@@ -147,7 +148,7 @@ fn prefers_the_most_recently_updated_owner_when_neither_is_active() {
     );
 
     // When
-    let owner = find_session_owning_branch(temp.path(), BRANCH).unwrap();
+    let owner = find_session_owning_branch(&DaemonSessionListing, temp.path(), BRANCH).unwrap();
 
     // Then
     assert_eq!(
@@ -170,7 +171,7 @@ fn skips_a_session_whose_changeset_cannot_be_read() {
     );
 
     // When
-    let owner = find_session_owning_branch(temp.path(), BRANCH).unwrap();
+    let owner = find_session_owning_branch(&DaemonSessionListing, temp.path(), BRANCH).unwrap();
 
     // Then — a session that names no branch claims none, and does not abort the scan
     assert_eq!(

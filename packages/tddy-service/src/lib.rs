@@ -35,6 +35,7 @@ pub use proto::actions::ActionServiceServer;
 pub use proto::auth::{AuthServiceServer, LiveKitTokenServiceServer};
 pub use proto::bsp::BspServiceServer;
 pub use proto::connection::ConnectionServiceServer;
+pub use proto::host::HostServiceServer;
 pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::models::{ModelRegistryService, ModelRegistryServiceServer};
 pub use proto::reflection::ServerReflectionServer;
@@ -47,6 +48,7 @@ pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
 pub use proto::vm::VmServiceServer;
+pub use proto::worktree::WorktreeServiceServer;
 pub use reflection_service::{reflection_entry_from, ServerReflectionImpl};
 pub use service::{session_view_adapter_surface, TddyRemoteService};
 pub use service_acp::TddyAcpService;
@@ -80,6 +82,20 @@ pub mod proto {
     #[allow(unused_imports, unused_variables)]
     pub mod connection {
         include!(concat!(env!("OUT_DIR"), "/connection.rs"));
+    }
+    /// `HostService`: the durable host registry, tooling probes, telemetry, prompts and ssh keys.
+    ///
+    /// Split out of [`connection`] by `#unbundle` node 1. It imports nothing from `connection` and
+    /// needs no shared types file, because the closure of messages its eight methods reach shares
+    /// **nothing** with any method that stayed behind — established by walking the field types
+    /// rather than assumed.
+    pub mod host {
+        include!(concat!(env!("OUT_DIR"), "/host.rs"));
+    }
+    /// `WorktreeService`: listing worktrees per project, their disk usage, their lifecycle, and
+    /// browsing and reading the files inside one.
+    pub mod worktree {
+        include!(concat!(env!("OUT_DIR"), "/worktree.rs"));
     }
     /// `RemoteGitService`: a daemon project served as a git remote. See
     /// `docs/ft/daemon/remote-git-repo.md`.
@@ -255,6 +271,20 @@ pub mod tonic_sandbox {
 pub mod tonic_connection {
     #![allow(unused_imports, clippy::all)]
     include!(concat!(env!("OUT_DIR"), "/tonic_connection/connection.rs"));
+}
+
+/// Tonic-generated gRPC server/client for `host.proto`, sharing `proto::host`'s message types via
+/// `extern_path`. Serves the Unix-domain-socket transport; every other transport goes through the
+/// tddy-rpc `HostServiceServer` re-exported above.
+pub mod tonic_host {
+    #![allow(unused_imports, clippy::all)]
+    include!(concat!(env!("OUT_DIR"), "/tonic_host/host.rs"));
+}
+
+/// Tonic-generated gRPC server/client for `worktree.proto`. See [`tonic_host`].
+pub mod tonic_worktree {
+    #![allow(unused_imports, clippy::all)]
+    include!(concat!(env!("OUT_DIR"), "/tonic_worktree/worktree.rs"));
 }
 
 #[cfg(test)]

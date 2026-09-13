@@ -1,46 +1,13 @@
 //! Per–OS-user settings read from `~/.tddy/config.yaml` (home of the user `tddy-coder` runs as).
+//!
+//! The reader itself lives in [`tddy_daemon_kernel::user_paths`], because
+//! `tddy-worktree-service`'s `remote_git_service` builds a child environment with it and cannot
+//! reach into this crate. This re-export keeps `crate::tddy_user_config::…` resolving, and the
+//! tests below stay here because they are this module's contract with its callers.
 
-use std::path::Path;
-
-/// YAML schema for `{home}/.tddy/config.yaml`.
-#[derive(Debug, Default, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TddyUserHomeConfig {
-    /// Colon-separated directories prepended to `PATH` for spawned `tddy-coder` (e.g. Cursor `agent`).
-    #[serde(default)]
-    pub spawn_path_extra: Option<String>,
-}
-
-/// Load `~/.tddy/config.yaml` under `home`. Missing file returns `None`; parse errors are logged.
-pub fn load_tddy_user_config(home: &Path) -> Option<TddyUserHomeConfig> {
-    let path = home.join(".tddy").join("config.yaml");
-    if !path.is_file() {
-        return None;
-    }
-    let contents = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(e) => {
-            log::warn!("tddy user config: read {}: {}", path.display(), e);
-            return None;
-        }
-    };
-    match serde_yaml::from_str::<TddyUserHomeConfig>(&contents) {
-        Ok(c) => Some(c),
-        Err(e) => {
-            log::warn!("tddy user config: parse {}: {}", path.display(), e);
-            None
-        }
-    }
-}
-
-/// `spawn_path_extra` from the target user's `~/.tddy/config.yaml`, if set and non-empty.
-pub fn spawn_path_extra_for_home(home: &Path) -> Option<String> {
-    load_tddy_user_config(home).and_then(|c| {
-        c.spawn_path_extra
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-    })
-}
+pub use tddy_daemon_kernel::user_paths::{
+    load_tddy_user_config, spawn_path_extra_for_home, TddyUserHomeConfig,
+};
 
 #[cfg(test)]
 mod tests {

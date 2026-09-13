@@ -72,6 +72,20 @@ pub enum RefactorKind {
     ExtractTrait,
     /// rust-analyzer `Inline into all callers`. TypeScript has no inline refactor at all.
     InlineMethod,
+    /// Moves a module's file into another crate, rewrites its own `use` header, and re-points every
+    /// caller. The **third** operation in this vocabulary with no engine behind it, after
+    /// `extract_class` and the facade `use` line — rust-analyzer has no cross-crate move assist, so
+    /// there is nothing to delegate to.
+    ///
+    /// It is engine-*informed* rather than engine-*performed*: every caller it rewrites comes from a
+    /// real `textDocument/references` result, not a text search. That is the line this operation
+    /// holds, and it is why it is not the `rewrite_import_path` the vocabulary already rejected —
+    /// that one had no way to find what to rewrite.
+    ///
+    /// Takes `to` (the destination crate's directory) and honours a crate-level `reexport`, which
+    /// leaves `pub use <new_crate>::…;` behind so a move can have zero caller diff — the same
+    /// principle as `extract_module`'s facade, one level up.
+    MoveModuleToCrate,
 }
 
 /// What a module extraction leaves in the parent so a path that reached the moved items still
@@ -219,12 +233,41 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
     // Silently ignoring the field would be worse than refusing it: the plan author asked for a
     // facade, would not get one, and would read the resulting stranded-reference refusal as the
     // facade having failed to help.
-    if op.reexport.is_some() && op.op != RefactorKind::ExtractModule {
+    // `move_module_to_crate` writes the same kind of facade one level up — `pub use <crate>::…;` in
+    // the crate the module left — so it honours the field for the same reason and with the same
+    // failure mode if the field were ignored.
+    if op.reexport.is_some()
+        && op.op != RefactorKind::ExtractModule
+        && op.op != RefactorKind::MoveModuleToCrate
+    {
         return Err(malformed(format!(
-            "`reexport` asks for a facade in the parent module, which only `extract_module` writes — \
-             `{:?}` cannot honour one",
+            "`reexport` asks for a facade where the moved items used to live, which only \
+             `extract_module` and `move_module_to_crate` write — `{:?}` cannot honour one",
             op.op
         )));
+    }
+
+    // A named facade cannot serve a *module* move, and refusing it beats emitting a tree that does
+    // not compile. Callers of a moved module write `crate::<module>::Item`, so the facade has to put
+    // something at `crate::<module>`; a `pub use <crate>::{Item, …};` puts the items at the crate
+    // root instead, and because a facade also suppresses caller re-pointing, every one of those
+    // callers is left naming a module that no longer exists. `glob` works because
+    // `pub use <crate>::*;` re-exports the destination's `pub mod <module>` under its own name.
+    // Refusing follows this file's own rule that a vocabulary advertising what it cannot perform is
+    // worse than a smaller one.
+    if op.op == RefactorKind::MoveModuleToCrate && op.reexport == Some(Reexport::Named) {
+        return Err(malformed(
+            "`move_module_to_crate` cannot write a named facade: a caller writes              `crate::<module>::Item`, and a named re-export puts the items at the crate root, so              every caller would stop resolving — use `glob`, which re-exports the module itself",
+        ));
+    }
+
+    // A cross-crate move with no destination has nowhere to go, and defaulting one would guess at a
+    // crate — the one thing a plan of intents must never do on the author's behalf.
+    if op.op == RefactorKind::MoveModuleToCrate && op.to.is_none() {
+        return Err(malformed(
+            "`move_module_to_crate` needs `to`: the destination crate's directory, relative to the \
+             repository root",
+        ));
     }
 
     if op.to_file && op.op != RefactorKind::ExtractModule {
@@ -517,6 +560,62 @@ mod tests {
         .unwrap();
 
         assert_eq!(plan.ops[0].reexport, Some(Reexport::Glob));
+    }
+
+    #[test]
+    fn reads_the_destination_crate_a_cross_crate_move_names() {
+        let plan = Plan::parse(&plan_with(
+            r#"{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-daemon/src/host_registry.rs","path":"host_registry"},"to":"packages/tddy-host-service"}"#,
+        ))
+        .unwrap();
+
+        assert_eq!(plan.ops[0].op, RefactorKind::MoveModuleToCrate);
+        assert_eq!(
+            plan.ops[0].to.as_deref(),
+            Some("packages/tddy-host-service")
+        );
+    }
+
+    /// The facade is the whole reason a cross-crate move can be reviewed: with one, no caller moves.
+    #[test]
+    fn reads_the_crate_level_facade_a_cross_crate_move_asks_for() {
+        let plan = Plan::parse(&plan_with(
+            r#"{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-daemon/src/host_registry.rs","path":"host_registry"},"to":"packages/tddy-host-service","reexport":"glob"}"#,
+        ))
+        .unwrap();
+
+        assert_eq!(plan.ops[0].reexport, Some(Reexport::Glob));
+    }
+
+    /// Defaulting a destination would guess at a crate, which is the one thing a plan of intents
+    /// must never do on the author's behalf.
+    #[test]
+    fn refuses_a_cross_crate_move_with_no_destination() {
+        let outcome = Plan::parse(&plan_with(
+            r#"{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-daemon/src/host_registry.rs","path":"host_registry"}}"#,
+        ));
+
+        let Err(RestructureError::MalformedPlan(reason)) = outcome else {
+            panic!("expected a malformed-plan refusal, got {outcome:?}");
+        };
+        assert!(reason.contains("`to`"), "{reason}");
+    }
+
+    /// A named facade would leave every caller naming a module that no longer exists, and a facade
+    /// also suppresses caller re-pointing — so the tree would not compile and nothing would say why.
+    #[test]
+    fn refuses_a_named_facade_on_a_cross_crate_move() {
+        let outcome = Plan::parse(&plan_with(
+            r#"{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-daemon/src/host_registry.rs","path":"host_registry"},"to":"packages/tddy-host-service","reexport":"named"}"#,
+        ));
+
+        let Err(RestructureError::MalformedPlan(reason)) = outcome else {
+            panic!("expected a malformed-plan refusal, got {outcome:?}");
+        };
+        assert!(
+            reason.contains("glob"),
+            "the refusal must name the alternative: {reason}"
+        );
     }
 
     /// Every plan written before the field existed has to go on meaning what it meant.

@@ -88,7 +88,8 @@ export interface ConnectionRpcOptions {
 
 /**
  * Registers cy.intercept aliases for all six RPCs used by ConnectionScreen:
- * GetAuthStatus, ListTools, ListAgents, ListEligibleDaemons, ListSessions, ListProjects.
+ * GetAuthStatus, ListTools, ListAgents, ListSessions, ListProjects (`connection.ConnectionService`)
+ * and ListEligibleDaemons (`host.HostService`).
  *
  * Always sets aliases @getAuthStatus, @listTools, @listAgents, @listEligibleDaemons,
  * @listSessions, @listProjects.
@@ -123,7 +124,7 @@ export function interceptConnectionRpcs(
       ? listEligibleDaemons([{ instanceId: "local", label: "local (this daemon)", isLocal: true }])
       : listEligibleDaemons(opts.daemons),
   );
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListEligibleDaemons", (req) => {
+  cy.intercept("POST", "**/rpc/host.HostService/ListEligibleDaemons", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: daemonsBody });
   }).as("listEligibleDaemons");
 

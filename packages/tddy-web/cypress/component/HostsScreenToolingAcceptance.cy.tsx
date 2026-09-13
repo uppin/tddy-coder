@@ -19,7 +19,7 @@ import {
   HostGitIdentitySchema,
   HostGithubCliSchema,
   ProbeOutcome,
-} from "../../src/gen/connection_pb";
+} from "../../src/gen/host_pb";
 import { HostRowTooling } from "../../src/components/hosts/HostRowTooling";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { mountWithRpc } from "../support/rpc/inMemory";

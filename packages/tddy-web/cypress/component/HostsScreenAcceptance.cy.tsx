@@ -11,7 +11,7 @@
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { HostsAppPage } from "../../src/components/hosts/HostsAppPage";
-import { ConnectionService, type KnownHostEntry } from "../../src/gen/connection_pb";
+import { HostService, type KnownHostEntry } from "../../src/gen/host_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { appShellPage } from "../support/pages/appShellPage";
@@ -46,7 +46,7 @@ function aKnownHost(overrides: Partial<KnownHostEntry>): KnownHostEntry {
 }
 
 function aBackendListing(hosts: KnownHostEntry[]): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().implement(ConnectionService, {
+  return anInMemoryRpcBackend().implement(HostService, {
     listKnownHosts: () => ({ hosts }),
   });
 }
@@ -132,7 +132,7 @@ describe("Hosts screen", () => {
 
     hostsScreenPage.row(ONLINE_HOST).should("exist");
     cy.then(() => {
-      expect(backend.callsTo(ConnectionService.method.listKnownHosts)).to.have.length(1);
+      expect(backend.callsTo(HostService.method.listKnownHosts)).to.have.length(1);
     });
   });
 });

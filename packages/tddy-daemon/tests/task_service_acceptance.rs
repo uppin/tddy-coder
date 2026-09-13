@@ -15,7 +15,8 @@ use tddy_service::proto::tasks::{
 };
 use tddy_task::{ChannelKind, TaskBody, TaskChannel, TaskContext, TaskRegistry, TaskStatus};
 
-use tddy_daemon::task_service::{SessionUserResolver, TaskServiceImpl};
+use tddy_daemon::task_service::TaskServiceImpl;
+use tddy_daemon_kernel::SessionUserResolver;
 
 const GOOD_TOKEN: &str = "valid-token";
 const BAD_TOKEN: &str = "bogus-token";

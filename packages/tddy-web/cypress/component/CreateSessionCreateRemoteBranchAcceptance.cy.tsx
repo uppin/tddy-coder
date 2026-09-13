@@ -12,6 +12,7 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { WorktreeService } from "../../src/gen/worktree_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
@@ -55,10 +56,13 @@ function mountPane(backend: ReturnType<typeof aCreateSessionBackend>) {
   // The pane takes a Connect client directly (not via a hook), so build one over the in-memory
   // backend's transport — its `callsTo` still records every StartSession the pane issues.
   const client = createClient(ConnectionService, backend.transport());
+  // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const worktreeClient = createClient(WorktreeService, backend.transport());
   cy.mount(
     withSelectedDaemon(
       <CreateSessionPane
         client={client}
+        worktreeClient={worktreeClient}
         sessionToken="fake-token"
         onCancel={cy.stub()}
         onCreated={cy.stub()}

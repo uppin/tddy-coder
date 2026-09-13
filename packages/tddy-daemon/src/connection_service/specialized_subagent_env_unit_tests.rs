@@ -11,6 +11,7 @@
 //! isolates the new, platform-independent resolution logic this changeset adds.
 
 use super::*;
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
 fn make_unit_config() -> crate::config::DaemonConfig {
     let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";

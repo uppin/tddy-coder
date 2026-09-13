@@ -1,7 +1,7 @@
 /**
  * The question a host is waiting on, for whichever surface can answer it.
  *
- * Subscribes to `ConnectionService.StreamHostPrompts` for one host and surfaces its current
+ * Subscribes to `HostService.StreamHostPrompts` for one host and surfaces its current
  * outstanding prompt. Nothing else in this app is server-initiated except the ACP bidi stream, so
  * this is the whole of "the daemon asked us something" — the hook returns the prompt and the caller
  * decides what dialog it deserves.
@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { ConnectionService } from "../gen/connection_pb";
+import { HostService } from "../gen/host_pb";
 import { subscribeHostPrompts, type HostPromptEventLike } from "./hostPromptsSubscription";
 import { useHostClient } from "./connections/registry";
 import { useAuthContext } from "../hooks/authProvider";
@@ -31,7 +31,7 @@ export type { HostPromptEventLike };
  * @returns the outstanding prompt, or `null` when the host is not asking anything.
  */
 export function useHostPrompts(hostId: string | null): HostPromptEventLike | null {
-  const client = useHostClient(ConnectionService, hostId);
+  const client = useHostClient(HostService, hostId);
   const { sessionToken } = useAuthContext();
   const [prompt, setPrompt] = useState<HostPromptEventLike | null>(null);
 

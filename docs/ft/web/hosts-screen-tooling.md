@@ -142,7 +142,7 @@ in the ordinary way.
 Loading a key onto such a host runs into the same wall, and for the same reason: the add speaks to
 the socket the read side resolved. It needs a privileged path to it, which is a change to
 `tddy-supervisor` rather than to this screen. See
-[`packages/tddy-daemon/docs/host-tooling-probe.md`](../../../packages/tddy-daemon/docs/host-tooling-probe.md#reaching-the-socket-on-a-supervised-host).
+[`packages/tddy-host-service/docs/host-tooling-probe.md`](../../../packages/tddy-host-service/docs/host-tooling-probe.md#reaching-the-socket-on-a-supervised-host).
 
 ## Reporting, and the one action
 
@@ -219,8 +219,8 @@ of its own. It fetches nothing itself.
 
 ## Technical reference
 
-- Daemon: [`packages/tddy-daemon/docs/host-tooling-probe.md`](../../../packages/tddy-daemon/docs/host-tooling-probe.md),
-  [`connection-service.md`](../../../packages/tddy-daemon/docs/connection-service.md)
+- Daemon: [`packages/tddy-host-service/docs/host-tooling-probe.md`](../../../packages/tddy-host-service/docs/host-tooling-probe.md),
+  [`host-service.md`](../../../packages/tddy-host-service/docs/host-service.md)
 - Web: [`packages/tddy-web/docs/hosts-screen.md`](../../../packages/tddy-web/docs/hosts-screen.md)
 - Feature: [hosts-screen-add-key.md](./hosts-screen-add-key.md) — loading a key into the agent this
   section reports on

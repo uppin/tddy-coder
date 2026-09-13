@@ -70,6 +70,24 @@ path = "junit.xml"
 [test-groups]
 docker = { max-threads = 1 }
 
+# The live-rust-analyzer acceptance suites. Indexing is the contended resource, not a port: two
+# servers loading a crate graph while a `cargo check` runs beside them is how a bounded indexing
+# budget expires on a runner that is otherwise fine. A binary earns its place here by spawning
+# rust-analyzer, so the list is derivable rather than a record of past failures. Within one binary
+# the harness holds the same line with a lock, for a plain `cargo test`, which never reads this file.
+rust-analyzer = { max-threads = 1 }
+
+# On the default profile rather than `ci`: the load sensitivity belongs to the suite, not to the
+# runner, and a profile that does not override a group inherits it.
+[[profile.default.overrides]]
+filter = """
+package(tddy-code-restructuring) and (
+    binary(move_module_to_crate_acceptance)
+    or binary(rename_cross_file_acceptance)
+)
+"""
+test-group = "rust-analyzer"
+
 # Every binary that brings up (or joins) a LiveKit server belongs here, not just the ones that have
 # been seen to flake. Two of them were listed and the other twenty-one leaned on `retries` instead —
 # which is a different mechanism for a different problem: a retry re-runs a test that lost a port

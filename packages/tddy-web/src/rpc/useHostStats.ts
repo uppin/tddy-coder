@@ -2,7 +2,7 @@
  * Streaming hook for host-level machine stats surfaced by the Host Stats Footer: per-core CPU
  * utilization and the free/total disk capacity of the selected daemon's default project directory.
  *
- * Both are sourced from a single `ConnectionService.StreamHostStats` server-stream. The daemon owns
+ * Both are sourced from a single `HostService.StreamHostStats` server-stream. The daemon owns
  * the cadence (immediate emit on subscribe, then CPU every 5 s and disk every 60 s); each event
  * carries the latest CPU and disk snapshot.
  *
@@ -25,7 +25,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { ConnectionService } from "../gen/connection_pb";
+import { HostService } from "../gen/host_pb";
 import { subscribeHostStats } from "./hostStatsSubscription";
 import { useHostClient } from "./connections/registry";
 import { useDaemonClient } from "./selectedDaemon";
@@ -71,7 +71,7 @@ export interface UseHostStatsResult {
 }
 
 /**
- * Subscribe once to `ConnectionService.StreamHostStats` — for `hostId` when given, otherwise for the
+ * Subscribe once to `HostService.StreamHostStats` — for `hostId` when given, otherwise for the
  * selected daemon — and expose the latest CPU and disk snapshots. The reading itself is
  * `subscribeHostStats`: unmounting closes the stream even when the host has never reported, which a
  * `for await` parked on its first frame could not do.
@@ -82,8 +82,8 @@ export interface UseHostStatsResult {
  *        name, which is the fabrication the tri-state exists to prevent.
  */
 export function useHostStats(hostId?: string | null): UseHostStatsResult {
-  const selectedClient = useDaemonClient(ConnectionService);
-  const hostClient = useHostClient(ConnectionService, hostId ?? null);
+  const selectedClient = useDaemonClient(HostService);
+  const hostClient = useHostClient(HostService, hostId ?? null);
   // `undefined` means "follow the selector"; an explicit id — even one nothing can reach — means
   // "that host and no other", so a null host client must not silently fall back to the selected
   // daemon and report another machine's CPU under this row.

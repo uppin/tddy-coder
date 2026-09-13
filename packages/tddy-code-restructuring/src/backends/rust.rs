@@ -9,6 +9,7 @@
 //! that a non-editor client would write straight into the source.
 
 use crate::backends::lsp_bridge::LspClientBridge;
+use crate::crate_move::{self, ItemReferences, ModuleReferences, Reference};
 use crate::edit::{
     FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit,
 };
@@ -34,7 +35,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 7] = [
+const SUPPORTED: [RefactorKind; 8] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -42,6 +43,7 @@ const SUPPORTED: [RefactorKind; 7] = [
     RefactorKind::ExtractTrait,
     RefactorKind::InlineMethod,
     RefactorKind::RenameSymbol,
+    RefactorKind::MoveModuleToCrate,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.
@@ -1170,6 +1172,14 @@ impl LanguageBackend for RustBackend {
             }
         }
 
+        // rust-analyzer has no cross-crate move assist, so this operation is authored rather than
+        // delegated — every caller it re-points still comes from the server's own reference set,
+        // which is what this backend supplies it. It opens the module for itself, so the document
+        // is deliberately not opened here first.
+        if op.op == RefactorKind::MoveModuleToCrate {
+            return Ok(Resolution::of(crate_move::resolve(self, workspace, op)?));
+        }
+
         self.start(workspace.root)?;
         self.did_open(&uri, &original)?;
         self.ensure_indexed(&uri)?;
@@ -1180,14 +1190,13 @@ impl LanguageBackend for RustBackend {
             return Ok(Resolution::of(self.multi_file_assist(&uri, workspace, op)?));
         }
 
-        let (final_text, report, notes) = match op.op {
-            RefactorKind::RenameSymbol => (
-                self.rename_symbol(&uri, &original, op)?,
-                Vec::new(),
-                Vec::new(),
-            ),
-            _ => self.assisted_edit(&uri, &original, op)?,
-        };
+        // A rename reaches every document the server names, so it produces its edits directly
+        // rather than through the single-document path the in-place assists share.
+        if op.op == RefactorKind::RenameSymbol {
+            return Ok(Resolution::of(self.rename_symbol(&uri, workspace, op)?));
+        }
+
+        let (final_text, report, notes) = self.assisted_edit(&uri, &original, op)?;
 
         Ok(Resolution {
             edit: self.edit_for(
@@ -1204,9 +1213,103 @@ impl LanguageBackend for RustBackend {
             notes,
         })
     }
+
+    /// This backend *is* the reference engine a cross-crate move surveys through — the same
+    /// `documentSymbol` + `textDocument/references` implementation the move itself resolves with, so
+    /// a `check --deep` rehearsal reports the blast radius an apply would act on and not a second
+    /// approximation of it.
+    fn module_references(&mut self) -> Option<&mut dyn ModuleReferences> {
+        Some(self)
+    }
+}
+
+/// The engine half of a cross-crate move.
+///
+/// `move_module_to_crate` decides what to write; this decides what is out there to be written to.
+/// Both halves of the answer are the server's own: `documentSymbol` for the items a module path can
+/// name, and `textDocument/references` for every place outside the file that names one.
+impl ModuleReferences for RustBackend {
+    fn outside_references(
+        &mut self,
+        workspace: &Workspace<'_>,
+        file: &str,
+    ) -> Result<Vec<ItemReferences>> {
+        let text = workspace.read(file)?;
+        let uri = uri_of(&workspace.root.join(file));
+
+        self.start(workspace.root)?;
+        self.did_open(&uri, &text)?;
+        self.ensure_indexed(&uri)?;
+
+        let symbols = self.request_settled(
+            "textDocument/documentSymbol",
+            json!({ "textDocument": { "uri": uri } }),
+        )?;
+
+        let mut found = Vec::new();
+        for item in path_reached_within(&symbols, whole_of(&text)) {
+            // An item nested in an inline module is reached through that module's own name, which
+            // is itself one of these — so re-pointing the outer name carries the inner path with
+            // it, and naming the inner one flat would write a facade line that resolves to nothing.
+            if !item.within.is_empty() {
+                continue;
+            }
+
+            found.push(ItemReferences {
+                referenced_at: self.references_outside(&uri, &item.position, workspace)?,
+                item: item.name,
+            });
+        }
+
+        Ok(found)
+    }
 }
 
 impl RustBackend {
+    /// Every place outside `uri` that names the item at `position`.
+    ///
+    /// Columns come back as byte offsets, per the encoding this client negotiates, and are
+    /// converted to the character columns [`crate::edit::Position`] is read in — the one place the
+    /// two counts have to be reconciled, because a caller is addressed in a file this backend never
+    /// opened.
+    fn references_outside(
+        &mut self,
+        uri: &str,
+        position: &Value,
+        workspace: &Workspace<'_>,
+    ) -> Result<Vec<Reference>> {
+        // References answer empty rather than pending while the crate graph is still loading, so an
+        // empty answer is only worth believing once the position resolves at all.
+        self.wait_until_resolved(uri, position)?;
+
+        let references = self.request_settled(
+            "textDocument/references",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": position,
+                "context": { "includeDeclaration": false }
+            }),
+        )?;
+
+        let mut sites = Vec::new();
+        for reference in references.as_array().into_iter().flatten() {
+            let referrer = reference
+                .get("uri")
+                .and_then(Value::as_str)
+                .ok_or_else(|| failure("a reference carries no uri"))?;
+            if referrer == uri {
+                continue;
+            }
+
+            let path = relative_to(referrer, workspace.root)?;
+            let text = workspace.read(&path)?;
+            let at = character_column(&text, LspPoint::read(reference.pointer("/range/start"))?);
+            sites.push(Reference { path, at });
+        }
+
+        Ok(sites)
+    }
+
     /// Run an assist that introduces a new symbol, then give that symbol its real name.
     fn assisted_edit(
         &mut self,
@@ -1838,7 +1941,16 @@ impl RustBackend {
     ///
     /// Both anchor kinds work: a range names a position directly, and a symbol is resolved through
     /// `workspace/symbol` so a plan need not carry different anchors per language.
-    fn rename_symbol(&mut self, uri: &str, original: &str, op: &RefactorOp) -> Result<String> {
+    ///
+    /// Every document the server names is edited, not only the anchor's own. rust-analyzer computes
+    /// the cross-file edits; keeping one of them is what left a caller in another file naming a
+    /// symbol that no longer existed, and the anchor's file looked right the whole time.
+    fn rename_symbol(
+        &mut self,
+        uri: &str,
+        workspace: &Workspace<'_>,
+        op: &RefactorOp,
+    ) -> Result<WorkspaceEdit> {
         let name = op
             .name
             .clone()
@@ -1856,7 +1968,21 @@ impl RustBackend {
             "textDocument/rename",
             json!({ "textDocument": { "uri": uri }, "position": position, "newName": name }),
         )?;
-        Ok(apply_lsp_edit(original, edits_for(&renamed, uri)?))
+
+        let mut changes = Vec::new();
+        for (document, edits) in workspace_edits_for(&renamed)? {
+            let path = relative_to(&document, workspace.root)?;
+            // Read through the overlay, as every other multi-document path does, so a caller an
+            // earlier operation in the same plan already edited is renamed against that text.
+            let original = workspace.read(&path)?;
+            let updated = apply_lsp_edit(&original, edits);
+            changes.push(FileEdit::Change {
+                path,
+                edits: minimal_edits(&original, &updated),
+            });
+        }
+
+        Ok(WorkspaceEdit { changes })
     }
 
     /// Wait, once per process, for the crate graph to load — with the server's progress on screen.
@@ -2442,6 +2568,43 @@ fn collect_path_reached(
     }
 }
 
+/// The range covering a whole document, for a survey that asks about all of it.
+fn whole_of(text: &str) -> Range {
+    Range {
+        start: Position { line: 1, col: 1 },
+        end: Position {
+            line: text.lines().count() as u32 + 1,
+            col: 1,
+        },
+    }
+}
+
+/// An LSP position as a one-based line and *character* column.
+fn character_column(text: &str, point: LspPoint) -> Position {
+    let line_start = offset_of(
+        text,
+        LspPoint {
+            line: point.line,
+            character: 0,
+        },
+    );
+    let line = &text[line_start..];
+    // Count characters that start strictly before the byte offset. The obvious
+    // `line[..point.character].chars().count()` is only defined when the offset lands on a UTF-8
+    // boundary, and falling back to the byte offset there would report a byte count as a character
+    // column — a plausible-looking wrong answer for exactly the non-ASCII line where it matters.
+    // This form is in character units for every offset, boundary or not.
+    let column = line
+        .char_indices()
+        .take_while(|(offset, _)| *offset < point.character)
+        .count();
+
+    Position {
+        line: point.line as u32 + 1,
+        col: column as u32 + 1,
+    }
+}
+
 /// The visibility an item was written with, read from the text preceding its name.
 ///
 /// `pub fn render` gives `pub`, `pub(crate) fn tier` gives `pub(crate)`, and `fn normalise` gives the
@@ -2527,6 +2690,14 @@ fn relative_path(uri: Option<&Value>, root: &Path) -> Result<String> {
     let uri = uri
         .and_then(Value::as_str)
         .ok_or_else(|| failure("a document change carries no uri"))?;
+    relative_to(uri, root)
+}
+
+/// The workspace-relative path a `file://` uri names.
+///
+/// A uri outside the root is refused rather than skipped: an edit this executor cannot address is
+/// one the operation was counting on, and dropping it is how a rename half-lands.
+fn relative_to(uri: &str, root: &Path) -> Result<String> {
     let path = uri
         .strip_prefix("file://")
         .ok_or_else(|| failure(format!("`{uri}` is not a file uri")))?;
@@ -2921,6 +3092,66 @@ fn edits_for(response: &Value, uri: &str) -> Result<Vec<LspEdit>> {
     }
 
     raw.iter().map(read_edit).collect()
+}
+
+/// Every document a workspace edit touches, with its edits — the multi-document counterpart of
+/// [`edits_for`].
+///
+/// [`edits_for`] filters `documentChanges` down to one `uri`, which is correct for an assist this
+/// backend resolves against a single file and **wrong for a rename**: rust-analyzer computes
+/// cross-file rename edits, and discarding every document but the anchor's left those callers naming
+/// a symbol that no longer existed. The anchor's own file looked right, so nothing surfaced until a
+/// later build.
+///
+/// It is also the primitive `move_module_to_crate` needs, because re-pointing a caller *is* editing
+/// another document.
+///
+/// Documents come back in the order the server listed them, so a caller can report them in a stable
+/// order. An edit naming no documents is still an error: this widens what counts as an answer, it
+/// does not make silence acceptable, and neither does a document whose edit list is empty.
+///
+/// Text edits are all it carries. A `documentChanges` entry that is a resource operation — a
+/// `create`, `rename` or `delete` — names no `textDocument`, and so is not one of these pairs;
+/// [`convert_change`] is where those are read.
+fn workspace_edits_for(response: &Value) -> Result<Vec<(String, Vec<LspEdit>)>> {
+    let workspace_edit = response.get("edit").unwrap_or(response);
+
+    let documents: Vec<(String, &Vec<Value>)> = match workspace_edit
+        .get("documentChanges")
+        .and_then(Value::as_array)
+    {
+        Some(changes) => changes
+            .iter()
+            .filter_map(|change| {
+                let uri = change
+                    .pointer("/textDocument/uri")
+                    .and_then(Value::as_str)?;
+                let edits = change.get("edits").and_then(Value::as_array)?;
+                Some((uri.to_string(), edits))
+            })
+            .filter(|(_, edits)| !edits.is_empty())
+            .collect(),
+        None => workspace_edit
+            .get("changes")
+            .and_then(Value::as_object)
+            .map(|documents| {
+                documents
+                    .iter()
+                    .filter_map(|(uri, edits)| Some((uri.clone(), edits.as_array()?)))
+                    .filter(|(_, edits)| !edits.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default(),
+    };
+
+    if documents.is_empty() {
+        return Err(failure("rust-analyzer returned no edits for any document"));
+    }
+
+    documents
+        .into_iter()
+        .map(|(uri, edits)| Ok((uri, edits.iter().map(read_edit).collect::<Result<_>>()?)))
+        .collect()
 }
 
 /// One text edit, refusing anything malformed rather than guessing at it.
@@ -6106,5 +6337,97 @@ mod tests {
         );
 
         assert!(described.contains("rust-src=present"));
+    }
+}
+
+#[cfg(test)]
+mod cross_file_edit_tests {
+    use super::*;
+
+    /// A rust-analyzer rename response naming two documents: the anchor's own, and a caller.
+    fn a_rename_touching_two_files() -> Value {
+        json!({
+            "documentChanges": [
+                {
+                    "textDocument": { "uri": "file:///repo/src/host_registry.rs", "version": 0 },
+                    "edits": [{
+                        "range": { "start": { "line": 4, "character": 11 },
+                                   "end":   { "line": 4, "character": 23 } },
+                        "newText": "HostRegistryStore"
+                    }]
+                },
+                {
+                    "textDocument": { "uri": "file:///repo/src/runtime.rs", "version": 0 },
+                    "edits": [{
+                        "range": { "start": { "line": 91, "character": 20 },
+                                   "end":   { "line": 91, "character": 32 } },
+                        "newText": "HostRegistryStore"
+                    }]
+                }
+            ]
+        })
+    }
+
+    /// rust-analyzer computes cross-file rename edits; this backend threw every document but the
+    /// anchor's away, so a rename of a symbol referenced elsewhere left those callers naming a
+    /// symbol that no longer exists — silently, because the anchor's own file looked correct.
+    ///
+    /// This is the defect `move_module_to_crate` cannot be built on top of: re-pointing a caller
+    /// *is* editing another document.
+    #[test]
+    fn keeps_every_document_a_rename_touches() {
+        // Given
+        let response = a_rename_touching_two_files();
+
+        // When
+        let edits = workspace_edits_for(&response).expect("a rename response is readable");
+
+        // Then
+        let touched: Vec<&str> = edits.iter().map(|(uri, _)| uri.as_str()).collect();
+        assert_eq!(
+            touched,
+            vec![
+                "file:///repo/src/host_registry.rs",
+                "file:///repo/src/runtime.rs"
+            ],
+            "a rename must carry the caller's document as well as the anchor's"
+        );
+    }
+
+    /// The caller's edit has to survive intact, not merely be counted: an empty edit list for a
+    /// document is the same silence the old filter produced.
+    #[test]
+    fn carries_the_callers_own_edit_not_just_its_path() {
+        // Given
+        let response = a_rename_touching_two_files();
+
+        // When
+        let edits = workspace_edits_for(&response).expect("a rename response is readable");
+
+        // Then
+        let (_, caller) = edits
+            .iter()
+            .find(|(uri, _)| uri.ends_with("runtime.rs"))
+            .expect("the caller's document is present");
+        assert_eq!(caller.len(), 1);
+        assert_eq!(caller[0].new_text, "HostRegistryStore");
+        assert_eq!(caller[0].start.line, 91);
+    }
+
+    /// A response with no documents at all is still an error, as it was before — the fix widens what
+    /// counts as an answer, it does not make silence acceptable.
+    #[test]
+    fn still_refuses_a_response_naming_no_documents() {
+        // Given
+        let response = json!({ "documentChanges": [] });
+
+        // When
+        let outcome = workspace_edits_for(&response);
+
+        // Then
+        assert!(
+            outcome.is_err(),
+            "an empty rename is not a successful rename"
+        );
     }
 }

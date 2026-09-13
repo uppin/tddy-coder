@@ -1,7 +1,7 @@
 /**
  * Streaming hook for the Session Inspector → Worktree tab.
  *
- * Subscribes to `ConnectionService.StreamWorktreeStats` for the session's project (mirroring
+ * Subscribes to `WorktreeService.StreamWorktreeStats` for the session's project (mirroring
  * `useHostStats` — a `for await` over the passed daemon client with a `cancelled` cleanup) and
  * selects the row whose `path` equals the session's `repoPath`. The daemon emits a first snapshot
  * frame carrying every worktree with its lazy size status, then one frame per worktree as its size
@@ -15,11 +15,11 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import {
-  ConnectionService,
+  WorktreeService,
   WorktreeSizeStatus,
   type WorktreeRow,
   type WorktreeStatsEvent,
-} from "../gen/connection_pb";
+} from "../gen/worktree_pb";
 import type { WorktreeSizeStatus as DomainSizeStatus } from "../lib/worktreeSize";
 
 export interface UseSessionWorktreeStatsResult {
@@ -70,7 +70,7 @@ function foldRows(rows: WorktreeRow[], event: WorktreeStatsEvent): WorktreeRow[]
  * changes.
  */
 export function useSessionWorktreeStats(
-  client: Client<typeof ConnectionService> | null,
+  client: Client<typeof WorktreeService> | null,
   sessionToken: string,
   projectId: string,
   repoPath: string,

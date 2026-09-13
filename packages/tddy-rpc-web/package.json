@@ -10,7 +10,7 @@
     "./test-fixtures": "./src/gen/test/echo_service_pb.ts"
   },
   "scripts": {
-    "generate": "buf generate ../tddy-rpc/proto",
+    "generate": "../../scripts/generated-code.sh write packages/tddy-rpc-web",
     "typecheck": "tsc --noEmit",
     "test": "bun test src",
     "test:ci": "bun test src --reporter=junit --reporter-outfile=../../reports/junit/rpc-web.xml"

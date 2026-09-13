@@ -37,4 +37,4 @@ In **daemon mode**, the shell **hamburger menu** (top left) includes **Worktrees
 
 - [Web terminal / Connection screen](web-terminal.md) — daemon host selection and project-centric flows.
 - [Local web development](local-web-dev.md) — **`./web-dev`** and **`/rpc`** proxy.
-- Daemon package: [worktrees module](../../../packages/tddy-daemon/docs/worktrees.md).
+- Daemon package: [worktrees module](../../../packages/tddy-worktree-service/docs/worktrees.md).

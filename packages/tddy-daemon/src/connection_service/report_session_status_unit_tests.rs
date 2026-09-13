@@ -1,6 +1,7 @@
 use super::*;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_service::proto::connection::ReportSessionStatusRequest;
 
 const TEST_HOOK_TOKEN: &str = "tok-unit-hook-abc123";

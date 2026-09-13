@@ -312,6 +312,42 @@ jobs:
       - name: cargo build
         run: ./dev cargo build --workspace --bins --examples --locked
 
+  generated-code:
+    name: Generated code
+    runs-on: ubuntu-latest
+    # No build, no browser: bun install for the pinned buf/protoc-gen-es, then
+    # regenerate every committed *_pb.ts and diff. Deliberately its own check
+    # rather than a step inside `Web tests`, so a stale descriptor reports itself
+    # by name instead of arriving as a failure in a 90-minute test job.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false # rust-build is the sole writer; see the comment there
+
+      - name: bun install
+        env:
+          # Nothing here launches a browser, and the binary is ~250 MB.
+          CYPRESS_INSTALL_BINARY: "0"
+        run: ./dev bun install --frozen-lockfile
+
+      # The gate proving itself against a fixture repo, so a gate that silently
+      # stopped comparing cannot pass as "no drift".
+      - name: Drift gate self-test
+        run: ./dev bun test ./scripts/generated-code.test.ts
+
+      - name: Check committed generated code
+        run: ./dev bash scripts/generated-code.sh check
+
   web:
     name: Web tests
     runs-on: ubuntu-latest

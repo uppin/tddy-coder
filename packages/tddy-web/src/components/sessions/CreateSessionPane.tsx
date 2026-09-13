@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
 import type { BranchConflict, ConnectionService, ProjectEntry, SessionEntry, ToolInfo } from "../../gen/connection_pb";
+import type { WorktreeService } from "../../gen/worktree_pb";
 import { localBranchName } from "../../lib/branchNames";
 import { projectSelectOptions } from "../../lib/projectSelectOptions";
 import { safeTestIdPart } from "../../lib/testId";
@@ -56,6 +57,7 @@ const WORKFLOW_RECIPES = [
 // ---------------------------------------------------------------------------
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type WorktreeClient = Client<typeof WorktreeService>;
 
 type SessionType = "tool" | "claude-cli" | "cursor-cli";
 type BranchIntent = BranchWorktreeIntent;
@@ -121,6 +123,12 @@ export type CreateSessionInitialValues = Partial<{
 
 export interface CreateSessionPaneProps {
   client: ConnectionClient;
+  /**
+   * The worktree service on the same host as `client` — the host-document picker's tree scopes
+   * browse through it. Required for the reason `HostDocumentPicker.worktreeClient` is: without one
+   * the tree scopes list nothing, and nothing is what an empty worktree looks like.
+   */
+  worktreeClient: WorktreeClient;
   sessionToken: string;
   onCancel: () => void;
   onCreated: (sessionId: string) => void;
@@ -133,6 +141,7 @@ export interface CreateSessionPaneProps {
 
 export function CreateSessionPane({
   client,
+  worktreeClient,
   sessionToken,
   onCancel,
   onCreated,
@@ -1295,6 +1304,7 @@ export function CreateSessionPane({
           // fetches it from there.
           <HostDocumentPicker
             client={client}
+            worktreeClient={worktreeClient}
             sessionToken={sessionToken}
             browsedDaemonInstanceId={stagingDaemonInstanceId}
             project={projects.find((p) => p.projectId === projectId)}

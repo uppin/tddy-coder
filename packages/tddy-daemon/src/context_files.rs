@@ -38,8 +38,8 @@ use tddy_service::proto::connection::{
     ContextFileBatchChunk, ContextFileChunk, ContextManifestEntry,
 };
 
-use crate::connection_service::HOST_DOCUMENT_FRAME_BYTES;
 use crate::worktree_files::{canonicalize_root, validate_rel_path_shape};
+use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 
 /// Bytes of file content carried per `StreamReadContextFile` frame.
 ///

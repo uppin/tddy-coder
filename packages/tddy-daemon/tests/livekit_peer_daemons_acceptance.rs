@@ -1,9 +1,14 @@
 //! LiveKit `common_room` peer discovery — acceptance tests from the feature PRD Testing Plan.
 //!
 //! Spins up [`tddy_livekit_testkit::LiveKitTestkit`] (Docker container unless `LIVEKIT_TESTKIT_WS_URL`
-//! points at a running server). Uses production [`ConnectionServiceImpl`] with
+//! points at a running server). Uses the production `HostServiceImpl` with
 //! `LiveKitEligibleDaemonSource`, `spawn_common_room_discovery_task`,
 //! and the shared room slot (same wiring as `main` when `livekit.common_room` is configured).
+//!
+//! Stays in `tddy-daemon` rather than moving to `tddy-host-service` with the RPC it drives: the
+//! wiring under test is the daemon's own common-room discovery, and `tddy-host-service` cannot
+//! depend on the crate that owns it. What did change is *what it calls* — the service, not the
+//! connection service.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,19 +17,16 @@ use std::time::Duration;
 use livekit::prelude::{Room, RoomOptions};
 use serial_test::serial;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_host_service::HostServiceImpl;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListEligibleDaemonsRequest,
-};
+use tddy_service::proto::host::{EligibleDaemonEntry, HostService, ListEligibleDaemonsRequest};
 
 const COMMON_ROOM: &str = "acceptance-common-room";
 const PEER_INSTANCE_ID: &str = "acceptance-daemon-b";
 const LIVEKIT_API_KEY: &str = "devkey";
 const LIVEKIT_API_SECRET: &str = "secret";
 
-type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 fn write_livekit_config(ws_url: &str) -> (tempfile::TempDir, PathBuf) {
@@ -50,13 +52,10 @@ livekit:
     (dir, path)
 }
 
-fn connection_service_with_livekit_discovery(
+fn host_service_with_livekit_discovery(
     config: DaemonConfig,
-) -> (ConnectionServiceImpl, tempfile::TempDir) {
+) -> (HostServiceImpl, tempfile::TempDir) {
     let sessions_tmp = tempfile::tempdir().unwrap();
-    let sessions_base = sessions_tmp.path().to_path_buf();
-    let sessions_base_resolver: SessionsBaseResolver =
-        Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver = Arc::new(|token| {
         if token == "valid-token" {
             Some("testuser".to_string())
@@ -79,26 +78,14 @@ fn connection_service_with_livekit_discovery(
             room_slot.clone(),
         ),
     );
-    let service = ConnectionServiceImpl::new(
-        config,
-        sessions_base_resolver,
-        sessions_tmp.path().to_path_buf(),
-        user_resolver,
-        None,
-        Some(
-            tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles {
-                eligible_daemon_source: eligible,
-                common_room_livekit_room: room_slot,
-            },
-        ),
-        None,
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
-    );
+    let service = HostServiceImpl::new(config, sessions_tmp.path(), user_resolver)
+        .with_eligible_daemon_source(eligible)
+        .with_common_room(room_slot);
     (service, sessions_tmp)
 }
 
 /// Wait until discovery sync sees the peer (bounded; avoids flake from fixed sleeps).
-async fn wait_until_peer_listed(service: &ConnectionServiceImpl, instance_id: &str) {
+async fn wait_until_peer_listed(service: &HostServiceImpl, instance_id: &str) {
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let daemons = list_eligible(service).await;
@@ -114,9 +101,7 @@ async fn wait_until_peer_listed(service: &ConnectionServiceImpl, instance_id: &s
     });
 }
 
-async fn list_eligible(
-    svc: &ConnectionServiceImpl,
-) -> Vec<tddy_service::proto::connection::EligibleDaemonEntry> {
+async fn list_eligible(svc: &HostServiceImpl) -> Vec<EligibleDaemonEntry> {
     let request = Request::new(ListEligibleDaemonsRequest {
         session_token: "valid-token".to_string(),
     });
@@ -160,7 +145,7 @@ async fn list_eligible_daemons_includes_discovered_peer_when_second_daemon_in_co
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
     let (_cfg_dir, cfg_path) = write_livekit_config(&livekit.get_ws_url());
     let config = DaemonConfig::load(&cfg_path).expect("daemon yaml");
-    let (service, _sessions_tmp) = connection_service_with_livekit_discovery(config);
+    let (service, _sessions_tmp) = host_service_with_livekit_discovery(config);
     let _peer = join_second_daemon_participant(&livekit).await;
     wait_until_peer_listed(&service, PEER_INSTANCE_ID).await;
 
@@ -199,7 +184,7 @@ async fn list_eligible_daemons_local_exactly_one_is_local() {
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
     let (_cfg_dir, cfg_path) = write_livekit_config(&livekit.get_ws_url());
     let config = DaemonConfig::load(&cfg_path).expect("daemon yaml");
-    let (service, _sessions_tmp) = connection_service_with_livekit_discovery(config);
+    let (service, _sessions_tmp) = host_service_with_livekit_discovery(config);
     let _peer = join_second_daemon_participant(&livekit).await;
     wait_until_peer_listed(&service, PEER_INSTANCE_ID).await;
 
@@ -238,7 +223,7 @@ async fn peer_list_removes_entry_after_simulated_disconnect() {
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
     let (_cfg_dir, cfg_path) = write_livekit_config(&livekit.get_ws_url());
     let config = DaemonConfig::load(&cfg_path).expect("daemon yaml");
-    let (service, _sessions_tmp) = connection_service_with_livekit_discovery(config);
+    let (service, _sessions_tmp) = host_service_with_livekit_discovery(config);
     let peer_room = join_second_daemon_participant(&livekit).await;
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
