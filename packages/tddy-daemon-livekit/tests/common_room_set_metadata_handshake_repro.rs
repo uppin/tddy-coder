@@ -91,7 +91,7 @@ async fn wait_until_room_slot_populated(
 }
 
 #[tokio::test]
-#[serial]
+#[serial(livekit_docker)]
 async fn common_room_room_slot_stays_populated_after_metadata_publish_with_peer_in_room() {
     // Given
     let livekit = LiveKitTestkit::start()

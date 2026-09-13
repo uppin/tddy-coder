@@ -196,32 +196,39 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
     handle.child_mut().wait().ok();
 }
 
-/// **sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags**: the daemon's sandboxed-session
-/// spawn/dial orchestration in `connection_service.rs` must request the stdio transport and must
-/// never build the gRPC control-channel flags — per this repo's convention, once a call site
-/// switches to `tddy-stdio` its old transport is deleted outright (no dual-path fallback).
+/// **sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags**: family-C spawn modules in
+/// `tddy-session-lifecycle` must request the stdio transport and must never build gRPC flags.
 #[test]
 fn sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags() {
-    // Given
-    let connection_service_rs = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../tddy-session-lifecycle/src/connection_service.rs"
-    ));
+    let sources = [
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_claude_cli_session.rs"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_cursor_cli_session.rs"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tddy-session-lifecycle/src/connection_service/svc_relaunch_sandboxed_runner.rs"
+        )),
+    ];
 
-    // When / Then — the sandbox-runner spawn argv must request the stdio transport…
     assert!(
-        connection_service_rs.contains("\"--stdio\""),
-        "sandbox-runner spawn argv must pass --stdio"
+        sources.iter().any(|src| src.contains("\"--stdio\"")),
+        "sandbox-runner spawn argv must pass --stdio in one of the family-C spawn modules"
     );
-    // …and must never build any of the gRPC control-channel flags for that spawn.
-    for grpc_flag in [
-        "\"--grpc-socket\"",
-        "\"--grpc-listen-port\"",
-        "\"--grpc-uds\"",
-    ] {
-        assert!(
-            !connection_service_rs.contains(grpc_flag),
-            "sandbox-runner spawn argv must not pass {grpc_flag} once switched to stdio"
-        );
+    for src in sources {
+        for grpc_flag in [
+            "\"--grpc-socket\"",
+            "\"--grpc-listen-port\"",
+            "\"--grpc-uds\"",
+        ] {
+            assert!(
+                !src.contains(grpc_flag),
+                "sandbox spawn must not pass {grpc_flag} once switched to stdio"
+            );
+        }
     }
 }

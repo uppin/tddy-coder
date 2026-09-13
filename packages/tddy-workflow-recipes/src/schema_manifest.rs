@@ -12,7 +12,7 @@ const SCHEMA_MANIFEST_JSON: &str = include_str!("../generated/schema-manifest.js
 
 /// Path to the generated manifest (`schema-manifest.json`) produced by the workflow-recipes build.
 pub fn schema_manifest_path() -> PathBuf {
-    debug!(target: "tddy_tools::schema_manifest", "schema_manifest_path");
+    debug!(target: "tddy_workflow_recipes::schema_manifest", "schema_manifest_path");
     generated_manifest_path()
 }
 
@@ -49,12 +49,12 @@ struct GoalEntry {
 
 /// Goal names registered for CLI / validation (from generated manifest).
 pub fn list_registered_goals() -> Result<Vec<String>, SchemaManifestError> {
-    debug!(target: "tddy_tools::schema_manifest", "list_registered_goals");
+    debug!(target: "tddy_workflow_recipes::schema_manifest", "list_registered_goals");
     let m: SchemaManifest = serde_json::from_str(SCHEMA_MANIFEST_JSON)
         .map_err(|e| SchemaManifestError::Parse(format!("embedded schema-manifest.json: {}", e)))?;
     let names: Vec<String> = m.goals.into_iter().map(|g| g.name).collect();
     info!(
-        target: "tddy_tools::schema_manifest",
+        target: "tddy_workflow_recipes::schema_manifest",
         "registered workflow goals count={}",
         names.len()
     );

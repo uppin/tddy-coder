@@ -19,6 +19,8 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use tddy_service::proto::daemon_config::DaemonConfigServiceServer;
+use tddy_service::proto::host::HostServiceTonicAdapter;
+use tddy_service::proto::worktree::WorktreeServiceTonicAdapter;
 use teloxide::prelude::Bot;
 use tokio::sync::Mutex;
 
@@ -218,6 +220,7 @@ type BinaryLocalSocketServices = crate::local_socket_server::LocalSocketServices
         tddy_session_lifecycle::connection_service::DaemonSessionHost,
     >,
     tddy_session_lifecycle::connection_service::DemoVmServiceImpl,
+    tddy_daemon_livekit::LiveKitServiceImpl,
     tddy_host_service::HostServiceImpl,
     tddy_worktree_service::WorktreeServiceImpl,
     tddy_terminal_rpc::TerminalSessionServiceImpl,
@@ -877,6 +880,13 @@ pub async fn build(
             Duration::from_secs(300),
         ));
 
+        let livekit_service = tddy_daemon_livekit::build_livekit_service(
+            tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config(
+                config_arc.livekit.as_ref(),
+            ),
+            vm_user_resolver.clone(),
+        );
+
         // Local Unix-domain socket transport (SO_PEERCRED peer-trust + MintLocalToken). Served by
         // the binary host only: the socket path names one daemon, and a systemd-activated listener
         // is addressed to the binary's pid.
@@ -906,6 +916,9 @@ pub async fn build(
                             ),
                         ),
                     ),
+                    livekit: tddy_service::proto::livekit::LiveKitServiceTonicAdapter::new(
+                        Arc::clone(&livekit_service),
+                    ),
                     local_token:
                         tddy_session_lifecycle::local_token_tonic_adapter::LocalTokenUdsTonicAdapter::new(
                             config_arc.clone(),
@@ -914,10 +927,10 @@ pub async fn build(
                         ),
                     // The same `Arc`s the entries above serve, so a host prompt raised over the
                     // socket is the one a browser answers over HTTP.
-                    host: tddy_session_lifecycle::host_tonic_adapter::HostServiceTonicAdapter::new(Arc::clone(
+                    host: HostServiceTonicAdapter::new(Arc::clone(
                         &host_service_impl,
                     )),
-                    worktree: tddy_session_lifecycle::worktree_tonic_adapter::WorktreeServiceTonicAdapter::new(
+                    worktree: WorktreeServiceTonicAdapter::new(
                         Arc::clone(&worktree_service_impl),
                     ),
                     // Built from `connection_arc` — the same `CliSessionManager` and sandbox
@@ -1023,12 +1036,9 @@ pub async fn build(
         // LiveKitService — the rooms this daemon can see on the LiveKit server and who is joined
         // to each. Family T left `the pre-unbundle monolithic RPC coordinate` in `#unbundle` node 4; the entry
         // comes from `tddy-daemon-livekit` assembled, so this wiring never names the poll cadence.
-        rpc_entries.push(tddy_daemon_livekit::livekit_service::build_livekit_entry(
-            tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config(
-                config_arc.livekit.as_ref(),
-            ),
-            vm_user_resolver.clone(),
-        ));
+        rpc_entries.push(tddy_daemon_livekit::build_livekit_entry(Arc::clone(
+            &livekit_service,
+        )));
 
         // WorktreeService — listing, cleaning, sizing, restoring and reading a project's checkouts.
         let worktree_server =
@@ -1212,7 +1222,10 @@ pub async fn build(
     });
 
     let service_name_strs: Vec<&str> = rpc_entries.iter().map(|e| e.name).collect();
-    rpc_entries.push(tddy_service::reflection_entry_from(&service_name_strs));
+    rpc_entries.push(tddy_service::reflection_entry_from_with_supplements(
+        &service_name_strs,
+        &[tddy_terminal_rpc::TERMINAL_SESSION_DESCRIPTOR_BYTES],
+    ));
 
     // Serve the daemon's RPC services on the LiveKit common room, so a client that can join the
     // room can invoke every service without an HTTP origin — and keep serving them on whatever

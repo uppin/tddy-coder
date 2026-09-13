@@ -38,6 +38,8 @@ pub struct StdioEndpoint<S: RpcService> {
     response_tx: mpsc::Sender<(String, RpcResponse)>,
     server: Arc<ServerEngine<S>>,
     client: Arc<StdioRpcClient>,
+    /// Fired once the read/dispatch/write tasks are running — see [`Self::run`].
+    start_ready: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl<S: RpcService> StdioEndpoint<S> {
@@ -58,8 +60,15 @@ impl<S: RpcService> StdioEndpoint<S> {
             response_tx,
             server: Arc::new(ServerEngine::new(service)),
             client: client.clone(),
+            start_ready: None,
         };
         (client, endpoint)
+    }
+
+    /// Signal `tx` once [`Self::run`] has started its writer and read loops (before the first frame).
+    pub fn signal_start_ready(mut self, tx: tokio::sync::oneshot::Sender<()>) -> Self {
+        self.start_ready = Some(tx);
+        self
     }
 
     /// Wrap this process's own stdin/stdout, hosting `service` for inbound requests from the
@@ -107,6 +116,7 @@ impl<S: RpcService> StdioEndpoint<S> {
             response_tx,
             server,
             client,
+            mut start_ready,
         } = self;
 
         // Response-drain task: encodes server responses and forwards them into the same
@@ -136,6 +146,10 @@ impl<S: RpcService> StdioEndpoint<S> {
                 }
             }
         });
+
+        if let Some(tx) = start_ready.take() {
+            let _ = tx.send(());
+        }
 
         let mut decoder = FrameDecoder::new();
         let mut buf = [0u8; READ_BUFFER_SIZE];

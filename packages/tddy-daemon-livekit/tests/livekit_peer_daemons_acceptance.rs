@@ -144,7 +144,7 @@ async fn join_second_daemon_participant(livekit: &LiveKitTestkit) -> Room {
 /// When another daemon shares `livekit.common_room`, `ListEligibleDaemons` must include that peer
 /// (`instance_id` matches the peer’s configured id) with `is_local: false`.
 #[tokio::test]
-#[serial]
+#[serial(livekit_docker)]
 async fn list_eligible_daemons_includes_discovered_peer_when_second_daemon_in_common_room() {
     // Given
     let livekit = LiveKitTestkit::start()
@@ -183,7 +183,7 @@ async fn list_eligible_daemons_includes_discovered_peer_when_second_daemon_in_co
 
 /// In a multi-daemon common room, exactly one row is `is_local: true` (this process).
 #[tokio::test]
-#[serial]
+#[serial(livekit_docker)]
 async fn list_eligible_daemons_local_exactly_one_is_local() {
     // Given
     let livekit = LiveKitTestkit::start()
@@ -222,7 +222,7 @@ async fn list_eligible_daemons_local_exactly_one_is_local() {
 
 /// After LiveKit signals the peer left, the remote row disappears within a bounded window.
 #[tokio::test]
-#[serial]
+#[serial(livekit_docker)]
 async fn peer_list_removes_entry_after_simulated_disconnect() {
     // Given
     let livekit = LiveKitTestkit::start()

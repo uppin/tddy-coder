@@ -147,37 +147,26 @@ fn decrypt_bytes(
 // ---------------------------------------------------------------------------
 
 fn write_vault_file(path: &Path, vault_file: &VaultFile) -> anyhow::Result<()> {
-    use std::io::Write;
-
     let yaml = serde_yaml::to_string(vault_file)
         .map_err(|e| anyhow::anyhow!("failed to serialize vault: {}", e))?;
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            anyhow::anyhow!(
-                "failed to create vault directory {}: {}",
-                parent.display(),
-                e
-            )
-        })?;
-    }
-
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|e| anyhow::anyhow!("failed to open vault file {}: {}", path.display(), e))?;
-        file.write_all(yaml.as_bytes())
-            .map_err(|e| anyhow::anyhow!("failed to write vault file: {}", e))?;
+        tddy_core::atomic_file::write_atomic_with_mode(path, yaml.as_bytes(), 0o600)
+            .map_err(|e| anyhow::anyhow!("failed to write vault file {}: {}", path.display(), e))?;
     }
 
     #[cfg(not(unix))]
     {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to create vault directory {}: {}",
+                    parent.display(),
+                    e
+                )
+            })?;
+        }
         std::fs::write(path, yaml.as_bytes())
             .map_err(|e| anyhow::anyhow!("failed to write vault file: {}", e))?;
     }

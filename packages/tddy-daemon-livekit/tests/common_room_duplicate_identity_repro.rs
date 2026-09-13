@@ -108,7 +108,7 @@ async fn wait_until_room_slot_cleared(
 }
 
 #[tokio::test]
-#[serial]
+#[serial(livekit_docker)]
 async fn common_room_room_slot_recovers_after_duplicate_identity_client_leaves() {
     // Given
     let livekit = LiveKitTestkit::start()

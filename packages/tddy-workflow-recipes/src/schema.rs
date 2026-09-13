@@ -76,7 +76,7 @@ fn load_common_schemas() -> Result<Vec<(&'static str, Value)>, String> {
         let v: Value = serde_json::from_str(s)
             .map_err(|e| format!("invalid JSON in embedded common schema {}: {}", path, e))?;
         debug!(
-            target: "tddy_tools::schema",
+            target: "tddy_workflow_recipes::schema",
             "loaded common schema uri={} path={}",
             uri,
             path
@@ -98,7 +98,7 @@ fn common_schemas_or_err() -> Result<&'static Vec<(&'static str, Value)>, String
 pub fn get_schema(goal: &str) -> Option<&'static str> {
     let (_, filename) = GOAL_SCHEMA_FILES.iter().find(|(g, _)| *g == goal)?;
     debug!(
-        target: "tddy_tools::schema",
+        target: "tddy_workflow_recipes::schema",
         "resolve goal schema goal={} file={}",
         goal,
         filename
@@ -110,7 +110,7 @@ pub fn get_schema(goal: &str) -> Option<&'static str> {
 /// Validates JSON string against the goal's schema. Returns Ok(()) if valid, Err with error list if invalid.
 pub fn validate_output(goal: &str, json_str: &str) -> Result<(), Vec<SchemaError>> {
     info!(
-        target: "tddy_tools::schema",
+        target: "tddy_workflow_recipes::schema",
         "validate_output start goal={} bytes={}",
         goal,
         json_str.len()
@@ -119,7 +119,7 @@ pub fn validate_output(goal: &str, json_str: &str) -> Result<(), Vec<SchemaError
     let common_list = match common_schemas_or_err() {
         Ok(v) => v,
         Err(msg) => {
-            error!(target: "tddy_tools::schema", "{}", msg);
+            error!(target: "tddy_workflow_recipes::schema", "{}", msg);
             return Err(vec![SchemaError {
                 instance_path: String::new(),
                 schema_path: String::new(),
@@ -175,11 +175,11 @@ pub fn validate_output(goal: &str, json_str: &str) -> Result<(), Vec<SchemaError
         .collect();
 
     if errors.is_empty() {
-        info!(target: "tddy_tools::schema", "validate_output ok goal={}", goal);
+        info!(target: "tddy_workflow_recipes::schema", "validate_output ok goal={}", goal);
         Ok(())
     } else {
         debug!(
-            target: "tddy_tools::schema",
+            target: "tddy_workflow_recipes::schema",
             "validate_output errors goal={} count={}",
             goal,
             errors.len()

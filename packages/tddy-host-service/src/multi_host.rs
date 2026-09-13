@@ -126,20 +126,3 @@ impl EligibleDaemonSource for LocalOnlyEligibleDaemonSource {
         vec![self.durable_row.clone()]
     }
 }
-
-/// Lists the local daemon under its **hostname**, ignoring any configured instance id.
-///
-/// Kept for callers that have no `DaemonConfig` in hand; a daemon assembling its own services has
-/// one, and uses [`LocalOnlyEligibleDaemonSource::for_config`].
-pub struct StubEligibleDaemonSource;
-
-impl EligibleDaemonSource for StubEligibleDaemonSource {
-    fn list_eligible_daemons(&self) -> Vec<EligibleDaemonInfo> {
-        let entry = local_eligible_daemon_entry();
-        log::info!(
-            "StubEligibleDaemonSource: listing local daemon instance_id={}",
-            entry.instance_id.0
-        );
-        vec![entry]
-    }
-}

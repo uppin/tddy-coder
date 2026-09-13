@@ -12,11 +12,8 @@ use serde_json::{json, Value};
 use tddy_core::session_actions::{
     derive_repo_key, ensure_action_architecture, invoke_action_core, list_action_summaries,
     parse_action_manifest_yaml, repo_actions_root, validate_authored_manifest, DiscoveryQuery,
+    MAX_MANIFEST_BYTES,
 };
-
-/// Upper bound on an authored manifest — mirrors the in-jail `request_action` cap; anything
-/// larger is a runaway generation, not an action.
-const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 
 /// Authoritatively validate an authored manifest and write it under
 /// `<session_dir>/actions/<id>.yaml`. Auto-establish: once this returns Ok, the action is

@@ -14,7 +14,6 @@
 pub mod action_tools;
 pub mod list_models;
 pub mod mcp_primitives;
-pub mod relay;
 pub mod server;
 pub mod session_actions_cli;
 

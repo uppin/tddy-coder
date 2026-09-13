@@ -36,5 +36,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .extern_path(".terminal_session", "crate::proto::terminal_session")
         .compile_protos(&["proto/terminal_session.proto"], &["proto"])?;
 
+    let descriptor_path = format!(
+        "{}/terminal_session_descriptors.bin",
+        std::env::var("OUT_DIR")?
+    );
+    let descriptor_scratch = format!("{}/descriptor_set_only", std::env::var("OUT_DIR")?);
+    std::fs::create_dir_all(&descriptor_scratch)?;
+    prost_build::Config::new()
+        .file_descriptor_set_path(&descriptor_path)
+        .out_dir(&descriptor_scratch)
+        .compile_protos(&["proto/terminal_session.proto"], &["proto"])?;
+
     Ok(())
 }

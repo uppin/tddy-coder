@@ -41,7 +41,7 @@ pub mod session_room;
 pub use common_room_supervisor::{CommonRoomSupervisor, SupervisedCommonRoom};
 pub use livekit_peer_discovery::{daemon_rpc_identity, CommonRoomPeerRegistry};
 pub use livekit_rooms_stream::{RoomRoster, RosterError};
-pub use livekit_service::{build_livekit_entry, LiveKitServiceImpl};
+pub use livekit_service::{build_livekit_entry, build_livekit_service, LiveKitServiceImpl};
 pub use session_room::{
     RemoteSnapshotSource, SessionRoomRegistry, SessionTerminalBridge, SessionTokenMinter,
     WorktreeSource,
@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn names_the_service_family_t_moves_to() {
         // Given the rooms reader and the resolver the wiring layer hands over
-        let entry = build_livekit_entry(Arc::new(NoRooms), a_resolver());
+        let entry = build_livekit_entry(build_livekit_service(Arc::new(NoRooms), a_resolver()));
 
         // Then the coordinate is the new one. A client generated against `livekit.proto` addresses
         // this string, so the entry's name is the whole of what the move is worth.

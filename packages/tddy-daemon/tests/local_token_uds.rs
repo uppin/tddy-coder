@@ -37,12 +37,14 @@ use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_daemon::user_sessions_path::username_for_uid;
 use tddy_daemon::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
+use tddy_daemon_livekit::{build_livekit_service, RoomRoster, RosterError};
 use tddy_github::{SessionTokenSigner, TokenKind};
 use tddy_service::proto::activity::{ActivityServiceTonicAdapter, ReportSessionStatusRequest};
 use tddy_service::proto::catalog::CatalogServiceTonicAdapter;
 use tddy_service::proto::demo_vm::DemoVmServiceTonicAdapter;
 use tddy_service::proto::exec_tools::ExecToolServiceTonicAdapter;
 use tddy_service::proto::host::{ListEligibleDaemonsRequest, StreamHostStatsRequest};
+use tddy_service::proto::livekit::LiveKitServiceTonicAdapter;
 use tddy_service::proto::local_token::MintLocalTokenRequest;
 use tddy_service::proto::pr_stack::PrStackServiceTonicAdapter;
 use tddy_service::proto::project::ProjectServiceTonicAdapter;
@@ -146,6 +148,20 @@ fn start_local_socket_server(
     let pr_stack_adapter =
         PrStackServiceTonicAdapter::new(Arc::new(connection.pr_stack_rpc_service()));
 
+    struct NoLiveKitRooms;
+    #[async_trait::async_trait]
+    impl RoomRoster for NoLiveKitRooms {
+        async fn list_rooms(
+            &self,
+        ) -> Result<Vec<tddy_service::proto::livekit::LiveKitRoomInfo>, RosterError> {
+            Ok(Vec::new())
+        }
+    }
+    let livekit_adapter = LiveKitServiceTonicAdapter::new(build_livekit_service(
+        Arc::new(NoLiveKitRooms),
+        Arc::new(|_| Some("testdev".to_string())),
+    ));
+
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let serve_path = socket_path.clone();
     tokio::spawn(async move {
@@ -158,6 +174,7 @@ fn start_local_socket_server(
                 session: session_adapter,
                 project: project_adapter,
                 demo_vm: demo_vm_adapter,
+                livekit: livekit_adapter,
                 local_token: local_token_adapter,
                 host: host_adapter,
                 worktree: worktree_adapter,

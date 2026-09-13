@@ -1169,9 +1169,9 @@ impl DaemonConfig {
     /// existing YAML `telegram` block, `enabled` is not changed by the token alone (set
     /// `TDDY_TELEGRAM_ENABLED` explicitly).
     pub fn apply_telegram_env_overrides(&mut self) {
-        let bot_token = non_empty_env("TDDY_TELEGRAM_BOT_TOKEN");
-        let chat_ids_csv = non_empty_env("TDDY_TELEGRAM_CHAT_IDS");
-        let enabled = non_empty_env("TDDY_TELEGRAM_ENABLED");
+        let bot_token = tddy_core::spawn_env::env_non_empty("TDDY_TELEGRAM_BOT_TOKEN");
+        let chat_ids_csv = tddy_core::spawn_env::env_non_empty("TDDY_TELEGRAM_CHAT_IDS");
+        let enabled = tddy_core::spawn_env::env_non_empty("TDDY_TELEGRAM_ENABLED");
         merge_telegram_env(
             self,
             bot_token.as_deref(),
@@ -1195,7 +1195,9 @@ impl DaemonConfig {
     /// Override [`Self::codex_oauth_loopback_proxy_eligible`] from `TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE`
     /// (`true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off`, case-insensitive). Call after YAML load.
     pub fn apply_oauth_loopback_proxy_env_override(&mut self) {
-        if let Some(s) = non_empty_env("TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE") {
+        if let Some(s) =
+            tddy_core::spawn_env::env_non_empty("TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE")
+        {
             if let Some(b) = parse_env_bool(&s) {
                 self.codex_oauth_loopback_proxy_eligible = b;
             } else {
@@ -1223,7 +1225,7 @@ impl DaemonConfig {
     /// [`MIN_WORKTREE_ROOM_INTERVAL_MS`], the same floor the YAML section is loaded under — a floor
     /// an environment variable could step under would not be one.
     pub fn apply_timing_env_overrides(&mut self) {
-        merge_timing_env(self, non_empty_env);
+        merge_timing_env(self, tddy_core::spawn_env::env_non_empty);
     }
 }
 
@@ -1282,17 +1284,6 @@ fn env_u64(lookup: &impl Fn(&str) -> Option<String>, name: &str) -> Option<u64> 
             None
         }
     }
-}
-
-fn non_empty_env(name: &str) -> Option<String> {
-    std::env::var(name).ok().and_then(|s| {
-        let t = s.trim();
-        if t.is_empty() {
-            None
-        } else {
-            Some(s)
-        }
-    })
 }
 
 fn parse_chat_ids_csv(s: &str) -> Result<Vec<i64>, ()> {

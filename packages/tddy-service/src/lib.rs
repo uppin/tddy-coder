@@ -67,7 +67,9 @@ pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
 pub use proto::vm::VmServiceServer;
 pub use proto::worktree::WorktreeServiceServer;
-pub use reflection_service::{reflection_entry_from, ServerReflectionImpl};
+pub use reflection_service::{
+    reflection_entry_from, reflection_entry_from_with_supplements, ServerReflectionImpl,
+};
 pub use service::{session_view_adapter_surface, TddyRemoteService};
 pub use service_acp::TddyAcpService;
 pub use service_coordinates::SESSION_FILES_SERVICE;
@@ -163,6 +165,13 @@ pub mod proto {
     pub mod tonic_activity {
         #![allow(unused_imports, clippy::all)]
         include!(concat!(env!("OUT_DIR"), "/tonic_activity/activity.rs"));
+    }
+
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `livekit.proto`. Family T on the
+    /// local Unix socket uses the generated [`livekit::LiveKitServiceTonicAdapter`].
+    pub mod tonic_livekit {
+        #![allow(unused_imports, clippy::all)]
+        include!(concat!(env!("OUT_DIR"), "/tonic_livekit/livekit.rs"));
     }
 
     /// `CatalogService`: the tools, backends, models and subagents this daemon can offer. Split out
