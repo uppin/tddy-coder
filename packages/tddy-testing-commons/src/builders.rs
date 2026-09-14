@@ -264,6 +264,7 @@ impl SessionMetadataBuilder {
             codebase_session_id: None,
             agent_daemon_instance_id: None,
             agent_session_id: None,
+            ssh_config_host: None,
         }
     }
 }

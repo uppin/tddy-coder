@@ -27,6 +27,7 @@ import {
 import { Button } from "../ui/button";
 import { useAvailableAgents } from "./useAvailableAgents";
 import { CreateSessionAgentSelect } from "./CreateSessionAgentSelect";
+import { CreateSessionSshConfigSelect } from "./CreateSessionSshConfigSelect";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import { useSelectableAgents } from "./useSelectableAgents";
 import {
@@ -1128,6 +1129,7 @@ export function CreateSessionPane({
                     </select>
                   </div>
                 )}
+                {sessionType === "claude-cli" && <CreateSessionSshConfigSelect />}
                 {/* Codebase host — which daemon's filesystem holds the worktree. Offered only in the
                     claude-cli copy of this block: only claude-cli can be *prevented* from touching a
                     local filesystem (--allowedTools/--disallowedTools), so it is the only session

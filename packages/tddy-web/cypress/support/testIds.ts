@@ -289,6 +289,8 @@ export const TEST_IDS = {
    * the session's git worktree. Empty value means "same as host" (co-located). claude-cli only.
    * See docs/ft/daemon/remote-managed-worktree.md. */
   createSessionCodebaseHostSelect: "create-session-codebase-host-select",
+  /** OpenSSH Host alias the session's exec catalog runs on. Empty = this host (LocalShell). */
+  createSessionSshConfigSelect: "create-session-ssh-config-select",
   createSessionInitialPromptInput: "create-session-initial-prompt-input",
   createSessionBranchIntentSelect: "create-session-branch-intent-select",
   createSessionNewBranchNameInput: "create-session-new-branch-name-input",

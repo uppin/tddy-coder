@@ -3149,6 +3149,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             codebase_session_id: None,
             agent_daemon_instance_id: None,
             agent_session_id: None,
+            ssh_config_host: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;
@@ -3382,6 +3383,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             codebase_session_id: None,
             agent_daemon_instance_id: None,
             agent_session_id: None,
+            ssh_config_host: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;

@@ -105,6 +105,12 @@ pub struct SessionMetadata {
     /// withdrawal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_id: Option<String>,
+    /// OpenSSH `Host` alias the code-managing daemon uses as the exec target. Absent = LocalShell
+    /// (this host's filesystem). When set, `repo_path` is the worktree on that SSH target, and
+    /// every exec-catalog tool runs there via RemoteShell. See
+    /// docs/ft/web/1-WIP/PRD-2026-09-14-ssh-exec.md.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_config_host: Option<String>,
 }
 
 /// Keeps `agents_rev: 0` out of the file, so a session with no roster writes no roster keys at all
@@ -218,6 +224,7 @@ pub fn write_initial_tool_session_metadata(
         codebase_session_id: None,
         agent_daemon_instance_id: None,
         agent_session_id: None,
+        ssh_config_host: None,
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -676,6 +683,7 @@ session_type: workspace
         SessionMetadata {
             agent_daemon_instance_id: agent_daemon_instance_id.map(str::to_string),
             agent_session_id: agent_session_id.map(str::to_string),
+            ssh_config_host: None,
             ..a_workspace_session()
         }
     }

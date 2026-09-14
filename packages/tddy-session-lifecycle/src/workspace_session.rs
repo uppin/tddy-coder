@@ -172,6 +172,7 @@ pub async fn start_workspace_session(
         // with and refuse the very withdrawal this placement exists to enforce.
         agent_daemon_instance_id: paired_agent.map(|a| a.daemon_instance_id.clone()),
         agent_session_id: paired_agent.map(|a| a.session_id.clone()),
+        ssh_config_host: None,
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -309,6 +310,7 @@ pub async fn start_agent_clone_session(
         codebase_session_id: None,
         agent_daemon_instance_id: None,
         agent_session_id: None,
+        ssh_config_host: None,
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;

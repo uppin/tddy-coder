@@ -118,8 +118,35 @@ fn a_session_file_written_before_split_placement_still_parses() {
     // Then — every session on disk today predates these fields
     assert_eq!(metadata.codebase_daemon_instance_id, None);
     assert_eq!(metadata.codebase_session_id, None);
+    assert_eq!(metadata.ssh_config_host, None);
     assert_eq!(
         metadata.repo_path.as_deref(),
         Some("/home/dev/repo/.worktrees/feature")
+    );
+}
+
+#[test]
+fn a_session_file_records_the_ssh_host_it_executes_on() {
+    // Given
+    let yaml = r#"
+session_id: "019d105b-ac0f-78d3-9a89-409731145a45"
+project_id: "proj-1"
+created_at: "2026-09-14T12:00:00Z"
+updated_at: "2026-09-14T12:00:00Z"
+status: "active"
+pending_elicitation: false
+session_type: "claude-cli"
+ssh_config_host: "buildbox"
+repo_path: "/home/dev/repo/.worktrees/sess"
+"#;
+
+    // When
+    let metadata: SessionMetadata = serde_yaml::from_str(yaml).expect("ssh exec file must parse");
+
+    // Then
+    assert_eq!(metadata.ssh_config_host.as_deref(), Some("buildbox"));
+    assert_eq!(
+        metadata.repo_path.as_deref(),
+        Some("/home/dev/repo/.worktrees/sess")
     );
 }

@@ -272,6 +272,7 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
         codebase_session_id: None,
         agent_daemon_instance_id: None,
         agent_session_id: None,
+        ssh_config_host: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
     let service = test_service(sessions_tmp.path().to_path_buf());

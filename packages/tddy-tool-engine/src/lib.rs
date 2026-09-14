@@ -7,8 +7,12 @@
 //! participant `ExecuteTool` / `ListExecTools`).
 
 pub mod catalog;
+pub mod shell;
 
 pub use catalog::{tool_catalog, ToolDef};
+pub use shell::{
+    execute_tool_on_shell, session_shell, LocalShell, RemoteShell, Shell, ShellError, ShellKind,
+};
 
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -29,7 +33,7 @@ pub struct ToolOutcome {
 }
 
 impl ToolOutcome {
-    fn ok(result_json: impl Into<String>) -> Self {
+    pub(crate) fn ok(result_json: impl Into<String>) -> Self {
         Self {
             result_json: result_json.into(),
             is_error: false,
@@ -39,7 +43,7 @@ impl ToolOutcome {
         }
     }
 
-    fn err(msg: impl Into<String>) -> Self {
+    pub(crate) fn err(msg: impl Into<String>) -> Self {
         let m = msg.into();
         Self {
             result_json: serde_json::json!({ "error": m }).to_string(),
@@ -54,7 +58,7 @@ impl ToolOutcome {
 /// Validate and resolve a path argument, ensuring it stays within `worktree_root`.
 ///
 /// Returns an `Err` string if the path escapes the worktree root.
-fn contain_path(worktree_root: &Path, arg_path: &str) -> Result<PathBuf, String> {
+pub(crate) fn contain_path(worktree_root: &Path, arg_path: &str) -> Result<PathBuf, String> {
     let root = worktree_root
         .canonicalize()
         .map_err(|e| format!("cannot canonicalize worktree root: {e}"))?;

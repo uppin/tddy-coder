@@ -636,6 +636,7 @@ impl DaemonSessionHost {
             codebase_session_id: None,
             agent_daemon_instance_id: None,
             agent_session_id: None,
+            ssh_config_host: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;

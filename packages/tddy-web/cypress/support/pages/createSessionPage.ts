@@ -97,6 +97,37 @@ export const createSessionPage = {
     byTestId(TEST_IDS.createSessionCodebaseHostSelect).should("not.exist");
   },
 
+  // ---------------------------------------------------------------------------
+  // SSH host — OpenSSH Host alias the exec catalog runs on (docs/ft/web/1-WIP/PRD-2026-09-14-ssh-exec.md)
+  // ---------------------------------------------------------------------------
+
+  /** The "SSH host" `<select>`. Present inside an open claude-cli Managed codebase block. */
+  sshConfigSelect: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionSshConfigSelect, { timeout: 5000, ...options }),
+
+  /** Choose which OpenSSH Host alias runs exec tools. `""` selects this host (LocalShell). */
+  selectSshConfigHost(alias: string) {
+    byTestId(TEST_IDS.createSessionSshConfigSelect).select(alias);
+  },
+
+  /** Alias values offered, in option order. Leading "This host" is `""`. */
+  sshConfigOptionValues: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .sshConfigSelect()
+      .find("option")
+      .then(($opts) => [...$opts].map((el) => (el as HTMLOptionElement).value)),
+
+  /** Captions for the SSH-host options, in option order. */
+  sshConfigOptionLabels: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .sshConfigSelect()
+      .find("option")
+      .then(($opts) => [...$opts].map((el) => (el.textContent ?? "").trim())),
+
+  expectNoSshConfigSelector() {
+    byTestId(TEST_IDS.createSessionSshConfigSelect).should("not.exist");
+  },
+
   /** Open the "Managed codebase" section, which is where split placement is configured. */
   enableManagedCodebase() {
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();

@@ -357,6 +357,7 @@ async fn resuming_a_managed_claude_cli_session_re_wires_orchestration_and_socket
         codebase_session_id: None,
         agent_daemon_instance_id: None,
         agent_session_id: None,
+        ssh_config_host: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 

@@ -1535,6 +1535,20 @@ pub fn list_worktrees(repo_root: &Path) -> Result<Vec<WorktreeInfo>, String> {
     Ok(worktrees)
 }
 
+/// Same operations [`setup_worktree_for_session`] runs today, executed on `ssh_config_host` through
+/// OpenSSH (`RemoteShell`): ensure the project checkout exists on the target (clone `git_url` there
+/// if needed), then `git worktree add` under `.worktrees/`. Returns the absolute path on the target.
+///
+/// A BatchMode failure is the result — never a local worktree.
+pub fn setup_worktree_for_session_over_ssh(
+    _ssh_config_host: &str,
+    _git_url: &str,
+    _session_id: &str,
+) -> Result<String, String> {
+    // TODO(exec): implement — RemoteShell clone + git worktree add on the SSH target
+    Err("TODO(exec): implement setup_worktree_for_session_over_ssh".to_string())
+}
+
 #[cfg(test)]
 mod integration_base_red_tests {
     use super::*;
