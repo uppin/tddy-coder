@@ -143,6 +143,38 @@ pub fn resolve_project_repo(projects_dir: &Path, project_ref: &str) -> Result<Pa
     Ok(repo_path)
 }
 
+/// Where a Serve spawn runs pack verbs. Local is today's `main_repo_path`. Remote is n2's
+/// RemoteShell (`ssh -o BatchMode=yes <alias>`) — this crate cannot take `tddy_tool_engine::Shell`
+/// because that crate already depends on this one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackExecution {
+    Local {
+        repo_path: PathBuf,
+    },
+    Remote {
+        ssh_config_host: String,
+        remote_repo_path: String,
+    },
+}
+
+/// Empty `ssh_config_host` is LocalShell. A set alias packs on the SSH target, never locally.
+pub fn pack_execution_for_session(
+    local_repo: PathBuf,
+    ssh_config_host: &str,
+    remote_repo_path: &str,
+) -> PackExecution {
+    if ssh_config_host.is_empty() {
+        PackExecution::Local {
+            repo_path: local_repo,
+        }
+    } else {
+        PackExecution::Remote {
+            ssh_config_host: ssh_config_host.to_string(),
+            remote_repo_path: remote_repo_path.to_string(),
+        }
+    }
+}
+
 /// The argv the child is spawned with, front-loaded with a `setpriv` privilege drop when the
 /// target OS user differs from the daemon's own identity (reusing
 /// [`tddy_daemon_kernel::privilege_drop::wrap_argv_for_privilege_drop`], so the PTY and pipe paths cannot diverge).
@@ -538,6 +570,29 @@ impl GitChildRelay {
         env: Vec<(String, String)>,
     ) -> Result<(GitChildRelay, GitServerFrames), Status> {
         Self::spawn_child(argv, cwd, Some(env))
+    }
+
+    /// Spawn a pack verb through [`PackExecution`]. Local is [`spawn_with_env`]. Remote is
+    /// OpenSSH to the session's Host alias — not yet wired.
+    pub fn spawn_pack_verb(
+        execution: &PackExecution,
+        argv: Vec<String>,
+        env: Vec<(String, String)>,
+    ) -> Result<(GitChildRelay, GitServerFrames), Status> {
+        match execution {
+            PackExecution::Local { repo_path } => {
+                Self::spawn_with_env(argv, repo_path.clone(), env)
+            }
+            PackExecution::Remote {
+                ssh_config_host: _,
+                remote_repo_path: _,
+            } => {
+                // TODO(remote-git): implement — ssh -o BatchMode=yes -- <alias> -- git upload-pack
+                Err(Status::unimplemented(
+                    "TODO(remote-git): spawn pack verb through RemoteShell",
+                ))
+            }
+        }
     }
 
     /// Spawn the child with all three stdio streams piped, and start pumping:
