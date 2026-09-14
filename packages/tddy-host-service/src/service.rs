@@ -803,11 +803,37 @@ impl HostService for HostServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
             .to_string();
 
-        let _github_user = github_user;
-        let _os_user = os_user;
-        let _files = Arc::clone(&self.host_user_files);
-        // TODO(ssh-config): implement — list_ssh_config_hosts as os_user; FAILED ≠ empty.
-        Err(Status::unimplemented("TODO(ssh-config): implement"))
+        let files = Arc::clone(&self.host_user_files);
+        let listed = tokio::task::spawn_blocking(move || {
+            crate::ssh_config::list_ssh_config_hosts(files.as_ref(), &os_user)
+        })
+        .await
+        .map_err(|_| Status::internal("listing SSH config hosts on this host did not complete"))?;
+
+        match listed {
+            Ok(hosts) => {
+                log::debug!(
+                    "ListSshConfigHosts: {} explicit aliases",
+                    hosts.aliases.len()
+                );
+                Ok(Response::new(ListSshConfigHostsResponse {
+                    outcome: tddy_service::proto::host::ProbeOutcome::Ok as i32,
+                    failure_reason: String::new(),
+                    hosts: hosts
+                        .aliases
+                        .into_iter()
+                        .map(|alias| tddy_service::proto::host::SshConfigHost { alias })
+                        .collect(),
+                }))
+            }
+            Err(crate::ssh_config::SshConfigHostsError::Unreadable(reason)) => {
+                Ok(Response::new(ListSshConfigHostsResponse {
+                    outcome: tddy_service::proto::host::ProbeOutcome::Failed as i32,
+                    failure_reason: reason,
+                    hosts: Vec::new(),
+                }))
+            }
+        }
     }
 
     /// Stream host telemetry for the selected daemon. Authenticates `session_token`, then spawns a
