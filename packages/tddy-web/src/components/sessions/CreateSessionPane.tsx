@@ -27,7 +27,10 @@ import {
 import { Button } from "../ui/button";
 import { useAvailableAgents } from "./useAvailableAgents";
 import { CreateSessionAgentSelect } from "./CreateSessionAgentSelect";
-import { CreateSessionSshConfigSelect } from "./CreateSessionSshConfigSelect";
+import {
+  CreateSessionSshConfigSelect,
+  sshConfigListDaemonId,
+} from "./CreateSessionSshConfigSelect";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import { useSelectableAgents } from "./useSelectableAgents";
 import {
@@ -236,7 +239,7 @@ export function CreateSessionPane({
   // Which daemon's filesystem holds the worktree. Empty means "same as host" — the co-located
   // placement every session had before docs/ft/daemon/remote-managed-worktree.md.
   const [codebaseDaemonInstanceId, setCodebaseDaemonInstanceId] = useState("");
-  /** OpenSSH Host alias for exec tools on this host (empty = LocalShell). */
+  // OpenSSH Host alias the exec catalog runs on. Empty is LocalShell on the code-managing host.
   const [sshConfigHost, setSshConfigHost] = useState("");
   /**
    * Whether placing the codebase on another daemon is even on offer.
@@ -321,6 +324,19 @@ export function CreateSessionPane({
    * sending `daemonInstanceId` exactly as the form holds it.
    */
   const agentHostInstanceId = hostRunningSession(daemonInstanceId, connectedInstanceId);
+
+  /**
+   * Host whose `~/.ssh/config` the SSH dropdown lists. Co-located: the session host. Split: the
+   * codebase host — that daemon is the OpenSSH client (n4).
+   */
+  const sshListDaemonId = sshConfigListDaemonId(
+    agentHostInstanceId,
+    isSplitCodebase ? codebaseDaemonInstanceId : "",
+  );
+
+  useEffect(() => {
+    setSshConfigHost("");
+  }, [sshListDaemonId]);
 
   /** The agents this form may offer, and the hosts whose silence it may report. */
   const offeredAgents = selectableAgents.agents;
@@ -614,7 +630,7 @@ export function CreateSessionPane({
       // codebase installs, so a placement chosen before the toggle was switched off would name a
       // combination the daemon refuses.
       codebaseDaemonInstanceId: isSplitCodebase ? codebaseDaemonInstanceId : "",
-      sshConfigHost: isSplitCodebase ? "" : sshConfigHost,
+      sshConfigHost,
     };
   };
 
@@ -1132,14 +1148,6 @@ export function CreateSessionPane({
                     </select>
                   </div>
                 )}
-                {sessionType === "claude-cli" && !isSplitCodebase && (
-                  <CreateSessionSshConfigSelect
-                    daemonInstanceId={daemonInstanceId || connectedInstanceId}
-                    sessionToken={sessionToken}
-                    value={sshConfigHost}
-                    onChange={setSshConfigHost}
-                  />
-                )}
                 {/* Codebase host — which daemon's filesystem holds the worktree. Offered only in the
                     claude-cli copy of this block: only claude-cli can be *prevented* from touching a
                     local filesystem (--allowedTools/--disallowedTools), so it is the only session
@@ -1165,6 +1173,14 @@ export function CreateSessionPane({
                       ))}
                     </select>
                   </div>
+                )}
+                {sessionType === "claude-cli" && (
+                  <CreateSessionSshConfigSelect
+                    sessionToken={sessionToken}
+                    listDaemonInstanceId={sshListDaemonId}
+                    value={sshConfigHost}
+                    onChange={setSshConfigHost}
+                  />
                 )}
                 {/* No split guard: an agent is placeable on any host, and the placement only
                     decides how it reads the codebase — an agent on the codebase host reads that

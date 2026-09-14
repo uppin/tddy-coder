@@ -588,6 +588,58 @@ pub fn prepare_split_agent_wiring(
     })
 }
 
+/// Daemon that opens `ssh(1)` for this session's exec catalog: the code-managing host.
+///
+/// Co-located: the session host is the OpenSSH client. Split: the codebase host holds the
+/// checkout and is the client — the agent host has no worktree and must not open SSH.
+/// `tddy-tools` in the jail never sees ssh-agent; dispatch stays IPC/HTTP/LiveKit to this daemon.
+pub fn ssh_client_daemon_instance_id(
+    session_host_daemon_id: &str,
+    codebase_host_daemon_id: &str,
+) -> String {
+    let _split =
+        !codebase_host_daemon_id.is_empty() && codebase_host_daemon_id != session_host_daemon_id;
+    // TODO(split): when `_split`, return `codebase_host_daemon_id` — it holds the checkout
+    // and opens ssh(1). The agent host must not be the OpenSSH client.
+    session_host_daemon_id.to_string()
+}
+
+#[cfg(test)]
+mod ssh_client_tests {
+    use super::ssh_client_daemon_instance_id;
+
+    #[test]
+    fn a_colocated_sessions_ssh_client_is_the_session_host() {
+        // Given the checkout lives on the same daemon as the agent
+        // When
+        let ssh_client = ssh_client_daemon_instance_id("laptop-a", "laptop-a");
+
+        // Then that host's ~/.ssh/config is what the dropdown lists, and it opens ssh(1)
+        assert_eq!(ssh_client, "laptop-a");
+    }
+
+    #[test]
+    fn an_empty_codebase_host_means_the_session_host_opens_ssh() {
+        // Given co-located placement spelled as "same as host"
+        // When
+        let ssh_client = ssh_client_daemon_instance_id("laptop-a", "");
+
+        // Then
+        assert_eq!(ssh_client, "laptop-a");
+    }
+
+    #[test]
+    fn a_split_sessions_ssh_client_is_the_codebase_host_not_the_agent_host() {
+        // Given a split: agent on laptop-a, checkout on workstation-b
+        // When
+        let ssh_client = ssh_client_daemon_instance_id("laptop-a", "workstation-b");
+
+        // Then A does not SSH — it has no checkout. B opens ssh(1) (and n2's RemoteShell on B
+        // is what a split Read uses; that behaviour is sequenced on exec green).
+        assert_eq!(ssh_client, "workstation-b");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
