@@ -510,6 +510,7 @@ impl DaemonSessionHost {
                     managed_recipe,
                     req.semantic_index,
                     req.create_remote_branch,
+                    req.ssh_config_host.trim(),
                 )
                 .await;
         }

@@ -10,6 +10,8 @@ cd "$(dirname "$0")"
 nix develop --profile ./.nix-profile -c bash -c '
   set -e
   set -o pipefail
+  # SSH exec acceptance tests speak OpenSSH against a local buildbox fixture.
+  source scripts/ssh-exec-test-fixture.sh
   # --bins: required alongside --examples so tddy-acp-stub (bin-only, no examples) is built.
   # tddy-sandbox-runner is here because the jail acceptance suites spawn it as a *binary* from
   # target/debug rather than linking it. Those tests run in packages that do not own it, so cargo

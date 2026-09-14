@@ -278,6 +278,7 @@ async fn spawn_claude_cli_session_inner(
     // When true (and the intent is new_branch_from_base), push the freshly created branch to origin
     // at session start; a push failure fails the start.
     create_remote_branch: bool,
+    ssh_config_host: &str,
     task_registry: &TaskRegistry,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
@@ -357,23 +358,45 @@ async fn spawn_claude_cli_session_inner(
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
 
-    // Create the real git worktree (blocking: involves git fetch + git worktree add).
-    let repo_root_clone = repo_root.clone();
-    let session_dir_clone = session_dir.clone();
+    // Create the real git worktree (blocking: involves git fetch + git worktree add), or materialize
+    // on an SSH target when `ssh_config_host` is set.
+    let ssh_alias = ssh_config_host.trim();
     let timeout = config.spawn_worker_request_timeout();
-    let worktree_path = service_util::spawn_blocking_with_timeout(
-        timeout,
-        "start_claude_cli_session: create worktree",
-        move || {
-            tddy_core::setup_worktree_for_session_with_optional_chain_base(
-                &repo_root_clone,
-                &session_dir_clone,
-                worktree_base_ref.as_deref(),
-            )
-            .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
-        },
-    )
-    .await?;
+    let worktree_path = if ssh_alias.is_empty() {
+        let repo_root_clone = repo_root.clone();
+        let session_dir_clone = session_dir.clone();
+        service_util::spawn_blocking_with_timeout(
+            timeout,
+            "start_claude_cli_session: create worktree",
+            move || {
+                tddy_core::setup_worktree_for_session_with_optional_chain_base(
+                    &repo_root_clone,
+                    &session_dir_clone,
+                    worktree_base_ref.as_deref(),
+                )
+                .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
+            },
+        )
+        .await?
+    } else {
+        let git_url = project.git_url.clone();
+        let session_id_owned = session_id.to_string();
+        let alias_owned = ssh_alias.to_string();
+        let remote_path = service_util::spawn_blocking_with_timeout(
+            timeout,
+            "start_claude_cli_session: create remote worktree",
+            move || {
+                tddy_core::setup_worktree_for_session_over_ssh(
+                    &alias_owned,
+                    &git_url,
+                    &session_id_owned,
+                )
+                .map_err(|e| anyhow::anyhow!("remote worktree setup failed: {}", e))
+            },
+        )
+        .await?;
+        PathBuf::from(remote_path)
+    };
 
     service_util::push_new_branch_to_origin_if_requested(
         create_remote_branch,
@@ -564,7 +587,11 @@ async fn spawn_claude_cli_session_inner(
         codebase_session_id: None,
         agent_daemon_instance_id: None,
         agent_session_id: None,
-        ssh_config_host: None,
+        ssh_config_host: if ssh_alias.is_empty() {
+            None
+        } else {
+            Some(ssh_alias.to_string())
+        },
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;

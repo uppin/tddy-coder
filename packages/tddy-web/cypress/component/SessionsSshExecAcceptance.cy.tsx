@@ -8,7 +8,6 @@
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
-import { Room } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
@@ -24,8 +23,9 @@ import {
   SshConfigHostSchema,
 } from "../../src/gen/host_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { createSessionPage } from "../support/pages/createSessionPage";
+import { mountWithRpc } from "../support/rpc/inMemory";
+import { withSelectedDaemonServedBy } from "../support/rpc/withSelectedDaemon";
 
 const SESSION_HOST = "laptop-a";
 
@@ -78,12 +78,8 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
   const catalogClient = createClient(CatalogService, backend.transport());
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
-  cy.mount(
-    <SelectedDaemonProvider
-      room={new Room()}
-      daemons={DAEMON_HOSTS}
-      servingInstanceId={SESSION_HOST}
-    >
+  mountWithRpc(
+    withSelectedDaemonServedBy(
       <CreateSessionPane
         client={client}
         projectClient={projectClient}
@@ -93,8 +89,11 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
         sessionToken="fake-token"
         onCancel={cy.stub()}
         onCreated={cy.stub()}
-      />
-    </SelectedDaemonProvider>,
+      />,
+      DAEMON_HOSTS,
+      SESSION_HOST,
+    ),
+    backend,
   );
 }
 

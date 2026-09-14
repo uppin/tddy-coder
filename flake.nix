@@ -105,6 +105,9 @@
               if [[ -d "$_tddy_root/node_modules/.bin" ]]; then
                 export PATH="$_tddy_root/node_modules/.bin:$PATH"
               fi
+              if [[ -f "$_tddy_root/scripts/ssh-exec-test-fixture.sh" ]]; then
+                source "$_tddy_root/scripts/ssh-exec-test-fixture.sh"
+              fi
             fi
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
             export CXXFLAGS="-include ''${SDKROOT}/usr/include/uuid/uuid.h''${CXXFLAGS:+ $CXXFLAGS}"

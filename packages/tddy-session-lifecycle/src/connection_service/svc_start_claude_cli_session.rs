@@ -55,6 +55,7 @@ impl DaemonSessionHost {
         semantic_index: bool,
         // When true (new_branch_from_base only), push the new branch to origin at session start.
         create_remote_branch: bool,
+        ssh_config_host: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
         // A pr-stack orchestrator gets a child-spawn handler bound to its toolcall listener so the
         // agent's `pr_spawn_child` relay can materialize planned nodes into child sessions.
@@ -122,6 +123,7 @@ impl DaemonSessionHost {
             conversation_spawn_handler,
             semantic_index,
             create_remote_branch,
+            ssh_config_host,
             &self.task_registry,
         )
         .await

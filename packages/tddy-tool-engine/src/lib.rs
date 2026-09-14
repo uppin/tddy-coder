@@ -155,7 +155,7 @@ impl TaskBody for ShellTaskBody {
 /// Wrap an already-completed inline tool invocation as a terminal task for observability.
 ///
 /// Returns the new `TaskId` string so callers can populate `ToolOutcome.job_id`.
-async fn register_sync_task(
+pub(crate) async fn register_sync_task(
     registry: &TaskRegistry,
     session_id: &str,
     kind: &str,
@@ -551,7 +551,7 @@ async fn tool_shell(
     o
 }
 
-async fn tool_await(args: &serde_json::Value, registry: &TaskRegistry) -> ToolOutcome {
+pub(crate) async fn tool_await(args: &serde_json::Value, registry: &TaskRegistry) -> ToolOutcome {
     // Accept both "job_id" (canonical) and "task_id" (alias used by some callers).
     let job_id = args
         .get("job_id")

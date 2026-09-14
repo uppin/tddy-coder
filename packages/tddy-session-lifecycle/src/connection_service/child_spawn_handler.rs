@@ -121,6 +121,7 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             // Child spawns are created by the orchestrator agent, not the Start-Session dialog, and
             // never push a remote branch here.
             false,
+            "",
             &self.claude_cli_manager.task_registry(),
         )
         .await

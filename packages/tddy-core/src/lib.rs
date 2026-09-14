@@ -32,6 +32,7 @@ pub mod session_metadata;
 pub mod session_participant_metadata;
 pub mod source_path;
 pub mod spawn_env;
+pub mod ssh_exec;
 pub mod stdio_safety;
 pub mod stream;
 #[cfg(test)]
@@ -123,6 +124,9 @@ pub use session_metadata::{
     SessionMetadata, SESSION_METADATA_FILENAME,
 };
 pub use source_path::{classify_rust_source_path, RustSourcePathKind};
+pub use ssh_exec::{
+    contain_remote_path, default_remote_repo_root, run_ssh_batch, shell_single_quote,
+};
 pub use stream::ProgressEvent;
 pub use tddy_workflow::{
     canonical_artifact_write_path, canonical_attachment_write_path, read_session_artifact_utf8,

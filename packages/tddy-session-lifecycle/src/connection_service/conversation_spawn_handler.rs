@@ -77,6 +77,7 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             false,
             // Child conversations are spawned by the orchestrator, never pushing a remote branch.
             false,
+            "",
             &self.claude_cli_manager.task_registry(),
         )
         .await
