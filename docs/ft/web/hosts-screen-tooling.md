@@ -2,8 +2,8 @@
 
 Every row of the Hosts screen reports what that host has installed and configured: the **git
 identity** its commits would carry, the state of the **GitHub CLI** on it, the **ssh-agent** it has
-with the keys that agent is holding, and whether a **remote desktop** on it can be reached — and
-bridged.
+with the keys that agent is holding, the **SSH connections** its OpenSSH config names, and whether a
+**remote desktop** on it can be reached — and bridged.
 
 ## Motivation
 
@@ -25,7 +25,7 @@ is; this says whether work on it will succeed.
 
 ## What a row shows
 
-Four sections, each labelled with the tool it speaks for.
+Five sections, each labelled with the tool it speaks for.
 
 | Cell | State | Reading |
 |---|---|---|
@@ -39,6 +39,9 @@ Four sections, each labelled with the tool it speaks for.
 | ssh-agent | agent, no keys | "No keys loaded" — an agent is running and holds nothing |
 | ssh-agent | no agent | "No agent" — nothing answered for that host's OS user |
 | ssh-agent | could not check | the probe failed, with the reason on hover |
+| ssh connections | aliases listed | one span per explicit `Host` alias from that host's `~/.ssh/config` |
+| ssh connections | none | "No SSH hosts" — the config was read and names no explicit aliases |
+| ssh connections | could not check | the listing failed; must not read as "no destinations" |
 | remote desktop | bridge present | "Bridge ready" — this host's daemon has the bridge binary for that protocol |
 | remote desktop | no bridge | "No bridge" — nothing to spawn, whatever is or is not serving |
 | remote desktop | desktop serving | "Desktop on :5900" — something accepted a connection on the port named |
@@ -68,6 +71,9 @@ empty string or into another. Four distinctions carry the whole design:
   answered can report an empty list; every other emptiness is "No agent" or "Could not check". An
   empty agent wants a key added, an absent one wants an agent started, and a failed probe wants
   looking at on the daemon side.
+- **"No SSH hosts" is never said when the config could not be read.** Key listing collapses an
+  unreadable `~/.ssh` into an empty offer; SSH destination listing does not, because empty here means
+  LocalShell is the only choice in later session flows.
 - **"No desktop" is never said about a port nobody reached.** A refused connection is an answer —
   we got to the host and nothing was listening. A timeout, an unreachable network or a denied
   connect is not: it reads "Could not check", with the port and the reason. A row that keyed off
@@ -200,6 +206,10 @@ than subscribed to, and only for hosts that are online.
 - [x] A probe that could not reach a port reads as a probe failure, distinct from "no desktop".
 - [x] The probe never performs a protocol handshake — a bare TCP connect, closed immediately.
 - [x] The row shows bridge capability and desktop reachability separately and never conflates them.
+- [x] A host whose `~/.ssh/config` defines explicit `Host` aliases lists each alias on the row.
+- [x] A readable config with no explicit aliases reads "No SSH hosts", not a probe failure.
+- [x] An unreadable config reads as "Could not check", never as "No SSH hosts".
+- [x] Wildcard-only `Host` patterns contribute no alias names.
 
 ## Not yet reachable in the running app
 

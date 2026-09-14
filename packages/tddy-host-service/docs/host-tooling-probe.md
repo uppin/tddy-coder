@@ -12,6 +12,16 @@ on it can be reached — and bridged. It backs the web's Hosts rows
 This is the first *capability probe* in the daemon — the first place tddy asks a machine what is on
 it rather than reporting something the daemon already holds.
 
+## SSH connections vs ssh-agent keys
+
+The Hosts row's **ssh-agent** cell comes from this probe's `ssh_agent` block. The **ssh
+connections** cell is a separate `ListSshConfigHosts` RPC ([host-service.md](./host-service.md)):
+it lists explicit OpenSSH `Host` aliases from the same OS user's `~/.ssh/config`, honours `Include`,
+and skips wildcard patterns. It does not shell out to `ssh`, and it does not treat the file named
+`config` as a key candidate — that file names destinations, not loadable keys. Failure semantics
+differ from `ListHostKeyCandidates`: an unreadable config is a failed listing, not an empty alias
+list, because "no aliases" is a real operator choice in later session flows.
+
 ## The seam
 
 ```rust
