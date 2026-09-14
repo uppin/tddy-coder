@@ -1,4 +1,4 @@
-//! `host.HostService` — the eight RPCs a browser asks a *machine* about.
+//! `host.HostService` — the RPCs a browser asks a *machine* about.
 //!
 //! Every method here is addressed by `daemon_instance_id`, and five of them are routed before the
 //! caller is even authenticated. That ordering is the whole design: a host's tooling, the prompts
@@ -25,8 +25,8 @@ use tddy_service::proto::host::{
     HostCpuStats, HostDiskStats, HostKeyCandidate, HostLoadStats, HostMemoryStats, HostPromptEvent,
     HostService, HostStatsEvent, KnownHostEntry, ListEligibleDaemonsRequest,
     ListEligibleDaemonsResponse, ListHostKeyCandidatesRequest, ListHostKeyCandidatesResponse,
-    ListKnownHostsRequest, ListKnownHostsResponse, StreamHostPromptsRequest,
-    StreamHostStatsRequest,
+    ListKnownHostsRequest, ListKnownHostsResponse, ListSshConfigHostsRequest,
+    ListSshConfigHostsResponse, StreamHostPromptsRequest, StreamHostStatsRequest,
 };
 use tddy_task::IdleTimeoutTracker;
 
@@ -775,6 +775,39 @@ impl HostService for HostServiceImpl {
                 })
                 .collect(),
         }))
+    }
+
+    /// Explicit OpenSSH `Host` aliases in this OS user's `~/.ssh/config`.
+    ///
+    /// Routed like [`Self::list_host_key_candidates`]: the file is on one machine. Honesty is the
+    /// opposite of that listing: unreadable is FAILED, not empty.
+    async fn list_ssh_config_hosts(
+        &self,
+        request: Request<ListSshConfigHostsRequest>,
+    ) -> Result<Response<ListSshConfigHostsResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        if let Some(answered) = self
+            .rpc_served_by_peer("ListSshConfigHosts", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
+            .to_string();
+
+        let _github_user = github_user;
+        let _os_user = os_user;
+        let _files = Arc::clone(&self.host_user_files);
+        // TODO(ssh-config): implement — list_ssh_config_hosts as os_user; FAILED ≠ empty.
+        Err(Status::unimplemented("TODO(ssh-config): implement"))
     }
 
     /// Stream host telemetry for the selected daemon. Authenticates `session_token`, then spawns a

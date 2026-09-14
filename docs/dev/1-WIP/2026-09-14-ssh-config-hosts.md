@@ -232,10 +232,10 @@ couple CI to the runner's `~/.ssh/config`.
 - [x] Cross-check `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
@@ -257,4 +257,5 @@ couple CI to the runner's `~/.ssh/config`.
 ## References
 
 - Stack slug `#ssh-exec` 1/4
+- Draft PR: https://github.com/uppin/tddy-coder/pull/483
 - makers-lt `LocalShell`/`RemoteHost` analogue (execution is n2)

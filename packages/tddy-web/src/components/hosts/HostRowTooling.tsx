@@ -24,6 +24,7 @@ import type {
 import { ProbeOutcome } from "../../gen/host_pb";
 import { HostRowRemoteDesktop } from "./HostRowRemoteDesktop";
 import { HostRowSshAgent } from "./HostRowSshAgent";
+import { HostRowSshConfig } from "./HostRowSshConfig";
 
 export interface HostRowToolingProps {
   instanceId: string;
@@ -160,6 +161,7 @@ export function HostRowTooling({
         {ghState.text}
       </span>
       <HostRowSshAgent instanceId={instanceId} sshAgent={sshAgent} />
+      <HostRowSshConfig instanceId={instanceId} />
       {/* No readings is no claim: a host nothing has answered for yet renders an empty section
           rather than a protocol row asserting something about a probe that has not run. */}
       <HostRowRemoteDesktop instanceId={instanceId} readings={remoteDesktop ?? []} />
