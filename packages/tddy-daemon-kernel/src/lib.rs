@@ -63,6 +63,7 @@ pub mod agent_tool_socket;
 pub mod config;
 pub mod daemon_identity;
 pub mod peer_forwarding;
+pub mod presenter_observer;
 pub mod privilege_drop;
 pub mod spawn_as_user;
 pub use agent_tool_socket::agent_tool_socket_path;

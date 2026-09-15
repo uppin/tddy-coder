@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Refactor + Architecture Change
 **Stack**: `#carve` 7/9
+**PR**: [#494](https://github.com/uppin/tddy-coder/pull/494)
 
 PRD: [`2026-09-15-carve-telegram-prd.md`](./2026-09-15-carve-telegram-prd.md)
 
@@ -49,10 +50,17 @@ PRD: [`2026-09-15-carve-telegram-prd.md`](./2026-09-15-carve-telegram-prd.md)
 
 Published first:
 
-1. `PresenterObserverSpawner` in `tddy-daemon-kernel`, with its real signature — the port
-   `connection_service` holds and `tddy-daemon` injects.
-2. The seven `telegram_session_control/` module files with their facades.
-3. Failing tests pinning AC1–AC6, including AC2's Telegram-disabled start.
+**Published** (commit 2): `tddy-daemon-kernel/src/presenter_observer.rs` —
+`PresenterObserverSpawner`, `SharedPresenterObserver` and `NoPresenterObserver`, with real
+signatures. It lives in the kernel beside the other symbols every daemon subsystem shares, for the
+same reason that crate exists: `pub(crate)` does not cross a crate boundary.
+
+`NoPresenterObserver` is the design's load-bearing detail. `Option<Arc<TelegramDaemonHooks>>` being
+`None` is a first-class state today — a daemon with no `telegram:` block has no hooks — so the port
+makes absence an *implementation* rather than a branch, and the service holds one shape.
+
+The seven control modules are a **split**, not new API, so they are pinned by
+`tests/telegram_extraction_shape.rs` rather than declared.
 
 This PR goes on to implement all of it. **It must not merge in that state.**
 
@@ -118,9 +126,15 @@ has been carved keeps the two diffs separable for review.
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset — this document
-- [ ] Publish the draft-PR contract (port signature + module shape + failing tests)
-- [ ] Failing acceptance tests — **USER REVIEW**
-- [ ] Failing unit/integration tests
+- [x] Publish the draft-PR contract (port signature + module shape + failing tests)
+- [x] Failing acceptance tests — **USER REVIEW** (approved 2026-09-15, gates delegated)
+  - `tddy-daemon-kernel/tests/telegram_extraction_shape.rs` — 5 failing (`connection_service` still
+    names `TelegramDaemonHooks`; the spawn path still calls the subscriber directly;
+    `tddy-session-lifecycle` still declares `teloxide` and holds six `telegram_*` modules;
+    `tddy-telegram-control` does not exist; the control plane is unsplit). **1 passing**:
+    `the_port_is_a_trait_object_the_service_can_hold` — the port is real now, which is what the rest
+    of the node is built on.
+- [x] Failing unit/integration tests — the same suite; AC2's Telegram-disabled start is exercised by `NoPresenterObserver`, which is the configuration it describes
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] Annotate the CRAP backlog entry with the handlers' new crate
 - [ ] `/validate-changes`
