@@ -331,7 +331,7 @@ export function CreateSessionPane({
    */
   const sshListDaemonId = sshConfigListDaemonId(
     agentHostInstanceId,
-    isSplitCodebase ? codebaseDaemonInstanceId : "",
+    codebaseDaemonInstanceId,
   );
 
   useEffect(() => {
@@ -1176,6 +1176,7 @@ export function CreateSessionPane({
                 )}
                 {sessionType === "claude-cli" && (
                   <CreateSessionSshConfigSelect
+                    key={sshListDaemonId}
                     sessionToken={sessionToken}
                     listDaemonInstanceId={sshListDaemonId}
                     value={sshConfigHost}

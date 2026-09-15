@@ -597,10 +597,11 @@ pub fn ssh_client_daemon_instance_id(
     session_host_daemon_id: &str,
     codebase_host_daemon_id: &str,
 ) -> String {
-    let _split =
-        !codebase_host_daemon_id.is_empty() && codebase_host_daemon_id != session_host_daemon_id;
-    // TODO(split): when `_split`, return `codebase_host_daemon_id` — it holds the checkout
-    // and opens ssh(1). The agent host must not be the OpenSSH client.
+    if !codebase_host_daemon_id.is_empty()
+        && codebase_host_daemon_id != session_host_daemon_id
+    {
+        return codebase_host_daemon_id.to_string();
+    }
     session_host_daemon_id.to_string()
 }
 

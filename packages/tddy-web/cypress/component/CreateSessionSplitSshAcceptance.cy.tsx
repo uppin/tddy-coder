@@ -8,7 +8,6 @@
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
-import { Room } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
@@ -24,8 +23,11 @@ import {
   SshConfigHostSchema,
 } from "../../src/gen/host_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
+import { AuthProvider } from "../../src/hooks/authProvider";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
+import { daemonRpcIdentity } from "../../src/lib/participantRole";
 import { mountWithRpc } from "../support/rpc/inMemory";
+import { aJoinedCommonRoom } from "../support/rpc/withSelectedDaemon";
 import { createSessionPage } from "../support/pages/createSessionPage";
 
 const AGENT_HOST = "laptop-a";
@@ -84,22 +86,27 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
   const sessionFilesClient = createClient(SessionFilesService, backend.transport());
   const worktreeClient = createClient(WorktreeService, backend.transport());
   mountWithRpc(
-    <SelectedDaemonProvider
-      room={new Room()}
-      daemons={DAEMON_HOSTS}
-      servingInstanceId={AGENT_HOST}
-    >
-      <CreateSessionPane
-        client={client}
-        projectClient={projectClient}
-        catalogClient={catalogClient}
-        sessionFilesClient={sessionFilesClient}
-        worktreeClient={worktreeClient}
-        sessionToken="fake-token"
-        onCancel={cy.stub()}
-        onCreated={cy.stub()}
-      />
-    </SelectedDaemonProvider>,
+    <AuthProvider>
+      <SelectedDaemonProvider
+        room={aJoinedCommonRoom([
+          daemonRpcIdentity(AGENT_HOST),
+          daemonRpcIdentity(CODEBASE_HOST),
+        ])}
+        daemons={DAEMON_HOSTS}
+        servingInstanceId={AGENT_HOST}
+      >
+        <CreateSessionPane
+          client={client}
+          projectClient={projectClient}
+          catalogClient={catalogClient}
+          sessionFilesClient={sessionFilesClient}
+          worktreeClient={worktreeClient}
+          sessionToken="fake-token"
+          onCancel={cy.stub()}
+          onCreated={cy.stub()}
+        />
+      </SelectedDaemonProvider>
+    </AuthProvider>,
     backend,
   );
 }
@@ -110,17 +117,25 @@ beforeEach(() => {
 });
 
 describe("Create session split SSH", () => {
+  let rpcBackend: InMemoryRpcBackend;
+
   it("lists the codebase host's aliases when the worktree is placed on another daemon", () => {
     // Given A names buildbox and B names jumpbox
-    mountCreatePane(aCreateSessionBackend());
+    rpcBackend = aCreateSessionBackend();
+    mountCreatePane(rpcBackend);
     createSessionPage.switchToClaudeCliSession();
     createSessionPage.enableManagedCodebase();
 
     // When the operator places the codebase on workstation-b
     createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+    createSessionPage.codebaseHostSelect().should("have.value", CODEBASE_HOST);
 
     // Then the SSH dropdown is B's list — A must not be the OpenSSH client
     createSessionPage.sshConfigSelect().should("be.visible");
+    cy.wrap(rpcBackend).should(() => {
+      const calls = rpcBackend.callsTo(HostService.method.listSshConfigHosts);
+      expect(calls.some((call) => call.daemonInstanceId === CODEBASE_HOST)).to.equal(true);
+    });
     createSessionPage.sshConfigOptionValues().should("deep.equal", [THIS_HOST, "jumpbox"]);
     createSessionPage.sshConfigOptionLabels().then((labels) => {
       expect(labels[0]).to.equal("This host");
@@ -131,7 +146,8 @@ describe("Create session split SSH", () => {
 
   it("lists the session host's aliases when the session is co-located", () => {
     // Given A names buildbox and B names jumpbox
-    mountCreatePane(aCreateSessionBackend());
+    rpcBackend = aCreateSessionBackend();
+    mountCreatePane(rpcBackend);
     createSessionPage.switchToClaudeCliSession();
 
     // When the operator keeps the checkout on this host

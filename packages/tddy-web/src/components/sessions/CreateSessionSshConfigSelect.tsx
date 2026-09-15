@@ -31,8 +31,9 @@ export function sshConfigListDaemonId(
 ): string {
   const split =
     codebaseHostDaemonId !== "" && codebaseHostDaemonId !== sessionHostDaemonId;
-  // TODO(split): when `split`, return `codebaseHostDaemonId` — that daemon is the OpenSSH client.
-  void split;
+  if (split) {
+    return codebaseHostDaemonId;
+  }
   return sessionHostDaemonId;
 }
 
@@ -61,13 +62,15 @@ export function CreateSessionSshConfigSelect({
   const factoryOverridden = useLiveKitTransportFactoryIsOverridden();
   const hostReachable =
     hostClient !== null &&
-    connection !== null &&
-    (connection.status === "connected" || factoryOverridden);
+    (factoryOverridden || connection?.status === "connected");
   const [load, setLoad] = useState<LoadState>({ kind: "idle" });
 
   useEffect(() => {
+    setLoad({ kind: "idle" });
+  }, [listDaemonInstanceId]);
+
+  useEffect(() => {
     if (!hostReachable || !hostClient || !listDaemonInstanceId) {
-      setLoad({ kind: "idle" });
       return;
     }
     let cancelled = false;
