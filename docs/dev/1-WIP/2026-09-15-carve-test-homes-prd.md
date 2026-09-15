@@ -93,7 +93,7 @@ A new operation. Anchor: `<crate>/tests/<name>.rs`. `to`: the destination crate'
 `tddy-daemon/src/lib.rs`'s two `pub use` blocks and its four one-line re-export shims are deleted —
 their only stated purpose was those suites.
 
-**16 of `tddy-daemon`'s `tddy-*` runtime dependencies are named by no file in its `src/`** and are
+**17 of `tddy-daemon`'s `tddy-*` runtime dependencies are named by no file in its `src/`** and are
 declared in `[dependencies]`, not `[dev-dependencies]`, so every consumer rebuilds them. With the
 suites gone they are unreferenced entirely and are removed.
 

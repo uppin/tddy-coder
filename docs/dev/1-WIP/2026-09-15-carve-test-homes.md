@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Refactor (tooling capability + mechanical relocation)
 **Stack**: `#carve` 4/10 — inserted after the two tooling nodes
+**PR**: [#498](https://github.com/uppin/tddy-coder/pull/498)
 
 PRD: [`2026-09-15-carve-test-homes-prd.md`](./2026-09-15-carve-test-homes-prd.md)
 
@@ -14,7 +15,7 @@ PRD: [`2026-09-15-carve-test-homes-prd.md`](./2026-09-15-carve-test-homes-prd.md
 ## Affected Packages
 
 - **`tddy-code-restructuring`**: gains `move_test_binary_to_crate`.
-- **`tddy-daemon`**: keeps 17 suites, loses 122 and its `lib.rs` facade, and drops 16 runtime
+- **`tddy-daemon`**: keeps 17 suites, loses 122 and its `lib.rs` facade, and drops 17 runtime
   dependencies nothing in its `src/` names.
 - **Thirteen destination crates**, `tddy-session-lifecycle` chief among them — it has **no `tests/`
   directory at all** today.
@@ -27,7 +28,7 @@ PRD: [`2026-09-15-carve-test-homes-prd.md`](./2026-09-15-carve-test-homes-prd.md
 - Move the 122 misplaced `tddy-daemon` suites and the one misplaced `tddy-workflow-recipes` suite to
   the crates they exercise.
 - Delete `tddy-daemon/src/lib.rs`'s two `pub use` blocks and its four re-export shims.
-- Remove the 16 `[dependencies]` entries no `tddy-daemon` source file names.
+- Remove the 17 `[dependencies]` entries no `tddy-daemon` source file names.
 
 ## Boundaries
 
@@ -51,9 +52,16 @@ PRD: [`2026-09-15-carve-test-homes-prd.md`](./2026-09-15-carve-test-homes-prd.md
 
 Published first:
 
-1. `move_test_binary_to_crate` in the plan vocabulary and `crate_move.rs`, with its real signature
-   and a `todo!()` body.
-2. Failing tests pinning AC1–AC4 (the operation) and AC5–AC8 (the resulting tree).
+**Published** (commit 2):
+
+1. `RefactorKind::MoveTestBinaryToCrate` in the plan vocabulary, with its two **real** refusals —
+   a facade (meaningless: nothing can reference a test binary) and a missing `to`.
+2. `TestBinaryMove { source, name, origin, destination }` + `moved_to()`, `read_test_binary_move`
+   and `resolve_test_binary_move` in `crate_move.rs`, bodies `todo!()`.
+
+`TestBinaryMove` is deliberately **not** `Move`: that struct carries `module`, `origin` and
+`reexport`, and a test binary has no module name to declare, no `mod` line in any origin to remove,
+and no facade it could ever leave behind.
 
 This PR goes on to implement all of it. **It must not merge in that state.**
 
@@ -87,7 +95,7 @@ Real dependency edges:
   ten further crates.
 - **0 of 139** test files name `tddy_session_lifecycle`; **133** name `tddy_daemon::`.
 - `tddy-session-lifecycle` has **no `tests/` directory**.
-- 16 `tddy-*` `[dependencies]` are named by no file in `tddy-daemon/src/`.
+- 17 `tddy-*` `[dependencies]` are named by no file in `tddy-daemon/src/`.
 - `move_module_to_crate` refuses any anchor outside `<crate>/src/`.
 
 ### State B
@@ -103,7 +111,7 @@ Real dependency edges:
 |---|---|---|
 | **A** | manual | `move_test_binary_to_crate` — the operation, its refusals, and the `[dev-dependencies]` pass. Hand-written: it is new tooling, and there is no assist behind a cross-crate move |
 | **B** | mechanical | The 123 moves as restructure plans, batched by destination crate. Thirteen plans, one per destination, each verifiable on its own |
-| **C** | manual | Delete the `lib.rs` facade and the four shims; drop the 16 dependencies; add the dev-dependencies each destination now needs (`tddy-testing-commons`, `tddy-session-tool-client`, `tddy-livekit-testkit` and the rest currently sitting in `tddy-daemon`'s `[dev-dependencies]`) |
+| **C** | manual | Delete the `lib.rs` facade and the four shims; drop the 17 dependencies; add the dev-dependencies each destination now needs (`tddy-testing-commons`, `tddy-session-tool-client`, `tddy-livekit-testkit` and the rest currently sitting in `tddy-daemon`'s `[dev-dependencies]`) |
 | **D** | manual | Annotate the CRAP backlog entry with the suites' new homes; `README.md` for `tddy-daemon` and `tddy-session-lifecycle` |
 
 Phase B is the node's bulk and is entirely intents. Phase A exists to make Phase B expressible at
@@ -115,9 +123,16 @@ operation are the layer split the boundary contract forbids.
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset — this document
-- [ ] Publish the draft-PR contract (operation surface + failing tests)
-- [ ] Failing acceptance tests — **USER REVIEW**
-- [ ] Failing unit/integration tests
+- [x] Publish the draft-PR contract (operation surface + failing tests)
+- [x] Failing acceptance tests — **USER REVIEW** (approved 2026-09-15, gates delegated)
+  - `tddy-daemon/tests/test_placement.rs` — 4 failing: 122 strays still present, the facade and its
+    four shims still there, `tddy-session-lifecycle` still has no `tests/`, and **17** runtime
+    dependencies named by no file in `src/`.
+- [x] Failing unit/integration tests
+  - `tddy-code-restructuring/tests/test_binary_move.rs` — 1 failing on `read_test_binary_move`;
+    **3 passing**, because the vocabulary refusals are real logic rather than stubs.
+  - **Correction:** these documents first said *16* unused runtime dependencies. The test measured
+    **17** — the original list had seventeen entries and was miscounted. Corrected throughout.
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] Annotate the CRAP backlog entry
 - [ ] `/validate-changes`

@@ -108,7 +108,7 @@ no recipe coupling.
 `tddy-daemon` (58,693 lines) was measured in the same pass and is **not** in this stack's scope.
 Its shape is relevant background: `src/` is only 2,377 production lines, `lib.rs` is a 30-line
 facade re-exporting ~90 modules from `tddy-session-lifecycle`, and its 139 test binaries
-(55,727 lines) are `tddy-session-lifecycle`'s acceptance suite parked in the wrong crate. **16 of
+(55,727 lines) are `tddy-session-lifecycle`'s acceptance suite parked in the wrong crate. **17 of
 its `tddy-*` runtime dependencies are named by no file in its `src/`.** Any node here that moves a
 module out of `tddy-session-lifecycle` must update that facade, and the daemon's telegram test
 suites (12 files, 4,901 lines) reach the cluster through it.
