@@ -1,4 +1,4 @@
-# Initial discovery — `#carve` 3/9 `restructure-clusters`
+# Initial discovery — `#carve` 4/10 `test-homes`
 
 **Scope:** `tddy-core`, `tddy-session-lifecycle`, `tddy-workflow-recipes`.
 **Explorations 1–3 are the whole-work dump for the `#carve` stack, copied here in full.** Exploration 4 is this node's own.
@@ -340,71 +340,68 @@ preserve blame) rather than treating tool success as the plan of record.
 
 ---
 
-## Exploration 4 — node-specific: why one module at a time cannot express a cluster
+## Exploration 4 — node-specific: resolving 139 test suites to the crates they exercise
 
-Run while writing this node's PRD, to pin the two mechanics the backlog describes in prose and the
-journal scoping it calls the largest tax on a multi-layer move.
+Run after the `#carve` wave-2 pass, when the user asked whether any tests sit in the wrong package.
 
 ### Sequence
 
-1. `grep -n 'journal.jsonl\|JournalExists\|\.restructure' src/*.rs` — where run state lives.
-2. `sed -n '770,815p' runner.rs` — `open_run` and `StatePaths`.
-3. `grep -n 'fn repointed_header\|fn planned\|struct Move' -A 12 crate_move.rs` — the single-module
-   shape.
-4. Re-read `docs/dev/todo/2026-09-10-move-module-to-crate-cannot-move-an-entangled-cluster.md`.
-
-### Inspected files — the surface this node owns
-
-- **`crate_move.rs:341` `struct Move`** — five fields, all singular:
-  ```rust
-  struct Move {
-      source: String,        // the module file
-      module: String,        // the identifier the crate root declares
-      origin: Destination,   // the crate it is leaving
-      destination: Destination,
-      reexport: Reexport,
-  }
-  ```
-  This is the whole reason a cluster has no expression: the operation's own model is one module.
-
-- **`crate_move.rs:647` `repointed_header(text: &str, origin_extern: &str) -> Header`** — walks the
-  moved file's `use` lines and re-points every `crate::` path at `origin_extern`. It takes the origin's
-  extern name as a **scalar**, so there is nowhere to say "except these siblings, which are coming
-  too". This is mechanic 1 of the backlog's two.
-
-- **`crate_move.rs:279 planned()`** — resolves one `Move`, surveys `engine.outside_references` for that
-  one source, and returns `(Move, Survey, Vec<PlannedRewrite>)`. Mechanic 2 lives here: the rewrites
-  are computed against a tree where the siblings have not moved, so applying them re-points
-  `crate::spawner` → `tddy_spawn::spawner` in files that are themselves still in `tddy-daemon`.
-
-- **`runner.rs:801-810` `StatePaths::under(root)`**:
-  ```rust
-  let dir = root.join(".restructure");
-  Self { journal: dir.join("journal.jsonl"), ledger: dir.join("ledger.json") }
-  ```
-  One state directory per **repository**. Nothing in the path identifies the plan.
-
-- **`runner.rs:771-788` `open_run`** — loads that journal and returns `JournalExists` when it is
-  non-empty and neither `--resume` nor `--from` was passed. A *completed* plan therefore blocks the
-  next one, and `--resume` would resume the wrong plan against the new plan's coordinates.
+1. `grep -E '^pub mod ' tddy-daemon/src/lib.rs` — the modules the daemon actually owns.
+2. A Python pass over `tddy-daemon/src/lib.rs`'s two `pub use tddy_session_lifecycle::{…}` blocks —
+   the 82 modules it re-exports.
+3. The same over `tddy-session-lifecycle/src/lib.rs` — which of those it **owns** versus re-exports
+   again, and from where.
+4. Per test file in `tddy-daemon/tests`: extract every `tddy_daemon::<module>`, resolve each through
+   both hops, and classify.
+5. Split the daemon-owned hits into *real* modules versus `config` / user-path boilerplate.
+6. The same classification for `tddy-core/tests` and `tddy-workflow-recipes/tests`.
+7. An inline-test pass over `tddy-session-lifecycle/src`, after step 6 found no `tests/` dir.
+8. `grep -n 'fn source_crate_of' -A 12` and a search for `tests/` handling in
+   `tddy-code-restructuring` — can the tooling move a test binary?
 
 ### Findings
 
-**The cluster defect is two defects with one cause** — the operation's model is a single module, so
-neither the header pass nor the reference survey has any way to know that a sibling is also moving.
-Fixing it means widening the model, not patching either pass: FR2's "destination-local sibling" is
-only expressible once the operation knows the set.
+**The facade is two hops deep.** `tddy-daemon/src/lib.rs` re-exports **82** modules from
+`tddy-session-lifecycle`; that crate **owns 32** and re-exports **49** more from ten crates —
+`tddy-host-service` (14), `tddy-session-files` (10), `tddy-worktree-service` (6),
+`tddy-daemon-livekit` (5), `tddy-telegram` (4), `tddy-daemon-auth` (3), `tddy-session-agents` (3),
+`tddy-projects` (2), `tddy-daemon-kernel` (1), `tddy-tool-engine` (1). So an import proves nothing
+about what a test exercises, and **`defining_crate` from `#carve` 1/10 is exactly the resolution
+this node needs.**
 
-**The journal defect is orthogonal but lands in the same file**, and it is what makes this node's
-Phase A worth doing: `crate_move.rs` is over 1,500 lines and this node rewrites more of it than any
-other, so carving it first puts the manual work in reviewable files.
+**122 of 139 suites (46,839 lines, 84%) never reach `tddy-daemon`'s production code**: 62 touch no
+daemon module at all, and 60 touch only `config` / user-path boilerplate. **17 genuinely do** — they
+mount `runtime`, or exercise `server`, `relay_idle`, `daemon_config_service`, `local_socket_server`.
 
-**Every `#carve` node pays the journal tax today.** Each is multi-plan by construction — Phase A
-carves a flat module, Phase C moves it — and the two plans cannot run back to back without archiving
-`.restructure/` by hand in between. That is six nodes × at least one hand-archive, which is why FR3
-is in this node rather than deferred.
+**`tddy-core` is clean**: all 44 of its test binaries exercise `tddy-core`.
 
-**`check` is blind to both.** The backlog records `no findings` on the four-op cluster plan that
-`apply` rejected — the same blindness `#carve` 1/9 fixes for its own two preconditions. FR4 adds the
-cluster precondition to the pass 1/9 creates, which is the concrete reason this node is wave 2 and
-not wave 1.
+**`tddy-workflow-recipes` has one outlier**: `stack_progress_contract_acceptance.rs` (169 lines)
+imports only `tddy_core::{changeset, session_lifecycle, workflow}`. Its sibling
+`proto_workflow_contracts.rs` names no crate but is **correctly placed** — it asserts its own
+package's `proto/` directory exists, which can only be done from inside it.
+
+**A correction to the method, worth recording.** An inline-test pass reported
+`tddy-session-lifecycle/src/connection_service.rs` naming `tddy_daemon::`, which would be a reverse
+dependency and serious. It is not: those are **log-target string literals**
+(`target: "tddy_daemon::connection_service"`, three of them), and `tddy-daemon` is not a dependency
+of that crate. The regex matched inside strings. Those stale targets are themselves small debt —
+`#unbundle` node 10 fixed the workflow-recipes ones and left these — but they are not a placement
+defect.
+
+**The tooling cannot move a test binary.** `source_crate_of` (`crate_move.rs:773`) requires
+`<crate>/src/<module>.rs`; `#carve` 1/10's nested fix extends that only *within* `src/`. A search for
+`tests/`, `test_binary` or any integration-test handling across `tddy-code-restructuring/src` returns
+**nothing**.
+
+A test binary is a different shape in three ways, and only the first makes it harder:
+
+| | Module | Test binary |
+|---|---|---|
+| Path | `<crate>/src/<module>.rs` | `<crate>/tests/<name>.rs` |
+| Declaration | a `mod` line to find and remove | **none — cargo auto-discovers** |
+| Callers | may be reached from anywhere; needs a facade | **nothing can reference a test binary** |
+| Manifest | destination `[dependencies]` | destination `[dev-dependencies]` |
+
+So the operation is genuinely simpler than `move_module_to_crate` once the path shape is admitted —
+no declaration surgery and no facade — which is why it is one new operation rather than a
+generalisation of the existing one.
