@@ -32,6 +32,7 @@ use tokio::sync::{mpsc, oneshot, Mutex, OwnedSemaphorePermit, Semaphore};
 use tddy_rpc::{Code, Status};
 use tddy_service::proto::remote_git::{GitClientFrame, GitOpen, GitServerFrame};
 
+use tddy_core::shell_single_quote;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::privilege_drop::ResolvedPtyUser;
 
@@ -252,6 +253,38 @@ fn git_child_env(target: &ResolvedPtyUser) -> Vec<(String, String)> {
     let home = PathBuf::from(&target.home_dir);
     let path_extra = tddy_daemon_kernel::user_paths::spawn_path_extra_for_home(&home);
     tddy_daemon_kernel::privilege_drop::pty_user_env_overrides(&home, path_extra.as_deref())
+}
+
+/// OpenSSH argv for one remote shell command — same shape as
+/// [`tddy_tool_engine::RemoteShell::ssh_argv`], without taking a dependency on tool-engine.
+fn ssh_batch_mode_argv(host_alias: &str, remote_shell_command: &str) -> Vec<String> {
+    vec![
+        "ssh".to_string(),
+        "-o".to_string(),
+        "BatchMode=yes".to_string(),
+        "--".to_string(),
+        host_alias.to_string(),
+        remote_shell_command.to_string(),
+    ]
+}
+
+/// Shell command run on the SSH target for a pack verb. The repo path in `git_argv` is replaced
+/// with `remote_repo_path` so the child never packs a path the session did not authorize.
+fn remote_pack_shell_command(
+    git_argv: &[String],
+    remote_repo_path: &str,
+) -> Result<String, String> {
+    let verb = git_argv
+        .get(1)
+        .ok_or_else(|| "pack argv must include a git subcommand".to_string())?;
+    if git_argv.first().map(String::as_str) != Some("git") {
+        return Err("pack argv must start with git".to_string());
+    }
+    Ok(format!(
+        "git {} -- {}",
+        verb,
+        shell_single_quote(remote_repo_path)
+    ))
 }
 
 /// `git <subcommand> -- <repo>`. The `--` matters because `main_repo_path` comes from a
@@ -573,7 +606,7 @@ impl GitChildRelay {
     }
 
     /// Spawn a pack verb through [`PackExecution`]. Local is [`spawn_with_env`]. Remote is
-    /// OpenSSH to the session's Host alias — not yet wired.
+    /// OpenSSH to the session's Host alias with piped stdio (same argv shape as RemoteShell).
     pub fn spawn_pack_verb(
         execution: &PackExecution,
         argv: Vec<String>,
@@ -584,13 +617,15 @@ impl GitChildRelay {
                 Self::spawn_with_env(argv, repo_path.clone(), env)
             }
             PackExecution::Remote {
-                ssh_config_host: _,
-                remote_repo_path: _,
+                ssh_config_host,
+                remote_repo_path,
             } => {
-                // TODO(remote-git): implement — ssh -o BatchMode=yes -- <alias> -- git upload-pack
-                Err(Status::unimplemented(
-                    "TODO(remote-git): spawn pack verb through RemoteShell",
-                ))
+                let remote_cmd = remote_pack_shell_command(&argv, remote_repo_path)
+                    .map_err(|e| Status::internal(format!("remote pack command: {e}")))?;
+                let ssh_argv = ssh_batch_mode_argv(ssh_config_host, &remote_cmd);
+                // OpenSSH runs as the daemon and must keep agent, config, and PATH — not the
+                // constructed env passed for a local `setpriv` git child.
+                Self::spawn_child(ssh_argv, PathBuf::from("/"), None)
             }
         }
     }
