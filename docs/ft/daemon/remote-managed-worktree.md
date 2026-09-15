@@ -74,8 +74,24 @@ BatchMode, missing agent key) surfaces as start or tool failure; there is no fal
 filesystem reads or writes.
 
 The create-session form offers aliases from `ListSshConfigHosts` on the session host plus an empty
-(local) choice (`create-session-ssh-config-select`). Split placement filtering of that list is a
-successor node; remote-git pack spawn over SSH is a successor node.
+(local) choice (`create-session-ssh-config-select`).
+
+### Split: SSH Host alias (`ssh_config_host`)
+
+When `codebase_daemon_instance_id` names a different host than `daemon_instance_id`, the **codebase
+host (B)** is the OpenSSH client — it holds the checkout and runs `RemoteShell` when
+`ssh_config_host` is set. The agent host (A) must not list A's aliases or open `ssh(1)` locally.
+
+| Piece | Behaviour |
+|---|---|
+| Create-session list | `ListSshConfigHosts` with `daemon_instance_id` = B (`sshConfigListDaemonId`) |
+| Operator choice | Same `ssh_config_host` field as co-located; forwarded on the workspace `StartSession` (`workspace_start_request` clones the operator request) |
+| SSH client daemon | `ssh_client_daemon_instance_id` returns B when split, A when co-located |
+| Agent on A | No worktree, no SSH — tools reach B over LiveKit `ExecuteTool` as today |
+
+End-to-end exec on the SSH target (e.g. a split `Read` returning bytes from T) is `RemoteShell` on B
+(stack node 2); this node only retargets the dropdown and pins the forward so A never consumes the
+alias locally.
 
 Tools a specialized agent has taken over are still refused before dispatch; they are not routed over
 SSH. `ReadLints`, LSP tools, and `SemanticSearch` are unavailable over `RemoteShell` and return an
