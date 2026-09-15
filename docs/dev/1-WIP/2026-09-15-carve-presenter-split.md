@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Refactor
 **Stack**: `#carve` 8/9
+**PR**: [#495](https://github.com/uppin/tddy-coder/pull/495)
 
 PRD: [`2026-09-15-carve-presenter-split-prd.md`](./2026-09-15-carve-presenter-split-prd.md)
 
@@ -44,12 +45,15 @@ PRD: [`2026-09-15-carve-presenter-split-prd.md`](./2026-09-15-carve-presenter-sp
 
 Published first:
 
-1. The six module files, each holding one `impl Presenter` block, produced by the partition and the
-   extraction.
-2. Failing assertions pinning AC2, AC3 and AC6.
+**Published** (commit 2): `tests/presenter_split_shape.rs` — five failing assertions pinning the
+partition. No new API surface, because every method keeps its name, signature and visibility, so
+what lands first is the shape.
 
-No new API surface — every method keeps its name, signature and visibility. What lands first is the
-shape.
+Two of the five are worth naming, because they guard against passing the *letter* of the split while
+missing its point: `every_partition_module_carries_an_inherent_impl` fails a partition that turned
+methods into free functions (which would satisfy a file-existence check and change every call site in
+the crate), and `the_partition_widens_no_method_beyond_the_crate` fails one that made a private
+method `pub(super)` to reach it across the seam — widening the surface to buy a file split.
 
 ## Green wave
 
@@ -106,9 +110,12 @@ is a text edit at five points, and there is no assist for "split this impl".
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset — this document
-- [ ] Publish the draft-PR contract (six modules + failing budget/verify assertions)
-- [ ] Failing acceptance tests — **USER REVIEW**
-- [ ] Failing unit/integration tests
+- [x] Publish the draft-PR contract (six modules + failing budget/verify assertions)
+- [x] Failing acceptance tests — **USER REVIEW** (approved 2026-09-15, gates delegated)
+  - `tests/presenter_split_shape.rs` — **5 failing**. An earlier draft had three of them passing
+    *vacuously*, by filtering to files that do not exist; they were tightened to require existence,
+    because a test that is green before the work is done is not red.
+- [x] Failing unit/integration tests — the same suite; the partition changes no behaviour, so there is nothing else to specify
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] Report any method group straddling two sub-structs
 - [ ] `/validate-changes`
