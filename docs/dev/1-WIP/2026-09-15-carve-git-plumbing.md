@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Refactor
 **Stack**: `#carve` 5/9
+**PR**: [#492](https://github.com/uppin/tddy-coder/pull/492)
 
 PRD: [`2026-09-15-carve-git-plumbing-prd.md`](./2026-09-15-carve-git-plumbing-prd.md)
 
@@ -52,11 +53,14 @@ PRD: [`2026-09-15-carve-git-plumbing-prd.md`](./2026-09-15-carve-git-plumbing-pr
 
 Published first:
 
-1. `tddy-git`'s public surface — the pure-git function signatures `#carve` 9/9 compiles against
-   (`detect_default_remote_name`, `worktree_path_for_branch`, `local_branch_name_for_remote`,
-   `checked_out_branch_name` are the four it names).
-2. `tddy-github`'s new PR surface.
-3. Failing tests pinning AC1–AC7.
+**Published** (commit 2): `packages/tddy-github/tests/git_plumbing_shape.rs` — five assertions
+pinning both halves. `tddy-git` does not exist yet, and creating a crate skeleton is Phase B
+implementation rather than surface, so what lands first is the **contract the crate must satisfy**:
+it exists, depends on no workspace crate, and holds nothing that names `Changeset`.
+
+The four helpers `#carve` 9/9 names — `detect_default_remote_name`, `worktree_path_for_branch`,
+`local_branch_name_for_remote`, `checked_out_branch_name` — are existing `tddy-core::worktree`
+functions that keep their signatures through the move, so there is no new signature to declare.
 
 This PR goes on to implement all of it. **It must not merge in that state.**
 
@@ -118,9 +122,13 @@ three-module move into three correct single-module moves.**
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset — this document
-- [ ] Publish the draft-PR contract (`tddy-git` + `tddy-github` surfaces, failing tests)
-- [ ] Failing acceptance tests — **USER REVIEW**
-- [ ] Failing unit/integration tests
+- [x] Publish the draft-PR contract (`tddy-git` + `tddy-github` surfaces, failing tests)
+- [x] Failing acceptance tests — **USER REVIEW** (approved 2026-09-15, gates delegated)
+  - `packages/tddy-github/tests/git_plumbing_shape.rs` — 4 failing (`tddy-git` absent, `worktree.rs`
+    still 1,606 prod lines, `tddy-github` publishes no PR surface); **1 passing**:
+    `tddy_github_gains_no_dependency_on_the_crate_the_client_left` is the cycle guard and must stay
+    green through the move.
+- [x] Failing unit/integration tests — the same suite; "which crate owns this" is not a question the type system answers once everything compiles
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — correct the title, ready for review
