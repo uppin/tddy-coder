@@ -14,6 +14,9 @@ long-running background jobs (e.g. `Shell` with `block_until_ms = 0`).
   — dispatch one tool call. `registry: &TaskRegistry` holds background jobs spawned by
   `Shell`/`Await`; `session_id` tags jobs.
 - `execute_tool_with_env(...)` — variant that forwards an environment map to spawned shells.
+- `Shell`, `LocalShell`, `RemoteShell`, `session_shell`, `execute_tool_on_shell` — pick local disk
+  vs OpenSSH (`BatchMode=yes`) for managed sessions with `ssh_config_host`; remote dispatch covers
+  the full exec catalog with path containment against the remote worktree root.
 - `tool_catalog() -> Vec<ToolDef>` — the canonical catalog. `ToolDef { name, description,
   input_schema_json }` is the engine's own struct (independent of `tddy-service` proto);
   callers map it to their RPC type at the boundary.

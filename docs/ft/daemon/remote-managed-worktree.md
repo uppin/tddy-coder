@@ -58,6 +58,29 @@ choose that placement from the new-session form rather than a CLI flag.
 that still has native filesystem tools has nothing to proxy through. A split placement without
 `managed_codebase` is a request error, not a silently co-located session.
 
+### Co-located: SSH Host alias (`ssh_config_host`)
+
+On a co-located managed `claude-cli` session, `StartSessionRequest.ssh_config_host` names an
+OpenSSH `Host` alias from the session host's `~/.ssh/config`. The code-managing daemon remains the
+SSH client; `tddy-tools` inside the jail does not open SSH.
+
+| `ssh_config_host` | Worktree | Exec catalog |
+|---|---|---|
+| empty | Created on the daemon's local disk (today) | `LocalShell` — `execute_tool` on the local root |
+| set | Materialized on the SSH target via `setup_worktree_for_session_over_ssh` | `RemoteShell` — `ssh -o BatchMode=yes <alias> …` against the remote worktree path |
+
+The alias is persisted on `.session.yaml` and listed on `SessionEntry`. Failed SSH (unknown host,
+BatchMode, missing agent key) surfaces as start or tool failure; there is no fallback to local
+filesystem reads or writes.
+
+The create-session form offers aliases from `ListSshConfigHosts` on the session host plus an empty
+(local) choice (`create-session-ssh-config-select`). Split placement filtering of that list is a
+successor node; remote-git pack spawn over SSH is a successor node.
+
+Tools a specialized agent has taken over are still refused before dispatch; they are not routed over
+SSH. `ReadLints`, LSP tools, and `SemanticSearch` are unavailable over `RemoteShell` and return an
+explicit error.
+
 ### What a split session cannot also ask for
 
 One otherwise-valid option cannot be served on a split placement. It is **refused** with

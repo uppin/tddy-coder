@@ -1,24 +1,64 @@
-# Initial Discovery: run session exec tools over an SSH Host alias (`#ssh-exec` 2/4)
+# Initial Discovery: SSH execution for managed sessions (`#ssh-exec`)
 
-**Changeset**: [2026-09-14-ssh-exec.md](./2026-09-14-ssh-exec.md)
+**Changeset**: whole-work source (copied into each node's companion as Exploration 1; not staged)
 **Date**: 2026-09-14
-**Passes**: 3
+**Passes**: 2
 
 ## Combined Conclusions
 
-**This node (n2)** owns `LocalShell`/`RemoteShell` on the code-managing daemon, session
-`ssh_config_host`, co-located StartSession + create-session dropdown (Host A's list from n1's
-RPC), worktree materialize over SSH, and routing every exec-catalog tool through RemoteShell
-when an alias is set.
+There is no SSH execution path for exec tools today. Managed split placement already puts the
+agent on daemon A and the worktree on daemon B, but B **must** run `tddy-daemon` and serve
+`ExecuteTool` / `StreamExecuteTool` over LiveKit. The operator's request is a third placement:
+the **code-managing host** (A, or split B) is the OpenSSH client; the SSH **target** holds the
+worktree and has no tddy-daemon.
 
-`execute_tool` today takes a local `Path` `worktree_root` and `contain_path` canonicalizes on
-the host FS. SSH from `tddy-tools` inside a jail is the wrong seam. Dispatch stays IPC/HTTP/
-LiveKit; the daemon's engine opens `ssh <alias>`. Empty alias = LocalShell (today). Native
-agent FS tools stay off when an alias is set (managed-codebase semantics).
+**Packages in play**
 
-n1 owns the list RPC — this node consumes it (UI doubles it in tests). n3 owns RemoteGit
-Serve-over-SSH. n4 owns split filtering to codebase host B. Specialized-agent `replaces`
-already withdraws before dispatch; this node must not re-route those names.
+| Node | Packages |
+|------|----------|
+| n1 ssh-config | `tddy-host-service`, `tddy-service` (proto), `tddy-web` |
+| n2 exec | `tddy-tool-engine`, `tddy-core` (session metadata), `tddy-session-lifecycle`, `tddy-service` (session proto), `tddy-web` |
+| n3 remote-git | `tddy-worktree-service` (`RemoteGitService`), `tddy-remote-git-repo` (unchanged client) |
+| n4 split | `tddy-web` (`CreateSessionPane`), `tddy-session-lifecycle` (forward `ssh_config_host` on workspace start) |
+
+**State A that the stack changes**
+
+1. **`HostService` lists keys, not destinations.** `ListHostKeyCandidates` enumerates `~/.ssh`
+   private keys with a matching `.pub`. The file named `config` is explicitly **not** a candidate.
+   Nothing parses OpenSSH `Host` aliases. Hosts UI shows ssh-agent keys (`HostRowSshAgent`), not
+   connection aliases. The session form's "SSH menu" does not exist yet; n1 is that menu.
+2. **Exec tools run on a local `worktree_root`.** `tddy_tool_engine::execute_tool` canonicalizes
+   paths with `contain_path` against a host filesystem. `tddy-tools` forwards via
+   `SessionToolTransport` (sandbox IPC / HTTP / LiveKit) to `ExecToolHandler` on the codebase
+   daemon. No `LocalShell`/`RemoteShell` trait. SSH from inside the agent jail is the wrong seam
+   (Seatbelt cannot see the operator's agent socket).
+3. **Session metadata has split pairing, not an SSH target.** `SessionMetadata` carries
+   `codebase_daemon_instance_id` / `codebase_session_id` / `agent_daemon_instance_id` /
+   `agent_session_id`. No `ssh_config_host`. `StartSessionRequest` has `managed_codebase` and
+   `codebase_daemon_instance_id`. Worktrees are created by `setup_worktree_for_session*` on a
+   local `repo_root` under `<repo>/.worktrees/`.
+4. **Specialized-agent `replaces` already withdraws tools before dispatch.**
+   `dispatch_dynamic_tool` calls `check_tool_available`; withdrawn names never hit
+   `dispatch_session_tool`. Remote specialized agents clone via `GIT_SSH_COMMAND=tddy-remote-git-repo`
+   against `{facilitator}:{project_id}`. `RemoteGitService` spawns local `git upload-pack` /
+   `receive-pack` on `main_repo_path`. If the authoritative tree lives only on an SSH target,
+   Serve must run those verbs through the same RemoteShell n2 introduces — that is n3, not a
+   layer split of n2.
+5. **Create-session already has Host + Codebase host.** `CreateSessionPane` shows
+   `create-session-codebase-host-select` when `canChooseCodebaseHost` (claude-cli + managed +
+   daemon list). No SSH alias control. n2 adds the dropdown sourced from A's
+   `ListSshConfigHosts`; n4 retargets the same control at B.
+
+**WIP conflicts:** `docs/dev/1-WIP/2026-08-31-split-sandbox-orchestration.md` and
+`2026-08-31-split-sandbox-resume.md` touch split start/sandbox, not SSH execution. This stack
+must not reopen those refusals or implement sandbox-on-T.
+
+**Open questions closed in the interview (do not re-litigate in `/green`):**
+
+- SSH client is the code-managing daemon, OpenSSH CLI, `BatchMode=yes`, ssh-agent already loaded.
+- Empty alias = LocalShell (today). Set alias = RemoteShell + worktree materialize on T.
+- Dropdown items are `Host` aliases from that daemon's `~/.ssh/config`, not agent keys.
+- No new crate for config parse unless consented; in-tree parser, honor `Include`, skip wildcards.
 
 ## Exploration 1: interview-time architecture — 2026-09-14
 
@@ -194,25 +234,3 @@ n1 RPC should mirror `ListHostKeyCandidates` addressing but **not** its empty-on
 an unreadable config is `FAILED` / a distinguished error, never "no Host aliases". n2 worktree
 setup is the existing `setup_worktree_for_session*` contract executed through RemoteShell. n3
 does not change `tddy-remote-git-repo`. n4 only retargets the dropdown and forwards the field.
-
-## Exploration 3: n2 engine and session start seams — 2026-09-14
-
-**Agent**: parent Read
-**Scope**: `execute_tool`, `SessionMetadata`, `setup_worktree_for_session`, CreateSessionPane host select
-
-### Sequence
-
-1. Read `packages/tddy-tool-engine/src/lib.rs` `execute_tool` / `contain_path`
-2. Read `packages/tddy-core/src/session_metadata.rs` split fields
-3. Read `packages/tddy-core/src/worktree.rs` `setup_worktree_for_session`
-4. Grep `createSessionHostSelect` in testIds.ts
-
-### Findings
-
-`execute_tool` must grow a shell backend (local vs `ssh -o BatchMode=yes <alias> --`) without
-changing the MCP dispatch stack. Session metadata needs `ssh_config_host` plus the remote
-worktree path the engine contains against. Worktree setup is the existing git worktree
-contract executed through RemoteShell on T (ensure clone, then `git worktree add`).
-Create-session dropdown `create-session-ssh-config-select` reads `ListSshConfigHosts` for the
-**session host** (A) in this node; n4 retargets it.
-
