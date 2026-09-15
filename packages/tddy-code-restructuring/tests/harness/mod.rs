@@ -63,22 +63,25 @@ pub struct AFixtureWorkspace {
     _directory: tempfile::TempDir,
 }
 
-pub fn a_workspace_a_module_can_move_across() -> AFixtureWorkspace {
+/// A canonicalised temporary workspace with nothing in it yet.
+///
+/// rust-analyzer answers with canonical paths, and on macOS a temporary directory is reached
+/// through a symlink — so a uri it returns would sit "outside" an uncanonicalised root.
+pub fn an_empty_fixture() -> AFixtureWorkspace {
     let directory = tempfile::tempdir().expect("a temporary directory");
-
-    // rust-analyzer answers with canonical paths, and on macOS a temporary directory is reached
-    // through a symlink — so a uri it returns would sit "outside" an uncanonicalised root.
     let root = directory
         .path()
         .canonicalize()
         .expect("the temporary directory canonicalises");
 
-    let fixture = AFixtureWorkspace {
+    AFixtureWorkspace {
         root,
         _directory: directory,
-    };
+    }
+}
 
-    fixture
+pub fn a_workspace_a_module_can_move_across() -> AFixtureWorkspace {
+    an_empty_fixture()
         .writing(
             "Cargo.toml",
             "[workspace]\nresolver = \"2\"\nmembers = [\n    \"crates/shared\",\n    \
@@ -160,6 +163,23 @@ impl AFixtureWorkspace {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }
 
+    /// Overwrite a file in a workspace that already exists.
+    ///
+    /// The builder's own `writing` consumes `self`, which is right while assembling a fixture and
+    /// wrong for a test that needs to vary one file from a shared starting point.
+    pub fn rewriting(&self, relative: &str, text: &str) {
+        let absolute = self.root.join(relative);
+        std::fs::create_dir_all(absolute.parent().expect("a parent directory"))
+            .expect("the directory is created");
+        std::fs::write(absolute, text).expect("the file is written");
+    }
+
+    /// Delete a file, for a test about what happens when it is absent.
+    pub fn removing(&self, relative: &str) {
+        std::fs::remove_file(self.root.join(relative))
+            .unwrap_or_else(|error| panic!("removing {relative}: {error}"));
+    }
+
     fn writing(self, relative: &str, text: &str) -> Self {
         let absolute = self.root.join(relative);
         std::fs::create_dir_all(absolute.parent().expect("a parent directory"))
@@ -226,6 +246,39 @@ pub async fn performing(fixture: &AFixtureWorkspace, op: RefactorOp) -> Workspac
     .expect("the blocking half of the operation joins")
 }
 
+/// Resolve one operation and hand back what it produced — including a refusal.
+///
+/// `performing` panics on a refusal because its tests assert on the tree. A test about *why* an
+/// operation refuses needs the error itself, which is what this returns.
+pub async fn resolving(
+    fixture: &AFixtureWorkspace,
+    op: RefactorOp,
+) -> Result<WorkspaceEdit, String> {
+    let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
+    let root = fixture.path().to_path_buf();
+    let client = a_rust_analyzer_rooted_at(&root).await;
+
+    tokio::task::spawn_blocking(move || {
+        let mut backend = tddy_code_restructuring::backends::rust::RustBackend::from_lsp_client(
+            client,
+            Some(INDEXING_BUDGET),
+            |_| {},
+        );
+        let overlay = Overlay::default();
+        let workspace = Workspace {
+            root: &root,
+            overlay: &overlay,
+        };
+
+        backend
+            .resolve(&op, &workspace)
+            .map(|resolution| resolution.edit)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .expect("the blocking half of the operation joins")
+}
+
 /// rust-analyzer, launched the way `tddy-tools restructure` launches it.
 async fn a_rust_analyzer_rooted_at(root: &Path) -> Arc<tddy_lsp::client::LspClient> {
     let mut allow = LspAllowList::new();
@@ -256,6 +309,153 @@ async fn a_rust_analyzer_rooted_at(root: &Path) -> Arc<tddy_lsp::client::LspClie
         .set_request_timeout(Duration::from_secs(INDEXING_BUDGET));
 
     Arc::clone(&service.client)
+}
+
+/// A workspace whose movable module is **nested** — declared by another module's file, not by the
+/// crate root.
+///
+/// This is the shape `source_crate_of` refuses today, and it is the *normal* shape of a subsystem
+/// worth extracting: `model_registry/` was chosen as `#unbundle` node 2's opening move precisely
+/// because it was the cleanest extraction available, and the operation could not touch a line of it.
+///
+/// `declared_by_mod_rs` selects which of the two forms Rust 2018 allows for the parent:
+/// `src/model_registry.rs`, or `src/model_registry/mod.rs`.
+pub fn a_workspace_whose_module_is_nested(declared_by_mod_rs: bool) -> AFixtureWorkspace {
+    let fixture = an_empty_fixture();
+    let parent = if declared_by_mod_rs {
+        "crates/origin/src/model_registry/mod.rs"
+    } else {
+        "crates/origin/src/model_registry.rs"
+    };
+
+    fixture
+        .writing(
+            "Cargo.toml",
+            "[workspace]\nresolver = \"2\"\nmembers = [\n    \"crates/shared\",\n    \
+             \"crates/origin\",\n    \"crates/destination\",\n]\n",
+        )
+        .writing(
+            "crates/shared/Cargo.toml",
+            "[package]\nname = \"shared\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .writing(
+            "crates/shared/src/lib.rs",
+            "//! What both crates depend on.\n\npub struct Clock;\n\nimpl Clock {\n    \
+             pub fn now(&self) -> u64 {\n        0\n    }\n}\n",
+        )
+        .writing(
+            "crates/origin/Cargo.toml",
+            "[package]\nname = \"origin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\nshared = { path = \"../shared\" }\n",
+        )
+        .writing(
+            "crates/origin/src/lib.rs",
+            "//! The crate the nested module leaves.\n\npub mod model_registry;\npub mod runtime;\n",
+        )
+        .writing(parent, "//! The parent that declares it.\n\npub mod store;\n")
+        .writing(
+            "crates/origin/src/model_registry/store.rs",
+            "use shared::Clock;\n\npub struct Store {\n    clock: Clock,\n}\n\n\
+             impl Store {\n    pub fn new() -> Self {\n        \
+             Self { clock: Clock }\n    }\n\n    pub fn stamp(&self) -> u64 {\n        \
+             self.clock.now()\n    }\n}\n",
+        )
+        .writing(
+            "crates/origin/src/runtime.rs",
+            "use crate::model_registry::store::Store;\n\npub fn boot() -> u64 {\n    \
+             Store::new().stamp()\n}\n",
+        )
+        .writing(
+            "crates/destination/Cargo.toml",
+            "[package]\nname = \"destination\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .writing(
+            "crates/destination/src/lib.rs",
+            "//! The crate the module moves into.\n\n",
+        )
+        .tracked_by_git()
+}
+
+/// A workspace where the origin keeps a **back-compat `pub use` facade**, and the moving module
+/// reaches through it.
+///
+/// rust-analyzer canonicalises the moving module's `crate::config::Setting` as
+/// `origin::config::Setting`, so the cycle refusal reads a re-export as an origin dependency and
+/// refuses a move that is in fact clean — `config` is `shared`'s.
+pub fn a_workspace_whose_origin_re_exports_what_moves_reaches() -> AFixtureWorkspace {
+    an_empty_fixture()
+        .writing(
+            "Cargo.toml",
+            "[workspace]\nresolver = \"2\"\nmembers = [\n    \"crates/shared\",\n    \
+             \"crates/origin\",\n    \"crates/destination\",\n]\n",
+        )
+        .writing(
+            "crates/shared/Cargo.toml",
+            "[package]\nname = \"shared\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .writing(
+            "crates/shared/src/lib.rs",
+            "//! Where `config` is actually defined.\n\npub mod config;\n",
+        )
+        .writing(
+            "crates/shared/src/config.rs",
+            "pub struct Setting;\n\nimpl Setting {\n    pub fn value(&self) -> u64 {\n        \
+             7\n    }\n}\n",
+        )
+        .writing(
+            "crates/origin/Cargo.toml",
+            "[package]\nname = \"origin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\nshared = { path = \"../shared\" }\n",
+        )
+        .writing(
+            "crates/origin/src/lib.rs",
+            "//! The crate the module leaves — and a facade it kept.\n\n\
+             pub use shared::config;\n\npub mod host_registry;\n",
+        )
+        .writing(
+            "crates/origin/src/host_registry.rs",
+            "use crate::config::Setting;\n\npub struct HostRegistry;\n\n\
+             impl HostRegistry {\n    pub fn stamp(&self) -> u64 {\n        \
+             Setting.value()\n    }\n}\n",
+        )
+        .writing(
+            "crates/destination/Cargo.toml",
+            "[package]\nname = \"destination\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .writing(
+            "crates/destination/src/lib.rs",
+            "//! The crate the module moves into.\n\n",
+        )
+        .tracked_by_git()
+}
+
+/// The cross-crate move of a module named by path, with or without a facade.
+pub fn a_move_of(
+    file: &str,
+    path: &str,
+    reexport: Option<tddy_code_restructuring::Reexport>,
+) -> RefactorOp {
+    RefactorOp {
+        op: RefactorKind::MoveModuleToCrate,
+        anchor: Anchor::Symbol {
+            file: file.to_string(),
+            path: path.to_string(),
+        },
+        name: None,
+        to: Some("crates/destination".to_string()),
+        variant: None,
+        with_private_deps: false,
+        reexport,
+        to_file: false,
+    }
+}
+
+/// Run the operation and return the refusal it produced, or fail saying it did not refuse.
+pub async fn refusal_from(fixture: &AFixtureWorkspace, op: RefactorOp) -> String {
+    match resolving(fixture, op).await {
+        Err(refusal) => refusal,
+        Ok(_) => panic!("the operation was expected to refuse, and resolved instead"),
+    }
 }
 
 /// The cross-crate move of `host_registry`, with or without a facade.

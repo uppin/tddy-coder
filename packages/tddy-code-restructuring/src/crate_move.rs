@@ -782,6 +782,90 @@ fn source_crate_of(source: &str, module: &str) -> Result<String> {
         })
 }
 
+/// Where a module sits in its crate: the crate that owns it, and the file that declares it.
+///
+/// Replaces the crate-root-only assumption [`source_crate_of`] encodes. A top-level module is
+/// declared by `<crate>/src/lib.rs`; a nested one by its parent's own module file, which Rust 2018
+/// allows to be either `<crate>/src/<parent>.rs` or `<crate>/src/<parent>/mod.rs`. Both are looked
+/// for, and the refusal survives only for a parent that exists as neither.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleHome {
+    /// The crate directory, relative to the repository root — `packages/tddy-daemon`.
+    pub crate_dir: String,
+    /// The file carrying this module's `mod` declaration. The crate root for a top-level module,
+    /// the parent's own module file otherwise.
+    pub declared_in: String,
+    /// The module path inside the crate, outermost first — `["model_registry", "store"]` for a
+    /// nested module, `["host_registry"]` for a top-level one.
+    pub path: Vec<String>,
+}
+
+impl ModuleHome {
+    /// Whether the crate root declares this module itself.
+    #[must_use]
+    pub fn is_top_level(&self) -> bool {
+        self.path.len() == 1
+    }
+}
+
+/// Resolve a module file to the crate that owns it and the file that declares it.
+///
+/// This is what lets a **directory-shaped** subsystem move. `source_crate_of` requires
+/// `<crate>/src/<module>.rs` and refuses everything deeper before rust-analyzer is spawned, which
+/// is not an edge case — it is the normal shape of a subsystem worth extracting.
+///
+/// The nesting is not guessed: the anchor already carries it, and the parent's declaring file is
+/// **located** on disk rather than assumed.
+///
+/// # Errors
+///
+/// Refuses when `source` is not under a crate's `src/`, and when the parent module exists as
+/// neither `<crate>/src/<parent>.rs` nor `<crate>/src/<parent>/mod.rs` — naming both paths it
+/// looked for.
+pub fn module_home(_workspace: &Workspace<'_>, _source: &str, _module: &str) -> Result<ModuleHome> {
+    // TODO(restructure-moves): implement
+    todo!("module_home: resolve a nested module to its crate and declaring file")
+}
+
+/// The crate that **defines** what an origin-named path reaches, resolving one level of re-export.
+///
+/// A back-compat facade in the origin — `pub use tddy_daemon_kernel::config;` — makes
+/// rust-analyzer canonicalise a caller's `crate::config::DaemonConfig` as
+/// `tddy_daemon::config::DaemonConfig`. [`refuse_a_dependency_cycle`] reads that as the destination
+/// depending on the crate it left, and refuses a move that is in fact clean.
+///
+/// Returns the defining crate's **extern name** when `path` resolves through a re-export, and
+/// `None` when the origin genuinely defines the item — which is the case the refusal is for.
+///
+/// # Errors
+///
+/// Refuses when the origin's crate root cannot be read.
+pub fn defining_crate(
+    _workspace: &Workspace<'_>,
+    _origin: &Destination,
+    _path: &str,
+) -> Result<Option<String>> {
+    // TODO(restructure-moves): implement
+    todo!("defining_crate: resolve an origin-named path through its re-export")
+}
+
+/// Every precondition [`resolve`] enforces before it consults rust-analyzer.
+///
+/// `restructure check` reported `no findings` on plans that `apply` then rejected outright — twice,
+/// on the nested-module refusal and on the cluster one. Both decisions are made before the server
+/// is spawned, so `check` can reach the same verdict statically and for free.
+///
+/// Returns one message per operation that cannot run, in plan order; empty when the plan's
+/// cross-crate moves are all viable.
+///
+/// # Errors
+///
+/// Refuses when a file the preconditions must read cannot be.
+pub fn unrunnable_moves(_workspace: &Workspace<'_>, _ops: &[RefactorOp]) -> Result<Vec<String>> {
+    // TODO(restructure-moves): implement
+    todo!("unrunnable_moves: run apply's preconditions without spawning rust-analyzer")
+}
+
 /// The span of the `mod <module>;` line in a crate root, newline included.
 fn module_declaration(text: &str, module: &str) -> Option<std::ops::Range<usize>> {
     let mut offset = 0usize;

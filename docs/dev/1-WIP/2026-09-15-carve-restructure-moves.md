@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Bug Fix (tooling capability)
 **Stack**: `#carve` 1/9 — the stack root
+**PR**: [#488](https://github.com/uppin/tddy-coder/pull/488)
 
 PRD: [`2026-09-15-carve-restructure-moves-prd.md`](./2026-09-15-carve-restructure-moves-prd.md)
 
@@ -52,11 +53,17 @@ None — this is the stack root, based on `master`.
 Published first, so the six dependent nodes can compile against a real signature while the
 implementation continues in this same PR:
 
-1. `source_crate_of` replaced by a parent-locating resolver with its real signature, returning the
-   source crate **and** the parent module file it found. Unimplemented body marked
-   `// TODO(restructure-moves): implement`.
-2. `refuse_a_dependency_cycle` gains the defining-crate resolution parameter it needs.
-3. Failing tests pinning AC1–AC7, against those signatures.
+**Published** (commit 2), all `pub` and re-exported from `lib.rs`, bodies `todo!()` marked
+`// TODO(restructure-moves): implement`:
+
+1. `ModuleHome { crate_dir, declared_in, path }` + `module_home(workspace, source, module)` — the
+   parent-locating resolver that replaces `source_crate_of`'s crate-root-only assumption. It is
+   **added alongside** `source_crate_of` rather than replacing it outright, so the branch builds and
+   lints clean on the surface alone; `/green` swaps the call site in `Move::read`.
+2. `defining_crate(workspace, origin, path)` — resolves an origin-named path through a `pub use`
+   re-export to the crate that defines the item. `None` when the origin genuinely defines it.
+3. `unrunnable_moves(workspace, ops)` — every precondition `resolve` enforces before it consults
+   rust-analyzer, one message per operation that cannot run, in plan order.
 
 This PR goes on to implement all of it. **It must not merge in that state.**
 
@@ -72,7 +79,11 @@ transitively
 
 Real dependency edges, as opposed to the branch line:
 
-    n1 → n3, n4, n5, n6, n9      n3 → n6, n7, n9      n4 → n8, n9      n5 → n9
+    n1 → n3, n4, n5, n6, n9      n3 → n7, n9      n4 → n6, n8, n9      n5 → n9
+
+Refined at wave 2 from `#carve` 6/9's discovery: `n4 → n6` was added (`error.rs` cannot leave until
+`ClarificationQuestion` has moved) and `n3 → n6` withdrawn (that group is a DAG, so leaf-first
+ordering suffices). No wave changed.
 
 ## Prerequisites
 
@@ -127,9 +138,19 @@ so it is almost entirely hand-written — and it is what makes phases A and C me
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset — this document
-- [ ] Publish the draft-PR contract (owned API surface + failing tests)
-- [ ] Failing acceptance tests — **USER REVIEW**
-- [ ] Failing unit/integration tests
+- [x] Publish the draft-PR contract (owned API surface + failing tests)
+- [x] Failing acceptance tests — **USER REVIEW** (approved 2026-09-15)
+  - `tests/nested_module_move_acceptance.rs` — AC1/AC2/AC3 plus a nested-facade case. 4 failing on
+    `source_crate_of` (`crate_move.rs:773`), reached before rust-analyzer is spawned.
+  - `tests/facade_cycle_acceptance.rs` — AC4 ×2 failing on the cycle refusal, reproducing the
+    production message verbatim (``still names `origin` (origin::config::Setting)``); **AC6 passes**
+    and must stay passing — it is the guard that the refusal keeps firing for a real cycle.
+- [x] Failing unit/integration tests
+  - `tests/check_precondition_parity.rs` — AC7, 4 failing on `unrunnable_moves`'s `todo!()`. No
+    server: that is the point, since both refusals are decided before one is spawned.
+  - **AC8 needs no new test.** `restructure_cli.rs:348`
+    `a_request_may_take_as_long_as_the_indexing_budget_the_run_was_given` already pins it. What
+    remains for AC8 is the live apply at `--indexing-budget 900`, run at `/green`.
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — correct the title, ready for review
