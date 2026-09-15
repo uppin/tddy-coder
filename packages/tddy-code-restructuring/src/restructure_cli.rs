@@ -16,7 +16,7 @@ use tddy_lsp::allowlist::{Language, LaunchSpec, LspAllowList};
 use tddy_lsp::registry::{LspKey, LspRegistry};
 use tddy_task::TaskRegistry;
 
-use crate::runner::{Command, Options};
+use crate::runner::{emit_progress, reset_progress_clock, Command, Options};
 
 #[derive(Parser)]
 #[command(name = "restructure")]
@@ -109,10 +109,13 @@ pub async fn run(args: RestructureArgs) -> Result<()> {
             root,
             language: Language::Rust,
         };
+        reset_progress_clock();
+        emit_progress("acquiring shared rust-analyzer client (first run may take minutes)");
         let service = lsp_registry
             .get_or_spawn(key)
             .await
             .context("rust-analyzer LSP")?;
+        emit_progress("rust-analyzer client ready");
         // The client's own per-request default is sized for interactive queries. A code-action
         // request against a cold index routinely outlasts it, and `--indexing-budget` is
         // documented as the remedy — so it has to reach the wait that actually fires.
