@@ -107,6 +107,10 @@ export const createSessionPage = {
 
   /** Choose which OpenSSH Host alias runs exec tools. `""` selects this host (LocalShell). */
   selectSshConfigHost(alias: string) {
+    byTestId(TEST_IDS.createSessionSshConfigSelect).should(($el) => {
+      const values = [...($el[0] as HTMLSelectElement).options].map((option) => option.value);
+      expect(values, `SSH host option ${JSON.stringify(alias)}`).to.include(alias);
+    });
     byTestId(TEST_IDS.createSessionSshConfigSelect).select(alias);
   },
 

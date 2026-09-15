@@ -250,3 +250,41 @@ fn an_unsandboxed_split_start_forwards_no_sandbox() {
         "an unsandboxed split start must not impose a sandbox on the codebase host"
     );
 }
+
+/// The alias is applied on the codebase host: B's RemoteShell opens `ssh(1)`. Forwarding is
+/// `..req.clone()` today; this pins the field so a future explicit-field refactor cannot drop it
+/// the way a silent drop would leave B on LocalShell with nothing here saying it should not have.
+#[test]
+fn a_requested_ssh_config_host_is_forwarded_to_the_host_holding_the_worktree() {
+    // Given a split start that runs exec tools on jumpbox
+    let req = StartSessionRequest {
+        ssh_config_host: "jumpbox".to_string(),
+        ..a_split_start_request()
+    };
+
+    // When
+    let forwarded = forwarded(&req);
+
+    // Then the workspace half is the one that materializes on T
+    assert_eq!(forwarded.ssh_config_host, "jumpbox");
+}
+
+/// The agent host receives the operator's StartSession, but it is not the OpenSSH client.
+/// Consuming `ssh_config_host` locally on A would run `ssh` on a machine with no checkout.
+#[test]
+fn the_agent_host_is_not_the_ssh_client_of_a_split_start() {
+    // Given a split start whose exec catalog runs on jumpbox
+    let req = StartSessionRequest {
+        ssh_config_host: "jumpbox".to_string(),
+        ..a_split_start_request()
+    };
+
+    // When
+    let ssh_client = crate::split_session::ssh_client_daemon_instance_id(
+        &req.daemon_instance_id,
+        &req.codebase_daemon_instance_id,
+    );
+
+    // Then A does not open ssh(1); B does
+    assert_eq!(ssh_client, req.codebase_daemon_instance_id);
+}
