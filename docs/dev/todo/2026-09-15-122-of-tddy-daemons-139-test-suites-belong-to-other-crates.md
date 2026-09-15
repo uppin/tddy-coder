@@ -70,7 +70,7 @@ own.
 
 ## What this costs today
 
-- **16 of `tddy-daemon`'s `tddy-*` runtime dependencies are named by no file in its `src/`** —
+- **17 of `tddy-daemon`'s `tddy-*` runtime dependencies are named by no file in its `src/`** —
   `tddy-workflow-recipes`, `tddy-livekit`, `tddy-telegram`, `tddy-session-files`,
   `tddy-session-activity`, `tddy-session-agents`, `tddy-daemon-sandbox`, `tddy-sandbox`,
   `tddy-sandbox-recipes`, `tddy-sandbox-runner`, `tddy-pty`, `tddy-task`, `tddy-stdio`,

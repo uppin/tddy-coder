@@ -284,6 +284,9 @@ pub use preconditions::*;
 mod cluster;
 pub use cluster::*;
 
+mod test_binary;
+pub use test_binary::*;
+
 mod manifest_edits;
 
 /// The `pub use` line a facade leaves in the crate the module left.
