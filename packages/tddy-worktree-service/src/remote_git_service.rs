@@ -32,6 +32,7 @@ use tokio::sync::{mpsc, oneshot, Mutex, OwnedSemaphorePermit, Semaphore};
 use tddy_rpc::{Code, Status};
 use tddy_service::proto::remote_git::{GitClientFrame, GitOpen, GitServerFrame};
 
+use tddy_core::shell_single_quote;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::privilege_drop::ResolvedPtyUser;
 
@@ -46,6 +47,27 @@ pub type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// Resolves an OS user to that user's project registry directory
 /// (`~/.tddy/projects/`). Mirrors `DaemonSessionHost`'s sessions-base resolver.
 pub type ProjectsDirResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+
+/// Resolves an OS user to that user's sessions base (`~/.tddy/`). Used to discover SSH-backed
+/// sessions when choosing where pack verbs run.
+pub type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+
+/// Everything [`PackExecutionResolver`] needs to decide local vs remote pack spawn for one open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackExecutionContext {
+    pub os_user: String,
+    pub project_ref: String,
+    pub local_repo_path: PathBuf,
+}
+
+/// Maps an admitted open to [`PackExecution`]. Production wiring lists the OS user's sessions and
+/// picks an SSH-backed row for the project; tests inject a stub.
+pub type PackExecutionResolver = Arc<dyn Fn(PackExecutionContext) -> PackExecution + Send + Sync>;
+
+/// Today's behaviour: always pack the registry's local `main_repo_path`.
+pub fn local_only_pack_execution_resolver() -> PackExecutionResolver {
+    Arc::new(|ctx| pack_execution_for_session(ctx.local_repo_path, "", ""))
+}
 
 /// Largest payload carried in one `GitServerFrame`. Kept well under
 /// `tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES` (60 000) so a git frame is never chunk-framed —
@@ -143,6 +165,38 @@ pub fn resolve_project_repo(projects_dir: &Path, project_ref: &str) -> Result<Pa
     Ok(repo_path)
 }
 
+/// Where a Serve spawn runs pack verbs. Local is today's `main_repo_path`. Remote is n2's
+/// RemoteShell (`ssh -o BatchMode=yes <alias>`) — this crate cannot take `tddy_tool_engine::Shell`
+/// because that crate already depends on this one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackExecution {
+    Local {
+        repo_path: PathBuf,
+    },
+    Remote {
+        ssh_config_host: String,
+        remote_repo_path: String,
+    },
+}
+
+/// Empty `ssh_config_host` is LocalShell. A set alias packs on the SSH target, never locally.
+pub fn pack_execution_for_session(
+    local_repo: PathBuf,
+    ssh_config_host: &str,
+    remote_repo_path: &str,
+) -> PackExecution {
+    if ssh_config_host.is_empty() {
+        PackExecution::Local {
+            repo_path: local_repo,
+        }
+    } else {
+        PackExecution::Remote {
+            ssh_config_host: ssh_config_host.to_string(),
+            remote_repo_path: remote_repo_path.to_string(),
+        }
+    }
+}
+
 /// The argv the child is spawned with, front-loaded with a `setpriv` privilege drop when the
 /// target OS user differs from the daemon's own identity (reusing
 /// [`tddy_daemon_kernel::privilege_drop::wrap_argv_for_privilege_drop`], so the PTY and pipe paths cannot diverge).
@@ -222,6 +276,38 @@ fn git_child_env(target: &ResolvedPtyUser) -> Vec<(String, String)> {
     tddy_daemon_kernel::privilege_drop::pty_user_env_overrides(&home, path_extra.as_deref())
 }
 
+/// OpenSSH argv for one remote shell command — same shape as
+/// [`tddy_tool_engine::RemoteShell::ssh_argv`], without taking a dependency on tool-engine.
+fn ssh_batch_mode_argv(host_alias: &str, remote_shell_command: &str) -> Vec<String> {
+    vec![
+        "ssh".to_string(),
+        "-o".to_string(),
+        "BatchMode=yes".to_string(),
+        "--".to_string(),
+        host_alias.to_string(),
+        remote_shell_command.to_string(),
+    ]
+}
+
+/// Shell command run on the SSH target for a pack verb. The repo path in `git_argv` is replaced
+/// with `remote_repo_path` so the child never packs a path the session did not authorize.
+fn remote_pack_shell_command(
+    git_argv: &[String],
+    remote_repo_path: &str,
+) -> Result<String, String> {
+    let verb = git_argv
+        .get(1)
+        .ok_or_else(|| "pack argv must include a git subcommand".to_string())?;
+    if git_argv.first().map(String::as_str) != Some("git") {
+        return Err("pack argv must start with git".to_string());
+    }
+    Ok(format!(
+        "git {} -- {}",
+        verb,
+        shell_single_quote(remote_repo_path)
+    ))
+}
+
 /// `git <subcommand> -- <repo>`. The `--` matters because `main_repo_path` comes from a
 /// hand-editable `projects.yaml`: a path beginning with `-` would otherwise be parsed as an option.
 fn git_child_argv(verb: GitVerb, repo_path: &Path) -> Vec<String> {
@@ -296,6 +382,7 @@ pub struct RemoteGitServiceImpl {
     user_resolver: UserResolver,
     projects_dir_resolver: ProjectsDirResolver,
     config: Arc<DaemonConfig>,
+    pack_execution_resolver: PackExecutionResolver,
     stream_slots: GitStreamSlots,
 }
 
@@ -313,10 +400,25 @@ impl RemoteGitServiceImpl {
         projects_dir_resolver: ProjectsDirResolver,
         config: Arc<DaemonConfig>,
     ) -> Self {
+        Self::new_with_pack_execution_resolver(
+            user_resolver,
+            projects_dir_resolver,
+            config,
+            local_only_pack_execution_resolver(),
+        )
+    }
+
+    pub fn new_with_pack_execution_resolver(
+        user_resolver: UserResolver,
+        projects_dir_resolver: ProjectsDirResolver,
+        config: Arc<DaemonConfig>,
+        pack_execution_resolver: PackExecutionResolver,
+    ) -> Self {
         Self {
             user_resolver,
             projects_dir_resolver,
             config,
+            pack_execution_resolver,
             stream_slots: GitStreamSlots::new(MAX_CONCURRENT_GIT_STREAMS),
         }
     }
@@ -430,9 +532,20 @@ impl tddy_service::proto::remote_git::RemoteGitService for RemoteGitServiceImpl 
             log_refused_open(&open.project_ref, &open.verb, status);
         })?;
 
-        let (relay, frames) =
-            GitChildRelay::spawn_with_env(command.argv, request.repo_path.clone(), command.env)
-                .inspect_err(|status| log_refused_open(&open.project_ref, &open.verb, status))?;
+        let execution = (self.pack_execution_resolver)(PackExecutionContext {
+            os_user: request.os_user.clone(),
+            project_ref: open.project_ref.clone(),
+            local_repo_path: request.repo_path.clone(),
+        });
+        let (relay, frames) = GitChildRelay::spawn_pack_verb(&execution, command.argv, command.env)
+            .inspect_err(|status| log_refused_open(&open.project_ref, &open.verb, status))?;
+        let spawn_target = match &execution {
+            PackExecution::Local { repo_path } => repo_path.display().to_string(),
+            PackExecution::Remote {
+                ssh_config_host,
+                remote_repo_path,
+            } => format!("ssh:{ssh_config_host}:{remote_repo_path}"),
+        };
         log::info!(
             target: LOG_TARGET,
             "serving git {} to github user '{}' as os_user '{}' on project '{}' at {} (pid {})",
@@ -440,7 +553,7 @@ impl tddy_service::proto::remote_git::RemoteGitService for RemoteGitServiceImpl 
             request.github_user,
             request.os_user,
             open.project_ref,
-            request.repo_path.display(),
+            spawn_target,
             relay.pid()
         );
 
@@ -538,6 +651,31 @@ impl GitChildRelay {
         env: Vec<(String, String)>,
     ) -> Result<(GitChildRelay, GitServerFrames), Status> {
         Self::spawn_child(argv, cwd, Some(env))
+    }
+
+    /// Spawn a pack verb through [`PackExecution`]. Local is [`spawn_with_env`]. Remote is
+    /// OpenSSH to the session's Host alias with piped stdio (same argv shape as RemoteShell).
+    pub fn spawn_pack_verb(
+        execution: &PackExecution,
+        argv: Vec<String>,
+        env: Vec<(String, String)>,
+    ) -> Result<(GitChildRelay, GitServerFrames), Status> {
+        match execution {
+            PackExecution::Local { repo_path } => {
+                Self::spawn_with_env(argv, repo_path.clone(), env)
+            }
+            PackExecution::Remote {
+                ssh_config_host,
+                remote_repo_path,
+            } => {
+                let remote_cmd = remote_pack_shell_command(&argv, remote_repo_path)
+                    .map_err(|e| Status::internal(format!("remote pack command: {e}")))?;
+                let ssh_argv = ssh_batch_mode_argv(ssh_config_host, &remote_cmd);
+                // OpenSSH runs as the daemon and must keep agent, config, and PATH — not the
+                // constructed env passed for a local `setpriv` git child.
+                Self::spawn_child(ssh_argv, PathBuf::from("/"), None)
+            }
+        }
     }
 
     /// Spawn the child with all three stdio streams piped, and start pumping:

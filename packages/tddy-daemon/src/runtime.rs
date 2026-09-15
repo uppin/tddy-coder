@@ -837,7 +837,7 @@ pub async fn build(
         let mut connection_impl =
             tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
                 config.clone(),
-                sessions_base_resolver,
+                sessions_base_resolver.clone(),
                 tddy_data_dir.clone(),
                 user_resolver,
                 options.spawn_client.clone(),
@@ -1082,11 +1082,17 @@ pub async fn build(
 
         // RemoteGitService — every project this daemon serves, usable as a git remote by any
         // client that can join the room (`GIT_SSH_COMMAND=tddy-remote-git-repo`).
+        let pack_execution_resolver =
+            tddy_session_lifecycle::remote_git_pack_execution::pack_execution_resolver_from_sessions(
+                sessions_base_resolver.clone(),
+                projects_dir_resolver.clone(),
+            );
         let remote_git_server = tddy_service::RemoteGitServiceServer::new(
-            tddy_session_lifecycle::remote_git_service::RemoteGitServiceImpl::new(
+            tddy_session_lifecycle::remote_git_service::RemoteGitServiceImpl::new_with_pack_execution_resolver(
                 remote_git_user_resolver.clone(),
                 projects_dir_resolver,
                 config_arc.clone(),
+                pack_execution_resolver,
             ),
         );
         rpc_entries.push(tddy_rpc::ServiceEntry {
