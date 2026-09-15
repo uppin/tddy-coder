@@ -9,12 +9,13 @@ The crate is the host subsystem plus the host-key path, and nothing else.
 
 | Group | Files | What is in them |
 |---|---|---|
-| `service.rs` | 1 | `HostServiceImpl` — the eight handlers, the state they read, and the `with_*` builders that inject each OS seam |
+| `service.rs` | 1 | `HostServiceImpl` — the nine handlers, the state they read, and the `with_*` builders that inject each OS seam |
 | `stream.rs` | 1 | `MpscHostPromptStream`, `MpscHostStatsStream` — the two server-streaming adapters |
 | the registry | `host_registry`, `multi_host`, `host_session_service` | which machines exist, and which project lives on which |
 | the probes | `host_tooling`, `host_stats`, `remote_desktop_probe`, `host_desktop_targets` | what a host has, how busy it is, and whether a desktop on it can be reached |
 | the prompt channel | `host_prompts`, `host_prompt_stream`, `host_messages` | the daemon-asks-the-operator mechanism and its wire mapping |
 | the key path | `host_keypair`, `host_private_key`, `ssh_agent`, `ssh_agent_add` | the host RSA keypair, per-user private-key reading, and the agent protocol |
+| ssh config | `ssh_config` | explicit OpenSSH `Host` aliases from an OS user's `~/.ssh/config` |
 | `test_util.rs` | 1 | shared helpers, ungated, because the `tests/` suites reach for them |
 
 **The key path lives here rather than with auth.** `AddHostKey` and `ListHostKeyCandidates` are
@@ -33,6 +34,7 @@ crate boundary could have tolerated.
 | `AnswerHostPrompt` | Unary; answers one prompt with `encrypted_answer` — **RSA-OAEP(SHA-256) ciphertext under that event's `host_public_key`**, never a plaintext. Answerable once, and only by the operator who raised it; a prompt id that was never issued and one belonging to somebody else get the *same* rejection. Response is `{accepted, rejection_reason}` |
 | `AddHostKey` | Unary, and **blocks for as long as the add takes**: it raises a passphrase prompt on `StreamHostPrompts`, waits for the ciphertext on `AnswerHostPrompt`, decrypts it, unlocks the OpenSSH key named by `subject` — read as the mapped OS user, out of their own home — and hands the identity to that user's ssh-agent. `subject` must be an **absolute** path; nothing expands `~`. Answers with `{added, outcome (AddHostKeyOutcome), fingerprint, failure_reason}` and never with anything derived from the passphrase |
 | `ListHostKeyCandidates` | Unary; the private keys the caller's own OS user could load, out of their own `~/.ssh` — one `HostKeyCandidate` (`path`, `key_type`, `fingerprint`) per key **whose `.pub` sits beside it**, ordered by path. Every field comes from the public half, so no private key is opened to build the list, and every path offered is one `AddHostKey` accepts. Returns a list and never a failure: an absent, unreadable and empty `~/.ssh` are one answer |
+| `ListSshConfigHosts` | Unary; the explicit OpenSSH `Host` aliases in the mapped OS user's `~/.ssh/config`, after `Include` expansion — one `SshConfigHost` (`alias`) per name, first-seen order, wildcard patterns skipped. Routed by `daemon_instance_id` like `ListHostKeyCandidates`. **Honesty is the opposite of key listing:** an unreadable or unparseable config is `ProbeOutcome::Failed` with an empty `hosts` list, never mistaken for "no aliases"; a missing or empty config with no includes is `Ok` with zero hosts. Parser: [`ssh_config.rs`](../src/ssh_config.rs) |
 | `StreamHostStats` | Server-streaming host telemetry — CPU, disk, memory and, where the platform provides one, load |
 
 ## How it is served
@@ -46,7 +48,7 @@ through the `with_*` builders, and registers it three ways from the same `Arc`:
 | the LiveKit common room | the same `ServiceEntry`, pushed into the room's `MultiRpcService` |
 | the local UDS socket | `HostServiceTonicAdapter`, a hand-written `#[tonic::async_trait]` impl — `tddy-codegen`'s `generate_tonic_adapter` is a stub — added to the **same** `Server::builder()` as `ConnectionService`, so a caller that reached `GetHostTooling` over the local socket before the split still does |
 
-**Five of the eight methods route to a peer before the caller is authenticated.** A host question is
+**Six of the nine methods route to a peer before the caller is authenticated.** A host question is
 answered by the host it is about, and the daemon serving the call may not be that host — so the
 routing decision is made from `daemon_instance_id` alone, ahead of the token. `tddy-daemon` hands
 this crate the three things every such decision reads (the config, the roster and the token

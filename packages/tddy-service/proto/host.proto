@@ -5,8 +5,8 @@ package host;
 // Everything about the hosts a daemon knows: the durable registry, each host's tooling probe, its
 // telemetry, the prompts it raises and the ssh keys it can be given.
 //
-// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 1. These eight methods and their
-// 30 messages were **fully self-contained** — no message they reach is referenced by any method that
+// Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 1. These methods and their
+// messages were **fully self-contained** — no message they reach is referenced by any method that
 // stayed behind — so the cut needed no shared types file. See
 // `docs/dev/changesets/2026-09-09-unbundle-host-worktree-services.md`.
 
@@ -66,6 +66,16 @@ service HostService {
   // not distinguish absent from malformed: an authenticated caller must not be able to use this as
   // a probe for what exists on the host.
   rpc ListHostKeyCandidates(ListHostKeyCandidatesRequest) returns (ListHostKeyCandidatesResponse);
+  // Hosts screen — the explicit OpenSSH `Host` aliases in this host's OS user's `~/.ssh/config`.
+  //
+  // Addressed by `daemon_instance_id` and honoured the way ListHostKeyCandidates honours it: the
+  // file is on one machine, and a listing served by whichever daemon took the call would offer
+  // destinations that host cannot `ssh` to.
+  //
+  // Unlike ListHostKeyCandidates, an unreadable or unparseable config is a FAILURE (outcome
+  // FAILED), never an empty alias list. Empty hosts with outcome OK means this user has no
+  // explicit Host aliases. Collapsing the two would silently force LocalShell.
+  rpc ListSshConfigHosts(ListSshConfigHostsRequest) returns (ListSshConfigHostsResponse);
   // Host Stats Footer (see docs/ft/web/host-stats-footer.md) — host-level telemetry for the
   // selected daemon. Addressed to the daemon directly over the common-room LiveKit connection (no
   // daemon_instance_id payload needed) and validates `session_token`. The server owns the cadence:
@@ -348,6 +358,27 @@ message ListHostKeyCandidatesResponse {
   // Ordered by path, so the list an operator reads is stable across calls. Empty when this user has
   // no keys, no ~/.ssh, or a ~/.ssh this host could not read — deliberately indistinguishable.
   repeated HostKeyCandidate candidates = 1;
+}
+
+message ListSshConfigHostsRequest {
+  string session_token = 1;
+  // The host whose config is listed. Empty means the daemon serving the call. Honoured as
+  // ListHostKeyCandidatesRequest.daemon_instance_id is: the file is on one machine.
+  string daemon_instance_id = 2;
+}
+
+message SshConfigHost {
+  // One explicit `Host` alias, e.g. "buildbox". Never a wildcard pattern.
+  string alias = 1;
+}
+
+message ListSshConfigHostsResponse {
+  // OK with an empty `hosts` is "no explicit aliases". FAILED is unreadable/unparseable.
+  // The two must not be collapsed: empty is LocalShell as a choice, FAILED is not a choice.
+  ProbeOutcome outcome = 1;
+  string failure_reason = 2;
+  // First-seen order of explicit aliases after Include expansion. Empty only when outcome is OK.
+  repeated SshConfigHost hosts = 3;
 }
 
 message ListKnownHostsRequest {

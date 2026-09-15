@@ -20,6 +20,7 @@ pub mod multi_host;
 pub mod remote_desktop_probe;
 pub mod ssh_agent;
 pub mod ssh_agent_add;
+pub mod ssh_config;
 
 pub mod service;
 pub mod stream;
@@ -42,3 +43,5 @@ mod host_tooling_handler_unit_tests;
 mod known_hosts_handler_unit_tests;
 #[cfg(test)]
 mod ssh_agent_block_handler_tests;
+#[cfg(test)]
+mod ssh_config_handler_tests;

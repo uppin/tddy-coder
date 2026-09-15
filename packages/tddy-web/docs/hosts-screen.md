@@ -76,6 +76,15 @@ matches nothing in an operator's own `ssh-add -l`. The comment is rendered in it
 suggesting it locates anything: the agent does not know which file a key came from, and a comment is
 free text.
 
+**`HostRowSshConfig`** is mounted beside the agent section, taking `{instanceId}` only — it fetches
+`ListSshConfigHosts` for that row's host rather than receiving a block from `GetHostTooling`. It
+lists the explicit OpenSSH `Host` aliases in that host's OS-user `~/.ssh/config`, and repeats the same
+outcome-first guard: only `ProbeOutcome.OK` licenses a finding, so an unknown outcome renders "Could
+not check" instead of "No SSH hosts". Past the guard, zero aliases read "No SSH hosts" — a real
+finding that this host's config names no destinations — and each alias renders as its own span. A
+failed read never borrows the empty shape, because empty is the LocalShell choice in later flows and
+must not be stated when the config was not read.
+
 **`HostRowRemoteDesktop`** is the fourth section, taking `{instanceId, readings}` — one reading per
 probed protocol, and an absent block renders as an empty list rather than a fabricated one. Each
 reading becomes one `hosts-row-<id>-<vnc|rdp>` span holding **two facts side by side**: the bridge

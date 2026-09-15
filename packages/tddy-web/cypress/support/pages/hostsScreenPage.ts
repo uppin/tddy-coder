@@ -114,6 +114,17 @@ export const hostSshAgentPage = {
 };
 
 /**
+ * SSH config Host-alias cell — added by `#ssh-exec` 1/4.
+ *
+ * Distinct from {@link hostSshAgentPage}: keys in an agent are not destinations in `~/.ssh/config`.
+ */
+export const hostSshConfigPage = {
+  section: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-ssh-config"]`),
+  alias: (instanceId: string, alias: string) =>
+    cy.get(`[data-testid="hosts-row-${instanceId}-ssh-config-host-${alias}"]`),
+};
+
+/**
  * Add-key action selectors — added by `#hosts-screen 6/8`.
  *
  * The action lives inside the ssh-agent section that `hostSshAgentPage` above addresses, but is
