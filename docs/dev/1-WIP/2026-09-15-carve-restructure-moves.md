@@ -152,6 +152,7 @@ so it is almost entirely hand-written — and it is what makes phases A and C me
     `a_request_may_take_as_long_as_the_indexing_budget_the_run_was_given` already pins it. What
     remains for AC8 is the live apply at `--indexing-budget 900`, run at `/green`.
 - [x] Implement production code making tests pass (`/green`)
+- [x] Apply progress on stderr (stamped `progress` / `indexing` lines) for long rust-analyzer runs
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — correct the title, ready for review
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
