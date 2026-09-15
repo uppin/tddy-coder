@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature (tooling capability)
 **Stack**: `#carve` 3/9
+**PR**: [#490](https://github.com/uppin/tddy-coder/pull/490)
 
 PRD: [`2026-09-15-carve-restructure-clusters-prd.md`](./2026-09-15-carve-restructure-clusters-prd.md)
 
@@ -50,11 +51,14 @@ PRD: [`2026-09-15-carve-restructure-clusters-prd.md`](./2026-09-15-carve-restruc
 
 Published first:
 
-1. The set-carrying shape of `move_module_to_crate`'s operation input, and `Move` widened to the
-   cluster it represents, with real signatures. Bodies marked `// TODO(restructure-clusters): implement`.
-2. `repointed_header`'s co-moving-set parameter.
-3. `StatePaths` keyed by plan.
-4. Failing tests pinning AC1–AC7.
+**Published** (commit 2), all `pub` and re-exported from `lib.rs`:
+
+1. `MovingCluster { members, destination, reexport }` with `co_moving()` — the set-carrying shape.
+   `co_moving()` is **real**, not a `todo!()`: it is the distinction the single-module model cannot
+   express, and every other criterion rests on it.
+2. `resolve_cluster(engine, workspace, cluster)` — one edit, applied all or not at all.
+3. `siblings_left_behind(workspace, ops)` — the `check` finding for a partial cluster move.
+4. `state_directory_for_plan(root, plan)` in `runner.rs` — run state keyed by the plan.
 
 This PR goes on to implement all of it. **It must not merge in that state.**
 
@@ -122,9 +126,11 @@ and carving it first means the manual work lands in files small enough to review
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset — this document
-- [ ] Publish the draft-PR contract (cluster surface + failing tests)
-- [ ] Failing acceptance tests — **USER REVIEW**
-- [ ] Failing unit/integration tests
+- [x] Publish the draft-PR contract (cluster surface + failing tests)
+- [x] Failing acceptance tests — **USER REVIEW** (approved 2026-09-15, gates delegated)
+  - `tests/cluster_move.rs` — 4 failing on `siblings_left_behind` and `state_directory_for_plan`;
+    `names_the_modules_travelling_together` passes, pinning the data shape the rest builds on.
+- [x] Failing unit/integration tests — covered by the same suite; neither decision needs a server, which is the point
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] Re-file the two cosmetic restructure defects as their own todo entry
 - [ ] `/validate-changes`
@@ -132,6 +138,9 @@ and carving it first means the manual work lands in files small enough to review
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
 
 ## Verification
+
+**Inherited red from `#carve` 1/9:** this branch's baseline is **297 passed, 10 failed** — node 1's
+own failing tests, which it has not been greened on yet. They are its red, not this node's.
 
 ```bash
 ./test -p tddy-code-restructuring

@@ -20,7 +20,8 @@ pub mod verify;
 
 pub use backends::rust::{client_capabilities, server_settings};
 pub use crate_move::{
-    defining_crate, module_home, unrunnable_moves, CallerRewrite, Destination, ModuleHome, Survey,
+    defining_crate, module_home, resolve_cluster, siblings_left_behind, unrunnable_moves,
+    CallerRewrite, Destination, ModuleHome, MovingCluster, Survey,
 };
 pub use edit::{FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit};
 pub use journal::{Journal, JournalRecord, OpStatus};
@@ -28,6 +29,7 @@ pub use ledger::{LedgerCheckpoint, PositionLedger};
 pub use overlay::Overlay;
 pub use plan::{Anchor, Plan, Reexport, RefactorKind, RefactorOp};
 pub use registry::{BackendRegistry, LanguageBackend};
+pub use runner::state_directory_for_plan;
 
 /// Errors surfaced by the executor. Every variant is fatal — the executor never falls back.
 #[derive(Debug, thiserror::Error)]
