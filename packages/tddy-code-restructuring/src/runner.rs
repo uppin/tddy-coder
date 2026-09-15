@@ -154,6 +154,22 @@ pub struct StatePaths {
     ledger: PathBuf,
 }
 
+/// Where a plan's run state lives, keyed by the plan rather than by the repository.
+///
+/// `StatePaths::under` puts the journal and ledger at `<root>/.restructure/`, one set per
+/// repository — so a **completed** plan blocks the next one with *"a journal already exists for this
+/// plan — pass `--resume`"*, and `--resume` would resume the wrong plan against the new plan's
+/// coordinates. The backlog calls this the single largest tax on a multi-layer move, and every
+/// `#carve` node is multi-layer by construction: one plan carves a flat module, the next moves it.
+///
+/// # Errors
+///
+/// Refuses when the plan path cannot be made into a stable key.
+pub fn state_directory_for_plan(_root: &Path, _plan: &Path) -> Result<PathBuf> {
+    // TODO(restructure-clusters): implement
+    todo!("state_directory_for_plan: key run state by the plan, not the repository")
+}
+
 impl StatePaths {
     /// The state paths for a run against `root`. Derives paths only; touches no disk.
     pub fn under(root: &Path) -> Self {
