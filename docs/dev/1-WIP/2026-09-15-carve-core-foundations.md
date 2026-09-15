@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Refactor
 **Stack**: `#carve` 4/9
+**PR**: [#491](https://github.com/uppin/tddy-coder/pull/491)
 
 PRD: [`2026-09-15-carve-core-foundations-prd.md`](./2026-09-15-carve-core-foundations-prd.md)
 
@@ -52,12 +53,16 @@ PRD: [`2026-09-15-carve-core-foundations-prd.md`](./2026-09-15-carve-core-founda
 
 Published first:
 
-1. The five sub-struct type definitions (`WorkflowRun`, `PendingQuestions`, `ActivityRecorder`,
-   `ViewChannels`, `BackendSelection`) with their real field sets — this is what `#carve` 8/9
-   compiles against.
-2. `tddy-workflow`'s new public surface for the five moved DTO groups.
-3. `changeset/{stack,model,io,merge}` module shape with the facade.
-4. Failing tests pinning AC1–AC7.
+**Published** (commit 2): `src/presenter/state_groups.rs` — the five sub-structs with their **real
+field sets and real types**, exported from `presenter/mod.rs`. This is what `#carve` 8/9 compiles
+against, and it is the one substantial hand-written part of this node: grouping fields into owned
+types is a type-level change no assist expresses.
+
+`PendingToolCallResponse` and `RecipeResolverFn` move with the groups that hold them, since a
+private type cannot be a field of a published one.
+
+`tddy-workflow`'s surface and the `changeset/` module shape are **moves**, not new API, so they are
+pinned by `tests/core_foundations_shape.rs` rather than declared.
 
 This PR goes on to implement all of it. **It must not merge in that state.**
 
@@ -128,9 +133,12 @@ move. Everything else is an intent.
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset — this document
-- [ ] Publish the draft-PR contract (sub-struct types + `tddy-workflow` surface + module shape)
-- [ ] Failing acceptance tests — **USER REVIEW**
-- [ ] Failing unit/integration tests
+- [x] Publish the draft-PR contract (sub-struct types + `tddy-workflow` surface + module shape)
+- [x] Failing acceptance tests — **USER REVIEW** (approved 2026-09-15, gates delegated)
+  - `tests/core_foundations_shape.rs` — 6 failing: the three DTO cycles still exist, `backend/mod.rs`
+    still re-exports the workflow vocabulary, `changeset.rs` is not split, and `Presenter` still
+    holds 37 fields rather than seven.
+- [x] Failing unit/integration tests — the same suite; three of this node's four claims are about *structure*, which the type system cannot observe once the code compiles (a cycle between two modules of one crate compiles perfectly well — that is why `tddy-core` has six)
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] File the `backend/`-extraction todo
 - [ ] `/validate-changes`
