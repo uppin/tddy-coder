@@ -113,6 +113,7 @@ pub use tddy_session_agents::{
     session_agent_inference, session_agent_roster, session_agent_status,
 };
 pub mod relay_idle;
+pub mod remote_git_pack_execution;
 pub mod session_deletion;
 pub mod session_list_enrichment;
 /// The daemon's Telegram subscriber, plus a re-export of the stream subscriber that moved to
@@ -123,7 +124,6 @@ pub mod session_notification_subscribers;
 /// notification bus, its event and its subscriber trait, which moved to `tddy-session-activity`
 /// with `#unbundle` node 7. All are reached as `crate::session_notifications::X`, as before.
 pub mod session_notifications;
-pub mod remote_git_pack_execution;
 pub mod session_reader;
 pub mod session_toolcall;
 pub mod split_session;

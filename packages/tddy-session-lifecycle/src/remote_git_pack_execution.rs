@@ -6,8 +6,8 @@ use std::sync::Arc;
 use tddy_core::default_remote_repo_root;
 use tddy_projects::project_storage;
 use tddy_worktree_service::remote_git_service::{
-    pack_execution_for_session, PackExecution, PackExecutionResolver,
-    ProjectsDirResolver, SessionsBaseResolver,
+    pack_execution_for_session, PackExecution, PackExecutionResolver, ProjectsDirResolver,
+    SessionsBaseResolver,
 };
 
 use crate::session_reader::{list_sessions_in_dir, SessionEntry};
@@ -50,11 +50,7 @@ fn resolve_pack_execution(
         return pack_execution_for_session(local_repo_path, "", "");
     };
     let remote_repo_path = remote_repo_path_for_session(session, &project.git_url);
-    pack_execution_for_session(
-        local_repo_path,
-        &session.ssh_config_host,
-        &remote_repo_path,
-    )
+    pack_execution_for_session(local_repo_path, &session.ssh_config_host, &remote_repo_path)
 }
 
 fn best_ssh_session_for_project<'a>(
