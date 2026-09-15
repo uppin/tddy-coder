@@ -364,6 +364,16 @@ pub fn check(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
     let mut rehearsal = Rehearsal::default();
     let mut findings = 0usize;
 
+    let static_overlay = Overlay::new();
+    let static_workspace = Workspace {
+        root: &root,
+        overlay: &static_overlay,
+    };
+    for message in crate_move::unrunnable_moves(&static_workspace, &plan.ops)? {
+        println!("{message}");
+        findings += 1;
+    }
+
     for (index, op) in plan.ops.iter().enumerate() {
         let statics = registry
             .backend_for(Path::new(op.anchor.file()), op.op)?

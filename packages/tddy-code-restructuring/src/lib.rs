@@ -19,7 +19,9 @@ pub mod runner;
 pub mod verify;
 
 pub use backends::rust::{client_capabilities, server_settings};
-pub use crate_move::{CallerRewrite, Destination, Survey};
+pub use crate_move::{
+    defining_crate, module_home, unrunnable_moves, CallerRewrite, Destination, ModuleHome, Survey,
+};
 pub use edit::{FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit};
 pub use journal::{Journal, JournalRecord, OpStatus};
 pub use ledger::{LedgerCheckpoint, PositionLedger};
