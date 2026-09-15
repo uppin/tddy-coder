@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Refactor
 **Stack**: `#carve` 6/9
+**PR**: [#493](https://github.com/uppin/tddy-coder/pull/493)
 
 PRD: [`2026-09-15-carve-session-store-prd.md`](./2026-09-15-carve-session-store-prd.md)
 
@@ -52,8 +53,12 @@ PRD: [`2026-09-15-carve-session-store-prd.md`](./2026-09-15-carve-session-store-
 
 Published first:
 
-1. `tddy-session-store`'s and `tddy-session-catalog`'s crate skeletons with their public surfaces.
-2. Failing tests pinning AC1–AC6, including the `cargo tree` assertion for AC2.
+**Published** (commit 2): `packages/tddy-core/tests/session_store_shape.rs` — four assertions
+pinning the manifest shape both new crates must have. The skeletons themselves are Phase A
+implementation, not surface.
+
+AC2's `cargo tree -p tddy-coder | grep sqlx` stays a `/green` verification rather than a test: it
+shells out to cargo against the whole workspace, which is a CI-shaped check, not a unit one.
 
 This PR goes on to implement all of it. **It must not merge in that state.**
 
@@ -113,9 +118,12 @@ crates** and `move_module_to_crate` needs somewhere to move to.
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset — this document
-- [ ] Publish the draft-PR contract (both crate surfaces + failing tests)
-- [ ] Failing acceptance tests — **USER REVIEW**
-- [ ] Failing unit/integration tests
+- [x] Publish the draft-PR contract (both crate surfaces + failing tests)
+- [x] Failing acceptance tests — **USER REVIEW** (approved 2026-09-15, gates delegated)
+  - `tests/session_store_shape.rs` — 3 failing (`tddy-core` still declares `sqlx`; neither new crate
+    exists); **1 passing**: `the_god_crate_keeps_the_dependency_that_does_not_leave` guards
+    `jsonschema` **staying**, since `session_action_pipeline.rs` remains and still names it.
+- [x] Failing unit/integration tests — the same suite; every claim here is about manifests and crate boundaries
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — correct the title, ready for review
