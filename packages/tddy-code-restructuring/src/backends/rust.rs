@@ -733,6 +733,7 @@ impl RustBackend {
 
     /// Start rust-analyzer and complete the initialize handshake, once per run.
     fn start(&mut self, root: &Path) -> Result<()> {
+        (self.progress)("starting rust-analyzer session");
         if let Some(bridge) = &self.bridge {
             // The handshake was someone else's, so the one thing that cannot be assumed is the
             // unit its columns are in. A server left on the LSP default counts utf-16 code
@@ -983,7 +984,12 @@ impl RustBackend {
         // an absent assist actionable.
         let mut answered = false;
         let mut offered: Vec<String> = Vec::new();
+        let mut reported_wait = false;
         loop {
+            if !reported_wait {
+                (self.progress)(&format!("waiting for assist `{wanted}`"));
+                reported_wait = true;
+            }
             let id = self.take_id();
             let actions = match self.request(
                 id,
@@ -1125,6 +1131,7 @@ impl LanguageBackend for RustBackend {
         self.did_open(&uri, &text)?;
         self.ensure_indexed(&uri)?;
 
+        (self.progress)("building anchor from module outline");
         let outline = self.module_outline(&uri)?;
         let places = places_of(&outline, items, file)?;
         refuse_non_adjacent(&outline, &places)?;
@@ -1177,6 +1184,7 @@ impl LanguageBackend for RustBackend {
         // which is what this backend supplies it. It opens the module for itself, so the document
         // is deliberately not opened here first.
         if op.op == RefactorKind::MoveModuleToCrate {
+            (self.progress)("cross-crate move: surveying callers and building edits");
             return Ok(Resolution::of(crate_move::resolve(self, workspace, op)?));
         }
 
@@ -1317,6 +1325,7 @@ impl RustBackend {
         original: &str,
         op: &RefactorOp,
     ) -> Result<(String, Vec<VisibilityChange>, Vec<String>)> {
+        (self.progress)(&format!("assist: {:?} in this file", op.op));
         let range = self.anchor_range(uri, op)?;
         let relocates = assist_for(op.op).is_some_and(|assist| assist.relocates_items);
         let reexport = op.reexport.unwrap_or(Reexport::None);
@@ -1891,6 +1900,7 @@ impl RustBackend {
         workspace: &Workspace<'_>,
         op: &RefactorOp,
     ) -> Result<WorkspaceEdit> {
+        (self.progress)(&format!("assist: {:?} (multi-file)", op.op));
         let range = self.anchor_range(uri, op)?;
 
         let action = self.assist(uri, range, op.op)?;
@@ -1955,6 +1965,9 @@ impl RustBackend {
             .name
             .clone()
             .ok_or_else(|| failure("rename_symbol needs a name"))?;
+        (self.progress)(&format!(
+            "rename: `{name}` — collecting edits from rust-analyzer"
+        ));
         let position = match &op.anchor {
             Anchor::Range { start, .. } => {
                 json!({ "line": start.line - 1, "character": start.col - 1 })
@@ -2003,11 +2016,16 @@ impl RustBackend {
         if self.indexed {
             return Ok(());
         }
+        (self.progress)(&format!(
+            "warming crate index (budget {}s)",
+            self.warmup.as_secs()
+        ));
         let symbols = self.request_settled(
             "textDocument/documentSymbol",
             json!({ "textDocument": { "uri": uri } }),
         )?;
         let Some(probe) = first_symbol_position(&symbols) else {
+            (self.progress)("no indexable symbols in file; skipping warm-up");
             return Ok(());
         };
 
@@ -2021,6 +2039,7 @@ impl RustBackend {
 
             if !hover.is_null() || self.chatter.quiescent {
                 self.indexed = true;
+                (self.progress)("crate index ready");
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -2054,6 +2073,7 @@ impl RustBackend {
     /// needs the crate graph. Hover is the cheapest request that also needs it, so a non-null hover
     /// is the signal that a rename will be accepted.
     fn wait_until_resolved(&mut self, uri: &str, position: &Value) -> Result<()> {
+        (self.progress)("waiting for type inference at the anchor");
         let started = Instant::now();
         let deadline = started + self.resolution_budget();
         loop {
