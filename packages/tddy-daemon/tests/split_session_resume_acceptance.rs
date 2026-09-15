@@ -273,6 +273,7 @@ fn a_stopped_split_session() -> SessionMetadata {
         codebase_session_id: Some(CODEBASE_SESSION_ID.to_string()),
         agent_daemon_instance_id: None,
         agent_session_id: None,
+        ssh_config_host: None,
     }
 }
 

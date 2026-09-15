@@ -19,6 +19,7 @@ serde_json = "1"
 anyhow = "1"
 tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "process"] }
 tddy-core = { path = "../tddy-core" }
+base64 = "0.22"
 tddy-task = { path = "../tddy-task" }
 tddy-service = { path = "../tddy-service" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }

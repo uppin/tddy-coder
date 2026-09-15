@@ -311,6 +311,10 @@ message SessionEntry {
   // and unset when the status came from the hook word alone (a bare timestamp with no summary
   // renders as an agent that did something unnameable just now).
   types.SessionAgentActivity last_activity = 32;
+  // OpenSSH `Host` alias this session's exec catalog runs on, from the code-managing daemon's
+  // `~/.ssh/config`. Empty = LocalShell (today's host filesystem). When set, `repo_path` is the
+  // worktree on that SSH target. See docs/ft/web/1-WIP/PRD-2026-09-14-ssh-exec.md.
+  string ssh_config_host = 33;
 }
 
 enum Signal {
@@ -528,6 +532,13 @@ message StartSessionRequest {
   // `spawn-child` uses: it always runs on the orchestrator's host, where that lookup is correct.
   // Meaningful only together with `stack_parent`, which names the orchestrator holding the node.
   string stack_node_id = 37;
+  // OpenSSH `Host` alias on the code-managing daemon. Empty = LocalShell (today's host FS).
+  // When set, that daemon materializes the session worktree on the SSH target and every
+  // exec-catalog tool runs there via RemoteShell (`ssh -o BatchMode=yes <alias>`). Implies
+  // managed-codebase semantics: native agent FS tools stay off. A missing key is a hard
+  // failure (`BatchMode=yes`), never a passphrase prompt and never a fallback to LocalShell.
+  // See docs/ft/web/1-WIP/PRD-2026-09-14-ssh-exec.md.
+  string ssh_config_host = 38;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

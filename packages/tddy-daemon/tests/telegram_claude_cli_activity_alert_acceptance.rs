@@ -74,6 +74,7 @@ fn write_claude_cli_session(
         codebase_session_id: None,
         agent_daemon_instance_id: None,
         agent_session_id: None,
+        ssh_config_host: None,
     };
     write_session_metadata(session_dir, &meta).unwrap();
 }

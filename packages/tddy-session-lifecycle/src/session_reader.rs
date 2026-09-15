@@ -27,6 +27,8 @@ pub struct SessionEntry {
     pub codebase_daemon_instance_id: String,
     /// The paired `workspace` session on that daemon. Empty for co-located sessions.
     pub codebase_session_id: String,
+    /// OpenSSH `Host` alias this session's exec catalog runs on. Empty = local tools.
+    pub ssh_config_host: String,
 }
 
 /// Check if a process with the given PID is alive (same semantics as listing sessions).
@@ -87,6 +89,7 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             previous_session_id: metadata.previous_session_id.unwrap_or_default(),
             codebase_daemon_instance_id: metadata.codebase_daemon_instance_id.unwrap_or_default(),
             codebase_session_id: metadata.codebase_session_id.unwrap_or_default(),
+            ssh_config_host: metadata.ssh_config_host.unwrap_or_default(),
         });
     }
 
@@ -158,6 +161,7 @@ mod tests {
             codebase_session_id: None,
             agent_daemon_instance_id: None,
             agent_session_id: None,
+            ssh_config_host: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -168,5 +172,6 @@ mod tests {
         assert_eq!(entries[0].updated_at, "2026-06-21T11:00:00Z");
         assert_eq!(entries[0].session_type, "tool");
         assert_eq!(entries[0].previous_session_id, "prev-session-000");
+        assert_eq!(entries[0].ssh_config_host, "");
     }
 }

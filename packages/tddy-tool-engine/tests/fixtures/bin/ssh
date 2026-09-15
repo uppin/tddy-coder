@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# SSH exec acceptance fixture: shadows OpenSSH when this directory is first on PATH (./test / nix shell).
+set -euo pipefail
+
+REAL_SSH="${TDDY_REAL_SSH:-$(command -v -p /usr/bin:/usr/local/bin ssh)}"
+
+args=("$@")
+host=""
+remote_cmd=""
+for ((i = 0; i < ${#args[@]}; i++)); do
+  if [[ "${args[i]}" == "--" && $((i + 1)) -lt ${#args[@]} ]]; then
+    host="${args[i + 1]}"
+    remote_cmd="${args[*]:i + 2}"
+    break
+  fi
+done
+
+if [[ "$host" == "buildbox" ]]; then
+  root="${TDDY_SSH_EXEC_FIXTURE_ROOT:?TDDY_SSH_EXEC_FIXTURE_ROOT must be set}"
+  mapped="${remote_cmd//\/home\/dev/$root/home/dev}"
+  bash -lc "$mapped"
+  exit $?
+fi
+
+if [[ "$host" == "no-such-host-tddy-exec" ]]; then
+  echo "ssh: Could not resolve hostname no-such-host-tddy-exec: nodename nor servname provided, or not known" >&2
+  exit 255
+fi
+
+exec "$REAL_SSH" "$@"

@@ -27,6 +27,7 @@ import {
 import { Button } from "../ui/button";
 import { useAvailableAgents } from "./useAvailableAgents";
 import { CreateSessionAgentSelect } from "./CreateSessionAgentSelect";
+import { CreateSessionSshConfigSelect } from "./CreateSessionSshConfigSelect";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import { useSelectableAgents } from "./useSelectableAgents";
 import {
@@ -235,6 +236,8 @@ export function CreateSessionPane({
   // Which daemon's filesystem holds the worktree. Empty means "same as host" — the co-located
   // placement every session had before docs/ft/daemon/remote-managed-worktree.md.
   const [codebaseDaemonInstanceId, setCodebaseDaemonInstanceId] = useState("");
+  /** OpenSSH Host alias for exec tools on this host (empty = LocalShell). */
+  const [sshConfigHost, setSshConfigHost] = useState("");
   /**
    * Whether placing the codebase on another daemon is even on offer.
    *
@@ -611,6 +614,7 @@ export function CreateSessionPane({
       // codebase installs, so a placement chosen before the toggle was switched off would name a
       // combination the daemon refuses.
       codebaseDaemonInstanceId: isSplitCodebase ? codebaseDaemonInstanceId : "",
+      sshConfigHost: isSplitCodebase ? "" : sshConfigHost,
     };
   };
 
@@ -1127,6 +1131,14 @@ export function CreateSessionPane({
                       ))}
                     </select>
                   </div>
+                )}
+                {sessionType === "claude-cli" && !isSplitCodebase && (
+                  <CreateSessionSshConfigSelect
+                    daemonInstanceId={daemonInstanceId || connectedInstanceId}
+                    sessionToken={sessionToken}
+                    value={sshConfigHost}
+                    onChange={setSshConfigHost}
+                  />
                 )}
                 {/* Codebase host — which daemon's filesystem holds the worktree. Offered only in the
                     claude-cli copy of this block: only claude-cli can be *prevented* from touching a

@@ -125,6 +125,7 @@ fn write_minimal_running_session(sessions_base: &std::path::Path, session_id: &s
         codebase_session_id: None,
         agent_daemon_instance_id: None,
         agent_session_id: None,
+        ssh_config_host: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 }

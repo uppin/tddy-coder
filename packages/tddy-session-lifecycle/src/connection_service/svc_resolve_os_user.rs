@@ -266,8 +266,14 @@ impl DaemonSessionHost {
         let session_dir = unified_session_dir_path(sessions_base, &req.session_id);
         let response = match self.exec_tool_route(&session_dir, &req.session_id).await {
             seeded_clone_guard::ExecToolRoute::HostWorktree => {
-                let outcome = tool_engine::execute_tool(
-                    worktree_root,
+                let meta = tddy_core::read_session_metadata(&session_dir).ok();
+                let ssh_host = meta
+                    .as_ref()
+                    .and_then(|m| m.ssh_config_host.as_deref())
+                    .unwrap_or("");
+                let shell = tool_engine::session_shell(worktree_root.to_path_buf(), ssh_host);
+                let outcome = tool_engine::execute_tool_on_shell(
+                    shell.as_ref(),
                     &req.tool_name,
                     &req.args_json,
                     &self.task_registry,

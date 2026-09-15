@@ -32,6 +32,7 @@ pub mod session_metadata;
 pub mod session_participant_metadata;
 pub mod source_path;
 pub mod spawn_env;
+pub mod ssh_exec;
 pub mod stdio_safety;
 pub mod stream;
 #[cfg(test)]
@@ -123,6 +124,9 @@ pub use session_metadata::{
     SessionMetadata, SESSION_METADATA_FILENAME,
 };
 pub use source_path::{classify_rust_source_path, RustSourcePathKind};
+pub use ssh_exec::{
+    contain_remote_path, default_remote_repo_root, run_ssh_batch, shell_single_quote,
+};
 pub use stream::ProgressEvent;
 pub use tddy_workflow::{
     canonical_artifact_write_path, canonical_attachment_write_path, read_session_artifact_utf8,
@@ -147,7 +151,8 @@ pub use worktree::{
     push_new_branch_to_remote, remove_worktree, resolve_default_integration_base_ref,
     resolve_default_integration_base_ref_with_remote,
     resolve_persisted_worktree_integration_base_for_session, set_git_ssh_command,
-    setup_worktree_for_session, setup_worktree_for_session_with_integration_base,
+    setup_worktree_for_session, setup_worktree_for_session_over_ssh,
+    setup_worktree_for_session_with_integration_base,
     setup_worktree_for_session_with_optional_chain_base, validate_chain_pr_integration_base_ref,
     validate_integration_base_ref, worktree_dir, worktree_path_for_branch, WorktreeInfo,
     FALLBACK_DEFAULT_INTEGRATION_BASE_REF,
