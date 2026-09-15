@@ -48,6 +48,27 @@ pub type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// (`~/.tddy/projects/`). Mirrors `DaemonSessionHost`'s sessions-base resolver.
 pub type ProjectsDirResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 
+/// Resolves an OS user to that user's sessions base (`~/.tddy/`). Used to discover SSH-backed
+/// sessions when choosing where pack verbs run.
+pub type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+
+/// Everything [`PackExecutionResolver`] needs to decide local vs remote pack spawn for one open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackExecutionContext {
+    pub os_user: String,
+    pub project_ref: String,
+    pub local_repo_path: PathBuf,
+}
+
+/// Maps an admitted open to [`PackExecution`]. Production wiring lists the OS user's sessions and
+/// picks an SSH-backed row for the project; tests inject a stub.
+pub type PackExecutionResolver = Arc<dyn Fn(PackExecutionContext) -> PackExecution + Send + Sync>;
+
+/// Today's behaviour: always pack the registry's local `main_repo_path`.
+pub fn local_only_pack_execution_resolver() -> PackExecutionResolver {
+    Arc::new(|ctx| pack_execution_for_session(ctx.local_repo_path, "", ""))
+}
+
 /// Largest payload carried in one `GitServerFrame`. Kept well under
 /// `tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES` (60 000) so a git frame is never chunk-framed —
 /// a lost chunk wedges the call with no error, and a pack stream is exactly the workload that
@@ -361,6 +382,7 @@ pub struct RemoteGitServiceImpl {
     user_resolver: UserResolver,
     projects_dir_resolver: ProjectsDirResolver,
     config: Arc<DaemonConfig>,
+    pack_execution_resolver: PackExecutionResolver,
     stream_slots: GitStreamSlots,
 }
 
@@ -378,10 +400,25 @@ impl RemoteGitServiceImpl {
         projects_dir_resolver: ProjectsDirResolver,
         config: Arc<DaemonConfig>,
     ) -> Self {
+        Self::new_with_pack_execution_resolver(
+            user_resolver,
+            projects_dir_resolver,
+            config,
+            local_only_pack_execution_resolver(),
+        )
+    }
+
+    pub fn new_with_pack_execution_resolver(
+        user_resolver: UserResolver,
+        projects_dir_resolver: ProjectsDirResolver,
+        config: Arc<DaemonConfig>,
+        pack_execution_resolver: PackExecutionResolver,
+    ) -> Self {
         Self {
             user_resolver,
             projects_dir_resolver,
             config,
+            pack_execution_resolver,
             stream_slots: GitStreamSlots::new(MAX_CONCURRENT_GIT_STREAMS),
         }
     }
@@ -495,9 +532,20 @@ impl tddy_service::proto::remote_git::RemoteGitService for RemoteGitServiceImpl 
             log_refused_open(&open.project_ref, &open.verb, status);
         })?;
 
-        let (relay, frames) =
-            GitChildRelay::spawn_with_env(command.argv, request.repo_path.clone(), command.env)
-                .inspect_err(|status| log_refused_open(&open.project_ref, &open.verb, status))?;
+        let execution = (self.pack_execution_resolver)(PackExecutionContext {
+            os_user: request.os_user.clone(),
+            project_ref: open.project_ref.clone(),
+            local_repo_path: request.repo_path.clone(),
+        });
+        let (relay, frames) = GitChildRelay::spawn_pack_verb(&execution, command.argv, command.env)
+            .inspect_err(|status| log_refused_open(&open.project_ref, &open.verb, status))?;
+        let spawn_target = match &execution {
+            PackExecution::Local { repo_path } => repo_path.display().to_string(),
+            PackExecution::Remote {
+                ssh_config_host,
+                remote_repo_path,
+            } => format!("ssh:{ssh_config_host}:{remote_repo_path}"),
+        };
         log::info!(
             target: LOG_TARGET,
             "serving git {} to github user '{}' as os_user '{}' on project '{}' at {} (pid {})",
@@ -505,7 +553,7 @@ impl tddy_service::proto::remote_git::RemoteGitService for RemoteGitServiceImpl 
             request.github_user,
             request.os_user,
             open.project_ref,
-            request.repo_path.display(),
+            spawn_target,
             relay.pid()
         );
 

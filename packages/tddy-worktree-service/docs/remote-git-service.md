@@ -74,7 +74,12 @@ a child crossing a uid boundary would otherwise receive every variable the daemo
 including `LIVEKIT_API_SECRET`, which signs session tokens, and which `git receive-pack` hooks and
 `uploadpack.packObjectsHook` would see. `spawn_with_env` clears the environment and hands the child
 exactly the `HOME`/`PATH` that `pty_runtime::pty_user_env_overrides` computes for the target user;
-that is also what makes git read the right `.gitconfig`. `serve` uses this path exclusively.
+that is also what makes git read the right `.gitconfig`. **Local** pack spawn uses this path.
+
+When the project's OS user has an SSH-backed session (`ssh_config_host` on `.session.yaml`),
+`serve` resolves a [`PackExecution`] and spawns through OpenSSH (`ssh -o BatchMode=yes`) at the
+session's remote worktree path — the same RemoteShell shape n2 uses for exec tools. The OpenSSH
+child inherits the daemon's environment (agent, config, `PATH`), not the scrubbed git-child env.
 `spawn_under_daemon_identity` is named for its one precondition, because the failure it guards
 against is silent.
 

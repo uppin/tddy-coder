@@ -123,6 +123,7 @@ pub mod session_notification_subscribers;
 /// notification bus, its event and its subscriber trait, which moved to `tddy-session-activity`
 /// with `#unbundle` node 7. All are reached as `crate::session_notifications::X`, as before.
 pub mod session_notifications;
+pub mod remote_git_pack_execution;
 pub mod session_reader;
 pub mod session_toolcall;
 pub mod split_session;

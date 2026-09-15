@@ -125,6 +125,10 @@ is already the LiveKit CLI credential set.
     main_repo_path`.
 14. A resolved project whose `main_repo_path` does not exist is `FAILED_PRECONDITION`; no process is
     spawned.
+14a. When the OS user has a session for the resolved project with `ssh_config_host` set, the server
+    spawns pack verbs on that SSH target at the session's remote worktree path (OpenSSH,
+    `BatchMode=yes`) instead of on the daemon's local `main_repo_path`. With no such session,
+    AC13–14 apply unchanged. The client (`tddy-remote-git-repo`) is unchanged.
 
 ### Server — byte fidelity and lifecycle
 
