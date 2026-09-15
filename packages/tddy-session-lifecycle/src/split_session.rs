@@ -597,9 +597,7 @@ pub fn ssh_client_daemon_instance_id(
     session_host_daemon_id: &str,
     codebase_host_daemon_id: &str,
 ) -> String {
-    if !codebase_host_daemon_id.is_empty()
-        && codebase_host_daemon_id != session_host_daemon_id
-    {
+    if !codebase_host_daemon_id.is_empty() && codebase_host_daemon_id != session_host_daemon_id {
         return codebase_host_daemon_id.to_string();
     }
     session_host_daemon_id.to_string()
