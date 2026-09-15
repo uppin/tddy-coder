@@ -11,6 +11,7 @@ mod presenter_impl;
 #[cfg(test)]
 mod presenter_test_recipe;
 mod state;
+pub mod state_groups;
 mod view;
 pub mod workflow_runner;
 mod worktree_display;
@@ -27,6 +28,10 @@ pub use presenter_events::{ModeChangedDetails, PresenterEvent, PresenterHandle, 
 pub use presenter_impl::{PendingWorkflowStart, Presenter};
 pub use state::{
     ActivityEntry, ActivityKind, AppMode, CriticalPresenterState, ExitAction, PresenterState,
+};
+pub use state_groups::{
+    ActivityRecorder, BackendSelection, PendingQuestions, PendingToolCallResponse,
+    RecipeResolverFn, ViewChannels, WorkflowRun,
 };
 pub use view::PresenterView;
 pub use worktree_display::format_worktree_for_status_bar;
