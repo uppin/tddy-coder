@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Refactor
 **Stack**: `#carve` 9/9 — the stack tip
+**PR**: [#496](https://github.com/uppin/tddy-coder/pull/496)
 
 PRD: [`2026-09-15-carve-pr-stack-crate-prd.md`](./2026-09-15-carve-pr-stack-crate-prd.md)
 
@@ -45,9 +46,15 @@ PRD: [`2026-09-15-carve-pr-stack-crate-prd.md`](./2026-09-15-carve-pr-stack-crat
 
 Published first:
 
-1. `tddy-pr-stack`'s crate skeleton and public surface — the stack-operation signatures the 79
-   external reference sites resolve to through the facade.
-2. Failing tests pinning AC1–AC5, including the AC1 manifest assertion.
+**Published** (commit 2): `tests/pr_stack_crate_shape.rs` — five assertions, three of which pin
+things that must **not** change. The stack operations keep their signatures through the move, so
+there is no new surface to declare; what lands first is the seam.
+
+`the_recipe_stays_with_the_recipes` and `the_plan_to_stack_bridge_stays_behind` **pass now and must
+stay passing**. They are the guards on the two measured cuts: moving `PrStackRecipe` would make the
+new crate depend on the workflow machinery it exists to be independent of, and moving
+`reseed_stack_from_plan_if_unspawned` would drag `plan_pr_stack`, which is mutually referenced with
+`pr_stack` and cannot come.
 
 This PR goes on to implement all of it. **It must not merge in that state.**
 
@@ -114,9 +121,11 @@ line 418 has been cut.
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset — this document
-- [ ] Publish the draft-PR contract (`tddy-pr-stack` surface + failing tests)
-- [ ] Failing acceptance tests — **USER REVIEW**
-- [ ] Failing unit/integration tests
+- [x] Publish the draft-PR contract (`tddy-pr-stack` surface + failing tests)
+- [x] Failing acceptance tests — **USER REVIEW** (approved 2026-09-15, gates delegated)
+  - `tests/pr_stack_crate_shape.rs` — 3 failing (the crate does not exist, and nothing has moved);
+    **2 passing guards** on the cuts that must hold.
+- [x] Failing unit/integration tests — the same suite; the seam, not behaviour, is what this node is about
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — correct the title, ready for review; **run the stack-wide backlog-delta sweep**
