@@ -62,6 +62,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub mod config;
 pub mod daemon_identity;
 pub mod peer_forwarding;
+pub mod presenter_observer;
 pub mod privilege_drop;
 pub mod spawn_as_user;
 pub mod user_paths;
