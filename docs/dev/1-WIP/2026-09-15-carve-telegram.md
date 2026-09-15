@@ -3,7 +3,7 @@
 **Date**: 2026-09-15
 **Status**: 🚧 In Progress
 **Type**: Refactor + Architecture Change
-**Stack**: `#carve` 7/9
+**Stack**: `#carve` 8/10
 **PR**: [#494](https://github.com/uppin/tddy-coder/pull/494)
 
 PRD: [`2026-09-15-carve-telegram-prd.md`](./2026-09-15-carve-telegram-prd.md)
@@ -26,7 +26,8 @@ PRD: [`2026-09-15-carve-telegram-prd.md`](./2026-09-15-carve-telegram-prd.md)
   `tddy-daemon-kernel` port, injected by `tddy-daemon`'s `runtime.rs`.
 - Split `telegram_session_control.rs` (3,980 prod, one 2,634-line `impl`) into seven modules.
 - Move all six Telegram modules into a new `tddy-telegram-control`.
-- Re-point `tddy-daemon`'s facade so its 12 Telegram test suites are not edited.
+- Move the 12 Telegram suites from `tddy-session-lifecycle/tests/` into `tddy-telegram-control`,
+  with the code they exercise.
 
 ## Boundaries
 
@@ -36,7 +37,7 @@ PRD: [`2026-09-15-carve-telegram-prd.md`](./2026-09-15-carve-telegram-prd.md)
 - Does **not** touch `connection_service/`'s other 64 files.
 - Does **not** change Telegram command syntax, callback payloads or message formatting.
 - Does **not** move the control modules into the existing `tddy-telegram` — that would close a cycle.
-- Does **not** edit the daemon's Telegram test suites.
+- Does **not** rewrite what the Telegram test suites assert. They move; their assertions do not.
 
 ## Dependencies
 
@@ -66,7 +67,7 @@ This PR goes on to implement all of it. **It must not merge in that state.**
 
 ## Green wave
 
-**Wave:** 3 of 4
+**Wave:** 4 of 5
 **Greenable independently:** **no** — the cluster is mutually referencing, so it cannot move until
 `#carve` 3/9's multi-module support exists as behaviour. The `git mv` fallback exists but is what
 this stack was built to avoid
@@ -146,9 +147,13 @@ has been carved keeps the two diffs separable for review.
 ```bash
 ./test -p tddy-session-lifecycle -p tddy-telegram-control -p tddy-daemon-kernel
 cargo clippy -p tddy-session-lifecycle -p tddy-telegram-control -- -D warnings
-cargo build -p tddy-daemon        # proves AC6 — the facade re-point compiles its 139 test binaries' paths
+./test -p tddy-telegram-control   # proves AC6 — the 12 suites pass from their new home
 cargo fmt --all --check
 ```
 
-The daemon's 12 Telegram acceptance suites (4,901 lines) are the real regression gate here, and they
-reach the cluster through `tddy_daemon::telegram_*`. They must pass **unedited**.
+The 12 Telegram acceptance suites (4,901 lines) are the real regression gate here. **`#carve` 4/10
+changed where they live and therefore what this criterion says**: they were `tddy-daemon`'s, reaching
+the cluster through a facade, and the original AC6 asked that they pass *unedited through it*. After
+4/10 they are `tddy-session-lifecycle`'s, so this node moves them **with the code** into
+`tddy-telegram-control` — code and tests as one vertical slice, which is what the boundary contract
+wanted in the first place. Their assertions still must not change.
