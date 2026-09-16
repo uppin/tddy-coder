@@ -10,7 +10,8 @@
 //! front ends should read the same to the operator who runs both.
 
 use tddy_index_daemon::proto::code_index::{
-    restructure_event, AnchorsResponse, OperationApplied, PlanStatusResponse, RestructureEvent,
+    analyze_event, restructure_event, AnalyzeEvent, AnchorsResponse, ComplexityResponse,
+    DuplicateTestsFound, OperationApplied, PlanStatusResponse, ReportResponse, RestructureEvent,
     RunOutcome, SourceRange, VerifyResponse,
 };
 
@@ -140,6 +141,124 @@ pub(crate) fn verify(response: &VerifyResponse) {
         "{} statement(s) the tree lost and {} it gained — see above",
         response.missing.len(),
         response.added.len()
+    );
+}
+
+/// One event a running analysis reported.
+///
+/// The counts are what distinguishes a long capture from a hung one, which is the reason the RPC
+/// streams at all — so every phase the library reports is rendered rather than summarised.
+pub(crate) fn analyze(event: &AnalyzeEvent) {
+    match &event.event {
+        Some(analyze_event::Event::BuildStarted(_)) => {
+            log::info!(
+                target: crate::MAIN,
+                "building instrumented tests — minutes, with nothing to report until it ends"
+            );
+        }
+        Some(analyze_event::Event::BuildFinished(built)) => {
+            log::info!(target: crate::MAIN, "{} harness(es) to run", built.harnesses);
+        }
+        Some(analyze_event::Event::HarnessStarted(harness)) => {
+            log::info!(
+                target: crate::MAIN,
+                "[{}/{}] {}: {} test(s)",
+                harness.index,
+                harness.total,
+                harness.spec,
+                harness.tests
+            );
+        }
+        Some(analyze_event::Event::TestCaptured(test)) => {
+            log::info!(
+                target: crate::MAIN,
+                "   [{}/{}] {} {}",
+                test.index,
+                test.total,
+                test.name,
+                test.status
+            );
+        }
+        Some(analyze_event::Event::CaptureFinished(captured)) => {
+            log::info!(
+                target: crate::MAIN,
+                "captured {} test(s) over {} file(s)",
+                captured.tests,
+                captured.files
+            );
+        }
+        Some(analyze_event::Event::DuplicateTests(found)) => duplicates(found),
+        // The service sets exactly one field on every event it sends, so an empty one means this
+        // process and the one that produced it disagree about the schema.
+        None => log::warn!(target: crate::MAIN, "an event carrying no field at all"),
+    }
+}
+
+/// Everything the duplicate detection found.
+fn duplicates(found: &DuplicateTestsFound) {
+    for group in &found.identical {
+        log::info!(
+            target: crate::MAIN,
+            "identical ({} keys): {}",
+            group.signature_size,
+            group.tests.join(", ")
+        );
+    }
+    for relation in &found.subsets {
+        log::info!(
+            target: crate::MAIN,
+            "subset ({:.2}): {} ⊂ {}",
+            relation.ratio,
+            relation.subset,
+            relation.superset
+        );
+    }
+    log::info!(
+        target: crate::MAIN,
+        "{} identical group(s), {} subset relation(s)",
+        found.identical.len(),
+        found.subsets.len()
+    );
+}
+
+/// What a report joined, and where it wrote its leaderboard.
+///
+/// The join rate leads because it is what says whether the leaderboard describes the tree: well
+/// below 1 means the join is missing sources, so the scores are over part of it.
+pub(crate) fn report(response: &ReportResponse) {
+    log::info!(
+        target: crate::MAIN,
+        "CRAP join: {:.1}% ({} matched, {} unmatched)",
+        response.join_rate * 100.0,
+        response.matched,
+        response.unmatched
+    );
+    log::info!(target: crate::MAIN, "{}", response.report_path);
+}
+
+/// Every function one file holds, with the complexity its branches earn.
+pub(crate) fn complexity(response: &ComplexityResponse) {
+    for function in &response.functions {
+        log::info!(
+            target: crate::MAIN,
+            "{}:{} {}",
+            function.line,
+            function.complexity,
+            function.name
+        );
+    }
+    log::info!(
+        target: crate::MAIN,
+        "{} function(s) scored",
+        response.functions.len()
+    );
+}
+
+/// The operator stopped the run, which the service learns from the stream going away.
+pub(crate) fn interrupted() {
+    log::error!(
+        target: crate::MAIN,
+        "interrupted — the work was asked to stop, and stops at the end of the unit it is in"
     );
 }
 

@@ -52,7 +52,8 @@ pub fn status_of(error: &RestructureError) -> Status {
 /// The same four classes, read against the same question: can the caller fix this by asking
 /// differently, by repairing the tree, or not at all? Coverage, CRAP and duplicate detection all
 /// stand on artefacts a previous run wrote, so "capture first" is the commonest answer here and it
-/// is a precondition rather than a defect in the request.
+/// is a precondition rather than a defect in the request. The fourth class, `DeadlineExceeded`,
+/// covers the two long operations stopping because nobody was left waiting for them.
 pub fn status_of_analysis(error: &AnalysisError) -> Status {
     let refusal = error.to_string();
     match error {
@@ -67,6 +68,11 @@ pub fn status_of_analysis(error: &AnalysisError) -> Status {
         AnalysisError::MissingCoverage { .. }
         | AnalysisError::MissingLlvmTool { .. }
         | AnalysisError::Cargo(_) => Status::failed_precondition(refusal),
+        // The work stopped because its caller went away, which is the same class as a wait that
+        // ended before the index did: the request was fine and the answer simply did not arrive in
+        // the time it had. Deliberately not `Cancelled` — a client that is still listening never
+        // sees this, and the one that caused it has already gone.
+        AnalysisError::Cancelled { .. } => Status::deadline_exceeded(refusal),
         // Nothing the caller did caused it and nothing it can do fixes it: an unreadable file, an
         // artefact that will not parse as the JSON this pipeline writes, or a refusal the library
         // left as prose. `Message` lands here deliberately — a class a caller cannot act on is
@@ -191,6 +197,24 @@ mod tests {
 
         // Then the request is named as the thing that is wrong
         assert_eq!(status.code(), Code::InvalidArgument);
+    }
+
+    /// The class the caller's own going-away deserves. Nothing about the request was wrong and
+    /// nothing on the host is broken — the work simply did not get the time it needed, which is
+    /// what `DeadlineExceeded` already means for a wait that ended before the index did.
+    #[test]
+    fn reports_a_capture_stopped_because_nobody_was_listening_as_a_deadline() {
+        // Given a capture that stopped when its caller went away
+        let refusal = AnalysisError::Cancelled {
+            work: "coverage capture".to_string(),
+            reached: "312 test(s) captured, and no denominator was written".to_string(),
+        };
+
+        // When it is classified
+        let status = status_of_analysis(&refusal);
+
+        // Then it is a deadline rather than a defective request or a broken server
+        assert_eq!(status.code(), Code::DeadlineExceeded);
     }
 
     #[test]

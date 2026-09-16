@@ -22,6 +22,7 @@ against 2.15 s, real rust-analyzer, three-crate workspace).
 
 ```text
 tddy-index-daemon restructure check --workspace-root <dir> <plan>   # run once, exit(0|1)
+tddy-index-daemon analyze complexity --workspace-root <dir> <file>  # the analysis half, likewise
 tddy-index-daemon --grpc 127.0.0.1:7777                            # serve gRPC over TCP
 tddy-index-daemon --grpc-uds <path>                                # serve gRPC over a Unix socket
 tddy-index-daemon --stdio                                          # serve over this process's stdio
@@ -154,9 +155,9 @@ path that exists without a daemon installed.
 
 - **`Warm.ready` means a live server holds the root**, not that its graph is loaded. Read the log's
   warm/cold line for the real answer.
-- **A coverage capture cannot be cancelled.** A client that hangs up one minute into a 55-minute
-  capture leaves the rest running.
-- **The binary's single-shot mode covers restructure only**; the analysis RPCs are reachable over a
-  transport but not from its command line.
+- **A capture stops between tests, not mid-test.** A client that hangs up is noticed within one
+  test of a capture and one signature of a duplicate-test detection, and the instrumented build is
+  a single unit that cannot be interrupted once it has begun — so a disconnect during the build
+  costs the rest of the build.
 - **Warming several worktrees at once narrows the per-root benefit**, because the resident
   rust-analyzers compete for CPU.

@@ -42,8 +42,12 @@ The command line installs a **pass-through** cache that keeps nothing, so `tddy-
 behaves exactly as it always has. The cache is process-wide rather than per workspace root: content
 addressing makes a per-root partition both unnecessary and wasteful across worktrees of one repo.
 
-It is **unbounded** — keyed by content, so over a tree under active edit it grows with the number of
-*versions* of a file rather than the number of files. It needs an eviction policy.
+It is **bounded and least-recently-used**, at 8192 scored versions. The bound is a count of
+*versions* rather than of files — the key is the content — so it is set to clear several passes over
+the largest tree here with room for the working set of files under active edit: two successive
+reports over one workspace must not evict each other's scores, and a day of editing must not
+accumulate every version it produced. A file read again renews its entry, so the one an editor keeps
+returning to is never the one dropped.
 
 ## CLI
 

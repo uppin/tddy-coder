@@ -69,41 +69,140 @@ pub fn cached_file_complexity(
     Ok(measured)
 }
 
+/// How many scored file versions a daemon's cache keeps.
+///
+/// A count of **versions**, not files: the key is the hash of the content, so a file edited twenty
+/// times between two reports occupies twenty entries. The bound therefore has to clear a full pass
+/// over the tree with room to spare, or two successive reports over one workspace would evict each
+/// other's entries and the cache would cost a lookup per file and save nothing.
+///
+/// 8192 is about five passes over the largest tree this repo holds (~1,500 Rust files), which
+/// leaves a working set of files under active edit — tens of files, a few versions each — held
+/// comfortably alongside the last report's scores, while a day of editing evicts its own oldest
+/// versions instead of accumulating them. The entries are small (a name, a line and a count per
+/// function), so the ceiling is single-digit megabytes rather than anything a process would notice.
+pub const SCORED_VERSIONS_KEPT: usize = 8192;
+
 /// Scores held in this process's memory, keyed by content — the cache a daemon owns.
+///
+/// Bounded, and least-recently-used: a file read again is the one a process must not have to
+/// rescore, however long ago it was first seen, so a hit renews an entry rather than only
+/// answering from it. Hand-rolled over a map and a use counter because there is no `lru` crate
+/// here and the entries are small enough that a counter per entry is cheaper than a dependency.
 ///
 /// Interior mutability so it can be shared as `&dyn ComplexityCache` across concurrent requests:
 /// a cache that needed `&mut` would have to be locked by every caller, which is the same lock one
 /// level further from the data.
-#[derive(Default)]
 pub struct InMemoryComplexityCache {
-    // TODO(tddy-index-daemon): unbounded. Every distinct source this process scores stays for the
-    // lifetime of the process, which for a long-running daemon over a tree under active edit grows
-    // with the number of *versions* of a file rather than the number of files. Bounding it needs an
-    // eviction policy — an LRU over insertion order, or dropping a root's entries when its index is
-    // reaped — and the daemon has no idle-reap hook for analysis state yet.
-    scores: Mutex<HashMap<ContentHash, Vec<FunctionComplexity>>>,
+    kept: Mutex<Lru>,
+}
+
+impl Default for InMemoryComplexityCache {
+    fn default() -> Self {
+        Self::holding(SCORED_VERSIONS_KEPT)
+    }
 }
 
 impl ComplexityCache for InMemoryComplexityCache {
     fn scored(&self, content: &ContentHash) -> Option<Vec<FunctionComplexity>> {
-        self.held().get(content).cloned()
+        self.held().renewed(content)
     }
 
     fn remember(&self, content: ContentHash, functions: Vec<FunctionComplexity>) {
-        self.held().insert(content, functions);
+        self.held().keep(content, functions);
     }
 }
 
 impl InMemoryComplexityCache {
+    /// A cache bounded at `capacity` scored versions. [`Self::default`] is the bound a daemon
+    /// wants, [`SCORED_VERSIONS_KEPT`]; a host that knows its own working set can say so.
+    #[must_use]
+    pub fn holding(capacity: usize) -> Self {
+        Self {
+            kept: Mutex::new(Lru::holding(capacity)),
+        }
+    }
+
     /// The held scores.
     ///
-    /// The lock covers a map lookup, a clone and an insert and nothing else — no scoring and no
-    /// caller's code runs under it — so it is never held across a panic, and a poisoned one would
-    /// mean this module is not what it says it is rather than something to recover from.
-    fn held(&self) -> std::sync::MutexGuard<'_, HashMap<ContentHash, Vec<FunctionComplexity>>> {
-        self.scores
+    /// The lock covers a map lookup, a clone, an insert and at most one eviction and nothing else
+    /// — no scoring and no caller's code runs under it — so it is never held across a panic, and a
+    /// poisoned one would mean this module is not what it says it is rather than something to
+    /// recover from.
+    fn held(&self) -> std::sync::MutexGuard<'_, Lru> {
+        self.kept
             .lock()
             .expect("nothing that can panic runs while the complexity cache is locked")
+    }
+}
+
+/// The bound itself: scores by content, each stamped with when it was last used.
+///
+/// The stamp is a counter rather than a clock. It only ever answers "which of these two was used
+/// longer ago", so wall time would add a syscall per lookup and a question about monotonicity for
+/// no gain — and at one increment per cached score, a `u64` outlives any process by a margin
+/// nothing here has to reason about.
+struct Lru {
+    capacity: usize,
+    scores: HashMap<ContentHash, (u64, Vec<FunctionComplexity>)>,
+    /// The next use stamp, so every access orders strictly after every earlier one.
+    used: u64,
+}
+
+impl Lru {
+    fn holding(capacity: usize) -> Self {
+        Self {
+            capacity,
+            scores: HashMap::new(),
+            used: 0,
+        }
+    }
+
+    /// The scores for this content, marked as just used.
+    ///
+    /// A miss spends no stamp, so the counter measures accesses to kept scores and nothing else.
+    fn renewed(&mut self, content: &ContentHash) -> Option<Vec<FunctionComplexity>> {
+        let stamp = self.used + 1;
+        let (last_used, functions) = self.scores.get_mut(content)?;
+        *last_used = stamp;
+        let scored = functions.clone();
+        self.used = stamp;
+        Some(scored)
+    }
+
+    /// Keep these scores, dropping the least recently used entry if that puts it over its bound.
+    ///
+    /// A cache bounded at nothing therefore evicts what it has just kept, which is the honest
+    /// reading of a zero bound rather than a case of its own.
+    fn keep(&mut self, content: ContentHash, functions: Vec<FunctionComplexity>) {
+        let stamp = self.next_stamp();
+        self.scores.insert(content, (stamp, functions));
+        while self.scores.len() > self.capacity {
+            let Some(coldest) = self.least_recently_used() else {
+                return;
+            };
+            self.scores.remove(&coldest);
+        }
+    }
+
+    fn next_stamp(&mut self) -> u64 {
+        self.used += 1;
+        self.used
+    }
+
+    /// The content whose score has gone longest without being asked for.
+    ///
+    /// A scan of the map rather than a second index ordered by stamp. It runs on every insert once
+    /// the cache is full, so it is a walk of the bound — tens of microseconds at 8192 entries —
+    /// against the milliseconds of `syn` parsing that a hit saves, which is the whole point of the
+    /// cache. An ordering structure would make it logarithmic and would also have to be kept in
+    /// step with the map on every renewal, which is a second thing to get wrong for a saving
+    /// nothing here can measure.
+    fn least_recently_used(&self) -> Option<ContentHash> {
+        self.scores
+            .iter()
+            .min_by_key(|(_, (last_used, _))| *last_used)
+            .map(|(content, _)| *content)
     }
 }
 

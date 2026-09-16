@@ -83,12 +83,17 @@ fn render_coverage_html(joined: &JoinResult) -> String {
 }
 
 /// Write duplicate-tests HTML pages under `out_dir`.
+///
+/// `cancelled` is the detection's, passed straight through: the pages are written from its result,
+/// so a detection that stopped writes none of them. Pass `&crate::never_cancelled` when nobody can
+/// hang up.
 pub fn generate_duplicate_tests_report(
     coverage_dir: &Path,
     out_dir: &Path,
     min_signature: usize,
     subset_ratio: f64,
     include_test_sources: bool,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<DuplicateAnalysis> {
     std::fs::create_dir_all(out_dir)?;
     let analysis = analyze_coverage_dir(
@@ -96,6 +101,7 @@ pub fn generate_duplicate_tests_report(
         min_signature,
         subset_ratio,
         include_test_sources,
+        cancelled,
     )?;
 
     let identical_html = render_duplicate_html("Identical test signatures", &analysis.identical);

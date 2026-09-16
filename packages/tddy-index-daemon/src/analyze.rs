@@ -16,7 +16,9 @@ use tddy_code_analysis::complexity_cache::cached_file_complexity;
 use tddy_code_analysis::coverage::{capture_coverage, CaptureProgress};
 use tddy_code_analysis::duplicate_tests::DuplicateAnalysis;
 use tddy_code_analysis::report::{generate_duplicate_tests_report, generate_report, report_path};
+use tddy_code_analysis::AnalysisError;
 use tddy_rpc::Status;
+use tokio_util::sync::CancellationToken;
 
 use crate::activity::Activity;
 use crate::index::WorkspaceIndex;
@@ -44,26 +46,29 @@ pub(crate) async fn serve_coverage(
 
     tokio::spawn(async move {
         let _queued = index.hold(&root).await;
+        // A capture reports per test, so the failed send below *is* the disconnect signal and this
+        // needs no watcher of its own — unlike the detection, which reports nothing while it runs.
+        let cancel = CancellationToken::new();
         let captured = {
             let events = events.clone();
+            let stopped = cancel;
             tokio::task::spawn_blocking(move || {
-                // TODO(tddy-code-analysis): a capture cannot be stopped. `capture_coverage` takes
-                // no cancellation surface, so a client that disconnects after minute one leaves
-                // the remaining 54 running for nobody. Giving it one means a parameter it can
-                // check between tests — this crate's `CancellationToken` cannot cross into
-                // `tddy-code-analysis`, which has no `tokio-util` — and that is an API change to
-                // the capture pipeline rather than part of putting it behind an RPC.
-                let mut listening = true;
-                capture_coverage(&crate_path, &coverage_dir, &mut |progress| {
-                    if !listening {
+                // The capture checks this between tests, so the disconnect a failed send below
+                // reports costs the rest of one test rather than the rest of the run.
+                let cancelled = {
+                    let stopped = stopped.clone();
+                    move || stopped.is_cancelled()
+                };
+                capture_coverage(&crate_path, &coverage_dir, &cancelled, &mut |progress| {
+                    if stopped.is_cancelled() {
                         return;
                     }
                     if events.blocking_send(Ok(captured_event(&progress))).is_err() {
-                        listening = false;
+                        stopped.cancel();
                         log::debug!(
                             target: "tddy_index_daemon::analyze",
-                            "nobody is listening to this capture any more; it runs to completion \
-                             because a capture cannot be stopped"
+                            "nobody is listening to this capture any more; it stops at the next \
+                             test rather than running the rest for nobody"
                         );
                     }
                 })
@@ -136,19 +141,32 @@ pub(crate) async fn serve_duplicate_tests(
     tokio::spawn(async move {
         let _queued = index.hold(&root).await;
         // One terminal event and no progress, because the detection reports nothing while it runs:
-        // `analyze_coverage_dir` takes no sink. The stream is still the right shape — it is what
-        // makes a ~22-minute call cancellable by a client hanging up, and it is where progress
-        // events will go when the detection can produce them.
-        let analysed = tokio::task::spawn_blocking(move || {
-            generate_duplicate_tests_report(
-                &coverage_dir,
-                &out_dir,
-                min_signature,
-                subset_ratio,
-                include_test_sources,
-            )
-        })
-        .await;
+        // `analyze_coverage_dir` takes no sink. The stream is still the right shape — it is where
+        // progress events will go when the detection can produce them.
+        //
+        // And because it sends nothing, a dropped receiver cannot be learned from a failed send
+        // the way a capture learns it. `Sender::closed` is the same fact asked for directly, so a
+        // ~22-minute detection stops on a disconnect rather than at the end of one.
+        let cancel = CancellationToken::new();
+        let watching = tokio::spawn(cancel_when_nobody_is_listening(
+            events.clone(),
+            cancel.clone(),
+        ));
+        let analysed = {
+            let cancelled = move || cancel.is_cancelled();
+            tokio::task::spawn_blocking(move || {
+                generate_duplicate_tests_report(
+                    &coverage_dir,
+                    &out_dir,
+                    min_signature,
+                    subset_ratio,
+                    include_test_sources,
+                    &cancelled,
+                )
+            })
+            .await
+        };
+        watching.abort();
 
         let Some(analysis) = reported(&events, analysed, &activity).await else {
             return;
@@ -225,18 +243,40 @@ fn under(root: &Path, named: &str, what: &str) -> Result<PathBuf, Status> {
     })
 }
 
+/// Cancel `stop` once the caller who asked for this analysis has dropped its stream.
+///
+/// For the operation that sends nothing while it works, which therefore has no failed send to
+/// learn a disconnect from. The caller aborts this the moment the work is done, so a client that
+/// holds its stream open after the answer leaves nothing waiting on it.
+async fn cancel_when_nobody_is_listening(
+    events: EventSender<AnalyzeEvent>,
+    stop: CancellationToken,
+) {
+    events.closed().await;
+    stop.cancel();
+}
+
 /// What an analysis produced, having reported its refusal into its own stream if it had one.
 async fn reported<T>(
     events: &EventSender<AnalyzeEvent>,
     outcome: Result<tddy_code_analysis::Result<T>, tokio::task::JoinError>,
     activity: &Activity,
 ) -> Option<T> {
-    let refusal = match outcome {
+    let (refusal, stopped) = match outcome {
         Ok(Ok(produced)) => return Some(produced),
-        Ok(Err(refusal)) => status_of_analysis(&refusal),
-        Err(failure) => joined(activity.method(), &failure),
+        Ok(Err(refusal)) => (
+            status_of_analysis(&refusal),
+            matches!(refusal, AnalysisError::Cancelled { .. }),
+        ),
+        Err(failure) => (joined(activity.method(), &failure), false),
     };
-    activity.refused(&refusal);
+    // Work this service stopped because its caller went away is not a refusal — nothing was wrong
+    // with the request — and the activity journal has an ending of its own for exactly that.
+    if stopped {
+        activity.cancelled();
+    } else {
+        activity.refused(&refusal);
+    }
     let _ = events.send(Err(refusal)).await;
     None
 }

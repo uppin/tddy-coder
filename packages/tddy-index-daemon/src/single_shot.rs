@@ -11,8 +11,12 @@
 //! failed run; the service returns them as values and this is the caller that turns them into a
 //! non-zero exit — the same judgement `restructure_cli::report` makes for `tddy-tools`.
 
+use std::future::Future;
+
 use futures_util::StreamExt;
-use tddy_index_daemon::proto::code_index::{restructure_event, CodeIndexService, RestructureEvent};
+use tddy_index_daemon::proto::code_index::{
+    restructure_event, AnalyzeEvent, CodeIndexService, RestructureEvent,
+};
 use tddy_index_daemon::{CodeIndexServiceImpl, EventStream};
 
 use crate::cli::Requested;
@@ -59,6 +63,32 @@ pub(crate) async fn run_once(service: &CodeIndexServiceImpl, requested: Requeste
             match service.plan_status(tddy_rpc::Request::new(request)).await {
                 Ok(response) => {
                     render::plan_status(&response.into_inner());
+                    Verdict::Held
+                }
+                Err(refusal) => refused(&refusal),
+            }
+        }
+        Requested::Coverage(request) => {
+            let streamed = service.coverage(tddy_rpc::Request::new(request)).await;
+            analysed(streamed, interrupted()).await
+        }
+        Requested::DuplicateTests(request) => {
+            let streamed = service
+                .duplicate_tests(tddy_rpc::Request::new(request))
+                .await;
+            analysed(streamed, interrupted()).await
+        }
+        Requested::Report(request) => match service.report(tddy_rpc::Request::new(request)).await {
+            Ok(response) => {
+                render::report(&response.into_inner());
+                Verdict::Held
+            }
+            Err(refusal) => refused(&refusal),
+        },
+        Requested::Complexity(request) => {
+            match service.complexity(tddy_rpc::Request::new(request)).await {
+                Ok(response) => {
+                    render::complexity(&response.into_inner());
                     Verdict::Held
                 }
                 Err(refusal) => refused(&refusal),
@@ -113,6 +143,50 @@ async fn applied(
     drain(streamed, |_| {}).await
 }
 
+/// This process's own interrupt, as the future an analysis is raced against.
+///
+/// Only the analyses take one: `^C` on a 55-minute capture or a ~22-minute detection is the one
+/// place a single-shot run has something to stop that outlives the keystroke, and the operations
+/// that finish in seconds are better served by the default disposition.
+async fn interrupted() {
+    // `let _ =` as `serve` does it: a listener this process could not register would leave `^C`
+    // with its default disposition, which is the behaviour a run had before this existed.
+    let _ = tokio::signal::ctrl_c().await;
+}
+
+/// Render every event an analysis reported, until it ends or `interrupt` resolves.
+///
+/// An interrupt's answer is to **drop the stream**, which is the whole point: a send into a
+/// dropped receiver is the only signal the service gets that its caller has gone, and it turns
+/// that into the cancellation predicate the capture checks between tests. So `^C` here stops the
+/// work rather than only this loop, and the run exits non-zero because a capture that stopped part
+/// way is not one to carry on from.
+async fn analysed(
+    streamed: Result<tddy_rpc::Response<EventStream<AnalyzeEvent>>, tddy_rpc::Status>,
+    interrupt: impl Future<Output = ()>,
+) -> Verdict {
+    let mut stream = match streamed {
+        Ok(response) => response.into_inner(),
+        Err(refusal) => return refused(&refusal),
+    };
+    let mut interrupt = std::pin::pin!(interrupt);
+
+    let mut verdict = Verdict::Held;
+    loop {
+        tokio::select! {
+            next = stream.next() => match next {
+                Some(Ok(event)) => render::analyze(&event),
+                Some(Err(refusal)) => verdict = refused(&refusal),
+                None => return verdict,
+            },
+            () = &mut interrupt => {
+                render::interrupted();
+                return Verdict::Refused;
+            }
+        }
+    }
+}
+
 /// Render every event a stream carried, letting `watch` see each one, and report whether the run
 /// was refused.
 ///
@@ -144,4 +218,98 @@ async fn drain(
 fn refused(status: &tddy_rpc::Status) -> Verdict {
     render::refusal(status);
     Verdict::Refused
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tddy_index_daemon::proto::code_index::{analyze_event, AnalyzeEvent, CaptureFinished};
+    use tokio::sync::mpsc;
+    use tokio_stream::wrappers::ReceiverStream;
+
+    /// What the service hands a single-shot run, as the call it came from returned it.
+    type Streamed = Result<tddy_rpc::Response<EventStream<AnalyzeEvent>>, tddy_rpc::Status>;
+
+    /// One analysis stream, with its sending half kept so a test can ask what became of it.
+    fn an_analysis_in_flight() -> (
+        mpsc::Sender<Result<AnalyzeEvent, tddy_rpc::Status>>,
+        Streamed,
+    ) {
+        let (events, receiver) = mpsc::channel(4);
+        (
+            events,
+            Ok(tddy_rpc::Response::new(ReceiverStream::new(receiver))),
+        )
+    }
+
+    /// Nothing will interrupt this run.
+    async fn never_interrupted() {
+        std::future::pending().await
+    }
+
+    /// The link that makes `^C` stop a 55-minute capture rather than only this loop: the drain's
+    /// answer to an interrupt is to **drop the stream**, and a send into a dropped receiver is the
+    /// only signal the service gets that its caller has gone.
+    #[tokio::test]
+    async fn an_interrupted_analysis_drops_the_stream_it_was_reading() {
+        // Given a capture that has reported nothing yet — its build phase — and an operator who
+        // has just pressed ^C
+        let (events, streamed) = an_analysis_in_flight();
+
+        // When the run is drained against that interrupt
+        let verdict = analysed(streamed, std::future::ready(())).await;
+
+        // Then the run failed and the stream is gone, so the capture's own cancellation predicate
+        // turns true at the next test it would have run
+        assert_eq!(verdict, Verdict::Refused);
+        assert!(
+            events.is_closed(),
+            "an interrupted run left its stream open, so the work would carry on for nobody"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_capture_that_ran_to_its_last_event_is_a_run_to_carry_on_from() {
+        // Given a capture that finished and wrote its denominator
+        let (events, streamed) = an_analysis_in_flight();
+        events
+            .send(Ok(AnalyzeEvent {
+                event: Some(analyze_event::Event::CaptureFinished(CaptureFinished {
+                    tests: 2014,
+                    files: 109,
+                })),
+            }))
+            .await
+            .expect("the stream takes its terminal event");
+        drop(events);
+
+        // When the run is drained
+        let verdict = analysed(streamed, never_interrupted()).await;
+
+        // Then it succeeded
+        assert_eq!(verdict, Verdict::Held);
+    }
+
+    /// The other end of the same cancellation: a capture the service stopped reports it as a
+    /// refusal on the stream, and a command line must exit non-zero rather than report a partial
+    /// capture as a success.
+    #[tokio::test]
+    async fn an_analysis_the_service_cancelled_fails_the_run() {
+        // Given a capture the service stopped because nobody was listening any more
+        let (events, streamed) = an_analysis_in_flight();
+        events
+            .send(Err(tddy_rpc::Status::deadline_exceeded(
+                "coverage capture was cancelled before it finished: 312 test(s) captured, and no \
+                 denominator was written",
+            )))
+            .await
+            .expect("the stream takes its refusal");
+        drop(events);
+
+        // When the run is drained
+        let verdict = analysed(streamed, never_interrupted()).await;
+
+        // Then the run failed
+        assert_eq!(verdict, Verdict::Refused);
+    }
 }

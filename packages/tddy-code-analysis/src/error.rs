@@ -18,6 +18,14 @@ pub enum AnalysisError {
     NotACrate { path: String },
     #[error("cargo failed: {0}")]
     Cargo(String),
+    /// The work was asked to stop before it finished, by the predicate its caller supplied (see
+    /// [`crate::cancellation`]). Its own variant rather than an `Ok` with less in it: a capture
+    /// that stopped half way has written per-test artefacts but no denominator, so a caller told
+    /// it succeeded would report over a tree that was never finished being measured. `work` names
+    /// the operation and `reached` how far it got, because the one question a reader has is
+    /// whether starting again is cheap.
+    #[error("{work} was cancelled before it finished: {reached}")]
+    Cancelled { work: String, reached: String },
     /// A refusal with no class of its own. Reaching for this leaves a caller unable to tell a
     /// request it should change from a state it should repair, so anything a caller could act on
     /// differently belongs in a variant instead.

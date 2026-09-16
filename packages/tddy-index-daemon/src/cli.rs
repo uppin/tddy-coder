@@ -9,13 +9,18 @@
 //! `tddy_code_restructuring::restructure_args` is split from `restructure_cli`: this module is the
 //! shape of the arguments, and that one is the shape of the process.
 
+mod analyze;
+
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 use tddy_index_daemon::proto::code_index::{
-    AnchorsRequest, ApplyRequest, CheckRequest, PlanStatusRequest, VerifyRequest,
+    AnchorsRequest, ApplyRequest, CheckRequest, ComplexityRequest, CoverageRequest,
+    DuplicateTestsRequest, PlanStatusRequest, ReportRequest, VerifyRequest,
 };
+
+use crate::cli::analyze::AnalyzeCommand;
 
 #[derive(Parser)]
 #[command(
@@ -57,6 +62,11 @@ pub(crate) enum Operation {
     Restructure {
         #[command(subcommand)]
         command: RestructureCommand,
+    },
+    /// Measure a tree: coverage, CRAP, duplicate tests, complexity.
+    Analyze {
+        #[command(subcommand)]
+        command: AnalyzeCommand,
     },
 }
 
@@ -168,6 +178,10 @@ pub(crate) enum Requested {
     Anchors(AnchorsRequest),
     PlanStatus(PlanStatusRequest),
     Verify(VerifyRequest),
+    Coverage(CoverageRequest),
+    Report(ReportRequest),
+    DuplicateTests(DuplicateTestsRequest),
+    Complexity(ComplexityRequest),
 }
 
 /// Which of the two lifetimes a command line asks for.
@@ -226,7 +240,14 @@ pub(crate) fn lifetime_of(args: IndexDaemonArgs) -> Result<Lifetime, String> {
 
 /// The request a subcommand carries.
 fn requested(operation: Operation) -> Result<Requested, String> {
-    let Operation::Restructure { command } = operation;
+    match operation {
+        Operation::Restructure { command } => restructuring(command),
+        Operation::Analyze { command } => analyze::requested(command),
+    }
+}
+
+/// The request a `restructure` subcommand carries.
+fn restructuring(command: RestructureCommand) -> Result<Requested, String> {
     Ok(match command {
         RestructureCommand::Check(check) => Requested::Check(CheckRequest {
             workspace_root: named(&check.root.workspace_root)?,
@@ -466,6 +487,144 @@ mod tests {
             PlanStatusRequest {
                 workspace_root: "/trees/one".to_string(),
                 plan: "plan.jsonl".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn an_analyze_coverage_run_names_the_crate_to_instrument_and_where_to_write() {
+        // Given a capture of one crate into a directory the operator chose
+        let requested = requested_by(&[
+            "analyze",
+            "coverage",
+            "--workspace-root",
+            "/trees/one",
+            "--path",
+            "packages/tddy-daemon",
+            "--coverage-dir",
+            "coverage",
+        ]);
+
+        // Then the request carries both, because only the caller knows where it keeps a capture
+        let Requested::Coverage(coverage) = requested else {
+            panic!("expected a coverage request");
+        };
+        assert_eq!(
+            coverage,
+            CoverageRequest {
+                workspace_root: "/trees/one".to_string(),
+                crate_path: "packages/tddy-daemon".to_string(),
+                coverage_dir: "coverage".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn a_report_names_both_the_capture_it_reads_and_the_tree_it_scores() {
+        // Given a report over a capture, scoring a tree that is not the crate captured
+        let requested = requested_by(&[
+            "analyze",
+            "report",
+            "--workspace-root",
+            "/trees/one",
+            "--coverage-dir",
+            "coverage",
+            "--path",
+            "packages",
+        ]);
+
+        // Then both reach the request as separate paths, which is what makes a CRAP score possible
+        let Requested::Report(report) = requested else {
+            panic!("expected a report request");
+        };
+        assert_eq!(
+            report,
+            ReportRequest {
+                workspace_root: "/trees/one".to_string(),
+                coverage_dir: "coverage".to_string(),
+                crate_path: "packages".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn duplicate_tests_carries_the_thresholds_it_was_given() {
+        // Given a detection with both thresholds and the test sources counted in
+        let requested = requested_by(&[
+            "analyze",
+            "duplicate-tests",
+            "--workspace-root",
+            "/trees/one",
+            "--coverage-dir",
+            "coverage",
+            "--out",
+            "coverage/dup",
+            "--min-signature",
+            "3",
+            "--subset-ratio",
+            "0.8",
+            "--include-test-sources",
+        ]);
+
+        // Then every threshold crosses as given — the service takes them literally, so a command
+        // line that rounded or re-defaulted one would ask a different question than it printed
+        let Requested::DuplicateTests(duplicates) = requested else {
+            panic!("expected a duplicate tests request");
+        };
+        assert_eq!(
+            duplicates,
+            DuplicateTestsRequest {
+                workspace_root: "/trees/one".to_string(),
+                coverage_dir: "coverage".to_string(),
+                out_dir: "coverage/dup".to_string(),
+                min_signature: 3,
+                subset_ratio: 0.8,
+                include_test_sources: true,
+            }
+        );
+    }
+
+    /// The service has no default for `out_dir` and must not invent one, so the command line
+    /// resolves it — beside the capture it reports on, which is where `tddy-tools analyze` writes.
+    #[test]
+    fn duplicate_tests_writes_beside_the_capture_when_no_output_directory_is_named() {
+        // Given a detection with no --out
+        let requested = requested_by(&[
+            "analyze",
+            "duplicate-tests",
+            "--workspace-root",
+            "/trees/one",
+            "--coverage-dir",
+            "coverage",
+        ]);
+
+        // Then the output directory sits under the capture directory, named for what it holds
+        let Requested::DuplicateTests(duplicates) = requested else {
+            panic!("expected a duplicate tests request");
+        };
+        assert_eq!(duplicates.out_dir, "coverage/duplicate-tests");
+    }
+
+    #[test]
+    fn complexity_asks_about_one_file_under_one_tree() {
+        // Given a complexity run over a single file
+        let requested = requested_by(&[
+            "analyze",
+            "complexity",
+            "--workspace-root",
+            "/trees/one",
+            "src/lib.rs",
+        ]);
+
+        // Then the file and the tree are the whole request
+        let Requested::Complexity(complexity) = requested else {
+            panic!("expected a complexity request");
+        };
+        assert_eq!(
+            complexity,
+            ComplexityRequest {
+                workspace_root: "/trees/one".to_string(),
+                file: "src/lib.rs".to_string(),
             }
         );
     }

@@ -980,11 +980,17 @@ pub fn restore_ledger(journal: &Journal, paths: &StatePaths) -> Result<PositionL
 /// Keyed by `root` and nothing else — no plan identity is in the path — so every plan run under one
 /// root shares one journal and one ledger. That is what makes [`open_run`]'s refusal repo-scoped,
 /// and it is why a host must not run two plans against the same root at once.
+/// The file names are **private**, so `.restructure/`'s layout is this crate's own business: a
+/// host drives the apply loop through [`StatePaths::under`], [`open_run`], [`restore_ledger`] and
+/// [`commit_operation`] and never re-derives a path. That is what keeps the change re-keying the
+/// journal to a plan identity — recorded in
+/// `docs/dev/todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md` — from being
+/// a breaking change for anything outside.
 pub struct StatePaths {
     /// The append-only event journal — the record of what a run has done.
-    pub journal: PathBuf,
+    journal: PathBuf,
     /// The position-ledger checkpoint — a projection over `journal`, rebuildable from it.
-    pub ledger: PathBuf,
+    ledger: PathBuf,
 }
 
 impl StatePaths {
@@ -1440,6 +1446,28 @@ mod tests {
         assert!(
             backend.module_references().is_some(),
             "the Rust backend answers references and must offer the seam a survey needs"
+        );
+    }
+
+    /// The layout pinned from inside the module that owns it, which is where it belongs now that
+    /// the fields are private: `.restructure/`'s file names are this crate's own business, and the
+    /// change that re-keys the journal to a plan identity must not be a breaking change for a host.
+    #[test]
+    fn derives_a_runs_journal_and_ledger_under_the_root_it_is_given() {
+        // Given a workspace root
+        let root = Path::new("/trees/one");
+
+        // When the state paths for a run against it are derived
+        let paths = StatePaths::under(root);
+
+        // Then both live in that root's own `.restructure/`, and nowhere near this process's
+        // directory
+        assert_eq!(
+            (paths.journal, paths.ledger),
+            (
+                PathBuf::from("/trees/one/.restructure/journal.jsonl"),
+                PathBuf::from("/trees/one/.restructure/ledger.json")
+            )
         );
     }
 }

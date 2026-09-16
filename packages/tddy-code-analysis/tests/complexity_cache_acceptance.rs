@@ -15,7 +15,7 @@ use pretty_assertions::assert_eq;
 use tddy_code_analysis::complexity::FunctionComplexity;
 use tddy_code_analysis::complexity_cache::{
     cached_file_complexity, ComplexityCache, ContentHash, InMemoryComplexityCache,
-    PassThroughComplexityCache,
+    PassThroughComplexityCache, SCORED_VERSIONS_KEPT,
 };
 
 /// One branching function — the smallest source whose score is something other than 1.
@@ -157,4 +157,92 @@ fn a_pass_through_cache_scores_every_time() {
     assert_eq!(cache.scorings(), 2);
     assert_eq!(first, classify_scoring(2));
     assert_eq!(second, classify_scoring(2));
+}
+
+/// A third source, so a bound of two can be filled and then exceeded.
+const A_THIRD_FUNCTION: &str = r#"pub fn double(x: i32) -> i32 {
+    x * 2
+}
+"#;
+
+/// Whether `cache` still holds a score for this source.
+fn holds(cache: &InMemoryComplexityCache, source: &str) -> bool {
+    cache.scored(&ContentHash::of(source)).is_some()
+}
+
+#[test]
+fn drops_the_oldest_scored_version_once_its_bound_is_reached() {
+    // Given a cache bounded at two scored versions, holding two
+    let cache = InMemoryComplexityCache::holding(2);
+    cached_file_complexity(&cache, A_BRANCHING_FUNCTION).expect("the first source scores");
+    cached_file_complexity(&cache, THE_SAME_FUNCTION_WITH_ANOTHER_BRANCH)
+        .expect("the second source scores");
+
+    // When a third version is scored
+    cached_file_complexity(&cache, A_THIRD_FUNCTION).expect("the third source scores");
+
+    // Then the bound held by dropping the version scored longest ago, and the two newer ones stay
+    assert_eq!(
+        (
+            holds(&cache, A_BRANCHING_FUNCTION),
+            holds(&cache, THE_SAME_FUNCTION_WITH_ANOTHER_BRANCH),
+            holds(&cache, A_THIRD_FUNCTION)
+        ),
+        (false, true, true)
+    );
+}
+
+/// What makes the bound an LRU rather than a queue: the file an editor keeps coming back to is the
+/// one a warm process must not have to rescore, however long ago it was first read.
+#[test]
+fn keeps_the_version_that_was_read_again_and_drops_the_one_that_was_not() {
+    // Given a cache bounded at two, holding two, whose older version has just been read again
+    let cache = InMemoryComplexityCache::holding(2);
+    cached_file_complexity(&cache, A_BRANCHING_FUNCTION).expect("the first source scores");
+    cached_file_complexity(&cache, THE_SAME_FUNCTION_WITH_ANOTHER_BRANCH)
+        .expect("the second source scores");
+    cached_file_complexity(&cache, A_BRANCHING_FUNCTION).expect("the first source is answered");
+
+    // When a third version is scored
+    cached_file_complexity(&cache, A_THIRD_FUNCTION).expect("the third source scores");
+
+    // Then the one nobody asked about again is the one that went
+    assert_eq!(
+        (
+            holds(&cache, A_BRANCHING_FUNCTION),
+            holds(&cache, THE_SAME_FUNCTION_WITH_ANOTHER_BRANCH),
+            holds(&cache, A_THIRD_FUNCTION)
+        ),
+        (true, false, true)
+    );
+}
+
+/// The entry this closes: a daemon left running across a day of editing accumulated one score per
+/// *version* of every file it was asked about, and nothing ever dropped one.
+#[test]
+fn bounds_the_cache_a_daemon_gets_by_default() {
+    // Given the cache a daemon holds, filled to its documented bound one version at a time
+    let cache = InMemoryComplexityCache::default();
+    let first = "pub fn f0() {}\n";
+    for version in 0..SCORED_VERSIONS_KEPT {
+        cache.remember(
+            ContentHash::of(&format!("pub fn f{version}() {{}}\n")),
+            classify_scoring(1),
+        );
+    }
+
+    // When one more version is scored
+    cache.remember(
+        ContentHash::of("pub fn one_more() {}\n"),
+        classify_scoring(1),
+    );
+
+    // Then it gave up the oldest version rather than growing, and the newest is held
+    assert_eq!(
+        (
+            holds(&cache, first),
+            holds(&cache, "pub fn one_more() {}\n")
+        ),
+        (false, true)
+    );
 }

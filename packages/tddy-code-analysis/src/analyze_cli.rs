@@ -84,9 +84,15 @@ fn run_coverage(args: AnalyzeCoverageArgs) -> Result<()> {
         .coverage_dir
         .unwrap_or_else(|| PathBuf::from("coverage"));
     let mut renderer = ProgressRenderer::new();
-    crate::coverage::capture_coverage(&args.path, &coverage_dir, &mut |event| {
-        renderer.render(&event)
-    })
+    // Nothing can hang up on a command line: this process *is* the caller, and a `^C` kills it
+    // along with the capture. The predicate is what a host serving the same capture to a client
+    // passes instead.
+    crate::coverage::capture_coverage(
+        &args.path,
+        &coverage_dir,
+        &crate::never_cancelled,
+        &mut |event| renderer.render(&event),
+    )
     .context("coverage capture failed")?;
     Ok(())
 }
@@ -226,6 +232,7 @@ fn run_duplicate_tests(args: AnalyzeDuplicateTestsArgs) -> Result<()> {
         args.min_signature,
         args.subset_ratio,
         args.include_test_sources,
+        &crate::never_cancelled,
     )
     .context("duplicate-tests analysis failed")?;
     Ok(())
