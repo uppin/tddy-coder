@@ -1,10 +1,18 @@
-//! CLI-facing entry points for restructuring subcommands.
+//! The entry points for restructuring subcommands, one per [`Command`].
 //!
 //! The plan is a command log and is never rewritten. Each operation's resolved edit is appended to
 //! an event journal, and the position ledger is a projection over that journal — which is what
 //! makes an interrupted run resumable.
+//!
+//! **Nothing here prints.** Every entry point returns its result — findings, progress, a summary,
+//! an anchor, a comparison — and its live account goes to the sinks its caller installed in
+//! [`Options`]. `backends::rust` states the reason for progress, and it is no less true of
+//! results: anything that speaks a protocol on stdout, a persistent server most obviously, would
+//! have its stream corrupted by this library writing into it. [`crate::restructure_cli`] is the
+//! one front end that owns a console, so it is the one module that prints.
 
 use crate::apply::{apply_workspace_edit, ensure_git_worktree, git_output, hash_touched_files};
+use crate::backends::rust::{discard, ProgressSink};
 use crate::backends::RustBackend;
 use crate::crate_move::{self, Survey};
 use crate::journal::{Journal, JournalRecord, OpStatus, ResumeDecision};
@@ -15,14 +23,14 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tddy_lsp::client::LspClient;
+use tokio_util::sync::CancellationToken;
 
 const USAGE: &str = "\
 usage:
   restructure apply  <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N]
-                                  [--indexing-budget SECONDS]
   restructure status <plan.jsonl>
-  restructure check  <plan.jsonl> [--deep] [--budget LINES] [--indexing-budget SECONDS]
-  restructure anchors <file.rs> --items A,B,C [--indexing-budget SECONDS]
+  restructure check  <plan.jsonl> [--deep] [--budget LINES]
+  restructure anchors <file.rs> --items A,B,C
   restructure verify --against <git-ref>
 
   --dry-run     resolve every operation and print the edits without writing anything
@@ -36,9 +44,7 @@ usage:
                 report every file the plan names that is longer than LINES. A record of where the
                 tree stands, not a gate: the check's verdict is what its findings say either way
   --items A,B,C the items an emitted range anchor must cover, in any order
-  --against REF the git ref to compare the working tree's statements against
-  --indexing-budget SECONDS
-                how long the Rust backend may spend loading the crate graph, once per run";
+  --against REF the git ref to compare the working tree's statements against";
 
 /// Which subcommand a run is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,7 +56,62 @@ pub enum Command {
     Verify,
 }
 
-/// Parsed command-line options for a restructuring run.
+/// One thing wrong with an operation, as a value a caller can act on.
+///
+/// Returned rather than printed, because this library is not only a CLI: a server that speaks a
+/// protocol on stdout has its stream corrupted by a library writing findings into it. The same
+/// reasoning `backends::rust` gives for keeping progress a sink applies to results.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Finding {
+    /// The operation's index in the plan.
+    pub operation: usize,
+    pub detail: String,
+}
+
+/// How far a plan's journal got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlanProgress {
+    pub completed: usize,
+    pub in_flight: usize,
+    pub pending: usize,
+    pub failed: usize,
+}
+
+/// What a whole run amounted to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RunSummary {
+    pub applied: usize,
+    pub total: usize,
+    /// True when the run stopped because `stop_after` was reached rather than because it failed.
+    pub stopped_early: bool,
+}
+
+/// What a dispatched run produced.
+///
+/// One variant per [`Command`], because the five entry points answer five different questions and
+/// a single shape covering all of them would be mostly empty whichever one ran. It exists so that
+/// [`dispatch`] can stay a routing table without becoming the place results are printed: a front
+/// end renders the variant it gets, and a front end that speaks a protocol encodes it instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    Applied(RunSummary),
+    Status(PlanProgress),
+    Checked(Vec<Finding>),
+    /// The range anchor a plan would carry, and the file it is a range in.
+    Anchored {
+        file: String,
+        range: crate::edit::Range,
+    },
+    Verified(crate::verify::Comparison),
+}
+
+/// What a restructuring run was asked for, and where its live account goes.
+///
+/// The three destinations are here rather than in each entry point's parameter list because they
+/// belong to the same thing the flags do — what this one run was asked for — and because they are
+/// the caller's, not this library's. Every one of them is silent by default: a library that was
+/// not asked to report says nothing, and the only module in this crate that prints is its
+/// command-line front end.
 pub struct Options {
     pub command: Command,
     /// The one positional argument: a plan for `apply`, `status` and `check`, a source file for
@@ -60,8 +121,6 @@ pub struct Options {
     pub resume: bool,
     pub from: Option<usize>,
     pub stop_after: Option<usize>,
-    /// Seconds to allow the Rust backend for its one-time index, when the default is not enough.
-    pub indexing_budget: Option<u64>,
     /// Whether `check` resolves each operation through the language server as well as reading text.
     pub deep: bool,
     /// The line count above which `check` reports a file the plan names.
@@ -70,6 +129,26 @@ pub struct Options {
     pub items: Vec<String>,
     /// The git ref `verify` compares against.
     pub against: Option<String>,
+    /// Where the language server's own indexing lines go while an operation waits for an index.
+    ///
+    /// Progress happens *while* a call is in flight and has nowhere to wait, so it needs a sink
+    /// rather than a return value — the reasoning `backends::rust` gives for its own sink.
+    pub progress: ProgressSink,
+    /// Where a run's running account goes: one line per operation an apply lands, the blast radius
+    /// a deep check surveys, and the file-budget report.
+    ///
+    /// A second sink rather than lines on the first, because the two are different claims: one is
+    /// the server saying how far it has got, and this is the run saying what it has just done. A
+    /// front end that merged them could not tell them apart again. Kept live rather than folded
+    /// into the returned value because an apply's account is only worth anything as it happens —
+    /// a line for an operation means that operation's edit is already on disk and in the journal.
+    pub account: ProgressSink,
+    /// Where a diagnostic trace goes when `RESTRUCTURE_TRACE` asks for one.
+    ///
+    /// A bare pointer rather than a [`ProgressSink`] because a trace has one destination per front
+    /// end rather than one per caller — the audience is whoever is working out why a seam behaved
+    /// as it did, not the person waiting. Silent by default, like the other two.
+    pub trace: fn(&str),
 }
 
 impl Default for Options {
@@ -81,39 +160,61 @@ impl Default for Options {
             resume: false,
             from: None,
             stop_after: None,
-            indexing_budget: None,
             deep: false,
             budget: None,
             items: Vec::new(),
             against: None,
+            progress: discard(),
+            account: discard(),
+            trace: untraced,
         }
     }
 }
 
 /// Dispatch a restructuring subcommand given a raw command line.
 ///
-/// `client` is required for LSP-backed operations (`apply`, `anchors`, `check --deep`).
-pub fn run(args: &[String], client: Option<Arc<LspClient>>) -> Result<()> {
+/// `client` is required for LSP-backed operations (`apply`, `anchors`, `check --deep`), and
+/// `cancel` is how those operations learn that whoever asked for them has stopped waiting.
+pub fn run(
+    root: &Path,
+    args: &[String],
+    client: Option<Arc<LspClient>>,
+    cancel: CancellationToken,
+) -> Result<Outcome> {
     let command = args.first().map(String::as_str).unwrap_or_default();
 
     if !matches!(command, "apply" | "status" | "check" | "anchors" | "verify") {
         return Err(usage(format!("unknown command `{command}`")));
     }
 
-    dispatch(parse_options(args)?, client)
+    dispatch(root, parse_options(args)?, client, cancel)
 }
 
 /// Dispatch a restructuring subcommand that has already been parsed.
 ///
 /// This is what [`crate::restructure_cli`] calls: clap parsed the command line once, and re-parsing
 /// its own output is what `cli_vector` used to do when the CLI lived in another package.
-pub fn dispatch(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
+///
+/// Returns the run's result rather than printing it, so that the front end decides what a result
+/// means and where it goes. A caller serving a protocol on its own stdout — the reason this
+/// matters — could not use a dispatch that wrote into that stream.
+pub fn dispatch(
+    root: &Path,
+    options: Options,
+    client: Option<Arc<LspClient>>,
+    cancel: CancellationToken,
+) -> Result<Outcome> {
     match options.command {
-        Command::Apply => apply(options, client),
-        Command::Status => status(options),
-        Command::Check => check(options, client),
-        Command::Anchors => anchors(options, client),
-        Command::Verify => verify(options),
+        Command::Apply => apply(root, options, client, cancel).map(Outcome::Applied),
+        Command::Status => status(root, options).map(Outcome::Status),
+        Command::Check => check(root, options, client, cancel).map(Outcome::Checked),
+        Command::Anchors => {
+            // The file is read off the request before the options move, because an anchor is
+            // "this range, in this file" — a range alone is not something a plan can carry.
+            let file = options.source()?.to_string_lossy().to_string();
+            anchors(root, options, client, cancel).map(|range| Outcome::Anchored { file, range })
+        }
+        Command::Verify => verify(root, options).map(Outcome::Verified),
     }
 }
 
@@ -155,9 +256,6 @@ impl Options {
             "--resume" => self.resume = true,
             "--from" => self.from = Some(numeric_value(rest.next(), "--from")?),
             "--stop-after" => self.stop_after = Some(numeric_value(rest.next(), "--stop-after")?),
-            "--indexing-budget" => {
-                self.indexing_budget = Some(numeric_value(rest.next(), "--indexing-budget")?)
-            }
             "--budget" => self.budget = Some(numeric_value(rest.next(), "--budget")?),
             "--items" => self.items = comma_separated(rest.next())?,
             "--against" => {
@@ -205,35 +303,52 @@ fn registry_for_static() -> BackendRegistry {
 }
 
 /// Build a registry backed by rust-analyzer through the shared LSP client.
+///
+/// The token is what ends a wait for an index that is still loading: this library states no budget
+/// of its own, so the only bound on such a wait is the caller it belongs to.
+///
+/// Both destinations are the caller's: `progress` takes the server's own indexing lines, and
+/// `trace` takes the diagnostic account of a seam — but only when `RESTRUCTURE_TRACE` asks for one,
+/// which is read here so that a run gets a trace without every caller having to look.
 pub fn registry_for(
     client: Arc<LspClient>,
-    indexing_budget: Option<u64>,
-    progress: fn(&str),
+    cancel: CancellationToken,
+    progress: ProgressSink,
+    trace: fn(&str),
 ) -> BackendRegistry {
     let mut registry = BackendRegistry::new();
-    let mut rust = RustBackend::from_lsp_client(client, indexing_budget, progress);
+    let mut rust = RustBackend::from_lsp_client(client, Some(cancel), progress);
     if wants_trace(std::env::var_os(TRACE_VARIABLE).as_deref()) {
-        rust = rust.with_trace(report_trace);
+        rust = rust.with_trace(trace);
     }
     registry.register(Box::new(rust));
     registry
 }
 
-/// Execute a plan against the working tree.
-pub fn apply(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
+/// Execute a plan against the working tree under `root`.
+///
+/// Returns what the whole run amounted to; the account of each operation as it lands goes to
+/// [`Options::account`] while the run is still going, because that is the only time it is worth
+/// anything.
+pub fn apply(
+    root: &Path,
+    options: Options,
+    client: Option<Arc<LspClient>>,
+    cancel: CancellationToken,
+) -> Result<RunSummary> {
     let client = client.ok_or_else(|| {
         RestructureError::MalformedPlan("apply requires a rust-analyzer LSP session".into())
     })?;
-    let root = std::env::current_dir()?;
     let plan = read_plan(&options.plan()?)?;
-    let paths = StatePaths::under(&root);
+    let paths = StatePaths::under(root);
 
-    let mut journal = open_run(&plan, &root, &paths, &options)?;
+    let mut journal = open_run(&plan, root, &paths, &options)?;
     let mut ledger = restore_ledger(&journal, &paths)?;
-    let mut registry = registry_for(client, options.indexing_budget, report_progress);
+    let mut registry = registry_for(client, cancel, Arc::clone(&options.progress), options.trace);
     let start = options.from.unwrap_or_else(|| journal.next_op());
     let mut overlay = Overlay::new();
     let mut done = 0usize;
+    let mut stopped_early = false;
 
     for (index, op) in plan.ops.iter().enumerate().skip(start) {
         // Honouring `--stop-after` is the run doing what it was told, so it ends the loop rather
@@ -243,7 +358,7 @@ pub fn apply(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
             .stop_after
             .is_some_and(|limit| index >= start + limit)
         {
-            println!("   stopped after {} operations as requested", index - start);
+            stopped_early = true;
             break;
         }
 
@@ -253,46 +368,49 @@ pub fn apply(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
             .resolve(
                 &op.with_anchor(anchor),
                 &Workspace {
-                    root: &root,
+                    root,
                     overlay: &overlay,
                 },
             )?;
 
-        report_visibility(&resolved);
+        report_visibility(&options.account, &resolved);
 
         let files = resolved.edit.changes.len();
         if options.dry_run {
-            println!(
-                "{}",
-                progress_line(index, done, plan.ops.len(), op.op, files, false)
-            );
+            (options.account)(&progress_line(
+                index,
+                done,
+                plan.ops.len(),
+                op.op,
+                files,
+                false,
+            ));
             ledger.record(&resolved.edit);
-            overlay.record(&root, &resolved.edit)?;
+            overlay.record(root, &resolved.edit)?;
             done += 1;
             continue;
         }
 
-        commit_operation(index, &resolved, &root, &paths, &mut journal, &mut ledger)?;
-        // Printed *after* the commit, so a line on stdout means the edit is on disk and in the
-        // journal. An apply used to report nothing at all — the dry run, where nothing is at
+        commit_operation(index, &resolved, root, &paths, &mut journal, &mut ledger)?;
+        // Reported *after* the commit, so a line in the account means the edit is on disk and in
+        // the journal. An apply used to report nothing at all — the dry run, where nothing is at
         // stake, was the only mode that spoke.
-        println!(
-            "{}",
-            progress_line(index, done, plan.ops.len(), op.op, files, true)
-        );
+        (options.account)(&progress_line(
+            index,
+            done,
+            plan.ops.len(),
+            op.op,
+            files,
+            true,
+        ));
         done += 1;
     }
 
-    println!(
-        "{} {done} of {} operations",
-        if options.dry_run {
-            "resolved"
-        } else {
-            "applied"
-        },
-        plan.ops.len()
-    );
-    Ok(())
+    Ok(RunSummary {
+        applied: done,
+        total: plan.ops.len(),
+        stopped_early,
+    })
 }
 
 /// One line of per-operation progress.
@@ -316,40 +434,48 @@ fn progress_line(
     )
 }
 
-/// Report journal progress for a plan.
-pub fn status(options: Options) -> Result<()> {
-    let root = std::env::current_dir()?;
+/// How far a plan's journal under `root` got.
+///
+/// `in_flight` discounts the operations that went on to complete — the journal holds a record of
+/// each — and `pending` is what the plan still has left.
+pub fn status(root: &Path, options: Options) -> Result<PlanProgress> {
     let plan = read_plan(&options.plan()?)?;
-    let journal = Journal::load(&StatePaths::under(&root).journal)?;
+    let journal = Journal::load(&StatePaths::under(root).journal)?;
+    let counted = |wanted: OpStatus| {
+        journal
+            .records
+            .iter()
+            .filter(|record| record.status == wanted)
+            .count()
+    };
+    let completed = counted(OpStatus::Completed);
 
-    let completed = journal
-        .records
-        .iter()
-        .filter(|r| r.status == OpStatus::Completed)
-        .count();
-    let in_flight = journal
-        .records
-        .iter()
-        .filter(|r| r.status == OpStatus::InFlight)
-        .count();
-    let failed = journal
-        .records
-        .iter()
-        .filter(|r| r.status == OpStatus::Failed)
-        .count();
-
-    println!("completed {completed}");
-    println!("in_flight {}", in_flight.saturating_sub(completed));
-    println!("failed {failed}");
-    println!("pending {}", plan.ops.len().saturating_sub(completed));
-    Ok(())
+    Ok(PlanProgress {
+        completed,
+        in_flight: counted(OpStatus::InFlight).saturating_sub(completed),
+        pending: plan.ops.len().saturating_sub(completed),
+        failed: counted(OpStatus::Failed),
+    })
 }
 
-/// Report everything wrong with a plan without writing anything.
-pub fn check(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
-    let root = std::env::current_dir()?;
+/// Everything wrong with a plan, without writing anything.
+///
+/// A plan with findings is an `Ok` carrying them, not a refusal: a caller that receives them as
+/// values decides for itself what they mean — a front end fails the run, a plan author reads the
+/// report, and a host serving the check forwards them. Only a plan that could not be *checked* —
+/// one that will not parse, or whose snapshot does not match the tree — is an error.
+///
+/// The two things a check produces that are not findings go to [`Options::account`]: a deep
+/// check's blast-radius survey, which is a cost rather than a defect, and the file-budget report,
+/// which is a record of where the tree stands.
+pub fn check(
+    root: &Path,
+    options: Options,
+    client: Option<Arc<LspClient>>,
+    cancel: CancellationToken,
+) -> Result<Vec<Finding>> {
     let plan = read_plan(&options.plan()?)?;
-    plan.verify_snapshot(&root)?;
+    plan.verify_snapshot(root)?;
 
     let mut registry = if options.deep {
         let client = client.ok_or_else(|| {
@@ -357,12 +483,12 @@ pub fn check(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
                 "deep check requires a rust-analyzer LSP session".into(),
             )
         })?;
-        registry_for(client, options.indexing_budget, report_progress)
+        registry_for(client, cancel, Arc::clone(&options.progress), options.trace)
     } else {
         registry_for_static()
     };
     let mut rehearsal = Rehearsal::default();
-    let mut findings = 0usize;
+    let mut findings: Vec<Finding> = Vec::new();
 
     for (index, op) in plan.ops.iter().enumerate() {
         let statics = registry
@@ -370,53 +496,53 @@ pub fn check(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
             .check(
                 op,
                 &Workspace {
-                    root: &root,
+                    root,
                     overlay: &Overlay::new(),
                 },
             )?;
-        for finding in &statics {
-            println!("{index}: {finding}");
-        }
-        findings += statics.len();
+        let statically_sound = statics.is_empty();
+        findings.extend(statics.into_iter().map(|detail| Finding {
+            operation: index,
+            detail,
+        }));
 
-        if !options.deep || !statics.is_empty() {
+        if !options.deep || !statically_sound {
             continue;
         }
 
-        let rehearsed = rehearsal.rehearse(&root, &mut registry, op)?;
+        let rehearsed = rehearsal.rehearse(root, &mut registry, op)?;
         if let Some(survey) = &rehearsed.survey {
             for line in survey_lines(index, survey) {
-                println!("{line}");
+                (options.account)(&line);
             }
         }
         if let Some(refusal) = rehearsed.refusal {
-            println!("{index}: {refusal}");
-            findings += 1;
+            findings.push(Finding {
+                operation: index,
+                detail: refusal,
+            });
         }
     }
 
     if let Some(budget) = options.budget {
-        for line in budget_report(&measured(&root, &files_named_by(&plan))?, budget) {
-            println!("{line}");
+        for line in budget_report(&measured(root, &files_named_by(&plan))?, budget) {
+            (options.account)(&line);
         }
     }
 
-    if findings > 0 {
-        return Err(RestructureError::MalformedPlan(format!(
-            "{findings} finding(s) — see above. Nothing was written."
-        )));
-    }
-
-    println!("no findings");
-    Ok(())
+    Ok(findings)
 }
 
-/// Emit the range anchor covering a named run of items, ready to paste into a plan.
-pub fn anchors(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
+/// The range anchor covering a named run of items, ready for a plan to carry.
+pub fn anchors(
+    root: &Path,
+    options: Options,
+    client: Option<Arc<LspClient>>,
+    cancel: CancellationToken,
+) -> Result<crate::edit::Range> {
     let client = client.ok_or_else(|| {
         RestructureError::MalformedPlan("anchors requires a rust-analyzer LSP session".into())
     })?;
-    let root = std::env::current_dir()?;
     let source = options.source()?;
     let file = source.to_string_lossy().to_string();
 
@@ -425,67 +551,50 @@ pub fn anchors(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
     }
 
     let overlay = Overlay::new();
-    let mut registry = registry_for(client, options.indexing_budget, report_progress_aside);
-    let range = registry
+    let mut registry = registry_for(client, cancel, Arc::clone(&options.progress), options.trace);
+    registry
         .backend_for(&source, crate::plan::RefactorKind::ExtractModule)?
         .anchor_for(
             &file,
             &options.items,
             &Workspace {
-                root: &root,
+                root,
                 overlay: &overlay,
             },
-        )?;
-
-    println!(
-        "{}",
-        serde_json::json!({
-            "kind": "range",
-            "file": file,
-            "start": { "line": range.start.line, "col": range.start.col },
-            "end": { "line": range.end.line, "col": range.end.col }
-        })
-    );
-    Ok(())
+        )
 }
 
 /// Hold the working tree's statements against a git ref's, as multisets.
-pub fn verify(options: Options) -> Result<()> {
-    let root = std::env::current_dir()?;
+///
+/// A comparison that does not hold is an `Ok` carrying what is missing and what was added, for the
+/// same reason a check with findings is: the comparison is the answer, and what it means is the
+/// caller's to decide. Only a tree that could not be compared at all — one that is not a git
+/// worktree, or a ref git will not read — is an error.
+pub fn verify(root: &Path, options: Options) -> Result<crate::verify::Comparison> {
     let against = options
         .against
         .clone()
         .ok_or_else(|| usage("verify needs --against <git-ref>"))?;
-    ensure_git_worktree(&root)?;
+    ensure_git_worktree(root)?;
 
-    let before = sources_at(&root, &against)?;
-    let after = sources_now(&root)?;
-    let comparison = crate::verify::compare(&before, &after);
-
-    println!(
-        "{} statements before, {} after",
-        comparison.before, comparison.after
-    );
-    for statement in &comparison.missing {
-        println!("missing: {statement}");
-    }
-    for statement in &comparison.added {
-        println!("added:   {statement}");
-    }
-
-    if comparison.holds() {
-        println!("every statement accounted for");
-        return Ok(());
-    }
-
-    Err(RestructureError::MalformedPlan(format!(
-        "{} statement(s) the tree lost and {} it gained — see above",
-        comparison.missing.len(),
-        comparison.added.len()
-    )))
+    let before = sources_at(root, &against)?;
+    let after = sources_now(root)?;
+    Ok(crate::verify::compare(&before, &after))
 }
 
-fn commit_operation(
+/// Write one resolved operation to disk, journalling it either side of the write.
+///
+/// The write-ahead sequence a caller would otherwise have to reproduce: hash what the edit touches,
+/// append an in-flight record, apply the edit, hash again, append the completed record carrying both
+/// hashes, then checkpoint the ledger folded through this operation. A crash between any two of
+/// those steps leaves a journal [`crate::journal::Journal::resume_decision`] can read, which is what
+/// makes an interrupted run resumable — so a caller driving the loop itself must commit through here
+/// rather than calling [`crate::apply::apply_workspace_edit`] directly.
+///
+/// The caller owns the ordering: `index` is the operation's position in the plan, and operations
+/// must be committed in the order the plan states them, because `ledger` is a projection over the
+/// journal and translating a later anchor depends on every earlier edit having been recorded.
+pub fn commit_operation(
     index: usize,
     resolved: &crate::Resolution,
     root: &Path,
@@ -768,7 +877,29 @@ fn is_comparable(path: &str) -> bool {
     path.ends_with(".rs") && !path.starts_with("target/") && !path.contains("/target/")
 }
 
-fn open_run(plan: &Plan, root: &Path, paths: &StatePaths, options: &Options) -> Result<Journal> {
+/// Open the journal a run under `root` will append to, refusing a run that must not start.
+///
+/// **This is the only concurrency gate that exists.** There is no lock file: what stops a second run
+/// from interleaving with a first is [`RestructureError::JournalExists`], raised when a journal is
+/// already there and the run did not say it was continuing one (`--resume`, or `--from`). A caller
+/// that passes either takes over the journal it finds, whatever wrote it.
+///
+/// And because [`StatePaths`] is keyed by `root` alone, that gate is repo-scoped rather than
+/// plan-scoped: a *completed* plan's journal refuses the next plan under the same root, and a resume
+/// would resume the journal on disk rather than the plan that was named. A host serving several
+/// callers therefore has to serialize them per root itself — this call cannot do it, and a run that
+/// starts anyway will write into another run's journal.
+///
+/// Also refused: a root that is not a git worktree (the edits are applied with git), and a journal
+/// whose last record cannot be decided either way ([`RestructureError::IndeterminateJournal`]).
+/// A fresh run — one not continuing a journal — verifies the plan's snapshot against `root` here,
+/// so a resumed run does not re-verify a snapshot its own earlier operations have already changed.
+pub fn open_run(
+    plan: &Plan,
+    root: &Path,
+    paths: &StatePaths,
+    options: &Options,
+) -> Result<Journal> {
     ensure_git_worktree(root)?;
     paths.ensure_self_ignoring()?;
 
@@ -787,20 +918,36 @@ fn open_run(plan: &Plan, root: &Path, paths: &StatePaths, options: &Options) -> 
     Ok(journal)
 }
 
-fn restore_ledger(journal: &Journal, paths: &StatePaths) -> Result<PositionLedger> {
+/// The position ledger a run continues from, folded out of the journal it has been given.
+///
+/// The ledger on disk is a checkpoint, not the record: the journal is. So this verifies the
+/// checkpoint against the journal — raising [`RestructureError::CheckpointDivergence`] when the two
+/// disagree, which means something other than a run of this library wrote under `root` — and then
+/// returns the ledger the journal itself folds to. A caller must fold from the same journal
+/// [`open_run`] returned, since a ledger folded from one journal cannot translate anchors against
+/// another.
+pub fn restore_ledger(journal: &Journal, paths: &StatePaths) -> Result<PositionLedger> {
     if let Some(checkpoint) = LedgerCheckpoint::load(&paths.ledger)? {
         journal.verify_checkpoint(&checkpoint)?;
     }
     Ok(journal.fold())
 }
 
-struct StatePaths {
-    journal: PathBuf,
-    ledger: PathBuf,
+/// Where a run's write-ahead state lives: `<root>/.restructure/`.
+///
+/// Keyed by `root` and nothing else — no plan identity is in the path — so every plan run under one
+/// root shares one journal and one ledger. That is what makes [`open_run`]'s refusal repo-scoped,
+/// and it is why a host must not run two plans against the same root at once.
+pub struct StatePaths {
+    /// The append-only event journal — the record of what a run has done.
+    pub journal: PathBuf,
+    /// The position-ledger checkpoint — a projection over `journal`, rebuildable from it.
+    pub ledger: PathBuf,
 }
 
 impl StatePaths {
-    fn under(root: &Path) -> Self {
+    /// The state paths for a run against `root`. Derives paths only; touches no disk.
+    pub fn under(root: &Path) -> Self {
         let dir = root.join(".restructure");
         Self {
             journal: dir.join("journal.jsonl"),
@@ -843,33 +990,29 @@ fn usage(reason: impl std::fmt::Display) -> RestructureError {
     RestructureError::MalformedPlan(format!("{reason}\n{USAGE}"))
 }
 
-fn report_progress(line: &str) {
-    println!("   indexing: {line}");
-}
-
-fn report_progress_aside(line: &str) {
-    eprintln!("   indexing: {line}");
-}
-
 const TRACE_VARIABLE: &str = "RESTRUCTURE_TRACE";
 
 fn wants_trace(value: Option<&std::ffi::OsStr>) -> bool {
     value.is_some_and(|value| !value.is_empty() && value != "0")
 }
 
-fn report_trace(line: &str) {
-    eprintln!("   trace: {line}");
-}
+/// The trace nothing is told, for a caller that installed no destination for one.
+fn untraced(_line: &str) {}
 
-fn report_visibility(resolved: &crate::Resolution) {
+/// What an operation had to do beyond the edit itself, as lines in the run's account.
+///
+/// A widened visibility and a note are consequences a reader has to see while the run is going,
+/// and both are already carried back in the [`crate::Resolution`] for a caller that wants them as
+/// values — which is what the daemon's own apply loop reads instead of this.
+fn report_visibility(account: &ProgressSink, resolved: &crate::Resolution) {
     for change in &resolved.report {
-        println!(
+        account(&format!(
             "   visibility: `{}` {} -> {}",
             change.item, change.from, change.to
-        );
+        ));
     }
     for note in &resolved.notes {
-        println!("   note: {note}");
+        account(&format!("   note: {note}"));
     }
 }
 
@@ -904,13 +1047,17 @@ mod tests {
         assert!(!wants_trace(Some(std::ffi::OsStr::new("0"))));
     }
 
+    /// The flag was withdrawn with the budgets it configured. Accepting and ignoring it would be
+    /// worse than refusing it: a run would look bounded and wait for as long as its caller does.
     #[test]
-    fn reads_the_indexing_budget_a_run_was_given() {
-        // Given an indexing budget flag
-        let options = parse_options(&args(&["--indexing-budget", "900"])).unwrap();
+    fn refuses_the_withdrawn_indexing_budget_flag_rather_than_accepting_a_number_nothing_honours() {
+        // Given a run that still passes the withdrawn flag
+        let outcome = parse_options(&args(&["--indexing-budget", "900"]));
 
-        // Then the budget is parsed
-        assert_eq!(options.indexing_budget, Some(900));
+        // Then it is refused as an unknown flag, naming it. `Options` carries no `Debug`, so the
+        // accepted half is discarded before the refusal is read.
+        let error = outcome.map(|_| ()).expect_err("a refusal").to_string();
+        assert!(error.contains("--indexing-budget"), "{error}");
     }
 
     /// An apply that rewrites the tree has to say what it did as it does it. The line is printed
@@ -949,31 +1096,26 @@ mod tests {
         assert!(line.starts_with("[1/29] op 20:"), "{line}");
     }
 
+    /// Withdrawing the flag must not cost the run its remaining flags: `--from` is parsed by the
+    /// same loop and takes a value the same way, and a run still has to be resumable.
     #[test]
-    fn leaves_the_indexing_budget_at_the_default_when_none_was_given() {
-        // Given no indexing budget flag
-        let options = parse_options(&args(&[])).unwrap();
+    fn still_reads_the_numeric_flags_the_run_does_take() {
+        // Given a run resumed at an operation, stopping after a count
+        let options = parse_options(&args(&["--from", "3", "--stop-after", "7"])).unwrap();
 
-        // Then the budget stays unset
-        assert_eq!(options.indexing_budget, None);
+        // Then both numbers reach the run
+        assert_eq!(options.from, Some(3));
+        assert_eq!(options.stop_after, Some(7));
     }
 
+    /// The usage text is what a refused run prints, so a withdrawn flag must not still be
+    /// advertised there — the next reader would pass it and be refused.
     #[test]
-    fn refuses_an_indexing_budget_that_is_not_a_number() {
-        // Given a non-numeric budget
-        let outcome = parse_options(&args(&["--indexing-budget", "soon"]));
-
-        // Then parsing fails
-        assert!(outcome.is_err());
-    }
-
-    #[test]
-    fn refuses_an_indexing_budget_with_no_value_after_it() {
-        // Given a bare budget flag
-        let outcome = parse_options(&args(&["--indexing-budget"]));
-
-        // Then parsing fails
-        assert!(outcome.is_err());
+    fn stops_advertising_the_indexing_budget_in_its_usage() {
+        // Given the usage a refusal prints
+        // When it is read
+        // Then it names no indexing budget
+        assert!(!USAGE.contains("--indexing-budget"), "{USAGE}");
     }
 
     #[test]

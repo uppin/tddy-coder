@@ -91,11 +91,24 @@ type DiagnosticsCache = Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>;
 /// Server notifications kept for a consumer to drain, newest last.
 type Notifications = Arc<Mutex<VecDeque<Value>>>;
 
+/// The last version each open document was announced at. A URI's presence is what "open" means:
+/// `did_open` inserts it, `did_close` removes it, and `did_change` refuses a URI that is absent.
+type DocumentVersions = Mutex<HashMap<String, i64>>;
+
+/// What a host installs to learn that this client was used.
+///
+/// A caller that borrows the client from a registry and then works for minutes never goes back to
+/// the registry, so nothing else tells an idle timer that the server is in use.
+pub type ActivityHook = Arc<dyn Fn() + Send + Sync>;
+
 /// How many undrained notifications to keep before dropping the oldest.
 ///
 /// A consumer that never drains must not grow this without bound, and one that drains on a poll
 /// only ever needs the recent few — rust-analyzer emits `$/progress` continuously while it loads.
 const NOTIFICATION_BACKLOG: usize = 256;
+
+/// The version a freshly opened document is announced at.
+const FIRST_DOCUMENT_VERSION: i64 = 1;
 
 /// A live LSP client attached to one running server.
 pub struct LspClient {
@@ -121,6 +134,14 @@ pub struct LspClient {
     /// account of what a server is doing during a load that answers no requests, and dropping
     /// them left every such wait silent and every timeout unable to say where the server got to.
     notifications: Notifications,
+    /// The version each open document was last announced at.
+    ///
+    /// Held here rather than by a caller because a server tracks versions per document for its
+    /// whole life, while a caller that drives one operation does not.
+    documents: DocumentVersions,
+    /// Installed by the host that owns this client's idle timer, and called on every request and
+    /// notification. Behind a `Mutex` because the host only ever holds the client behind an `Arc`.
+    activity: Mutex<Option<ActivityHook>>,
 }
 
 impl Drop for LspClient {
@@ -165,6 +186,8 @@ impl LspClient {
             request_timeout_ms: AtomicU64::new(DEFAULT_REQUEST_TIMEOUT.as_millis() as u64),
             handshake: Mutex::new(Value::Null),
             notifications,
+            documents: Mutex::new(HashMap::new()),
+            activity: Mutex::new(None),
         };
 
         let params = json!({
@@ -182,16 +205,62 @@ impl LspClient {
 
     /// Open a source file as an LSP document so the server indexes it.
     pub async fn did_open(&self, uri: &str, language_id: &str, text: &str) -> Result<(), LspError> {
+        self.documents
+            .lock()
+            .unwrap()
+            .insert(uri.to_string(), FIRST_DOCUMENT_VERSION);
         self.notify(
             "textDocument/didOpen",
             json!({
                 "textDocument": {
                     "uri": uri,
                     "languageId": language_id,
-                    "version": 1,
+                    "version": FIRST_DOCUMENT_VERSION,
                     "text": text,
                 }
             }),
+        )
+    }
+
+    /// Replace an open document's contents, advancing the version the server is told about.
+    ///
+    /// The version counter belongs here rather than to a caller because a server tracks versions
+    /// per document for its whole life, while a caller that drives one operation does not: a second
+    /// caller starting again at 1 against a server that has already seen 40 is a protocol
+    /// violation, and the server is entitled to ignore the edit. Refused for a URI this client has
+    /// not opened, since there is no version sequence to continue.
+    pub async fn did_change(&self, uri: &str, text: &str) -> Result<(), LspError> {
+        let version = {
+            let mut documents = self.documents.lock().unwrap();
+            let version = documents
+                .get_mut(uri)
+                .ok_or_else(|| LspError::DocumentNotOpen(uri.to_string()))?;
+            *version += 1;
+            *version
+        };
+        self.notify(
+            "textDocument/didChange",
+            json!({
+                "textDocument": { "uri": uri, "version": version },
+                // A full-text change: the whole document replaces the whole document. The
+                // incremental form would need the client to track ranges the caller never sends.
+                "contentChanges": [{ "text": text }],
+            }),
+        )
+    }
+
+    /// Close an open document, so a later reopen legitimately starts its versions again.
+    ///
+    /// Refused for a URI this client has not opened, for the same reason [`Self::did_change`] is.
+    pub async fn did_close(&self, uri: &str) -> Result<(), LspError> {
+        if self.documents.lock().unwrap().remove(uri).is_none() {
+            return Err(LspError::DocumentNotOpen(uri.to_string()));
+        }
+        // `DidCloseTextDocumentParams` carries a bare document identifier: a close ends the
+        // version sequence rather than extending it.
+        self.notify(
+            "textDocument/didClose",
+            json!({ "textDocument": { "uri": uri } }),
         )
     }
 
@@ -363,8 +432,29 @@ impl LspClient {
         Duration::from_millis(self.request_timeout_ms.load(Ordering::SeqCst))
     }
 
+    /// Install the hook called whenever this client is used.
+    ///
+    /// The host that owns the client's idle timer installs it once, on receiving the client, so
+    /// that a caller which borrows the client and then works for minutes keeps its server alive
+    /// without going back to the registry for it. The last installer wins.
+    pub fn set_activity_hook(&self, hook: ActivityHook) {
+        *self.activity.lock().unwrap() = Some(hook);
+    }
+
+    /// Report use of this client to the installed hook, if any.
+    ///
+    /// The hook is cloned out of the lock before it runs: it is the host's code, and holding this
+    /// client's lock across it would make every request wait on whatever the host does.
+    fn record_activity(&self) {
+        let hook = self.activity.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+
     /// Send a request and await its correlated response `result`.
     async fn request(&self, method: &str, params: Value) -> Result<Value, LspError> {
+        self.record_activity();
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
@@ -403,6 +493,7 @@ impl LspClient {
 
     /// Send a notification (no id, no response expected).
     fn notify(&self, method: &str, params: Value) -> Result<(), LspError> {
+        self.record_activity();
         let message = json!({
             "jsonrpc": "2.0",
             "method": method,

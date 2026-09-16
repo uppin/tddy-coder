@@ -2,6 +2,7 @@
 
 pub mod analyze_cli;
 pub mod complexity;
+pub mod complexity_cache;
 pub mod coverage;
 pub mod crap;
 pub mod duplicate_tests;

@@ -14,6 +14,7 @@ pub mod ledger;
 pub mod overlay;
 pub mod plan;
 pub mod registry;
+mod restructure_args;
 pub mod restructure_cli;
 pub mod runner;
 pub mod verify;
@@ -58,10 +59,27 @@ pub enum RestructureError {
     JournalExists,
     #[error("the language server is still catching up with an earlier change")]
     ServerCatchingUp,
+    /// The server stayed unable to answer one method, as distinct from the plan being wrong.
+    ///
+    /// Kept apart from [`RestructureError::MalformedPlan`] because a caller acts on the difference:
+    /// a malformed plan is fixed by editing the plan, and a server that will not settle is fixed by
+    /// waiting or by looking at the server. Reporting the second as the first is what makes the
+    /// advice "fix your plan" actively misleading.
     #[error(
-        "rust-analyzer had not finished indexing after {seconds}s (last progress: {last}) — \
-         raise the budget with --indexing-budget <seconds>. Toolchain it resolved with: \
-         {environment}"
+        "rust-analyzer would not settle enough to answer {method} after {seconds}s \
+         (last progress: {last})"
+    )]
+    ServerNotSettled {
+        method: String,
+        seconds: u64,
+        last: String,
+    },
+    /// The wait for the index ended before the server was ready, because its caller stopped
+    /// waiting. Nothing else ends such a wait: there is no budget to raise, so the message names
+    /// where the index got to instead of advising a number.
+    #[error(
+        "rust-analyzer had not finished indexing after {seconds}s (last progress: {last}) and the \
+         wait was cancelled. Toolchain it resolved with: {environment}"
     )]
     IndexingIncomplete {
         seconds: u64,

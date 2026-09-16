@@ -74,7 +74,7 @@ mod tests {
 
     /// A request that outlived its wait is a slow index, not a defective plan. Reporting it as
     /// `MalformedPlan` sends the reader to rewrite anchors that were never wrong, and — because
-    /// only `ServerCatchingUp` is retried — skips the very loop `--indexing-budget` governs.
+    /// only `ServerCatchingUp` is retried — skips the retry loop that waits an index out.
     #[test]
     fn treats_a_timeout_as_a_server_still_catching_up() {
         // Given a request that timed out

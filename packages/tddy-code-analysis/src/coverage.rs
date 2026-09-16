@@ -81,10 +81,9 @@ fn cargo_manifest_dir(crate_path: &Path) -> Result<PathBuf> {
         crate_path.to_path_buf()
     };
     if !manifest.is_file() {
-        return Err(AnalysisError::Message(format!(
-            "no Cargo.toml at {}",
-            manifest.display()
-        )));
+        return Err(AnalysisError::NotACrate {
+            path: manifest.display().to_string(),
+        });
     }
     Ok(manifest
         .parent()

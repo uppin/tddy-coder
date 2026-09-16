@@ -1,104 +1,53 @@
 //! `restructure` subcommands: apply/check/status/anchors/verify JSONL plans.
 //!
+//! **The one module in this crate that prints.** The library returns its results and reports its
+//! live account into the sinks this module installs, because a front end that speaks a protocol on
+//! stdout — the daemon serving these same operations — would have its frames corrupted by a
+//! library writing into that stream. So rendering a result, and deciding that a result means a
+//! failed run, both happen here.
+//!
 //! Moved here from `tddy-tools` by `#unbundle` node 5, and the move is the point: the dispatch used
 //! to re-serialize its parsed clap arguments back into a `Vec<String>` (`cli_vector`) so that
 //! [`crate::runner::parse_options`] could parse them a second time on the other side of the package
 //! boundary. With the dispatch in the crate that owns the runner, the parsed arguments are handed
 //! to [`crate::runner::dispatch`] as parsed.
+//!
+//! The command line's own shape lives in [`crate::restructure_args`], which this module re-exports
+//! so that a binary needs one path for both.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
 use tddy_lsp::allowlist::{Language, LaunchSpec, LspAllowList};
 use tddy_lsp::registry::{LspKey, LspRegistry};
 use tddy_task::TaskRegistry;
+use tokio_util::sync::CancellationToken;
 
-use crate::runner::{Command, Options};
+use crate::backends::rust::ProgressSink;
+use crate::restructure_args::options_for;
+use crate::runner::{Command, Finding, Options, Outcome};
+use crate::verify::Comparison;
 
-#[derive(Parser)]
-#[command(name = "restructure")]
-pub struct RestructureArgs {
-    #[command(subcommand)]
-    pub command: RestructureCommand,
-}
-
-#[derive(Subcommand)]
-pub enum RestructureCommand {
-    /// Execute a JSONL refactoring plan (default).
-    Apply(RestructurePlanArgs),
-    /// Count journal statuses for a plan.
-    Status(RestructurePlanArgs),
-    /// Static (+ optional deep) preflight without writes.
-    Check(RestructureCheckArgs),
-    /// Emit a range anchor covering named items.
-    Anchors(RestructureAnchorsArgs),
-    /// Compare statement multisets against a git ref.
-    Verify(RestructureVerifyArgs),
-}
-
-#[derive(Parser)]
-pub struct RestructurePlanArgs {
-    /// Path to the plan JSONL file.
-    pub plan: PathBuf,
-
-    #[arg(long)]
-    pub dry_run: bool,
-
-    #[arg(long)]
-    pub resume: bool,
-
-    #[arg(long)]
-    pub from: Option<usize>,
-
-    #[arg(long)]
-    pub stop_after: Option<usize>,
-
-    #[arg(long)]
-    pub indexing_budget: Option<u64>,
-}
-
-#[derive(Parser)]
-pub struct RestructureCheckArgs {
-    pub plan: PathBuf,
-
-    /// Also resolve every operation through rust-analyzer, reporting the refusals an apply would
-    /// give and the blast radius of every cross-crate move.
-    #[arg(long)]
-    pub deep: bool,
-
-    /// Report every file the plan names that is longer than this many lines.
-    #[arg(long)]
-    pub budget: Option<usize>,
-
-    #[arg(long)]
-    pub indexing_budget: Option<u64>,
-}
-
-#[derive(Parser)]
-pub struct RestructureAnchorsArgs {
-    pub file: PathBuf,
-
-    #[arg(long, value_delimiter = ',')]
-    pub items: Vec<String>,
-
-    #[arg(long)]
-    pub indexing_budget: Option<u64>,
-}
-
-#[derive(Parser)]
-pub struct RestructureVerifyArgs {
-    #[arg(long)]
-    pub against: String,
-}
+pub use crate::restructure_args::{
+    RestructureAnchorsArgs, RestructureArgs, RestructureCheckArgs, RestructureCommand,
+    RestructurePlanArgs, RestructureVerifyArgs,
+};
 
 pub async fn run(args: RestructureArgs) -> Result<()> {
-    let options = options_for(args);
+    let mut options = options_for(args);
+    install_console(&mut options);
+    let cancel = cancelled_on_interrupt();
+    let rehearsal = options.dry_run;
+
+    // The one place the process directory becomes a workspace root. The library takes the root as a
+    // parameter and reads the process directory nowhere, so that one process can serve several
+    // trees; a command line is the case where the operator has already chosen a tree by standing in
+    // it, and saying so once here is that choice. Read once so the language server and the run it
+    // serves cannot disagree about which tree they are working on.
+    let root = std::env::current_dir().context("current_dir")?;
 
     let client = if needs_lsp_client(&options) {
-        let root = std::env::current_dir().context("current_dir")?;
         let task_registry = TaskRegistry::new();
         let lsp_registry = LspRegistry::new(
             restructure_allow_list(),
@@ -106,88 +55,186 @@ pub async fn run(args: RestructureArgs) -> Result<()> {
             Duration::from_secs(600),
         );
         let key = LspKey {
-            root,
+            root: root.clone(),
             language: Language::Rust,
         };
         let service = lsp_registry
             .get_or_spawn(key)
             .await
             .context("rust-analyzer LSP")?;
-        // The client's own per-request default is sized for interactive queries. A code-action
-        // request against a cold index routinely outlasts it, and `--indexing-budget` is
-        // documented as the remedy — so it has to reach the wait that actually fires.
-        service
-            .client
-            .set_request_timeout(request_timeout(&options));
+        // The client's own per-request default is sized for interactive queries, and one request
+        // against a cold index routinely outlasts it. This is not a budget on the index — nothing
+        // bounds that now but the caller — it is how long a single *unanswered* request may hold
+        // the blocking thread before the retry loop gets to look at its token again.
+        service.client.set_request_timeout(ONE_REQUEST_LIVENESS);
         Some(Arc::clone(&service.client))
     } else {
         None
     };
 
-    tokio::task::spawn_blocking(move || crate::runner::dispatch(options, client))
-        .await
-        .context("restructure task join")?
-        .map_err(anyhow::Error::msg)
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::runner::dispatch(&root, options, client, cancel)
+    })
+    .await
+    .context("restructure task join")?
+    .map_err(anyhow::Error::msg)?;
+
+    report(outcome, rehearsal)
 }
 
-/// The parsed subcommand as the runner's own options.
+/// Write a run's result to the console this front end owns, and say whether the run succeeded.
 ///
-/// One `match` and no strings: this is what replaced `cli_vector`, which turned these same fields
-/// back into `--flag value` pairs for the runner to re-parse.
-fn options_for(args: RestructureArgs) -> Options {
-    match args.command {
-        RestructureCommand::Apply(plan) => Options {
-            command: Command::Apply,
-            target: Some(plan.plan),
-            dry_run: plan.dry_run,
-            resume: plan.resume,
-            from: plan.from,
-            stop_after: plan.stop_after,
-            indexing_budget: plan.indexing_budget,
-            ..Options::default()
-        },
-        RestructureCommand::Status(plan) => Options {
-            command: Command::Status,
-            target: Some(plan.plan),
-            ..Options::default()
-        },
-        RestructureCommand::Check(check) => Options {
-            command: Command::Check,
-            target: Some(check.plan),
-            deep: check.deep,
-            budget: check.budget,
-            indexing_budget: check.indexing_budget,
-            ..Options::default()
-        },
-        RestructureCommand::Anchors(anchors) => Options {
-            command: Command::Anchors,
-            target: Some(anchors.file),
-            items: normalised_items(anchors.items),
-            indexing_budget: anchors.indexing_budget,
-            ..Options::default()
-        },
-        RestructureCommand::Verify(verify) => Options {
-            command: Command::Verify,
-            against: Some(verify.against),
-            ..Options::default()
-        },
+/// This is also where a result becomes an exit status. A check with findings and a comparison that
+/// does not hold are both *answered* calls whose answer is a failed run: the library returns them
+/// as values because a caller decides what they mean, and what this caller means by them is a
+/// non-zero exit — which `main` produces from the error returned here.
+fn report(outcome: Outcome, rehearsal: bool) -> Result<()> {
+    match outcome {
+        Outcome::Applied(summary) => {
+            if summary.stopped_early {
+                println!(
+                    "   stopped after {} operations as requested",
+                    summary.applied
+                );
+            }
+            println!(
+                "{} {} of {} operations",
+                if rehearsal { "resolved" } else { "applied" },
+                summary.applied,
+                summary.total
+            );
+            Ok(())
+        }
+        Outcome::Status(progress) => {
+            println!("completed {}", progress.completed);
+            println!("in_flight {}", progress.in_flight);
+            println!("failed {}", progress.failed);
+            println!("pending {}", progress.pending);
+            Ok(())
+        }
+        Outcome::Checked(findings) => report_findings(&findings),
+        Outcome::Anchored { file, range } => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "kind": "range",
+                    "file": file,
+                    "start": { "line": range.start.line, "col": range.start.col },
+                    "end": { "line": range.end.line, "col": range.end.col }
+                })
+            );
+            Ok(())
+        }
+        Outcome::Verified(comparison) => report_comparison(&comparison),
     }
 }
 
-/// `--items` as the runner has always received it: trimmed, with empty elements dropped.
+/// Every finding a check made, attributed to the operation that caused it.
+fn report_findings(findings: &[Finding]) -> Result<()> {
+    for finding in findings {
+        println!("{}: {}", finding.operation, finding.detail);
+    }
+
+    if findings.is_empty() {
+        println!("no findings");
+        return Ok(());
+    }
+
+    Err(anyhow::anyhow!(
+        "{} finding(s) — see above. Nothing was written.",
+        findings.len()
+    ))
+}
+
+/// What holding the tree against a git ref found, and whether it held.
+fn report_comparison(comparison: &Comparison) -> Result<()> {
+    println!(
+        "{} statements before, {} after",
+        comparison.before, comparison.after
+    );
+    for statement in &comparison.missing {
+        println!("missing: {statement}");
+    }
+    for statement in &comparison.added {
+        println!("added:   {statement}");
+    }
+
+    if comparison.holds() {
+        println!("every statement accounted for");
+        return Ok(());
+    }
+
+    Err(anyhow::anyhow!(
+        "{} statement(s) the tree lost and {} it gained — see above",
+        comparison.missing.len(),
+        comparison.added.len()
+    ))
+}
+
+/// Point a run's live account at the console this front end owns.
 ///
-/// clap's `value_delimiter = ','` splits on the comma and stops there, so `--items "One, Two"`
-/// would otherwise resolve an item literally named `" Two"` and `--items "A,,B"` would carry an
-/// empty one — a wrong answer with no error. `runner::comma_separated` did this normalisation
-/// while the dispatch lived in `tddy-tools`; the call site keeps doing it now that the parsed
-/// arguments cross no package boundary.
-fn normalised_items(items: Vec<String>) -> Vec<String> {
-    items
-        .iter()
-        .map(|item| item.trim())
-        .filter(|item| !item.is_empty())
-        .map(str::to_string)
-        .collect()
+/// Where it goes depends on the command, not on the process: `anchors` writes a JSON document to
+/// stdout for a caller to paste into a plan, and a line of indexing progress landing in the middle
+/// of it would make that document unreadable — so its account goes beside the answer instead.
+/// Every other command's stdout is prose already, so its account belongs there, where the operator
+/// is reading.
+fn install_console(options: &mut Options) {
+    let (progress, account): (ProgressSink, ProgressSink) = if options.command == Command::Anchors {
+        (
+            Arc::new(report_indexing_aside),
+            Arc::new(report_account_aside),
+        )
+    } else {
+        (Arc::new(report_indexing), Arc::new(report_account))
+    };
+    options.progress = progress;
+    options.account = account;
+    options.trace = report_trace;
+}
+
+fn report_indexing(line: &str) {
+    println!("   indexing: {line}");
+}
+
+fn report_indexing_aside(line: &str) {
+    eprintln!("   indexing: {line}");
+}
+
+fn report_account(line: &str) {
+    println!("{line}");
+}
+
+fn report_account_aside(line: &str) {
+    eprintln!("{line}");
+}
+
+/// Where a seam's diagnostic trace goes when `RESTRUCTURE_TRACE` asks for one.
+///
+/// Stderr for every command, `anchors` included: a trace is for whoever is working out why a seam
+/// behaved as it did, and it must not land in the prose — or the JSON — that stdout is carrying.
+fn report_trace(line: &str) {
+    eprintln!("   trace: {line}");
+}
+
+/// A token this run owns, cancelled when the operator interrupts it.
+///
+/// The library waits for a loading index for as long as its caller is waiting, so for a one-shot
+/// command the operator *is* the caller and `^C` is how they say they have stopped. Cancelling
+/// rather than dying on the signal is what lets the run unwind through its own refusal — naming
+/// where the index got to, with the journal it has written so far left consistent.
+///
+/// Taking the signal does replace its default disposition for the rest of the process, so a run
+/// wedged inside a single request cannot be interrupted again until that request gives up. `SIGTERM`
+/// is deliberately left alone, so there is still an immediate way out of that case.
+fn cancelled_on_interrupt() -> CancellationToken {
+    let cancel = CancellationToken::new();
+    let interrupted = cancel.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            interrupted.cancel();
+        }
+    });
+    cancel
 }
 
 /// rust-analyzer, launched with the handshake the restructure backend needs.
@@ -207,21 +254,15 @@ fn restructure_allow_list() -> LspAllowList {
     allow
 }
 
-/// How long one LSP request may take, taken from `--indexing-budget` where it was given.
+/// How long one LSP request may go unanswered before the transport gives up on it.
 ///
-/// The budget is the caller's statement of how long the whole resolution may take, so no single
-/// request inside it should be cut short by a smaller default.
-fn request_timeout(options: &Options) -> Duration {
-    Duration::from_secs(
-        options
-            .indexing_budget
-            .unwrap_or(DEFAULT_INDEXING_BUDGET_SECONDS),
-    )
-}
-
-/// The backend's own warm-up budget, used when `--indexing-budget` is absent so that the
-/// request wait and the retry loop expire together.
-const DEFAULT_INDEXING_BUDGET_SECONDS: u64 = 600;
+/// Not a budget on indexing: the backend's waits span many requests and end on readiness or on
+/// cancellation. This bounds a *single* request, which is a liveness question — a server wedged
+/// mid-request holds the blocking thread inside the transport, where no cancellation check runs,
+/// so the wait has to come back to the retry loop eventually. It is therefore set well above what
+/// one request against a cold index takes: a value near the client's interactive default would
+/// turn ordinary indexing into a refusal, which is the defect this change exists to remove.
+const ONE_REQUEST_LIVENESS: Duration = Duration::from_secs(600);
 
 fn needs_lsp_client(options: &Options) -> bool {
     match options.command {
@@ -234,97 +275,12 @@ fn needs_lsp_client(options: &Options) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
     fn parse(argv: &[&str]) -> Options {
         let mut all = vec!["restructure"];
         all.extend_from_slice(argv);
         options_for(RestructureArgs::parse_from(all))
-    }
-
-    #[test]
-    fn an_apply_carries_its_plan_and_flags_through_as_parsed_values() {
-        // Given an apply with every flag it takes
-        let options = parse(&[
-            "apply",
-            "plan.jsonl",
-            "--dry-run",
-            "--resume",
-            "--from",
-            "3",
-            "--stop-after",
-            "7",
-            "--indexing-budget",
-            "900",
-        ]);
-
-        // Then the runner receives them as the values clap already parsed
-        assert_eq!(options.command, Command::Apply);
-        assert_eq!(options.target, Some(PathBuf::from("plan.jsonl")));
-        assert!(options.dry_run);
-        assert!(options.resume);
-        assert_eq!(options.from, Some(3));
-        assert_eq!(options.stop_after, Some(7));
-        assert_eq!(options.indexing_budget, Some(900));
-    }
-
-    #[test]
-    fn a_check_carries_its_depth_and_budgets() {
-        // Given a deep check with a file-length budget
-        let options = parse(&[
-            "check",
-            "plan.jsonl",
-            "--deep",
-            "--budget",
-            "500",
-            "--indexing-budget",
-            "1200",
-        ]);
-
-        // Then the runner receives all three
-        assert_eq!(options.command, Command::Check);
-        assert!(options.deep);
-        assert_eq!(options.budget, Some(500));
-        assert_eq!(options.indexing_budget, Some(1200));
-    }
-
-    #[test]
-    fn anchors_carries_its_items_as_a_list_rather_than_a_comma_joined_string() {
-        // Given an anchors run over three items
-        let options = parse(&["anchors", "src/lib.rs", "--items", "One,Two,Three"]);
-
-        // Then the runner receives the list, not a string it has to split again
-        assert_eq!(options.command, Command::Anchors);
-        assert_eq!(options.target, Some(PathBuf::from("src/lib.rs")));
-        assert_eq!(options.items, vec!["One", "Two", "Three"]);
-    }
-
-    #[test]
-    fn anchors_resolves_an_item_written_with_a_space_after_the_comma() {
-        // Given an items list spelled the way a human writes one
-        let options = parse(&["anchors", "src/lib.rs", "--items", "One, Two ,Three"]);
-
-        // Then the runner receives the item names, not the whitespace around them
-        assert_eq!(options.items, vec!["One", "Two", "Three"]);
-    }
-
-    #[test]
-    fn anchors_drops_an_empty_element_rather_than_looking_for_an_unnamed_item() {
-        // Given an items list with a stray comma at both ends and in the middle
-        let options = parse(&["anchors", "src/lib.rs", "--items", ",One,,Two, ,"]);
-
-        // Then only the two named items reach the runner
-        assert_eq!(options.items, vec!["One", "Two"]);
-    }
-
-    #[test]
-    fn verify_carries_only_the_git_ref_it_compares_against() {
-        // Given a verify against a ref
-        let options = parse(&["verify", "--against", "HEAD~1"]);
-
-        // Then that ref is what the runner gets, with no plan
-        assert_eq!(options.command, Command::Verify);
-        assert_eq!(options.against, Some("HEAD~1".to_string()));
-        assert_eq!(options.target, None);
     }
 
     #[test]
@@ -345,17 +301,14 @@ mod tests {
         assert!(!needs_lsp_client(&parse(&["verify", "--against", "HEAD"])));
     }
 
+    /// Kept as an assertion on the number because it is a policy, not an incidental default: a
+    /// value anywhere near the client's interactive default (10s) would turn ordinary indexing
+    /// into a timeout, which is the defect the budgets were removed to fix.
     #[test]
-    fn a_request_may_take_as_long_as_the_indexing_budget_the_run_was_given() {
-        // Given a run with an explicit budget, and one without
-        let with_budget = parse(&["apply", "plan.jsonl", "--indexing-budget", "900"]);
-        let without = parse(&["apply", "plan.jsonl"]);
-
-        // Then a single request may take the whole budget, defaulting to the backend's own
-        assert_eq!(request_timeout(&with_budget), Duration::from_secs(900));
-        assert_eq!(
-            request_timeout(&without),
-            Duration::from_secs(DEFAULT_INDEXING_BUDGET_SECONDS)
-        );
+    fn allows_one_request_minutes_rather_than_the_seconds_an_interactive_query_gets() {
+        // Given the per-request wait a run installs on the shared client
+        // When it is read
+        // Then it is the ten minutes a cold index can take to answer one request
+        assert_eq!(ONE_REQUEST_LIVENESS, Duration::from_secs(600));
     }
 }

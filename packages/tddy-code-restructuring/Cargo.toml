@@ -8,6 +8,13 @@ description = "Replays a JSONL plan of named Rust refactoring intents via rust-a
 name = "tddy_code_restructuring"
 path = "src/lib.rs"
 
+# Reuse tddy-lsp's deterministic fake server so the cancellation suites have a real binary to
+# launch (exposes CARGO_BIN_EXE_fake_lsp to this crate's tests) without a real rust-analyzer. It
+# compiles against `tddy_lsp::protocol`, which is a dependency here.
+[[bin]]
+name = "fake_lsp"
+path = "../tddy-lsp/tests/bin/fake_lsp.rs"
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
@@ -16,8 +23,14 @@ serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
 tddy-lsp = { path = "../tddy-lsp" }
-tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+# `signal` is what lets the CLI cancel its own run on `^C`: with no budget to expire, the
+# operator interrupting the command is how a one-shot caller says it has stopped waiting.
+tokio = { version = "1", features = ["rt", "sync", "time", "macros", "signal"] }
 tddy-task = { path = "../tddy-task" }
+# `CancellationToken` — how a wait learns its caller is gone, now that no budget bounds it. Declared
+# here rather than inherited: `tokio-util` is a per-crate dependency in this workspace, at 0.7 in
+# every crate that has it.
+tokio-util = { version = "0.7", features = ["rt"] }
 
 [dev-dependencies]
 tempfile = "3"

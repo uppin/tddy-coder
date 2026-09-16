@@ -152,6 +152,14 @@ pub struct DaemonRuntime {
     /// Relay mode: fires once the idle timeout expires, for a server that shuts down gracefully.
     /// The monitor that fires it is started by [`RuntimeTasks::spawn`].
     pub relay_shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
+    /// The index daemon this runtime manages, when an `index_daemon:` section asked for one.
+    /// `None` for every deployment that did not.
+    ///
+    /// Handed to the host as well as to [`RuntimeTasks`] because the host has to *stop* it: the
+    /// index daemon holds a rust-analyzer per workspace root, and leaving it behind is the defect
+    /// `docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md` records
+    /// against the sandbox path.
+    pub index_daemon: Option<crate::index_daemon::IndexDaemonRegistry>,
     /// Everything this runtime needs running but has not started: see [`RuntimeTasks`].
     pub tasks: RuntimeTasks,
 }
@@ -172,6 +180,7 @@ pub struct RuntimeTasks {
     oauth_loopback_tunnel: Option<OauthLoopbackTunnel>,
     local_socket: Option<LocalSocketTransport>,
     lsp_idle_reaper: Option<tddy_lsp::LspRegistry>,
+    index_daemon: Option<crate::index_daemon::IndexDaemonRegistry>,
     relay_idle_monitor: Option<(
         Arc<crate::relay_idle::IdleTimeoutTracker>,
         tokio::sync::oneshot::Sender<()>,
@@ -308,6 +317,20 @@ impl RuntimeTasks {
                 loop {
                     ticker.tick().await;
                     reaper.reap_idle().await;
+                }
+            }));
+        }
+
+        // The index daemon's idle reaper, on the same 60-second cadence as the LSP one above. It
+        // only ever *stops* a process: starting one is a caller's doing, and a daemon that indexed
+        // on a timer would hold a multi-gigabyte rust-analyzer for a host nobody was restructuring.
+        if let Some(index_daemon) = self.index_daemon {
+            handles.push(tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(Duration::from_secs(60));
+                ticker.tick().await; // consume the immediate first tick
+                loop {
+                    ticker.tick().await;
+                    index_daemon.reap_idle().await;
                 }
             }));
         }
@@ -575,11 +598,16 @@ pub async fn build(
     // registry and room slot it was built with.
     let mut peer_discovery: Option<PeerDiscoveryHandles> = None;
 
+    // The index daemon this runtime manages, so the host can stop it. Assembled below, inside the
+    // branch that has the task registry to run it on.
+    let mut index_daemon_registry: Option<crate::index_daemon::IndexDaemonRegistry> = None;
+
     let mut tasks = RuntimeTasks {
         common_room: None,
         oauth_loopback_tunnel: None,
         local_socket: None,
         lsp_idle_reaper: None,
+        index_daemon: None,
         relay_idle_monitor,
         telegram_inbound: telegram.inbound,
     };
@@ -879,6 +907,26 @@ pub async fn build(
             tddy_lsp::LspAllowList::rust_only(),
             Duration::from_secs(300),
         ));
+
+        // The warm code-intelligence index, when this daemon was configured to manage one. Its
+        // lifecycle is owned here and its *index* is owned by the process itself — the two are
+        // split because rust-analyzer's handshake is fixed at spawn and this daemon's registry
+        // advertises no client capabilities, so the two cannot share one registry entry (see the
+        // PRD, § "A separate process, whose lifecycle the daemon manages"). Nothing is started
+        // here: the first request that needs it starts it.
+        if let Some(configured) = config_arc.index_daemon.as_ref() {
+            let index_daemon = crate::index_daemon::IndexDaemonRegistry::new(
+                crate::index_daemon::IndexDaemonSpawn::from_config(configured),
+                task_registry.clone(),
+            );
+            log::info!(
+                target: "tddy_daemon::index_daemon",
+                "managing an index daemon on {}",
+                index_daemon.socket_path().display()
+            );
+            tasks.index_daemon = Some(index_daemon.clone());
+            index_daemon_registry = Some(index_daemon);
+        }
 
         let livekit_service = tddy_daemon_livekit::build_livekit_service(
             tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config(
@@ -1249,6 +1297,7 @@ pub async fn build(
         cli_sessions: shared_claude_cli_manager,
         lifecycle_telegram,
         relay_shutdown,
+        index_daemon: index_daemon_registry,
         tasks,
     })
 }

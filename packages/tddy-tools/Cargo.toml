@@ -35,6 +35,14 @@ uuid = { version = "1", features = ["v4"] }
 tddy-bsp = { path = "../tddy-bsp" }
 tddy-code-analysis = { path = "../tddy-code-analysis" }
 tddy-code-restructuring = { path = "../tddy-code-restructuring" }
+# `restructure` against a warm daemon, when `TDDY_INDEX_SOCKET` names one: the crate owns
+# `code_index.proto`, serves it, and publishes both the message types and the tonic client, so a
+# caller that addresses the coordinate depends on it rather than re-declaring the schema.
+tddy-index-daemon = { path = "../tddy-index-daemon" }
+# `connect_uds_channel`, the one AF_UNIX tonic connector in this workspace. Its own doc comment
+# states the rule — "reused by any AF_UNIX tonic client ... so the connector pattern lives in one
+# place" — and `tddy-sandbox-app` already depends on this crate for exactly that.
+tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 # The `Lsp*` MCP tool catalog: owned by the crate that answers the calls.
 tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 # The one exec-tool catalog. The crate that dispatches Read/Write/Shell/… also defines them; this
@@ -57,6 +65,9 @@ tddy-service = { path = "../tddy-service" }
 # daemon HTTP or LiveKit RPC. Its `livekit` feature is off by default and turned on by this crate's.
 tddy-session-tool-client = { path = "../tddy-session-tool-client" }
 prost = { version = "0.13" }
+# The generated `CodeIndexServiceClient` and the `Status` its refusals arrive as. Transport only:
+# this crate serves no gRPC of its own.
+tonic = { version = "0.12", default-features = false, features = ["transport", "codegen", "prost"] }
 # Relay dispatch: HTTP forwarding for dispatch_dynamic_tool.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 

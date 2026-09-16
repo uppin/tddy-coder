@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# Start or reuse a warm code-intelligence daemon for this checkout, and print how to reach it.
+#
+# tddy-index-daemon holds a warm rust-analyzer index per workspace root, so `tddy-tools restructure`
+# stops paying a six-to-ten-minute crate-graph load on every invocation. The handshake is the one
+# run-livekit-testkit-server established: narration on stderr, one machine-readable line on stdout.
+#
+# Usage:
+#   ./run-index-daemon              # start or reuse, then print the export line
+#   ./run-index-daemon --status     # report what is running; start nothing
+#   ./run-index-daemon --stop       # stop this checkout's daemon
+#
+# Output (stdout, one line, nothing else):
+#   export TDDY_INDEX_SOCKET=/path/to/tddy-index-<tag>.sock
+#
+# To use it:
+#   eval $(./run-index-daemon | grep '^export ')
+#   cargo run -p tddy-tools -- restructure check plan.jsonl
+#
+# Everything else — what it did, where the log is, how to stop it — goes to stderr, so the eval
+# above sees exactly one assignment.
+#
+# Environment variables:
+#   TDDY_INDEX_RUNTIME_DIR  — where the socket, pid file and log live (default: $TMPDIR, else /tmp).
+#                             Deliberately not inside the checkout: an AF_UNIX path is limited to
+#                             ~104 bytes and a worktree path plus a subdirectory already exceeds it.
+#   TDDY_INDEX_LOG          — RUST_LOG for the daemon (default: info). Readiness is read from the
+#                             daemon's own `listening on …` line, which it logs at info — a level
+#                             below that starts a daemon this script cannot confirm.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+ROOT_DIR="$(pwd -P)"
+RUNTIME_DIR="${TDDY_INDEX_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
+RUNTIME_DIR="${RUNTIME_DIR%/}"
+
+# One daemon per checkout, keyed by its path. Not one for the machine: the daemon serves whichever
+# roots its clients name, but it *is* the binary built from this tree — reusing another worktree's
+# daemon would silently run that worktree's restructuring code against this one's source.
+TAG="$(printf '%s' "$ROOT_DIR" | cksum | awk '{print $1}')"
+SOCKET="${RUNTIME_DIR}/tddy-index-${TAG}.sock"
+PID_FILE="${RUNTIME_DIR}/tddy-index-${TAG}.pid"
+LOG_FILE="${RUNTIME_DIR}/tddy-index-${TAG}.log"
+BINARY="${ROOT_DIR}/target/debug/tddy-index-daemon"
+
+# Long enough for a debug-profile binary to come up on a loaded machine; short enough that a daemon
+# which never binds is reported rather than waited on forever.
+READY_TICKS=150
+READY_TICK_SECONDS=0.2
+
+narrate() { echo "$@" >&2; }
+
+# The pid of the daemon this checkout started, if it is still running.
+running_pid() {
+  [[ -f "$PID_FILE" ]] || return 1
+  local pid
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  printf '%s' "$pid"
+}
+
+# The one line stdout carries, plus the narration a developer needs around it.
+announce() {
+  local pid="$1"
+  narrate ""
+  narrate "index daemon pid ${pid}, serving code_index.CodeIndexService on ${SOCKET}"
+  narrate "log:  ${LOG_FILE}"
+  narrate "stop: ./run-index-daemon --stop   (or: kill ${pid})"
+  narrate ""
+  narrate "To run against it:"
+  narrate "  eval \$(./run-index-daemon | grep '^export ')"
+  narrate "  cargo run -p tddy-tools -- restructure check plan.jsonl"
+  narrate ""
+  echo "export TDDY_INDEX_SOCKET=${SOCKET}"
+}
+
+stop_daemon() {
+  local pid
+  if ! pid="$(running_pid)"; then
+    narrate "No index daemon is running for ${ROOT_DIR}"
+    rm -f "$PID_FILE"
+    exit 0
+  fi
+  narrate "Stopping index daemon pid ${pid}"
+  # SIGTERM, not SIGKILL: the daemon's own shutdown path is what takes its rust-analyzer children
+  # with it, and killing it outright orphans a multi-gigabyte server per warm root.
+  kill "$pid" 2>/dev/null || true
+  for _ in $(seq 1 "$READY_TICKS"); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep "$READY_TICK_SECONDS"
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    narrate "It did not stop on SIGTERM; killing it"
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  rm -f "$PID_FILE"
+  exit 0
+}
+
+case "${1:-}" in
+  --stop)
+    stop_daemon
+    ;;
+  --status)
+    if pid="$(running_pid)"; then
+      narrate "Index daemon pid ${pid} is serving ${SOCKET}"
+      echo "export TDDY_INDEX_SOCKET=${SOCKET}"
+    else
+      narrate "No index daemon is running for ${ROOT_DIR}"
+    fi
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    narrate "run-index-daemon: unknown argument '$1'. Use --status, --stop, or no argument."
+    exit 2
+    ;;
+esac
+
+# Reuse before starting, the rule run-livekit-testkit-server states: a second daemon on a second
+# socket would load the crate graph again, which is the cost this whole thing exists to pay once.
+if pid="$(running_pid)"; then
+  if [[ -S "$SOCKET" ]]; then
+    narrate "Reusing index daemon pid ${pid}"
+    announce "$pid"
+    exit 0
+  fi
+  narrate "Index daemon pid ${pid} is running but ${SOCKET} is gone; restarting it"
+  kill "$pid" 2>/dev/null || true
+  rm -f "$PID_FILE"
+fi
+
+mkdir -p "$RUNTIME_DIR"
+
+# The daemon refuses to bind a path that already exists, because a socket file is indistinguishable
+# from one a live daemon is serving on and taking it away would leave that daemon unreachable. Here
+# the pid file is the evidence that no such daemon exists — running_pid failed above — so clearing
+# it is the operator's own answer rather than a guess.
+if [[ -e "$SOCKET" ]]; then
+  narrate "Clearing ${SOCKET}, left behind by a daemon that is no longer running"
+  rm -f "$SOCKET"
+fi
+
+narrate "Building tddy-index-daemon"
+nix develop --profile ./.nix-profile -c cargo build -p tddy-index-daemon >&2
+
+if [[ ! -x "$BINARY" ]]; then
+  narrate "run-index-daemon: ${BINARY} was not built"
+  exit 1
+fi
+
+narrate "Starting index daemon on ${SOCKET}"
+# stderr to the log by shell redirection rather than via the daemon's own --log-file, so this script
+# owns the truncation: readiness is decided by finding `listening on` in the file, and an appended
+# log would answer with the previous run's line.
+RUST_LOG="${TDDY_INDEX_LOG:-info}" nohup "$BINARY" --grpc-uds "$SOCKET" \
+  </dev/null >/dev/null 2>"$LOG_FILE" &
+daemon_pid=$!
+
+for _ in $(seq 1 "$READY_TICKS"); do
+  if grep -q "listening on ${SOCKET}" "$LOG_FILE" 2>/dev/null; then
+    echo "$daemon_pid" >"$PID_FILE"
+    announce "$daemon_pid"
+    exit 0
+  fi
+  # Checked every tick, not only at the end: a daemon that refused its socket or failed to start has
+  # already said why, and waiting thirty seconds to read it is thirty seconds of nothing.
+  if ! kill -0 "$daemon_pid" 2>/dev/null; then
+    narrate "run-index-daemon: the daemon exited before it was listening. Its log said:"
+    tail -n 20 "$LOG_FILE" >&2 || true
+    exit 1
+  fi
+  sleep "$READY_TICK_SECONDS"
+done
+
+narrate "run-index-daemon: the daemon did not announce a listener on ${SOCKET}. Its log said:"
+tail -n 20 "$LOG_FILE" >&2 || true
+kill "$daemon_pid" 2>/dev/null || true
+exit 1

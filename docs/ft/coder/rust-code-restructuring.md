@@ -2,7 +2,7 @@
 
 **Product area:** Coder / tddy-tools  
 **Status:** Active  
-**Updated:** 2026-09-09
+**Updated:** 2026-09-16
 
 ## Summary
 
@@ -12,16 +12,39 @@
 
 A green baseline is required; a red tree is a stop.
 
+## Entry points
+
+Two front ends over one engine.
+
+| Front end | Shape |
+|---|---|
+| `tddy-tools restructure …` | one operation per process, printing to a console |
+| `tddy-index-daemon` | a warm rust-analyzer index per workspace root, served as `code_index.CodeIndexService` over gRPC and stdio — or one operation in process, then exit |
+
+Every library entry point takes the **workspace root** it acts on; none reads the process directory.
+That is what lets one process serve several worktrees.
+
+**One caveat on serving several at once.** The host is cheap per root — a backend registry and a
+document-version map — but the rust-analyzer behind each is not, and two resident on one machine
+compete for CPU. Measured on a three-crate workspace: a second request on *one* warm root is ~2,500×
+faster than its cold load, but re-asking a root after a *different* root's graph loaded ranged from
+880 ms to 3.6 s, the upper end exceeding that root's own 2.19 s cold load. Warm several worktrees at
+once and the per-root benefit narrows sharply; warm one and it is total.
+
+See [PRD: warm code-intelligence daemon](1-WIP/PRD-2026-09-15-warm-code-intelligence-daemon.md).
+
 ## CLI
 
 ```text
 tddy-tools restructure apply <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N]
-                                       [--indexing-budget SECONDS]
 tddy-tools restructure status <plan.jsonl>
-tddy-tools restructure check <plan.jsonl> [--deep] [--budget LINES] [--indexing-budget SECONDS]
-tddy-tools restructure anchors <file.rs> --items A,B,C [--indexing-budget SECONDS]
+tddy-tools restructure check <plan.jsonl> [--deep] [--budget LINES]
+tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure verify --against <git-ref>
 ```
+
+**`--indexing-budget` was withdrawn.** A run now waits until it succeeds or its caller stops it, so
+there is no budget to state. See [Waiting](#waiting).
 
 | Subcommand | Role |
 |---|---|
@@ -52,11 +75,29 @@ See [`.agents/skills/code-restructuring/references/plan-schema.md`](../../../.ag
 | `inline_method` | Inline callee |
 | `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite its own `use crate::…` / `use super::…` header, re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves `pub use <dest_crate>::*;` in the origin, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
 
-Invariants: moves that need history use `git mv`; visibility widenings are reviewable output (journal/stdout), not silent; progress goes to an injected sink, never mixed into library stdout.
+Invariants: moves that need history use `git mv`; visibility widenings are reviewable output
+(journal plus the caller's sink), not silent; **nothing in the library writes to stdout** — progress
+and the per-operation account go to injected sinks, and results are returned as values. Only
+`restructure_cli.rs` prints, and a test enforces that by reading the crate's own sources: a server
+serving this engine over its own stdin/stdout would otherwise have every RPC frame after the first
+log line corrupted.
 
 ## LSP integration
 
-Restructuring uses the existing long-running rust-analyzer task (`LspRegistry::rust_only()`). The restructure crate does **not** spawn a private rust-analyzer.
+Restructuring reaches rust-analyzer through `tddy-lsp`'s registry, keyed by `(workspace root,
+Rust)`, so a host that outlives one request reuses one server per root.
+
+The allow-list it uses is **not** `LspAllowList::rust_only()`. That constructor advertises no client
+capabilities at all, and rust-analyzer returns no code actions and sends no `$/progress` to such a
+client — so `restructure_allow_list()` attaches `client_capabilities()` and `server_settings()`
+instead. The handshake is fixed at spawn, which is why a consumer needing assists cannot share a
+registry entry with one that only needs definitions.
+
+`RustBackend` also retains a **self-spawning** transport, used when no shared client is bridged in —
+the static-check path and the standalone case. That path is the only one that pins the toolchain
+(`CARGO_HOME`, `RUSTUP_HOME`, `RUSTUP_TOOLCHAIN`), which is what prevents a rustup proxy
+channel-sync from stalling at `discovering sysroot`; a registry-spawned server sets no env, so a host
+supplying its own allow-list must carry the pinning itself.
 
 `LspClientBridge` wraps `Arc<LspClient>` and exposes sync `request` / `notify` via `request_raw` / `notify_raw` on `tddy-lsp`. Typed assist APIs (`codeAction`, `rename`, `semanticTokens`, progress forwarding) remain a follow-up; v1 uses the raw RPC bridge.
 
@@ -75,13 +116,29 @@ Two parts of that handshake are load-bearing:
   utf-16 agrees on every line until one carries a character outside ASCII, and then every column is
   wrong. A handshake that settles on any other encoding is **refused** rather than resolved against.
 
-### Budgets
+### Waiting
 
-`--indexing-budget SECONDS` governs every wait the run makes: the one-time crate-graph warm-up, the
-per-request timeout on the shared client, and the per-operation settle budget once the first index has
-succeeded (a twentieth of the run budget, floored at 30s). An indexing timeout is not a plan defect,
-and the message says so along with **how far the index got** — the last phase plus the furthest
-percentage reported, because a stall at 12% and a timeout at 99% want opposite responses.
+**A wait ends when the server is ready or when its caller stops waiting. Nothing else bounds it.**
+
+There were budgets, and how they were wrong is worth recording. `--indexing-budget SECONDS` set a
+one-time warm-up bound and derived the per-operation bound from it as a twentieth, floored at 30s. So
+`--indexing-budget 900` produced a **45-second** ceiling on every wait after the first, and a plan
+against a workspace this size was refused with *"had not finished indexing after 46s"* having already
+indexed for twenty minutes. The premise behind the ratio — that once the graph is loaded the only
+thing left to wait out is seconds — is false for a large file in a large workspace, which the code's
+own comment said before the flag was removed.
+
+A server should not invent a deadline its caller never stated, so the caller's own bound is the only
+one: a gRPC caller's `grpc-timeout`, a streaming caller dropping its receiver, `^C` on the command
+line, or the host cancelling on shutdown. Cancellation is checked **inside** the poll loops rather
+than awaited, because the engine is synchronous and runs under `spawn_blocking`, where dropping the
+calling future stops nothing.
+
+A cancelled wait still reports **how far the index got** — the last phase plus the furthest
+percentage — because a stall at 12% and a stop at 99% want opposite responses. A server that stays
+unable to answer one method is `ServerNotSettled`, kept distinct from a malformed plan: the first is
+fixed by waiting or by looking at the server, the second by editing the plan, and reporting the
+second as the first sends the reader to the wrong place.
 
 ### Import restoration
 
@@ -120,6 +177,8 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
 
 - [Reusable LSP](reusable-lsp.md) — client reuse; raw RPC surface for restructuring
 - [Rust code analysis](rust-code-analysis.md) — prerequisite targeting pass
+- [PRD: warm code-intelligence daemon](1-WIP/PRD-2026-09-15-warm-code-intelligence-daemon.md) — the
+  daemon front end, the workspace-root parameter, cancellation in place of budgets
 - [Feature prompt: agent skills](feature-prompt-agent-skills.md)
 - Package: [`packages/tddy-code-restructuring/README.md`](../../../packages/tddy-code-restructuring/README.md)
 

@@ -31,6 +31,13 @@ pub enum LspError {
     #[error("lsp server exited")]
     ServerExited,
 
+    /// A document-sync notification named a URI this client has not opened.
+    ///
+    /// A caller error rather than a server one: there is no version sequence to continue, and
+    /// silently dropping the notification would make the caller's edit disappear.
+    #[error("document not open: {0}")]
+    DocumentNotOpen(String),
+
     /// An underlying I/O failure.
     #[error("io error: {0}")]
     Io(String),

@@ -21,8 +21,13 @@ use crate::server_body::LspServerBody;
 /// How long to wait for a freshly-spawned server to complete its handshake.
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// A live service together with its idle-timer (reset on each reuse).
-type ServiceEntry = (Arc<LspService>, IdleTimeoutTracker);
+/// A live service together with its idle-timer (reset on each reuse, and on each use of its
+/// client). The tracker is shared because the client holds it too, through the activity hook.
+type ServiceEntry = (Arc<LspService>, Arc<IdleTimeoutTracker>);
+
+/// The in-flight placeholder for one key's cold spawn: concurrent callers queue on it, and the
+/// second one through finds the first's server rather than starting another.
+type SpawnGate = Arc<Mutex<()>>;
 
 /// The stable reuse key: one server per workspace root + language.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -52,6 +57,9 @@ pub struct LspRegistry {
     task_registry: TaskRegistry,
     /// Live services keyed by workspace+language, each with its idle-timer.
     services: Arc<Mutex<HashMap<LspKey, ServiceEntry>>>,
+    /// One gate per key with a spawn in flight. Held only across that key's spawn, so two roots
+    /// still start their servers concurrently.
+    spawn_gates: Arc<Mutex<HashMap<LspKey, SpawnGate>>>,
     idle_timeout: Duration,
 }
 
@@ -63,6 +71,7 @@ impl LspRegistry {
             allow,
             task_registry,
             services: Arc::new(Mutex::new(HashMap::new())),
+            spawn_gates: Arc::new(Mutex::new(HashMap::new())),
             idle_timeout,
         }
     }
@@ -70,30 +79,75 @@ impl LspRegistry {
     /// Lazily get (or spawn) the server for `key`. Rejects disallowed languages before
     /// spawning. A repeated key returns the same [`LspService`]; a key whose task has
     /// become terminal is re-spawned.
+    ///
+    /// Concurrent callers on one cold key queue on that key's spawn gate, so exactly one server
+    /// is spawned and all of them are handed it. Without the gate the second `insert` overwrote
+    /// the first, orphaning a live task that nothing could cancel or reap.
     pub async fn get_or_spawn(&self, key: LspKey) -> Result<Arc<LspService>, LspError> {
         if !self.allow.is_allowed(key.language) {
             return Err(LspError::LanguageNotAllowed(key.language.id().to_string()));
         }
 
-        {
-            let mut services = self.services.lock().await;
-            if let Some(existing) = services.get(&key).map(|(svc, _)| Arc::clone(svc)) {
-                let alive = match self.task_registry.get(&existing.task_id).await {
-                    Some(handle) => !handle.status().is_terminal(),
-                    None => false,
-                };
-                if alive {
-                    // Reuse: refresh the idle timer and hand back the same server.
-                    if let Some((_, tracker)) = services.get(&key) {
-                        tracker.record_activity();
-                    }
-                    return Ok(existing);
-                }
-                // The task died — drop the stale entry and spawn a fresh server.
-                services.remove(&key);
-            }
+        if let Some(live) = self.live_service(&key).await {
+            return Ok(live);
         }
 
+        let gate = self.spawn_gate(&key).await;
+        let spawning = gate.lock().await;
+        // Whoever held the gate before us may have spawned the very server we came for.
+        let result = match self.live_service(&key).await {
+            Some(live) => Ok(live),
+            None => self.spawn_service(key.clone()).await,
+        };
+        drop(spawning);
+        self.release_spawn_gate(&key, gate).await;
+        result
+    }
+
+    /// The running server for `key`, with its idle timer refreshed — or `None`, having dropped a
+    /// stale entry whose task has become terminal so a fresh server can replace it.
+    async fn live_service(&self, key: &LspKey) -> Option<Arc<LspService>> {
+        let mut services = self.services.lock().await;
+        let (existing, tracker) = services
+            .get(key)
+            .map(|(svc, tracker)| (Arc::clone(svc), Arc::clone(tracker)))?;
+        let alive = match self.task_registry.get(&existing.task_id).await {
+            Some(handle) => !handle.status().is_terminal(),
+            None => false,
+        };
+        if alive {
+            tracker.record_activity();
+            return Some(existing);
+        }
+        // The task died — drop the stale entry and let the caller spawn a fresh server.
+        services.remove(key);
+        None
+    }
+
+    /// The gate for `key`'s spawn, creating it if this is the first caller to need it.
+    async fn spawn_gate(&self, key: &LspKey) -> SpawnGate {
+        let mut gates = self.spawn_gates.lock().await;
+        Arc::clone(
+            gates
+                .entry(key.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
+    }
+
+    /// Forget `key`'s gate once no caller is queued behind it, so a host reaching many roots does
+    /// not accumulate one gate per root it has ever seen.
+    ///
+    /// Holding the gate map's lock means nobody can take a new reference while we count, so two
+    /// references — the map's and ours — is exactly "nobody else is here".
+    async fn release_spawn_gate(&self, key: &LspKey, gate: SpawnGate) {
+        let mut gates = self.spawn_gates.lock().await;
+        if Arc::strong_count(&gate) == 2 {
+            gates.remove(key);
+        }
+    }
+
+    /// Spawn a server for `key`, complete its handshake, and record it as the live service.
+    async fn spawn_service(&self, key: LspKey) -> Result<Arc<LspService>, LspError> {
         let spec = self
             .allow
             .launch_spec(key.language)
@@ -129,17 +183,21 @@ impl LspRegistry {
             }
         };
 
+        let tracker = Arc::new(IdleTimeoutTracker::new(self.idle_timeout));
+        // Using the client is activity. A caller that borrows it and then works for minutes never
+        // comes back here, so without this hook the reaper can take rust-analyzer out from under
+        // an operation still using it.
+        let for_hook = Arc::clone(&tracker);
+        client.set_activity_hook(Arc::new(move || for_hook.record_activity()));
+
         let service = Arc::new(LspService {
             task_id: handle.id.clone(),
             client,
         });
-        self.services.lock().await.insert(
-            key,
-            (
-                Arc::clone(&service),
-                IdleTimeoutTracker::new(self.idle_timeout),
-            ),
-        );
+        self.services
+            .lock()
+            .await
+            .insert(key, (Arc::clone(&service), tracker));
         Ok(service)
     }
 

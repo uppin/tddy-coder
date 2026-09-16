@@ -24,6 +24,13 @@ const GRACEFUL_SHUTDOWN: Duration = Duration::from_millis(500);
 /// Buffer size for streaming the server's stdout to subscribers.
 const STDOUT_CHUNK: usize = 8192;
 
+/// Buffer size for draining the server's stderr into the log.
+const STDERR_CHUNK: usize = 8192;
+
+/// Log target for what the server writes to stderr, so it is filterable apart from this crate's
+/// own messages.
+const STDERR_LOG_TARGET: &str = "tddy_lsp::server_body";
+
 /// A [`TaskBody`] hosting a single language server. Once the `initialize` handshake
 /// succeeds, an [`LspClient`] is handed back to the registry via `client_tx`.
 pub struct LspServerBody {
@@ -120,6 +127,28 @@ impl TaskBody for LspServerBody {
             }
         });
 
+        // Drain the child's stderr into the log. Piping it without reading it fills the pipe
+        // buffer (~64 KiB), at which point the server blocks mid-write and stops answering
+        // requests — a diagnostic channel becoming a deadlock. It goes to the log rather than to
+        // this process's stderr because a consumer of this crate may be speaking a protocol there.
+        let child_stderr = child.stderr.take();
+        let stderr_task = tokio::spawn(async move {
+            let Some(mut stderr) = child_stderr else {
+                return;
+            };
+            let mut buf = [0u8; STDERR_CHUNK];
+            loop {
+                match stderr.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let text = String::from_utf8_lossy(&buf[..n]);
+                        log::debug!(target: STDERR_LOG_TARGET, "{}", text.trim_end());
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
         // Complete the LSP handshake and publish the client to the registry.
         let root_uri = format!("file://{}", root_dir.display());
         let client = match LspClient::initialize(
@@ -137,6 +166,7 @@ impl TaskBody for LspServerBody {
                 let _ = child.wait().await;
                 stdin_task.abort();
                 stdout_task.abort();
+                stderr_task.abort();
                 return TaskStatus::Failed {
                     message: format!("language server initialize failed: {err}"),
                 };
@@ -151,6 +181,7 @@ impl TaskBody for LspServerBody {
             result = child.wait() => {
                 stdin_task.abort();
                 stdout_task.abort();
+                stderr_task.abort();
                 if ctx.is_cancelled() {
                     return TaskStatus::Cancelled;
                 }
@@ -170,6 +201,7 @@ impl TaskBody for LspServerBody {
         let _ = child.wait().await;
         stdin_task.abort();
         stdout_task.abort();
+        stderr_task.abort();
         TaskStatus::Cancelled
     }
 }
