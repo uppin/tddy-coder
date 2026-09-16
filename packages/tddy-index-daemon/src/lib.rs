@@ -14,6 +14,7 @@
 //! encode/decode — and exits with a status. With `--grpc` and/or `--stdio` it serves that same
 //! implementation and stays alive. There is one code path, not two that must be kept in step.
 
+mod activity;
 pub mod analyze;
 mod apply;
 pub mod index;

@@ -227,7 +227,15 @@ fn a_stamped_sink(kind: &'static str, aside: bool) -> ProgressSink {
 ///
 /// Carried over from #500 unchanged: a phase that took 6 minutes and one that took 60ms want
 /// different reactions, and a reader should not have to subtract timestamps to tell them apart.
-fn step_delta(previous: Option<Instant>, now: Instant) -> String {
+///
+/// **Public because it is the contract between the front ends, not because it is part of a
+/// console.** It is pure — instants in, text out, nothing printed — so publishing it leaves this
+/// module the only one in the crate that writes to stdout, the invariant
+/// `tests/library_returns_its_results.rs` pins. The other front ends are
+/// `tddy_tools::index_console`, which narrates the same run served by the index daemon and would
+/// otherwise have to restate these units, and `tddy_index_daemon::activity`, which stamps how long
+/// a request took in the same vocabulary. A fourth spelling of "+1m30s" is a thing that drifts.
+pub fn step_delta(previous: Option<Instant>, now: Instant) -> String {
     let delta = previous
         .map(|earlier| now.duration_since(earlier))
         .unwrap_or(Duration::ZERO);

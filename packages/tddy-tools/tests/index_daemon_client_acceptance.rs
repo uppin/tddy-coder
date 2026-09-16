@@ -390,3 +390,94 @@ fn reports_a_socket_variable_pointing_at_nothing_rather_than_falling_back() {
         "an unreachable daemon was silently answered from the cold path"
     );
 }
+
+// ─── The narration a run writes beside its answer ──────────────────────────────────────────
+
+/// The three steps a check of this suite's two-operation plan narrates, in the shape #500 gave them.
+///
+/// The elapsed value in each stamp is elided rather than matched: it is measured while the run
+/// happens — `+0ms` on an idle machine, `+14ms` on a loaded one — so no literal could hold it.
+/// Everything around it is compared exactly, which is what makes this pin the *shape* both front
+/// ends have to agree on rather than a duration neither controls.
+const THE_STEPS_A_CHECK_OF_BOTH_MODULES_NARRATES: [&str; 3] = [
+    "   indexing (+…): check: 2 operation(s)",
+    "   indexing (+…): op 0 of 2: static check RenameSymbol in `src/big.rs`",
+    "   indexing (+…): op 1 of 2: static check RenameSymbol in `src/small.rs`",
+];
+
+/// The server's narration of how far it got, each line's elapsed value elided.
+fn indexing_account(output: &std::process::Output) -> Vec<String> {
+    narration(output)
+        .lines()
+        .filter(|line| line.trim_start().starts_with("indexing"))
+        .map(with_the_stamp_elided)
+        .collect()
+}
+
+/// One narration line, with the elapsed duration inside its stamp replaced by an ellipsis.
+///
+/// A line carrying no stamp at all fails here rather than being passed through, because an
+/// unstamped line is the defect this pins: on a six-to-ten-minute crate-graph load the stamp is the
+/// only thing that distinguishes a run making progress from one that has hung.
+fn with_the_stamp_elided(line: &str) -> String {
+    let (before, stamped) = line
+        .split_once("(+")
+        .unwrap_or_else(|| panic!("this narration line carries no elapsed stamp: {line}"));
+    let (_elapsed, after) = stamped
+        .split_once(')')
+        .unwrap_or_else(|| panic!("this narration line's stamp is never closed: {line}"));
+    format!("{before}(+…){after}")
+}
+
+/// The stderr counterpart of `restructure_runs_against_the_warm_daemon_when_the_socket_variable_is_set`.
+///
+/// That test pins the whole *stdout* vector against the cold path's literals, which is why this
+/// drift went unnoticed: the stamp #500 introduced lives on stderr. It is the whole point of #500 —
+/// on a seven-minute load it is the only thing distinguishing progress from a hang — so a client of
+/// the daemon has to be given it too.
+#[test]
+fn the_warm_paths_narration_stamps_every_step_as_the_cold_paths_does() {
+    // Given a plan naming a twelve-line module and a three-line one, and a warm daemon
+    let workspace = a_workspace_of_a_long_module_and_a_short_one();
+    let plan = a_plan_naming_both_modules(workspace.path());
+    let daemon = a_warm_index_daemon();
+
+    // When the same check runs against that daemon, and again with no daemon at all
+    let warm = a_restructure_run_in(workspace.path())
+        .env("TDDY_INDEX_SOCKET", daemon.socket())
+        .args([
+            "check",
+            plan.to_str().expect("the plan path"),
+            "--budget",
+            "10",
+        ])
+        .output()
+        .expect("the warm run completes");
+    let cold = a_restructure_run_in(workspace.path())
+        .args([
+            "check",
+            plan.to_str().expect("the plan path"),
+            "--budget",
+            "10",
+        ])
+        .output()
+        .expect("the cold run completes");
+
+    // Then both narrate the same three steps, each stamped with the time since the step before it
+    assert_eq!(
+        indexing_account(&warm),
+        THE_STEPS_A_CHECK_OF_BOTH_MODULES_NARRATES
+            .map(String::from)
+            .to_vec(),
+        "the warm path's narration is not the cold path's; its whole stderr was: {}",
+        narration(&warm)
+    );
+    assert_eq!(
+        indexing_account(&cold),
+        THE_STEPS_A_CHECK_OF_BOTH_MODULES_NARRATES
+            .map(String::from)
+            .to_vec(),
+        "the cold path's narration changed shape; its whole stderr was: {}",
+        narration(&cold)
+    );
+}

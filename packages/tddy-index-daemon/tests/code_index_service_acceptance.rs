@@ -795,3 +795,33 @@ async fn refuses_duplicate_tests_before_any_coverage_has_been_captured() {
         tddy_rpc::Code::FailedPrecondition
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reports_a_plan_that_is_not_there_as_a_failed_precondition_naming_the_path() {
+    // Given a reachable workspace and a request naming a plan that does not exist
+    let workspace = a_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
+    let entry = a_host_over_fake_language_servers();
+
+    // When it is checked
+    let outcome = stream_at::<_, RestructureEvent>(
+        &entry,
+        "Check",
+        CheckRequest {
+            workspace_root: workspace.path().to_string_lossy().to_string(),
+            plan: "absent.jsonl".to_string(),
+            deep: false,
+            file_budget: 0,
+        },
+    )
+    .await;
+
+    // Then the refusal says the tree is wrong and names what is missing — not `Internal`, which
+    // would claim the caller neither caused it nor can fix it
+    let refusal = outcome.expect_err("a plan that is not there is refused");
+    assert_eq!(refusal.code(), tddy_rpc::Code::FailedPrecondition);
+    assert!(
+        refusal.message().contains("absent.jsonl"),
+        "the refusal must name the plan it could not find, was: {}",
+        refusal.message()
+    );
+}

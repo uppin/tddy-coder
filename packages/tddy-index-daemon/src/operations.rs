@@ -24,6 +24,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
+use crate::activity::Activity;
 use crate::apply::apply_plan;
 use crate::index::WorkspaceIndex;
 use crate::proto::code_index::{
@@ -50,7 +51,7 @@ pub(crate) async fn serve_warm(
     index: &WorkspaceIndex,
     workspace_root: &str,
 ) -> Result<EventStream<IndexProgress>, Status> {
-    let root = WorkspaceIndex::workspace_root_of(workspace_root)?;
+    let (activity, root) = Activity::arrived("warm", index, workspace_root).await?;
     let (events, stream) = event_stream();
     let index = index.clone();
 
@@ -60,6 +61,7 @@ pub(crate) async fn serve_warm(
             ..IndexProgress::default()
         };
         if events.send(Ok(loading)).await.is_err() {
+            activity.cancelled();
             return;
         }
         // TODO(tddy-lsp, tddy-code-restructuring): `ready` is "this root has a live language
@@ -69,25 +71,40 @@ pub(crate) async fn serve_warm(
         // server's own `$/progress` can only be read through `LspClient::drain_notifications`,
         // which *consumes* the queue an operation on the same root is folding. Forwarding phases
         // and percentages needs one of the two exposed non-destructively.
-        let reported = match index.client_for(&root).await {
-            Ok(_) => Ok(IndexProgress {
-                line: format!("{} is served from a warm index", root.display()),
-                ready: true,
-                ..IndexProgress::default()
-            }),
-            Err(status) => Err(status),
-        };
-        let _ = events.send(reported).await;
+        match index.client_for(&root).await {
+            Ok(_) => {
+                let _ = events
+                    .send(Ok(IndexProgress {
+                        line: format!("{} is served from a warm index", root.display()),
+                        ready: true,
+                        ..IndexProgress::default()
+                    }))
+                    .await;
+                activity.answered();
+            }
+            Err(refusal) => {
+                activity.refused(&refusal);
+                let _ = events.send(Err(refusal)).await;
+            }
+        }
     });
 
     Ok(stream)
 }
 
 /// Which workspace roots this process currently holds an index for.
+///
+/// The one request that names no root, and the one logged at DEBUG rather than INFO: it reads
+/// state, writes nothing and is what a dashboard polls, so a line per call at INFO would bury the
+/// requests that did work. What it answers is on the record anyway — every root it reports arrived
+/// in an INFO line of its own, and every root it stops reporting was logged as reaped.
 pub(crate) async fn serve_workspaces(index: &WorkspaceIndex) -> WorkspacesResponse {
-    WorkspacesResponse {
-        workspaces: index.warm_workspaces().await,
-    }
+    let workspaces = index.warm_workspaces().await;
+    log::debug!(
+        target: "tddy_index_daemon::operations",
+        "workspaces: answered with {} warm root(s)", workspaces.len()
+    );
+    WorkspacesResponse { workspaces }
 }
 
 /// Everything wrong with a plan, without writing anything.
@@ -95,8 +112,8 @@ pub(crate) async fn serve_check(
     index: &WorkspaceIndex,
     request: CheckRequest,
 ) -> Result<EventStream<RestructureEvent>, Status> {
-    let root = WorkspaceIndex::workspace_root_of(&request.workspace_root)?;
-    let plan = plan_path(&root, &request.plan)?;
+    let (activity, root) = Activity::arrived("check", index, &request.workspace_root).await?;
+    let plan = activity.refusing(plan_path(&root, &request.plan))?;
     let deep = request.deep;
     let budget = file_budget(request.file_budget);
     let (events, stream) = event_stream();
@@ -109,8 +126,9 @@ pub(crate) async fn serve_check(
         let client = if deep {
             match index.client_for(&root).await {
                 Ok(client) => Some(client),
-                Err(status) => {
-                    let _ = events.send(Err(status)).await;
+                Err(refusal) => {
+                    activity.refused(&refusal);
+                    let _ = events.send(Err(refusal)).await;
                     return;
                 }
             }
@@ -140,17 +158,32 @@ pub(crate) async fn serve_check(
             tokio::task::spawn_blocking(move || runner::check(&root, options, client, cancel)).await
         };
 
+        // A run whose caller went away ended because of that, whatever the engine returned: this
+        // token is cancelled by nothing but a sink whose send found nobody listening, so it *is*
+        // the disconnect. Reported here rather than as a refusal, and the refusal is not sent —
+        // the receiver it would go to is the one that is gone.
+        if cancel.is_cancelled() {
+            activity.cancelled();
+            return;
+        }
+
         // Findings are results, not refusals: `runner::check` hands them back as values and this
         // is where they become the events the schema declares. A plan with findings is a check
         // that worked, so the stream ends with them rather than with an error.
-        let Some(findings) = reported(&events, checked, "check").await else {
+        let Some(findings) = reported(&events, checked, &activity).await else {
             return;
         };
+        log::debug!(
+            target: "tddy_index_daemon::operations",
+            "check: {} finding(s) to report", findings.len()
+        );
         for finding in findings {
             if events.send(Ok(finding_event(&finding))).await.is_err() {
+                activity.cancelled();
                 return;
             }
         }
+        activity.answered();
     });
 
     Ok(stream)
@@ -161,8 +194,8 @@ pub(crate) async fn serve_apply(
     index: &WorkspaceIndex,
     request: ApplyRequest,
 ) -> Result<EventStream<RestructureEvent>, Status> {
-    let root = WorkspaceIndex::workspace_root_of(&request.workspace_root)?;
-    let plan = plan_path(&root, &request.plan)?;
+    let (activity, root) = Activity::arrived("apply", index, &request.workspace_root).await?;
+    let plan = activity.refusing(plan_path(&root, &request.plan))?;
     let options = Options {
         command: Command::Apply,
         target: Some(plan),
@@ -179,8 +212,9 @@ pub(crate) async fn serve_apply(
         let _queued = index.hold(&root).await;
         let client = match index.client_for(&root).await {
             Ok(client) => client,
-            Err(status) => {
-                let _ = events.send(Err(status)).await;
+            Err(refusal) => {
+                activity.refused(&refusal);
+                let _ = events.send(Err(refusal)).await;
                 return;
             }
         };
@@ -189,12 +223,22 @@ pub(crate) async fn serve_apply(
         let progress = progress_into(events.clone(), cancel.clone());
         let applied = {
             let events = events.clone();
+            let cancel = cancel.clone();
             tokio::task::spawn_blocking(move || {
                 apply_plan(&root, &options, client, cancel, progress, &events)
             })
             .await
         };
-        reported(&events, applied, "apply").await;
+        // The same disconnect rule as a check, and it matters more here: an apply stopped by its
+        // caller leaving has written part of a plan into the tree, and the log is where that is on
+        // the record.
+        if cancel.is_cancelled() {
+            activity.cancelled();
+            return;
+        }
+        if reported(&events, applied, &activity).await.is_some() {
+            activity.answered();
+        }
     });
 
     Ok(stream)
@@ -214,14 +258,14 @@ pub(crate) fn event_stream<T>() -> (EventSender<T>, EventStream<T>) {
 async fn reported<T>(
     events: &EventSender<RestructureEvent>,
     outcome: Result<tddy_code_restructuring::Result<T>, tokio::task::JoinError>,
-    operation: &str,
+    activity: &Activity,
 ) -> Option<T> {
     let refusal = match outcome {
         Ok(Ok(produced)) => return Some(produced),
         Ok(Err(refusal)) => status_of(&refusal),
-        Err(failure) => joined(operation, &failure),
+        Err(failure) => joined(activity.method(), &failure),
     };
-    log::debug!(target: "tddy_index_daemon::operations", "{operation} refused: {}", refusal.message());
+    activity.refused(&refusal);
     let _ = events.send(Err(refusal)).await;
     None
 }
@@ -307,11 +351,22 @@ pub(crate) fn plan_path(root: &Path, plan: &str) -> Result<PathBuf, Status> {
         return Err(Status::invalid_argument("the request names no plan"));
     }
     let named = Path::new(plan);
-    Ok(if named.is_absolute() {
+    let resolved = if named.is_absolute() {
         named.to_path_buf()
     } else {
         root.join(named)
-    })
+    };
+    // Refused here, naming the path, rather than left to surface as an `Io` error from the read
+    // several frames down — which maps to `Internal`, i.e. "the caller neither caused this nor can
+    // fix it". A plan the caller named and that is not there is the opposite of that. Same class as
+    // an unreachable workspace root, and refused the same way.
+    if !resolved.is_file() {
+        return Err(Status::failed_precondition(format!(
+            "no plan at `{}`",
+            resolved.display()
+        )));
+    }
+    Ok(resolved)
 }
 
 /// The file-length budget a request asked for, if it asked for one.
@@ -386,26 +441,49 @@ mod tests {
 
     #[test]
     fn reads_a_plan_named_relatively_against_the_root_it_came_with() {
-        // Given a plan named relative to its workspace root
-        let root = Path::new("/trees/one");
+        // Given a plan that exists, named relative to its workspace root
+        let tree = tempfile::tempdir().expect("a temporary tree");
+        std::fs::create_dir_all(tree.path().join("plans")).expect("the plans directory");
+        std::fs::write(tree.path().join("plans/carve.jsonl"), "").expect("the plan");
 
         // When it is resolved
-        let plan = plan_path(root, "plans/carve.jsonl").expect("a relative plan resolves");
+        let plan = plan_path(tree.path(), "plans/carve.jsonl").expect("a relative plan resolves");
 
         // Then it is resolved against that root, not against this process's directory
-        assert_eq!(plan, Path::new("/trees/one/plans/carve.jsonl"));
+        assert_eq!(plan, tree.path().join("plans/carve.jsonl"));
     }
 
     #[test]
     fn keeps_a_plan_named_absolutely_as_it_was_given() {
-        // Given a plan named absolutely
+        // Given a plan that exists somewhere other than under the root the request named
+        let elsewhere = tempfile::tempdir().expect("a temporary directory");
+        let named = elsewhere.path().join("carve.jsonl");
+        std::fs::write(&named, "").expect("the plan");
         let root = Path::new("/trees/one");
 
         // When it is resolved
-        let plan = plan_path(root, "/elsewhere/carve.jsonl").expect("an absolute plan resolves");
+        let plan = plan_path(root, &named.to_string_lossy()).expect("an absolute plan resolves");
 
         // Then the root is not prepended to it
-        assert_eq!(plan, Path::new("/elsewhere/carve.jsonl"));
+        assert_eq!(plan, named);
+    }
+
+    #[test]
+    fn refuses_a_plan_that_is_not_there_rather_than_resolving_a_path_nothing_can_read() {
+        // Given a reachable tree and a plan name nothing under it answers to
+        let tree = tempfile::tempdir().expect("a temporary tree");
+
+        // When it is resolved
+        let refusal = plan_path(tree.path(), "absent.jsonl").expect_err("a missing plan is refused");
+
+        // Then the refusal says the tree is wrong and names what was not found, rather than
+        // deferring to an `Io` error several frames down that would read as this host's fault
+        assert_eq!(refusal.code(), tddy_rpc::Code::FailedPrecondition);
+        assert!(
+            refusal.message().contains("absent.jsonl"),
+            "the refusal must name the plan, was: {}",
+            refusal.message()
+        );
     }
 
     #[test]

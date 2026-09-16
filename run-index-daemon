@@ -151,11 +151,26 @@ if [[ ! -x "$BINARY" ]]; then
   exit 1
 fi
 
+# The daemon spawns rust-analyzer, which only the nix dev shell provides — so it needs that shell's
+# PATH, not this script's. Taking the PATH and launching the binary directly, rather than launching
+# through `nix develop -c`, keeps `$!` the daemon's own pid: wrapping it would record the wrapper's,
+# and `--stop` would then kill the wrapper and orphan the daemon it was supposed to stop.
+#
+# Without this the daemon comes up, binds, serves, and refuses every LSP-backed operation with
+# `Unavailable: lsp server exited` — a daemon that looks healthy and cannot do the one thing it is
+# for.
+narrate "Resolving the dev shell's PATH so the daemon can find rust-analyzer"
+DEV_SHELL_PATH="$(nix develop --profile ./.nix-profile -c sh -c 'printf %s "$PATH"')"
+if [[ -z "$DEV_SHELL_PATH" ]]; then
+  narrate "run-index-daemon: could not read the dev shell's PATH; the daemon would not find rust-analyzer"
+  exit 1
+fi
+
 narrate "Starting index daemon on ${SOCKET}"
 # stderr to the log by shell redirection rather than via the daemon's own --log-file, so this script
 # owns the truncation: readiness is decided by finding `listening on` in the file, and an appended
 # log would answer with the previous run's line.
-RUST_LOG="${TDDY_INDEX_LOG:-info}" nohup "$BINARY" --grpc-uds "$SOCKET" \
+PATH="$DEV_SHELL_PATH" RUST_LOG="${TDDY_INDEX_LOG:-info}" nohup "$BINARY" --grpc-uds "$SOCKET" \
   </dev/null >/dev/null 2>"$LOG_FILE" &
 daemon_pid=$!
 

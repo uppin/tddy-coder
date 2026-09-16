@@ -20,6 +20,7 @@ use tddy_lsp::{Language, LspRegistry};
 use tddy_rpc::Status;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
+use crate::activity::{reaped_line, Warmth};
 use crate::proto::code_index::WarmWorkspace;
 use crate::status::status_of_lsp;
 
@@ -148,6 +149,25 @@ impl WorkspaceIndex {
         Ok(Arc::clone(&service.client))
     }
 
+    /// Whether this process already holds an index for `root`.
+    ///
+    /// Asked *before* the work starts, because it is what an operator needs to read the request
+    /// that follows: the same `check` answers in milliseconds against a warm root and waits six to
+    /// ten minutes for a cold one. Answered against the registry rather than against this host's
+    /// own map, for the reason [`Self::warm_workspaces`] gives — a root whose server has been
+    /// reaped is not warm, whatever this host once asked for.
+    pub(crate) async fn warmth_of(&self, root: &Path) -> Warmth {
+        let key = LspKey {
+            root: root.to_path_buf(),
+            language: Language::Rust,
+        };
+        if self.servers.get(&key).await.is_some() {
+            Warmth::AlreadyWarm
+        } else {
+            Warmth::NotYetIndexed
+        }
+    }
+
     /// The roots this process currently holds an index for.
     ///
     /// Answered against the registry rather than from this map alone: a root whose server the
@@ -183,6 +203,7 @@ impl WorkspaceIndex {
         if !reaped.is_empty() {
             let mut roots = self.roots.lock().await;
             for root in reaped {
+                log::info!(target: "tddy_index_daemon::index", "{}", reaped_line(&root));
                 roots.remove(&root);
             }
         }

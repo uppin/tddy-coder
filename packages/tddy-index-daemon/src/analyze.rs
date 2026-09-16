@@ -18,6 +18,7 @@ use tddy_code_analysis::duplicate_tests::DuplicateAnalysis;
 use tddy_code_analysis::report::{generate_duplicate_tests_report, generate_report, report_path};
 use tddy_rpc::Status;
 
+use crate::activity::Activity;
 use crate::index::WorkspaceIndex;
 use crate::operations::{event_stream, joined, EventSender};
 use crate::proto::code_index::{
@@ -34,9 +35,10 @@ pub(crate) async fn serve_coverage(
     index: &WorkspaceIndex,
     request: CoverageRequest,
 ) -> Result<EventStream<AnalyzeEvent>, Status> {
-    let root = WorkspaceIndex::workspace_root_of(&request.workspace_root)?;
-    let crate_path = under(&root, &request.crate_path, "crate path")?;
-    let coverage_dir = under(&root, &request.coverage_dir, "coverage directory")?;
+    let (activity, root) = Activity::arrived("coverage", index, &request.workspace_root).await?;
+    let crate_path = activity.refusing(under(&root, &request.crate_path, "crate path"))?;
+    let coverage_dir =
+        activity.refusing(under(&root, &request.coverage_dir, "coverage directory"))?;
     let (events, stream) = event_stream();
     let index = index.clone();
 
@@ -68,7 +70,9 @@ pub(crate) async fn serve_coverage(
             })
             .await
         };
-        reported(&events, captured, "coverage").await;
+        if reported(&events, captured, &activity).await.is_some() {
+            activity.answered();
+        }
     });
 
     Ok(stream)
@@ -79,7 +83,16 @@ pub(crate) async fn serve_report(
     index: &WorkspaceIndex,
     request: ReportRequest,
 ) -> Result<ReportResponse, Status> {
-    let root = WorkspaceIndex::workspace_root_of(&request.workspace_root)?;
+    let (activity, root) = Activity::arrived("report", index, &request.workspace_root).await?;
+    activity.recorded(joint_report(index, root, request).await)
+}
+
+/// The join itself, with the root already resolved and its arrival already recorded.
+async fn joint_report(
+    index: &WorkspaceIndex,
+    root: PathBuf,
+    request: ReportRequest,
+) -> Result<ReportResponse, Status> {
     let coverage_dir = under(&root, &request.coverage_dir, "coverage directory")?;
     let crate_path = under(&root, &request.crate_path, "crate path")?;
     let scores = index.complexity_scores();
@@ -109,9 +122,11 @@ pub(crate) async fn serve_duplicate_tests(
     index: &WorkspaceIndex,
     request: DuplicateTestsRequest,
 ) -> Result<EventStream<AnalyzeEvent>, Status> {
-    let root = WorkspaceIndex::workspace_root_of(&request.workspace_root)?;
-    let coverage_dir = under(&root, &request.coverage_dir, "coverage directory")?;
-    let out_dir = under(&root, &request.out_dir, "output directory")?;
+    let (activity, root) =
+        Activity::arrived("duplicate tests", index, &request.workspace_root).await?;
+    let coverage_dir =
+        activity.refusing(under(&root, &request.coverage_dir, "coverage directory"))?;
+    let out_dir = activity.refusing(under(&root, &request.out_dir, "output directory"))?;
     let min_signature = request.min_signature as usize;
     let subset_ratio = request.subset_ratio;
     let include_test_sources = request.include_test_sources;
@@ -135,10 +150,11 @@ pub(crate) async fn serve_duplicate_tests(
         })
         .await;
 
-        let Some(analysis) = reported(&events, analysed, "duplicate tests").await else {
+        let Some(analysis) = reported(&events, analysed, &activity).await else {
             return;
         };
         let _ = events.send(Ok(duplicates_event(&analysis))).await;
+        activity.answered();
     });
 
     Ok(stream)
@@ -154,7 +170,16 @@ pub(crate) async fn serve_complexity(
     index: &WorkspaceIndex,
     request: ComplexityRequest,
 ) -> Result<ComplexityResponse, Status> {
-    let root = WorkspaceIndex::workspace_root_of(&request.workspace_root)?;
+    let (activity, root) = Activity::arrived("complexity", index, &request.workspace_root).await?;
+    activity.recorded(scored_file(index, root, request).await)
+}
+
+/// The scores themselves, with the root already resolved and its arrival already recorded.
+async fn scored_file(
+    index: &WorkspaceIndex,
+    root: PathBuf,
+    request: ComplexityRequest,
+) -> Result<ComplexityResponse, Status> {
     let file = under(&root, &request.file, "file")?;
     if !file.is_file() {
         return Err(Status::failed_precondition(format!(
@@ -204,14 +229,14 @@ fn under(root: &Path, named: &str, what: &str) -> Result<PathBuf, Status> {
 async fn reported<T>(
     events: &EventSender<AnalyzeEvent>,
     outcome: Result<tddy_code_analysis::Result<T>, tokio::task::JoinError>,
-    operation: &str,
+    activity: &Activity,
 ) -> Option<T> {
     let refusal = match outcome {
         Ok(Ok(produced)) => return Some(produced),
         Ok(Err(refusal)) => status_of_analysis(&refusal),
-        Err(failure) => joined(operation, &failure),
+        Err(failure) => joined(activity.method(), &failure),
     };
-    log::debug!(target: "tddy_index_daemon::analyze", "{operation} refused: {}", refusal.message());
+    activity.refused(&refusal);
     let _ = events.send(Err(refusal)).await;
     None
 }

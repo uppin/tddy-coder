@@ -12,11 +12,19 @@
 //! `Finding` and `Comparison` types; until it does, this module is the second front end and the
 //! duplication is recorded rather than hidden.
 //!
+//! The one shape that is **called rather than restated** is the elapsed-time stamp:
+//! [`tddy_code_restructuring::restructure_cli::step_delta`] is pure, so it is published and used
+//! here. A second spelling of "+1m30s" is a thing that drifts, and the stamp is what tells a
+//! developer a six-minute crate-graph load from a hang.
+//!
 //! TODO(tddy-code-restructuring): publish the result renderer — `report`, `report_findings`,
 //! `report_comparison` over `Outcome`/`Finding`/`Comparison` — so this module maps the daemon's
 //! events onto those library types instead of re-stating their wording.
 
+use std::time::Instant;
+
 use anyhow::Result;
+use tddy_code_restructuring::restructure_cli::step_delta;
 use tddy_index_daemon::proto::code_index::{
     restructure_event, AnchorsResponse, Finding, IndexProgress, OperationApplied,
     PlanStatusResponse, RestructureEvent, RunOutcome, SourceRange, VerifyResponse,
@@ -55,6 +63,14 @@ pub(crate) struct Rendered {
     /// True when the run was a rehearsal, which decides whether it "resolved" or "applied".
     rehearsal: bool,
     findings: usize,
+    /// When this run last narrated something, which is what the next line's stamp is measured
+    /// against.
+    ///
+    /// The clock belongs to the run, exactly as the cold path's belongs to its sink: one
+    /// `Rendered` per run, so two runs in one process — or two runs served by one daemon — cannot
+    /// interleave their deltas through a shared instant. `None` until the first line, which is
+    /// therefore stamped `+0ms` rather than with the age of the process.
+    narrated: Option<Instant>,
 }
 
 impl Rendered {
@@ -62,6 +78,7 @@ impl Rendered {
         Self {
             rehearsal,
             findings: 0,
+            narrated: None,
         }
     }
 
@@ -86,8 +103,18 @@ impl Rendered {
         Ok(())
     }
 
-    fn indexing(&self, progress: &IndexProgress) {
-        aside(&format!("   indexing: {}", progress.line));
+    /// One line of the server's narration, stamped with the time since the line before it.
+    ///
+    /// The stamp is #500's and the reason is #500's: on a six-to-ten-minute crate-graph load it is
+    /// the only thing distinguishing a run making progress from one that has hung, so a developer
+    /// who exported `TDDY_INDEX_SOCKET` must be given it too. The elapsed time is measured *here*,
+    /// against this run's own clock, rather than carried on the event: it is how long this console
+    /// has been waiting, which is the question a reader of it is asking.
+    fn indexing(&mut self, progress: &IndexProgress) {
+        let now = Instant::now();
+        let stamp = step_delta(self.narrated, now);
+        self.narrated = Some(now);
+        aside(&format!("   indexing ({stamp}): {}", progress.line));
     }
 
     /// What one operation of a plan amounted to, and what it had to widen to get there.

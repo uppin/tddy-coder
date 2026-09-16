@@ -662,6 +662,69 @@ New coverage: `streams_a_finding_attributed_to_the_operation_that_caused_it`, an
 `holds_a_tree_against_the_ref_it_was_committed_as` now asserts the whole `VerifyResponse` rather
 than just `holds`.
 
+### ⛔ `run-index-daemon` started the daemon outside the nix shell (found by running it)
+
+**The feature's primary entry point produced a daemon that could not do the one thing it is for.**
+The script built inside `nix develop` and then launched the binary plain, so `rust-analyzer` was not
+on the daemon's `PATH` and every LSP-backed operation was refused:
+
+    anchors for `…/warmcrate`: refused as Unavailable (+4ms): lsp server exited
+
+The daemon came up, bound its socket, served, and failed every real request — healthy-looking and
+useless. No test caught it: the acceptance suites use `fake_lsp` by design, and the live production
+tier builds its own registry in-process rather than going through the script.
+
+Fixed by resolving the dev shell's `PATH` and launching the binary with it, rather than launching
+through `nix develop -c`: wrapping would make `$!` the wrapper's pid, and `--stop` would then kill
+the wrapper and orphan the daemon it was meant to stop.
+
+**This is the argument for running the thing.** Everything else about this change was green — 582
+tests, clippy clean, a production tier measuring 2,500× — and the headline workflow did not work.
+
+### ✅ The daemon now reports its own state and activity (found by running it)
+
+After serving a complete request, the daemon's whole log used to be its startup line. It said nothing
+about the request arriving, which root it named, **whether that root was already warm** — the one
+distinction this crate exists for — what it answered, or how long it took. An operator could not tell
+a working daemon from a wedged one.
+
+Now, verbatim from a live run:
+
+    listening on …/index.sock
+    anchors arrived for `…/warm2`, which has no index yet
+    anchors for `…/warm2`: answered (+2.1s)
+    anchors arrived for `…/warm2`, which is already warm
+    anchors for `…/warm2`: answered (+4ms)
+
+2.1 s cold, 4 ms warm, and the log says which one the caller got. `Workspaces` is logged at `DEBUG`
+rather than `INFO` — it names no root, does no work, and is what a dashboard polls.
+
+**A logger-capture test caught a defect the pure-composer tests could not**: every answered check was
+logged **twice**, because an intermediate path resolution and the run itself both recorded an outcome.
+No test of a pure formatting function can see how many lines a request emits. The fix is structural —
+`Activity::recorded` now consumes `self`, so a second outcome on one request is a compile error, and
+intermediate steps that can only fail use `refusing(&self)` instead.
+
+### The warm path had lost #500's stamps
+
+Cold gave `indexing (+0ms): …`; warm gave `indexing: …`. Stdout was byte-identical, which is why the
+drift-guard test passed — the divergence was on stderr, which nothing asserted. `step_delta` is now
+published from `restructure_cli` (pure, so the print-only-here invariant still holds) and the client
+renderer stamps with a clock it owns. A stderr counterpart to the stdout guard now pins it, matching
+the stamp's *shape* since an elapsed value cannot be asserted exactly.
+
+### A missing plan was reported as `Internal`
+
+`plan_path` resolved without checking existence, so a plan the caller named and that was not there
+surfaced as an `Io` error several frames down → `Internal`, which claims the caller neither caused it
+nor can fix it. It now refuses as `FailedPrecondition` naming the path — the same class as an
+unreachable workspace root, and the same principle as `NotAGitWorktree`:
+
+    Error: the index daemon refused this run (FailedPrecondition): no plan at `…/warm2/absent.jsonl`
+
+Two existing unit tests asserted resolution of paths that did not exist; they now use real files,
+which makes them stronger, plus one new test for the refusal itself.
+
 ### A mutation test found a defect no test could, and the fix was structural (M6)
 
 Deleting the line that clears a dead predecessor's socket left **all 11 lifecycle tests green**: a

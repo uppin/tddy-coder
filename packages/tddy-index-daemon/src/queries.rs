@@ -8,7 +8,7 @@
 //! They still take the root's queue, because each reads the tree or the `.restructure/` state a
 //! concurrent apply is writing.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tddy_code_restructuring::registry::Workspace;
 use tddy_code_restructuring::runner::{self, Command, Options};
@@ -16,6 +16,7 @@ use tddy_code_restructuring::{Overlay, RefactorKind};
 use tddy_rpc::Status;
 use tokio_util::sync::CancellationToken;
 
+use crate::activity::Activity;
 use crate::index::WorkspaceIndex;
 use crate::operations::{joined, plan_path};
 use crate::proto::code_index::{
@@ -25,11 +26,24 @@ use crate::proto::code_index::{
 use crate::status::status_of;
 
 /// The range anchor covering a named run of items, trivia included.
+///
+/// Split in two so the whole answer — refusal included — passes through
+/// [`Activity::recorded`]: the resolving happens in the inner function, and this one is the record
+/// that a request arrived and what it came to.
 pub(crate) async fn serve_anchors(
     index: &WorkspaceIndex,
     request: AnchorsRequest,
 ) -> Result<AnchorsResponse, Status> {
-    let root = WorkspaceIndex::workspace_root_of(&request.workspace_root)?;
+    let (activity, root) = Activity::arrived("anchors", index, &request.workspace_root).await?;
+    activity.recorded(anchor_covering(index, root, request).await)
+}
+
+/// The anchor itself, with the root already resolved and its arrival already recorded.
+async fn anchor_covering(
+    index: &WorkspaceIndex,
+    root: PathBuf,
+    request: AnchorsRequest,
+) -> Result<AnchorsResponse, Status> {
     if request.file.trim().is_empty() {
         return Err(Status::invalid_argument("the request names no file"));
     }
@@ -93,7 +107,16 @@ pub(crate) async fn serve_plan_status(
     index: &WorkspaceIndex,
     request: PlanStatusRequest,
 ) -> Result<PlanStatusResponse, Status> {
-    let root = WorkspaceIndex::workspace_root_of(&request.workspace_root)?;
+    let (activity, root) = Activity::arrived("plan status", index, &request.workspace_root).await?;
+    activity.recorded(plan_progress(index, root, request).await)
+}
+
+/// The four counts themselves, with the root already resolved and its arrival already recorded.
+async fn plan_progress(
+    index: &WorkspaceIndex,
+    root: PathBuf,
+    request: PlanStatusRequest,
+) -> Result<PlanStatusResponse, Status> {
     let plan = plan_path(&root, &request.plan)?;
 
     let options = Options {
@@ -121,7 +144,16 @@ pub(crate) async fn serve_verify(
     index: &WorkspaceIndex,
     request: VerifyRequest,
 ) -> Result<VerifyResponse, Status> {
-    let root = WorkspaceIndex::workspace_root_of(&request.workspace_root)?;
+    let (activity, root) = Activity::arrived("verify", index, &request.workspace_root).await?;
+    activity.recorded(comparison_against(index, root, request).await)
+}
+
+/// The comparison itself, with the root already resolved and its arrival already recorded.
+async fn comparison_against(
+    index: &WorkspaceIndex,
+    root: PathBuf,
+    request: VerifyRequest,
+) -> Result<VerifyResponse, Status> {
     if request.against.trim().is_empty() {
         return Err(Status::invalid_argument(
             "the request names no git ref to verify against",

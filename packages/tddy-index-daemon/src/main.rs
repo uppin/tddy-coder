@@ -33,9 +33,10 @@ use crate::cli::{IndexDaemonArgs, Lifetime};
 
 /// The target every line this binary logs carries.
 ///
-/// One target for the whole binary, distinct from the library's per-module targets
-/// (`tddy_index_daemon::index`, `::operations`, `::apply`), so a log policy can turn the process's
-/// own narration up or down without touching what the service says about a request.
+/// One target for the whole binary, distinct from the library's own targets — `::activity` for the
+/// journal of requests served, and `::index`, `::operations`, `::apply`, `::analyze` for what those
+/// modules say about their internals — so a log policy can turn the process's own narration up or
+/// down without touching what the service says about a request.
 pub(crate) const MAIN: &str = "tddy_index_daemon::main";
 
 /// How long a language server may sit unused before its host is entitled to reap it.
