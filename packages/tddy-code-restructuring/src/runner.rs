@@ -13,7 +13,8 @@ use crate::registry::{BackendRegistry, Workspace};
 use crate::{LedgerCheckpoint, Overlay, Plan, PositionLedger, RestructureError, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tddy_lsp::client::LspClient;
 
 const USAGE: &str = "\
@@ -230,10 +231,20 @@ pub fn apply(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
 
     let mut journal = open_run(&plan, &root, &paths, &options)?;
     let mut ledger = restore_ledger(&journal, &paths)?;
-    let mut registry = registry_for(client, options.indexing_budget, report_progress);
+    let mut registry = registry_for(client, options.indexing_budget, emit_indexing);
     let start = options.from.unwrap_or_else(|| journal.next_op());
     let mut overlay = Overlay::new();
     let mut done = 0usize;
+    let total = plan.ops.len();
+    emit_progress(&format!(
+        "apply: {total} operation(s){}{}",
+        if options.dry_run { ", dry-run" } else { "" },
+        if start > 0 {
+            format!(", from op {start}")
+        } else {
+            String::new()
+        }
+    ));
 
     for (index, op) in plan.ops.iter().enumerate().skip(start) {
         // Honouring `--stop-after` is the run doing what it was told, so it ends the loop rather
@@ -243,11 +254,19 @@ pub fn apply(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
             .stop_after
             .is_some_and(|limit| index >= start + limit)
         {
-            println!("   stopped after {} operations as requested", index - start);
+            emit_progress(&format!(
+                "stopped after {} operation(s) as requested",
+                index - start
+            ));
             break;
         }
 
         let anchor = ledger.translate_anchor(&op.anchor)?;
+        emit_progress(&format!(
+            "op {index} of {total}: resolving {:?} in `{}`",
+            op.op,
+            anchor.file()
+        ));
         let resolved = registry
             .backend_for(Path::new(anchor.file()), op.op)?
             .resolve(
@@ -261,37 +280,45 @@ pub fn apply(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
         report_visibility(&resolved);
 
         let files = resolved.edit.changes.len();
+        emit_progress(&format!("op {index} of {total}: resolved {files} file(s)"));
         if options.dry_run {
-            println!(
-                "{}",
-                progress_line(index, done, plan.ops.len(), op.op, files, false)
-            );
+            emit_progress(&progress_line(
+                index,
+                done,
+                plan.ops.len(),
+                op.op,
+                files,
+                false,
+            ));
             ledger.record(&resolved.edit);
             overlay.record(&root, &resolved.edit)?;
             done += 1;
             continue;
         }
 
+        emit_progress(&format!(
+            "op {index} of {total}: applying {files} file(s) to disk"
+        ));
         commit_operation(index, &resolved, &root, &paths, &mut journal, &mut ledger)?;
-        // Printed *after* the commit, so a line on stdout means the edit is on disk and in the
-        // journal. An apply used to report nothing at all — the dry run, where nothing is at
-        // stake, was the only mode that spoke.
-        println!(
-            "{}",
-            progress_line(index, done, plan.ops.len(), op.op, files, true)
-        );
+        emit_progress(&progress_line(
+            index,
+            done,
+            plan.ops.len(),
+            op.op,
+            files,
+            true,
+        ));
         done += 1;
     }
 
-    println!(
-        "{} {done} of {} operations",
+    emit_progress(&format!(
+        "{} {done} of {total} operations",
         if options.dry_run {
             "resolved"
         } else {
             "applied"
-        },
-        plan.ops.len()
-    );
+        }
+    ));
     Ok(())
 }
 
@@ -347,9 +374,17 @@ pub fn status(options: Options) -> Result<()> {
 
 /// Report everything wrong with a plan without writing anything.
 pub fn check(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
+    if client.is_none() {
+        reset_progress_clock();
+    }
     let root = std::env::current_dir()?;
     let plan = read_plan(&options.plan()?)?;
     plan.verify_snapshot(&root)?;
+    let total = plan.ops.len();
+    emit_progress(&format!(
+        "check: {total} operation(s){}",
+        if options.deep { ", deep" } else { "" }
+    ));
 
     let mut registry = if options.deep {
         let client = client.ok_or_else(|| {
@@ -357,7 +392,7 @@ pub fn check(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
                 "deep check requires a rust-analyzer LSP session".into(),
             )
         })?;
-        registry_for(client, options.indexing_budget, report_progress)
+        registry_for(client, options.indexing_budget, emit_indexing)
     } else {
         registry_for_static()
     };
@@ -365,6 +400,11 @@ pub fn check(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
     let mut findings = 0usize;
 
     for (index, op) in plan.ops.iter().enumerate() {
+        emit_progress(&format!(
+            "op {index} of {total}: static check {:?} in `{}`",
+            op.op,
+            op.anchor.file()
+        ));
         let statics = registry
             .backend_for(Path::new(op.anchor.file()), op.op)?
             .check(
@@ -383,6 +423,11 @@ pub fn check(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
             continue;
         }
 
+        emit_progress(&format!(
+            "op {index} of {total}: deep resolve {:?} in `{}`",
+            op.op,
+            op.anchor.file()
+        ));
         let rehearsed = rehearsal.rehearse(&root, &mut registry, op)?;
         if let Some(survey) = &rehearsed.survey {
             for line in survey_lines(index, survey) {
@@ -424,8 +469,13 @@ pub fn anchors(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
         return Err(usage("anchors needs --items A,B,C"));
     }
 
+    emit_progress(&format!(
+        "anchors: `{file}` ({} item(s))",
+        options.items.len()
+    ));
+
     let overlay = Overlay::new();
-    let mut registry = registry_for(client, options.indexing_budget, report_progress_aside);
+    let mut registry = registry_for(client, options.indexing_budget, emit_indexing);
     let range = registry
         .backend_for(&source, crate::plan::RefactorKind::ExtractModule)?
         .anchor_for(
@@ -843,12 +893,55 @@ fn usage(reason: impl std::fmt::Display) -> RestructureError {
     RestructureError::MalformedPlan(format!("{reason}\n{USAGE}"))
 }
 
-fn report_progress(line: &str) {
-    println!("   indexing: {line}");
+struct ProgressClock(Mutex<Option<Instant>>);
+
+static PROGRESS_CLOCK: OnceLock<ProgressClock> = OnceLock::new();
+
+fn progress_clock() -> &'static ProgressClock {
+    PROGRESS_CLOCK.get_or_init(|| ProgressClock(Mutex::new(None)))
 }
 
-fn report_progress_aside(line: &str) {
-    eprintln!("   indexing: {line}");
+/// Start (or restart) the step timer for `progress` / `indexing` lines on this thread.
+pub fn reset_progress_clock() {
+    let mut last = progress_clock().0.lock().expect("progress clock poisoned");
+    *last = Some(Instant::now());
+}
+
+/// Human-readable elapsed time since the previous progress line.
+fn format_step_delta(previous: Option<Instant>, now: Instant) -> String {
+    let delta = previous
+        .map(|earlier| now.duration_since(earlier))
+        .unwrap_or(Duration::ZERO);
+    let ms = delta.as_millis();
+    if ms == 0 {
+        return "+0ms".to_string();
+    }
+    if ms < 1000 {
+        format!("+{ms}ms")
+    } else if ms < 60_000 {
+        format!("+{:.1}s", delta.as_secs_f64())
+    } else {
+        let minutes = ms / 60_000;
+        let seconds = delta.as_secs() % 60;
+        format!("+{minutes}m{seconds}s")
+    }
+}
+
+fn emit_stamped(kind: &str, line: &str) {
+    let now = Instant::now();
+    let mut last = progress_clock().0.lock().expect("progress clock poisoned");
+    let stamp = format_step_delta(*last, now);
+    *last = Some(now);
+    eprintln!("   {kind} ({stamp}): {line}");
+}
+
+/// Run progress on stderr so stdout stays machine-readable (`anchors` JSON, apply summaries).
+pub fn emit_progress(line: &str) {
+    emit_stamped("progress", line);
+}
+
+fn emit_indexing(line: &str) {
+    emit_stamped("indexing", line);
 }
 
 const TRACE_VARIABLE: &str = "RESTRUCTURE_TRACE";
@@ -863,13 +956,13 @@ fn report_trace(line: &str) {
 
 fn report_visibility(resolved: &crate::Resolution) {
     for change in &resolved.report {
-        println!(
-            "   visibility: `{}` {} -> {}",
+        emit_progress(&format!(
+            "visibility: `{}` {} -> {}",
             change.item, change.from, change.to
-        );
+        ));
     }
     for note in &resolved.notes {
-        println!("   note: {note}");
+        emit_progress(&format!("note: {note}"));
     }
 }
 
@@ -935,6 +1028,24 @@ mod tests {
 
         // Then it says so
         assert!(line.ends_with("resolved"), "{line}");
+    }
+
+    #[test]
+    fn formats_elapsed_time_since_the_previous_progress_line() {
+        let t0 = Instant::now();
+        assert_eq!(format_step_delta(None, t0), "+0ms");
+        assert_eq!(
+            format_step_delta(Some(t0), t0 + Duration::from_millis(250)),
+            "+250ms"
+        );
+        assert_eq!(
+            format_step_delta(Some(t0), t0 + Duration::from_secs(3)),
+            "+3.0s"
+        );
+        assert_eq!(
+            format_step_delta(Some(t0), t0 + Duration::from_secs(90)),
+            "+1m30s"
+        );
     }
 
     /// The counter is what the run has completed; the index is what `--from` would resume at. A
