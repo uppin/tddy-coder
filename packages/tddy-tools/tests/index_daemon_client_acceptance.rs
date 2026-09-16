@@ -1,7 +1,6 @@
 //! `tddy-tools restructure` against a warm index daemon, and the cold path it must leave alone.
 //!
-//! Changeset: docs/dev/1-WIP/2026-09-15-warm-code-intelligence-daemon.md (M5)
-//! Feature: docs/ft/coder/1-WIP/PRD-2026-09-15-warm-code-intelligence-daemon.md
+//! Contract: docs/ft/coder/warm-code-intelligence-daemon.md § Running it
 //!          § Opt-in client wiring in `tddy-tools`
 //!
 //! Every test here drives the real `tddy-tools` binary as a child process rather than calling into

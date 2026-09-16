@@ -28,7 +28,23 @@ A cluster whose members reference each other has to move as one unit. The operat
 no way to say that, and `check` does not detect it — which is the worse half, because a plan that
 passes `check` reads as safe.
 
-## 2. `--indexing-budget` is not honoured
+## 2. `--indexing-budget` is not honoured — ANSWERED, and the flag is gone
+
+**Resolved 2026-09-16.** The mechanism was not a fixed 46-second ceiling but a derived one:
+`settle_budget_for(warmup) = max(30s, warmup / 20)`, reached through `resolution_budget()` once
+`ensure_indexed` set the `indexed` flag. So `--indexing-budget 900` yielded 45 seconds for every wait
+after the first, which is the "46s" this entry recorded.
+
+The flag has been withdrawn rather than repaired. A wait now ends when the server is ready or when its
+caller stops waiting, checked inside the poll loops because the engine is synchronous and runs under
+`spawn_blocking`, where dropping the calling future stops nothing. See
+[docs/ft/coder/rust-code-restructuring.md](../../ft/coder/rust-code-restructuring.md) § Waiting.
+
+**This entry stays open for § 1**, which is a different problem and untouched.
+
+### What it said
+
+
 
 ```
 tddy-tools restructure apply --dry-run --indexing-budget 900

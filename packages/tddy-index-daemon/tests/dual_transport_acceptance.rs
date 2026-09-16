@@ -207,7 +207,7 @@ fn a_tcp_connection_is_accepted_on(port: u16, budget: Duration) -> bool {
 
 // ─── One subcommand per single-shot operation ──────────────────────────────────────────────
 //
-// Changeset: docs/dev/1-WIP/2026-09-15-warm-code-intelligence-daemon.md (M4b)
+// Contract: docs/ft/coder/warm-code-intelligence-daemon.md § Two lifetimes, one implementation
 //
 // `check` is pinned above. These pin the other four, at the same level and in the same way: a real
 // process, real arguments, and the answer the operator is left with. Each asserts the *whole*

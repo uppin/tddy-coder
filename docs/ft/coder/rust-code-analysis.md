@@ -29,7 +29,7 @@ the one analysis operation cheap enough to be, and cheaper still on a warm proce
 **A capture cannot yet be stopped.** `capture_coverage` takes no cancellation surface, so a client
 that hangs up one minute in leaves the other 54 running; the progress sink notices the dropped
 receiver and stops sending, but cannot cancel. See
-[PRD: warm code-intelligence daemon](1-WIP/PRD-2026-09-15-warm-code-intelligence-daemon.md).
+[warm code-intelligence daemon](warm-code-intelligence-daemon.md).
 
 ## Complexity is cached by content, not by path
 

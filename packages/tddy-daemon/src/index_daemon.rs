@@ -7,7 +7,7 @@
 //! "the process we already started" needs a layer that keys by identity. Here the identity is
 //! trivial — there is exactly **one** index daemon per host, because that process is itself
 //! root-parameterised and serves every workspace root
-//! (`docs/ft/coder/1-WIP/PRD-2026-09-15-warm-code-intelligence-daemon.md` § *One process, many
+//! (`docs/ft/coder/warm-code-intelligence-daemon.md` § *One process, many
 //! worktrees*) — so the map collapses to a single slot.
 //!
 //! What the layer still has to do is everything the trivial key does not remove: start the process
@@ -323,7 +323,7 @@ impl IndexDaemonRegistry {
     /// Wait until the child has bound its socket.
     ///
     /// The readiness signal is the socket itself appearing, which is what
-    /// `docs/dev/1-WIP/2026-09-15-warm-code-intelligence-daemon.md` calls the
+    /// `docs/ft/coder/warm-code-intelligence-daemon.md` calls the
     /// bind-then-write-the-marker contract: `UnixListener::bind` creates the path *and* starts
     /// accepting, so the file is evidence of the one thing a caller needs, and it does not depend
     /// on the child's log level the way reading its `listening on …` narration would.

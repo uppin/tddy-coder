@@ -474,7 +474,8 @@ mod tests {
         let tree = tempfile::tempdir().expect("a temporary tree");
 
         // When it is resolved
-        let refusal = plan_path(tree.path(), "absent.jsonl").expect_err("a missing plan is refused");
+        let refusal =
+            plan_path(tree.path(), "absent.jsonl").expect_err("a missing plan is refused");
 
         // Then the refusal says the tree is wrong and names what was not found, rather than
         // deferring to an `Io` error several frames down that would read as this host's fault

@@ -31,7 +31,7 @@ faster than its cold load, but re-asking a root after a *different* root's graph
 880 ms to 3.6 s, the upper end exceeding that root's own 2.19 s cold load. Warm several worktrees at
 once and the per-root benefit narrows sharply; warm one and it is total.
 
-See [PRD: warm code-intelligence daemon](1-WIP/PRD-2026-09-15-warm-code-intelligence-daemon.md).
+See [warm code-intelligence daemon](warm-code-intelligence-daemon.md).
 
 ## CLI
 
@@ -177,7 +177,7 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
 
 - [Reusable LSP](reusable-lsp.md) — client reuse; raw RPC surface for restructuring
 - [Rust code analysis](rust-code-analysis.md) — prerequisite targeting pass
-- [PRD: warm code-intelligence daemon](1-WIP/PRD-2026-09-15-warm-code-intelligence-daemon.md) — the
+- [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — the
   daemon front end, the workspace-root parameter, cancellation in place of budgets
 - [Feature prompt: agent skills](feature-prompt-agent-skills.md)
 - Package: [`packages/tddy-code-restructuring/README.md`](../../../packages/tddy-code-restructuring/README.md)
