@@ -280,12 +280,15 @@ pub fn apply(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
         report_visibility(&resolved);
 
         let files = resolved.edit.changes.len();
-        emit_progress(&format!(
-            "op {index} of {total}: resolved {files} file(s)"
-        ));
+        emit_progress(&format!("op {index} of {total}: resolved {files} file(s)"));
         if options.dry_run {
             emit_progress(&progress_line(
-                index, done, plan.ops.len(), op.op, files, false,
+                index,
+                done,
+                plan.ops.len(),
+                op.op,
+                files,
+                false,
             ));
             ledger.record(&resolved.edit);
             overlay.record(&root, &resolved.edit)?;
@@ -298,7 +301,12 @@ pub fn apply(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
         ));
         commit_operation(index, &resolved, &root, &paths, &mut journal, &mut ledger)?;
         emit_progress(&progress_line(
-            index, done, plan.ops.len(), op.op, files, true,
+            index,
+            done,
+            plan.ops.len(),
+            op.op,
+            files,
+            true,
         ));
         done += 1;
     }
@@ -895,10 +903,7 @@ fn progress_clock() -> &'static ProgressClock {
 
 /// Start (or restart) the step timer for `progress` / `indexing` lines on this thread.
 pub fn reset_progress_clock() {
-    let mut last = progress_clock()
-        .0
-        .lock()
-        .expect("progress clock poisoned");
+    let mut last = progress_clock().0.lock().expect("progress clock poisoned");
     *last = Some(Instant::now());
 }
 
@@ -924,10 +929,7 @@ fn format_step_delta(previous: Option<Instant>, now: Instant) -> String {
 
 fn emit_stamped(kind: &str, line: &str) {
     let now = Instant::now();
-    let mut last = progress_clock()
-        .0
-        .lock()
-        .expect("progress clock poisoned");
+    let mut last = progress_clock().0.lock().expect("progress clock poisoned");
     let stamp = format_step_delta(*last, now);
     *last = Some(now);
     eprintln!("   {kind} ({stamp}): {line}");
