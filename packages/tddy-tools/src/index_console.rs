@@ -22,9 +22,14 @@ use tddy_index_daemon::proto::code_index::{
     PlanStatusResponse, RestructureEvent, RunOutcome, SourceRange, VerifyResponse,
 };
 
-/// One line of a run's live account, on the console this front end owns.
+/// One line of a run's answer, on the console this front end owns.
 fn say(line: &str) {
     println!("{line}");
+}
+
+/// One line of the server's narration, beside the answer rather than in it.
+fn aside(line: &str) {
+    eprintln!("{line}");
 }
 
 /// What a run has been told so far, and therefore what it amounts to.
@@ -33,13 +38,19 @@ fn say(line: &str) {
 /// whose answer is a failed run, so the count is what becomes this process's exit status — the
 /// judgement `restructure_cli::report_findings` makes, made here for the same reason.
 ///
-/// Every line goes to **stdout**. `restructure_cli::install_console` puts an `anchors` run's
-/// account beside the answer instead, because that command's stdout is a JSON document a caller
-/// pastes into a plan and a progress line landing in the middle of it would make the document
-/// unreadable. That case cannot arise here: `Anchors` is a unary RPC, so a client of the daemon
-/// receives a range and no account at all — the waiting the cold path narrates happens in the
-/// daemon, and goes to the daemon's log. The two streaming commands, `check` and `apply`, both
-/// write prose to stdout, which is where their account belongs.
+/// Two destinations, and they must match `restructure_cli::install_console`'s exactly: the answer
+/// — findings, per-operation lines, the summary — goes to **stdout**, and the server's narration of
+/// how far it got goes **aside, to stderr**.
+///
+/// The rule is not cosmetic. A test pins the whole stdout vector of a `check --budget` run against
+/// the literal lines the cold path's own suite pins, so the two front ends cannot drift apart
+/// silently. It caught this: when #500's run-level narration was merged in, the cold path started
+/// sending it to stderr and this renderer was still putting it on stdout, and the assertion failed
+/// with the three extra lines.
+///
+/// `Anchors` needs no special case here, unlike the cold path — it is a unary RPC, so a client
+/// receives a range and no account at all; the waiting the cold path narrates happens inside the
+/// daemon and goes to the daemon's log.
 pub(crate) struct Rendered {
     /// True when the run was a rehearsal, which decides whether it "resolved" or "applied".
     rehearsal: bool,
@@ -76,7 +87,7 @@ impl Rendered {
     }
 
     fn indexing(&self, progress: &IndexProgress) {
-        say(&format!("   indexing: {}", progress.line));
+        aside(&format!("   indexing: {}", progress.line));
     }
 
     /// What one operation of a plan amounted to, and what it had to widen to get there.

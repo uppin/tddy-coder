@@ -15,8 +15,8 @@
 //! The command line's own shape lives in [`crate::restructure_args`], which this module re-exports
 //! so that a binary needs one path for both.
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use tddy_lsp::allowlist::{Language, LaunchSpec, LspAllowList};
@@ -58,10 +58,12 @@ pub async fn run(args: RestructureArgs) -> Result<()> {
             root: root.clone(),
             language: Language::Rust,
         };
+        (options.progress)("acquiring shared rust-analyzer client (first run may take minutes)");
         let service = lsp_registry
             .get_or_spawn(key)
             .await
             .context("rust-analyzer LSP")?;
+        (options.progress)("rust-analyzer client ready");
         // The client's own per-request default is sized for interactive queries, and one request
         // against a cold index routinely outlasts it. This is not a budget on the index — nothing
         // bounds that now but the caller — it is how long a single *unanswered* request may hold
@@ -173,31 +175,72 @@ fn report_comparison(comparison: &Comparison) -> Result<()> {
 
 /// Point a run's live account at the console this front end owns.
 ///
-/// Where it goes depends on the command, not on the process: `anchors` writes a JSON document to
-/// stdout for a caller to paste into a plan, and a line of indexing progress landing in the middle
-/// of it would make that document unreadable — so its account goes beside the answer instead.
-/// Every other command's stdout is prose already, so its account belongs there, where the operator
-/// is reading.
+/// Two destinations, on a rule #500 got right: the server's narration — how far the index got, which
+/// assist is outstanding — is **always** stderr, stamped with the time since the line before it, so
+/// stdout carries only the answer. `anchors` writes a JSON document there for a caller to paste into
+/// a plan, and an indexing line landing in the middle of it would make that document unreadable;
+/// the same holds less dramatically for a check's findings and an apply's summary. `anchors`' own
+/// per-operation account therefore also goes aside, because its stdout is the document.
 fn install_console(options: &mut Options) {
-    let (progress, account): (ProgressSink, ProgressSink) = if options.command == Command::Anchors {
-        (
-            Arc::new(report_indexing_aside),
-            Arc::new(report_account_aside),
-        )
+    let account: ProgressSink = if options.command == Command::Anchors {
+        Arc::new(report_account_aside)
     } else {
-        (Arc::new(report_indexing), Arc::new(report_account))
+        Arc::new(report_account)
     };
+    // Narration goes to stderr for every command, #500's rule and the better one: stdout then
+    // carries only the answer — `anchors`' JSON document, a check's findings, an apply's summary —
+    // and stays something a caller can read without filtering.
+    let progress = a_stamped_sink("indexing", true);
     options.progress = progress;
     options.account = account;
     options.trace = report_trace;
 }
 
-fn report_indexing(line: &str) {
-    println!("   indexing: {line}");
+/// A sink that stamps each line with the time since the line before it, and writes it where
+/// `aside` says.
+///
+/// The clock belongs to the sink, not to the process. #500 introduced this stamping over a
+/// `static OnceLock<Mutex<Option<Instant>>>`, which is right for a command line — one run, one
+/// clock — and wrong for anything serving two callers at once: their deltas would interleave
+/// through one shared instant and both accounts would be nonsense. A closure owning its own
+/// `Instant` reads identically for the CLI and stays correct when a second caller appears.
+fn a_stamped_sink(kind: &'static str, aside: bool) -> ProgressSink {
+    let previous: Mutex<Option<Instant>> = Mutex::new(None);
+    Arc::new(move |line: &str| {
+        let now = Instant::now();
+        let stamp = {
+            let mut last = previous.lock().expect("the sink's own clock");
+            let stamp = step_delta(*last, now);
+            *last = Some(now);
+            stamp
+        };
+        let stamped = format!("   {kind} ({stamp}): {line}");
+        if aside {
+            eprintln!("{stamped}");
+        } else {
+            println!("{stamped}");
+        }
+    })
 }
 
-fn report_indexing_aside(line: &str) {
-    eprintln!("   indexing: {line}");
+/// Elapsed time since the previous line, in the units a reader can act on.
+///
+/// Carried over from #500 unchanged: a phase that took 6 minutes and one that took 60ms want
+/// different reactions, and a reader should not have to subtract timestamps to tell them apart.
+fn step_delta(previous: Option<Instant>, now: Instant) -> String {
+    let delta = previous
+        .map(|earlier| now.duration_since(earlier))
+        .unwrap_or(Duration::ZERO);
+    let ms = delta.as_millis();
+    if ms == 0 {
+        "+0ms".to_string()
+    } else if ms < 1000 {
+        format!("+{ms}ms")
+    } else if ms < 60_000 {
+        format!("+{:.1}s", delta.as_secs_f64())
+    } else {
+        format!("+{}m{}s", ms / 60_000, delta.as_secs() % 60)
+    }
 }
 
 fn report_account(line: &str) {
@@ -274,6 +317,38 @@ fn needs_lsp_client(options: &Options) -> bool {
 
 #[cfg(test)]
 mod tests {
+    // Carried over from #500 with the function, which moved here when the library stopped printing.
+    // Four cases because each picks a different unit, and a reader acts on the unit: `+250ms` and
+    // `+1m30s` want opposite reactions and a single format would bury one of them.
+    #[test]
+    fn stamps_elapsed_time_since_the_previous_line() {
+        let t0 = Instant::now();
+        assert_eq!(step_delta(None, t0), "+0ms");
+        assert_eq!(
+            step_delta(Some(t0), t0 + Duration::from_millis(250)),
+            "+250ms"
+        );
+        assert_eq!(step_delta(Some(t0), t0 + Duration::from_secs(3)), "+3.0s");
+        assert_eq!(step_delta(Some(t0), t0 + Duration::from_secs(90)), "+1m30s");
+    }
+
+    #[test]
+    fn a_stamped_sink_keeps_its_own_clock_rather_than_sharing_one() {
+        // Given two sinks, as two concurrent callers would each own
+        let first = a_stamped_sink("indexing", true);
+        let second = a_stamped_sink("indexing", true);
+
+        // When both are written to, interleaved
+        first("one");
+        second("two");
+        first("three");
+
+        // Then neither panicked on a poisoned shared clock, and each advanced its own. The
+        // process-global `static` this replaced would have had both callers' deltas measured
+        // against whichever line was written last, by either of them.
+        second("four");
+    }
+
     use super::*;
     use clap::Parser;
 

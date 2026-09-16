@@ -346,6 +346,16 @@ pub fn apply(
     let mut ledger = restore_ledger(&journal, &paths)?;
     let mut registry = registry_for(client, cancel, Arc::clone(&options.progress), options.trace);
     let start = options.from.unwrap_or_else(|| journal.next_op());
+    let total = plan.ops.len();
+    (options.progress)(&format!(
+        "apply: {total} operation(s){}{}",
+        if options.dry_run { ", dry-run" } else { "" },
+        if start > 0 {
+            format!(", from op {start}")
+        } else {
+            String::new()
+        }
+    ));
     let mut overlay = Overlay::new();
     let mut done = 0usize;
     let mut stopped_early = false;
@@ -358,11 +368,20 @@ pub fn apply(
             .stop_after
             .is_some_and(|limit| index >= start + limit)
         {
+            (options.progress)(&format!(
+                "stopped after {} operation(s) as requested",
+                index - start
+            ));
             stopped_early = true;
             break;
         }
 
         let anchor = ledger.translate_anchor(&op.anchor)?;
+        (options.progress)(&format!(
+            "op {index} of {total}: resolving {:?} in `{}`",
+            op.op,
+            anchor.file()
+        ));
         let resolved = registry
             .backend_for(Path::new(anchor.file()), op.op)?
             .resolve(
@@ -376,6 +395,7 @@ pub fn apply(
         report_visibility(&options.account, &resolved);
 
         let files = resolved.edit.changes.len();
+        (options.progress)(&format!("op {index} of {total}: resolved {files} file(s)"));
         if options.dry_run {
             (options.account)(&progress_line(
                 index,
@@ -391,6 +411,9 @@ pub fn apply(
             continue;
         }
 
+        (options.progress)(&format!(
+            "op {index} of {total}: applying {files} file(s) to disk"
+        ));
         commit_operation(index, &resolved, root, &paths, &mut journal, &mut ledger)?;
         // Reported *after* the commit, so a line in the account means the edit is on disk and in
         // the journal. An apply used to report nothing at all — the dry run, where nothing is at
@@ -489,8 +512,18 @@ pub fn check(
     };
     let mut rehearsal = Rehearsal::default();
     let mut findings: Vec<Finding> = Vec::new();
+    let total = plan.ops.len();
+    (options.progress)(&format!(
+        "check: {total} operation(s){}",
+        if options.deep { ", deep" } else { "" }
+    ));
 
     for (index, op) in plan.ops.iter().enumerate() {
+        (options.progress)(&format!(
+            "op {index} of {total}: static check {:?} in `{}`",
+            op.op,
+            op.anchor.file()
+        ));
         let statics = registry
             .backend_for(Path::new(op.anchor.file()), op.op)?
             .check(
@@ -510,6 +543,11 @@ pub fn check(
             continue;
         }
 
+        (options.progress)(&format!(
+            "op {index} of {total}: deep resolve {:?} in `{}`",
+            op.op,
+            op.anchor.file()
+        ));
         let rehearsed = rehearsal.rehearse(root, &mut registry, op)?;
         if let Some(survey) = &rehearsed.survey {
             for line in survey_lines(index, survey) {
@@ -550,6 +588,10 @@ pub fn anchors(
         return Err(usage("anchors needs --items A,B,C"));
     }
 
+    (options.progress)(&format!(
+        "anchors: `{file}` ({} item(s))",
+        options.items.len()
+    ));
     let overlay = Overlay::new();
     let mut registry = registry_for(client, cancel, Arc::clone(&options.progress), options.trace);
     registry
