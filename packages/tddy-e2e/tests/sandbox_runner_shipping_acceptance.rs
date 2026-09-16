@@ -68,6 +68,9 @@ const RELEASE_BINARIES: &[&str] = &[
     "tddy-remote-git-repo",
     "tddy-session-sync",
     RUNNER,
+    // Spawned by the daemon as a sibling of its own executable, exactly like the runner, so
+    // `install` pre-flights it too and a fixture without it never reaches the assertion below.
+    "tddy-index-daemon",
 ];
 
 fn copy_install_tree(dest: &Path) {
