@@ -110,12 +110,28 @@ fn contains(subset: &[u32], superset: &[u32]) -> bool {
     subset.iter().zip(superset).all(|(s, p)| (s & p) == *s)
 }
 
+/// The refusal a cancelled detection ends with, naming the pass it stopped in and how far it got.
+///
+/// One shape for every pass, because what a reader does about it is the same whichever one it
+/// was: nothing was written, and starting again costs the whole run.
+fn detection_cancelled(done: usize, total: usize, pass: &str) -> AnalysisError {
+    AnalysisError::Cancelled {
+        work: "duplicate-test detection".to_string(),
+        reached: format!("{done} of {total} {pass}"),
+    }
+}
+
 /// Find identical signature groups and strict subset relations.
+///
+/// `cancelled` is checked once per signature in each of the two passes over them — the inverted
+/// index and the subset scan — which is what makes a ~22-minute detection stoppable. Pass
+/// `&crate::never_cancelled` when nobody can hang up.
 pub fn analyze_duplicates(
     signatures: &[(String, Vec<String>)],
     min_signature: usize,
     subset_ratio: f64,
-) -> DuplicateAnalysis {
+    cancelled: &dyn Fn() -> bool,
+) -> Result<DuplicateAnalysis> {
     let (bitsets, intern) = build_bitsets(signatures);
     let mut identical: Vec<DuplicateGroup> = Vec::new();
     let mut bucket: HashMap<String, Vec<String>> = HashMap::new();
@@ -144,6 +160,13 @@ pub fn analyze_duplicates(
 
     let mut inverted: HashMap<usize, Vec<usize>> = HashMap::new();
     for (index, entry) in bitsets.iter().enumerate() {
+        if cancelled() {
+            return Err(detection_cancelled(
+                index,
+                bitsets.len(),
+                "test signatures indexed",
+            ));
+        }
         for (word_index, word) in entry.words.iter().enumerate() {
             for bit in 0..32 {
                 if word & (1u32 << bit) != 0 {
@@ -163,6 +186,13 @@ pub fn analyze_duplicates(
 
     let mut subsets = Vec::new();
     for (subset_index, subset) in bitsets.iter().enumerate() {
+        if cancelled() {
+            return Err(detection_cancelled(
+                subset_index,
+                bitsets.len(),
+                "test signatures compared",
+            ));
+        }
         let subset_size = subset.words.iter().map(|w| w.count_ones()).sum::<u32>() as usize;
         if subset_size == 0 {
             continue;
@@ -202,19 +232,32 @@ pub fn analyze_duplicates(
         }
     }
 
-    DuplicateAnalysis { identical, subsets }
+    Ok(DuplicateAnalysis { identical, subsets })
 }
 
 /// Load per-test artifacts and run duplicate analysis.
+///
+/// `cancelled` is checked once per artefact loaded as well as through the analysis itself, since
+/// reading a capture of two thousand tests off disk is minutes of the run. Pass
+/// `&crate::never_cancelled` when nobody can hang up.
 pub fn analyze_coverage_dir(
     coverage_dir: &std::path::Path,
     min_signature: usize,
     subset_ratio: f64,
     include_test_sources: bool,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<DuplicateAnalysis> {
     let metas = load_per_test_meta(coverage_dir)?;
     let mut signatures = Vec::new();
+    let loading = metas.len();
     for meta in metas {
+        if cancelled() {
+            return Err(detection_cancelled(
+                signatures.len(),
+                loading,
+                "per-test signatures loaded",
+            ));
+        }
         let path = coverage_dir
             .join("per-test")
             .join(format!("{}.rust.json", meta.id));
@@ -228,7 +271,7 @@ pub fn analyze_coverage_dir(
         let keys = signature_for_rust_test(&per_test, include_test_sources);
         signatures.push((meta.full_name, keys));
     }
-    Ok(analyze_duplicates(&signatures, min_signature, subset_ratio))
+    analyze_duplicates(&signatures, min_signature, subset_ratio, cancelled)
 }
 
 #[cfg(test)]
@@ -247,6 +290,77 @@ mod tests {
         }
     }
 
+    /// A caller that has already gone away.
+    fn already_cancelled() -> bool {
+        true
+    }
+
+    /// The work a cancellation names and how far it got, or a panic saying what arrived instead.
+    fn cancellation(refusal: AnalysisError) -> (String, String) {
+        match refusal {
+            AnalysisError::Cancelled { work, reached } => (work, reached),
+            other => panic!("expected a cancellation, got {other:?}"),
+        }
+    }
+
+    /// Two tests covering one region each, which is a whole signature set to compare.
+    fn two_signatures() -> Vec<(String, Vec<String>)> {
+        vec![
+            (
+                "covers_one".to_string(),
+                vec![rust_region_key("/src/lib.rs", &region("code", 3))],
+            ),
+            (
+                "covers_the_same".to_string(),
+                vec![rust_region_key("/src/lib.rs", &region("code", 3))],
+            ),
+        ]
+    }
+
+    #[test]
+    fn refuses_a_detection_whose_caller_went_away_before_it_indexed_a_signature() {
+        // Given two signatures to compare and a caller that is already gone
+        let signatures = two_signatures();
+
+        // When the detection runs
+        let outcome = analyze_duplicates(&signatures, 2, 0.5, &already_cancelled);
+
+        // Then it is refused as cancelled, naming the phase it stopped in and how far it got
+        assert_eq!(
+            cancellation(outcome.expect_err("a cancelled detection is not a success")),
+            (
+                "duplicate-test detection".to_string(),
+                "0 of 2 test signatures indexed".to_string()
+            )
+        );
+    }
+
+    /// The check that matters for a ~22-minute run: it is made **between** signatures, not only
+    /// before the first one, so a caller that hangs up part way through stops the rest.
+    #[test]
+    fn stops_between_signatures_once_the_indexing_pass_is_behind_it() {
+        // Given a caller that goes away after the two signatures have been indexed — one check per
+        // signature per pass, so the third check is the first of the comparison pass
+        let signatures = two_signatures();
+        let checks = std::cell::Cell::new(0usize);
+        let goes_away_after_indexing = || {
+            checks.set(checks.get() + 1);
+            checks.get() > 2
+        };
+
+        // When the detection runs
+        let outcome = analyze_duplicates(&signatures, 2, 0.5, &goes_away_after_indexing);
+
+        // Then it stopped in the comparison pass, having got through the indexing one
+        assert_eq!(
+            cancellation(outcome.expect_err("a cancelled detection is not a success")),
+            (
+                "duplicate-test detection".to_string(),
+                "0 of 2 test signatures compared".to_string()
+            )
+        );
+    }
+
     #[test]
     fn identical_signatures_group_when_min_size_is_met() {
         // Given two tests covering the same production region
@@ -260,7 +374,8 @@ mod tests {
         ];
 
         // When
-        let analysis = analyze_duplicates(&signatures, 5, 0.5);
+        let analysis = analyze_duplicates(&signatures, 5, 0.5, &crate::never_cancelled)
+            .expect("a detection nobody stopped produces its analysis");
 
         // Then
         assert_eq!(analysis.identical.len(), 1);
@@ -284,7 +399,8 @@ mod tests {
         signatures.push(("large".to_string(), keys_b));
 
         // When
-        let analysis = analyze_duplicates(&signatures, 100, 0.4);
+        let analysis = analyze_duplicates(&signatures, 100, 0.4, &crate::never_cancelled)
+            .expect("a detection nobody stopped produces its analysis");
 
         // Then
         assert!(

@@ -8,13 +8,32 @@ Replays a JSONL plan of named Rust refactoring intents via rust-analyzer through
 
 Exposed via `tddy-tools restructure`:
 
-- `apply <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N] [--indexing-budget SECONDS]`
+- `apply <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N]`
 - `status <plan.jsonl>`
-- `check <plan.jsonl> [--deep] [--budget LINES] [--indexing-budget SECONDS]` — `--deep` also reports the blast radius of every cross-crate move; `--budget` reports the files the plan names that are longer than LINES, as a record rather than a gate
-- `anchors <file.rs> --items A,B,C [--indexing-budget SECONDS]`
+- `check <plan.jsonl> [--deep] [--budget LINES]` — `--deep` also reports the blast radius of every cross-crate move; `--budget` reports the files the plan names that are longer than LINES, as a record rather than a gate
+- `anchors <file.rs> --items A,B,C`
 - `verify --against <git-ref>`
 
+A run waits until the server is ready or until its caller stops waiting; there is no budget flag.
+
 Plans hold intents only — no source text (`text` / `code` / `content` refused). Unsupported operations are hard errors.
+
+## Driving it from something other than a command line
+
+Two properties make that possible, and both are load-bearing:
+
+- **Every entry point takes the workspace root it acts on.** Nothing here reads the process
+  directory, so one process can serve several worktrees. `StatePaths`, `open_run`, `restore_ledger`
+  and `commit_operation` are public so a host can drive the apply loop without re-deriving
+  `.restructure/` or re-implementing the write-ahead commit sequence — note `open_run` is the only
+  concurrency gate that exists and there is no lock file, so a host serializes per root itself.
+- **Nothing here prints.** Results come back as values — `RunSummary`, `PlanProgress`,
+  `Vec<Finding>`, `Range`, `Comparison` — and progress goes to caller-owned sinks on `Options`. Only
+  `restructure_cli` writes to a console, and a test reads this crate's sources to keep that true: a
+  host speaking a protocol on its own stdout would otherwise have its frames corrupted by a finding.
+
+`tddy-index-daemon` is that host. See
+[warm-code-intelligence-daemon.md](../../docs/ft/coder/warm-code-intelligence-daemon.md).
 
 ## Operations (v1)
 

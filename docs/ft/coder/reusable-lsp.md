@@ -2,7 +2,7 @@
 
 **Product Area**: Coder
 **Status**: Draft
-**Updated**: 2026-08-31
+**Updated**: 2026-09-16
 
 ## Summary
 
@@ -175,9 +175,64 @@ definitions, and three parts of `LspClient` exist for it:
 behind an `Arc` from the registry. Ten seconds suits the interactive queries; a code-action request
 against a cold index does not fit in it, which is why the wait is the caller's to set.
 
+## What a host that outlives one request needs (added 2026-09-16)
+
+Requirements 4–8 always said the servers are long-running and reused. Four things in the registry
+were nevertheless written for a process that handles **one** request and exits, and a second host
+found all four. They are fixed; recorded here because each was invisible until something outlived a
+request, and the next host will assume they were always this way.
+
+### Document versions belong to the client
+
+A server tracks a document's version for its whole life. `LspClient` used to send
+`"version": 1` on every `didOpen` and keep no state at all, and the only working `didChange` in the
+tree lived in `tddy-code-restructuring`'s `RustBackend` with a counter that died when the backend
+did. A second caller therefore began again at 1 against a server that had already seen 40 — a
+protocol violation the server is entitled to ignore, which would have shown up as an edit silently
+having no effect.
+
+`LspClient` now owns per-URI version state and an open-document set, with `did_change` and
+`did_close` beside `did_open`. A notification naming a URI the client never opened is **refused**
+(`LspError::DocumentNotOpen`) rather than dropped: there is no sequence to continue, and a silent
+no-op is how a caller's edit disappears.
+
+Still open: `did_open` on an **already-open** URI restarts that document at 1. That is deliberate,
+because `bind_target` re-opens every `src` on every call and `tddy-lsp-executor` calls it per tool
+invocation — refusing would break that consumer. The honest fix is `bind_target` issuing a
+`did_change` for a URI already open, which is a behaviour change to a consumer's path.
+
+### Using a client counts as activity
+
+The idle tracker was refreshed only by `get_or_spawn`. A caller that borrowed `service.client` and
+then worked for minutes — which is exactly what a restructuring run does — never touched it, so a
+host running the reaper loop could **reap rust-analyzer out from under an operation in flight**. The
+client now carries an activity hook the registry installs after the handshake, and every request and
+notification touches it. Installing it *after* the handshake matters: doing it before would let a
+spawn backdate the idle clock and defeat the teardown requirement.
+
+### Concurrent cold requests spawn one server
+
+`get_or_spawn` released its map lock before spawning, so two callers racing on a cold key each
+started a rust-analyzer and the second insert orphaned the first — a live task, unreachable for
+reaping, holding a multi-gigabyte process. There is now a per-key spawn gate with a double-checked
+lookup. Different keys still start concurrently; the map lock is never held across a spawn.
+
+### The server's stderr is drained
+
+`LspServerBody` piped the child's stderr and never read it. Once the pipe buffer filled (~64 KiB)
+the server blocked mid-write and stopped answering every request thereafter. This was inferred from
+reading the code and then demonstrated: a fake server flooding stderr wedges, and the client's next
+request times out. Now drained in bounded chunks to the log.
+
 ## Future Considerations (Not In Scope)
 
 - Additional languages (TypeScript / Python / Go) beyond the Rust allow-list entry.
 - Rename / code-actions / formatting LSP operations (MCP tools remain diagnostics/definition/references/hover/symbols; restructuring uses raw RPC for assists).
 - Sharing one server across distinct sessions in the same workspace (initial slice
   reuses across targets within an owner; cross-session sharing is a follow-up).
+- **A non-destructive way to observe server progress.** `drain_notifications` is destructive and
+  single-consumer, so two observers steal each other's `$/progress`: a status reader and a running
+  operation on the same root cannot both see it. That is why `code_index.CodeIndexService`'s
+  `Warm.ready` means "a live server holds this root's index" rather than "the crate graph is loaded"
+  — the probe that would decide the stronger claim is private, and the progress stream cannot be
+  shared. Closing it means a broadcast or watch in place of a drain.

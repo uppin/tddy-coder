@@ -24,6 +24,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tddy_lsp::client::LspClient;
+use tokio_util::sync::CancellationToken;
 
 /// LSP `SymbolKind::Object` — how rust-analyzer reports an `impl` block. Its members are reached
 /// through the type, never through a module path, which is why a seam may move a whole `impl` freely
@@ -312,8 +313,15 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
 /// minutes loading a crate graph showed nothing at all and then failed claiming the plan was
 /// malformed. Folding those messages in costs one match per message and turns the wait into
 /// something a developer can watch.
+///
+/// **Published because the fold is not this backend's alone.** `tddy-index-daemon` observes the
+/// same two notifications — `$/progress` and `experimental/serverStatus` — to answer "is this
+/// root's graph loaded?", and there is exactly one right way to read them: a title arrives only
+/// with `begin` and has to be carried forward per token, the same phase reports once per file
+/// scanned, and the furthest percentage is not the last one. A second reading of that would drift
+/// from this one, and the two would then disagree about a load they were both watching.
 #[derive(Default)]
-struct ServerChatter {
+pub struct ServerChatter {
     /// The title of each work-done progress token in flight, by token. A title arrives only with
     /// `begin`, so it has to be carried forward to the `report` lines that follow — and per token,
     /// because rust-analyzer runs several phases at once and a single field would attribute one
@@ -342,7 +350,7 @@ impl ServerChatter {
     ///
     /// A message that answers a request carries no `method`, which is what keeps every result out
     /// of the progress stream without having to know the ids in flight.
-    fn absorb(&mut self, message: &Value) -> Option<String> {
+    pub fn absorb(&mut self, message: &Value) -> Option<String> {
         match message.get("method").and_then(Value::as_str)? {
             "$/progress" => self.progress(message.get("params")?),
             "experimental/serverStatus" => {
@@ -415,7 +423,7 @@ impl ServerChatter {
     /// pairs it with the furthest percentage seen, so the reader can tell a server that stalled at
     /// 12% from one that timed out at 99% — the first wants investigating, the second wants a
     /// bigger budget.
-    fn how_far(&self) -> String {
+    pub fn how_far(&self) -> String {
         let last = self
             .last
             .clone()
@@ -424,6 +432,27 @@ impl ServerChatter {
             Some((percentage, phase)) => format!("{last}; furthest {phase} {percentage}%"),
             None => last,
         }
+    }
+
+    /// Whether the server has reported its own graph loaded and queryable.
+    ///
+    /// `experimental/serverStatus` is an extension, so a `false` here means "has not said so",
+    /// never "is not loaded" — which is why [`RustBackend::ensure_indexed`] treats it as a shortcut
+    /// out of a hover probe rather than as the probe itself. A consumer with no probe available has
+    /// only this, and must say so rather than presenting it as the stronger claim.
+    pub fn quiescent(&self) -> bool {
+        self.quiescent
+    }
+
+    /// The furthest percentage any phase has reported, and the phase it belonged to.
+    ///
+    /// Kept apart from the last line for the reason the field states: the server counts files
+    /// inside a phase and then emits sub-steps carrying no percentage at all, so the last line is
+    /// routinely the one with no number in it.
+    pub fn furthest(&self) -> Option<(u64, &str)> {
+        self.furthest
+            .as_ref()
+            .map(|(percentage, phase)| (*percentage, phase.as_str()))
     }
 }
 
@@ -448,39 +477,17 @@ fn progress_line(title: Option<&str>, value: &Value) -> String {
     line
 }
 
-/// How long the one-time warm-up may spend waiting for the crate graph, when a run does not say.
-///
-/// Generous on purpose: it is paid once per process, and the alternative to waiting is a refusal
-/// that reads as a defect in the plan. A cold `~/.cargo` on a loaded machine is the case this covers.
-const WARMUP_BUDGET: Duration = Duration::from_secs(600);
-
-/// How long a wait for name resolution may spend *after* the warm-up has succeeded.
-///
-/// By then the graph is loaded and the only thing left to wait out is the server catching up with
-/// this client's own edits, which is seconds. Keeping this short is the point of the warm-up: these
-/// waits are paid per operation, and `survey_moved_items` pays one per moved item.
-///
-/// "Which is seconds" holds for a file of ordinary size and fails badly on a very large one: an
-/// edit to an 18,000-line module in a workspace this size takes rust-analyzer well past thirty
-/// seconds to re-resolve, and the run then reports an incomplete index for a server that was
-/// working normally. So this is the *default*, and [`settle_budget_for`] scales it when a caller
-/// has said how long it is willing to wait.
-const SETTLE_BUDGET: Duration = Duration::from_secs(30);
-
-/// The per-operation settle budget implied by a whole-run indexing budget.
-///
-/// A caller who raised `--indexing-budget` is saying the machine or the file is slow, and the
-/// per-operation waits are exactly where that slowness shows up after the first index. The divisor
-/// is chosen so the default 600s warm-up yields exactly [`SETTLE_BUDGET`]: a caller who never
-/// passed the flag sees the behaviour they saw before this was configurable, which a test pins.
-fn settle_budget_for(warmup: Duration) -> Duration {
-    std::cmp::max(SETTLE_BUDGET, warmup / 20)
-}
-
 /// rust-analyzer answers `codeAction` with an empty list until it has finished loading the crate
 /// graph, so a request that needs the graph is retried at this cadence until it is answered.
 const INDEXING_POLL: Duration = Duration::from_secs(2);
 const SETTLE_POLL: Duration = Duration::from_millis(200);
+
+/// How often a wait looks at its cancellation token while it is sleeping between polls.
+///
+/// The poll intervals above are the cadence the *server* is asked again at; this is the cadence the
+/// *caller* is listened to at. Keeping the two apart is what lets a cancelled wait unwind promptly
+/// without asking a loading server more often than it deserves.
+const CANCEL_CHECK: Duration = Duration::from_millis(100);
 
 /// The semantic-token type rust-analyzer gives an identifier it cannot resolve. It is an extension
 /// to the standard legend, and the only way this client learns which names a moved item has lost
@@ -522,17 +529,21 @@ pub struct RustBackend {
     environment: String,
     /// What the server has said while this client was waiting on an answer.
     chatter: ServerChatter,
-    /// How long the one-time warm-up may run before it gives up.
-    warmup: Duration,
-    /// How long each later wait for name resolution may run. Derived from `warmup`.
-    settle: Duration,
+    /// How a wait learns that its caller has stopped waiting.
+    ///
+    /// This is the only thing that ends a wait other than the server becoming ready. There is no
+    /// budget: a number this library guessed is not evidence about the server, and a run that
+    /// raised one still met a ceiling derived from it. The token is checked *inside* the poll
+    /// loops, beside each sleep, because those loops are synchronous and run under
+    /// `spawn_blocking` — dropping the calling future stops nothing at all.
+    cancel: CancellationToken,
     /// Where a progress line goes. Every other consequence of an operation travels back to the
     /// caller inside a [`Resolution`], but progress happens *while* a call is in flight and has
     /// nowhere to wait — so it needs a sink rather than a return value. It stays a sink rather than
     /// a `println!` because this library is not the only possible front end: anything that speaks a
     /// protocol on stdout, a persistent server most obviously, would have its stream corrupted by an
     /// engine writing progress into it. Silent by default, and the binary is what makes it visible.
-    progress: fn(&str),
+    progress: ProgressSink,
     /// Where a diagnostic trace goes. A second sink rather than a level on the first, because they
     /// have different audiences: progress is for the person waiting, and this is for whoever is
     /// working out why a seam behaved as it did. Silent unless the front end installs one.
@@ -566,7 +577,22 @@ pub struct RustBackend {
 }
 
 /// The default progress sink: a library that was not asked to report says nothing.
-fn discard(_line: &str) {}
+/// Where a progress line goes.
+///
+/// A boxed sink rather than a `fn` pointer because a function pointer cannot capture: a host
+/// serving several callers at once needs each caller's progress to reach *that* caller, and a bare
+/// `fn` has nowhere to put the channel it would have to write to. Shared rather than owned because
+/// the same sink is handed to a backend and to the runner around it.
+pub type ProgressSink = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
+
+/// A sink that drops every line — the default, so a library front end is silent unless it asks.
+pub fn discard() -> ProgressSink {
+    std::sync::Arc::new(discard_line)
+}
+
+/// The no-op a `fn`-pointer sink defaults to. `trace` is still a bare pointer: it has one
+/// destination per front end, not one per caller, so it needs nothing a pointer cannot carry.
+fn discard_line(_line: &str) {}
 
 /// Drop `use` declarations left binding nothing at all.
 ///
@@ -661,10 +687,9 @@ impl RustBackend {
             next_id: 0,
             environment: String::from("<server not started>"),
             chatter: ServerChatter::default(),
-            warmup: WARMUP_BUDGET,
-            settle: settle_budget_for(WARMUP_BUDGET),
-            progress: discard,
-            trace: discard,
+            cancel: CancellationToken::new(),
+            progress: discard(),
+            trace: discard_line,
             indexed: false,
             unresolved_token: None,
             doc_version: 1,
@@ -672,17 +697,28 @@ impl RustBackend {
         }
     }
 
-    /// Give the warm-up a budget other than the default.
-    pub fn with_indexing_budget(mut self, seconds: u64) -> Self {
-        self.warmup = Duration::from_secs(seconds);
-        self.settle = settle_budget_for(self.warmup);
+    /// Send progress somewhere. Without this the indexing wait is silent, which is the state the
+    /// field report spent two hours in.
+    pub fn with_progress(mut self, sink: ProgressSink) -> Self {
+        self.progress = sink;
         self
     }
 
-    /// Send progress somewhere. Without this the indexing wait is silent, which is the state the
-    /// field report spent two hours in.
-    pub fn with_progress(mut self, sink: fn(&str)) -> Self {
-        self.progress = sink;
+    /// Hand the backend the token that says when its caller has stopped waiting.
+    ///
+    /// This replaces the budgets. A server is not refused for taking longer than a number this
+    /// library guessed; it is waited for until the caller gives up, and the caller is the only one
+    /// who knows when that is. The token is checked inside the poll loops rather than awaited,
+    /// because those loops are synchronous: this backend runs under `spawn_blocking`, where
+    /// dropping the calling future stops nothing.
+    pub fn with_cancellation(mut self, cancel: CancellationToken) -> Self {
+        self.cancel = cancel.clone();
+        // The bridge needs it too, and for the harder half: the poll loops check the token between
+        // requests, and only the bridge can end one that is already in flight. A bridge left on
+        // the token it was built with would leave every such request unreachable by this run.
+        if let Some(bridge) = &mut self.bridge {
+            bridge.set_cancellation(cancel);
+        }
         self
     }
 
@@ -696,39 +732,72 @@ impl RustBackend {
     ///
     /// No child process is spawned; [`LspClientBridge`] forwards requests through the shared
     /// client via `Handle::current().block_on`.
+    ///
+    /// `cancel` is the caller's own token where it has one — a host serving requests takes it from
+    /// the task it is serving. `None` says nothing but readiness will end a wait, which is what a
+    /// single-shot caller whose process *is* the operation means; [`RustBackend::with_cancellation`]
+    /// attaches one to a backend built elsewhere.
     pub fn from_lsp_client(
         client: Arc<LspClient>,
-        indexing_budget: Option<u64>,
-        progress: fn(&str),
+        cancel: Option<CancellationToken>,
+        progress: ProgressSink,
     ) -> Self {
-        let mut backend = Self {
+        Self {
             binary: PathBuf::new(),
             cargo_home: PathBuf::new(),
             rustup_home: PathBuf::new(),
             server: None,
-            bridge: Some(LspClientBridge::new(client)),
+            bridge: Some(LspClientBridge::new(
+                client,
+                cancel.clone().unwrap_or_default(),
+            )),
             next_id: 0,
             environment: String::from("external tddy-lsp client"),
             chatter: ServerChatter::default(),
-            warmup: WARMUP_BUDGET,
-            settle: settle_budget_for(WARMUP_BUDGET),
+            cancel: cancel.unwrap_or_default(),
             progress,
-            trace: discard,
+            trace: discard_line,
             indexed: false,
             unresolved_token: None,
             doc_version: 1,
             claimed: Vec::new(),
-        };
-        if let Some(seconds) = indexing_budget {
-            backend.warmup = Duration::from_secs(seconds);
-            backend.settle = settle_budget_for(backend.warmup);
         }
-        backend
     }
 
     fn take_id(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
+    }
+
+    /// Sleep until the server is worth asking again, unless the caller has stopped waiting.
+    ///
+    /// Returns whether waiting may continue. The cancellation check is *here*, beside the sleep,
+    /// rather than left to an await point in a caller: every wait in this backend is synchronous
+    /// and runs inside `spawn_blocking`, so a dropped future leaves the closure sleeping on.
+    fn keep_waiting(&self, poll: Duration) -> bool {
+        let until = Instant::now() + poll;
+        loop {
+            if self.cancel.is_cancelled() {
+                return false;
+            }
+            let remaining = until.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return true;
+            }
+            std::thread::sleep(remaining.min(CANCEL_CHECK));
+        }
+    }
+
+    /// The refusal for a wait that ended before the server was ready.
+    ///
+    /// Where the index got to is carried rather than dropped, because a server that stalled at 12%
+    /// and one that was nearly done want opposite responses from whoever reads this.
+    fn incomplete_index(&self, waited: Duration) -> RestructureError {
+        RestructureError::IndexingIncomplete {
+            seconds: waited.as_secs(),
+            last: self.chatter.how_far(),
+            environment: self.environment.clone(),
+        }
     }
 
     /// Start rust-analyzer and complete the initialize handshake, once per run.
@@ -818,6 +887,7 @@ impl RustBackend {
 
     fn request(&mut self, id: u64, method: &str, params: Value) -> Result<Value> {
         if let Some(bridge) = &self.bridge {
+            let started = Instant::now();
             let outcome = bridge.request(method, params);
             // The self-spawned transport folds progress in as it reads the stream; a bridged one
             // never sees the stream, so it collects what arrived and folds it in here. Without
@@ -827,7 +897,17 @@ impl RustBackend {
                     (self.progress)(&line);
                 }
             }
-            return outcome;
+            // A request the run's own token ended is the caller having stopped, and it is reported
+            // as the incomplete index it is — folded *after* the drain above, so `how_far` names
+            // the furthest the load actually got rather than where it stood one request ago. Not
+            // retryable, which is what keeps `request_settled` from re-asking a server on behalf
+            // of somebody who has gone.
+            return match outcome {
+                Err(RestructureError::CallerStopped) => {
+                    Err(self.incomplete_index(started.elapsed()))
+                }
+                other => other,
+            };
         }
         self.send(json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))?;
         loop {
@@ -858,17 +938,25 @@ impl RustBackend {
     }
 
     /// Issue a request, re-sending while the server reports it is still catching up.
+    ///
+    /// The retry count is a bound on one method's *answers*, not on indexing: a server that keeps
+    /// asking to be asked again is not making progress this client can wait out, and it is the one
+    /// case where waiting longer is not the remedy. Exhausting it says the server would not settle
+    /// — which is a different thing from the plan being wrong, and is reported as such.
     fn request_settled(&mut self, method: &str, params: Value) -> Result<Value> {
+        let started = Instant::now();
         for _ in 0..CONTENT_MODIFIED_RETRIES {
             let id = self.take_id();
             match self.request(id, method, params.clone()) {
-                Err(RestructureError::ServerCatchingUp) => std::thread::sleep(SETTLE_POLL),
+                Err(RestructureError::ServerCatchingUp) => {
+                    if !self.keep_waiting(SETTLE_POLL) {
+                        return Err(self.incomplete_index(started.elapsed()));
+                    }
+                }
                 outcome => return outcome,
             }
         }
-        Err(failure(format!(
-            "rust-analyzer never settled enough to answer {method}"
-        )))
+        Err(unsettled(method, started.elapsed(), self.chatter.how_far()))
     }
 
     fn notify(&mut self, method: &str, params: Value) -> Result<()> {
@@ -964,7 +1052,12 @@ impl RustBackend {
         Ok(!hover.is_null())
     }
 
-    /// Ask for a named assist, retrying while the crate graph is still loading.
+    /// Ask for a named assist, waiting while the crate graph is still loading.
+    ///
+    /// The wait ends on one of three things and never on a clock. The assist arrives, and that is
+    /// the answer. Or the server is demonstrably ready *here* and still does not offer it, which is
+    /// the range being wrong rather than the server being slow — and that readiness is the very
+    /// evidence the old deadline used to gather once it had expired. Or the caller stops waiting.
     fn assist(&mut self, uri: &str, range: Range, kind: RefactorKind) -> Result<Value> {
         let assist = assist_for(kind)
             .ok_or_else(|| failure(format!("no rust-analyzer assist maps to {kind:?}")))?;
@@ -978,63 +1071,51 @@ impl RustBackend {
             range
         };
         let started = Instant::now();
-        let deadline = started + self.resolution_budget();
-        // Whether the server ever answered this request at all, which decides what an expired
-        // budget means, and what it offered when it did — the one piece of evidence that makes
-        // an absent assist actionable.
-        let mut answered = false;
-        let mut offered: Vec<String> = Vec::new();
+        // #500's account of what the wait is for, said once rather than per poll: a reader needs to
+        // know which assist is outstanding, not how many times it has been asked for.
         let mut reported_wait = false;
         loop {
             if !reported_wait {
                 (self.progress)(&format!("waiting for assist `{wanted}`"));
                 reported_wait = true;
             }
-            let id = self.take_id();
-            let actions = match self.request(
-                id,
+            let actions = self.request_settled(
                 "textDocument/codeAction",
                 json!({
                     "textDocument": { "uri": uri },
                     "range": lsp_range(target),
                     "context": context_for(assist.kinds)
                 }),
-            ) {
-                Ok(actions) => {
-                    answered = true;
-                    offered = offered_titles(&actions);
-                    actions
-                }
-                // Still loading the crate graph; that is what this loop is waiting out.
-                Err(RestructureError::ServerCatchingUp) => Value::Null,
-                Err(error) => return Err(error),
-            };
+            )?;
 
             if let Some(action) = titled(&actions, wanted) {
                 return Ok(action);
             }
-            if Instant::now() >= deadline {
-                // An assist that needs inference is absent for two indistinguishable reasons:
-                // the range does not support it, or inference is not ready *there*. `indexed` is
-                // a whole-file flag set from a hover on the file's first symbol, which on a
-                // large module says nothing about a body thousands of lines further down. So
-                // ask at the range itself before blaming the plan.
-                let inference = if answered && assist.needs_inference {
-                    Some(self.inference_ready_at(uri, target.start)?)
-                } else {
-                    None
-                };
-                return Err(unresolved_assist(
+
+            // An assist that needs inference is absent for two indistinguishable reasons: the
+            // range does not support it, or inference is not ready *there*. `indexed` is a
+            // whole-file flag set from a hover on the file's first symbol, which on a large module
+            // says nothing about a body thousands of lines further down. So ask at the range
+            // itself before blaming the plan.
+            let inference = if assist.needs_inference {
+                Some(self.inference_ready_at(uri, target.start)?)
+            } else {
+                None
+            };
+            let offered = offered_titles(&actions);
+            if inference.unwrap_or(self.indexed) {
+                return Err(absent_assist(wanted, &offered));
+            }
+            if !self.keep_waiting(INDEXING_POLL) {
+                return Err(incomplete_assist_index(
                     wanted,
                     &offered,
-                    answered,
                     inference,
                     started.elapsed(),
                     self.chatter.how_far(),
                     self.environment.clone(),
                 ));
             }
-            std::thread::sleep(INDEXING_POLL);
         }
     }
 }
@@ -2001,9 +2082,8 @@ impl RustBackend {
     /// Wait, once per process, for the crate graph to load — with the server's progress on screen.
     ///
     /// Every request that needs name resolution is answered emptily until rust-analyzer has loaded
-    /// the graph, so each loop that waits on one used to carry the whole indexing budget of its own.
-    /// On a real crate that is paid per operation, and `survey_moved_items` pays it per moved item.
-    /// Paying it once here is what lets every later wait be short.
+    /// the graph, so waiting for it here once is what keeps every later wait short. On a real crate
+    /// the alternative is paid per operation, and `survey_moved_items` pays it per moved item.
     ///
     /// Hover is the authority, because it is the cheapest request that needs the graph and it is the
     /// same signal a rename is gated on. `serverStatus` is only a shortcut out: it is an extension,
@@ -2011,15 +2091,12 @@ impl RustBackend {
     ///
     /// A document with no symbols has nothing to hover, so the warm-up is skipped rather than spent
     /// on a position that would never resolve — which leaves `indexed` false, and the first real
-    /// wait holding the full budget it would have had.
+    /// wait doing the waiting instead.
     fn ensure_indexed(&mut self, uri: &str) -> Result<()> {
         if self.indexed {
             return Ok(());
         }
-        (self.progress)(&format!(
-            "warming crate index (budget {}s)",
-            self.warmup.as_secs()
-        ));
+        (self.progress)("warming crate index (until ready, or until you stop waiting)");
         let symbols = self.request_settled(
             "textDocument/documentSymbol",
             json!({ "textDocument": { "uri": uri } }),
@@ -2030,7 +2107,6 @@ impl RustBackend {
         };
 
         let started = Instant::now();
-        let deadline = started + self.warmup;
         loop {
             let hover = self.request_settled(
                 "textDocument/hover",
@@ -2042,28 +2118,9 @@ impl RustBackend {
                 (self.progress)("crate index ready");
                 return Ok(());
             }
-            if Instant::now() >= deadline {
-                return Err(RestructureError::IndexingIncomplete {
-                    environment: self.environment.clone(),
-                    seconds: started.elapsed().as_secs(),
-                    last: self.chatter.how_far(),
-                });
+            if !self.keep_waiting(INDEXING_POLL) {
+                return Err(self.incomplete_index(started.elapsed()));
             }
-            std::thread::sleep(INDEXING_POLL);
-        }
-    }
-
-    /// How long the next wait for name resolution may run.
-    ///
-    /// Before the warm-up has succeeded this is the whole indexing budget, because whatever the
-    /// caller is waiting on, what it is really waiting on is the graph. After it, the graph is
-    /// loaded and the only thing left to wait out is the server catching up with this client's own
-    /// edits.
-    fn resolution_budget(&self) -> Duration {
-        if self.indexed {
-            self.settle
-        } else {
-            self.warmup
         }
     }
 
@@ -2075,7 +2132,6 @@ impl RustBackend {
     fn wait_until_resolved(&mut self, uri: &str, position: &Value) -> Result<()> {
         (self.progress)("waiting for type inference at the anchor");
         let started = Instant::now();
-        let deadline = started + self.resolution_budget();
         loop {
             let hover = self.request_settled(
                 "textDocument/hover",
@@ -2086,14 +2142,9 @@ impl RustBackend {
                 self.indexed = true;
                 return Ok(());
             }
-            if Instant::now() >= deadline {
-                return Err(RestructureError::IndexingIncomplete {
-                    environment: self.environment.clone(),
-                    seconds: started.elapsed().as_secs(),
-                    last: self.chatter.how_far(),
-                });
+            if !self.keep_waiting(INDEXING_POLL) {
+                return Err(self.incomplete_index(started.elapsed()));
             }
-            std::thread::sleep(INDEXING_POLL);
         }
     }
 
@@ -2102,8 +2153,11 @@ impl RustBackend {
     /// Asked of the document rather than the workspace, so the answer does not depend on how a URI
     /// is spelled. Polled for the same reason the assists are: until the crate graph is loaded the
     /// server answers with no symbols, and a rename against an unresolved position is refused.
+    ///
+    /// An outline the server did answer is its real answer, so a name missing from one is missing
+    /// from the file — that is a mistake in the request, and waiting cannot fix it.
     fn locate_symbol(&mut self, uri: &str, name: &str) -> Result<Value> {
-        let deadline = Instant::now() + self.resolution_budget();
+        let started = Instant::now();
         loop {
             let symbols = self.request_settled(
                 "textDocument/documentSymbol",
@@ -2113,10 +2167,12 @@ impl RustBackend {
             if let Some(position) = find_symbol(&symbols, name) {
                 return Ok(position);
             }
-            if Instant::now() >= deadline {
+            if self.indexed || !outline_is_empty(&symbols) {
                 return Err(failure(format!("`{name}` is not declared in this file")));
             }
-            std::thread::sleep(INDEXING_POLL);
+            if !self.keep_waiting(INDEXING_POLL) {
+                return Err(self.incomplete_index(started.elapsed()));
+            }
         }
     }
 
@@ -2338,30 +2394,45 @@ fn offered_titles(actions: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The failure to report when a requested assist never arrived inside the budget.
+/// Whether a `documentSymbol` answer holds no items — which is how the server answers while it is
+/// still loading the crate graph, and therefore not yet an answer about the file.
+fn outline_is_empty(symbols: &Value) -> bool {
+    symbols
+        .as_array()
+        .map(|items| items.is_empty())
+        .unwrap_or(true)
+}
+
+/// The failure to report when the server is ready to answer for a range and offers no such assist.
 ///
-/// The two causes want opposite advice. A server that answered and offered nothing is a seam
-/// refusal: the reader should look at the range. A server that never answered at all is an index
-/// that was not ready: the reader should look at the budget. Reporting both as an absent assist
-/// sent half of them to rewrite anchors that were never wrong.
+/// This is a seam refusal: the reader should look at the range they asked for. What the server
+/// *did* offer is named, because an assist that is absent under one title and present under
+/// another is otherwise indistinguishable from a range that supports no refactoring at all.
+fn absent_assist(wanted: &str, offered: &[String]) -> RestructureError {
+    let offered = if offered.is_empty() {
+        "it offered none".to_string()
+    } else {
+        format!("it offered: {}", offered.join(", "))
+    };
+    failure(format!(
+        "rust-analyzer offers no \"{wanted}\" assist for the given range ({offered})"
+    ))
+}
+
+/// The failure to report when a wait for an assist ended before the server could offer it.
 ///
-/// What the server *did* offer is named either way, because an assist that is absent under one
-/// title and present under another is otherwise indistinguishable from a range that supports no
-/// refactoring at all.
-fn unresolved_assist(
+/// A range the server answered `codeAction` for but could not *type* is named as such: the assist
+/// needing inference was never going to be in that list, and reporting it as an absent assist
+/// sends the reader to rewrite an anchor that was correct.
+fn incomplete_assist_index(
     wanted: &str,
     offered: &[String],
-    answered: bool,
     inference_ready: Option<bool>,
     waited: Duration,
     last: String,
     environment: String,
 ) -> RestructureError {
-    // The server answered, but only from the syntax tree: it cannot yet type the range, so the
-    // assist that needs inference was never going to be in the list. That is a budget problem,
-    // not a plan problem, and reporting it as an absent assist sends the reader to rewrite an
-    // anchor that was correct.
-    if answered && inference_ready == Some(false) {
+    if inference_ready == Some(false) {
         return RestructureError::IndexingIncomplete {
             seconds: waited.as_secs(),
             last: format!(
@@ -2376,20 +2447,24 @@ fn unresolved_assist(
             environment,
         };
     }
-    if answered {
-        let offered = if offered.is_empty() {
-            "it offered none".to_string()
-        } else {
-            format!("it offered: {}", offered.join(", "))
-        };
-        return failure(format!(
-            "rust-analyzer offers no \"{wanted}\" assist for the given range ({offered})"
-        ));
-    }
     RestructureError::IndexingIncomplete {
         seconds: waited.as_secs(),
         last,
         environment,
+    }
+}
+
+/// The failure to report when the server stayed unable to answer one method.
+///
+/// Kept apart from a malformed plan on purpose: the plan was not wrong, the indexer never settled,
+/// and a caller acts on the difference — one is fixed by editing the plan and the other by looking
+/// at the server. Where the index got to travels with it, for the same reason a cancelled wait
+/// carries it.
+fn unsettled(method: &str, waited: Duration, last: String) -> RestructureError {
+    RestructureError::ServerNotSettled {
+        method: method.to_string(),
+        seconds: waited.as_secs(),
+        last,
     }
 }
 
@@ -5500,52 +5575,102 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         assert_eq!(ServerChatter::default().how_far(), "nothing reported");
     }
 
-    /// A caller who never passed `--indexing-budget` must see exactly the behaviour they saw
-    /// before this became configurable.
-    #[test]
-    fn leaves_the_settle_budget_at_its_default_for_the_default_warmup() {
-        // Given the default warm-up budget
-        let settle = settle_budget_for(WARMUP_BUDGET);
-
-        // Then the per-operation wait is unchanged
-        assert_eq!(settle, SETTLE_BUDGET);
+    /// A backend with no server behind it. Every wait in this file is decided before a request is
+    /// sent, so what ends one is answerable without a language server at all.
+    fn a_backend() -> RustBackend {
+        RustBackend::new("/usr/bin/rust-analyzer", "/tmp", "/tmp")
     }
 
-    /// Raising the run budget is the caller saying the machine or the file is slow, and the
-    /// per-operation waits are where that shows up once the first index is done. A 30s cap there
-    /// reported an incomplete index for a server that was working normally.
+    /// The replacement for the budgets: nothing but the caller ends a wait, and it ends it at once
+    /// rather than at the end of the poll the wait was sleeping out.
     #[test]
-    fn scales_the_settle_budget_with_a_raised_indexing_budget() {
-        // Given a caller who allowed 2400s for the run
-        let settle = settle_budget_for(Duration::from_secs(2400));
+    fn stops_waiting_as_soon_as_its_caller_does() {
+        // Given a backend whose caller has stopped waiting
+        let cancel = CancellationToken::new();
+        let backend = a_backend().with_cancellation(cancel.clone());
+        cancel.cancel();
 
-        // Then each later wait scales with it rather than staying at the 30s default
-        assert_eq!(settle, Duration::from_secs(120));
+        // When it would sleep out a poll interval far longer than any test
+        let started = Instant::now();
+        let keep_waiting = backend.keep_waiting(Duration::from_secs(300));
+
+        // Then it does not wait at all, and reports the wait as over
+        assert!(!keep_waiting, "a cancelled wait asked to continue");
+        assert!(
+            // Wall-clock, so an exact figure is not available; the poll it skipped is 300s.
+            started.elapsed() < Duration::from_secs(1),
+            "a cancelled wait slept for {:?}",
+            started.elapsed()
+        );
     }
 
-    /// Lowering the budget must not drop the per-operation wait below what a normal settle needs.
+    /// The other half of the same rule: while the caller is still waiting, the server is left
+    /// alone for the whole poll interval rather than asked again immediately.
     #[test]
-    fn never_lowers_the_settle_budget_below_its_default() {
-        // Given a caller who allowed only 60s
-        let settle = settle_budget_for(Duration::from_secs(60));
+    fn waits_out_the_whole_poll_while_its_caller_is_still_waiting() {
+        // Given a backend whose caller is still waiting
+        let backend = a_backend().with_cancellation(CancellationToken::new());
 
-        // Then the default floor still applies
-        assert_eq!(settle, SETTLE_BUDGET);
+        // When it sleeps out a poll interval
+        let started = Instant::now();
+        let keep_waiting = backend.keep_waiting(Duration::from_millis(300));
+
+        // Then it waited the interval and reports the wait as continuing
+        assert!(keep_waiting, "an uncancelled wait reported itself over");
+        assert!(
+            // Wall-clock again: the floor is the interval, and a loaded machine may exceed it.
+            started.elapsed() >= Duration::from_millis(300),
+            "the poll returned early, after {:?}",
+            started.elapsed()
+        );
     }
 
-    /// A server that answered and offered nothing is a seam refusal; the reader should look at
+    /// A backend nobody handed a token to waits on readiness alone — which is what a single-shot
+    /// caller whose process *is* the operation means, and is why no wait needs a budget.
+    #[test]
+    fn waits_on_readiness_alone_when_no_caller_handed_it_a_token() {
+        // Given a backend built with no cancellation token
+        let backend = a_backend();
+
+        // When it is asked whether a wait may continue
+        // Then it may, because nothing has said otherwise
+        assert!(backend.keep_waiting(Duration::ZERO));
+    }
+
+    /// The error class the TODO called wrong: the plan was not malformed, the indexer never
+    /// settled, and the two want opposite responses from whoever reads the refusal.
+    #[test]
+    fn names_the_server_rather_than_the_plan_when_a_method_never_settles() {
+        // Given a method the server never settled enough to answer
+        let error = unsettled(
+            "textDocument/codeAction",
+            Duration::from_secs(6),
+            "working (100%)".to_string(),
+        );
+
+        // Then the refusal names the method, the wait and where the index got to
+        match error {
+            RestructureError::ServerNotSettled {
+                method,
+                seconds,
+                last,
+            } => {
+                assert_eq!(method, "textDocument/codeAction");
+                assert_eq!(seconds, 6);
+                assert_eq!(last, "working (100%)");
+            }
+            other => panic!("expected ServerNotSettled, got {other:?}"),
+        }
+    }
+
+    /// A server that is ready here and offers nothing is a seam refusal; the reader should look at
     /// the range they asked for.
     #[test]
-    fn names_the_absent_assist_when_the_server_answered() {
-        // Given a budget that expired after the server had answered
-        let error = unresolved_assist(
+    fn names_the_absent_assist_when_the_server_is_ready_to_answer() {
+        // Given a server that can type the range and still offers something else
+        let error = absent_assist(
             "extract into function",
             &["Extract into variable".to_string()],
-            true,
-            Some(true),
-            Duration::from_secs(30),
-            "indexing".to_string(),
-            "cargo 1.94".to_string(),
         );
 
         // Then the failure points at the range
@@ -5565,11 +5690,11 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     /// has nothing to do with the range. Reported as an absent assist, it reads as a plan defect.
     #[test]
     fn reports_an_incomplete_index_when_the_range_could_not_be_typed() {
-        // Given a server that answered with syntax-level assists but could not type the range
-        let error = unresolved_assist(
+        // Given a cancelled wait on a server that answered with syntax-level assists but could
+        // not type the range
+        let error = incomplete_assist_index(
             "extract into function",
             &["Extract into variable".to_string()],
-            true,
             Some(false),
             Duration::from_secs(120),
             "working (100%)".to_string(),
@@ -5588,22 +5713,21 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         }
     }
 
-    /// A server that never answered is an index that was not ready, and the remedy is the
-    /// budget rather than the anchors.
+    /// A wait cancelled while the graph was still loading is an index that was not ready, and the
+    /// reader needs where it got to rather than anything about the anchors.
     #[test]
-    fn reports_an_incomplete_index_when_the_server_never_answered() {
-        // Given a budget that expired without a single answer
-        let error = unresolved_assist(
+    fn reports_an_incomplete_index_when_a_wait_is_cancelled_before_the_graph_loads() {
+        // Given a cancelled wait on an assist that needs no inference, so nothing was probed
+        let error = incomplete_assist_index(
             "extract into function",
             &[],
-            false,
             None,
             Duration::from_secs(45),
             "discovering sysroot".to_string(),
             "cargo 1.94".to_string(),
         );
 
-        // Then the failure names the budget and where the server got to
+        // Then the failure names how long it waited and where the server got to
         match error {
             RestructureError::IndexingIncomplete {
                 seconds,

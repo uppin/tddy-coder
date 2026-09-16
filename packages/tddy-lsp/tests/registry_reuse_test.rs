@@ -1,10 +1,14 @@
 //! Registry behaviour: reuse across targets, per-root isolation, allow-list gating, idle
-//! teardown, and respawn-after-crash. All tests run against the deterministic `fake_lsp`
-//! server, never a real language server.
+//! teardown, respawn-after-crash, and what a host that outlives one request needs — a server kept
+//! alive by use of its client, one spawn under concurrent demand, and a server whose stderr is
+//! drained. All tests run against the deterministic `fake_lsp` server, never a real language
+//! server.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
+use serde_json::Value;
 use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspError, LspKey, LspRegistry};
 use tddy_task::{TaskId, TaskRegistry};
 
@@ -161,4 +165,100 @@ async fn a_crashed_language_server_is_respawned_on_the_next_request() {
 
     // Then a fresh server task is spawned rather than a dead handle returned
     assert_ne!(first.task_id, second.task_id);
+}
+
+/// A position the fake server answers hover for, so a test can make a real request through a
+/// borrowed client rather than going back to the registry for one.
+fn a_position_in_the_file() -> tddy_lsp::Position {
+    tddy_lsp::Position {
+        line: 10,
+        character: 3,
+    }
+}
+
+#[tokio::test]
+async fn using_a_borrowed_client_keeps_its_language_server_alive_past_the_idle_timeout() {
+    // Given a running server with a short idle timeout, and a client borrowed from it
+    let tasks = TaskRegistry::new();
+    let registry = LspRegistry::new(fake_allow_list(), tasks.clone(), Duration::from_millis(80));
+    let workspace = key("/workspace");
+    let service = registry
+        .get_or_spawn(workspace.clone())
+        .await
+        .expect("server");
+    let client = Arc::clone(&service.client);
+
+    // When the borrowed client is used shortly before the reaper runs, without asking the registry
+    // for the server again
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    client
+        .hover("file:///workspace/src/lib.rs", a_position_in_the_file())
+        .await
+        .expect("a request through the borrowed client");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let reaped = registry.reap_idle().await;
+
+    // Then the server is not reaped out from under the caller still using it
+    assert!(
+        reaped.is_empty(),
+        "reaped a server whose client was in use: {reaped:?}"
+    );
+    assert!(registry.get(&workspace).await.is_some());
+}
+
+#[tokio::test]
+async fn concurrent_requests_for_one_cold_workspace_spawn_exactly_one_language_server() {
+    // Given a registry with no server yet for a workspace
+    let tasks = TaskRegistry::new();
+    let registry = LspRegistry::new(fake_allow_list(), tasks.clone(), Duration::from_secs(60));
+    let workspace = key("/workspace");
+
+    // When four callers request that workspace's server at once
+    let requests: Vec<_> = (0..4)
+        .map(|_| {
+            let registry = registry.clone();
+            let workspace = workspace.clone();
+            tokio::spawn(async move { registry.get_or_spawn(workspace).await })
+        })
+        .collect();
+    let mut services = Vec::new();
+    for request in requests {
+        services.push(request.await.expect("request task").expect("server"));
+    }
+
+    // Then they all share one server, and only one was ever spawned
+    let first_task_id = services[0].task_id.clone();
+    for service in &services {
+        assert_eq!(service.task_id, first_task_id);
+    }
+    assert_eq!(tasks.list().await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_language_server_that_floods_stderr_keeps_answering_requests() {
+    // Given a running server and a client that will not wait long for an answer
+    let tasks = TaskRegistry::new();
+    let registry = LspRegistry::new(fake_allow_list(), tasks.clone(), Duration::from_secs(60));
+    let service = registry
+        .get_or_spawn(key("/workspace"))
+        .await
+        .expect("server");
+    let client = Arc::clone(&service.client);
+    client.set_request_timeout(Duration::from_secs(2));
+
+    // When the server writes more to stderr than a pipe buffer holds
+    client
+        .request_raw("tddy/floodStderr", Value::Null)
+        .await
+        .expect("the server answers after writing to stderr");
+
+    // Then it is still answering, rather than blocked mid-write on an undrained pipe
+    let hover = client
+        .hover("file:///workspace/src/lib.rs", a_position_in_the_file())
+        .await
+        .expect("a request after the stderr flood");
+    assert!(
+        hover.is_some(),
+        "expected the server to still answer after flooding stderr"
+    );
 }

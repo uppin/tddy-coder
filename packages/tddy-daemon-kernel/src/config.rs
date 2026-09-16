@@ -239,6 +239,72 @@ pub struct SandboxCgroupConfig {
     pub pids_max: Option<u64>,
 }
 
+/// The warm code-intelligence index this daemon manages (`index_daemon:` YAML section).
+///
+/// Presence of the section is the switch, the way it is for `supervisor:`: without it this daemon
+/// starts no index daemon at all, so an existing deployment behaves exactly as it did. With it,
+/// a `tddy-index-daemon` that cannot be started is an error on the request that needed it — not a
+/// quiet fall back to a cold rust-analyzer, which would turn a misconfiguration into six minutes
+/// of unexplained latency per request.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct IndexDaemonConfig {
+    /// The binary to run. When unset it is resolved at spawn time, from the daemon's own
+    /// executable's directory or from `PATH`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binary_path: Option<PathBuf>,
+    /// The AF_UNIX socket the index daemon is told to bind and this daemon dials. When unset,
+    /// resolved to `${XDG_RUNTIME_DIR:-/run}/tddy-index-daemon.sock` — see
+    /// [`IndexDaemonConfig::resolved_socket_path`], which mirrors [`DaemonConfig::local_socket_path`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_path: Option<PathBuf>,
+    /// How long a freshly started index daemon has to bind that socket. A budget on *binding*
+    /// only: indexing is not waited for here, and a process that dies in the meantime is reported
+    /// at once rather than at this deadline.
+    #[serde(default = "default_index_daemon_ready_timeout_secs")]
+    pub ready_timeout_secs: u64,
+    /// How long the index daemon may sit unused before the reaper stops it. Generous by default:
+    /// the warm index it holds costs minutes to rebuild.
+    #[serde(default = "default_index_daemon_idle_timeout_secs")]
+    pub idle_timeout_secs: u64,
+}
+
+/// 60s. Binding a socket is immediate; this covers a cold start of the process around it.
+fn default_index_daemon_ready_timeout_secs() -> u64 {
+    60
+}
+
+/// 30 minutes. The index behind this process costs six to ten minutes to rebuild on this
+/// workspace, so reaping it eagerly would cost more than holding it.
+fn default_index_daemon_idle_timeout_secs() -> u64 {
+    30 * 60
+}
+
+impl Default for IndexDaemonConfig {
+    fn default() -> Self {
+        Self {
+            binary_path: None,
+            socket_path: None,
+            ready_timeout_secs: default_index_daemon_ready_timeout_secs(),
+            idle_timeout_secs: default_index_daemon_idle_timeout_secs(),
+        }
+    }
+}
+
+impl IndexDaemonConfig {
+    /// The socket path this daemon tells the index daemon to bind, resolving the default when the
+    /// section names none.
+    pub fn resolved_socket_path(&self) -> PathBuf {
+        if let Some(path) = &self.socket_path {
+            return path.clone();
+        }
+        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/run"));
+        runtime_dir.join("tddy-index-daemon.sock")
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DaemonConfig {
@@ -345,6 +411,11 @@ pub struct DaemonConfig {
     /// forked spawn worker and whatever privilege its own unit grants it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supervisor: Option<SupervisorClientConfig>,
+    /// The warm code-intelligence index daemon this daemon starts, supervises and stops (see
+    /// [`IndexDaemonConfig`]). Absent = this daemon manages none, which is every deployment that
+    /// has not asked for one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index_daemon: Option<IndexDaemonConfig>,
 
     /// Browser DEBUG mask exposed to tddy-web via `GET /api/config` (`debug` field). A `debug`-package
     /// namespace mask (e.g. `tddy:term:*`, or `tddy:term:write,tddy:term:resize`) that enables scoped
@@ -415,6 +486,7 @@ impl Default for DaemonConfig {
             sandbox_cgroup: None,
             local: LocalConfig::default(),
             supervisor: None,
+            index_daemon: None,
             debug: None,
             max_attachment_bytes: default_max_attachment_bytes(),
         }

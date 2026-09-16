@@ -100,9 +100,15 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 ///
 /// A whitelist rather than a line count, because "under 6,000 lines" would still pass if a session
 /// module stayed and something else left.
+///
+/// Paths relative to `src/`, not bare file names. A bare-name whitelist that had to admit
+/// `index_daemon/registry.rs` would have admitted *any* `registry.rs` anywhere under `src/` —
+/// including a session module reintroduced under that name, which is the one thing this test
+/// exists to catch. Qualifying the three `index_daemon/` submodules by their directory keeps the
+/// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 12] = [
+    const ENDPOINT: [&str; 17] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -115,6 +121,17 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         "user_sessions_path.rs",
         "tddy_user_config.rs",
         "relay_idle.rs",
+        // Lifecycle of the `tddy-index-daemon` child this endpoint spawns: lazy get-or-spawn,
+        // readiness, restart on death, idle stop, cancellation on shutdown. Wiring by this test's
+        // criterion — it implements no RPC method, holds no session state, touches no
+        // `SessionHost`, and its only caller is `runtime.rs`, which builds it from the
+        // `index_daemon:` config section, ticks its idle reaper and shuts it down. It is the
+        // startup/shutdown code `runtime.rs` would otherwise carry inline, for one child process.
+        "index_daemon.rs",
+        "index_daemon_body.rs",
+        "index_daemon/error.rs",
+        "index_daemon/registry.rs",
+        "index_daemon/spawn.rs",
     ];
 
     let mut files = Vec::new();
@@ -122,8 +139,13 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
 
     let mut unexpected: Vec<String> = files
         .iter()
-        .filter_map(|f| f.file_name().and_then(|n| n.to_str()).map(str::to_string))
-        .filter(|n| !ENDPOINT.contains(&n.as_str()))
+        .map(|f| {
+            f.strip_prefix(daemon_src())
+                .unwrap_or(f)
+                .display()
+                .to_string()
+        })
+        .filter(|p| !ENDPOINT.contains(&p.as_str()))
         .collect();
     unexpected.sort();
 

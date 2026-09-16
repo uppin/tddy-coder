@@ -12,10 +12,10 @@ description: Restructure Rust code without writing moved code by hand — split 
 ## CLI
 
 ```bash
-tddy-tools restructure apply  <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N] [--indexing-budget SECONDS]
+tddy-tools restructure apply  <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N]
 tddy-tools restructure status <plan.jsonl>
-tddy-tools restructure check  <plan.jsonl> [--deep] [--indexing-budget SECONDS]
-tddy-tools restructure anchors <file.rs> --items A,B,C [--indexing-budget SECONDS]
+tddy-tools restructure check  <plan.jsonl> [--deep] [--budget LINES]
+tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure verify --against <git-ref>
 ```
 
@@ -35,7 +35,19 @@ tddy-tools restructure verify --against <git-ref>
 - **No code in plans** — fields `text`, `code`, `content` are refused.
 - **No `create_file`** — files appear via assists only.
 - **Unsupported ops are hard errors** — never skip silently.
-- **Indexing budget** — raise `--indexing-budget` on slow machines; indexing timeout is not a plan defect.
+- **Waiting** — a run waits until the server is ready or until you stop it; there is no
+  `--indexing-budget` any more (it derived a per-operation ceiling of a twentieth of itself, which
+  refused large files at 45s). `^C` cancels, and the refusal says how far the index got.
+- **A warm index** — a cold start is minutes per run, so for an iterative carve start the daemon once
+  and point the CLI at it:
+
+  ```bash
+  eval $(./run-index-daemon | grep '^export ')   # exports TDDY_INDEX_SOCKET
+  tddy-tools restructure check plan.jsonl        # now costs the assist, not the index
+  ```
+
+  With `TDDY_INDEX_SOCKET` unset the CLI spawns its own rust-analyzer exactly as before. A set but
+  unreachable socket is an error, not a silent fall back to the cold path.
 
 ## References
 

@@ -1,0 +1,61 @@
+[package]
+name = "tddy-index-daemon"
+version = "0.1.0"
+edition = "2021"
+description = "Warm rust-analyzer index served as code_index.CodeIndexService over gRPC and stdio, or run once in-process and exit"
+
+[lib]
+name = "tddy_index_daemon"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tddy-index-daemon"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+# Required by the generated streaming handlers, not chosen here — `tddy-terminal-rpc` carries it
+# for the same reason.
+futures-util = "0.3"
+log = "0.4"
+prost = "0.13"
+serde_json = "1"
+tddy-code-analysis = { path = "../tddy-code-analysis" }
+tddy-code-restructuring = { path = "../tddy-code-restructuring" }
+tddy-core = { path = "../tddy-core" }
+tddy-lsp = { path = "../tddy-lsp" }
+tddy-rpc = { path = "../tddy-rpc" }
+# The shared refusal conversion every generated tonic adapter routes through. Not incidental
+# coupling: `generate_tonic_adapter` emits calls to `tddy_service::to_tonic_status` by design, so
+# that one refusal cannot reach two transports as two different gRPC codes.
+tddy-service = { path = "../tddy-service" }
+tddy-stdio = { path = "../tddy-stdio" }
+tddy-task = { path = "../tddy-task" }
+# `net` for the binary's own listeners: a TCP one for `--grpc` and an AF_UNIX one for
+# `--grpc-uds`. The service itself binds nothing.
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "signal", "process", "net"] }
+# `net` for `TcpListenerStream`/`UnixListenerStream`, which is how a listener this binary owns is
+# handed to `tonic`'s `serve_with_incoming_shutdown` — the only serve shape that takes a shutdown
+# signal for an AF_UNIX socket.
+tokio-stream = { version = "0.1", features = ["net"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tonic = "0.12"
+
+[build-dependencies]
+prost-build = "0.13"
+tddy-codegen = { path = "../tddy-codegen", features = ["tonic"] }
+tonic-build = "0.12"
+
+[dev-dependencies]
+# tddy-lsp's deterministic fake server, so the suites exercise a warm index without a real
+# rust-analyzer. It compiles against `tddy_lsp::protocol`, which is a dependency here.
+tempfile = "3"
+tddy-code-restructuring = { path = "../tddy-code-restructuring" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+pretty_assertions = { workspace = true }
+
+[[bin]]
+name = "fake_lsp"
+path = "../tddy-lsp/tests/bin/fake_lsp.rs"

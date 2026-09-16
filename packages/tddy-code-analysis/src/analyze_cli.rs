@@ -84,9 +84,15 @@ fn run_coverage(args: AnalyzeCoverageArgs) -> Result<()> {
         .coverage_dir
         .unwrap_or_else(|| PathBuf::from("coverage"));
     let mut renderer = ProgressRenderer::new();
-    crate::coverage::capture_coverage(&args.path, &coverage_dir, &mut |event| {
-        renderer.render(&event)
-    })
+    // Nothing can hang up on a command line: this process *is* the caller, and a `^C` kills it
+    // along with the capture. The predicate is what a host serving the same capture to a client
+    // passes instead.
+    crate::coverage::capture_coverage(
+        &args.path,
+        &coverage_dir,
+        &crate::never_cancelled,
+        &mut |event| renderer.render(&event),
+    )
     .context("coverage capture failed")?;
     Ok(())
 }
@@ -196,8 +202,23 @@ fn human(elapsed: Duration) -> String {
 }
 
 fn run_report(args: AnalyzeReportArgs) -> Result<()> {
-    crate::report::generate_report(&args.coverage_dir, &args.path)
-        .context("report generation failed")?;
+    // A pass-through cache, because this process scores the tree once and exits: there is no
+    // second request for a kept score to answer, and keeping them would only hold memory until
+    // the run ended. A warm host passes a keeping one instead, which is the only difference
+    // between the two callers.
+    let joined = crate::report::generate_report(
+        &args.coverage_dir,
+        &args.path,
+        &crate::complexity_cache::PassThroughComplexityCache,
+    )
+    .context("report generation failed")?;
+    eprintln!(
+        "CRAP join: {:.1}% ({} matched / {} instrumented, {} unmatched)",
+        joined.join_rate * 100.0,
+        joined.functions.len(),
+        joined.functions.len() + joined.unmatched_functions,
+        joined.unmatched_functions
+    );
     Ok(())
 }
 
@@ -211,6 +232,7 @@ fn run_duplicate_tests(args: AnalyzeDuplicateTestsArgs) -> Result<()> {
         args.min_signature,
         args.subset_ratio,
         args.include_test_sources,
+        &crate::never_cancelled,
     )
     .context("duplicate-tests analysis failed")?;
     Ok(())
