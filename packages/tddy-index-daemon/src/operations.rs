@@ -43,55 +43,6 @@ pub(crate) type EventSender<T> = mpsc::Sender<Result<T, Status>>;
 /// consumer which has stopped reading is noticed while the run still has work left to cancel.
 const EVENT_CHANNEL_CAPACITY: usize = 64;
 
-/// Load a workspace root's crate graph and report progress until it is ready.
-///
-/// Idempotent, as the schema says: a root this process already holds an index for is answered out
-/// of [`tddy_lsp::LspRegistry`] without spawning anything, and the stream ends immediately.
-pub(crate) async fn serve_warm(
-    index: &WorkspaceIndex,
-    workspace_root: &str,
-) -> Result<EventStream<IndexProgress>, Status> {
-    let (activity, root) = Activity::arrived("warm", index, workspace_root).await?;
-    let (events, stream) = event_stream();
-    let index = index.clone();
-
-    tokio::spawn(async move {
-        let loading = IndexProgress {
-            line: format!("loading the crate graph at {}", root.display()),
-            ..IndexProgress::default()
-        };
-        if events.send(Ok(loading)).await.is_err() {
-            activity.cancelled();
-            return;
-        }
-        // TODO(tddy-lsp, tddy-code-restructuring): `ready` is "this root has a live language
-        // server holding its index", which is the furthest this crate can observe. The
-        // hover-until-answered probe that decides the question properly is
-        // `RustBackend::ensure_indexed`, which is private and takes a document URI; and the
-        // server's own `$/progress` can only be read through `LspClient::drain_notifications`,
-        // which *consumes* the queue an operation on the same root is folding. Forwarding phases
-        // and percentages needs one of the two exposed non-destructively.
-        match index.client_for(&root).await {
-            Ok(_) => {
-                let _ = events
-                    .send(Ok(IndexProgress {
-                        line: format!("{} is served from a warm index", root.display()),
-                        ready: true,
-                        ..IndexProgress::default()
-                    }))
-                    .await;
-                activity.answered();
-            }
-            Err(refusal) => {
-                activity.refused(&refusal);
-                let _ = events.send(Err(refusal)).await;
-            }
-        }
-    });
-
-    Ok(stream)
-}
-
 /// Which workspace roots this process currently holds an index for.
 ///
 /// The one request that names no root, and the one logged at DEBUG rather than INFO: it reads

@@ -44,6 +44,24 @@ fn a_host_over_fake_language_servers() -> tddy_rpc::ServiceEntry {
     })
 }
 
+/// A host whose warm servers narrate a crate-graph load and then report themselves quiescent, the
+/// way a real rust-analyzer does.
+///
+/// Separate from [`a_host_over_fake_language_servers`] because the default fake answers everything
+/// at once and never claims to load anything — which is what the other forty-odd tests here want,
+/// and the one thing a test about *waiting for a graph* cannot use.
+fn a_host_over_fake_language_servers_that_load_a_graph() -> tddy_rpc::ServiceEntry {
+    let mut spec = LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
+        .with_capabilities(tddy_code_restructuring::client_capabilities())
+        .with_initialization_options(tddy_code_restructuring::server_settings());
+    spec.args = vec!["--loads-crate-graph".to_string()];
+    let mut allow = LspAllowList::new();
+    allow.allow(Language::Rust, spec);
+    build_code_index_entry(CodeIndexPorts {
+        servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
+    })
+}
+
 /// A git worktree holding one source file, at a path that is not the process directory.
 fn a_workspace_holding(source: &str) -> tempfile::TempDir {
     let workspace = tempfile::tempdir().expect("a temporary workspace");
@@ -197,7 +215,7 @@ async fn refuses_an_unknown_method_on_its_own_coordinate() {
 async fn warms_a_workspace_root_and_reports_it_ready() {
     // Given a workspace root and a host holding no index for it
     let workspace = a_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
-    let entry = a_host_over_fake_language_servers();
+    let entry = a_host_over_fake_language_servers_that_load_a_graph();
 
     // When that root is warmed
     let progress: Vec<IndexProgress> = stream_at(
@@ -218,12 +236,109 @@ async fn warms_a_workspace_root_and_reports_it_ready() {
     );
 }
 
+/// What `ready` is *for*: a client that reads it as "ask me anything now" and then pays the whole
+/// graph load on its next request has been told nothing. A live server holding the root is not a
+/// loaded graph, and the server itself is the only thing that knows the difference — so its phases
+/// are forwarded and its own quiescence is what ends the wait.
+#[tokio::test(flavor = "multi_thread")]
+async fn warming_a_root_forwards_the_servers_phases_and_reports_ready_only_once_it_is_quiescent() {
+    // Given a workspace root whose server narrates a crate-graph load before it goes quiescent
+    let workspace = a_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
+    let entry = a_host_over_fake_language_servers_that_load_a_graph();
+
+    // When that root is warmed
+    let progress: Vec<IndexProgress> = stream_at(
+        &entry,
+        "Warm",
+        WarmRequest {
+            workspace_root: workspace.path().to_string_lossy().to_string(),
+        },
+    )
+    .await
+    .expect("warming a reachable root succeeds");
+
+    // Then the server's own phases reached the caller, named and with the percentage they carried
+    let narrated: Vec<(String, u32)> = progress
+        .iter()
+        .filter(|message| !message.phase.is_empty())
+        .map(|message| (message.phase.clone(), message.percentage))
+        .collect();
+    assert_eq!(
+        narrated,
+        vec![
+            ("loading crate graph".to_string(), 25),
+            ("loading crate graph".to_string(), 50),
+            ("loading crate graph".to_string(), 75),
+        ],
+        "the server's phases did not reach the caller: {progress:?}"
+    );
+    // and the furthest the load got travels with them, so a wait that ends badly can say where it
+    // stopped rather than only that it did
+    assert!(
+        progress
+            .iter()
+            .any(|message| message.furthest.contains("75%")),
+        "no message said how far the load got: {progress:?}"
+    );
+    // and exactly one message claims the index is ready: the last, after the server said so
+    assert_eq!(
+        progress
+            .iter()
+            .map(|message| message.ready)
+            .collect::<Vec<bool>>(),
+        {
+            let mut expected = vec![false; progress.len() - 1];
+            expected.push(true);
+            expected
+        },
+        "a warm claimed the index ready before the server was quiescent: {progress:?}"
+    );
+}
+
+/// `Warm` is documented idempotent, and a graph that is loaded is loaded: a server reports itself
+/// quiescent on the transition and never again, so a second warm that waited to be told would wait
+/// for ever. What this process observed once is what answers it.
+#[tokio::test(flavor = "multi_thread")]
+async fn warming_a_root_whose_graph_is_already_loaded_answers_ready_without_waiting_again() {
+    // Given a root this process has already warmed to a loaded graph
+    let workspace = a_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
+    let entry = a_host_over_fake_language_servers_that_load_a_graph();
+    let root = workspace.path().to_string_lossy().to_string();
+    stream_at::<_, IndexProgress>(
+        &entry,
+        "Warm",
+        WarmRequest {
+            workspace_root: root.clone(),
+        },
+    )
+    .await
+    .expect("the first warm succeeds");
+
+    // When it is warmed again
+    let progress: Vec<IndexProgress> = stream_at(
+        &entry,
+        "Warm",
+        WarmRequest {
+            workspace_root: root,
+        },
+    )
+    .await
+    .expect("the second warm succeeds");
+
+    // Then it is answered ready from what this process already observed, rather than waiting for a
+    // server to repeat a transition it has already made
+    assert!(
+        progress.last().expect("at least one message").ready,
+        "a second warm of a loaded root did not report it ready: {progress:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn warms_two_workspace_roots_independently() {
     // Given two workspace roots and one host
     let one = a_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
     let other = a_workspace_holding("pub fn bar() -> u32 {\n    2\n}\n");
-    let entry = a_host_over_fake_language_servers();
+    let entry = a_host_over_fake_language_servers_that_load_a_graph();
 
     // When only the first is warmed
     stream_at::<_, IndexProgress>(

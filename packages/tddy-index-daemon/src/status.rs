@@ -43,6 +43,12 @@ pub fn status_of(error: &RestructureError) -> Status {
         }
         // The server asked to be asked again, so the same request is worth repeating.
         RestructureError::ServerCatchingUp => Status::unavailable(refusal),
+        // The caller stopped waiting mid-request, which is neither a slow server nor a bad plan.
+        // The same class `LspError::Abandoned` gets in [`status_of_lsp`], and for the same reason:
+        // reporting somebody's `^C` as a deadline sends whoever reads the log hunting a server
+        // that was answering perfectly well. A client still listening never sees it — the run that
+        // caused it is the one that has gone — so it is on the record for the log's sake.
+        RestructureError::CallerStopped => Status::cancelled(refusal),
         RestructureError::Io(_) => Status::internal(refusal),
     }
 }
@@ -99,6 +105,10 @@ pub fn status_of_lsp(error: &LspError) -> Status {
             Status::failed_precondition(failure)
         }
         LspError::Timeout => Status::deadline_exceeded(failure),
+        // The caller stopped waiting, which is neither a slow server nor a bad request. Kept apart
+        // from `Timeout` on purpose: reporting an interrupt as a deadline sends whoever reads the
+        // log hunting a server that was answering perfectly well.
+        LspError::Abandoned => Status::cancelled(failure),
         LspError::ServerExited => Status::unavailable(failure),
         // The server answered, and what it said made no sense. Nothing the caller did caused it.
         LspError::Protocol(_)
@@ -217,6 +227,27 @@ mod tests {
         assert_eq!(status.code(), Code::DeadlineExceeded);
     }
 
+    /// The caller's own going-away, arriving through the restructuring library this time rather
+    /// than through the LSP client: a run interrupted by whoever asked for it is not a slow server
+    /// and not a defective plan, and reporting it as either sends the reader hunting the wrong
+    /// thing. Told apart from a wait that ended before the index did, which is a deadline.
+    #[test]
+    fn reports_a_run_its_caller_stopped_as_cancelled_rather_than_as_a_deadline() {
+        // Given a run whose caller stopped waiting mid-request
+        let stopped = RestructureError::CallerStopped;
+        // And a wait that ended before the index was loaded
+        let unfinished = RestructureError::IndexingIncomplete {
+            seconds: 46,
+            last: "loading crate graph; furthest indexing 12%".to_string(),
+            environment: "rust-analyzer".to_string(),
+        };
+
+        // When each is classified
+        // Then the interrupt is cancelled and the unfinished wait is a deadline
+        assert_eq!(status_of(&stopped).code(), Code::Cancelled);
+        assert_eq!(status_of(&unfinished).code(), Code::DeadlineExceeded);
+    }
+
     #[test]
     fn reports_a_missing_language_server_as_a_failed_precondition() {
         // Given a host with no rust-analyzer to reach
@@ -227,5 +258,22 @@ mod tests {
 
         // Then the host's state is named, not the request
         assert_eq!(status.code(), Code::FailedPrecondition);
+    }
+
+    #[test]
+    fn reports_an_abandoned_request_as_cancelled_rather_than_as_a_deadline() {
+        // Given a request whose caller stopped waiting for it
+        let abandoned = LspError::Abandoned;
+        // And a request that outlasted a bound instead
+        let expired = LspError::Timeout;
+
+        // When each is classified
+        let stopped = status_of_lsp(&abandoned);
+        let timed_out = status_of_lsp(&expired);
+
+        // Then the two are told apart. Collapsing them would send whoever reads the log hunting a
+        // slow server for what was somebody pressing ^C.
+        assert_eq!(stopped.code(), Code::Cancelled);
+        assert_eq!(timed_out.code(), Code::DeadlineExceeded);
     }
 }

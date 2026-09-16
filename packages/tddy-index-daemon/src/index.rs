@@ -21,18 +21,22 @@ use tddy_rpc::Status;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::activity::{reaped_line, Warmth};
+use crate::graph::GraphLoad;
 use crate::proto::code_index::WarmWorkspace;
 use crate::status::status_of_lsp;
 
 /// How long one LSP request may go unanswered before the transport gives up on it.
 ///
-/// Not a budget on indexing — nothing bounds that but the caller. This bounds a *single*
-/// unanswered request, which is a liveness question: a server wedged mid-request holds a blocking
-/// thread inside the transport, where no cancellation check runs, so the wait has to come back to
-/// the retry loop eventually. It is set well above what one request against a cold index takes,
-/// because a value near the client's interactive default would turn ordinary indexing into a
-/// refusal. The same number, for the same reason, as the one a one-shot command line installs.
-const ONE_REQUEST_LIVENESS: Duration = Duration::from_secs(600);
+/// **Not a way out of a wedged request.** `tddy_code_restructuring::backends::LspClientBridge`
+/// drives every request with the serving task's cancellation token, so a client that hangs up
+/// reaches a request already in flight and this bound is not what its disconnect waits on.
+///
+/// What is left is the reason it must stay high: the backend re-issues a request whose bound
+/// expired, a bounded number of times, so the bound multiplied by that count is a hard ceiling on
+/// how long a cold index may take — whatever the client is willing to wait for. Ten minutes puts
+/// it clear of any single request against a cold graph. The same number, for the same reason, as
+/// the one a one-shot command line installs.
+const REQUEST_BOUND_ABOVE_ANY_COLD_INDEX: Duration = Duration::from_secs(600);
 
 /// What this process knows about one workspace root.
 struct RootState {
@@ -42,6 +46,13 @@ struct RootState {
     /// When an operation on this root last reached its language server — what idle reaping is
     /// measured against, and what a client reading [`WarmWorkspace::idle_seconds`] is told.
     last_used: Instant,
+    /// Whether this root's crate graph has been observed loaded, watched from the moment its
+    /// server was reached.
+    ///
+    /// `None` until a server has been reached for this root at all. Replaced rather than reused
+    /// when the watcher behind it has ended, because that means the server it was about is gone and
+    /// the registry has spawned another — whose graph starts unloaded again.
+    graph: Option<GraphLoad>,
 }
 
 /// The roots this process holds an index for, and their queues.
@@ -140,8 +151,10 @@ impl WorkspaceIndex {
             .get_or_spawn(key)
             .await
             .map_err(|failure| status_of_lsp(&failure))?;
-        service.client.set_request_timeout(ONE_REQUEST_LIVENESS);
-        self.record_use(root).await;
+        service
+            .client
+            .set_request_timeout(REQUEST_BOUND_ABOVE_ANY_COLD_INDEX);
+        self.record_use(root, &service.client).await;
         log::debug!(
             target: "tddy_index_daemon::index",
             "serving {} from the warm index", root.display()
@@ -210,14 +223,35 @@ impl WorkspaceIndex {
         warm
     }
 
+    /// Whether `root`'s crate graph has been observed loaded, if a server has been reached for it.
+    ///
+    /// `None` means no server has been asked for yet, which is a different thing from a graph that
+    /// is not loaded: nothing has been watched, so there is nothing to report. [`Self::client_for`]
+    /// is what turns the first into the second.
+    pub(crate) async fn graph_load_of(&self, root: &Path) -> Option<GraphLoad> {
+        self.roots.lock().await.get(root)?.graph.clone()
+    }
+
     /// Note that `root`'s index has just served something, which is what its idle timer is read
     /// against — and what makes the root appear in [`Self::warm_workspaces`].
-    async fn record_use(&self, root: &Path) {
+    ///
+    /// Also where this root's crate-graph watcher is attached, because this is the earliest moment
+    /// a host has a client to attach one to — and `experimental/serverStatus` is reported on the
+    /// transition only, so anything later would be too late. Attached once per server: a latch
+    /// whose watcher has ended is about a server that is gone, and is replaced rather than read.
+    async fn record_use(&self, root: &Path, client: &LspClient) {
         let mut roots = self.roots.lock().await;
-        roots
+        let state = roots
             .entry(root.to_path_buf())
-            .or_insert_with(RootState::new)
-            .last_used = Instant::now();
+            .or_insert_with(RootState::new);
+        state.last_used = Instant::now();
+        if !state
+            .graph
+            .as_ref()
+            .is_some_and(|graph| graph.still_watching())
+        {
+            state.graph = Some(GraphLoad::watching(client));
+        }
     }
 }
 
@@ -226,6 +260,7 @@ impl RootState {
         Self {
             gate: Arc::new(Mutex::new(())),
             last_used: Instant::now(),
+            graph: None,
         }
     }
 }

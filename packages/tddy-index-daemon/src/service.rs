@@ -68,7 +68,7 @@ impl CodeIndexService for CodeIndexServiceImpl {
         request: tddy_rpc::Request<WarmRequest>,
     ) -> Result<tddy_rpc::Response<Self::WarmStream>, tddy_rpc::Status> {
         let request = request.into_inner();
-        operations::serve_warm(&self.index, &request.workspace_root)
+        crate::warm::serve_warm(&self.index, &request.workspace_root)
             .await
             .map(tddy_rpc::Response::new)
     }

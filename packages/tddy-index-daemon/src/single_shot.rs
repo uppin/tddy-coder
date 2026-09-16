@@ -48,17 +48,24 @@ pub(crate) async fn run_once(service: &CodeIndexServiceImpl, requested: Requeste
             checked(streamed).await
         }
         Requested::Apply(request) => {
+            // Read before the request is handed over, because the summary at the end of the run
+            // has to say whether the tree was written to and the events do not carry that.
+            let rehearsal = request.dry_run;
             let streamed = service.apply(tddy_rpc::Request::new(request)).await;
-            applied(streamed).await
+            applied(streamed, rehearsal).await
         }
-        Requested::Anchors(request) => match service.anchors(tddy_rpc::Request::new(request)).await
-        {
-            Ok(response) => {
-                render::anchors(&response.into_inner());
-                Verdict::Held
+        Requested::Anchors(request) => {
+            // Likewise: the anchor document names the file the range is in, and the answer carries
+            // the range alone.
+            let file = request.file.clone();
+            match service.anchors(tddy_rpc::Request::new(request)).await {
+                Ok(response) => {
+                    render::anchors(&file, &response.into_inner());
+                    Verdict::Held
+                }
+                Err(refusal) => refused(&refusal),
             }
-            Err(refusal) => refused(&refusal),
-        },
+        }
         Requested::PlanStatus(request) => {
             match service.plan_status(tddy_rpc::Request::new(request)).await {
                 Ok(response) => {
@@ -116,7 +123,9 @@ async fn checked(
     streamed: Result<tddy_rpc::Response<EventStream<RestructureEvent>>, tddy_rpc::Status>,
 ) -> Verdict {
     let mut found = 0usize;
-    let drained = drain(streamed, |event| {
+    // A check writes nothing whatever it finds, so nothing it reports is an apply's summary and
+    // the rehearsal flag has nothing to change.
+    let drained = drain(streamed, false, |event| {
         if matches!(event.event, Some(restructure_event::Event::Finding(_))) {
             found += 1;
         }
@@ -139,8 +148,9 @@ async fn checked(
 /// An apply's stream, rendered. Everything it has to say about how far it got is in the events.
 async fn applied(
     streamed: Result<tddy_rpc::Response<EventStream<RestructureEvent>>, tddy_rpc::Status>,
+    rehearsal: bool,
 ) -> Verdict {
-    drain(streamed, |_| {}).await
+    drain(streamed, rehearsal, |_| {}).await
 }
 
 /// This process's own interrupt, as the future an analysis is raced against.
@@ -194,6 +204,7 @@ async fn analysed(
 /// had already started, which is why both are folded into one verdict here.
 async fn drain(
     streamed: Result<tddy_rpc::Response<EventStream<RestructureEvent>>, tddy_rpc::Status>,
+    rehearsal: bool,
     mut watch: impl FnMut(&RestructureEvent),
 ) -> Verdict {
     let mut stream = match streamed {
@@ -206,7 +217,7 @@ async fn drain(
         match next {
             Ok(event) => {
                 watch(&event);
-                render::restructure(&event);
+                render::restructure(&event, rehearsal);
             }
             Err(refusal) => verdict = refused(&refusal),
         }

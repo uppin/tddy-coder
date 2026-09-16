@@ -17,11 +17,13 @@
 mod activity;
 pub mod analyze;
 mod apply;
+mod graph;
 pub mod index;
 pub mod operations;
 pub mod queries;
 pub mod service;
 pub mod status;
+mod warm;
 
 pub use service::{build_code_index_entry, CodeIndexPorts, CodeIndexServiceImpl, EventStream};
 

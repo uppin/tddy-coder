@@ -25,9 +25,9 @@ use tddy_task::TaskRegistry;
 use tokio_util::sync::CancellationToken;
 
 use crate::backends::rust::ProgressSink;
+use crate::console;
 use crate::restructure_args::options_for;
-use crate::runner::{Command, Finding, Options, Outcome};
-use crate::verify::Comparison;
+use crate::runner::{Command, Options, Outcome};
 
 pub use crate::restructure_args::{
     RestructureAnchorsArgs, RestructureArgs, RestructureCheckArgs, RestructureCommand,
@@ -64,11 +64,9 @@ pub async fn run(args: RestructureArgs) -> Result<()> {
             .await
             .context("rust-analyzer LSP")?;
         (options.progress)("rust-analyzer client ready");
-        // The client's own per-request default is sized for interactive queries, and one request
-        // against a cold index routinely outlasts it. This is not a budget on the index — nothing
-        // bounds that now but the caller — it is how long a single *unanswered* request may hold
-        // the blocking thread before the retry loop gets to look at its token again.
-        service.client.set_request_timeout(ONE_REQUEST_LIVENESS);
+        service
+            .client
+            .set_request_timeout(REQUEST_BOUND_ABOVE_ANY_COLD_INDEX);
         Some(Arc::clone(&service.client))
     } else {
         None
@@ -86,91 +84,31 @@ pub async fn run(args: RestructureArgs) -> Result<()> {
 
 /// Write a run's result to the console this front end owns, and say whether the run succeeded.
 ///
-/// This is also where a result becomes an exit status. A check with findings and a comparison that
-/// does not hold are both *answered* calls whose answer is a failed run: the library returns them
-/// as values because a caller decides what they mean, and what this caller means by them is a
-/// non-zero exit — which `main` produces from the error returned here.
+/// The wording is [`crate::console`]'s, which is what makes the same operation read the same
+/// whether it was served cold by this process or warm by the index daemon. What is *this* front
+/// end's, and stays here, is where those lines go — stdout, because this is the only module in the
+/// crate that owns a console — and what the result means. A check with findings and a comparison
+/// that does not hold are both *answered* calls whose answer is a failed run: the library returns
+/// them as values because a caller decides what they mean, and what this caller means by them is a
+/// non-zero exit, which `main` produces from the error returned here.
 fn report(outcome: Outcome, rehearsal: bool) -> Result<()> {
+    for line in console::outcome(&outcome, rehearsal) {
+        println!("{line}");
+    }
+    verdict_on(&outcome)
+}
+
+/// Whether a result that was *answered* is nonetheless a failed run.
+fn verdict_on(outcome: &Outcome) -> Result<()> {
     match outcome {
-        Outcome::Applied(summary) => {
-            if summary.stopped_early {
-                println!(
-                    "   stopped after {} operations as requested",
-                    summary.applied
-                );
-            }
-            println!(
-                "{} {} of {} operations",
-                if rehearsal { "resolved" } else { "applied" },
-                summary.applied,
-                summary.total
-            );
-            Ok(())
+        Outcome::Checked(findings) if !findings.is_empty() => {
+            Err(anyhow::anyhow!(console::findings_refusal(findings.len())))
         }
-        Outcome::Status(progress) => {
-            println!("completed {}", progress.completed);
-            println!("in_flight {}", progress.in_flight);
-            println!("failed {}", progress.failed);
-            println!("pending {}", progress.pending);
-            Ok(())
+        Outcome::Verified(comparison) if !comparison.holds() => {
+            Err(anyhow::anyhow!(console::comparison_refusal(comparison)))
         }
-        Outcome::Checked(findings) => report_findings(&findings),
-        Outcome::Anchored { file, range } => {
-            println!(
-                "{}",
-                serde_json::json!({
-                    "kind": "range",
-                    "file": file,
-                    "start": { "line": range.start.line, "col": range.start.col },
-                    "end": { "line": range.end.line, "col": range.end.col }
-                })
-            );
-            Ok(())
-        }
-        Outcome::Verified(comparison) => report_comparison(&comparison),
+        _ => Ok(()),
     }
-}
-
-/// Every finding a check made, attributed to the operation that caused it.
-fn report_findings(findings: &[Finding]) -> Result<()> {
-    for finding in findings {
-        println!("{}: {}", finding.operation, finding.detail);
-    }
-
-    if findings.is_empty() {
-        println!("no findings");
-        return Ok(());
-    }
-
-    Err(anyhow::anyhow!(
-        "{} finding(s) — see above. Nothing was written.",
-        findings.len()
-    ))
-}
-
-/// What holding the tree against a git ref found, and whether it held.
-fn report_comparison(comparison: &Comparison) -> Result<()> {
-    println!(
-        "{} statements before, {} after",
-        comparison.before, comparison.after
-    );
-    for statement in &comparison.missing {
-        println!("missing: {statement}");
-    }
-    for statement in &comparison.added {
-        println!("added:   {statement}");
-    }
-
-    if comparison.holds() {
-        println!("every statement accounted for");
-        return Ok(());
-    }
-
-    Err(anyhow::anyhow!(
-        "{} statement(s) the tree lost and {} it gained — see above",
-        comparison.missing.len(),
-        comparison.added.len()
-    ))
 }
 
 /// Point a run's live account at the console this front end owns.
@@ -214,7 +152,7 @@ fn a_stamped_sink(kind: &'static str, aside: bool) -> ProgressSink {
             *last = Some(now);
             stamp
         };
-        let stamped = format!("   {kind} ({stamp}): {line}");
+        let stamped = console::narration(kind, Some(&stamp), line);
         if aside {
             eprintln!("{stamped}");
         } else {
@@ -274,9 +212,11 @@ fn report_trace(line: &str) {
 /// rather than dying on the signal is what lets the run unwind through its own refusal — naming
 /// where the index got to, with the journal it has written so far left consistent.
 ///
-/// Taking the signal does replace its default disposition for the rest of the process, so a run
-/// wedged inside a single request cannot be interrupted again until that request gives up. `SIGTERM`
-/// is deliberately left alone, so there is still an immediate way out of that case.
+/// Taking the signal does replace its default disposition for the rest of the process, so `^C` no
+/// longer kills the run outright — which is why the token has to reach everywhere a run waits,
+/// including a request already in flight. It does:
+/// [`crate::backends::LspClientBridge`] drives each request with this token and abandons it, at the
+/// server as well as here. `SIGTERM` is still deliberately left alone.
 fn cancelled_on_interrupt() -> CancellationToken {
     let cancel = CancellationToken::new();
     let interrupted = cancel.clone();
@@ -307,13 +247,18 @@ fn restructure_allow_list() -> LspAllowList {
 
 /// How long one LSP request may go unanswered before the transport gives up on it.
 ///
-/// Not a budget on indexing: the backend's waits span many requests and end on readiness or on
-/// cancellation. This bounds a *single* request, which is a liveness question — a server wedged
-/// mid-request holds the blocking thread inside the transport, where no cancellation check runs,
-/// so the wait has to come back to the retry loop eventually. It is therefore set well above what
-/// one request against a cold index takes: a value near the client's interactive default would
-/// turn ordinary indexing into a refusal, which is the defect this change exists to remove.
-const ONE_REQUEST_LIVENESS: Duration = Duration::from_secs(600);
+/// **Not a way out of a wedged request.** That was the old justification, and it no longer holds:
+/// [`crate::backends::LspClientBridge`] drives every request with this run's cancellation token,
+/// so a `^C` reaches one in flight and the bound is not what an interrupted operator waits on.
+///
+/// What is left is the reason it must stay *high*. `RustBackend::request_settled` maps an expired
+/// bound to "the server is still catching up" and re-issues the request, a bounded number of
+/// times — so the bound multiplied by that count is a hard ceiling on how long a cold index may
+/// take, whatever the caller is willing to wait. At the client's interactive default (10s) that
+/// ceiling is minutes, which is a budget by the back door and the very defect the budgets were
+/// removed to fix. Ten minutes puts it clear of any single request against a cold graph, leaving
+/// the end of a run where this library wants it: with the caller.
+const REQUEST_BOUND_ABOVE_ANY_COLD_INDEX: Duration = Duration::from_secs(600);
 
 fn needs_lsp_client(options: &Options) -> bool {
     match options.command {
@@ -384,14 +329,20 @@ mod tests {
         assert!(!needs_lsp_client(&parse(&["verify", "--against", "HEAD"])));
     }
 
-    /// Kept as an assertion on the number because it is a policy, not an incidental default: a
-    /// value anywhere near the client's interactive default (10s) would turn ordinary indexing
-    /// into a timeout, which is the defect the budgets were removed to fix.
+    /// Kept as an assertion on the number because it is a policy, not an incidental default.
+    ///
+    /// The bound is no longer how a run gets out of a wedged request — the run's cancellation
+    /// token reaches one in flight now — so what is left to justify is that it stays *well clear*
+    /// of a cold index. `request_settled` re-issues a request whose bound expired, up to
+    /// `CONTENT_MODIFIED_RETRIES` times, so a bound anywhere near the client's interactive default
+    /// (10s) puts a hard ceiling of retries × bound on indexing: a budget by the back door, and
+    /// the defect removing the budgets was meant to fix.
     #[test]
-    fn allows_one_request_minutes_rather_than_the_seconds_an_interactive_query_gets() {
-        // Given the per-request wait a run installs on the shared client
+    fn keeps_the_per_request_bound_far_above_what_a_cold_index_takes_to_answer_one_request() {
+        // Given the per-request bound a run installs on the shared client
         // When it is read
-        // Then it is the ten minutes a cold index can take to answer one request
-        assert_eq!(ONE_REQUEST_LIVENESS, Duration::from_secs(600));
+        // Then it is the ten minutes a cold index can take to answer one request, not the seconds
+        // an interactive query gets
+        assert_eq!(REQUEST_BOUND_ABOVE_ANY_COLD_INDEX, Duration::from_secs(600));
     }
 }

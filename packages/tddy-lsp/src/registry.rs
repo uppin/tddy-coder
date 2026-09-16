@@ -201,7 +201,13 @@ impl LspRegistry {
         Ok(service)
     }
 
-    /// Get-or-spawn, then bind a target by opening each of its `srcs` as an LSP document.
+    /// Get-or-spawn, then bind a target by announcing each of its `srcs` as an LSP document.
+    ///
+    /// A source the server has not been told about is opened; one it already holds is announced as
+    /// an edit at the next version. No bind can assume it is the first: a host that outlives one
+    /// request binds the same target again on the next one, and re-opening a document restarts a
+    /// version sequence the server has already advanced — after which it is entitled to ignore
+    /// what the bind announced.
     pub async fn bind_target(
         &self,
         key: LspKey,
@@ -211,7 +217,7 @@ impl LspRegistry {
         for src in srcs {
             service
                 .client
-                .did_open(&src.uri, &src.language_id, &src.text)
+                .sync_document(&src.uri, &src.language_id, &src.text)
                 .await?;
         }
         Ok(service)

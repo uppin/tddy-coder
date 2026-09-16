@@ -84,11 +84,16 @@ fn a_cargo_workspace() -> tempfile::TempDir {
 
 /// Ask for an anchor through the registered coordinate, returning how long it took.
 ///
-/// **This, not `Warm`, is what demonstrates index reuse.** `Warm` reports ready as soon as
-/// `get_or_spawn` hands back a live server — it does not wait for the crate graph, which is the
-/// weakness recorded against `Warm.ready` in this change's `## Technical Debt`. An anchor is a
-/// different matter: it goes through `RustBackend::ensure_indexed`, which polls until the server can
-/// actually answer, so the first one on a root pays the graph load and a later one does not.
+/// One of two requests that demonstrate index reuse, and the stricter one: it goes through
+/// `RustBackend::ensure_indexed`, which probes with a hover until the server can actually answer,
+/// so the first anchor on a root pays the graph load and a later one does not.
+///
+/// `Warm` can now be trusted for the same claim — it waits for the server's own
+/// `experimental/serverStatus` rather than for a live process — and
+/// `a_warm_of_a_loaded_root_is_immediate_where_the_first_one_paid_for_the_graph` pins that below.
+/// An anchor is still kept here as the independent witness: it needs the graph to produce a range
+/// at all, so it cannot pass against a root whose graph was never loaded, whatever a readiness
+/// signal claims.
 async fn anchoring(entry: &tddy_rpc::ServiceEntry, root: &Path) -> Duration {
     let request = AnchorsRequest {
         workspace_root: root.to_string_lossy().to_string(),
@@ -172,12 +177,48 @@ async fn warming_a_root_reports_its_index_ready() {
     // When it is warmed
     let (_, progress) = warming(&entry, workspace.path()).await;
 
-    // Then the stream ends by reporting the index ready. Note this says a live server holds the
-    // root, not that its graph is loaded — see `Warm.ready` in this change's `## Technical Debt`.
-    // The reuse claim is pinned by the anchor test above, which needs the graph to answer at all.
+    // Then the stream ends by reporting the index ready, and `ready` now means the crate graph is
+    // loaded: the wait ends on rust-analyzer's own `experimental/serverStatus`, not on a live
+    // process. The phases it passed through on the way are forwarded too, which is what a reader
+    // of a six-minute load has instead of silence.
     assert!(
         progress.last().expect("progress").ready,
         "a completed warm must end by reporting the index ready"
+    );
+    assert!(
+        progress.iter().any(|message| !message.phase.is_empty()),
+        "a real load reported no phase at all, so nothing was forwarded: {progress:?}"
+    );
+}
+
+/// The claim `Warm` could not make before, against the real server: a root whose graph is already
+/// loaded is answered immediately, and the first warm of a cold one is not.
+///
+/// This is what changes the meaning of `ready`. It used to be true within a third of a second of a
+/// *cold* root, because it only ever said a live server held the root — so a ratio like this one
+/// would have compared two answers that both skipped the load. Both halves matter: the cold warm
+/// has to be slow, or the second being fast says nothing.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "boots a real rust-analyzer and loads a real crate graph — minutes, and a toolchain"]
+async fn a_warm_of_a_loaded_root_is_immediate_where_the_first_one_paid_for_the_graph() {
+    // Given a workspace whose crate graph this process has loaded by warming it once
+    let workspace = a_cargo_workspace();
+    let entry = a_host_over_real_rust_analyzers();
+    let (cold, _) = warming(&entry, workspace.path()).await;
+
+    // When it is warmed again
+    let (warm, progress) = warming(&entry, workspace.path()).await;
+
+    // Then the second warm is answered out of what this process already observed, rather than
+    // waiting on a transition the server has already made
+    assert!(
+        warm * A_WARM_REQUEST_SHOULD_BE_IMMEDIATE_FACTOR < cold,
+        "the second warm took {warm:?} against the first's {cold:?}, so `ready` is not waiting \
+         for the graph"
+    );
+    assert!(
+        progress.last().expect("progress").ready,
+        "a second warm of a loaded root must still end by reporting the index ready"
     );
 }
 

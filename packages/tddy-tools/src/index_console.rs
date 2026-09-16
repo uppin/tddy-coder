@@ -1,30 +1,35 @@
 //! What a run served by the warm index daemon looks like on this binary's console.
 //!
-//! **The shapes are `tddy_code_restructuring::restructure_cli`'s, deliberately**: a developer who
-//! exports `TDDY_INDEX_SOCKET` must read the same account of the same operation as one who does
-//! not, or the variable changes more than where the work happens.
+//! **The shapes are [`tddy_code_restructuring::console`]'s, and they are called rather than
+//! re-stated**: a developer who exports `TDDY_INDEX_SOCKET` must read the same account of the same
+//! operation as one who does not, or the variable changes more than where the work happens.
 //!
-//! They are re-stated here rather than called because `restructure_cli`'s `report`,
-//! `report_findings`, `report_comparison` and `install_console` are all private to that module —
-//! its only public surface is `run(RestructureArgs)`, which owns the whole run including the
-//! language server it spawns, and is therefore the one thing a client of the daemon cannot use.
-//! Reusing them needs `tddy-code-restructuring` to publish a renderer over its `Outcome`,
-//! `Finding` and `Comparison` types; until it does, this module is the second front end and the
-//! duplication is recorded rather than hidden.
+//! What remains here, and is all that ever should have, is the mapping and the destination. The
+//! daemon streams *events* — prost messages shaped for a wire — and this maps each one onto the
+//! library type the renderer speaks: `RunOutcome` to a `RunSummary`, `PlanStatusResponse` to a
+//! `PlanProgress`, `VerifyResponse` to a `Comparison`, `SourceRange` to a `Range`. Then it writes
+//! the lines where this front end writes them.
 //!
-//! The one shape that is **called rather than restated** is the elapsed-time stamp:
-//! [`tddy_code_restructuring::restructure_cli::step_delta`] is pure, so it is published and used
-//! here. A second spelling of "+1m30s" is a thing that drifts, and the stamp is what tells a
-//! developer a six-minute crate-graph load from a hang.
+//! Two destinations, and they must match `restructure_cli::install_console`'s exactly: the answer
+//! — findings, per-operation lines, the summary — goes to **stdout**, and the server's narration of
+//! how far it got goes **aside, to stderr**. The rule is not cosmetic. A test pins the whole stdout
+//! vector of a `check --budget` run against the literal lines the cold path's own suite pins, so
+//! the two front ends cannot drift apart silently. It caught this: when #500's run-level narration
+//! was merged in, the cold path started sending it to stderr and this renderer was still putting it
+//! on stdout, and the assertion failed with the three extra lines.
 //!
-//! TODO(tddy-code-restructuring): publish the result renderer — `report`, `report_findings`,
-//! `report_comparison` over `Outcome`/`Finding`/`Comparison` — so this module maps the daemon's
-//! events onto those library types instead of re-stating their wording.
+//! The elapsed-time stamp is the run's own, measured here against this run's clock and handed to
+//! [`tddy_code_restructuring::restructure_cli::step_delta`]: it is how long *this console* has been
+//! waiting, which is the question its reader is asking.
 
 use std::time::Instant;
 
 use anyhow::Result;
+use tddy_code_restructuring::console;
 use tddy_code_restructuring::restructure_cli::step_delta;
+use tddy_code_restructuring::runner::{PlanProgress, RunSummary};
+use tddy_code_restructuring::verify::Comparison;
+use tddy_code_restructuring::{Position, Range};
 use tddy_index_daemon::proto::code_index::{
     restructure_event, AnchorsResponse, Finding, IndexProgress, OperationApplied,
     PlanStatusResponse, RestructureEvent, RunOutcome, SourceRange, VerifyResponse,
@@ -42,19 +47,10 @@ fn aside(line: &str) {
 
 /// What a run has been told so far, and therefore what it amounts to.
 ///
-/// Findings are counted rather than rendered twice: a check with findings is an *answered* call
-/// whose answer is a failed run, so the count is what becomes this process's exit status — the
-/// judgement `restructure_cli::report_findings` makes, made here for the same reason.
-///
-/// Two destinations, and they must match `restructure_cli::install_console`'s exactly: the answer
-/// — findings, per-operation lines, the summary — goes to **stdout**, and the server's narration of
-/// how far it got goes **aside, to stderr**.
-///
-/// The rule is not cosmetic. A test pins the whole stdout vector of a `check --budget` run against
-/// the literal lines the cold path's own suite pins, so the two front ends cannot drift apart
-/// silently. It caught this: when #500's run-level narration was merged in, the cold path started
-/// sending it to stderr and this renderer was still putting it on stdout, and the assertion failed
-/// with the three extra lines.
+/// Findings are counted rather than collected: a check with findings is an *answered* call whose
+/// answer is a failed run, so the count is what becomes this process's exit status — the judgement
+/// the cold path makes in its own `verdict_on`, made here for the same reason and worded by
+/// [`console::findings_refusal`].
 ///
 /// `Anchors` needs no special case here, unlike the cold path — it is a unary RPC, so a client
 /// receives a range and no account at all; the waiting the cold path narrates happens inside the
@@ -114,98 +110,77 @@ impl Rendered {
         let now = Instant::now();
         let stamp = step_delta(self.narrated, now);
         self.narrated = Some(now);
-        aside(&format!("   indexing ({stamp}): {}", progress.line));
+        aside(&console::narration(
+            "indexing",
+            Some(&stamp),
+            &progress.line,
+        ));
     }
 
     /// What one operation of a plan amounted to, and what it had to widen to get there.
+    ///
+    /// The widenings come off the event already stated — the daemon's apply loop states each one
+    /// with `console::widening` — so all that is left is the account's own prefix.
     fn operation(&self, operation: &OperationApplied) {
         for widened in &operation.visibility {
-            say(&format!("   visibility: {widened}"));
+            say(&console::visibility(widened));
         }
-        say(&format!(
-            "[{}/{}] op {}: {} -> {} file(s) {}",
-            operation.done,
-            operation.total,
-            operation.index,
-            operation.kind,
+        say(&console::operation(
+            operation.index as usize,
+            // The event carries how many operations are *done*, which is already this one
+            // included; the renderer counts from the one before it, as the cold path's loop does.
+            (operation.done as usize).saturating_sub(1),
+            operation.total as usize,
+            &operation.kind,
             operation.files.len(),
-            if operation.rehearsed_only {
-                "resolved"
-            } else {
-                "applied"
-            }
+            !operation.rehearsed_only,
         ));
     }
 
     /// What the whole run amounted to.
     fn outcome(&self, outcome: &RunOutcome) {
-        if outcome.stopped_early {
-            say(&format!(
-                "   stopped after {} operations as requested",
-                outcome.applied
-            ));
+        for line in console::run_summary(&a_run_summary(outcome), self.rehearsal) {
+            say(&line);
         }
-        say(&format!(
-            "{} {} of {} operations",
-            if self.rehearsal {
-                "resolved"
-            } else {
-                "applied"
-            },
-            outcome.applied,
-            outcome.total
-        ));
     }
 
     fn finding(&mut self, finding: &Finding) {
         self.findings += 1;
-        say(&format!("{}: {}", finding.operation, finding.detail));
+        say(&console::finding(&a_finding(finding)));
     }
 
     /// Whether a check that ran to the end of its stream is a successful run.
     pub(crate) fn verdict_on_findings(&self) -> Result<()> {
         if self.findings == 0 {
-            say("no findings");
+            say(console::NO_FINDINGS);
             return Ok(());
         }
-        Err(anyhow::anyhow!(
-            "{} finding(s) — see above. Nothing was written.",
-            self.findings
-        ))
+        Err(anyhow::anyhow!(console::findings_refusal(self.findings)))
     }
 }
 
 /// How far a plan's journal got.
 pub(crate) fn plan_status(response: &PlanStatusResponse) {
-    say(&format!("completed {}", response.completed));
-    say(&format!("in_flight {}", response.in_flight));
-    say(&format!("failed {}", response.failed));
-    say(&format!("pending {}", response.pending));
+    for line in console::plan_progress(&PlanProgress {
+        completed: response.completed as usize,
+        in_flight: response.in_flight as usize,
+        pending: response.pending as usize,
+        failed: response.failed as usize,
+    }) {
+        say(&line);
+    }
 }
 
 /// What holding the tree against a git ref found, and whether it held.
 pub(crate) fn verify(response: &VerifyResponse) -> Result<()> {
-    say(&format!(
-        "{} statements before, {} after",
-        response.before, response.after
-    ));
-    for statement in &response.missing {
-        say(&format!("missing: {statement}"));
+    let comparison = a_comparison(response);
+    for line in console::comparison(&comparison) {
+        say(&line);
     }
-    for statement in &response.added {
-        say(&format!("added:   {statement}"));
-    }
-
-    if response.holds {
-        say("every statement accounted for");
+    if comparison.holds() {
         return Ok(());
     }
-
-    Err(anyhow::anyhow!(
-        "{} statement(s) the tree lost and {} it gained — see above",
-        response.missing.len(),
-        response.added.len()
-    ))
+    Err(anyhow::anyhow!(console::comparison_refusal(&comparison)))
 }
 
 /// The anchor a run of items sits at, as the JSON document a plan carries it as.
@@ -221,16 +196,51 @@ pub(crate) fn anchors(file: &str, response: &AnchorsResponse) -> Result<()> {
     else {
         anyhow::bail!("the index daemon answered the anchor without a range");
     };
-    say(&format!(
-        "{}",
-        serde_json::json!({
-            "kind": "range",
-            "file": file,
-            "start": { "line": start.line, "col": start.column },
-            "end": { "line": end.line, "col": end.column }
-        })
+    say(&console::anchor(
+        file,
+        Range {
+            start: Position {
+                line: start.line,
+                col: start.column,
+            },
+            end: Position {
+                line: end.line,
+                col: end.column,
+            },
+        },
     ));
     Ok(())
+}
+
+/// The run summary the renderer speaks, out of the event the daemon sent.
+fn a_run_summary(outcome: &RunOutcome) -> RunSummary {
+    RunSummary {
+        applied: outcome.applied as usize,
+        total: outcome.total as usize,
+        stopped_early: outcome.stopped_early,
+    }
+}
+
+/// The finding the renderer speaks, out of the event the daemon sent.
+fn a_finding(finding: &Finding) -> tddy_code_restructuring::runner::Finding {
+    tddy_code_restructuring::runner::Finding {
+        operation: finding.operation as usize,
+        detail: finding.detail.clone(),
+    }
+}
+
+/// The comparison the renderer speaks, out of the answer the daemon sent.
+///
+/// `holds` is recomputed from the two lists rather than read off the wire: the field is the
+/// service's own judgement of its own answer, and a renderer that trusted it while printing the
+/// lists could state a verdict its own output contradicts.
+fn a_comparison(response: &VerifyResponse) -> Comparison {
+    Comparison {
+        before: response.before as usize,
+        after: response.after as usize,
+        missing: response.missing.clone(),
+        added: response.added.clone(),
+    }
 }
 
 #[cfg(test)]

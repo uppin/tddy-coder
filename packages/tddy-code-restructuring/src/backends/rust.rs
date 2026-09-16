@@ -313,8 +313,15 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
 /// minutes loading a crate graph showed nothing at all and then failed claiming the plan was
 /// malformed. Folding those messages in costs one match per message and turns the wait into
 /// something a developer can watch.
+///
+/// **Published because the fold is not this backend's alone.** `tddy-index-daemon` observes the
+/// same two notifications — `$/progress` and `experimental/serverStatus` — to answer "is this
+/// root's graph loaded?", and there is exactly one right way to read them: a title arrives only
+/// with `begin` and has to be carried forward per token, the same phase reports once per file
+/// scanned, and the furthest percentage is not the last one. A second reading of that would drift
+/// from this one, and the two would then disagree about a load they were both watching.
 #[derive(Default)]
-struct ServerChatter {
+pub struct ServerChatter {
     /// The title of each work-done progress token in flight, by token. A title arrives only with
     /// `begin`, so it has to be carried forward to the `report` lines that follow — and per token,
     /// because rust-analyzer runs several phases at once and a single field would attribute one
@@ -343,7 +350,7 @@ impl ServerChatter {
     ///
     /// A message that answers a request carries no `method`, which is what keeps every result out
     /// of the progress stream without having to know the ids in flight.
-    fn absorb(&mut self, message: &Value) -> Option<String> {
+    pub fn absorb(&mut self, message: &Value) -> Option<String> {
         match message.get("method").and_then(Value::as_str)? {
             "$/progress" => self.progress(message.get("params")?),
             "experimental/serverStatus" => {
@@ -416,7 +423,7 @@ impl ServerChatter {
     /// pairs it with the furthest percentage seen, so the reader can tell a server that stalled at
     /// 12% from one that timed out at 99% — the first wants investigating, the second wants a
     /// bigger budget.
-    fn how_far(&self) -> String {
+    pub fn how_far(&self) -> String {
         let last = self
             .last
             .clone()
@@ -425,6 +432,27 @@ impl ServerChatter {
             Some((percentage, phase)) => format!("{last}; furthest {phase} {percentage}%"),
             None => last,
         }
+    }
+
+    /// Whether the server has reported its own graph loaded and queryable.
+    ///
+    /// `experimental/serverStatus` is an extension, so a `false` here means "has not said so",
+    /// never "is not loaded" — which is why [`RustBackend::ensure_indexed`] treats it as a shortcut
+    /// out of a hover probe rather than as the probe itself. A consumer with no probe available has
+    /// only this, and must say so rather than presenting it as the stronger claim.
+    pub fn quiescent(&self) -> bool {
+        self.quiescent
+    }
+
+    /// The furthest percentage any phase has reported, and the phase it belonged to.
+    ///
+    /// Kept apart from the last line for the reason the field states: the server counts files
+    /// inside a phase and then emits sub-steps carrying no percentage at all, so the last line is
+    /// routinely the one with no number in it.
+    pub fn furthest(&self) -> Option<(u64, &str)> {
+        self.furthest
+            .as_ref()
+            .map(|(percentage, phase)| (*percentage, phase.as_str()))
     }
 }
 
@@ -684,7 +712,13 @@ impl RustBackend {
     /// because those loops are synchronous: this backend runs under `spawn_blocking`, where
     /// dropping the calling future stops nothing.
     pub fn with_cancellation(mut self, cancel: CancellationToken) -> Self {
-        self.cancel = cancel;
+        self.cancel = cancel.clone();
+        // The bridge needs it too, and for the harder half: the poll loops check the token between
+        // requests, and only the bridge can end one that is already in flight. A bridge left on
+        // the token it was built with would leave every such request unreachable by this run.
+        if let Some(bridge) = &mut self.bridge {
+            bridge.set_cancellation(cancel);
+        }
         self
     }
 
@@ -713,7 +747,10 @@ impl RustBackend {
             cargo_home: PathBuf::new(),
             rustup_home: PathBuf::new(),
             server: None,
-            bridge: Some(LspClientBridge::new(client)),
+            bridge: Some(LspClientBridge::new(
+                client,
+                cancel.clone().unwrap_or_default(),
+            )),
             next_id: 0,
             environment: String::from("external tddy-lsp client"),
             chatter: ServerChatter::default(),
@@ -850,6 +887,7 @@ impl RustBackend {
 
     fn request(&mut self, id: u64, method: &str, params: Value) -> Result<Value> {
         if let Some(bridge) = &self.bridge {
+            let started = Instant::now();
             let outcome = bridge.request(method, params);
             // The self-spawned transport folds progress in as it reads the stream; a bridged one
             // never sees the stream, so it collects what arrived and folds it in here. Without
@@ -859,7 +897,17 @@ impl RustBackend {
                     (self.progress)(&line);
                 }
             }
-            return outcome;
+            // A request the run's own token ended is the caller having stopped, and it is reported
+            // as the incomplete index it is — folded *after* the drain above, so `how_far` names
+            // the furthest the load actually got rather than where it stood one request ago. Not
+            // retryable, which is what keeps `request_settled` from re-asking a server on behalf
+            // of somebody who has gone.
+            return match outcome {
+                Err(RestructureError::CallerStopped) => {
+                    Err(self.incomplete_index(started.elapsed()))
+                }
+                other => other,
+            };
         }
         self.send(json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))?;
         loop {

@@ -99,7 +99,11 @@ pub(crate) fn apply_plan(
             operation_event(index, done, plan.ops.len(), op, &resolved, options.dry_run),
         );
         for note in &resolved.notes {
-            emit(events, &cancel, note_event(note));
+            emit(
+                events,
+                &cancel,
+                note_event(&tddy_code_restructuring::console::note(note)),
+            );
         }
     }
 
@@ -133,10 +137,12 @@ fn operation_event(
             total: total as u32,
             kind: format!("{:?}", op.op),
             files: tddy_code_restructuring::apply::touched_paths(&resolved.edit),
+            // Stated by the renderer rather than here, so a widening carried as a value on this
+            // event and one carried in a line of the cold path's account read the same.
             visibility: resolved
                 .report
                 .iter()
-                .map(|widened| format!("`{}` {} -> {}", widened.item, widened.from, widened.to))
+                .map(tddy_code_restructuring::console::widening)
                 .collect(),
             rehearsed_only: dry_run,
         })),

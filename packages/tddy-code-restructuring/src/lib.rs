@@ -7,6 +7,7 @@
 
 pub mod apply;
 pub mod backends;
+pub mod console;
 pub mod crate_move;
 pub mod edit;
 pub mod journal;
@@ -90,6 +91,18 @@ pub enum RestructureError {
         /// is the line that separates them in a CI log.
         environment: String,
     },
+    /// The caller stopped waiting while a language-server request was in flight, so the request
+    /// was abandoned — at the server too, which is told to stop computing an answer nobody will
+    /// read.
+    ///
+    /// Distinct from every other variant because nothing is wrong: not the plan, not the tree, not
+    /// the server. It is also the one refusal that must **not** be retried — there is nobody left
+    /// to answer — which is why it is a variant of its own rather than folded into
+    /// [`RestructureError::ServerCatchingUp`]. The backend converts it into
+    /// [`RestructureError::IndexingIncomplete`] as it leaves, so the run still reports how far the
+    /// index got; it is visible here for the paths that have no index to report on.
+    #[error("the caller stopped waiting, so the request was abandoned")]
+    CallerStopped,
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

@@ -1,36 +1,38 @@
-# 2026-09-16 — `Warm.ready` means "a live server holds this root", not "the graph is loaded"
+# 2026-09-16 — `RustBackend::ensure_indexed` is the readiness probe, and it is private and URI-scoped
 
-**Category:** Defect
+**Category:** Future enhancement
 **Source:** `2026-09-15-warm-code-intelligence-daemon` changeset, M4a
 
-`code_index.CodeIndexService`'s `Warm` streams `IndexProgress` and ends with `ready: true`. The
-schema's comment says the root's crate graph is loaded and queryable. What the field actually means
-is weaker: a live language server holds that root. `Warm` returns as soon as
-`LspRegistry::get_or_spawn` yields a server, without waiting for the graph.
+## What has been closed
 
-Measured: a `Warm` of a real three-crate workspace returned in **0.34s**, while the first `Anchors`
-on the same root — which goes through `RustBackend::ensure_indexed` and therefore does wait — took
-**2.1s**. So `ready` can be true while the next request still pays the whole load.
+`Warm.ready` now means the root's crate graph is loaded, which is what the schema always claimed.
+`tddy-lsp` publishes `LspClient::subscribe_notifications`, and `tddy-index-daemon` uses it: a
+per-root latch (`graph.rs`) is fed by a watcher attached the moment a server is reached, folding
+`$/progress` and `experimental/serverStatus` through `tddy-code-restructuring`'s own
+`ServerChatter` — which is now published for the purpose rather than restated. `warm.rs` forwards
+the server's phases into `IndexProgress` (`line`, `phase`, `percentage`, `furthest`) and ends
+`ready: true` only once the latch says the graph is queryable.
 
-This was found by writing the production test for index reuse *against* `Warm`, which passed in 0.34s
-having proven nothing. The test now probes `Anchors` instead, and says so in a comment.
+A latch, rather than a per-request read of the notifications, because rust-analyzer reports
+quiescence **on the transition and only on the transition**: a second `Warm` that waited to be told
+would wait for ever. Pinned by `code_index_service_acceptance.rs` against `fake_lsp`'s new
+`--loads-crate-graph` mode, and by `warm_index_production.rs` against a real rust-analyzer —
+`a_warm_of_a_loaded_root_is_immediate_where_the_first_one_paid_for_the_graph`, which fails if
+`ready` stops waiting for the graph.
 
-## Why it was not fixed
+## What remains
 
-Two private things stand in the way, and neither is a small change:
+`RustBackend::ensure_indexed` is still the *strongest* readiness probe there is — it hovers until
+the server answers, so it stands on an answer rather than on an extension — and it is still private
+and URI-scoped rather than root-scoped. Two consequences:
 
-- `RustBackend::ensure_indexed` (`packages/tddy-code-restructuring/src/backends/rust.rs`) is the
-  probe that decides readiness properly — private, and URI-scoped rather than root-scoped.
-- The server's own `$/progress` is reachable only through `LspClient::drain_notifications`
-  (`packages/tddy-lsp/src/client.rs`), which is **destructive and single-consumer**. Forwarding
-  phases from there would steal them from a concurrent operation on the same root, which is folding
-  the same queue into its own account.
+- `Warm` stands on `experimental/serverStatus`, which is an extension. A server that never sent it
+  would leave a warm waiting until its caller hung up. Every rust-analyzer this repo runs against
+  sends it, and `ServerChatter::quiescent` is documented as "has not said so" rather than "is not
+  loaded", but a probe would not need the extension at all.
+- A watcher that falls behind is told how many notifications it lost and cannot know whether the
+  transition was among them. It keeps waiting rather than guessing (`graph.rs`), and logs the loss.
+  A probe would answer the question directly instead.
 
-## What closing it would take
-
-`drain_notifications` becoming non-destructive — a `broadcast` or `watch` in place of a drain — so a
-status reader and a running operation can both see progress. That is a design change in `tddy-lsp`
-affecting every consumer of the client, which is why it was not folded into a feature.
-
-Until then, treat `ready` as "addressable", and read the daemon's own log for the real answer: it
-reports `which has no index yet` versus `which is already warm` per request.
+Closing this means a root-scoped readiness probe on `RustBackend`, public, which `Warm` would use as
+the authority — keeping the notification stream as the narration it is good at.
