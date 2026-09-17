@@ -4,6 +4,8 @@
 //! - MCP mode (`--mcp`): Retains approval_prompt MCP server for backwards compatibility
 
 mod cli;
+mod index_client;
+mod index_console;
 mod pty_relay;
 mod remote_cli;
 mod session_hook;
@@ -153,9 +155,7 @@ async fn main() -> Result<()> {
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         Some(Subcommand::ListModels(s)) => tddy_tools::list_models::run_list_models(&s).await?,
         Some(Subcommand::Analyze(s)) => tddy_code_analysis::analyze_cli::run(s)?,
-        Some(Subcommand::Restructure(s)) => {
-            tddy_code_restructuring::restructure_cli::run(s).await?
-        }
+        Some(Subcommand::Restructure(s)) => index_client::run_restructure(s).await?,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);

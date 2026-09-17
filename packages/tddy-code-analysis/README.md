@@ -4,6 +4,10 @@ Rust code analysis library: cyclomatic complexity (`syn`), CRAP scoring, llvm-co
 
 **Feature doc:** [docs/ft/coder/rust-code-analysis.md](../../docs/ft/coder/rust-code-analysis.md)
 
+Complexity is scored through a `ComplexityCache` keyed by a hash of the **content** scored, so a
+long-lived host does not rescore an unchanged file and always rescores a changed one. The command
+line installs a pass-through cache that keeps nothing.
+
 ## CLI
 
 Exposed via `tddy-tools analyze`:

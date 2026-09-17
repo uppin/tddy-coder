@@ -81,10 +81,9 @@ fn cargo_manifest_dir(crate_path: &Path) -> Result<PathBuf> {
         crate_path.to_path_buf()
     };
     if !manifest.is_file() {
-        return Err(AnalysisError::Message(format!(
-            "no Cargo.toml at {}",
-            manifest.display()
-        )));
+        return Err(AnalysisError::NotACrate {
+            path: manifest.display().to_string(),
+        });
     }
     Ok(manifest
         .parent()
@@ -125,12 +124,22 @@ pub enum CaptureProgress<'a> {
 /// Capture per-test Rust coverage for the crate at `crate_path`, writing into `coverage_dir`.
 ///
 /// `progress` is called as the capture advances; pass `&mut |_| {}` to stay silent.
+///
+/// `cancelled` is checked before the instrumented build and before every test, and a capture that
+/// finds it true stops with [`AnalysisError::Cancelled`] rather than with the `Ok(())` of a
+/// capture that finished. Pass `&crate::never_cancelled` when nobody can hang up. The build itself
+/// is one unit and cannot be interrupted part way, which is why the check before it matters: it is
+/// the difference between a cancelled capture costing nothing and costing ten minutes.
 pub fn capture_coverage(
     crate_path: &Path,
     coverage_dir: &Path,
+    cancelled: &dyn Fn() -> bool,
     progress: &mut dyn FnMut(CaptureProgress<'_>),
 ) -> Result<()> {
     let manifest_dir = cargo_manifest_dir(crate_path)?;
+    if cancelled() {
+        return Err(capture_cancelled(0));
+    }
     let per_test = coverage_dir.join("per-test");
     std::fs::create_dir_all(&per_test)?;
 
@@ -148,6 +157,9 @@ pub fn capture_coverage(
 
     let mut captured = 0usize;
     for (position, harness) in harnesses.iter().enumerate() {
+        if cancelled() {
+            return Err(capture_cancelled(captured));
+        }
         let tests = list_tests(&manifest_dir, &harness.executable)?;
         progress(CaptureProgress::HarnessStarted {
             index: position + 1,
@@ -156,6 +168,9 @@ pub fn capture_coverage(
             tests: tests.len(),
         });
         for (test_position, test_name) in tests.iter().enumerate() {
+            if cancelled() {
+                return Err(capture_cancelled(captured));
+            }
             let status = capture_one_test(&context, harness, test_name, &mut denominator)?;
             captured += 1;
             progress(CaptureProgress::TestCaptured {
@@ -173,6 +188,18 @@ pub fn capture_coverage(
         files: denominator.len(),
     });
     Ok(())
+}
+
+/// The refusal a cancelled capture ends with, naming how far it got.
+///
+/// The denominator is named because it is the one artefact a stopped capture never has: it is
+/// written last, out of every test's export, so no later report can stand on a capture that
+/// stopped — and a reader deciding whether to start again wants to know that rather than guess.
+fn capture_cancelled(captured: usize) -> AnalysisError {
+    AnalysisError::Cancelled {
+        work: "coverage capture".to_string(),
+        reached: format!("{captured} test(s) captured, and no denominator was written"),
+    }
 }
 
 /// Paths shared by every per-test capture, kept together so

@@ -1,9 +1,18 @@
 //! LSP JSON-RPC client. Speaks to a running server through `tddy-task` channels: requests
 //! go out via the task's stdin sender, responses/notifications arrive on the stdout
 //! broadcast. Requests are correlated to responses by id; `publishDiagnostics`
-//! notifications are cached per document URI.
+//! notifications are cached per document URI, and every other notification goes to the
+//! [`notifications`] sink, which serves a drainer and any number of observers at once.
 
-use std::collections::{HashMap, VecDeque};
+mod dispatch;
+mod documents;
+pub mod notifications;
+mod parse;
+mod queries;
+mod types;
+
+use std::collections::HashMap;
+use std::future::Future;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,7 +23,13 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::error::LspError;
-use crate::protocol::{encode_message, FrameReader};
+use crate::protocol::encode_message;
+use dispatch::read_loop;
+use documents::DocumentVersions;
+use notifications::NotificationSink;
+
+pub use notifications::{NotificationEvent, NotificationStream};
+pub use types::{Diagnostic, Location, Position, Range, ResponseError, SymbolInfo};
 
 /// How long a single request waits for its correlated response before giving up, unless a
 /// caller raises it with [`LspClient::set_request_timeout`].
@@ -24,62 +39,6 @@ use crate::protocol::{encode_message, FrameReader};
 /// than a cap.
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// A zero-based line/character position (LSP semantics).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Position {
-    pub line: u32,
-    pub character: u32,
-}
-
-impl Position {
-    /// A position at `line`/`character`.
-    pub fn at(line: u32, character: u32) -> Self {
-        Self { line, character }
-    }
-}
-
-/// A half-open range between two positions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Range {
-    pub start: Position,
-    pub end: Position,
-}
-
-/// A location: a document URI plus a range within it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Location {
-    pub uri: String,
-    pub range: Range,
-}
-
-/// A diagnostic (error/warning/…) at a range.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Diagnostic {
-    pub range: Range,
-    /// LSP severity: 1=Error, 2=Warning, 3=Information, 4=Hint.
-    pub severity: u8,
-    pub message: String,
-    pub source: Option<String>,
-}
-
-/// A symbol reported by document/workspace symbol requests.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SymbolInfo {
-    pub name: String,
-    /// LSP `SymbolKind` numeric code.
-    pub kind: u8,
-    pub location: Location,
-    pub container: Option<String>,
-}
-
-/// A JSON-RPC `error` object the server sent in place of a `result`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResponseError {
-    /// The server's own error code (e.g. -32801 `ContentModified`).
-    pub code: i64,
-    pub message: String,
-}
-
 /// What a pending request is handed: the response `result`, or the server's error.
 type Response = std::result::Result<Value, ResponseError>;
 
@@ -88,14 +47,14 @@ type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Response>>>>;
 /// Cache of the most recent `publishDiagnostics` per document URI.
 type DiagnosticsCache = Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>;
 
-/// Server notifications kept for a consumer to drain, newest last.
-type Notifications = Arc<Mutex<VecDeque<Value>>>;
+/// Where server notifications the client does not consume itself are put.
+type Notifications = Arc<NotificationSink>;
 
-/// How many undrained notifications to keep before dropping the oldest.
+/// What a host installs to learn that this client was used.
 ///
-/// A consumer that never drains must not grow this without bound, and one that drains on a poll
-/// only ever needs the recent few — rust-analyzer emits `$/progress` continuously while it loads.
-const NOTIFICATION_BACKLOG: usize = 256;
+/// A caller that borrows the client from a registry and then works for minutes never goes back to
+/// the registry, so nothing else tells an idle timer that the server is in use.
+pub type ActivityHook = Arc<dyn Fn() + Send + Sync>;
 
 /// A live LSP client attached to one running server.
 pub struct LspClient {
@@ -121,6 +80,14 @@ pub struct LspClient {
     /// account of what a server is doing during a load that answers no requests, and dropping
     /// them left every such wait silent and every timeout unable to say where the server got to.
     notifications: Notifications,
+    /// The version each open document was last announced at.
+    ///
+    /// Held here rather than by a caller because a server tracks versions per document for its
+    /// whole life, while a caller that drives one operation does not.
+    documents: DocumentVersions,
+    /// Installed by the host that owns this client's idle timer, and called on every request and
+    /// notification. Behind a `Mutex` because the host only ever holds the client behind an `Arc`.
+    activity: Mutex<Option<ActivityHook>>,
 }
 
 impl Drop for LspClient {
@@ -146,7 +113,7 @@ impl LspClient {
     ) -> Result<Self, LspError> {
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let diagnostics: DiagnosticsCache = Arc::new(Mutex::new(HashMap::new()));
-        let notifications: Notifications = Arc::new(Mutex::new(VecDeque::new()));
+        let notifications: Notifications = Arc::new(NotificationSink::new());
 
         let reader = tokio::spawn(read_loop(
             stdout,
@@ -165,6 +132,8 @@ impl LspClient {
             request_timeout_ms: AtomicU64::new(DEFAULT_REQUEST_TIMEOUT.as_millis() as u64),
             handshake: Mutex::new(Value::Null),
             notifications,
+            documents: Mutex::new(HashMap::new()),
+            activity: Mutex::new(None),
         };
 
         let params = json!({
@@ -178,147 +147,6 @@ impl LspClient {
         client.notify("initialized", json!({}))?;
 
         Ok(client)
-    }
-
-    /// Open a source file as an LSP document so the server indexes it.
-    pub async fn did_open(&self, uri: &str, language_id: &str, text: &str) -> Result<(), LspError> {
-        self.notify(
-            "textDocument/didOpen",
-            json!({
-                "textDocument": {
-                    "uri": uri,
-                    "languageId": language_id,
-                    "version": 1,
-                    "text": text,
-                }
-            }),
-        )
-    }
-
-    /// Diagnostics for a document (cached `publishDiagnostics` or a pull request).
-    pub async fn diagnostics(&self, uri: &str) -> Result<Vec<Diagnostic>, LspError> {
-        if let Some(cached) = self.diagnostics.lock().unwrap().get(uri).cloned() {
-            return Ok(cached);
-        }
-        // Nothing published yet — fall back to a pull diagnostic request.
-        let result = self
-            .request(
-                "textDocument/diagnostic",
-                json!({ "textDocument": { "uri": uri } }),
-            )
-            .await?;
-        Ok(parse_diagnostics(result.get("items")))
-    }
-
-    /// Pull workspace-wide diagnostics, returning one `(uri, diagnostics)` group per
-    /// reported document.
-    pub async fn workspace_diagnostics(&self) -> Result<Vec<(String, Vec<Diagnostic>)>, LspError> {
-        let result = self
-            .request("workspace/diagnostic", json!({ "previousResultIds": [] }))
-            .await?;
-        let mut groups = Vec::new();
-        if let Some(items) = result.get("items").and_then(Value::as_array) {
-            for item in items {
-                let uri = item
-                    .get("uri")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                groups.push((uri, parse_diagnostics(item.get("items"))));
-            }
-        }
-        Ok(groups)
-    }
-
-    /// Go-to-definition at a position.
-    pub async fn definition(&self, uri: &str, pos: Position) -> Result<Vec<Location>, LspError> {
-        let result = self
-            .request("textDocument/definition", position_params(uri, pos))
-            .await?;
-        Ok(parse_locations(&result))
-    }
-
-    /// Find-references at a position.
-    pub async fn references(&self, uri: &str, pos: Position) -> Result<Vec<Location>, LspError> {
-        let mut params = position_params(uri, pos);
-        params["context"] = json!({ "includeDeclaration": true });
-        let result = self.request("textDocument/references", params).await?;
-        Ok(parse_locations(&result))
-    }
-
-    /// Hover markdown at a position, if any.
-    pub async fn hover(&self, uri: &str, pos: Position) -> Result<Option<String>, LspError> {
-        let result = self
-            .request("textDocument/hover", position_params(uri, pos))
-            .await?;
-        Ok(result
-            .pointer("/contents/value")
-            .and_then(Value::as_str)
-            .map(str::to_string))
-    }
-
-    /// Document symbols for a file.
-    pub async fn symbols(&self, uri: &str) -> Result<Vec<SymbolInfo>, LspError> {
-        let result = self
-            .request(
-                "textDocument/documentSymbol",
-                json!({ "textDocument": { "uri": uri } }),
-            )
-            .await?;
-        let symbols = result
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .map(|item| SymbolInfo {
-                        name: item
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_string(),
-                        kind: item.get("kind").and_then(Value::as_u64).unwrap_or(0) as u8,
-                        location: Location {
-                            uri: uri.to_string(),
-                            range: parse_range(item.get("range")),
-                        },
-                        container: item
-                            .get("containerName")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(symbols)
-    }
-
-    /// Workspace symbol search.
-    pub async fn workspace_symbols(&self, query: &str) -> Result<Vec<SymbolInfo>, LspError> {
-        let result = self
-            .request("workspace/symbol", json!({ "query": query }))
-            .await?;
-        let symbols = result
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .map(|item| SymbolInfo {
-                        name: item
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_string(),
-                        kind: item.get("kind").and_then(Value::as_u64).unwrap_or(0) as u8,
-                        location: parse_location(item.get("location").unwrap_or(&Value::Null)),
-                        container: item
-                            .get("containerName")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(symbols)
     }
 
     /// Graceful `shutdown` / `exit`.
@@ -339,8 +167,21 @@ impl LspClient {
     }
 
     /// Take every server notification received since the last drain, oldest first.
+    ///
+    /// Destructive and single-consumer by design: the bridged restructuring path folds what it
+    /// drains into its own account of the server. An observer that must not take notifications
+    /// from that account wants [`Self::subscribe_notifications`].
     pub fn drain_notifications(&self) -> Vec<Value> {
-        self.notifications.lock().unwrap().drain(..).collect()
+        self.notifications.drain()
+    }
+
+    /// Watch this server's notifications without consuming them.
+    ///
+    /// Any number of subscribers may attach alongside each other and alongside
+    /// [`Self::drain_notifications`], each seeing every notification that arrives after it
+    /// attached. See [`NotificationStream`] for what a subscriber that falls behind is told.
+    pub fn subscribe_notifications(&self) -> NotificationStream {
+        self.notifications.subscribe()
     }
 
     /// The server's `initialize` result, as it answered the handshake.
@@ -363,11 +204,58 @@ impl LspClient {
         Duration::from_millis(self.request_timeout_ms.load(Ordering::SeqCst))
     }
 
-    /// Send a request and await its correlated response `result`.
+    /// Install the hook called whenever this client is used.
+    ///
+    /// The host that owns the client's idle timer installs it once, on receiving the client, so
+    /// that a caller which borrows the client and then works for minutes keeps its server alive
+    /// without going back to the registry for it. The last installer wins.
+    pub fn set_activity_hook(&self, hook: ActivityHook) {
+        *self.activity.lock().unwrap() = Some(hook);
+    }
+
+    /// Report use of this client to the installed hook, if any.
+    ///
+    /// The hook is cloned out of the lock before it runs: it is the host's code, and holding this
+    /// client's lock across it would make every request wait on whatever the host does.
+    fn record_activity(&self) {
+        let hook = self.activity.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+
+    /// Send a request and await its correlated response `result`, bounded only by the request
+    /// timeout.
     async fn request(&self, method: &str, params: Value) -> Result<Value, LspError> {
+        // A caller with nothing to abandon it for waits exactly as long as it always did.
+        self.request_abandonable(method, params, std::future::pending())
+            .await
+    }
+
+    /// Send a request and await its response, giving up as soon as `abandon` completes.
+    ///
+    /// For a caller that has its own reason to stop — a `^C`d run, a dropped RPC — and must not be
+    /// held until the request timeout expires. `abandon` is any future: a cancellation token's
+    /// `cancelled()`, a `oneshot` the caller keeps the sending half of, a `Notify`.
+    ///
+    /// An abandoned request is also cancelled *at the server* with `$/cancelRequest`, so it stops
+    /// computing an answer nobody will read — which on a wedged run is the point: the caller
+    /// stopping has to stop the work, not only the waiting.
+    pub async fn request_abandonable<A>(
+        &self,
+        method: &str,
+        params: Value,
+        abandon: A,
+    ) -> Result<Value, LspError>
+    where
+        A: Future<Output = ()>,
+    {
+        self.record_activity();
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, tx);
+        // Held for the rest of this call: however the request ends, the correlation map is left
+        // as it was found.
+        let _slot = PendingSlot::register(&self.pending, id, tx);
 
         let message = json!({
             "jsonrpc": "2.0",
@@ -380,29 +268,34 @@ impl LspClient {
             .send(Bytes::from(encode_message(&message)))
             .is_err()
         {
-            self.pending.lock().unwrap().remove(&id);
             return Err(LspError::ServerExited);
         }
 
-        match tokio::time::timeout(self.request_timeout(), rx).await {
-            Ok(Ok(Ok(result))) => Ok(result),
-            Ok(Ok(Err(error))) => Err(LspError::Server {
-                code: error.code,
-                message: error.message,
-            }),
-            Ok(Err(_)) => {
-                self.pending.lock().unwrap().remove(&id);
-                Err(LspError::ServerExited)
-            }
-            Err(_) => {
-                self.pending.lock().unwrap().remove(&id);
-                Err(LspError::Timeout)
+        tokio::select! {
+            delivered = tokio::time::timeout(self.request_timeout(), rx) => match delivered {
+                Ok(Ok(Ok(result))) => Ok(result),
+                Ok(Ok(Err(error))) => Err(LspError::Server {
+                    code: error.code,
+                    message: error.message,
+                }),
+                Ok(Err(_)) => Err(LspError::ServerExited),
+                Err(_) => Err(LspError::Timeout),
+            },
+            () = abandon => {
+                if let Err(err) = self.notify("$/cancelRequest", json!({ "id": id })) {
+                    log::debug!(
+                        target: "tddy_lsp::client",
+                        "could not cancel request {id} ({method}) at the server: {err}"
+                    );
+                }
+                Err(LspError::Abandoned)
             }
         }
     }
 
     /// Send a notification (no id, no response expected).
     fn notify(&self, method: &str, params: Value) -> Result<(), LspError> {
+        self.record_activity();
         let message = json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -414,365 +307,56 @@ impl LspClient {
     }
 }
 
-/// Drain the server's stdout: correlate responses to pending requests and cache
-/// `publishDiagnostics` notifications.
-async fn read_loop(
-    mut stdout: broadcast::Receiver<Bytes>,
+/// One request's place in the correlation map, given up when this is dropped.
+///
+/// Every way a request can end has to leave the map as it was found — answered, timed out,
+/// abandoned, or its future simply dropped by a caller that raced it. The abandoned and dropped
+/// endings have no code of their own to clean up in, which is how an id nothing would ever answer
+/// stayed in the map for the client's whole life.
+struct PendingSlot {
     pending: Pending,
-    diagnostics: DiagnosticsCache,
-    notifications: Notifications,
-    stdin: mpsc::UnboundedSender<Bytes>,
-) {
-    let mut frames = FrameReader::new();
-    loop {
-        match stdout.recv().await {
-            Ok(bytes) => {
-                frames.push(&bytes);
-                while let Some(message) = frames.next_message() {
-                    dispatch(&message, &pending, &diagnostics, &notifications, &stdin);
-                }
-            }
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(broadcast::error::RecvError::Closed) => break,
+    id: i64,
+}
+
+impl PendingSlot {
+    /// Register `id` as in flight, awaiting its response on `tx`.
+    fn register(pending: &Pending, id: i64, tx: oneshot::Sender<Response>) -> Self {
+        pending.lock().unwrap().insert(id, tx);
+        Self {
+            pending: Arc::clone(pending),
+            id,
         }
     }
 }
 
-/// Route one incoming message to a pending request, the diagnostics cache, or (for a
-/// server→client request) an acknowledgement reply.
-fn dispatch(
-    message: &Value,
-    pending: &Pending,
-    diagnostics: &DiagnosticsCache,
-    notifications: &Notifications,
-    stdin: &mpsc::UnboundedSender<Bytes>,
-) {
-    // Notifications and server-to-client requests carry a `method`.
-    if let Some(method) = message.get("method").and_then(Value::as_str) {
-        if method == "textDocument/publishDiagnostics" {
-            if let Some(params) = message.get("params") {
-                let uri = params
-                    .get("uri")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                diagnostics
-                    .lock()
-                    .unwrap()
-                    .insert(uri, parse_diagnostics(params.get("diagnostics")));
-            }
-            return;
-        }
-        // A `method` with an `id` is a server→client request (e.g. rust-analyzer's
-        // `client/registerCapability`, `window/workDoneProgress/create`,
-        // `workspace/configuration`). It expects a response — acknowledge it minimally so
-        // the server does not stall waiting on us.
-        if let Some(id) = message.get("id").cloned() {
-            let reply = server_request_reply(method, message.get("params"), id);
-            let _ = stdin.send(Bytes::from(encode_message(&reply)));
-            return;
-        }
-        // A notification this client does not consume itself. Kept rather than dropped: during a
-        // load that answers no requests, `$/progress` is the only account of what the server is
-        // doing, and `experimental/serverStatus` the only signal that it has finished.
-        let mut kept = notifications.lock().unwrap();
-        if kept.len() == NOTIFICATION_BACKLOG {
-            kept.pop_front();
-        }
-        kept.push_back(message.clone());
-        return;
+impl Drop for PendingSlot {
+    fn drop(&mut self) {
+        self.pending.lock().unwrap().remove(&self.id);
     }
-
-    // Otherwise it is a response to one of our requests. A JSON-RPC response carries either
-    // a `result` or an `error`, never both — reading `result` alone and defaulting to null
-    // turned every server error into a successful empty answer.
-    if let Some(id) = message.get("id").and_then(Value::as_i64) {
-        if let Some(tx) = pending.lock().unwrap().remove(&id) {
-            let _ = tx.send(response_payload(message));
-        }
-    }
-}
-
-/// Split a response into its `result` or its `error`.
-fn response_payload(message: &Value) -> Response {
-    if let Some(error) = message.get("error") {
-        return Err(ResponseError {
-            code: error.get("code").and_then(Value::as_i64).unwrap_or(0),
-            message: error
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-        });
-    }
-    Ok(message.get("result").cloned().unwrap_or(Value::Null))
-}
-
-/// Build the response to a server→client request. `workspace/configuration` expects an
-/// array with one entry per requested item; every other request is acknowledged with a
-/// `null` result (sufficient for `registerCapability` / `workDoneProgress/create`).
-fn server_request_reply(method: &str, params: Option<&Value>, id: Value) -> Value {
-    let result = match method {
-        "workspace/configuration" => {
-            let count = params
-                .and_then(|p| p.get("items"))
-                .and_then(Value::as_array)
-                .map(|items| items.len())
-                .unwrap_or(0);
-            Value::Array(vec![Value::Null; count])
-        }
-        _ => Value::Null,
-    };
-    json!({ "jsonrpc": "2.0", "id": id, "result": result })
-}
-
-/// Standard `{ textDocument, position }` request params.
-fn position_params(uri: &str, pos: Position) -> Value {
-    json!({
-        "textDocument": { "uri": uri },
-        "position": { "line": pos.line, "character": pos.character },
-    })
-}
-
-fn parse_position(value: Option<&Value>) -> Position {
-    let value = value.unwrap_or(&Value::Null);
-    Position::at(
-        value.get("line").and_then(Value::as_u64).unwrap_or(0) as u32,
-        value.get("character").and_then(Value::as_u64).unwrap_or(0) as u32,
-    )
-}
-
-fn parse_range(value: Option<&Value>) -> Range {
-    let value = value.unwrap_or(&Value::Null);
-    Range {
-        start: parse_position(value.get("start")),
-        end: parse_position(value.get("end")),
-    }
-}
-
-fn parse_location(value: &Value) -> Location {
-    Location {
-        uri: value
-            .get("uri")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        range: parse_range(value.get("range")),
-    }
-}
-
-fn parse_locations(result: &Value) -> Vec<Location> {
-    result
-        .as_array()
-        .map(|items| items.iter().map(parse_location).collect())
-        .unwrap_or_default()
-}
-
-fn parse_diagnostics(value: Option<&Value>) -> Vec<Diagnostic> {
-    value
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .map(|item| Diagnostic {
-                    range: parse_range(item.get("range")),
-                    severity: item.get("severity").and_then(Value::as_u64).unwrap_or(0) as u8,
-                    message: item
-                        .get("message")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    source: item
-                        .get("source")
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// During a load that answers no requests, `$/progress` is the only account of what the
-    /// server is doing. Dropping it left the wait silent and left a timeout unable to say where
-    /// the server had got to.
+    /// A request that ends any way other than being answered — abandoned, timed out, or its
+    /// future dropped by a caller racing it — must leave nothing behind, or the correlation map
+    /// grows an entry per such request for the client's whole life.
     #[test]
-    fn keeps_a_progress_notification_for_a_caller_to_drain() {
-        // Given a client with nothing drained yet
+    fn forgets_an_in_flight_request_once_its_slot_is_given_up() {
+        // Given a request registered as in flight on id 9
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
-        let diagnostics: DiagnosticsCache = Arc::new(Mutex::new(HashMap::new()));
-        let notifications: Notifications = Arc::new(Mutex::new(VecDeque::new()));
-        let (stdin, _stdin_rx) = mpsc::unbounded_channel();
-
-        // When the server reports progress
-        let progress = json!({
-            "jsonrpc": "2.0",
-            "method": "$/progress",
-            "params": { "token": "rustAnalyzer/Roots Scanned", "value": { "kind": "begin" } },
-        });
-        dispatch(&progress, &pending, &diagnostics, &notifications, &stdin);
-
-        // Then it is retained verbatim
-        let kept: Vec<Value> = notifications.lock().unwrap().iter().cloned().collect();
-        assert_eq!(kept, vec![progress]);
-    }
-
-    /// Diagnostics are consumed into their own cache, so retaining them again would hand every
-    /// drainer a stream of notifications it has no use for.
-    #[test]
-    fn does_not_retain_a_notification_it_consumes_itself() {
-        // Given a client with nothing drained yet
-        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
-        let diagnostics: DiagnosticsCache = Arc::new(Mutex::new(HashMap::new()));
-        let notifications: Notifications = Arc::new(Mutex::new(VecDeque::new()));
-        let (stdin, _stdin_rx) = mpsc::unbounded_channel();
-
-        // When diagnostics are published
-        dispatch(
-            &json!({
-                "jsonrpc": "2.0",
-                "method": "textDocument/publishDiagnostics",
-                "params": { "uri": "file:///a.rs", "diagnostics": [] },
-            }),
-            &pending,
-            &diagnostics,
-            &notifications,
-            &stdin,
+        let (tx, _rx) = oneshot::channel();
+        let slot = PendingSlot::register(&pending, 9, tx);
+        assert!(
+            pending.lock().unwrap().contains_key(&9),
+            "expected the request to be registered before it is given up"
         );
 
-        // Then they land in the diagnostics cache and not in the backlog
-        assert!(diagnostics.lock().unwrap().contains_key("file:///a.rs"));
-        assert!(notifications.lock().unwrap().is_empty());
-    }
+        // When its slot is given up
+        drop(slot);
 
-    /// rust-analyzer emits progress continuously, so a consumer that never drains must not be
-    /// able to grow this without bound.
-    #[test]
-    fn drops_the_oldest_notification_once_the_backlog_is_full() {
-        // Given a backlog filled to capacity
-        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
-        let diagnostics: DiagnosticsCache = Arc::new(Mutex::new(HashMap::new()));
-        let notifications: Notifications = Arc::new(Mutex::new(VecDeque::new()));
-        let (stdin, _stdin_rx) = mpsc::unbounded_channel();
-        for n in 0..NOTIFICATION_BACKLOG {
-            dispatch(
-                &json!({ "jsonrpc": "2.0", "method": "$/progress", "params": { "n": n } }),
-                &pending,
-                &diagnostics,
-                &notifications,
-                &stdin,
-            );
-        }
-
-        // When one more arrives
-        dispatch(
-            &json!({ "jsonrpc": "2.0", "method": "$/progress", "params": { "n": "last" } }),
-            &pending,
-            &diagnostics,
-            &notifications,
-            &stdin,
-        );
-
-        // Then the backlog is still capped, and it is the oldest that went
-        let kept = notifications.lock().unwrap();
-        assert_eq!(kept.len(), NOTIFICATION_BACKLOG);
-        assert_eq!(kept.front().unwrap().pointer("/params/n"), Some(&json!(1)));
-        assert_eq!(
-            kept.back().unwrap().pointer("/params/n"),
-            Some(&json!("last"))
-        );
-    }
-
-    #[test]
-    fn acknowledges_register_capability_with_a_null_result() {
-        // Given a server->client `client/registerCapability` request
-        let id = json!(7);
-
-        // When we build the reply
-        let reply = server_request_reply("client/registerCapability", None, id);
-
-        // Then it is a well-formed response with a null result
-        assert_eq!(reply, json!({ "jsonrpc": "2.0", "id": 7, "result": null }));
-    }
-
-    /// A JSON-RPC error response carries no `result`. Reading `result` and defaulting to null
-    /// turns every server error into a successful empty answer, which is how a
-    /// `ContentModified` — the code rust-analyzer uses to mean "ask again" — was reaching
-    /// callers as "the server had nothing to offer".
-    #[test]
-    fn hands_a_server_error_response_to_the_waiting_request() {
-        // Given a request awaiting a response on id 4
-        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
-        let diagnostics: DiagnosticsCache = Arc::new(Mutex::new(HashMap::new()));
-        let notifications: Notifications = Arc::new(Mutex::new(VecDeque::new()));
-        let (stdin, _stdin_rx) = mpsc::unbounded_channel();
-        let (tx, rx) = oneshot::channel();
-        pending.lock().unwrap().insert(4, tx);
-
-        // When the server answers it with a JSON-RPC error instead of a result
-        dispatch(
-            &json!({
-                "jsonrpc": "2.0",
-                "id": 4,
-                "error": { "code": -32801, "message": "content modified" },
-            }),
-            &pending,
-            &diagnostics,
-            &notifications,
-            &stdin,
-        );
-
-        // Then the waiting request is handed the error, not an empty success
-        let delivered = rx.blocking_recv().expect("a response was delivered");
-        let error = delivered.expect_err("a JSON-RPC error must not arrive as a result");
-        assert_eq!(
-            (error.code, error.message.as_str()),
-            (-32801, "content modified")
-        );
-    }
-
-    #[test]
-    fn hands_a_successful_response_to_the_waiting_request() {
-        // Given a request awaiting a response on id 5
-        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
-        let diagnostics: DiagnosticsCache = Arc::new(Mutex::new(HashMap::new()));
-        let notifications: Notifications = Arc::new(Mutex::new(VecDeque::new()));
-        let (stdin, _stdin_rx) = mpsc::unbounded_channel();
-        let (tx, rx) = oneshot::channel();
-        pending.lock().unwrap().insert(5, tx);
-
-        // When the server answers with a result
-        dispatch(
-            &json!({ "jsonrpc": "2.0", "id": 5, "result": { "ok": true } }),
-            &pending,
-            &diagnostics,
-            &notifications,
-            &stdin,
-        );
-
-        // Then the result arrives unchanged
-        let delivered = rx.blocking_recv().expect("a response was delivered");
-        assert_eq!(
-            delivered.expect("a successful result"),
-            json!({ "ok": true })
-        );
-    }
-
-    #[test]
-    fn answers_workspace_configuration_with_one_null_per_requested_item() {
-        // Given a `workspace/configuration` request for three items
-        let params = json!({ "items": [{}, {}, {}] });
-
-        // When we build the reply
-        let reply = server_request_reply("workspace/configuration", Some(&params), json!(3));
-
-        // Then the result is an array with one null per item
-        assert_eq!(
-            reply,
-            json!({ "jsonrpc": "2.0", "id": 3, "result": [null, null, null] })
-        );
+        // Then the correlation map holds nothing for it
+        assert!(pending.lock().unwrap().is_empty());
     }
 }

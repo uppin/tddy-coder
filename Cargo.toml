@@ -56,6 +56,7 @@ members = [
     "packages/tddy-lsp",
     "packages/tddy-code-analysis",
     "packages/tddy-code-restructuring",
+    "packages/tddy-index-daemon",
     "packages/tddy-lsp-executor",
     "packages/tddy-pty",
     "packages/tddy-terminal-rpc",

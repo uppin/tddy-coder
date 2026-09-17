@@ -2,7 +2,7 @@
 
 **Product area:** Coder / tddy-tools  
 **Status:** Active  
-**Updated:** 2026-08-31
+**Updated:** 2026-09-16
 
 ## Summary
 
@@ -11,6 +11,43 @@
 **v1 scope:** Rust only. No TypeScript, `hot-files`, large-file ranking, or `issues` intersection CLI. Coverage is invoked through `tddy-tools analyze`, not `tddy-build`. No CI gate on CRAP or coverage thresholds.
 
 Complements `/analyze-clean-code` (LLM heuristic at PR-wrap). Run analysis **before** plan-driven restructuring.
+
+## Entry points
+
+Two front ends over one engine.
+
+| Front end | Shape |
+|---|---|
+| `tddy-tools analyze …` | one operation per process, printing to a console |
+| `tddy-index-daemon` | `Coverage`, `Report`, `DuplicateTests` and `Complexity` on `code_index.CodeIndexService`, over gRPC and stdio |
+
+`Coverage` and `DuplicateTests` are **server-streaming**, because they are tens of minutes of
+near-silence otherwise — 55.8 minutes for a `tddy-daemon` capture, ~22 for duplicate-tests — and the
+phase a run is in is the only thing that distinguishes it from a hang. `Complexity` is unary: it is
+the one analysis operation cheap enough to be, and cheaper still on a warm process.
+
+**A capture cannot yet be stopped.** `capture_coverage` takes no cancellation surface, so a client
+that hangs up one minute in leaves the other 54 running; the progress sink notices the dropped
+receiver and stops sending, but cannot cancel. See
+[warm code-intelligence daemon](warm-code-intelligence-daemon.md).
+
+## Complexity is cached by content, not by path
+
+`file_complexity` is pure over the source text, so a warm process keeps each score against a hash of
+the text it scored. Two files with identical contents are scored once; a file whose contents changed
+is always rescored; and a path is never the key, because a path says nothing about whether the answer
+is still true.
+
+The command line installs a **pass-through** cache that keeps nothing, so `tddy-tools analyze`
+behaves exactly as it always has. The cache is process-wide rather than per workspace root: content
+addressing makes a per-root partition both unnecessary and wasteful across worktrees of one repo.
+
+It is **bounded and least-recently-used**, at 8192 scored versions. The bound is a count of
+*versions* rather than of files — the key is the content — so it is set to clear several passes over
+the largest tree here with room for the working set of files under active edit: two successive
+reports over one workspace must not evict each other's scores, and a day of editing must not
+accumulate every version it produced. A file read again renews its entry, so the one an editor keeps
+returning to is never the one dropped.
 
 ## CLI
 

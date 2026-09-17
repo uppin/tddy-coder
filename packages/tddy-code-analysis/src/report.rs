@@ -3,14 +3,23 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::complexity::file_complexity;
+use crate::complexity_cache::{cached_file_complexity, ComplexityCache};
 use crate::coverage::{load_per_test_meta, load_rust_final, TestMeta};
 use crate::crap::{join_rust_function_metrics, FunctionMetric, JoinResult};
 use crate::duplicate_tests::{analyze_coverage_dir, DuplicateAnalysis};
 use crate::error::Result;
 
-/// Console summary + `coverage/report.html` with Highest CRAP leaderboard.
-pub fn generate_report(coverage_dir: &Path, crate_root: &Path) -> Result<JoinResult> {
+/// `coverage/report.html` with a Highest CRAP leaderboard, and the join it was built from.
+///
+/// `cache` holds the complexity scores. A one-shot caller passes
+/// [`crate::complexity_cache::PassThroughComplexityCache`] and scores the tree once, as this
+/// function always did; a process that reports on the same tree more than once passes
+/// [`crate::complexity_cache::InMemoryComplexityCache`] and rescores only the files that changed.
+pub fn generate_report(
+    coverage_dir: &Path,
+    crate_root: &Path,
+    cache: &dyn ComplexityCache,
+) -> Result<JoinResult> {
     let rust_final = load_rust_final(coverage_dir)?;
     let _metas = load_per_test_meta(coverage_dir)?;
 
@@ -28,23 +37,25 @@ pub fn generate_report(coverage_dir: &Path, crate_root: &Path) -> Result<JoinRes
         }
         let text = std::fs::read_to_string(path)?;
         let abs = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        let measured = file_complexity(&text)?;
+        let measured = cached_file_complexity(cache, &text)?;
         complexity_by_file.insert(abs.display().to_string(), measured);
     }
 
     let joined = join_rust_function_metrics(&rust_final, &complexity_by_file);
     let html = render_coverage_html(&joined);
-    std::fs::write(coverage_dir.join("report.html"), html)?;
+    std::fs::write(report_path(coverage_dir), html)?;
 
-    eprintln!(
-        "CRAP join: {:.1}% ({} matched / {} instrumented, {} unmatched)",
-        joined.join_rate * 100.0,
-        joined.functions.len(),
-        joined.functions.len() + joined.unmatched_functions,
-        joined.unmatched_functions
-    );
-
+    // What the join amounted to is returned rather than printed: a front end renders it (the
+    // command line to stderr, the daemon into its response), and a library that printed it would
+    // corrupt the framing of any caller that speaks a protocol on its own stdout.
     Ok(joined)
+}
+
+/// Where [`generate_report`] writes its leaderboard, so a caller can say where to look for it
+/// without re-deriving the name.
+#[must_use]
+pub fn report_path(coverage_dir: &Path) -> std::path::PathBuf {
+    coverage_dir.join("report.html")
 }
 
 fn render_coverage_html(joined: &JoinResult) -> String {
@@ -72,12 +83,17 @@ fn render_coverage_html(joined: &JoinResult) -> String {
 }
 
 /// Write duplicate-tests HTML pages under `out_dir`.
+///
+/// `cancelled` is the detection's, passed straight through: the pages are written from its result,
+/// so a detection that stopped writes none of them. Pass `&crate::never_cancelled` when nobody can
+/// hang up.
 pub fn generate_duplicate_tests_report(
     coverage_dir: &Path,
     out_dir: &Path,
     min_signature: usize,
     subset_ratio: f64,
     include_test_sources: bool,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<DuplicateAnalysis> {
     std::fs::create_dir_all(out_dir)?;
     let analysis = analyze_coverage_dir(
@@ -85,6 +101,7 @@ pub fn generate_duplicate_tests_report(
         min_signature,
         subset_ratio,
         include_test_sources,
+        cancelled,
     )?;
 
     let identical_html = render_duplicate_html("Identical test signatures", &analysis.identical);

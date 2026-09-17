@@ -147,6 +147,13 @@ fn main() -> anyhow::Result<()> {
         // SIGTERM, independent of how long the HTTP server takes to drain open connections.
         // This prevents orphaned Claude processes when systemd escalates to SIGKILL.
         let kill_on_signal_manager = Arc::clone(&daemon.cli_sessions);
+        // The index daemon goes with them, and for the same reason: it is a child of this process
+        // holding a rust-analyzer per workspace root, so a SIGKILL escalation that arrives before
+        // the HTTP server has drained would leave it behind. Stopped explicitly here rather than
+        // left to `tasks.abort_all()` — aborting the reaper that would have stopped it is exactly
+        // how `dial_and_bridge` orphans a sandbox runner
+        // (`docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md`).
+        let index_daemon_on_signal = daemon.index_daemon.clone();
         let _kill_on_signal_task = tokio::spawn(async move {
             #[cfg(unix)]
             {
@@ -159,6 +166,9 @@ fn main() -> anyhow::Result<()> {
                         "SIGTERM received — killing all claude-cli sessions"
                     );
                     kill_on_signal_manager.kill_all().await;
+                    if let Some(index_daemon) = index_daemon_on_signal {
+                        index_daemon.shutdown().await;
+                    }
                 }
             }
         });
@@ -182,6 +192,12 @@ fn main() -> anyhow::Result<()> {
         // Also call kill_all after the server finishes (covers graceful ctrl-c shutdown
         // and any sessions started while the first kill_all was already running).
         daemon.cli_sessions.kill_all().await;
+        // The same second pass for the index daemon: a graceful ctrl-c never delivered the SIGTERM
+        // above, and a request served while the first shutdown ran could have started one. Before
+        // `abort_all`, because the reaper it aborts is not what stops this process.
+        if let Some(index_daemon) = &daemon.index_daemon {
+            index_daemon.shutdown().await;
+        }
 
         tasks.abort_all();
         res

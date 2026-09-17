@@ -21,8 +21,8 @@
 #   PUBLISH_GPG_KEY_ID  if set, sign .deb with dpkg-sig (must be installed)
 #
 # Layout in the .deb:
-#   /usr/bin/{tddy-daemon,tddy-coder,tddy-tools,tddy-remote-git-repo,tddy-session-sync,
-#            tddy-sandbox-runner,codex-acp}
+#   /usr/bin/{tddy-daemon,tddy-coder,tddy-tools,tddy-index-daemon,tddy-remote-git-repo,
+#            tddy-session-sync,tddy-sandbox-runner,codex-acp}
 #   /usr/share/tddy/web/...
 #   /etc/tddy/daemon.yaml          (conffile, from daemon.yaml.production)
 #   /lib/systemd/system/tddy-daemon.service
@@ -61,7 +61,7 @@ if "$WANT_BUILD"; then
 fi
 
 # Verify build artifacts
-for f in target/release/tddy-daemon target/release/tddy-coder target/release/tddy-tools target/release/tddy-remote-git-repo target/release/tddy-session-sync target/release/tddy-sandbox-runner; do
+for f in target/release/tddy-daemon target/release/tddy-coder target/release/tddy-tools target/release/tddy-index-daemon target/release/tddy-remote-git-repo target/release/tddy-session-sync target/release/tddy-sandbox-runner; do
   [[ -f "$f" ]] || { echo "publish: missing $f (run ./release or pass --build)" >&2; exit 1; }
 done
 [[ -f packages/tddy-web/dist/index.html ]] || {
@@ -109,9 +109,15 @@ mkdir -p \
 #
 # tddy-sandbox-runner runs inside every jail the daemon spawns, and the daemon looks for it beside
 # its own executable — so it belongs in the same /usr/bin, not in a libexec dir.
+#
+# tddy-index-daemon holds a warm rust-analyzer index and is resolved as a sibling of the binary that
+# spawns it, for the same reason as tddy-sandbox-runner. `tddy-tools` reaches it only when
+# TDDY_INDEX_SOCKET names one, so a host that never sets it never pays for the process — but a host
+# that does must find the binary on PATH.
 install -m 0755 target/release/tddy-daemon          "${STAGE}/usr/bin/tddy-daemon"
 install -m 0755 target/release/tddy-coder           "${STAGE}/usr/bin/tddy-coder"
 install -m 0755 target/release/tddy-tools           "${STAGE}/usr/bin/tddy-tools"
+install -m 0755 target/release/tddy-index-daemon    "${STAGE}/usr/bin/tddy-index-daemon"
 install -m 0755 target/release/tddy-remote-git-repo "${STAGE}/usr/bin/tddy-remote-git-repo"
 install -m 0755 target/release/tddy-session-sync   "${STAGE}/usr/bin/tddy-session-sync"
 install -m 0755 target/release/tddy-sandbox-runner  "${STAGE}/usr/bin/tddy-sandbox-runner"
@@ -159,7 +165,7 @@ Maintainer: ${MAINTAINER}
 Depends: ${DEPENDS}
 Installed-Size: ${INSTALLED_SIZE}
 Description: tddy — TDD-driven coder daemon, CLI, tools, and web dashboard
- Bundles tddy-daemon, tddy-coder, tddy-tools, tddy-remote-git-repo, tddy-session-sync,
+ Bundles tddy-daemon, tddy-coder, tddy-tools, tddy-index-daemon, tddy-remote-git-repo, tddy-session-sync,
  tddy-sandbox-runner and codex-acp,
  the tddy-web static dashboard at /usr/share/tddy/web,
  a default systemd unit, and /etc/tddy/daemon.yaml.

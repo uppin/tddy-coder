@@ -1,0 +1,350 @@
+syntax = "proto3";
+
+// A bare, lower-snake package name, matching every other crate-owned proto in this workspace
+// (`terminal_session`, `sandbox`, `host`, `worktree`). Deliberately not `tddy.code_index.v1`:
+// nothing in the workspace uses a versioned package name, and introducing one for a single new
+// service is the partial adoption `docs/dev/todo/2026-09-09-versioned-proto-package-names.md`
+// records as worse than none, because it makes the convention unreadable.
+package code_index;
+
+// CodeIndexService: restructuring and analysis against a rust-analyzer index that is warm because
+// the process holding it outlives the request.
+//
+// Every request names its `workspace_root`. That is not a convenience — it is what lets one process
+// serve several worktrees, each with its own language server, and it is what replaced the library's
+// former reliance on the process directory.
+//
+// The long operations are server-streaming, for two reasons. Progress happens *while* a call is in
+// flight and has nowhere else to go; and a stream is the only back-channel a handler gets, so a send
+// failing into a dropped receiver is how this service learns its caller has gone away and cancels
+// the work. A unary handler has no way to find that out.
+service CodeIndexService {
+  // Load a workspace root's crate graph and report progress until it is ready. Idempotent: a root
+  // that is already warm completes immediately.
+  rpc Warm(WarmRequest) returns (stream IndexProgress);
+
+  // Everything wrong with a plan, without writing anything.
+  rpc Check(CheckRequest) returns (stream RestructureEvent);
+
+  // Execute a plan against the working tree.
+  rpc Apply(ApplyRequest) returns (stream RestructureEvent);
+
+  // A range anchor covering a named run of items, trivia included.
+  rpc Anchors(AnchorsRequest) returns (AnchorsResponse);
+
+  // How far a plan's journal got: completed, in flight, pending, failed.
+  rpc PlanStatus(PlanStatusRequest) returns (PlanStatusResponse);
+
+  // Statement-multiset comparison of the tree against a git ref.
+  rpc Verify(VerifyRequest) returns (VerifyResponse);
+
+  // Build the instrumented tests, run them one at a time and write a per-test coverage profile
+  // for each. Streaming because it is tens of minutes of near-silence otherwise — 55.8 minutes for
+  // `tddy-daemon` — and the phase it is in is the only thing that distinguishes it from a hang.
+  rpc Coverage(CoverageRequest) returns (stream AnalyzeEvent);
+
+  // Join a capture against the complexity of the tree it measured, and write the CRAP leaderboard.
+  rpc Report(ReportRequest) returns (ReportResponse);
+
+  // Tests whose coverage signatures are identical, and tests whose signatures are contained in
+  // another's. Streaming for the same reason as `Coverage`: the detection is quadratic over
+  // per-test signatures and runs ~22 minutes on this workspace.
+  rpc DuplicateTests(DuplicateTestsRequest) returns (stream AnalyzeEvent);
+
+  // Per-function cyclomatic complexity of one source file. The only analysis operation cheap
+  // enough to be unary, and cheaper still on a warm process, which keeps each score against the
+  // hash of the content it scored.
+  rpc Complexity(ComplexityRequest) returns (ComplexityResponse);
+
+  // Which workspace roots this process currently holds an index for.
+  rpc Workspaces(WorkspacesRequest) returns (WorkspacesResponse);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Warming
+
+message WarmRequest {
+  // Absolute path to the workspace root (for Rust, the outermost directory holding a Cargo.toml).
+  string workspace_root = 1;
+}
+
+// One line of account from a server that cannot answer yet.
+//
+// `phase` and `percentage` come from the language server's own `$/progress`; `furthest` is the
+// highest percentage seen in any phase, which is what distinguishes a server stalled at 12% from
+// one nearly finished at 99%.
+message IndexProgress {
+  string line       = 1;
+  string phase      = 2;
+  uint32 percentage = 3;
+  string furthest   = 4;
+  // True on the final message of the stream, when the index is loaded and queryable.
+  bool   ready      = 5;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Restructuring
+
+message CheckRequest {
+  string workspace_root = 1;
+  // Path to the JSONL plan, absolute or relative to `workspace_root`.
+  string plan           = 2;
+  // Resolve each operation through the language server as well as reading the text.
+  bool   deep           = 3;
+  // Line count above which a file the plan's anchors name is reported. A report, never a gate.
+  uint32 file_budget    = 4;
+}
+
+message ApplyRequest {
+  string workspace_root = 1;
+  string plan           = 2;
+  // Rehearse in an overlay; nothing is written.
+  bool   dry_run        = 3;
+  // Continue an existing journal for this plan rather than refusing it.
+  bool   resume         = 4;
+  // Start at this operation index instead of the journal's next.
+  optional uint32 from       = 5;
+  // Stop after this operation index.
+  optional uint32 stop_after = 6;
+}
+
+// What happened while a plan ran. Exactly one field is set.
+message RestructureEvent {
+  oneof event {
+    IndexProgress    indexing  = 1;
+    OperationApplied operation = 2;
+    // A consequence the operation could not avoid, reported rather than left in the diff.
+    string           note      = 3;
+    // The terminal event: what the whole run amounted to.
+    RunOutcome       outcome   = 4;
+    // A finding from `Check`. Findings are not failures; a run reports all of them.
+    Finding          finding   = 5;
+  }
+}
+
+message OperationApplied {
+  // The operation's index in the plan — the number a `--resume` or `--from` would name.
+  uint32          index          = 1;
+  // How many operations the run has finished, for a reader counting progress. Deliberately
+  // separate from `index`: they differ whenever a run started part-way through a plan.
+  uint32          done           = 2;
+  uint32          total          = 3;
+  string          kind           = 4;
+  repeated string files          = 5;
+  // Visibility this operation had to widen, as reviewable output rather than a silent edit.
+  repeated string visibility     = 6;
+  // True when the run was a rehearsal and nothing was written.
+  bool            rehearsed_only = 7;
+}
+
+message Finding {
+  uint32 operation = 1;
+  string detail    = 2;
+}
+
+message RunOutcome {
+  uint32 applied  = 1;
+  uint32 total    = 2;
+  // Set when the run stopped early because `stop_after` was reached rather than because it failed.
+  bool   stopped_early = 3;
+}
+
+message AnchorsRequest {
+  string          workspace_root = 1;
+  string          file           = 2;
+  repeated string items          = 3;
+}
+
+message AnchorsResponse {
+  SourceRange range = 1;
+}
+
+// One-based line, one-based column, counted in bytes — the encoding this client negotiates and
+// refuses to proceed without.
+message SourcePosition {
+  uint32 line   = 1;
+  uint32 column = 2;
+}
+
+message SourceRange {
+  SourcePosition start = 1;
+  SourcePosition end   = 2;
+}
+
+message PlanStatusRequest {
+  string workspace_root = 1;
+  string plan           = 2;
+}
+
+message PlanStatusResponse {
+  uint32 completed = 1;
+  uint32 in_flight = 2;
+  uint32 pending   = 3;
+  uint32 failed    = 4;
+}
+
+message VerifyRequest {
+  string workspace_root = 1;
+  // The git ref to compare the working tree against.
+  string against        = 2;
+}
+
+message VerifyResponse {
+  bool            holds   = 1;
+  uint32          before  = 2;
+  uint32          after   = 3;
+  repeated string missing = 4;
+  repeated string added   = 5;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Analysis
+
+message CoverageRequest {
+  string workspace_root = 1;
+  // The crate to instrument: a directory holding a Cargo.toml, or the manifest itself. Absolute,
+  // or relative to `workspace_root`.
+  string crate_path     = 2;
+  // Where the per-test profiles and the denominator are written, absolute or relative to
+  // `workspace_root`. Named by the caller rather than derived, because a capture's artifacts are
+  // what a later `Report` and `DuplicateTests` read, and only the caller knows where it keeps them.
+  string coverage_dir   = 3;
+}
+
+message ReportRequest {
+  string workspace_root = 1;
+  // The capture to report on — the same directory a `Coverage` call wrote.
+  string coverage_dir   = 2;
+  // The tree whose sources are scored for complexity, which is what turns a coverage percentage
+  // into a CRAP score. Often but not necessarily the crate that was captured.
+  string crate_path     = 3;
+}
+
+message ReportResponse {
+  // Fraction of instrumented functions that were matched to a measured one, 0 to 1. Well below 1
+  // means the join is missing sources, so the leaderboard is reporting on part of the tree.
+  double join_rate    = 1;
+  uint32 matched      = 2;
+  uint32 unmatched    = 3;
+  // The HTML leaderboard this run wrote, so a caller need not re-derive the file name.
+  string report_path  = 4;
+}
+
+message DuplicateTestsRequest {
+  string workspace_root        = 1;
+  string coverage_dir          = 2;
+  // Where the HTML pages are written, absolute or relative to `workspace_root`.
+  string out_dir               = 3;
+  // Smallest signature worth grouping. Taken literally, zero included: a server that substituted
+  // the command line's default would answer a different question than the one it was asked.
+  uint32 min_signature         = 4;
+  // How much of a test's signature another must cover for it to count as a superset, 0 to 1. Also
+  // taken literally — at zero every pair is a subset relation.
+  double subset_ratio          = 5;
+  // Count coverage of the test sources themselves, not only of production sources.
+  bool   include_test_sources  = 6;
+}
+
+message ComplexityRequest {
+  string workspace_root = 1;
+  // The file to score, absolute or relative to `workspace_root`.
+  string file           = 2;
+}
+
+message ComplexityResponse {
+  repeated FunctionComplexity functions = 1;
+}
+
+message FunctionComplexity {
+  string name       = 1;
+  // One-based line the function is declared on — the line a coverage record is joined on, which is
+  // why it is the line of the *name* rather than of the body.
+  uint32 line       = 2;
+  uint32 complexity = 3;
+}
+
+// What happened while an analysis ran. Exactly one field is set.
+//
+// The capture phases are the ones the library already distinguishes, unchanged: a front end that
+// renders these renders what a one-shot `tddy-tools analyze` prints.
+message AnalyzeEvent {
+  oneof event {
+    BuildStarted        build_started        = 1;
+    BuildFinished       build_finished       = 2;
+    HarnessStarted      harness_started      = 3;
+    TestCaptured        test_captured        = 4;
+    CaptureFinished     capture_finished     = 5;
+    // The terminal event of a `DuplicateTests` run: everything the detection found.
+    DuplicateTestsFound duplicate_tests      = 6;
+  }
+}
+
+// The instrumented build has begun — the longest silent phase of a capture, and the one most
+// easily mistaken for a hang, which is the whole reason it is an event.
+message BuildStarted {}
+
+message BuildFinished {
+  uint32 harnesses = 1;
+}
+
+message HarnessStarted {
+  // One-based position of this harness among `total`, so a reader can see how far a capture is.
+  uint32 index = 1;
+  uint32 total = 2;
+  string spec  = 3;
+  uint32 tests = 4;
+}
+
+message TestCaptured {
+  uint32 index  = 1;
+  uint32 total  = 2;
+  string name   = 3;
+  // The libtest verdict, as libtest words it. A failing test does not stop a capture — its
+  // coverage is still what that test covered.
+  string status = 4;
+}
+
+message CaptureFinished {
+  uint32 tests = 1;
+  // Source files the denominator covers, which is the count written last and therefore the one
+  // that says the capture completed rather than stopped.
+  uint32 files = 2;
+}
+
+message DuplicateTestsFound {
+  repeated DuplicateGroup identical = 1;
+  repeated SubsetRelation subsets   = 2;
+}
+
+message DuplicateGroup {
+  // How many signature keys the tests in this group share — all of them, since the group is by
+  // identical signature. A larger number is a stronger claim that the duplication is real.
+  uint32          signature_size = 1;
+  repeated string tests          = 2;
+}
+
+message SubsetRelation {
+  string subset         = 1;
+  string superset       = 2;
+  uint32 subset_size    = 3;
+  uint32 superset_size  = 4;
+  // Fraction of the subset's keys the superset also covers.
+  double ratio          = 5;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Introspection
+
+message WorkspacesRequest {}
+
+message WorkspacesResponse {
+  repeated WarmWorkspace workspaces = 1;
+}
+
+message WarmWorkspace {
+  string workspace_root = 1;
+  bool   ready          = 2;
+  // Seconds since this root's index last served a request, which is what its idle reaping is
+  // measured against.
+  uint64 idle_seconds   = 3;
+}

@@ -213,7 +213,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      # The deployment set the VM chain leg installs: the five binaries
+      # The deployment set the VM chain leg installs: every binary
       # `recipes::deployed_binaries` names, plus the files `./install` reads out
       # of a checkout, flat and under the staged names
       # `BuiltBinaries::from_dist_dir` expects. The AppArmor profile is renamed
@@ -233,7 +233,8 @@ jobs:
           # INSTALLED_BINARIES by a unit test — the script refuses to run with any of
           # them missing, and a short list only announces itself after a bake and a boot.
           for b in tddy-supervisor tddy-daemon tddy-coder tddy-tools \
-                   tddy-remote-git-repo tddy-session-sync tddy-sandbox-runner; do
+                   tddy-remote-git-repo tddy-session-sync tddy-sandbox-runner \
+                   tddy-index-daemon; do
             cp "target/debug/$b" dist/
           done
           cp install daemon.yaml.production supervisor.yaml.production dist/
