@@ -216,9 +216,11 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
   rewrites what it left behind to reach the new module through qualified `module::Item` paths. The
   run reports which lines stayed. Author the anchor with `anchors --items` rather than by hand — a
   range that clips a helper is the usual way into this — and read the widening report the run prints.
-- **`check` without `--deep` cannot predict an apply.** The plain form reads text; it has returned
-  `no findings` on plans that `apply` then refused outright. `--deep` resolves through the apply's own
-  path and writes nothing, so it is the form to gate on.
+- **`check` without `--deep` cannot predict every apply refusal.** The plain form reads text and
+  runs `move_module_to_crate` preconditions (parent module present, crate layout) before any server
+  starts; it still has returned `no findings` on plans that `apply` then refused for reasons only a
+  deep resolve sees. `--deep` resolves through the apply's own path and writes nothing, so it is the
+  form to gate on.
 
 - **`extract_method` is the operation most sensitive to index readiness.** It needs type inference,
   where `extract_module` needs only the syntax tree — so on a large file in a large workspace the
@@ -242,8 +244,10 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
 - **A cyclic module group cannot be moved at any layering.** The operation moves one module per op,
   so a mutually-dependent pair (`host_tooling ⇄ ssh_agent`) is unreachable: each op sees the other
   module still in the origin crate. Cut the cycle by hand first, or move the group by hand.
-- **Only `<crate>/src/<module>.rs` moves.** A nested module and a crate root are **refused, not
-  guessed** — a nested module's `mod` line lives in a file the operation would have to guess at.
+- **A nested module moves when its parent is locatable.** Anchors at
+  `<crate>/src/<parent>/<module>.rs` or `<crate>/src/<parent>/mod.rs` take the destination path from
+  the plan's `path` and locate the parent's `mod` line in `<crate>/src/<parent>.rs` then
+  `<crate>/src/<parent>/mod.rs`. Refused only when neither parent file exists.
 - **Registry dependencies are not carried, only path ones.** The destination manifest gains the
   `path` dependencies the moved file needs and nothing else; a moved file that uses `chrono` or
   `futures-util` leaves the destination short of it, and the build says so.
@@ -262,6 +266,8 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
 - **A move that would make the workspace cyclic is refused up front**, on both the facade and the
   no-facade path: a facade makes the origin depend on the destination, and a re-pointed caller does
   the same, so if the moved code still names the origin, cargo would reject the pair with an error
-  naming neither the module nor the operation. The refusal names every path that forced it.
+  naming neither the module nor the operation. The refusal names every path that forced it. Paths that
+  resolve through a back-compat `pub use` facade in the origin are attributed to the **defining**
+  crate, not the origin, so a re-export alone does not read as an origin dependency.
 - Restructuring tests that start rust-analyzer are load-sensitive; run affected suites with `--test-threads=1` when binding a server.
 - Typed `tddy-lsp` assist methods are not yet first-class; restructuring uses `request_raw` / `notify_raw`.

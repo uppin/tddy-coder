@@ -296,11 +296,7 @@ async fn a_rust_analyzer_rooted_at(root: &Path) -> Arc<tddy_lsp::client::LspClie
             .with_initialization_options(server_settings()),
     );
 
-    let registry = LspRegistry::new(
-        allow,
-        TaskRegistry::new(),
-        A_WAIT_A_TEST_CAN_OUTLAST,
-    );
+    let registry = LspRegistry::new(allow, TaskRegistry::new(), A_WAIT_A_TEST_CAN_OUTLAST);
     let service = registry
         .get_or_spawn(LspKey {
             root: root.to_path_buf(),
