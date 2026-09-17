@@ -45,6 +45,15 @@ pub(crate) struct IndexDaemonArgs {
     #[arg(long)]
     pub(crate) stdio: bool,
 
+    /// Ask whether a daemon is serving this AF_UNIX socket, and exit — serving nothing itself.
+    ///
+    /// A liveness probe that stands on an answer rather than on an inference. A pid proves that
+    /// something with that number is alive and a socket file outlives the process that bound it,
+    /// so neither says a daemon is reachable; this dials the socket and issues `Workspaces`, the
+    /// cheapest call the service has. It reaches no language server and loads no crate graph.
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["grpc", "grpc_uds", "stdio"])]
+    pub(crate) ping: Option<PathBuf>,
+
     /// Send this process's stderr — its log, and anything a library writes there directly — to
     /// this file instead of the stream it inherited.
     ///
@@ -191,6 +200,8 @@ pub(crate) enum Lifetime {
     SingleShot(Requested),
     /// Serve that same implementation over these transports and stay alive.
     Serve(Transports),
+    /// Ask whether a daemon is serving this socket, and exit. Serves nothing and runs nothing.
+    Ping(PathBuf),
 }
 
 /// Where a serving process answers.
@@ -216,6 +227,20 @@ impl Transports {
 /// nobody, and failing fast beats that. Both together is an error for the mirror-image reason —
 /// serving would silently discard an operation the caller asked for.
 pub(crate) fn lifetime_of(args: IndexDaemonArgs) -> Result<Lifetime, String> {
+    // First, and before the "nothing to do" refusal below: a ping is the one lifetime that asks
+    // for no transport of its own, so reading it after `transports.any()` would refuse it as a run
+    // with nothing to serve. `conflicts_with_all` on the flag keeps it from arriving beside one.
+    if let Some(socket) = args.ping {
+        if args.operation.is_some() {
+            return Err(
+                "a ping and an operation ask for different lifetimes: drop the \
+                        subcommand to probe a socket, or drop --ping to run the operation once"
+                    .to_string(),
+            );
+        }
+        return Ok(Lifetime::Ping(socket));
+    }
+
     let transports = Transports {
         grpc: args.grpc,
         grpc_uds: args.grpc_uds,
@@ -322,15 +347,52 @@ mod tests {
     fn requested_by(argv: &[&str]) -> Requested {
         match parse(argv).expect("the command line resolves") {
             Lifetime::SingleShot(requested) => requested,
-            Lifetime::Serve(_) => panic!("expected a single-shot run"),
+            other => panic!("expected a single-shot run, got {other:?}"),
         }
     }
 
     fn served_by(argv: &[&str]) -> Transports {
         match parse(argv).expect("the command line resolves") {
             Lifetime::Serve(transports) => transports,
-            Lifetime::SingleShot(_) => panic!("expected a serving process"),
+            other => panic!("expected a serving process, got {other:?}"),
         }
+    }
+
+    fn pinged_by(argv: &[&str]) -> PathBuf {
+        match parse(argv).expect("the command line resolves") {
+            Lifetime::Ping(socket) => socket,
+            other => panic!("expected a ping, got {other:?}"),
+        }
+    }
+
+    /// A ping asks for no transport of its own, so it has to be read before the refusal that
+    /// catches a command line serving nothing — otherwise it is rejected as a run with nothing
+    /// to do.
+    #[test]
+    fn a_ping_is_not_a_run_with_nothing_to_serve() {
+        // Given a ping at a socket, and no transport and no subcommand beside it
+        // When the command line is resolved
+        let socket = pinged_by(&["--ping", "/tmp/index.sock"]);
+
+        // Then it asks to probe that socket rather than being refused
+        assert_eq!(socket, PathBuf::from("/tmp/index.sock"));
+    }
+
+    /// Serving and probing are different lifetimes, and a command line asking for both has said
+    /// two things. `conflicts_with_all` refuses it at the parser rather than letting one win.
+    #[test]
+    fn a_ping_beside_a_transport_is_refused_by_the_command_line() {
+        // Given a ping and a transport together
+        let parsed = IndexDaemonArgs::try_parse_from([
+            "tddy-index-daemon",
+            "--ping",
+            "/tmp/index.sock",
+            "--grpc-uds",
+            "/tmp/serve.sock",
+        ]);
+
+        // Then the command line refuses it
+        assert!(parsed.is_err(), "a ping and a transport were both accepted");
     }
 
     #[test]

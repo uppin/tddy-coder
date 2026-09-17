@@ -21,7 +21,7 @@ use super::options::usage;
 use super::rehearsal::{survey_lines, Rehearsal};
 use super::{
     commit_operation, open_run, parse_options, restore_ledger, Command, Finding, Options, Outcome,
-    PlanProgress, RunSummary, StatePaths,
+    PlanProgress, RunSummary, SnapshotRewrite, StatePaths,
 };
 
 /// Dispatch a restructuring subcommand given a raw command line.
@@ -36,7 +36,10 @@ pub fn run(
 ) -> Result<Outcome> {
     let command = args.first().map(String::as_str).unwrap_or_default();
 
-    if !matches!(command, "apply" | "status" | "check" | "anchors" | "verify") {
+    if !matches!(
+        command,
+        "apply" | "status" | "check" | "anchors" | "verify" | "snapshot"
+    ) {
         return Err(usage(format!("unknown command `{command}`")));
     }
 
@@ -68,6 +71,7 @@ pub fn dispatch(
             anchors(root, options, client, cancel).map(|range| Outcome::Anchored { file, range })
         }
         Command::Verify => verify(root, options).map(Outcome::Verified),
+        Command::Snapshot => snapshot(root, options).map(Outcome::Snapshotted),
     }
 }
 
@@ -233,6 +237,55 @@ fn progress_line(
     applied: bool,
 ) -> String {
     crate::console::operation(index, done, total, &format!("{op:?}"), files, applied)
+}
+
+/// Rewrite a plan's snapshot header to the working tree under `root` as it stands.
+///
+/// Every edit to a snapshotted file invalidates the header, and until this existed recomputing it
+/// was a shell pipeline each author had to invent around [`crate::apply::hash_file`] — which is
+/// public, and which nothing exposed.
+///
+/// **Line 1 and nothing else.** The plan is a command log, and a subcommand that rewrote an
+/// operation would be editing the author's intent rather than restating what the tree holds. So
+/// the operations are carried through as the bytes they arrived as, rather than parsed and
+/// re-serialized: a plan is also a file people diff, and a round trip through `serde_json` would
+/// renumber its whitespace and reorder its keys for nothing.
+///
+/// Nothing is written when the header already matches, so a `snapshot` of a current plan leaves
+/// its mtime alone.
+///
+/// Nothing goes to [`Options::progress`] either. That sink carries how far an index has got, and
+/// this reads a file and hashes what it names — a run with nothing to wait for has no progress to
+/// report, and a line there would be narration about an index that was never consulted.
+pub fn snapshot(root: &Path, options: Options) -> Result<SnapshotRewrite> {
+    let path = options.plan()?;
+    let text = std::fs::read_to_string(&path)?;
+    let plan = Plan::parse(&text)?;
+    let header = plan.rehashed_header(root)?;
+
+    // The header is the first line that is *not blank*, which is where `Plan::parse` reads it from.
+    // Taking "everything before the first newline" instead would rewrite a leading blank line and
+    // leave the real header behind to be parsed as an operation.
+    let blank: usize = text
+        .split_inclusive('\n')
+        .take_while(|line| line.trim().is_empty())
+        .map(str::len)
+        .sum();
+    let produced = match text[blank..].split_once('\n') {
+        Some((_, operations)) => format!("{}{header}\n{operations}", &text[..blank]),
+        None => format!("{}{header}", &text[..blank]),
+    };
+
+    let rewritten = produced != text;
+    if rewritten {
+        std::fs::write(&path, &produced)?;
+    }
+
+    Ok(SnapshotRewrite {
+        plan: path.to_string_lossy().to_string(),
+        paths: plan.snapshot.len(),
+        rewritten,
+    })
 }
 
 /// How far a plan's journal under `root` got.

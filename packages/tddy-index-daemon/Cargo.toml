@@ -19,6 +19,15 @@ clap = { version = "4", features = ["derive"] }
 # Required by the generated streaming handlers, not chosen here — `tddy-terminal-rpc` carries it
 # for the same reason.
 futures-util = "0.3"
+# `--ping` dials this service's own AF_UNIX socket, and tonic reaches a unix socket only through a
+# custom connector: `hyper-util`'s `TokioIo` to adapt the stream, `tower`'s `service_fn` to hand it
+# to an `Endpoint`. Both already arrive under `tonic`'s `transport` feature, so declaring them adds
+# nothing to the build graph — it makes a use this crate already depends on transitively explicit.
+# The shape is `tddy_sandbox_runner::connect_uds_channel`'s, which is where the pattern is
+# documented; depending on that crate for one function would put the sandbox runner behind the
+# index daemon, which is a worse trade than restating eight lines.
+hyper-util = "0.1"
+tower = "0.5"
 log = "0.4"
 prost = "0.13"
 serde_json = "1"

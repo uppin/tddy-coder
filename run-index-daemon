@@ -103,13 +103,35 @@ case "${1:-}" in
     stop_daemon
     ;;
   --status)
-    if pid="$(running_pid)"; then
-      narrate "Index daemon pid ${pid} is serving ${SOCKET}"
+    # A pid and a socket file are both inferences: a pid proves something with that number is
+    # alive, and a socket file outlives the process that bound it. Only an answer proves a daemon
+    # is reachable, so this dials and asks — which is what `tddy-index-daemon --ping` is for.
+    #
+    # The binary has to exist to ask. Not built here: `--status` starts nothing, and building is
+    # how the start path begins, so a status that compiled a daemon would surprise its caller.
+    if [[ ! -x "$BINARY" ]]; then
+      narrate "No index daemon binary at ${BINARY} — nothing has been started from this checkout."
+      exit 1
+    fi
+    # The ping's own answer goes to stderr with the rest of the narration: this script's stdout is
+    # one line, the `export`, and `eval $(./run-index-daemon --status)` has to stay safe.
+    if "$BINARY" --ping "$SOCKET" >&2; then
+      if pid="$(running_pid)"; then
+        narrate "Index daemon pid ${pid} is serving ${SOCKET}"
+      fi
       echo "export TDDY_INDEX_SOCKET=${SOCKET}"
+      exit 0
+    fi
+    # The pid file disagreeing with the socket is worth saying out loud rather than flattening to
+    # "nothing is running": it means a daemon died without cleaning up, and the next start has to
+    # clear the socket it left.
+    if pid="$(running_pid)"; then
+      narrate "Index daemon pid ${pid} is alive but is not answering on ${SOCKET}."
+      narrate "Stop it and start again: ./run-index-daemon --stop && ./run-index-daemon"
     else
       narrate "No index daemon is running for ${ROOT_DIR}"
     fi
-    exit 0
+    exit 1
     ;;
   "")
     ;;
@@ -166,25 +188,63 @@ if [[ -z "$DEV_SHELL_PATH" ]]; then
   exit 1
 fi
 
-narrate "Starting index daemon on ${SOCKET}"
+# `setsid` comes from the dev shell, so a host without util-linux on its own PATH is not a reason
+# for the daemon to come up un-detached. Resolved explicitly rather than trusted to a `VAR=x cmd`
+# prefix, because the shell looks a command up on the PATH it already has, not the one the prefix
+# sets.
+if ! env PATH="$DEV_SHELL_PATH" command -v setsid >/dev/null 2>&1; then
+  narrate "run-index-daemon: the dev shell provides no setsid, so the daemon could not be given a"
+  narrate "session of its own — and one that shares this shell's process group does not outlive it."
+  exit 1
+fi
+
+narrate "Starting index daemon on ${SOCKET}, in a session of its own"
+# `setsid`, not `nohup`. `nohup` blocks SIGHUP and nothing else: a background job stays in the
+# process group of the shell that started it, so a caller that tears that group down when its
+# command finishes — an agent harness, a CI step, a terminal closing on a job-control shell — takes
+# the daemon with it. That is what made several starts announce `listening on …` and then refuse the
+# connection seconds later, with the socket file still on disk. A session of its own is what makes
+# this a daemon rather than a background job.
+#
+# The pid is written from inside the process that becomes the daemon, not taken from `$!`: `setsid`
+# forks when its caller is already a process group leader and execs in place when it is not, so `$!`
+# is the daemon's pid in some shells and a wrapper's in others — and `--stop` reading the wrong one
+# kills the wrapper and orphans the multi-gigabyte server. `exec` leaves `$$` the daemon's own pid
+# either way.
+#
 # stderr to the log by shell redirection rather than via the daemon's own --log-file, so this script
 # owns the truncation: readiness is decided by finding `listening on` in the file, and an appended
 # log would answer with the previous run's line.
-PATH="$DEV_SHELL_PATH" RUST_LOG="${TDDY_INDEX_LOG:-info}" nohup "$BINARY" --grpc-uds "$SOCKET" \
+rm -f "$PID_FILE"
+env PATH="$DEV_SHELL_PATH" RUST_LOG="${TDDY_INDEX_LOG:-info}" \
+  setsid sh -c 'echo $$ >"$1"; exec "$2" --grpc-uds "$3"' \
+  run-index-daemon "$PID_FILE" "$BINARY" "$SOCKET" \
   </dev/null >/dev/null 2>"$LOG_FILE" &
-daemon_pid=$!
 
+daemon_pid=""
 for _ in $(seq 1 "$READY_TICKS"); do
+  # The pid file appears a moment after the fork, so it is read each tick until it is there rather
+  # than once before the loop.
+  if [[ -z "$daemon_pid" && -s "$PID_FILE" ]]; then
+    daemon_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  fi
+
   if grep -q "listening on ${SOCKET}" "$LOG_FILE" 2>/dev/null; then
-    echo "$daemon_pid" >"$PID_FILE"
+    if [[ -z "$daemon_pid" ]]; then
+      narrate "run-index-daemon: the daemon is listening but wrote no pid to ${PID_FILE}, so --stop"
+      narrate "would have nothing to stop. Kill it by hand: pkill -f 'tddy-index-daemon .*${SOCKET}'"
+      exit 1
+    fi
     announce "$daemon_pid"
     exit 0
   fi
+
   # Checked every tick, not only at the end: a daemon that refused its socket or failed to start has
   # already said why, and waiting thirty seconds to read it is thirty seconds of nothing.
-  if ! kill -0 "$daemon_pid" 2>/dev/null; then
+  if [[ -n "$daemon_pid" ]] && ! kill -0 "$daemon_pid" 2>/dev/null; then
     narrate "run-index-daemon: the daemon exited before it was listening. Its log said:"
     tail -n 20 "$LOG_FILE" >&2 || true
+    rm -f "$PID_FILE"
     exit 1
   fi
   sleep "$READY_TICK_SECONDS"
@@ -192,5 +252,6 @@ done
 
 narrate "run-index-daemon: the daemon did not announce a listener on ${SOCKET}. Its log said:"
 tail -n 20 "$LOG_FILE" >&2 || true
-kill "$daemon_pid" 2>/dev/null || true
+[[ -n "$daemon_pid" ]] && kill "$daemon_pid" 2>/dev/null || true
+rm -f "$PID_FILE"
 exit 1

@@ -39,6 +39,7 @@ See [warm code-intelligence daemon](warm-code-intelligence-daemon.md).
 tddy-tools restructure apply <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N]
 tddy-tools restructure status <plan.jsonl>
 tddy-tools restructure check <plan.jsonl> [--deep] [--budget LINES]
+tddy-tools restructure snapshot <plan.jsonl>
 tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure verify --against <git-ref>
 ```
@@ -51,7 +52,14 @@ there is no budget to state. See [Waiting](#waiting).
 | `apply` | Execute the plan; `--dry-run` rehearses in an overlay; `--resume` continues from the journal |
 | `status` | completed / in_flight / pending / failed |
 | `check` | All findings, no writes; `--deep` resolves through the same path as apply; `--budget LINES` additionally reports which of the files the plan's **anchors** name exceed that many lines — a report, never a gate |
+| `snapshot` | Rewrite the plan's line-1 `sha256:` header from the working tree, leaving every operation line byte-identical. No index, no language server |
 | `anchors` | Emit a correct range covering named items (including trivia) |
+
+**A plain `check` is not a rehearsal.** It reads text. `--deep` resolves every operation through the
+same path `apply` takes and writes nothing, so it is the only form that reports an assist or import
+refusal before an index has been paid for. `no findings` from a plain `check` has been followed by an
+apply that refused more than once — see
+[§ Known limitations](#known-limitations).
 | `verify` | Statement-multiset comparison against a git ref |
 
 ## Plan format
@@ -140,6 +148,24 @@ unable to answer one method is `ServerNotSettled`, kept distinct from a malforme
 fixed by waiting or by looking at the server, the second by editing the plan, and reporting the
 second as the first sends the reader to the wrong place.
 
+### Refusal classes
+
+Every refusal is fatal — the executor never falls back — and its **class** is what says who has to do
+something about it. Read the class before the text.
+
+| Reads | Class | What to do | Over the wire |
+|---|---|---|---|
+| `plan is malformed: …` | The plan says something this executor will not do | Edit the plan | `InvalidArgument` |
+| `this seam cannot be cut here: …` | The plan is well formed and the code will not permit this cut — stranded references, an `impl` cut in half, a module name already taken, an import the file's own bindings cannot disambiguate | Move the seam, or change the code | `FailedPrecondition` |
+| `rust-analyzer's answer was unusable: …` | The server answered and the answer cannot be used — an extraction produced before inference, a mangled rewrite, a response with no edits | Retry against a warm server, or look at the server | `Internal` |
+| `rust-analyzer would not settle …` | The wait ended before the index did | Wait, or look at the server | `DeadlineExceeded` |
+| snapshot / journal / anchor mismatches | The tree is not in the state the plan was written against | Repair the tree, or re-snapshot | `FailedPrecondition` |
+
+The distinction is not cosmetic. These were one class until a live extraction was refused twice with
+`plan is malformed` over a plan that was correct both times, sending its author to edit the one thing
+that was not wrong. Each message already ends with its own remedy; the class is what tells a reader
+whether that remedy is theirs to apply.
+
 ### Import restoration
 
 An extraction moves items out of the scope of their file's `use` declarations, so the backend restores
@@ -149,7 +175,8 @@ cannot answer, reads the parent's own `use` tree:
 | Case | How it resolves |
 |---|---|
 | One offered path | applied |
-| Several offered paths | settled by an exact binding the file already has; failing that, by the one candidate whose **module** the file already imports from; otherwise **refused**, naming the candidates |
+| Several offered paths | settled by an exact binding the file already has; failing that, by the one candidate whose **module** the file already imports from; failing that, by the one whose **crate** the file binds that same name from; otherwise **refused**, naming the candidates |
+| A re-exported item (`tddy_core::ParseError` offered, `tddy_core::error::ParseError` imported) | settled by the crate tier — one item under two paths is not two candidates. Keyed on a binding of the contested name, never on any binding from that crate, or every file importing anything from `std` would match `std::string::ParseError` |
 | A name the parent binds under an alias (`ProbeOutcome as ProtoProbeOutcome`) | reconstructed from the parent's declaration — rust-analyzer offers the unaliased path, which binds nothing |
 | A **module** binding (`use crate::tool_engine;`) | reconstructed the same way; `Import` is offered for items, never for a bare module path |
 | A name the seam's own facade will re-export | left to the facade — a named import here would be private and would shadow it |
@@ -183,6 +210,15 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
 - Package: [`packages/tddy-code-restructuring/README.md`](../../../packages/tddy-code-restructuring/README.md)
 
 ## Known limitations
+
+- **An assist may relocate less than the anchor asked for, and rewrite the remainder in place.**
+  rust-analyzer decides the extraction's real extent; when it moves part of the anchored range, it
+  rewrites what it left behind to reach the new module through qualified `module::Item` paths. The
+  run reports which lines stayed. Author the anchor with `anchors --items` rather than by hand — a
+  range that clips a helper is the usual way into this — and read the widening report the run prints.
+- **`check` without `--deep` cannot predict an apply.** The plain form reads text; it has returned
+  `no findings` on plans that `apply` then refused outright. `--deep` resolves through the apply's own
+  path and writes nothing, so it is the form to gate on.
 
 - **`extract_method` is the operation most sensitive to index readiness.** It needs type inference,
   where `extract_module` needs only the syntax tree — so on a large file in a large workspace the

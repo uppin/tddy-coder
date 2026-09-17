@@ -29,7 +29,12 @@ pub fn status_of(error: &RestructureError) -> Status {
         | RestructureError::NoBackend { .. } => Status::invalid_argument(refusal),
         // The tree is at fault: the request is well formed, and the state it names is not the
         // state on disk. Retrying it unchanged fails identically.
-        RestructureError::SnapshotMismatch { .. }
+        //
+        // `SeamRefused` belongs here rather than beside `MalformedPlan`: the plan says something
+        // the executor would happily do, and the code it names will not permit it. A client that
+        // rewrote its plan on this would ask again and be refused the same way.
+        RestructureError::SeamRefused(_)
+        | RestructureError::SnapshotMismatch { .. }
         | RestructureError::AnchorInvalidated { .. }
         | RestructureError::JournalExists
         | RestructureError::CheckpointDivergence { .. }
@@ -49,7 +54,10 @@ pub fn status_of(error: &RestructureError) -> Status {
         // that was answering perfectly well. A client still listening never sees it — the run that
         // caused it is the one that has gone — so it is on the record for the log's sake.
         RestructureError::CallerStopped => Status::cancelled(refusal),
-        RestructureError::Io(_) => Status::internal(refusal),
+        // Nothing the caller did produced it and nothing the caller changes fixes it. The server
+        // answered and the answer could not be used, which is this service's own problem to report
+        // rather than the client's to act on.
+        RestructureError::ServerDefect(_) | RestructureError::Io(_) => Status::internal(refusal),
     }
 }
 
@@ -135,6 +143,36 @@ mod tests {
 
         // Then the request is named as the thing that is wrong
         assert_eq!(status.code(), Code::InvalidArgument);
+    }
+
+    /// A seam the code refuses is the tree's state, not the request's. A client told
+    /// `InvalidArgument` rewrites its plan and asks again with the same result; told
+    /// `FailedPrecondition`, it knows the plan is right and the cut is in the wrong place.
+    #[test]
+    fn reports_a_refused_seam_as_a_failed_precondition() {
+        // Given a seam the code will not permit, on a plan that is well formed
+        let refusal = RestructureError::SeamRefused("this seam cuts an `impl` in half".to_string());
+
+        // When it is classified
+        let status = status_of(&refusal);
+
+        // Then the tree is named as the thing that is wrong
+        assert_eq!(status.code(), Code::FailedPrecondition);
+    }
+
+    /// Nothing the caller did produced this and nothing the caller changes fixes it, which is what
+    /// `Internal` means. Reporting it as `InvalidArgument` sends them editing a correct plan.
+    #[test]
+    fn reports_an_unusable_answer_from_the_server_as_internal() {
+        // Given an extraction rust-analyzer produced before it could infer the signature
+        let refusal =
+            RestructureError::ServerDefect("rust-analyzer wrote `fn f(v: _) -> _`".to_string());
+
+        // When it is classified
+        let status = status_of(&refusal);
+
+        // Then neither the plan nor the tree is blamed for it
+        assert_eq!(status.code(), Code::Internal);
     }
 
     #[test]
