@@ -11908,6 +11908,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -12429,6 +12430,38 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "uuid",
+]
+
+[[package]]
+name = "tddy-index-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "futures-util",
+ "hyper-util",
+ "log",
+ "pretty_assertions",
+ "prost 0.13.5",
+ "prost-build 0.13.5",
+ "serde_json",
+ "tddy-code-analysis",
+ "tddy-code-restructuring",
+ "tddy-codegen",
+ "tddy-core",
+ "tddy-lsp",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-stdio",
+ "tddy-task",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic 0.12.3",
+ "tonic-build",
+ "tower 0.5.3",
 ]
 
 [[package]]
@@ -13349,9 +13382,11 @@ dependencies = [
  "tddy-connectrpc",
  "tddy-core",
  "tddy-discovery",
+ "tddy-index-daemon",
  "tddy-lsp-executor",
  "tddy-rpc",
  "tddy-sandbox",
+ "tddy-sandbox-runner",
  "tddy-service",
  "tddy-session-tool-client",
  "tddy-stdio",
@@ -13361,6 +13396,7 @@ dependencies = [
  "tddy-workflow-recipes",
  "tempfile",
  "tokio",
+ "tonic 0.12.3",
  "uuid",
  "wiremock",
 ]

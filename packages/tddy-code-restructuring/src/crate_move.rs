@@ -1079,7 +1079,7 @@ pub fn unrunnable_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Result
 }
 
 /// Every check [`resolve`] runs before it consults rust-analyzer.
-fn move_preconditions(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<()> {
+pub(crate) fn move_preconditions(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<()> {
     let moving = Move::read(workspace, op)?;
     let text = workspace.read(&moving.home.declared_in)?;
     if module_declaration(&text, &moving.module).is_none() {

@@ -551,7 +551,14 @@ fi
 # only remaining fallback is a bare name on PATH. It is required in both modes, --user included —
 # a per-user install spawns jails too, and the daemon that cannot find it fails the first sandboxed
 # start rather than at install time.
-INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools tddy-remote-git-repo tddy-session-sync tddy-sandbox-runner)
+#
+# tddy-index-daemon holds a warm rust-analyzer index per workspace root and serves the restructure
+# and analyze operations over gRPC. Like tddy-sandbox-runner it is a process the daemon SPAWNS
+# rather than a service with a unit of its own, and it lands in BIN_DIR next to tddy-daemon for the
+# same reason: the daemon resolves it as a sibling of its own executable, with a bare name on PATH
+# as the only remaining fallback. Required in both modes, --user included, or the first restructure
+# a session asks for fails at spawn rather than at install time.
+INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools tddy-remote-git-repo tddy-session-sync tddy-sandbox-runner tddy-index-daemon)
 if "$want_supervisor"; then
   INSTALLED_BINARIES=(tddy-supervisor "${INSTALLED_BINARIES[@]}")
 fi

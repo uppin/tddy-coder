@@ -74,8 +74,20 @@ not define is refused rather than ignored.
 - **`extract_module` restores the imports its own assist loses, and refuses when it cannot.** The
   items move out of the scope of the file's `use` declarations, so the backend asks rust-analyzer for
   an import at each name left unresolved. Where the server offers several paths for one name, the
-  file's existing imports decide; where they do not settle it, the operation refuses and names the
-  candidates rather than guessing.
+  file's existing imports decide — by an exact path match, then by a module the file already imports
+  from, then by the **crate** the file binds that same name from. Where none of the three settles it,
+  the operation refuses and names the candidates rather than guessing.
+
+  The crate tier exists because a re-export gives one item two paths. `tddy-core` publishes
+  `pub use error::{BackendError, ParseError, WorkflowError};`, so a file writing the canonical
+  `tddy_core::error::ParseError` is offered the shorter `tddy_core::ParseError` — the same type under
+  a different string, which neither of the first two tiers can match. Before the crate tier, one
+  extraction was refused three candidates deep over exactly that.
+
+  **Two candidates rooted in the same crate is still a refusal**, and so is a name the file does not
+  already bind. Qualifying the name fully inside the anchored range settles it either way, but reach
+  for that only after reading the refusal: it writes a fully-qualified path into production code
+  permanently.
 - **`extract_module` refuses when another file references what would move — unless you ask for a
   facade.** The module is reached by a different path than the items are now and rust-analyzer
   rewrites no reference it did not move, so a caller elsewhere would only surface at compile time.

@@ -63,9 +63,19 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 | [Feature prompt: agent skills](feature-prompt-agent-skills.md) | **`.agents/skills`** discovery, composed skill prompts, presenter **`/recipe`** selection |
 | [Rust code analysis](rust-code-analysis.md) | **`tddy-tools analyze`** — CRAP, coverage, duplicate tests (Rust v1) |
 | [Rust code restructuring](rust-code-restructuring.md) | **`tddy-tools restructure`** — plan-driven refactors via **`tddy-lsp`** (Rust v1) |
+| [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) | **`tddy-index-daemon`** — one binary, two lifetimes: run one operation in process, or hold a warm rust-analyzer index per worktree and serve `code_index.CodeIndexService` over **gRPC** and **stdio** |
 | [Activity log streaming](activity-log-streaming.md) | User **`User:`** / **`Queued:`** lines in the activity log; incremental agent tail; **`AgentOutput`** as the streaming channel for workflow chunks |
 | [Codex ACP backend](codex-acp-backend.md) | **`--agent codex-acp`**: ACP to **`codex-acp`** subprocess; resume via **`load_session`**; **`codex_thread_id`** parity with **`codex`**; OAuth retry via **`codex login`** and **`codex_oauth_authorize.url`** |
 | [Session participant RPC & metadata](session-participant-rpc.md) | The coder's LiveKit participant serves session-scoped **`ConnectionService`** (tools, control, VNC, screen-sharing) and publishes **`session`** metadata for the web sessions list; **`DeleteSession`/`SignalSession` are daemon-direct** (not served by the coder) |
+
+## Active PRDs
+
+Requirement changes in flight, in `1-WIP/`. Each is folded into the feature documents it names when
+its changeset wraps.
+
+| PRD | Affects |
+|-----|---------|
+| [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
 
 ## Integration Points
 

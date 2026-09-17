@@ -150,6 +150,9 @@ fn write_fake_release_binaries(root: &Path) {
         // Runs inside every jail the daemon spawns, so `install` requires it exactly as it
         // requires the daemon. A fixture missing it fails the preflight before any assertion runs.
         "tddy-sandbox-runner",
+        // Spawned by the daemon as a sibling of its own executable, so `install` requires it for
+        // the same reason and with the same preflight.
+        "tddy-index-daemon",
     ] {
         let p = rel.join(name);
         fs::write(&p, b"fake-binary\n").unwrap();

@@ -165,7 +165,7 @@ const SCHEMA_VERSION: u32 = 1;
 /// language engine should have produced, so the plan is refused rather than partially honoured.
 const CODE_BEARING_FIELDS: [&str; 3] = ["text", "code", "content"];
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct SnapshotHeader {
     v: u32,
     snapshot: BTreeMap<String, String>,
@@ -193,6 +193,26 @@ impl Plan {
             snapshot: header.snapshot,
             ops,
         })
+    }
+
+    /// This plan's snapshot header line, with every path it names hashed as the working tree under
+    /// `root` holds it now.
+    ///
+    /// Only the paths the header already names. Adding the files the operations touch would be
+    /// inventing a claim the author never made: the header is their statement of which files they
+    /// wrote the plan against, and [`Plan::verify_snapshot`] refuses the run when one of them has
+    /// moved since. What this produces is that statement, restated about the tree as it stands.
+    pub fn rehashed_header(&self, root: &std::path::Path) -> Result<String> {
+        let mut snapshot = BTreeMap::new();
+        for path in self.snapshot.keys() {
+            snapshot.insert(path.clone(), crate::apply::hash_file(&root.join(path))?);
+        }
+
+        serde_json::to_string(&SnapshotHeader {
+            v: self.version,
+            snapshot,
+        })
+        .map_err(|error| malformed(error.to_string()))
     }
 
     /// Verify every snapshot hash still matches the working tree. Fails loudly on drift.

@@ -108,6 +108,19 @@ impl Status {
         }
     }
 
+    /// The caller stopped waiting, so nothing is wrong with the request or the server.
+    ///
+    /// Distinct from [`Status::deadline_exceeded`], which says a bound expired: a caller that
+    /// reports its own interrupt as a deadline sends whoever reads the log looking for a slow
+    /// server. `Code::Cancelled` existed before this constructor did, so callers were reaching for
+    /// a neighbouring code instead.
+    pub fn cancelled(msg: impl Into<String>) -> Self {
+        Self {
+            code: Code::Cancelled,
+            message: msg.into(),
+        }
+    }
+
     /// Returns the status code. Accessor method for use in tests and trait impls.
     pub fn code(&self) -> Code {
         self.code

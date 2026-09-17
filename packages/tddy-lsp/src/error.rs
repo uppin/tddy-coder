@@ -31,6 +31,20 @@ pub enum LspError {
     #[error("lsp server exited")]
     ServerExited,
 
+    /// The caller abandoned the request before the server answered it.
+    ///
+    /// Distinct from [`LspError::Timeout`]: nothing about the server is known to be wrong, and a
+    /// caller that treats this as a failed request would report its own `^C` as a broken server.
+    #[error("lsp request abandoned")]
+    Abandoned,
+
+    /// A document-sync notification named a URI this client has not opened.
+    ///
+    /// A caller error rather than a server one: there is no version sequence to continue, and
+    /// silently dropping the notification would make the caller's edit disappear.
+    #[error("document not open: {0}")]
+    DocumentNotOpen(String),
+
     /// An underlying I/O failure.
     #[error("io error: {0}")]
     Io(String),

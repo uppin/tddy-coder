@@ -24,6 +24,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tddy_lsp::client::LspClient;
+use tokio_util::sync::CancellationToken;
 
 /// LSP `SymbolKind::Object` — how rust-analyzer reports an `impl` block. Its members are reached
 /// through the type, never through a module path, which is why a seam may move a whole `impl` freely
@@ -312,8 +313,15 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
 /// minutes loading a crate graph showed nothing at all and then failed claiming the plan was
 /// malformed. Folding those messages in costs one match per message and turns the wait into
 /// something a developer can watch.
+///
+/// **Published because the fold is not this backend's alone.** `tddy-index-daemon` observes the
+/// same two notifications — `$/progress` and `experimental/serverStatus` — to answer "is this
+/// root's graph loaded?", and there is exactly one right way to read them: a title arrives only
+/// with `begin` and has to be carried forward per token, the same phase reports once per file
+/// scanned, and the furthest percentage is not the last one. A second reading of that would drift
+/// from this one, and the two would then disagree about a load they were both watching.
 #[derive(Default)]
-struct ServerChatter {
+pub struct ServerChatter {
     /// The title of each work-done progress token in flight, by token. A title arrives only with
     /// `begin`, so it has to be carried forward to the `report` lines that follow — and per token,
     /// because rust-analyzer runs several phases at once and a single field would attribute one
@@ -342,7 +350,7 @@ impl ServerChatter {
     ///
     /// A message that answers a request carries no `method`, which is what keeps every result out
     /// of the progress stream without having to know the ids in flight.
-    fn absorb(&mut self, message: &Value) -> Option<String> {
+    pub fn absorb(&mut self, message: &Value) -> Option<String> {
         match message.get("method").and_then(Value::as_str)? {
             "$/progress" => self.progress(message.get("params")?),
             "experimental/serverStatus" => {
@@ -415,7 +423,7 @@ impl ServerChatter {
     /// pairs it with the furthest percentage seen, so the reader can tell a server that stalled at
     /// 12% from one that timed out at 99% — the first wants investigating, the second wants a
     /// bigger budget.
-    fn how_far(&self) -> String {
+    pub fn how_far(&self) -> String {
         let last = self
             .last
             .clone()
@@ -424,6 +432,27 @@ impl ServerChatter {
             Some((percentage, phase)) => format!("{last}; furthest {phase} {percentage}%"),
             None => last,
         }
+    }
+
+    /// Whether the server has reported its own graph loaded and queryable.
+    ///
+    /// `experimental/serverStatus` is an extension, so a `false` here means "has not said so",
+    /// never "is not loaded" — which is why [`RustBackend::ensure_indexed`] treats it as a shortcut
+    /// out of a hover probe rather than as the probe itself. A consumer with no probe available has
+    /// only this, and must say so rather than presenting it as the stronger claim.
+    pub fn quiescent(&self) -> bool {
+        self.quiescent
+    }
+
+    /// The furthest percentage any phase has reported, and the phase it belonged to.
+    ///
+    /// Kept apart from the last line for the reason the field states: the server counts files
+    /// inside a phase and then emits sub-steps carrying no percentage at all, so the last line is
+    /// routinely the one with no number in it.
+    pub fn furthest(&self) -> Option<(u64, &str)> {
+        self.furthest
+            .as_ref()
+            .map(|(percentage, phase)| (*percentage, phase.as_str()))
     }
 }
 
@@ -448,39 +477,17 @@ fn progress_line(title: Option<&str>, value: &Value) -> String {
     line
 }
 
-/// How long the one-time warm-up may spend waiting for the crate graph, when a run does not say.
-///
-/// Generous on purpose: it is paid once per process, and the alternative to waiting is a refusal
-/// that reads as a defect in the plan. A cold `~/.cargo` on a loaded machine is the case this covers.
-const WARMUP_BUDGET: Duration = Duration::from_secs(600);
-
-/// How long a wait for name resolution may spend *after* the warm-up has succeeded.
-///
-/// By then the graph is loaded and the only thing left to wait out is the server catching up with
-/// this client's own edits, which is seconds. Keeping this short is the point of the warm-up: these
-/// waits are paid per operation, and `survey_moved_items` pays one per moved item.
-///
-/// "Which is seconds" holds for a file of ordinary size and fails badly on a very large one: an
-/// edit to an 18,000-line module in a workspace this size takes rust-analyzer well past thirty
-/// seconds to re-resolve, and the run then reports an incomplete index for a server that was
-/// working normally. So this is the *default*, and [`settle_budget_for`] scales it when a caller
-/// has said how long it is willing to wait.
-const SETTLE_BUDGET: Duration = Duration::from_secs(30);
-
-/// The per-operation settle budget implied by a whole-run indexing budget.
-///
-/// A caller who raised `--indexing-budget` is saying the machine or the file is slow, and the
-/// per-operation waits are exactly where that slowness shows up after the first index. The divisor
-/// is chosen so the default 600s warm-up yields exactly [`SETTLE_BUDGET`]: a caller who never
-/// passed the flag sees the behaviour they saw before this was configurable, which a test pins.
-fn settle_budget_for(warmup: Duration) -> Duration {
-    std::cmp::max(SETTLE_BUDGET, warmup / 20)
-}
-
 /// rust-analyzer answers `codeAction` with an empty list until it has finished loading the crate
 /// graph, so a request that needs the graph is retried at this cadence until it is answered.
 const INDEXING_POLL: Duration = Duration::from_secs(2);
 const SETTLE_POLL: Duration = Duration::from_millis(200);
+
+/// How often a wait looks at its cancellation token while it is sleeping between polls.
+///
+/// The poll intervals above are the cadence the *server* is asked again at; this is the cadence the
+/// *caller* is listened to at. Keeping the two apart is what lets a cancelled wait unwind promptly
+/// without asking a loading server more often than it deserves.
+const CANCEL_CHECK: Duration = Duration::from_millis(100);
 
 /// The semantic-token type rust-analyzer gives an identifier it cannot resolve. It is an extension
 /// to the standard legend, and the only way this client learns which names a moved item has lost
@@ -522,17 +529,21 @@ pub struct RustBackend {
     environment: String,
     /// What the server has said while this client was waiting on an answer.
     chatter: ServerChatter,
-    /// How long the one-time warm-up may run before it gives up.
-    warmup: Duration,
-    /// How long each later wait for name resolution may run. Derived from `warmup`.
-    settle: Duration,
+    /// How a wait learns that its caller has stopped waiting.
+    ///
+    /// This is the only thing that ends a wait other than the server becoming ready. There is no
+    /// budget: a number this library guessed is not evidence about the server, and a run that
+    /// raised one still met a ceiling derived from it. The token is checked *inside* the poll
+    /// loops, beside each sleep, because those loops are synchronous and run under
+    /// `spawn_blocking` — dropping the calling future stops nothing at all.
+    cancel: CancellationToken,
     /// Where a progress line goes. Every other consequence of an operation travels back to the
     /// caller inside a [`Resolution`], but progress happens *while* a call is in flight and has
     /// nowhere to wait — so it needs a sink rather than a return value. It stays a sink rather than
     /// a `println!` because this library is not the only possible front end: anything that speaks a
     /// protocol on stdout, a persistent server most obviously, would have its stream corrupted by an
     /// engine writing progress into it. Silent by default, and the binary is what makes it visible.
-    progress: fn(&str),
+    progress: ProgressSink,
     /// Where a diagnostic trace goes. A second sink rather than a level on the first, because they
     /// have different audiences: progress is for the person waiting, and this is for whoever is
     /// working out why a seam behaved as it did. Silent unless the front end installs one.
@@ -566,7 +577,22 @@ pub struct RustBackend {
 }
 
 /// The default progress sink: a library that was not asked to report says nothing.
-fn discard(_line: &str) {}
+/// Where a progress line goes.
+///
+/// A boxed sink rather than a `fn` pointer because a function pointer cannot capture: a host
+/// serving several callers at once needs each caller's progress to reach *that* caller, and a bare
+/// `fn` has nowhere to put the channel it would have to write to. Shared rather than owned because
+/// the same sink is handed to a backend and to the runner around it.
+pub type ProgressSink = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
+
+/// A sink that drops every line — the default, so a library front end is silent unless it asks.
+pub fn discard() -> ProgressSink {
+    std::sync::Arc::new(discard_line)
+}
+
+/// The no-op a `fn`-pointer sink defaults to. `trace` is still a bare pointer: it has one
+/// destination per front end, not one per caller, so it needs nothing a pointer cannot carry.
+fn discard_line(_line: &str) {}
 
 /// Drop `use` declarations left binding nothing at all.
 ///
@@ -661,10 +687,9 @@ impl RustBackend {
             next_id: 0,
             environment: String::from("<server not started>"),
             chatter: ServerChatter::default(),
-            warmup: WARMUP_BUDGET,
-            settle: settle_budget_for(WARMUP_BUDGET),
-            progress: discard,
-            trace: discard,
+            cancel: CancellationToken::new(),
+            progress: discard(),
+            trace: discard_line,
             indexed: false,
             unresolved_token: None,
             doc_version: 1,
@@ -672,17 +697,28 @@ impl RustBackend {
         }
     }
 
-    /// Give the warm-up a budget other than the default.
-    pub fn with_indexing_budget(mut self, seconds: u64) -> Self {
-        self.warmup = Duration::from_secs(seconds);
-        self.settle = settle_budget_for(self.warmup);
+    /// Send progress somewhere. Without this the indexing wait is silent, which is the state the
+    /// field report spent two hours in.
+    pub fn with_progress(mut self, sink: ProgressSink) -> Self {
+        self.progress = sink;
         self
     }
 
-    /// Send progress somewhere. Without this the indexing wait is silent, which is the state the
-    /// field report spent two hours in.
-    pub fn with_progress(mut self, sink: fn(&str)) -> Self {
-        self.progress = sink;
+    /// Hand the backend the token that says when its caller has stopped waiting.
+    ///
+    /// This replaces the budgets. A server is not refused for taking longer than a number this
+    /// library guessed; it is waited for until the caller gives up, and the caller is the only one
+    /// who knows when that is. The token is checked inside the poll loops rather than awaited,
+    /// because those loops are synchronous: this backend runs under `spawn_blocking`, where
+    /// dropping the calling future stops nothing.
+    pub fn with_cancellation(mut self, cancel: CancellationToken) -> Self {
+        self.cancel = cancel.clone();
+        // The bridge needs it too, and for the harder half: the poll loops check the token between
+        // requests, and only the bridge can end one that is already in flight. A bridge left on
+        // the token it was built with would leave every such request unreachable by this run.
+        if let Some(bridge) = &mut self.bridge {
+            bridge.set_cancellation(cancel);
+        }
         self
     }
 
@@ -696,34 +732,36 @@ impl RustBackend {
     ///
     /// No child process is spawned; [`LspClientBridge`] forwards requests through the shared
     /// client via `Handle::current().block_on`.
+    ///
+    /// `cancel` is the caller's own token where it has one — a host serving requests takes it from
+    /// the task it is serving. `None` says nothing but readiness will end a wait, which is what a
+    /// single-shot caller whose process *is* the operation means; [`RustBackend::with_cancellation`]
+    /// attaches one to a backend built elsewhere.
     pub fn from_lsp_client(
         client: Arc<LspClient>,
-        indexing_budget: Option<u64>,
-        progress: fn(&str),
+        cancel: Option<CancellationToken>,
+        progress: ProgressSink,
     ) -> Self {
-        let mut backend = Self {
+        Self {
             binary: PathBuf::new(),
             cargo_home: PathBuf::new(),
             rustup_home: PathBuf::new(),
             server: None,
-            bridge: Some(LspClientBridge::new(client)),
+            bridge: Some(LspClientBridge::new(
+                client,
+                cancel.clone().unwrap_or_default(),
+            )),
             next_id: 0,
             environment: String::from("external tddy-lsp client"),
             chatter: ServerChatter::default(),
-            warmup: WARMUP_BUDGET,
-            settle: settle_budget_for(WARMUP_BUDGET),
+            cancel: cancel.unwrap_or_default(),
             progress,
-            trace: discard,
+            trace: discard_line,
             indexed: false,
             unresolved_token: None,
             doc_version: 1,
             claimed: Vec::new(),
-        };
-        if let Some(seconds) = indexing_budget {
-            backend.warmup = Duration::from_secs(seconds);
-            backend.settle = settle_budget_for(backend.warmup);
         }
-        backend
     }
 
     fn take_id(&mut self) -> u64 {
@@ -731,8 +769,40 @@ impl RustBackend {
         self.next_id
     }
 
+    /// Sleep until the server is worth asking again, unless the caller has stopped waiting.
+    ///
+    /// Returns whether waiting may continue. The cancellation check is *here*, beside the sleep,
+    /// rather than left to an await point in a caller: every wait in this backend is synchronous
+    /// and runs inside `spawn_blocking`, so a dropped future leaves the closure sleeping on.
+    fn keep_waiting(&self, poll: Duration) -> bool {
+        let until = Instant::now() + poll;
+        loop {
+            if self.cancel.is_cancelled() {
+                return false;
+            }
+            let remaining = until.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return true;
+            }
+            std::thread::sleep(remaining.min(CANCEL_CHECK));
+        }
+    }
+
+    /// The refusal for a wait that ended before the server was ready.
+    ///
+    /// Where the index got to is carried rather than dropped, because a server that stalled at 12%
+    /// and one that was nearly done want opposite responses from whoever reads this.
+    fn incomplete_index(&self, waited: Duration) -> RestructureError {
+        RestructureError::IndexingIncomplete {
+            seconds: waited.as_secs(),
+            last: self.chatter.how_far(),
+            environment: self.environment.clone(),
+        }
+    }
+
     /// Start rust-analyzer and complete the initialize handshake, once per run.
     fn start(&mut self, root: &Path) -> Result<()> {
+        (self.progress)("starting rust-analyzer session");
         if let Some(bridge) = &self.bridge {
             // The handshake was someone else's, so the one thing that cannot be assumed is the
             // unit its columns are in. A server left on the LSP default counts utf-16 code
@@ -817,6 +887,7 @@ impl RustBackend {
 
     fn request(&mut self, id: u64, method: &str, params: Value) -> Result<Value> {
         if let Some(bridge) = &self.bridge {
+            let started = Instant::now();
             let outcome = bridge.request(method, params);
             // The self-spawned transport folds progress in as it reads the stream; a bridged one
             // never sees the stream, so it collects what arrived and folds it in here. Without
@@ -826,7 +897,17 @@ impl RustBackend {
                     (self.progress)(&line);
                 }
             }
-            return outcome;
+            // A request the run's own token ended is the caller having stopped, and it is reported
+            // as the incomplete index it is — folded *after* the drain above, so `how_far` names
+            // the furthest the load actually got rather than where it stood one request ago. Not
+            // retryable, which is what keeps `request_settled` from re-asking a server on behalf
+            // of somebody who has gone.
+            return match outcome {
+                Err(RestructureError::CallerStopped) => {
+                    Err(self.incomplete_index(started.elapsed()))
+                }
+                other => other,
+            };
         }
         self.send(json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))?;
         loop {
@@ -848,7 +929,7 @@ impl RustBackend {
                 if let Some(error) = message.get("error") {
                     return Err(match error.get("code").and_then(Value::as_i64) {
                         Some(CONTENT_MODIFIED) => RestructureError::ServerCatchingUp,
-                        _ => failure(format!("rust-analyzer: {error}")),
+                        _ => server_defect(format!("rust-analyzer: {error}")),
                     });
                 }
                 return Ok(message.get("result").cloned().unwrap_or(Value::Null));
@@ -857,17 +938,25 @@ impl RustBackend {
     }
 
     /// Issue a request, re-sending while the server reports it is still catching up.
+    ///
+    /// The retry count is a bound on one method's *answers*, not on indexing: a server that keeps
+    /// asking to be asked again is not making progress this client can wait out, and it is the one
+    /// case where waiting longer is not the remedy. Exhausting it says the server would not settle
+    /// — which is a different thing from the plan being wrong, and is reported as such.
     fn request_settled(&mut self, method: &str, params: Value) -> Result<Value> {
+        let started = Instant::now();
         for _ in 0..CONTENT_MODIFIED_RETRIES {
             let id = self.take_id();
             match self.request(id, method, params.clone()) {
-                Err(RestructureError::ServerCatchingUp) => std::thread::sleep(SETTLE_POLL),
+                Err(RestructureError::ServerCatchingUp) => {
+                    if !self.keep_waiting(SETTLE_POLL) {
+                        return Err(self.incomplete_index(started.elapsed()));
+                    }
+                }
                 outcome => return outcome,
             }
         }
-        Err(failure(format!(
-            "rust-analyzer never settled enough to answer {method}"
-        )))
+        Err(unsettled(method, started.elapsed(), self.chatter.how_far()))
     }
 
     fn notify(&mut self, method: &str, params: Value) -> Result<()> {
@@ -963,7 +1052,12 @@ impl RustBackend {
         Ok(!hover.is_null())
     }
 
-    /// Ask for a named assist, retrying while the crate graph is still loading.
+    /// Ask for a named assist, waiting while the crate graph is still loading.
+    ///
+    /// The wait ends on one of three things and never on a clock. The assist arrives, and that is
+    /// the answer. Or the server is demonstrably ready *here* and still does not offer it, which is
+    /// the range being wrong rather than the server being slow — and that readiness is the very
+    /// evidence the old deadline used to gather once it had expired. Or the caller stops waiting.
     fn assist(&mut self, uri: &str, range: Range, kind: RefactorKind) -> Result<Value> {
         let assist = assist_for(kind)
             .ok_or_else(|| failure(format!("no rust-analyzer assist maps to {kind:?}")))?;
@@ -977,58 +1071,51 @@ impl RustBackend {
             range
         };
         let started = Instant::now();
-        let deadline = started + self.resolution_budget();
-        // Whether the server ever answered this request at all, which decides what an expired
-        // budget means, and what it offered when it did — the one piece of evidence that makes
-        // an absent assist actionable.
-        let mut answered = false;
-        let mut offered: Vec<String> = Vec::new();
+        // #500's account of what the wait is for, said once rather than per poll: a reader needs to
+        // know which assist is outstanding, not how many times it has been asked for.
+        let mut reported_wait = false;
         loop {
-            let id = self.take_id();
-            let actions = match self.request(
-                id,
+            if !reported_wait {
+                (self.progress)(&format!("waiting for assist `{wanted}`"));
+                reported_wait = true;
+            }
+            let actions = self.request_settled(
                 "textDocument/codeAction",
                 json!({
                     "textDocument": { "uri": uri },
                     "range": lsp_range(target),
                     "context": context_for(assist.kinds)
                 }),
-            ) {
-                Ok(actions) => {
-                    answered = true;
-                    offered = offered_titles(&actions);
-                    actions
-                }
-                // Still loading the crate graph; that is what this loop is waiting out.
-                Err(RestructureError::ServerCatchingUp) => Value::Null,
-                Err(error) => return Err(error),
-            };
+            )?;
 
             if let Some(action) = titled(&actions, wanted) {
                 return Ok(action);
             }
-            if Instant::now() >= deadline {
-                // An assist that needs inference is absent for two indistinguishable reasons:
-                // the range does not support it, or inference is not ready *there*. `indexed` is
-                // a whole-file flag set from a hover on the file's first symbol, which on a
-                // large module says nothing about a body thousands of lines further down. So
-                // ask at the range itself before blaming the plan.
-                let inference = if answered && assist.needs_inference {
-                    Some(self.inference_ready_at(uri, target.start)?)
-                } else {
-                    None
-                };
-                return Err(unresolved_assist(
+
+            // An assist that needs inference is absent for two indistinguishable reasons: the
+            // range does not support it, or inference is not ready *there*. `indexed` is a
+            // whole-file flag set from a hover on the file's first symbol, which on a large module
+            // says nothing about a body thousands of lines further down. So ask at the range
+            // itself before blaming the plan.
+            let inference = if assist.needs_inference {
+                Some(self.inference_ready_at(uri, target.start)?)
+            } else {
+                None
+            };
+            let offered = offered_titles(&actions);
+            if inference.unwrap_or(self.indexed) {
+                return Err(absent_assist(wanted, &offered));
+            }
+            if !self.keep_waiting(INDEXING_POLL) {
+                return Err(incomplete_assist_index(
                     wanted,
                     &offered,
-                    answered,
                     inference,
                     started.elapsed(),
                     self.chatter.how_far(),
                     self.environment.clone(),
                 ));
             }
-            std::thread::sleep(INDEXING_POLL);
         }
     }
 }
@@ -1125,6 +1212,7 @@ impl LanguageBackend for RustBackend {
         self.did_open(&uri, &text)?;
         self.ensure_indexed(&uri)?;
 
+        (self.progress)("building anchor from module outline");
         let outline = self.module_outline(&uri)?;
         let places = places_of(&outline, items, file)?;
         refuse_non_adjacent(&outline, &places)?;
@@ -1177,6 +1265,7 @@ impl LanguageBackend for RustBackend {
         // which is what this backend supplies it. It opens the module for itself, so the document
         // is deliberately not opened here first.
         if op.op == RefactorKind::MoveModuleToCrate {
+            (self.progress)("cross-crate move: surveying callers and building edits");
             return Ok(Resolution::of(crate_move::resolve(self, workspace, op)?));
         }
 
@@ -1296,7 +1385,7 @@ impl RustBackend {
             let referrer = reference
                 .get("uri")
                 .and_then(Value::as_str)
-                .ok_or_else(|| failure("a reference carries no uri"))?;
+                .ok_or_else(|| server_defect("a reference carries no uri"))?;
             if referrer == uri {
                 continue;
             }
@@ -1317,6 +1406,7 @@ impl RustBackend {
         original: &str,
         op: &RefactorOp,
     ) -> Result<(String, Vec<VisibilityChange>, Vec<String>)> {
+        (self.progress)(&format!("assist: {:?} in this file", op.op));
         let range = self.anchor_range(uri, op)?;
         let relocates = assist_for(op.op).is_some_and(|assist| assist.relocates_items);
         let reexport = op.reexport.unwrap_or(Reexport::None);
@@ -1369,6 +1459,11 @@ impl RustBackend {
         if !relocates {
             return Ok((named, Vec::new(), Vec::new()));
         }
+
+        // Before the import passes, because a seam the assist only half-took is not one those
+        // passes can repair — and refusing here costs the operator two LSP round trips rather than
+        // the whole import restoration on a module that is not the one they asked for.
+        refuse_partial_relocation(&named, &name, &moved)?;
 
         // Versions 1 and 2 belong to the open and to the rename above; both import phases send
         // more, so the counter runs across them rather than restarting.
@@ -1534,7 +1629,7 @@ impl RustBackend {
             let referrer = reference
                 .get("uri")
                 .and_then(Value::as_str)
-                .ok_or_else(|| failure("a reference carries no uri"))?;
+                .ok_or_else(|| server_defect("a reference carries no uri"))?;
 
             if referrer != uri {
                 let file = path_of(referrer)?.display().to_string();
@@ -1598,7 +1693,7 @@ impl RustBackend {
             }
         }
 
-        Err(failure(format!(
+        Err(server_defect(format!(
             "rust-analyzer was still offering imports after {IMPORT_PASSES} passes"
         )))
     }
@@ -1729,7 +1824,7 @@ impl RustBackend {
             }
 
             let ordered = import_order(text, &offered).ok_or_else(|| {
-                failure(format!(
+                seam_refusal(format!(
                     "`{}` could be imported {} ways and neither rust-analyzer nor this file's own \
                      imports say which the moved code meant: {}",
                     name.text,
@@ -1745,7 +1840,7 @@ impl RustBackend {
 
             for title in &ordered {
                 let action = titled(&actions, &title.to_lowercase())
-                    .ok_or_else(|| failure("the import offered could not be read back"))?;
+                    .ok_or_else(|| server_defect("the import offered could not be read back"))?;
                 let resolved = self.request_settled("codeAction/resolve", action)?;
                 let trial = apply_lsp_edit(text, edits_for(&resolved, uri)?);
 
@@ -1760,7 +1855,7 @@ impl RustBackend {
             // Every path the server offered leaves the name unresolved. Writing one anyway is how a
             // successful run lands source that does not compile, so the operation says which name it
             // could not import and what it tried.
-            return Err(failure(format!(
+            return Err(seam_refusal(format!(
                 "no import rust-analyzer offered for `{}` left fewer of its {} unresolved \
                  occurrence(s) — tried {}. Writing one anyway is how a run reports success over a \
                  `use` that resolves nothing.",
@@ -1776,7 +1871,7 @@ impl RustBackend {
     /// Every identifier in the open document that the server cannot resolve, in source order.
     fn unresolved_names(&mut self, uri: &str, text: &str) -> Result<Vec<UnresolvedName>> {
         let wanted = self.unresolved_token.ok_or_else(|| {
-            failure(format!(
+            server_defect(format!(
                 "rust-analyzer's semantic token legend has no `{UNRESOLVED_TOKEN}`, so the names an \
                  extraction loses cannot be found"
             ))
@@ -1891,6 +1986,7 @@ impl RustBackend {
         workspace: &Workspace<'_>,
         op: &RefactorOp,
     ) -> Result<WorkspaceEdit> {
+        (self.progress)(&format!("assist: {:?} (multi-file)", op.op));
         let range = self.anchor_range(uri, op)?;
 
         let action = self.assist(uri, range, op.op)?;
@@ -1905,7 +2001,7 @@ impl RustBackend {
         }
 
         if changes.is_empty() {
-            return Err(failure(format!(
+            return Err(server_defect(format!(
                 "rust-analyzer returned no edits for {:?}",
                 op.op
             )));
@@ -1955,6 +2051,9 @@ impl RustBackend {
             .name
             .clone()
             .ok_or_else(|| failure("rename_symbol needs a name"))?;
+        (self.progress)(&format!(
+            "rename: `{name}` — collecting edits from rust-analyzer"
+        ));
         let position = match &op.anchor {
             Anchor::Range { start, .. } => {
                 json!({ "line": start.line - 1, "character": start.col - 1 })
@@ -1988,9 +2087,8 @@ impl RustBackend {
     /// Wait, once per process, for the crate graph to load — with the server's progress on screen.
     ///
     /// Every request that needs name resolution is answered emptily until rust-analyzer has loaded
-    /// the graph, so each loop that waits on one used to carry the whole indexing budget of its own.
-    /// On a real crate that is paid per operation, and `survey_moved_items` pays it per moved item.
-    /// Paying it once here is what lets every later wait be short.
+    /// the graph, so waiting for it here once is what keeps every later wait short. On a real crate
+    /// the alternative is paid per operation, and `survey_moved_items` pays it per moved item.
     ///
     /// Hover is the authority, because it is the cheapest request that needs the graph and it is the
     /// same signal a rename is gated on. `serverStatus` is only a shortcut out: it is an extension,
@@ -1998,21 +2096,22 @@ impl RustBackend {
     ///
     /// A document with no symbols has nothing to hover, so the warm-up is skipped rather than spent
     /// on a position that would never resolve — which leaves `indexed` false, and the first real
-    /// wait holding the full budget it would have had.
+    /// wait doing the waiting instead.
     fn ensure_indexed(&mut self, uri: &str) -> Result<()> {
         if self.indexed {
             return Ok(());
         }
+        (self.progress)("warming crate index (until ready, or until you stop waiting)");
         let symbols = self.request_settled(
             "textDocument/documentSymbol",
             json!({ "textDocument": { "uri": uri } }),
         )?;
         let Some(probe) = first_symbol_position(&symbols) else {
+            (self.progress)("no indexable symbols in file; skipping warm-up");
             return Ok(());
         };
 
         let started = Instant::now();
-        let deadline = started + self.warmup;
         loop {
             let hover = self.request_settled(
                 "textDocument/hover",
@@ -2021,30 +2120,12 @@ impl RustBackend {
 
             if !hover.is_null() || self.chatter.quiescent {
                 self.indexed = true;
+                (self.progress)("crate index ready");
                 return Ok(());
             }
-            if Instant::now() >= deadline {
-                return Err(RestructureError::IndexingIncomplete {
-                    environment: self.environment.clone(),
-                    seconds: started.elapsed().as_secs(),
-                    last: self.chatter.how_far(),
-                });
+            if !self.keep_waiting(INDEXING_POLL) {
+                return Err(self.incomplete_index(started.elapsed()));
             }
-            std::thread::sleep(INDEXING_POLL);
-        }
-    }
-
-    /// How long the next wait for name resolution may run.
-    ///
-    /// Before the warm-up has succeeded this is the whole indexing budget, because whatever the
-    /// caller is waiting on, what it is really waiting on is the graph. After it, the graph is
-    /// loaded and the only thing left to wait out is the server catching up with this client's own
-    /// edits.
-    fn resolution_budget(&self) -> Duration {
-        if self.indexed {
-            self.settle
-        } else {
-            self.warmup
         }
     }
 
@@ -2054,8 +2135,8 @@ impl RustBackend {
     /// needs the crate graph. Hover is the cheapest request that also needs it, so a non-null hover
     /// is the signal that a rename will be accepted.
     fn wait_until_resolved(&mut self, uri: &str, position: &Value) -> Result<()> {
+        (self.progress)("waiting for type inference at the anchor");
         let started = Instant::now();
-        let deadline = started + self.resolution_budget();
         loop {
             let hover = self.request_settled(
                 "textDocument/hover",
@@ -2066,14 +2147,9 @@ impl RustBackend {
                 self.indexed = true;
                 return Ok(());
             }
-            if Instant::now() >= deadline {
-                return Err(RestructureError::IndexingIncomplete {
-                    environment: self.environment.clone(),
-                    seconds: started.elapsed().as_secs(),
-                    last: self.chatter.how_far(),
-                });
+            if !self.keep_waiting(INDEXING_POLL) {
+                return Err(self.incomplete_index(started.elapsed()));
             }
-            std::thread::sleep(INDEXING_POLL);
         }
     }
 
@@ -2082,8 +2158,11 @@ impl RustBackend {
     /// Asked of the document rather than the workspace, so the answer does not depend on how a URI
     /// is spelled. Polled for the same reason the assists are: until the crate graph is loaded the
     /// server answers with no symbols, and a rename against an unresolved position is refused.
+    ///
+    /// An outline the server did answer is its real answer, so a name missing from one is missing
+    /// from the file — that is a mistake in the request, and waiting cannot fix it.
     fn locate_symbol(&mut self, uri: &str, name: &str) -> Result<Value> {
-        let deadline = Instant::now() + self.resolution_budget();
+        let started = Instant::now();
         loop {
             let symbols = self.request_settled(
                 "textDocument/documentSymbol",
@@ -2093,10 +2172,12 @@ impl RustBackend {
             if let Some(position) = find_symbol(&symbols, name) {
                 return Ok(position);
             }
-            if Instant::now() >= deadline {
+            if self.indexed || !outline_is_empty(&symbols) {
                 return Err(failure(format!("`{name}` is not declared in this file")));
             }
-            std::thread::sleep(INDEXING_POLL);
+            if !self.keep_waiting(INDEXING_POLL) {
+                return Err(self.incomplete_index(started.elapsed()));
+            }
         }
     }
 
@@ -2131,7 +2212,7 @@ impl RustBackend {
             .find(&declaration)
             .map(|offset| offset + placeholder.identifier_offset())
             .ok_or_else(|| {
-                failure(format!(
+                server_defect(format!(
                     "rust-analyzer did not produce a `{declaration}` to name"
                 ))
             })?;
@@ -2249,7 +2330,7 @@ fn refuse_non_adjacent(outline: &[OutlineItem], places: &[usize]) -> Result<()> 
         return Ok(());
     };
 
-    Err(failure(format!(
+    Err(seam_refusal(format!(
         "the named items are not adjacent: `{}` and `{}` have `{}` between them, and a seam is one \
          contiguous range — a span reaching from one to the other would carry everything in between.",
         outline[gap[0]].name,
@@ -2296,7 +2377,7 @@ fn refuse_foreign_encoding(encoding: &str) -> Result<()> {
     if encoding == BYTE_ENCODING {
         return Ok(());
     }
-    Err(failure(format!(
+    Err(server_defect(format!(
         "rust-analyzer settled on `{encoding}` positions, and this client counts \
          `{BYTE_ENCODING}` — every column it converted would be wrong on any line carrying a \
          character outside the BMP. Refusing rather than resolving anchors against the wrong \
@@ -2318,30 +2399,45 @@ fn offered_titles(actions: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The failure to report when a requested assist never arrived inside the budget.
+/// Whether a `documentSymbol` answer holds no items — which is how the server answers while it is
+/// still loading the crate graph, and therefore not yet an answer about the file.
+fn outline_is_empty(symbols: &Value) -> bool {
+    symbols
+        .as_array()
+        .map(|items| items.is_empty())
+        .unwrap_or(true)
+}
+
+/// The failure to report when the server is ready to answer for a range and offers no such assist.
 ///
-/// The two causes want opposite advice. A server that answered and offered nothing is a seam
-/// refusal: the reader should look at the range. A server that never answered at all is an index
-/// that was not ready: the reader should look at the budget. Reporting both as an absent assist
-/// sent half of them to rewrite anchors that were never wrong.
+/// This is a seam refusal: the reader should look at the range they asked for. What the server
+/// *did* offer is named, because an assist that is absent under one title and present under
+/// another is otherwise indistinguishable from a range that supports no refactoring at all.
+fn absent_assist(wanted: &str, offered: &[String]) -> RestructureError {
+    let offered = if offered.is_empty() {
+        "it offered none".to_string()
+    } else {
+        format!("it offered: {}", offered.join(", "))
+    };
+    seam_refusal(format!(
+        "rust-analyzer offers no \"{wanted}\" assist for the given range ({offered})"
+    ))
+}
+
+/// The failure to report when a wait for an assist ended before the server could offer it.
 ///
-/// What the server *did* offer is named either way, because an assist that is absent under one
-/// title and present under another is otherwise indistinguishable from a range that supports no
-/// refactoring at all.
-fn unresolved_assist(
+/// A range the server answered `codeAction` for but could not *type* is named as such: the assist
+/// needing inference was never going to be in that list, and reporting it as an absent assist
+/// sends the reader to rewrite an anchor that was correct.
+fn incomplete_assist_index(
     wanted: &str,
     offered: &[String],
-    answered: bool,
     inference_ready: Option<bool>,
     waited: Duration,
     last: String,
     environment: String,
 ) -> RestructureError {
-    // The server answered, but only from the syntax tree: it cannot yet type the range, so the
-    // assist that needs inference was never going to be in the list. That is a budget problem,
-    // not a plan problem, and reporting it as an absent assist sends the reader to rewrite an
-    // anchor that was correct.
-    if answered && inference_ready == Some(false) {
+    if inference_ready == Some(false) {
         return RestructureError::IndexingIncomplete {
             seconds: waited.as_secs(),
             last: format!(
@@ -2356,20 +2452,24 @@ fn unresolved_assist(
             environment,
         };
     }
-    if answered {
-        let offered = if offered.is_empty() {
-            "it offered none".to_string()
-        } else {
-            format!("it offered: {}", offered.join(", "))
-        };
-        return failure(format!(
-            "rust-analyzer offers no \"{wanted}\" assist for the given range ({offered})"
-        ));
-    }
     RestructureError::IndexingIncomplete {
         seconds: waited.as_secs(),
         last,
         environment,
+    }
+}
+
+/// The failure to report when the server stayed unable to answer one method.
+///
+/// Kept apart from a malformed plan on purpose: the plan was not wrong, the indexer never settled,
+/// and a caller acts on the difference — one is fixed by editing the plan and the other by looking
+/// at the server. Where the index got to travels with it, for the same reason a cancelled wait
+/// carries it.
+fn unsettled(method: &str, waited: Duration, last: String) -> RestructureError {
+    RestructureError::ServerNotSettled {
+        method: method.to_string(),
+        seconds: waited.as_secs(),
+        last,
     }
 }
 
@@ -2397,7 +2497,7 @@ fn caret_at_module(text: &str, module: &str) -> Result<Range> {
         });
     }
 
-    Err(failure(format!(
+    Err(seam_refusal(format!(
         "the extraction left no `{needle}` for `to_file` to move out"
     )))
 }
@@ -2443,12 +2543,12 @@ impl LspPoint {
     /// Read a position, refusing a malformed one rather than defaulting to the top of the file —
     /// a silently wrong position would corrupt the source it is applied to.
     fn read(value: Option<&Value>) -> Result<LspPoint> {
-        let value = value.ok_or_else(|| failure("edit is missing a position"))?;
+        let value = value.ok_or_else(|| server_defect("edit is missing a position"))?;
         let field = |name: &str| {
             value
                 .get(name)
                 .and_then(Value::as_u64)
-                .ok_or_else(|| failure(format!("position is missing `{name}`")))
+                .ok_or_else(|| server_defect(format!("position is missing `{name}`")))
         };
         Ok(LspPoint {
             line: field("line")? as usize,
@@ -2496,7 +2596,7 @@ fn first_symbol_position(symbols: &Value) -> Option<Value> {
 fn path_of(uri: &str) -> Result<PathBuf> {
     uri.strip_prefix("file://")
         .map(PathBuf::from)
-        .ok_or_else(|| failure(format!("`{uri}` is not a file uri")))
+        .ok_or_else(|| server_defect(format!("`{uri}` is not a file uri")))
 }
 
 /// The symbols a range covers that a caller could name by *module path*, each with the position to
@@ -2689,7 +2789,7 @@ fn document_changes(workspace_edit: &Value) -> Vec<Value> {
 fn relative_path(uri: Option<&Value>, root: &Path) -> Result<String> {
     let uri = uri
         .and_then(Value::as_str)
-        .ok_or_else(|| failure("a document change carries no uri"))?;
+        .ok_or_else(|| server_defect("a document change carries no uri"))?;
     relative_to(uri, root)
 }
 
@@ -2700,12 +2800,12 @@ fn relative_path(uri: Option<&Value>, root: &Path) -> Result<String> {
 fn relative_to(uri: &str, root: &Path) -> Result<String> {
     let path = uri
         .strip_prefix("file://")
-        .ok_or_else(|| failure(format!("`{uri}` is not a file uri")))?;
+        .ok_or_else(|| server_defect(format!("`{uri}` is not a file uri")))?;
 
     Path::new(path)
         .strip_prefix(root)
         .map(|relative| relative.display().to_string())
-        .map_err(|_| failure(format!("`{path}` lies outside the workspace")))
+        .map_err(|_| server_defect(format!("`{path}` lies outside the workspace")))
 }
 
 /// The text edits one `documentChanges` entry carries.
@@ -2713,7 +2813,7 @@ fn edits_in(change: &Value) -> Result<Vec<LspEdit>> {
     change
         .get("edits")
         .and_then(Value::as_array)
-        .ok_or_else(|| failure("a document change carries no edits"))?
+        .ok_or_else(|| server_defect("a document change carries no edits"))?
         .iter()
         .map(read_edit)
         .collect()
@@ -2760,8 +2860,52 @@ fn choose_import<'a>(text: &str, offered: &[&'a str]) -> Option<&'a str> {
             .is_some_and(|module| modules.contains(&module))
     });
 
-    let only = *by_module.next()?;
-    by_module.next().is_none().then_some(only)
+    if let Some(only) = by_module.next() {
+        if by_module.next().is_none() {
+            return Some(only);
+        }
+        return None;
+    }
+
+    // Neither tier can see through a re-export. A crate publishing an item at its root gives one
+    // item two paths, and rust-analyzer offers the shortest: `tddy-core` carries
+    // `pub use error::{BackendError, ParseError, WorkflowError};`, so a file writing the canonical
+    // `tddy_core::error::ParseError` is offered `tddy_core::ParseError` — a different string and a
+    // different parent module for the same type. One live extraction was refused three candidates
+    // deep over exactly that.
+    //
+    // The crate the file already binds *this name* from is the evidence that settles it, and it is
+    // keyed on a binding of the contested name rather than on any binding from the crate. Keyed on
+    // the crate alone it would be worthless: almost every file imports something from `std`, so
+    // `std::string::ParseError` would match as readily as the one the file means.
+    //
+    // Third, and strictly weaker than the two above — a crate root is a coarser claim than a path,
+    // and must never outrank one. Two candidates rooted in the crate the name is bound from is
+    // still the ambiguity this function exists to refuse, because a crate holding both is no
+    // narrower. A wrong guess costs a refusal rather than bad source either way: the caller
+    // verifies each import it writes against the occurrences it was supposed to resolve.
+    let mut by_crate = offered
+        .iter()
+        .filter(|title| import_path(title).is_some_and(|path| binds_that_name(&in_scope, &path)));
+
+    let only = *by_crate.next()?;
+    by_crate.next().is_none().then_some(only)
+}
+
+/// Whether one of `in_scope` binds `path`'s own last segment from `path`'s own crate.
+fn binds_that_name(in_scope: &[String], path: &str) -> bool {
+    let (Some(root), Some(name)) = (crate_root(path), path.rsplit("::").next()) else {
+        return false;
+    };
+
+    in_scope
+        .iter()
+        .any(|bound| bound.rsplit("::").next() == Some(name) && crate_root(bound) == Some(root))
+}
+
+/// The crate a path is rooted in — `a::b::C` is `a`. `None` for an empty path.
+fn crate_root(path: &str) -> Option<&str> {
+    path.split("::").next().filter(|root| !root.is_empty())
 }
 
 /// The module a path's last segment lives in — `a::b::C` is `a::b`. `None` for a bare name.
@@ -3088,7 +3232,9 @@ fn edits_for(response: &Value, uri: &str) -> Result<Vec<LspEdit>> {
     };
 
     if raw.is_empty() {
-        return Err(failure("rust-analyzer returned no edits for the document"));
+        return Err(server_defect(
+            "rust-analyzer returned no edits for the document",
+        ));
     }
 
     raw.iter().map(read_edit).collect()
@@ -3145,7 +3291,9 @@ fn workspace_edits_for(response: &Value) -> Result<Vec<(String, Vec<LspEdit>)>> 
     };
 
     if documents.is_empty() {
-        return Err(failure("rust-analyzer returned no edits for any document"));
+        return Err(server_defect(
+            "rust-analyzer returned no edits for any document",
+        ));
     }
 
     documents
@@ -3162,7 +3310,7 @@ fn read_edit(entry: &Value) -> Result<LspEdit> {
         new_text: entry
             .get("newText")
             .and_then(Value::as_str)
-            .ok_or_else(|| failure("edit is missing `newText`"))?
+            .ok_or_else(|| server_defect("edit is missing `newText`"))?
             .to_string(),
     })
 }
@@ -3243,7 +3391,7 @@ fn refuse_inferred_placeholder(text: &str, declaration: &str) -> Result<()> {
         return Ok(());
     };
 
-    Err(failure(format!(
+    Err(server_defect(format!(
         "rust-analyzer wrote `{}` — it produced the extraction before it could infer the types the \
          signature needs, and `_` is not legal there (E0121). The crate graph was most likely still \
          loading; retrying the operation against a warm server resolves it.",
@@ -3307,7 +3455,7 @@ fn refuse_residual_placeholder(original: &str, produced: &str, name: &str) -> Re
          inside an already-extracted module when it moves."
     };
 
-    Err(failure(format!(
+    Err(server_defect(format!(
         "rust-analyzer left `{name}` behind in {} place(s) its rename could not reach, so the \
          extraction would report success over source that resolves nowhere — line(s) {}. {remedy}",
         sites.len() - before,
@@ -3510,7 +3658,7 @@ fn refuse_stranded(items: &[MovedItem]) -> Result<()> {
         return Ok(());
     }
 
-    Err(failure(format!(
+    Err(seam_refusal(format!(
         "the module would be reached by a different path than the items moved into it are now, \
          and rust-analyzer rewrites no reference it did not move: {}. Ask for `reexport` to leave the \
          old path resolving through the parent, or cut the seam where these references do not reach.",
@@ -3581,7 +3729,7 @@ fn refuse_impl_sibling_references(items: &[MovedItem]) -> Result<()> {
         return Ok(());
     }
 
-    Err(failure(format!(
+    Err(seam_refusal(format!(
         "this seam cuts an `impl` in half, and a member left behind still calls one that would move: \
          {}. The new module is written outside the `impl`, so that call would resolve nowhere and \
          rust-analyzer will not rewrite it. An `impl` body cannot hold a `mod`, so no ordering helps — \
@@ -3772,7 +3920,7 @@ fn refuse_mangled_rewrite(text: &str, module: &str, moved: &[MovedItem]) -> Resu
                 continue;
             }
             if let Some(base) = known.iter().find(|name| ident.starts_with(*name)) {
-                return Err(failure(format!(
+                return Err(server_defect(format!(
                     "the rewrite of `{base}` produced `{module}::{ident}` on line {} — the \
                      identifier was written over itself, which is a corrupted edit rather than a \
                      path. Refusing rather than reporting success over source that will not build.",
@@ -3891,7 +4039,7 @@ fn refuse_uncovered_nesting(items: &[MovedItem]) -> Result<()> {
         return Ok(());
     }
 
-    Err(failure(format!(
+    Err(seam_refusal(format!(
         "a named re-export cannot keep these paths resolving: {}. Nothing outside reaches the module \
          holding them, so there is no name the parent could re-export that would cover them. Ask for \
          `reexport: glob`, which re-exports the module too, or cut the seam so the nested item stays \
@@ -3935,7 +4083,7 @@ fn refuse_module_name_taken(text: &str, module: &str, range: Range) -> Result<()
 
     match taken {
         None => Ok(()),
-        Some(binding) => Err(failure(format!(
+        Some(binding) => Err(seam_refusal(format!(
             "`{module}` is already taken in this module by `{binding}`. A second declaration of the \
              name is `E0428` and the assist writes it without complaint, so the run would report \
              success against a crate that no longer compiles. Give the module a different name."
@@ -4053,7 +4201,7 @@ fn refuse_split_attribute_paths(text: &str, range: Range) -> Result<()> {
         return Ok(());
     }
 
-    Err(failure(format!(
+    Err(seam_refusal(format!(
         "the seam would separate an attribute from the item its string names: {}. The name resolves \
          in the scope the attribute sits in, and no reference query reports the attribute — a macro \
          builds the call out of the string's contents, so the identifier it generates has no span to \
@@ -4128,7 +4276,7 @@ fn module_bounds(source: &[String], module: &str) -> Result<ModuleBlock> {
         .iter()
         .position(|line| line.trim_start().starts_with(&header) && line.trim_end().ends_with('{'))
         .ok_or_else(|| {
-            failure(format!(
+            server_defect(format!(
                 "rust-analyzer did not write a `{header}` block where one was expected"
             ))
         })?;
@@ -4141,7 +4289,7 @@ fn module_bounds(source: &[String], module: &str) -> Result<ModuleBlock> {
         .skip(opened + 1)
         .position(|line| line.trim_end() == closing)
         .map(|offset| opened + 1 + offset)
-        .ok_or_else(|| failure(format!("`{header}` is never closed at its own indent")))?;
+        .ok_or_else(|| server_defect(format!("`{header}` is never closed at its own indent")))?;
 
     Ok(ModuleBlock {
         opened,
@@ -4253,6 +4401,13 @@ const ITEM_KEYWORDS: [&str; 8] = [
 /// method — an invariant the compiler had been enforcing, left as a comment that then contradicted the
 /// code. Nothing is narrowed here that a reference still needs, so a seam that co-locates a private
 /// helper with its only caller keeps the privacy, and a seam that does not says so out loud.
+///
+/// Two witnesses say a reference still needs it, and the second is here because the first goes
+/// stale. `MovedItem::reached_from_outside` comes from a survey of the **original** text over the
+/// **requested** range, taken before the assist ran. An assist that relocates only part of that
+/// range rewrites what it leaves behind to reach into the module it has just written, so references
+/// the survey saw *inside* the range are outside it by the time this runs. `text` is the produced
+/// parent, and it is the only witness that is not stale.
 fn restore_visibility(
     text: &str,
     module: &str,
@@ -4261,6 +4416,11 @@ fn restore_visibility(
     let mut source: Vec<String> = text.split('\n').map(str::to_string).collect();
     let block = module_bounds(&source, module)?;
     let mut report = Vec::new();
+
+    // Read once, before the narrowing below rewrites any declaration — and read from outside the
+    // block alone, because a `module::Item` mention inside the module's own body says nothing about
+    // what the parent reaches.
+    let outside = outside_the_module(&source, &block);
 
     for item in items {
         // The assist never narrows, so an item written `pub` has nothing to answer for.
@@ -4278,7 +4438,12 @@ fn restore_visibility(
             continue;
         };
 
-        if item.reached_from_outside {
+        // One live extraction on `parser.rs` ended on the second half of this condition:
+        // `struct StructuredPlan` and `fn prd_value_looks_like_md_file_path` were narrowed back to
+        // private while the assist had rewritten the parent to `planning::StructuredPlan` and
+        // `planning::prd_value_looks_like_md_file_path`. `E0603` at the next build, after the run
+        // reported `applied 1 of 1 operations`.
+        if item.reached_from_outside || reaches_through_module(&outside, module, &item.name) {
             report.push(VisibilityChange {
                 item: item.name.clone(),
                 from: if item.visibility.is_empty() {
@@ -4304,13 +4469,57 @@ fn restore_visibility(
     Ok((source.join("\n"), report))
 }
 
+/// Everything in `source` that is not inside `block`, as one text.
+fn outside_the_module(source: &[String], block: &ModuleBlock) -> String {
+    source
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index < block.opened || *index > block.closed)
+        .map(|(_, line)| line.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Whether `text` reaches `name` through `module` — `planning::StructuredPlan`.
+///
+/// Read as a path rather than as a substring, because the two neighbouring mistakes are both real
+/// source: `myplanning::StructuredPlan` names a different module, and `planning::StructuredPlanner`
+/// a different item. A qualifier in front is not one of them — `crate::planning::StructuredPlan`
+/// reaches this item, and the `::` before it is not an identifier character.
+fn reaches_through_module(text: &str, module: &str, name: &str) -> bool {
+    let path = format!("{module}::{name}");
+    let mut searched = 0;
+
+    while let Some(offset) = text[searched..].find(&path) {
+        let at = searched + offset;
+        let before = text[..at].chars().next_back();
+        let after = text[at + path.len()..].chars().next();
+        if !before.is_some_and(is_identifier_char) && !after.is_some_and(is_identifier_char) {
+            return true;
+        }
+        searched = at + path.len();
+    }
+
+    false
+}
+
 /// Whether `line` declares `name` at the visibility the assist widened it to.
 fn declares_at_widened_visibility(line: &str, name: &str) -> bool {
     let Some(rest) = line.trim_start().strip_prefix(WIDENED) else {
         return false;
     };
 
-    let tokens: Vec<&str> = rest
+    declares_item(rest, name)
+}
+
+/// Whether `line` declares `name` as an item, at whatever visibility it carries.
+///
+/// The visibility-agnostic form of [`declares_at_widened_visibility`]. That one answers "did the
+/// assist widen this", which is the narrowing pass's question; this one answers "is this item here
+/// at all", which is the relocation guard's. An item the seam moved that was already `pub` is never
+/// widened, so keying the guard on the widened form would report it as left behind.
+fn declares_item(line: &str, name: &str) -> bool {
+    let tokens: Vec<&str> = line
         .split(|character: char| !is_identifier_char(character))
         .filter(|token| !token.is_empty())
         .collect();
@@ -4318,6 +4527,49 @@ fn declares_at_widened_visibility(line: &str, name: &str) -> bool {
     tokens
         .windows(2)
         .any(|pair| ITEM_KEYWORDS.contains(&pair[0]) && pair[1] == name)
+}
+
+/// Refuse an extraction whose assist relocated less than the anchor asked for.
+///
+/// rust-analyzer decides the extraction's real extent, and it does not have to agree with the range
+/// it was handed. When it moves part of that range it rewrites the remainder **in place**, reaching
+/// into the module it has just written through qualified `module::Item` paths. One live extraction
+/// anchored at lines 10–152 came back having relocated 10–116, and the run reported
+/// `applied 1 of 1 operations` over a parser module that had been split in half.
+///
+/// With visibility now decided on the produced text that result compiles, which is precisely why it
+/// needs saying out loud: a silent partial split is a seam the author did not ask for, and a plan
+/// whose next step assumes the whole range moved is built on it. A `#carve` node promising "one
+/// module per phase" would go green here and fail its own shape assertions later.
+///
+/// Keyed on the surveyed items rather than on a line count. [`path_reached_within`] collects exactly
+/// the path-reachable items the range covered, so an item absent from the produced module is
+/// material by construction — and trailing trivia, a blank line or a comment the assist declined to
+/// carry never trips it.
+fn refuse_partial_relocation(text: &str, module: &str, anchored: &[MovedItem]) -> Result<()> {
+    let source: Vec<String> = text.split('\n').map(str::to_string).collect();
+    let block = module_bounds(&source, module)?;
+    let relocated = &source[block.opened..block.closed];
+
+    let left_behind: Vec<&str> = anchored
+        .iter()
+        .filter(|item| !relocated.iter().any(|line| declares_item(line, &item.name)))
+        .map(|item| item.name.as_str())
+        .collect();
+
+    if left_behind.is_empty() {
+        return Ok(());
+    }
+
+    Err(seam_refusal(format!(
+        "rust-analyzer relocated part of the anchored range and left {} behind: {}. It rewrote what \
+         stayed to reach into `{module}`, so the seam is split rather than extracted — the module \
+         the plan described does not exist. Anchor the range with `restructure anchors --items`, \
+         which covers whole items and their trivia, or cut the seam where the assist will carry all \
+         of it.",
+        if left_behind.len() == 1 { "an item" } else { "items" },
+        left_behind.join(", ")
+    )))
 }
 
 /// One contiguous run of `before` lines and what replaces it. `from` and `to` index `before`.
@@ -4470,8 +4722,37 @@ fn uri_of(path: &Path) -> String {
     format!("file://{}", path.display())
 }
 
+/// A refusal the author fixes by editing their plan: a name the operation needs and did not carry,
+/// an item the file does not define, a kind no assist implements.
+///
+/// The transport failures stay here too — a server that would not start, one that is not running,
+/// a connection that closed. They are not a plan defect either, but `Io` and `ServerCatchingUp`
+/// already sit beside this variant for the cases a caller routes differently, and a fourth class
+/// nobody acts on differently would be ceremony.
 fn failure(reason: impl Into<String>) -> RestructureError {
     RestructureError::MalformedPlan(reason.into())
+}
+
+/// A refusal the author fixes by cutting the seam elsewhere, or by changing the code.
+///
+/// Stranded references, an `impl` cut in half, a module name already taken, a name the file's own
+/// imports cannot disambiguate. The plan is well formed and says exactly what it meant; the code
+/// will not permit it. Every one of these messages already ends with its own remedy, and for as
+/// long as they all arrived as [`failure`] the sentence in front of that remedy told the author to
+/// go and edit a plan that was correct.
+fn seam_refusal(reason: impl Into<String>) -> RestructureError {
+    RestructureError::SeamRefused(reason.into())
+}
+
+/// A refusal nothing in the plan or the tree can fix: rust-analyzer answered, and the answer could
+/// not be used.
+///
+/// An extraction produced before the types were inferred, a rewrite that came back with an
+/// identifier written over itself, a response carrying no edits at all. The remedy these messages
+/// give is a retry against a warm server or a look at the server — neither of which is something an
+/// author does to a plan.
+fn server_defect(reason: impl Into<String>) -> RestructureError {
+    RestructureError::ServerDefect(reason.into())
 }
 
 #[cfg(test)]
@@ -5078,6 +5359,140 @@ mod tests {
         assert!(report.is_empty());
     }
 
+    /// An assist that relocates only part of the anchored range rewrites what it leaves behind to
+    /// reach into the module it just wrote. The survey feeding the narrowing ran **before** that,
+    /// over the original text, where those references were inside the range — so it reports no
+    /// outside reach for an item the produced parent now names through the module.
+    ///
+    /// One live extraction on `parser.rs` ended exactly here: `struct StructuredPlan` and
+    /// `fn prd_value_looks_like_md_file_path` were narrowed back to private while the parent had
+    /// been rewritten to `planning::StructuredPlan` and
+    /// `planning::prd_value_looks_like_md_file_path`. `E0603` at the next build, after the run
+    /// reported `applied 1 of 1 operations`. The produced text is the only witness that is not
+    /// stale, so it is the one the decision stands on.
+    #[test]
+    fn keeps_the_widening_of_an_item_the_produced_parent_reaches_through_the_module() {
+        // Given a parent the assist rewrote to reach an item through the module it wrote
+        let produced = "mod planning {\n    pub(crate) struct StructuredPlan {\n        goal: Option<String>,\n    }\n}\n\nfn parse_planning_response_impl(s: &str) -> u32 {\n    let parsed: planning::StructuredPlan = serde_json::from_str(s).unwrap();\n    0\n}\n";
+
+        // When the survey taken before the assist ran saw no reference from outside the range
+        let (restored, report) =
+            restore_visibility(produced, "planning", &[moved("StructuredPlan", "", false)])
+                .unwrap();
+
+        // Then the widening stands, because narrowing it is `E0603` on the line above
+        assert!(
+            restored.contains("pub(crate) struct StructuredPlan"),
+            "{restored}"
+        );
+        assert_eq!(report.len(), 1);
+        assert_eq!(report[0].item, "StructuredPlan");
+    }
+
+    /// The narrowing rule itself is right and stays: a helper that travelled with its only caller
+    /// keeps the privacy the compiler was enforcing. A fix that simply stopped narrowing would pass
+    /// the test above and undo that.
+    #[test]
+    fn narrows_an_item_the_produced_parent_does_not_reach_through_the_module() {
+        // Given a produced parent that names the module but never reaches this item through it
+        let produced = "mod planning {\n    pub(crate) fn prd_value_looks_like_md_file_path(p: &str) -> bool {\n        p.ends_with(\".md\")\n    }\n}\n\nfn unrelated() -> u32 {\n    0\n}\n";
+
+        // When the item was written private and nothing outside reaches it
+        let (restored, report) = restore_visibility(
+            produced,
+            "planning",
+            &[moved("prd_value_looks_like_md_file_path", "", false)],
+        )
+        .unwrap();
+
+        // Then it goes back to private
+        assert!(
+            restored.contains("    fn prd_value_looks_like_md_file_path(p: &str) -> bool {"),
+            "{restored}"
+        );
+        assert!(report.is_empty());
+    }
+
+    /// A mention inside the module's own body is not an outside reach. The module referring to its
+    /// own item — or to `planning::` from within `planning` — says nothing about the parent.
+    #[test]
+    fn reads_no_outside_reach_from_a_mention_inside_the_module_itself() {
+        // Given a module whose own body names the item through the module path
+        let produced = "mod planning {\n    pub(crate) struct StructuredPlan;\n    fn build() -> planning::StructuredPlan {\n        planning::StructuredPlan\n    }\n}\n\nfn unrelated() -> u32 {\n    0\n}\n";
+
+        // When nothing outside the module reaches it
+        let (restored, report) =
+            restore_visibility(produced, "planning", &[moved("StructuredPlan", "", false)])
+                .unwrap();
+
+        // Then the mention inside the module does not hold the widening open
+        assert!(
+            restored.contains("    struct StructuredPlan;"),
+            "{restored}"
+        );
+        assert!(report.is_empty());
+    }
+
+    /// The other half of the partial relocation, and the one the author has to know about.
+    /// Visibility is now decided on the produced text, so the result compiles — but it is not what
+    /// the plan described. An anchor covering six items that yields a module holding four has left
+    /// two behind, reaching into the module through qualified paths, and the seam the author asked
+    /// for does not exist. A `#carve` node whose contract is "one module per phase" would report
+    /// success and fail its own shape assertions.
+    ///
+    /// Keyed on a surveyed item rather than on a line count: the survey holds exactly the
+    /// path-reachable items the range covered, so an item missing from the produced module is
+    /// material by construction, and trailing trivia never trips it.
+    #[test]
+    fn refuses_an_assist_that_left_an_anchored_item_behind() {
+        // Given a produced file whose module holds one of the two items the range covered
+        let produced = "mod planning {\n    pub(crate) struct StructuredPlan;\n}\n\nfn parse_planning_response_impl(s: &str) -> planning::StructuredPlan {\n    planning::StructuredPlan\n}\n";
+        let anchored = [
+            moved("StructuredPlan", "", true),
+            moved("parse_planning_response_impl", "", false),
+        ];
+
+        // When what the assist wrote is held against what the anchor asked for
+        let refusal = refuse_partial_relocation(produced, "planning", &anchored)
+            .expect_err("an item left behind is refused");
+
+        // Then it is a seam refusal naming the item that stayed
+        assert!(
+            matches!(refusal, RestructureError::SeamRefused(_)),
+            "{refusal:?}"
+        );
+        assert!(
+            refusal.to_string().contains("parse_planning_response_impl"),
+            "{refusal}"
+        );
+    }
+
+    #[test]
+    fn accepts_a_relocation_that_carried_every_anchored_item() {
+        // Given a produced module holding both items the range covered
+        let produced = "mod planning {\n    pub(crate) struct StructuredPlan;\n    pub(crate) fn parse(s: &str) -> u32 {\n        0\n    }\n}\n";
+        let anchored = [
+            moved("StructuredPlan", "", false),
+            moved("parse", "", false),
+        ];
+
+        // Then nothing is refused
+        assert!(refuse_partial_relocation(produced, "planning", &anchored).is_ok());
+    }
+
+    /// An item the range held inside an inline module of its own travels nested, so it is declared
+    /// deeper in the block rather than at its top level. Looking only at the block's own level
+    /// would report every one of them as left behind.
+    #[test]
+    fn finds_an_anchored_item_the_assist_nested_inside_an_inline_module() {
+        // Given a produced module whose own body holds the inline module the range covered
+        let produced = "mod grouped {\n    pub(crate) mod inner {\n        pub(crate) fn tier(v: f64) -> u32 {\n            0\n        }\n    }\n}\n";
+        let anchored = [moved_within("tier", "inner", false)];
+
+        // Then the nested item counts as relocated
+        assert!(refuse_partial_relocation(produced, "grouped", &anchored).is_ok());
+    }
+
     #[test]
     fn keeps_the_widening_of_an_item_something_outside_the_module_reaches() {
         let widened = "mod rendering {\n    pub(crate) fn clamp(v: f64) -> f64 { v }\n}\n";
@@ -5147,6 +5562,76 @@ mod tests {
         let lines: Vec<&str> = restored.split('\n').collect();
         assert_eq!(lines[0], "pub(crate) fn helper(v: f64) -> f64 { v }");
         assert_eq!(lines[3], "    fn helper(v: f64) -> f64 { v }");
+    }
+
+    /// A reader acts on the class, and every class currently says the same wrong thing. A module
+    /// name already taken is a fact about the code the seam is being cut in — the plan asked for
+    /// something the file will not permit — and "plan is malformed" sends the author to edit a plan
+    /// that is correct. `status.rs` already refuses to let this distinction be lost at the
+    /// transport boundary; it has to survive being made.
+    #[test]
+    fn a_seam_refusal_does_not_tell_the_author_their_plan_is_malformed() {
+        // Given a file that already declares the module an extraction wants to write
+        let text = "mod grouped;\npub fn foo() -> u32 {\n    1\n}\n";
+        let range = Range {
+            start: Position { line: 2, col: 1 },
+            end: Position { line: 4, col: 2 },
+        };
+
+        // When the seam is refused for that collision
+        let refusal = refuse_module_name_taken(text, "grouped", range)
+            .expect_err("a taken module name is refused");
+
+        // Then it is a seam refusal, and it does not blame the plan
+        assert!(
+            matches!(refusal, RestructureError::SeamRefused(_)),
+            "{refusal:?}"
+        );
+        assert!(
+            !refusal.to_string().contains("plan is malformed"),
+            "{refusal}"
+        );
+    }
+
+    /// The other half of the same distinction. rust-analyzer writing `_` into a signature is a
+    /// defect in the server's answer, and the remedy the message already gives — retry against a
+    /// warm server — is not something an author does to a plan.
+    #[test]
+    fn a_defect_in_the_servers_answer_is_not_reported_as_a_defect_in_the_plan() {
+        // Given an extraction rust-analyzer produced before it could infer the signature
+        let produced = "fn fun_name(v: _) -> _ {\n    v\n}\n";
+
+        // When the run refuses it
+        let refusal = refuse_inferred_placeholder(produced, "fn fun_name")
+            .expect_err("an inferred placeholder is refused");
+
+        // Then it is a server defect, and it does not blame the plan
+        assert!(
+            matches!(refusal, RestructureError::ServerDefect(_)),
+            "{refusal:?}"
+        );
+        assert!(
+            !refusal.to_string().contains("plan is malformed"),
+            "{refusal}"
+        );
+    }
+
+    /// The class that keeps its name. An operation arriving without the name it needs is a plan
+    /// that does not say enough, and editing the plan is exactly the remedy.
+    #[test]
+    fn a_plan_that_does_not_say_enough_is_still_reported_as_a_malformed_plan() {
+        // Given the refusal raised when an operation carries no name
+        let refusal = failure("the operation needs a name");
+
+        // Then it stays a malformed plan
+        assert!(
+            matches!(refusal, RestructureError::MalformedPlan(_)),
+            "{refusal:?}"
+        );
+        assert!(
+            refusal.to_string().contains("plan is malformed"),
+            "{refusal}"
+        );
     }
 
     #[test]
@@ -5329,7 +5814,7 @@ mod tests {
         let outcome = refuse_mangled_rewrite(text, "seeded_clone_guard", &moved);
 
         let message = match outcome {
-            Err(RestructureError::MalformedPlan(m)) => m,
+            Err(RestructureError::ServerDefect(m)) => m,
             other => panic!("expected a refusal, got {other:?}"),
         };
         assert!(message.contains("SeededCloneGuard"), "{message}");
@@ -5429,6 +5914,66 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         assert_eq!(chosen, Some("Import `c::d::Thing`"));
     }
 
+    /// A crate that re-exports an item at its root gives one item two paths, and rust-analyzer
+    /// offers the shortest. `tddy-core` publishes `pub use error::{BackendError, ParseError,
+    /// WorkflowError};`, so a file writing the canonical `tddy_core::error::ParseError` is offered
+    /// `tddy_core::ParseError` — a different string for the same type. Neither the exact-path tier
+    /// nor the module tier can see that, and one live extraction was refused three candidates deep
+    /// over it. The crate the file already binds the name from is the evidence that settles it.
+    #[test]
+    fn settles_a_contested_name_on_the_crate_the_file_already_binds_it_from() {
+        // Given the three paths rust-analyzer offered for `ParseError`, one of them a re-export
+        let offered = [
+            "Import `tddy_core::ParseError`",
+            "Import `std::string::ParseError`",
+            "Import `chrono::ParseError`",
+        ];
+
+        // When the file that lost the name binds it canonically from one of those crates
+        let chosen = choose_import("use tddy_core::error::ParseError;\n", &offered);
+
+        // Then the candidate rooted in that same crate is the one the moved code meant
+        assert_eq!(chosen, Some("Import `tddy_core::ParseError`"));
+    }
+
+    /// Two candidates rooted in the crate the name is bound from is an ambiguity the crate root
+    /// cannot settle — the tier narrows by crate, and a crate holding both is no narrower.
+    #[test]
+    fn settles_nothing_when_two_candidates_share_the_crate_the_name_is_bound_from() {
+        // Given two candidates from one crate and one from another
+        let offered = [
+            "Import `tddy_core::ParseError`",
+            "Import `tddy_core::json::ParseError`",
+            "Import `chrono::ParseError`",
+        ];
+
+        // When the file binds the name from the crate that offers two of them
+        let chosen = choose_import("use tddy_core::error::ParseError;\n", &offered);
+
+        // Then nothing is chosen, because the crate does not say which of its two was meant
+        assert_eq!(chosen, None);
+    }
+
+    /// The crate tier keys on a binding **of the same name**, not on any binding from that crate.
+    /// Keyed on any binding it would be worthless here: almost every file imports something from
+    /// `std`, so `std::string::ParseError` would match as readily as the one the file means, and the
+    /// tier would refuse every time it was needed.
+    #[test]
+    fn keys_the_crate_tier_on_a_binding_of_the_contested_name() {
+        // Given two candidates, one rooted in a crate this file imports other names from
+        let offered = [
+            "Import `tddy_core::ParseError`",
+            "Import `std::string::ParseError`",
+        ];
+
+        // When the file imports something unrelated from `std` and binds the name from `tddy_core`
+        let text = "use std::collections::HashMap;\nuse tddy_core::error::ParseError;\n";
+        let chosen = choose_import(text, &offered);
+
+        // Then the `std` import is not evidence about `ParseError`, and the binding of that name is
+        assert_eq!(chosen, Some("Import `tddy_core::ParseError`"));
+    }
+
     #[test]
     fn reads_the_module_a_path_lives_in() {
         assert_eq!(parent_module("a::b::C").as_deref(), Some("a::b"));
@@ -5480,63 +6025,113 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         assert_eq!(ServerChatter::default().how_far(), "nothing reported");
     }
 
-    /// A caller who never passed `--indexing-budget` must see exactly the behaviour they saw
-    /// before this became configurable.
-    #[test]
-    fn leaves_the_settle_budget_at_its_default_for_the_default_warmup() {
-        // Given the default warm-up budget
-        let settle = settle_budget_for(WARMUP_BUDGET);
-
-        // Then the per-operation wait is unchanged
-        assert_eq!(settle, SETTLE_BUDGET);
+    /// A backend with no server behind it. Every wait in this file is decided before a request is
+    /// sent, so what ends one is answerable without a language server at all.
+    fn a_backend() -> RustBackend {
+        RustBackend::new("/usr/bin/rust-analyzer", "/tmp", "/tmp")
     }
 
-    /// Raising the run budget is the caller saying the machine or the file is slow, and the
-    /// per-operation waits are where that shows up once the first index is done. A 30s cap there
-    /// reported an incomplete index for a server that was working normally.
+    /// The replacement for the budgets: nothing but the caller ends a wait, and it ends it at once
+    /// rather than at the end of the poll the wait was sleeping out.
     #[test]
-    fn scales_the_settle_budget_with_a_raised_indexing_budget() {
-        // Given a caller who allowed 2400s for the run
-        let settle = settle_budget_for(Duration::from_secs(2400));
+    fn stops_waiting_as_soon_as_its_caller_does() {
+        // Given a backend whose caller has stopped waiting
+        let cancel = CancellationToken::new();
+        let backend = a_backend().with_cancellation(cancel.clone());
+        cancel.cancel();
 
-        // Then each later wait scales with it rather than staying at the 30s default
-        assert_eq!(settle, Duration::from_secs(120));
+        // When it would sleep out a poll interval far longer than any test
+        let started = Instant::now();
+        let keep_waiting = backend.keep_waiting(Duration::from_secs(300));
+
+        // Then it does not wait at all, and reports the wait as over
+        assert!(!keep_waiting, "a cancelled wait asked to continue");
+        assert!(
+            // Wall-clock, so an exact figure is not available; the poll it skipped is 300s.
+            started.elapsed() < Duration::from_secs(1),
+            "a cancelled wait slept for {:?}",
+            started.elapsed()
+        );
     }
 
-    /// Lowering the budget must not drop the per-operation wait below what a normal settle needs.
+    /// The other half of the same rule: while the caller is still waiting, the server is left
+    /// alone for the whole poll interval rather than asked again immediately.
     #[test]
-    fn never_lowers_the_settle_budget_below_its_default() {
-        // Given a caller who allowed only 60s
-        let settle = settle_budget_for(Duration::from_secs(60));
+    fn waits_out_the_whole_poll_while_its_caller_is_still_waiting() {
+        // Given a backend whose caller is still waiting
+        let backend = a_backend().with_cancellation(CancellationToken::new());
 
-        // Then the default floor still applies
-        assert_eq!(settle, SETTLE_BUDGET);
+        // When it sleeps out a poll interval
+        let started = Instant::now();
+        let keep_waiting = backend.keep_waiting(Duration::from_millis(300));
+
+        // Then it waited the interval and reports the wait as continuing
+        assert!(keep_waiting, "an uncancelled wait reported itself over");
+        assert!(
+            // Wall-clock again: the floor is the interval, and a loaded machine may exceed it.
+            started.elapsed() >= Duration::from_millis(300),
+            "the poll returned early, after {:?}",
+            started.elapsed()
+        );
     }
 
-    /// A server that answered and offered nothing is a seam refusal; the reader should look at
+    /// A backend nobody handed a token to waits on readiness alone — which is what a single-shot
+    /// caller whose process *is* the operation means, and is why no wait needs a budget.
+    #[test]
+    fn waits_on_readiness_alone_when_no_caller_handed_it_a_token() {
+        // Given a backend built with no cancellation token
+        let backend = a_backend();
+
+        // When it is asked whether a wait may continue
+        // Then it may, because nothing has said otherwise
+        assert!(backend.keep_waiting(Duration::ZERO));
+    }
+
+    /// The error class the TODO called wrong: the plan was not malformed, the indexer never
+    /// settled, and the two want opposite responses from whoever reads the refusal.
+    #[test]
+    fn names_the_server_rather_than_the_plan_when_a_method_never_settles() {
+        // Given a method the server never settled enough to answer
+        let error = unsettled(
+            "textDocument/codeAction",
+            Duration::from_secs(6),
+            "working (100%)".to_string(),
+        );
+
+        // Then the refusal names the method, the wait and where the index got to
+        match error {
+            RestructureError::ServerNotSettled {
+                method,
+                seconds,
+                last,
+            } => {
+                assert_eq!(method, "textDocument/codeAction");
+                assert_eq!(seconds, 6);
+                assert_eq!(last, "working (100%)");
+            }
+            other => panic!("expected ServerNotSettled, got {other:?}"),
+        }
+    }
+
+    /// A server that is ready here and offers nothing is a seam refusal; the reader should look at
     /// the range they asked for.
     #[test]
-    fn names_the_absent_assist_when_the_server_answered() {
-        // Given a budget that expired after the server had answered
-        let error = unresolved_assist(
+    fn names_the_absent_assist_when_the_server_is_ready_to_answer() {
+        // Given a server that can type the range and still offers something else
+        let error = absent_assist(
             "extract into function",
             &["Extract into variable".to_string()],
-            true,
-            Some(true),
-            Duration::from_secs(30),
-            "indexing".to_string(),
-            "cargo 1.94".to_string(),
         );
 
         // Then the failure points at the range
         match error {
-            RestructureError::MalformedPlan(message) => {
+            RestructureError::SeamRefused(message) => {
                 assert!(message.contains("extract into function"), "{message}");
                 assert!(message.contains("given range"), "{message}");
                 // The evidence that separates a wrong title from an unrefactorable range.
                 assert!(message.contains("Extract into variable"), "{message}");
             }
-            other => panic!("expected MalformedPlan, got {other:?}"),
+            other => panic!("expected SeamRefused, got {other:?}"),
         }
     }
 
@@ -5545,11 +6140,11 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     /// has nothing to do with the range. Reported as an absent assist, it reads as a plan defect.
     #[test]
     fn reports_an_incomplete_index_when_the_range_could_not_be_typed() {
-        // Given a server that answered with syntax-level assists but could not type the range
-        let error = unresolved_assist(
+        // Given a cancelled wait on a server that answered with syntax-level assists but could
+        // not type the range
+        let error = incomplete_assist_index(
             "extract into function",
             &["Extract into variable".to_string()],
-            true,
             Some(false),
             Duration::from_secs(120),
             "working (100%)".to_string(),
@@ -5568,22 +6163,21 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         }
     }
 
-    /// A server that never answered is an index that was not ready, and the remedy is the
-    /// budget rather than the anchors.
+    /// A wait cancelled while the graph was still loading is an index that was not ready, and the
+    /// reader needs where it got to rather than anything about the anchors.
     #[test]
-    fn reports_an_incomplete_index_when_the_server_never_answered() {
-        // Given a budget that expired without a single answer
-        let error = unresolved_assist(
+    fn reports_an_incomplete_index_when_a_wait_is_cancelled_before_the_graph_loads() {
+        // Given a cancelled wait on an assist that needs no inference, so nothing was probed
+        let error = incomplete_assist_index(
             "extract into function",
             &[],
-            false,
             None,
             Duration::from_secs(45),
             "discovering sysroot".to_string(),
             "cargo 1.94".to_string(),
         );
 
-        // Then the failure names the budget and where the server got to
+        // Then the failure names how long it waited and where the server got to
         match error {
             RestructureError::IndexingIncomplete {
                 seconds,

@@ -23,20 +23,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_code_restructuring::apply::apply_workspace_edit;
+use tddy_code_restructuring::backends::rust::discard;
 use tddy_code_restructuring::registry::{LanguageBackend, Workspace};
 use tddy_code_restructuring::{
     client_capabilities, server_settings, Anchor, Overlay, RefactorKind, RefactorOp, WorkspaceEdit,
 };
 use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspKey, LspRegistry};
 use tddy_task::TaskRegistry;
+use tokio_util::sync::CancellationToken;
 
-/// How long the operation may wait for rust-analyzer to load the crate graph.
+/// How long this harness is willing to wait for rust-analyzer to load the crate graph.
 ///
-/// Three crates with no external dependencies index in seconds locally; the budget is generous
-/// because a CI runner is not, and it is *bounded* because the alternative — the library's
-/// ten-minute default — turns a broken server into a test that hangs the suite rather than one
-/// that fails with `IndexingIncomplete` and the toolchain it resolved with.
-const INDEXING_BUDGET: u64 = 180;
+/// The library states no such bound any more: a wait ends when the server is ready or when its
+/// caller stops waiting, and nothing else. Here the caller is a test, and a test has to stop —
+/// three crates with no external dependencies index in seconds locally, the figure is generous
+/// because a CI runner is not, and without it a broken server hangs the suite instead of failing
+/// with `IndexingIncomplete` and the toolchain it resolved with.
+const A_WAIT_A_TEST_CAN_OUTLAST: Duration = Duration::from_secs(180);
 
 /// One rust-analyzer at a time within this binary.
 ///
@@ -63,25 +66,22 @@ pub struct AFixtureWorkspace {
     _directory: tempfile::TempDir,
 }
 
-/// A canonicalised temporary workspace with nothing in it yet.
-///
-/// rust-analyzer answers with canonical paths, and on macOS a temporary directory is reached
-/// through a symlink — so a uri it returns would sit "outside" an uncanonicalised root.
-pub fn an_empty_fixture() -> AFixtureWorkspace {
+pub fn a_workspace_a_module_can_move_across() -> AFixtureWorkspace {
     let directory = tempfile::tempdir().expect("a temporary directory");
+
+    // rust-analyzer answers with canonical paths, and on macOS a temporary directory is reached
+    // through a symlink — so a uri it returns would sit "outside" an uncanonicalised root.
     let root = directory
         .path()
         .canonicalize()
         .expect("the temporary directory canonicalises");
 
-    AFixtureWorkspace {
+    let fixture = AFixtureWorkspace {
         root,
         _directory: directory,
-    }
-}
+    };
 
-pub fn a_workspace_a_module_can_move_across() -> AFixtureWorkspace {
-    an_empty_fixture()
+    fixture
         .writing(
             "Cargo.toml",
             "[workspace]\nresolver = \"2\"\nmembers = [\n    \"crates/shared\",\n    \
@@ -163,23 +163,6 @@ impl AFixtureWorkspace {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }
 
-    /// Overwrite a file in a workspace that already exists.
-    ///
-    /// The builder's own `writing` consumes `self`, which is right while assembling a fixture and
-    /// wrong for a test that needs to vary one file from a shared starting point.
-    pub fn rewriting(&self, relative: &str, text: &str) {
-        let absolute = self.root.join(relative);
-        std::fs::create_dir_all(absolute.parent().expect("a parent directory"))
-            .expect("the directory is created");
-        std::fs::write(absolute, text).expect("the file is written");
-    }
-
-    /// Delete a file, for a test about what happens when it is absent.
-    pub fn removing(&self, relative: &str) {
-        std::fs::remove_file(self.root.join(relative))
-            .unwrap_or_else(|error| panic!("removing {relative}: {error}"));
-    }
-
     fn writing(self, relative: &str, text: &str) -> Self {
         let absolute = self.root.join(relative);
         std::fs::create_dir_all(absolute.parent().expect("a parent directory"))
@@ -224,11 +207,13 @@ pub async fn performing(fixture: &AFixtureWorkspace, op: RefactorOp) -> Workspac
     let root = fixture.path().to_path_buf();
     let client = a_rust_analyzer_rooted_at(&root).await;
 
+    let cancel = a_token_cancelled_after(A_WAIT_A_TEST_CAN_OUTLAST);
+
     tokio::task::spawn_blocking(move || {
         let mut backend = tddy_code_restructuring::backends::rust::RustBackend::from_lsp_client(
             client,
-            Some(INDEXING_BUDGET),
-            |_| {},
+            Some(cancel),
+            discard(),
         );
         let overlay = Overlay::default();
         let workspace = Workspace {
@@ -246,39 +231,6 @@ pub async fn performing(fixture: &AFixtureWorkspace, op: RefactorOp) -> Workspac
     .expect("the blocking half of the operation joins")
 }
 
-/// Resolve one operation and hand back what it produced — including a refusal.
-///
-/// `performing` panics on a refusal because its tests assert on the tree. A test about *why* an
-/// operation refuses needs the error itself, which is what this returns.
-pub async fn resolving(
-    fixture: &AFixtureWorkspace,
-    op: RefactorOp,
-) -> Result<WorkspaceEdit, String> {
-    let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
-    let root = fixture.path().to_path_buf();
-    let client = a_rust_analyzer_rooted_at(&root).await;
-
-    tokio::task::spawn_blocking(move || {
-        let mut backend = tddy_code_restructuring::backends::rust::RustBackend::from_lsp_client(
-            client,
-            Some(INDEXING_BUDGET),
-            |_| {},
-        );
-        let overlay = Overlay::default();
-        let workspace = Workspace {
-            root: &root,
-            overlay: &overlay,
-        };
-
-        backend
-            .resolve(&op, &workspace)
-            .map(|resolution| resolution.edit)
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .expect("the blocking half of the operation joins")
-}
-
 /// rust-analyzer, launched the way `tddy-tools restructure` launches it.
 async fn a_rust_analyzer_rooted_at(root: &Path) -> Arc<tddy_lsp::client::LspClient> {
     let mut allow = LspAllowList::new();
@@ -289,11 +241,7 @@ async fn a_rust_analyzer_rooted_at(root: &Path) -> Arc<tddy_lsp::client::LspClie
             .with_initialization_options(server_settings()),
     );
 
-    let registry = LspRegistry::new(
-        allow,
-        TaskRegistry::new(),
-        Duration::from_secs(INDEXING_BUDGET),
-    );
+    let registry = LspRegistry::new(allow, TaskRegistry::new(), A_WAIT_A_TEST_CAN_OUTLAST);
     let service = registry
         .get_or_spawn(LspKey {
             root: root.to_path_buf(),
@@ -302,21 +250,37 @@ async fn a_rust_analyzer_rooted_at(root: &Path) -> Arc<tddy_lsp::client::LspClie
         .await
         .expect("rust-analyzer starts — the nix dev shell puts it on PATH");
 
-    // The client's own default is sized for interactive queries; a request against a cold index
-    // routinely outlasts it. `tddy-tools` raises it from `--indexing-budget` for the same reason.
+    // The client's own default is sized for interactive queries; one request against a cold index
+    // routinely outlasts it. `tddy-tools` raises it to the same kind of figure for the same reason.
     service
         .client
-        .set_request_timeout(Duration::from_secs(INDEXING_BUDGET));
+        .set_request_timeout(A_WAIT_A_TEST_CAN_OUTLAST);
 
     Arc::clone(&service.client)
+}
+
+/// A token this harness cancels once it has waited as long as it is prepared to.
+///
+/// The bound lives here rather than in the library because that is where it belongs: only a caller
+/// knows how long it is willing to wait, and a run whose caller is a test suite is the one case
+/// where the answer is "less than the server might take".
+fn a_token_cancelled_after(wait: Duration) -> CancellationToken {
+    let cancel = CancellationToken::new();
+    let outlasted = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(wait).await;
+        outlasted.cancel();
+    });
+    cancel
 }
 
 /// A workspace whose movable module is **nested** — declared by another module's file, not by the
 /// crate root.
 ///
-/// This is the shape `source_crate_of` refuses today, and it is the *normal* shape of a subsystem
-/// worth extracting: `model_registry/` was chosen as `#unbundle` node 2's opening move precisely
-/// because it was the cleanest extraction available, and the operation could not touch a line of it.
+/// This is the shape `source_crate_of` refused before nested moves landed, and it is the *normal*
+/// shape of a subsystem worth extracting: `model_registry/` was chosen as `#unbundle` node 2's
+/// opening move precisely because it was the cleanest extraction available, and the operation could
+/// not touch a line of it.
 ///
 /// `declared_by_mod_rs` selects which of the two forms Rust 2018 allows for the parent:
 /// `src/model_registry.rs`, or `src/model_registry/mod.rs`.

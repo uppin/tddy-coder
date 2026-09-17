@@ -7,6 +7,7 @@
 
 pub mod apply;
 pub mod backends;
+pub mod console;
 pub mod crate_move;
 pub mod edit;
 pub mod journal;
@@ -14,6 +15,7 @@ pub mod ledger;
 pub mod overlay;
 pub mod plan;
 pub mod registry;
+mod restructure_args;
 pub mod restructure_cli;
 pub mod runner;
 pub mod verify;
@@ -34,6 +36,23 @@ pub use registry::{BackendRegistry, LanguageBackend};
 pub enum RestructureError {
     #[error("plan is malformed: {0}")]
     MalformedPlan(String),
+    /// The plan is well formed and the code will not permit this cut.
+    ///
+    /// Kept apart from [`RestructureError::MalformedPlan`] for the reason
+    /// [`RestructureError::ServerNotSettled`] already states, applied to the other large family of
+    /// refusals: a malformed plan is fixed by editing the plan, and a seam the code refuses is fixed
+    /// by cutting it elsewhere or by changing the code. Stranded references, an `impl` cut in half,
+    /// a module name already taken, an import the file's own bindings cannot disambiguate — none of
+    /// them is a defect in the plan, and every one of them used to say it was.
+    #[error("this seam cannot be cut here: {0}")]
+    SeamRefused(String),
+    /// rust-analyzer answered, and the answer could not be used.
+    ///
+    /// An extraction produced before the types were inferred, a rewrite that came back mangled, a
+    /// response carrying no edits. The remedy is to retry against a warm server or to look at the
+    /// server, and neither is something an author does to a plan.
+    #[error("rust-analyzer's answer was unusable: {0}")]
+    ServerDefect(String),
     #[error("plan carries code text in field `{field}` — plans hold intents only")]
     CodeTextInPlan { field: String },
     #[error("snapshot mismatch for {path}: plan expected {expected}, working tree has {actual}")]
@@ -60,10 +79,27 @@ pub enum RestructureError {
     JournalExists,
     #[error("the language server is still catching up with an earlier change")]
     ServerCatchingUp,
+    /// The server stayed unable to answer one method, as distinct from the plan being wrong.
+    ///
+    /// Kept apart from [`RestructureError::MalformedPlan`] because a caller acts on the difference:
+    /// a malformed plan is fixed by editing the plan, and a server that will not settle is fixed by
+    /// waiting or by looking at the server. Reporting the second as the first is what makes the
+    /// advice "fix your plan" actively misleading.
     #[error(
-        "rust-analyzer had not finished indexing after {seconds}s (last progress: {last}) — \
-         raise the budget with --indexing-budget <seconds>. Toolchain it resolved with: \
-         {environment}"
+        "rust-analyzer would not settle enough to answer {method} after {seconds}s \
+         (last progress: {last})"
+    )]
+    ServerNotSettled {
+        method: String,
+        seconds: u64,
+        last: String,
+    },
+    /// The wait for the index ended before the server was ready, because its caller stopped
+    /// waiting. Nothing else ends such a wait: there is no budget to raise, so the message names
+    /// where the index got to instead of advising a number.
+    #[error(
+        "rust-analyzer had not finished indexing after {seconds}s (last progress: {last}) and the \
+         wait was cancelled. Toolchain it resolved with: {environment}"
     )]
     IndexingIncomplete {
         seconds: u64,
@@ -74,6 +110,18 @@ pub enum RestructureError {
         /// is the line that separates them in a CI log.
         environment: String,
     },
+    /// The caller stopped waiting while a language-server request was in flight, so the request
+    /// was abandoned — at the server too, which is told to stop computing an answer nobody will
+    /// read.
+    ///
+    /// Distinct from every other variant because nothing is wrong: not the plan, not the tree, not
+    /// the server. It is also the one refusal that must **not** be retried — there is nobody left
+    /// to answer — which is why it is a variant of its own rather than folded into
+    /// [`RestructureError::ServerCatchingUp`]. The backend converts it into
+    /// [`RestructureError::IndexingIncomplete`] as it leaves, so the run still reports how far the
+    /// index got; it is visible here for the paths that have no index to report on.
+    #[error("the caller stopped waiting, so the request was abandoned")]
+    CallerStopped,
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

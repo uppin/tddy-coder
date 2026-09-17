@@ -16,6 +16,7 @@
 use std::collections::BTreeMap;
 
 /// What comparing two trees found.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Comparison {
     pub before: usize,
     pub after: usize,
