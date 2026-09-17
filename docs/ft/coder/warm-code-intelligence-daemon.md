@@ -27,8 +27,16 @@ tddy-index-daemon --grpc 127.0.0.1:7777                            # serve gRPC 
 tddy-index-daemon --grpc-uds <path>                                # serve gRPC over a Unix socket
 tddy-index-daemon --stdio                                          # serve over this process's stdio
 tddy-index-daemon --grpc 127.0.0.1:7777 --stdio                    # both, concurrently, one index
+tddy-index-daemon --ping <path>                                    # is a daemon serving this socket?
 tddy-index-daemon                                                  # error: nothing to do
 ```
+
+`--ping` is a third lifetime, and the shortest: it serves nothing, runs no operation, reaches no
+language server and loads no crate graph. It dials the socket, issues `Workspaces`, and exits with
+whether anything answered. It exists because the two cheaper probes both lie — a pid says something
+with that number is alive, and a socket **file** outlives the process that bound it — and
+`run-index-daemon --status` reported healthy daemons that refused the next connection on exactly
+that pair.
 
 Single-shot calls the generated service trait **in process** — prost structs in and out, no encode or
 decode — so there is one code path rather than two that must be kept in step. Several transports
@@ -100,9 +108,19 @@ transports as two different codes and a new error variant is a compile error:
 ```bash
 eval $(./run-index-daemon | grep '^export ')   # exports TDDY_INDEX_SOCKET
 tddy-tools restructure check plan.jsonl        # now costs the assist, not the index
-./run-index-daemon --status                    # what is running; starts nothing
+./run-index-daemon --status                    # dials the socket; non-zero if nothing answers
 ./run-index-daemon --stop
 ```
+
+**The daemon is started in a session of its own**, via `setsid` from the dev shell, and its pid is
+written from inside the process that becomes the daemon rather than read from the starting shell's
+`$!`. Both matter, and neither is incidental: a background job started with `nohup` alone stays in
+the process group of the shell that launched it, so an agent harness, a CI step or a job-control
+terminal tearing that group down takes the daemon with it — which is how several starts announced
+`listening on …` and then refused the connection seconds later, leaving the socket file behind. And
+`setsid` forks when its caller is already a process group leader, so `$!` names the daemon in some
+shells and a wrapper in others; `--stop` reading the wrong one would kill the wrapper and orphan a
+multi-gigabyte rust-analyzer.
 
 One daemon per checkout, keyed by a checksum of the resolved root — reusing another worktree's daemon
 would run *that* worktree's restructuring code against this tree's source. Its socket, pid file and

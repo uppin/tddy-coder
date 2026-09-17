@@ -16,6 +16,7 @@
 //! service needs — a host registers `build_code_index_entry` and owns its own console.
 
 mod cli;
+mod ping;
 mod render;
 mod serve;
 mod single_shot;
@@ -88,21 +89,15 @@ async fn main() -> ExitCode {
         }
     };
 
-    let tasks = TaskRegistry::new();
-    let servers = LspRegistry::new(
-        rust_analyzer_as_this_crate_needs_it(),
-        tasks.clone(),
-        A_SERVER_MAY_SIT_UNUSED_FOR,
-    );
-    // One instance, whichever lifetime this is. Behind an `Arc` even for a single-shot run, because
-    // the serving path needs the same handle in more than one place and a second construction
-    // shape would be a second thing to keep in step.
-    let service = Arc::new(CodeIndexServiceImpl::new(CodeIndexPorts {
-        servers: servers.clone(),
-    }));
-
     match lifetime {
+        // Wired by neither arm below, because it needs neither. Standing up an `LspRegistry` and a
+        // service instance to answer "is something listening on this socket" would be a language
+        // server's worth of setup for a question about a socket.
+        Lifetime::Ping(socket) => ping::run(&socket).await,
         Lifetime::SingleShot(requested) => {
+            // The task registry is the serving path's; a single-shot run holds the servers only
+            // long enough to shut them down again.
+            let (_tasks, servers, service) = wired();
             let verdict = single_shot::run_once(service.as_ref(), requested).await;
             // The same cleanup a serving process does, for the same reason: this run may have
             // started a language server, and it is a child of this process either way.
@@ -110,6 +105,7 @@ async fn main() -> ExitCode {
             verdict.exit_code()
         }
         Lifetime::Serve(transports) => {
+            let (tasks, servers, service) = wired();
             match serve::serve(transports, service, servers, tasks).await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(failure) => {
@@ -119,6 +115,25 @@ async fn main() -> ExitCode {
             }
         }
     }
+}
+
+/// The task registry, the language-server registry and the service, wired as every lifetime that
+/// serves the operations needs them.
+///
+/// One instance, whichever of the two lifetimes this is. Behind an `Arc` even for a single-shot
+/// run, because the serving path needs the same handle in more than one place and a second
+/// construction shape would be a second thing to keep in step.
+fn wired() -> (TaskRegistry, LspRegistry, Arc<CodeIndexServiceImpl>) {
+    let tasks = TaskRegistry::new();
+    let servers = LspRegistry::new(
+        rust_analyzer_as_this_crate_needs_it(),
+        tasks.clone(),
+        A_SERVER_MAY_SIT_UNUSED_FOR,
+    );
+    let service = Arc::new(CodeIndexServiceImpl::new(CodeIndexPorts {
+        servers: servers.clone(),
+    }));
+    (tasks, servers, service)
 }
 
 /// Point this process's stderr at `path`.

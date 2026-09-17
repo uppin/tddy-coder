@@ -929,7 +929,7 @@ impl RustBackend {
                 if let Some(error) = message.get("error") {
                     return Err(match error.get("code").and_then(Value::as_i64) {
                         Some(CONTENT_MODIFIED) => RestructureError::ServerCatchingUp,
-                        _ => failure(format!("rust-analyzer: {error}")),
+                        _ => server_defect(format!("rust-analyzer: {error}")),
                     });
                 }
                 return Ok(message.get("result").cloned().unwrap_or(Value::Null));
@@ -1385,7 +1385,7 @@ impl RustBackend {
             let referrer = reference
                 .get("uri")
                 .and_then(Value::as_str)
-                .ok_or_else(|| failure("a reference carries no uri"))?;
+                .ok_or_else(|| server_defect("a reference carries no uri"))?;
             if referrer == uri {
                 continue;
             }
@@ -1459,6 +1459,11 @@ impl RustBackend {
         if !relocates {
             return Ok((named, Vec::new(), Vec::new()));
         }
+
+        // Before the import passes, because a seam the assist only half-took is not one those
+        // passes can repair — and refusing here costs the operator two LSP round trips rather than
+        // the whole import restoration on a module that is not the one they asked for.
+        refuse_partial_relocation(&named, &name, &moved)?;
 
         // Versions 1 and 2 belong to the open and to the rename above; both import phases send
         // more, so the counter runs across them rather than restarting.
@@ -1624,7 +1629,7 @@ impl RustBackend {
             let referrer = reference
                 .get("uri")
                 .and_then(Value::as_str)
-                .ok_or_else(|| failure("a reference carries no uri"))?;
+                .ok_or_else(|| server_defect("a reference carries no uri"))?;
 
             if referrer != uri {
                 let file = path_of(referrer)?.display().to_string();
@@ -1688,7 +1693,7 @@ impl RustBackend {
             }
         }
 
-        Err(failure(format!(
+        Err(server_defect(format!(
             "rust-analyzer was still offering imports after {IMPORT_PASSES} passes"
         )))
     }
@@ -1819,7 +1824,7 @@ impl RustBackend {
             }
 
             let ordered = import_order(text, &offered).ok_or_else(|| {
-                failure(format!(
+                seam_refusal(format!(
                     "`{}` could be imported {} ways and neither rust-analyzer nor this file's own \
                      imports say which the moved code meant: {}",
                     name.text,
@@ -1835,7 +1840,7 @@ impl RustBackend {
 
             for title in &ordered {
                 let action = titled(&actions, &title.to_lowercase())
-                    .ok_or_else(|| failure("the import offered could not be read back"))?;
+                    .ok_or_else(|| server_defect("the import offered could not be read back"))?;
                 let resolved = self.request_settled("codeAction/resolve", action)?;
                 let trial = apply_lsp_edit(text, edits_for(&resolved, uri)?);
 
@@ -1850,7 +1855,7 @@ impl RustBackend {
             // Every path the server offered leaves the name unresolved. Writing one anyway is how a
             // successful run lands source that does not compile, so the operation says which name it
             // could not import and what it tried.
-            return Err(failure(format!(
+            return Err(seam_refusal(format!(
                 "no import rust-analyzer offered for `{}` left fewer of its {} unresolved \
                  occurrence(s) — tried {}. Writing one anyway is how a run reports success over a \
                  `use` that resolves nothing.",
@@ -1866,7 +1871,7 @@ impl RustBackend {
     /// Every identifier in the open document that the server cannot resolve, in source order.
     fn unresolved_names(&mut self, uri: &str, text: &str) -> Result<Vec<UnresolvedName>> {
         let wanted = self.unresolved_token.ok_or_else(|| {
-            failure(format!(
+            server_defect(format!(
                 "rust-analyzer's semantic token legend has no `{UNRESOLVED_TOKEN}`, so the names an \
                  extraction loses cannot be found"
             ))
@@ -1996,7 +2001,7 @@ impl RustBackend {
         }
 
         if changes.is_empty() {
-            return Err(failure(format!(
+            return Err(server_defect(format!(
                 "rust-analyzer returned no edits for {:?}",
                 op.op
             )));
@@ -2207,7 +2212,7 @@ impl RustBackend {
             .find(&declaration)
             .map(|offset| offset + placeholder.identifier_offset())
             .ok_or_else(|| {
-                failure(format!(
+                server_defect(format!(
                     "rust-analyzer did not produce a `{declaration}` to name"
                 ))
             })?;
@@ -2325,7 +2330,7 @@ fn refuse_non_adjacent(outline: &[OutlineItem], places: &[usize]) -> Result<()> 
         return Ok(());
     };
 
-    Err(failure(format!(
+    Err(seam_refusal(format!(
         "the named items are not adjacent: `{}` and `{}` have `{}` between them, and a seam is one \
          contiguous range — a span reaching from one to the other would carry everything in between.",
         outline[gap[0]].name,
@@ -2372,7 +2377,7 @@ fn refuse_foreign_encoding(encoding: &str) -> Result<()> {
     if encoding == BYTE_ENCODING {
         return Ok(());
     }
-    Err(failure(format!(
+    Err(server_defect(format!(
         "rust-analyzer settled on `{encoding}` positions, and this client counts \
          `{BYTE_ENCODING}` — every column it converted would be wrong on any line carrying a \
          character outside the BMP. Refusing rather than resolving anchors against the wrong \
@@ -2414,7 +2419,7 @@ fn absent_assist(wanted: &str, offered: &[String]) -> RestructureError {
     } else {
         format!("it offered: {}", offered.join(", "))
     };
-    failure(format!(
+    seam_refusal(format!(
         "rust-analyzer offers no \"{wanted}\" assist for the given range ({offered})"
     ))
 }
@@ -2492,7 +2497,7 @@ fn caret_at_module(text: &str, module: &str) -> Result<Range> {
         });
     }
 
-    Err(failure(format!(
+    Err(seam_refusal(format!(
         "the extraction left no `{needle}` for `to_file` to move out"
     )))
 }
@@ -2538,12 +2543,12 @@ impl LspPoint {
     /// Read a position, refusing a malformed one rather than defaulting to the top of the file —
     /// a silently wrong position would corrupt the source it is applied to.
     fn read(value: Option<&Value>) -> Result<LspPoint> {
-        let value = value.ok_or_else(|| failure("edit is missing a position"))?;
+        let value = value.ok_or_else(|| server_defect("edit is missing a position"))?;
         let field = |name: &str| {
             value
                 .get(name)
                 .and_then(Value::as_u64)
-                .ok_or_else(|| failure(format!("position is missing `{name}`")))
+                .ok_or_else(|| server_defect(format!("position is missing `{name}`")))
         };
         Ok(LspPoint {
             line: field("line")? as usize,
@@ -2591,7 +2596,7 @@ fn first_symbol_position(symbols: &Value) -> Option<Value> {
 fn path_of(uri: &str) -> Result<PathBuf> {
     uri.strip_prefix("file://")
         .map(PathBuf::from)
-        .ok_or_else(|| failure(format!("`{uri}` is not a file uri")))
+        .ok_or_else(|| server_defect(format!("`{uri}` is not a file uri")))
 }
 
 /// The symbols a range covers that a caller could name by *module path*, each with the position to
@@ -2784,7 +2789,7 @@ fn document_changes(workspace_edit: &Value) -> Vec<Value> {
 fn relative_path(uri: Option<&Value>, root: &Path) -> Result<String> {
     let uri = uri
         .and_then(Value::as_str)
-        .ok_or_else(|| failure("a document change carries no uri"))?;
+        .ok_or_else(|| server_defect("a document change carries no uri"))?;
     relative_to(uri, root)
 }
 
@@ -2795,12 +2800,12 @@ fn relative_path(uri: Option<&Value>, root: &Path) -> Result<String> {
 fn relative_to(uri: &str, root: &Path) -> Result<String> {
     let path = uri
         .strip_prefix("file://")
-        .ok_or_else(|| failure(format!("`{uri}` is not a file uri")))?;
+        .ok_or_else(|| server_defect(format!("`{uri}` is not a file uri")))?;
 
     Path::new(path)
         .strip_prefix(root)
         .map(|relative| relative.display().to_string())
-        .map_err(|_| failure(format!("`{path}` lies outside the workspace")))
+        .map_err(|_| server_defect(format!("`{path}` lies outside the workspace")))
 }
 
 /// The text edits one `documentChanges` entry carries.
@@ -2808,7 +2813,7 @@ fn edits_in(change: &Value) -> Result<Vec<LspEdit>> {
     change
         .get("edits")
         .and_then(Value::as_array)
-        .ok_or_else(|| failure("a document change carries no edits"))?
+        .ok_or_else(|| server_defect("a document change carries no edits"))?
         .iter()
         .map(read_edit)
         .collect()
@@ -2855,8 +2860,52 @@ fn choose_import<'a>(text: &str, offered: &[&'a str]) -> Option<&'a str> {
             .is_some_and(|module| modules.contains(&module))
     });
 
-    let only = *by_module.next()?;
-    by_module.next().is_none().then_some(only)
+    if let Some(only) = by_module.next() {
+        if by_module.next().is_none() {
+            return Some(only);
+        }
+        return None;
+    }
+
+    // Neither tier can see through a re-export. A crate publishing an item at its root gives one
+    // item two paths, and rust-analyzer offers the shortest: `tddy-core` carries
+    // `pub use error::{BackendError, ParseError, WorkflowError};`, so a file writing the canonical
+    // `tddy_core::error::ParseError` is offered `tddy_core::ParseError` — a different string and a
+    // different parent module for the same type. One live extraction was refused three candidates
+    // deep over exactly that.
+    //
+    // The crate the file already binds *this name* from is the evidence that settles it, and it is
+    // keyed on a binding of the contested name rather than on any binding from the crate. Keyed on
+    // the crate alone it would be worthless: almost every file imports something from `std`, so
+    // `std::string::ParseError` would match as readily as the one the file means.
+    //
+    // Third, and strictly weaker than the two above — a crate root is a coarser claim than a path,
+    // and must never outrank one. Two candidates rooted in the crate the name is bound from is
+    // still the ambiguity this function exists to refuse, because a crate holding both is no
+    // narrower. A wrong guess costs a refusal rather than bad source either way: the caller
+    // verifies each import it writes against the occurrences it was supposed to resolve.
+    let mut by_crate = offered
+        .iter()
+        .filter(|title| import_path(title).is_some_and(|path| binds_that_name(&in_scope, &path)));
+
+    let only = *by_crate.next()?;
+    by_crate.next().is_none().then_some(only)
+}
+
+/// Whether one of `in_scope` binds `path`'s own last segment from `path`'s own crate.
+fn binds_that_name(in_scope: &[String], path: &str) -> bool {
+    let (Some(root), Some(name)) = (crate_root(path), path.rsplit("::").next()) else {
+        return false;
+    };
+
+    in_scope
+        .iter()
+        .any(|bound| bound.rsplit("::").next() == Some(name) && crate_root(bound) == Some(root))
+}
+
+/// The crate a path is rooted in — `a::b::C` is `a`. `None` for an empty path.
+fn crate_root(path: &str) -> Option<&str> {
+    path.split("::").next().filter(|root| !root.is_empty())
 }
 
 /// The module a path's last segment lives in — `a::b::C` is `a::b`. `None` for a bare name.
@@ -3183,7 +3232,9 @@ fn edits_for(response: &Value, uri: &str) -> Result<Vec<LspEdit>> {
     };
 
     if raw.is_empty() {
-        return Err(failure("rust-analyzer returned no edits for the document"));
+        return Err(server_defect(
+            "rust-analyzer returned no edits for the document",
+        ));
     }
 
     raw.iter().map(read_edit).collect()
@@ -3240,7 +3291,9 @@ fn workspace_edits_for(response: &Value) -> Result<Vec<(String, Vec<LspEdit>)>> 
     };
 
     if documents.is_empty() {
-        return Err(failure("rust-analyzer returned no edits for any document"));
+        return Err(server_defect(
+            "rust-analyzer returned no edits for any document",
+        ));
     }
 
     documents
@@ -3257,7 +3310,7 @@ fn read_edit(entry: &Value) -> Result<LspEdit> {
         new_text: entry
             .get("newText")
             .and_then(Value::as_str)
-            .ok_or_else(|| failure("edit is missing `newText`"))?
+            .ok_or_else(|| server_defect("edit is missing `newText`"))?
             .to_string(),
     })
 }
@@ -3338,7 +3391,7 @@ fn refuse_inferred_placeholder(text: &str, declaration: &str) -> Result<()> {
         return Ok(());
     };
 
-    Err(failure(format!(
+    Err(server_defect(format!(
         "rust-analyzer wrote `{}` — it produced the extraction before it could infer the types the \
          signature needs, and `_` is not legal there (E0121). The crate graph was most likely still \
          loading; retrying the operation against a warm server resolves it.",
@@ -3402,7 +3455,7 @@ fn refuse_residual_placeholder(original: &str, produced: &str, name: &str) -> Re
          inside an already-extracted module when it moves."
     };
 
-    Err(failure(format!(
+    Err(server_defect(format!(
         "rust-analyzer left `{name}` behind in {} place(s) its rename could not reach, so the \
          extraction would report success over source that resolves nowhere — line(s) {}. {remedy}",
         sites.len() - before,
@@ -3605,7 +3658,7 @@ fn refuse_stranded(items: &[MovedItem]) -> Result<()> {
         return Ok(());
     }
 
-    Err(failure(format!(
+    Err(seam_refusal(format!(
         "the module would be reached by a different path than the items moved into it are now, \
          and rust-analyzer rewrites no reference it did not move: {}. Ask for `reexport` to leave the \
          old path resolving through the parent, or cut the seam where these references do not reach.",
@@ -3676,7 +3729,7 @@ fn refuse_impl_sibling_references(items: &[MovedItem]) -> Result<()> {
         return Ok(());
     }
 
-    Err(failure(format!(
+    Err(seam_refusal(format!(
         "this seam cuts an `impl` in half, and a member left behind still calls one that would move: \
          {}. The new module is written outside the `impl`, so that call would resolve nowhere and \
          rust-analyzer will not rewrite it. An `impl` body cannot hold a `mod`, so no ordering helps — \
@@ -3867,7 +3920,7 @@ fn refuse_mangled_rewrite(text: &str, module: &str, moved: &[MovedItem]) -> Resu
                 continue;
             }
             if let Some(base) = known.iter().find(|name| ident.starts_with(*name)) {
-                return Err(failure(format!(
+                return Err(server_defect(format!(
                     "the rewrite of `{base}` produced `{module}::{ident}` on line {} — the \
                      identifier was written over itself, which is a corrupted edit rather than a \
                      path. Refusing rather than reporting success over source that will not build.",
@@ -3986,7 +4039,7 @@ fn refuse_uncovered_nesting(items: &[MovedItem]) -> Result<()> {
         return Ok(());
     }
 
-    Err(failure(format!(
+    Err(seam_refusal(format!(
         "a named re-export cannot keep these paths resolving: {}. Nothing outside reaches the module \
          holding them, so there is no name the parent could re-export that would cover them. Ask for \
          `reexport: glob`, which re-exports the module too, or cut the seam so the nested item stays \
@@ -4030,7 +4083,7 @@ fn refuse_module_name_taken(text: &str, module: &str, range: Range) -> Result<()
 
     match taken {
         None => Ok(()),
-        Some(binding) => Err(failure(format!(
+        Some(binding) => Err(seam_refusal(format!(
             "`{module}` is already taken in this module by `{binding}`. A second declaration of the \
              name is `E0428` and the assist writes it without complaint, so the run would report \
              success against a crate that no longer compiles. Give the module a different name."
@@ -4148,7 +4201,7 @@ fn refuse_split_attribute_paths(text: &str, range: Range) -> Result<()> {
         return Ok(());
     }
 
-    Err(failure(format!(
+    Err(seam_refusal(format!(
         "the seam would separate an attribute from the item its string names: {}. The name resolves \
          in the scope the attribute sits in, and no reference query reports the attribute — a macro \
          builds the call out of the string's contents, so the identifier it generates has no span to \
@@ -4223,7 +4276,7 @@ fn module_bounds(source: &[String], module: &str) -> Result<ModuleBlock> {
         .iter()
         .position(|line| line.trim_start().starts_with(&header) && line.trim_end().ends_with('{'))
         .ok_or_else(|| {
-            failure(format!(
+            server_defect(format!(
                 "rust-analyzer did not write a `{header}` block where one was expected"
             ))
         })?;
@@ -4236,7 +4289,7 @@ fn module_bounds(source: &[String], module: &str) -> Result<ModuleBlock> {
         .skip(opened + 1)
         .position(|line| line.trim_end() == closing)
         .map(|offset| opened + 1 + offset)
-        .ok_or_else(|| failure(format!("`{header}` is never closed at its own indent")))?;
+        .ok_or_else(|| server_defect(format!("`{header}` is never closed at its own indent")))?;
 
     Ok(ModuleBlock {
         opened,
@@ -4348,6 +4401,13 @@ const ITEM_KEYWORDS: [&str; 8] = [
 /// method — an invariant the compiler had been enforcing, left as a comment that then contradicted the
 /// code. Nothing is narrowed here that a reference still needs, so a seam that co-locates a private
 /// helper with its only caller keeps the privacy, and a seam that does not says so out loud.
+///
+/// Two witnesses say a reference still needs it, and the second is here because the first goes
+/// stale. `MovedItem::reached_from_outside` comes from a survey of the **original** text over the
+/// **requested** range, taken before the assist ran. An assist that relocates only part of that
+/// range rewrites what it leaves behind to reach into the module it has just written, so references
+/// the survey saw *inside* the range are outside it by the time this runs. `text` is the produced
+/// parent, and it is the only witness that is not stale.
 fn restore_visibility(
     text: &str,
     module: &str,
@@ -4356,6 +4416,11 @@ fn restore_visibility(
     let mut source: Vec<String> = text.split('\n').map(str::to_string).collect();
     let block = module_bounds(&source, module)?;
     let mut report = Vec::new();
+
+    // Read once, before the narrowing below rewrites any declaration — and read from outside the
+    // block alone, because a `module::Item` mention inside the module's own body says nothing about
+    // what the parent reaches.
+    let outside = outside_the_module(&source, &block);
 
     for item in items {
         // The assist never narrows, so an item written `pub` has nothing to answer for.
@@ -4373,7 +4438,12 @@ fn restore_visibility(
             continue;
         };
 
-        if item.reached_from_outside {
+        // One live extraction on `parser.rs` ended on the second half of this condition:
+        // `struct StructuredPlan` and `fn prd_value_looks_like_md_file_path` were narrowed back to
+        // private while the assist had rewritten the parent to `planning::StructuredPlan` and
+        // `planning::prd_value_looks_like_md_file_path`. `E0603` at the next build, after the run
+        // reported `applied 1 of 1 operations`.
+        if item.reached_from_outside || reaches_through_module(&outside, module, &item.name) {
             report.push(VisibilityChange {
                 item: item.name.clone(),
                 from: if item.visibility.is_empty() {
@@ -4399,13 +4469,57 @@ fn restore_visibility(
     Ok((source.join("\n"), report))
 }
 
+/// Everything in `source` that is not inside `block`, as one text.
+fn outside_the_module(source: &[String], block: &ModuleBlock) -> String {
+    source
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index < block.opened || *index > block.closed)
+        .map(|(_, line)| line.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Whether `text` reaches `name` through `module` — `planning::StructuredPlan`.
+///
+/// Read as a path rather than as a substring, because the two neighbouring mistakes are both real
+/// source: `myplanning::StructuredPlan` names a different module, and `planning::StructuredPlanner`
+/// a different item. A qualifier in front is not one of them — `crate::planning::StructuredPlan`
+/// reaches this item, and the `::` before it is not an identifier character.
+fn reaches_through_module(text: &str, module: &str, name: &str) -> bool {
+    let path = format!("{module}::{name}");
+    let mut searched = 0;
+
+    while let Some(offset) = text[searched..].find(&path) {
+        let at = searched + offset;
+        let before = text[..at].chars().next_back();
+        let after = text[at + path.len()..].chars().next();
+        if !before.is_some_and(is_identifier_char) && !after.is_some_and(is_identifier_char) {
+            return true;
+        }
+        searched = at + path.len();
+    }
+
+    false
+}
+
 /// Whether `line` declares `name` at the visibility the assist widened it to.
 fn declares_at_widened_visibility(line: &str, name: &str) -> bool {
     let Some(rest) = line.trim_start().strip_prefix(WIDENED) else {
         return false;
     };
 
-    let tokens: Vec<&str> = rest
+    declares_item(rest, name)
+}
+
+/// Whether `line` declares `name` as an item, at whatever visibility it carries.
+///
+/// The visibility-agnostic form of [`declares_at_widened_visibility`]. That one answers "did the
+/// assist widen this", which is the narrowing pass's question; this one answers "is this item here
+/// at all", which is the relocation guard's. An item the seam moved that was already `pub` is never
+/// widened, so keying the guard on the widened form would report it as left behind.
+fn declares_item(line: &str, name: &str) -> bool {
+    let tokens: Vec<&str> = line
         .split(|character: char| !is_identifier_char(character))
         .filter(|token| !token.is_empty())
         .collect();
@@ -4413,6 +4527,49 @@ fn declares_at_widened_visibility(line: &str, name: &str) -> bool {
     tokens
         .windows(2)
         .any(|pair| ITEM_KEYWORDS.contains(&pair[0]) && pair[1] == name)
+}
+
+/// Refuse an extraction whose assist relocated less than the anchor asked for.
+///
+/// rust-analyzer decides the extraction's real extent, and it does not have to agree with the range
+/// it was handed. When it moves part of that range it rewrites the remainder **in place**, reaching
+/// into the module it has just written through qualified `module::Item` paths. One live extraction
+/// anchored at lines 10–152 came back having relocated 10–116, and the run reported
+/// `applied 1 of 1 operations` over a parser module that had been split in half.
+///
+/// With visibility now decided on the produced text that result compiles, which is precisely why it
+/// needs saying out loud: a silent partial split is a seam the author did not ask for, and a plan
+/// whose next step assumes the whole range moved is built on it. A `#carve` node promising "one
+/// module per phase" would go green here and fail its own shape assertions later.
+///
+/// Keyed on the surveyed items rather than on a line count. [`path_reached_within`] collects exactly
+/// the path-reachable items the range covered, so an item absent from the produced module is
+/// material by construction — and trailing trivia, a blank line or a comment the assist declined to
+/// carry never trips it.
+fn refuse_partial_relocation(text: &str, module: &str, anchored: &[MovedItem]) -> Result<()> {
+    let source: Vec<String> = text.split('\n').map(str::to_string).collect();
+    let block = module_bounds(&source, module)?;
+    let relocated = &source[block.opened..block.closed];
+
+    let left_behind: Vec<&str> = anchored
+        .iter()
+        .filter(|item| !relocated.iter().any(|line| declares_item(line, &item.name)))
+        .map(|item| item.name.as_str())
+        .collect();
+
+    if left_behind.is_empty() {
+        return Ok(());
+    }
+
+    Err(seam_refusal(format!(
+        "rust-analyzer relocated part of the anchored range and left {} behind: {}. It rewrote what \
+         stayed to reach into `{module}`, so the seam is split rather than extracted — the module \
+         the plan described does not exist. Anchor the range with `restructure anchors --items`, \
+         which covers whole items and their trivia, or cut the seam where the assist will carry all \
+         of it.",
+        if left_behind.len() == 1 { "an item" } else { "items" },
+        left_behind.join(", ")
+    )))
 }
 
 /// One contiguous run of `before` lines and what replaces it. `from` and `to` index `before`.
@@ -4565,8 +4722,37 @@ fn uri_of(path: &Path) -> String {
     format!("file://{}", path.display())
 }
 
+/// A refusal the author fixes by editing their plan: a name the operation needs and did not carry,
+/// an item the file does not define, a kind no assist implements.
+///
+/// The transport failures stay here too — a server that would not start, one that is not running,
+/// a connection that closed. They are not a plan defect either, but `Io` and `ServerCatchingUp`
+/// already sit beside this variant for the cases a caller routes differently, and a fourth class
+/// nobody acts on differently would be ceremony.
 fn failure(reason: impl Into<String>) -> RestructureError {
     RestructureError::MalformedPlan(reason.into())
+}
+
+/// A refusal the author fixes by cutting the seam elsewhere, or by changing the code.
+///
+/// Stranded references, an `impl` cut in half, a module name already taken, a name the file's own
+/// imports cannot disambiguate. The plan is well formed and says exactly what it meant; the code
+/// will not permit it. Every one of these messages already ends with its own remedy, and for as
+/// long as they all arrived as [`failure`] the sentence in front of that remedy told the author to
+/// go and edit a plan that was correct.
+fn seam_refusal(reason: impl Into<String>) -> RestructureError {
+    RestructureError::SeamRefused(reason.into())
+}
+
+/// A refusal nothing in the plan or the tree can fix: rust-analyzer answered, and the answer could
+/// not be used.
+///
+/// An extraction produced before the types were inferred, a rewrite that came back with an
+/// identifier written over itself, a response carrying no edits at all. The remedy these messages
+/// give is a retry against a warm server or a look at the server — neither of which is something an
+/// author does to a plan.
+fn server_defect(reason: impl Into<String>) -> RestructureError {
+    RestructureError::ServerDefect(reason.into())
 }
 
 #[cfg(test)]
@@ -5173,6 +5359,140 @@ mod tests {
         assert!(report.is_empty());
     }
 
+    /// An assist that relocates only part of the anchored range rewrites what it leaves behind to
+    /// reach into the module it just wrote. The survey feeding the narrowing ran **before** that,
+    /// over the original text, where those references were inside the range — so it reports no
+    /// outside reach for an item the produced parent now names through the module.
+    ///
+    /// One live extraction on `parser.rs` ended exactly here: `struct StructuredPlan` and
+    /// `fn prd_value_looks_like_md_file_path` were narrowed back to private while the parent had
+    /// been rewritten to `planning::StructuredPlan` and
+    /// `planning::prd_value_looks_like_md_file_path`. `E0603` at the next build, after the run
+    /// reported `applied 1 of 1 operations`. The produced text is the only witness that is not
+    /// stale, so it is the one the decision stands on.
+    #[test]
+    fn keeps_the_widening_of_an_item_the_produced_parent_reaches_through_the_module() {
+        // Given a parent the assist rewrote to reach an item through the module it wrote
+        let produced = "mod planning {\n    pub(crate) struct StructuredPlan {\n        goal: Option<String>,\n    }\n}\n\nfn parse_planning_response_impl(s: &str) -> u32 {\n    let parsed: planning::StructuredPlan = serde_json::from_str(s).unwrap();\n    0\n}\n";
+
+        // When the survey taken before the assist ran saw no reference from outside the range
+        let (restored, report) =
+            restore_visibility(produced, "planning", &[moved("StructuredPlan", "", false)])
+                .unwrap();
+
+        // Then the widening stands, because narrowing it is `E0603` on the line above
+        assert!(
+            restored.contains("pub(crate) struct StructuredPlan"),
+            "{restored}"
+        );
+        assert_eq!(report.len(), 1);
+        assert_eq!(report[0].item, "StructuredPlan");
+    }
+
+    /// The narrowing rule itself is right and stays: a helper that travelled with its only caller
+    /// keeps the privacy the compiler was enforcing. A fix that simply stopped narrowing would pass
+    /// the test above and undo that.
+    #[test]
+    fn narrows_an_item_the_produced_parent_does_not_reach_through_the_module() {
+        // Given a produced parent that names the module but never reaches this item through it
+        let produced = "mod planning {\n    pub(crate) fn prd_value_looks_like_md_file_path(p: &str) -> bool {\n        p.ends_with(\".md\")\n    }\n}\n\nfn unrelated() -> u32 {\n    0\n}\n";
+
+        // When the item was written private and nothing outside reaches it
+        let (restored, report) = restore_visibility(
+            produced,
+            "planning",
+            &[moved("prd_value_looks_like_md_file_path", "", false)],
+        )
+        .unwrap();
+
+        // Then it goes back to private
+        assert!(
+            restored.contains("    fn prd_value_looks_like_md_file_path(p: &str) -> bool {"),
+            "{restored}"
+        );
+        assert!(report.is_empty());
+    }
+
+    /// A mention inside the module's own body is not an outside reach. The module referring to its
+    /// own item — or to `planning::` from within `planning` — says nothing about the parent.
+    #[test]
+    fn reads_no_outside_reach_from_a_mention_inside_the_module_itself() {
+        // Given a module whose own body names the item through the module path
+        let produced = "mod planning {\n    pub(crate) struct StructuredPlan;\n    fn build() -> planning::StructuredPlan {\n        planning::StructuredPlan\n    }\n}\n\nfn unrelated() -> u32 {\n    0\n}\n";
+
+        // When nothing outside the module reaches it
+        let (restored, report) =
+            restore_visibility(produced, "planning", &[moved("StructuredPlan", "", false)])
+                .unwrap();
+
+        // Then the mention inside the module does not hold the widening open
+        assert!(
+            restored.contains("    struct StructuredPlan;"),
+            "{restored}"
+        );
+        assert!(report.is_empty());
+    }
+
+    /// The other half of the partial relocation, and the one the author has to know about.
+    /// Visibility is now decided on the produced text, so the result compiles — but it is not what
+    /// the plan described. An anchor covering six items that yields a module holding four has left
+    /// two behind, reaching into the module through qualified paths, and the seam the author asked
+    /// for does not exist. A `#carve` node whose contract is "one module per phase" would report
+    /// success and fail its own shape assertions.
+    ///
+    /// Keyed on a surveyed item rather than on a line count: the survey holds exactly the
+    /// path-reachable items the range covered, so an item missing from the produced module is
+    /// material by construction, and trailing trivia never trips it.
+    #[test]
+    fn refuses_an_assist_that_left_an_anchored_item_behind() {
+        // Given a produced file whose module holds one of the two items the range covered
+        let produced = "mod planning {\n    pub(crate) struct StructuredPlan;\n}\n\nfn parse_planning_response_impl(s: &str) -> planning::StructuredPlan {\n    planning::StructuredPlan\n}\n";
+        let anchored = [
+            moved("StructuredPlan", "", true),
+            moved("parse_planning_response_impl", "", false),
+        ];
+
+        // When what the assist wrote is held against what the anchor asked for
+        let refusal = refuse_partial_relocation(produced, "planning", &anchored)
+            .expect_err("an item left behind is refused");
+
+        // Then it is a seam refusal naming the item that stayed
+        assert!(
+            matches!(refusal, RestructureError::SeamRefused(_)),
+            "{refusal:?}"
+        );
+        assert!(
+            refusal.to_string().contains("parse_planning_response_impl"),
+            "{refusal}"
+        );
+    }
+
+    #[test]
+    fn accepts_a_relocation_that_carried_every_anchored_item() {
+        // Given a produced module holding both items the range covered
+        let produced = "mod planning {\n    pub(crate) struct StructuredPlan;\n    pub(crate) fn parse(s: &str) -> u32 {\n        0\n    }\n}\n";
+        let anchored = [
+            moved("StructuredPlan", "", false),
+            moved("parse", "", false),
+        ];
+
+        // Then nothing is refused
+        assert!(refuse_partial_relocation(produced, "planning", &anchored).is_ok());
+    }
+
+    /// An item the range held inside an inline module of its own travels nested, so it is declared
+    /// deeper in the block rather than at its top level. Looking only at the block's own level
+    /// would report every one of them as left behind.
+    #[test]
+    fn finds_an_anchored_item_the_assist_nested_inside_an_inline_module() {
+        // Given a produced module whose own body holds the inline module the range covered
+        let produced = "mod grouped {\n    pub(crate) mod inner {\n        pub(crate) fn tier(v: f64) -> u32 {\n            0\n        }\n    }\n}\n";
+        let anchored = [moved_within("tier", "inner", false)];
+
+        // Then the nested item counts as relocated
+        assert!(refuse_partial_relocation(produced, "grouped", &anchored).is_ok());
+    }
+
     #[test]
     fn keeps_the_widening_of_an_item_something_outside_the_module_reaches() {
         let widened = "mod rendering {\n    pub(crate) fn clamp(v: f64) -> f64 { v }\n}\n";
@@ -5242,6 +5562,76 @@ mod tests {
         let lines: Vec<&str> = restored.split('\n').collect();
         assert_eq!(lines[0], "pub(crate) fn helper(v: f64) -> f64 { v }");
         assert_eq!(lines[3], "    fn helper(v: f64) -> f64 { v }");
+    }
+
+    /// A reader acts on the class, and every class currently says the same wrong thing. A module
+    /// name already taken is a fact about the code the seam is being cut in — the plan asked for
+    /// something the file will not permit — and "plan is malformed" sends the author to edit a plan
+    /// that is correct. `status.rs` already refuses to let this distinction be lost at the
+    /// transport boundary; it has to survive being made.
+    #[test]
+    fn a_seam_refusal_does_not_tell_the_author_their_plan_is_malformed() {
+        // Given a file that already declares the module an extraction wants to write
+        let text = "mod grouped;\npub fn foo() -> u32 {\n    1\n}\n";
+        let range = Range {
+            start: Position { line: 2, col: 1 },
+            end: Position { line: 4, col: 2 },
+        };
+
+        // When the seam is refused for that collision
+        let refusal = refuse_module_name_taken(text, "grouped", range)
+            .expect_err("a taken module name is refused");
+
+        // Then it is a seam refusal, and it does not blame the plan
+        assert!(
+            matches!(refusal, RestructureError::SeamRefused(_)),
+            "{refusal:?}"
+        );
+        assert!(
+            !refusal.to_string().contains("plan is malformed"),
+            "{refusal}"
+        );
+    }
+
+    /// The other half of the same distinction. rust-analyzer writing `_` into a signature is a
+    /// defect in the server's answer, and the remedy the message already gives — retry against a
+    /// warm server — is not something an author does to a plan.
+    #[test]
+    fn a_defect_in_the_servers_answer_is_not_reported_as_a_defect_in_the_plan() {
+        // Given an extraction rust-analyzer produced before it could infer the signature
+        let produced = "fn fun_name(v: _) -> _ {\n    v\n}\n";
+
+        // When the run refuses it
+        let refusal = refuse_inferred_placeholder(produced, "fn fun_name")
+            .expect_err("an inferred placeholder is refused");
+
+        // Then it is a server defect, and it does not blame the plan
+        assert!(
+            matches!(refusal, RestructureError::ServerDefect(_)),
+            "{refusal:?}"
+        );
+        assert!(
+            !refusal.to_string().contains("plan is malformed"),
+            "{refusal}"
+        );
+    }
+
+    /// The class that keeps its name. An operation arriving without the name it needs is a plan
+    /// that does not say enough, and editing the plan is exactly the remedy.
+    #[test]
+    fn a_plan_that_does_not_say_enough_is_still_reported_as_a_malformed_plan() {
+        // Given the refusal raised when an operation carries no name
+        let refusal = failure("the operation needs a name");
+
+        // Then it stays a malformed plan
+        assert!(
+            matches!(refusal, RestructureError::MalformedPlan(_)),
+            "{refusal:?}"
+        );
+        assert!(
+            refusal.to_string().contains("plan is malformed"),
+            "{refusal}"
+        );
     }
 
     #[test]
@@ -5424,7 +5814,7 @@ mod tests {
         let outcome = refuse_mangled_rewrite(text, "seeded_clone_guard", &moved);
 
         let message = match outcome {
-            Err(RestructureError::MalformedPlan(m)) => m,
+            Err(RestructureError::ServerDefect(m)) => m,
             other => panic!("expected a refusal, got {other:?}"),
         };
         assert!(message.contains("SeededCloneGuard"), "{message}");
@@ -5522,6 +5912,66 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         let chosen = choose_import("use c::d::Thing;\nuse a::b::Other;\n", &offered);
 
         assert_eq!(chosen, Some("Import `c::d::Thing`"));
+    }
+
+    /// A crate that re-exports an item at its root gives one item two paths, and rust-analyzer
+    /// offers the shortest. `tddy-core` publishes `pub use error::{BackendError, ParseError,
+    /// WorkflowError};`, so a file writing the canonical `tddy_core::error::ParseError` is offered
+    /// `tddy_core::ParseError` — a different string for the same type. Neither the exact-path tier
+    /// nor the module tier can see that, and one live extraction was refused three candidates deep
+    /// over it. The crate the file already binds the name from is the evidence that settles it.
+    #[test]
+    fn settles_a_contested_name_on_the_crate_the_file_already_binds_it_from() {
+        // Given the three paths rust-analyzer offered for `ParseError`, one of them a re-export
+        let offered = [
+            "Import `tddy_core::ParseError`",
+            "Import `std::string::ParseError`",
+            "Import `chrono::ParseError`",
+        ];
+
+        // When the file that lost the name binds it canonically from one of those crates
+        let chosen = choose_import("use tddy_core::error::ParseError;\n", &offered);
+
+        // Then the candidate rooted in that same crate is the one the moved code meant
+        assert_eq!(chosen, Some("Import `tddy_core::ParseError`"));
+    }
+
+    /// Two candidates rooted in the crate the name is bound from is an ambiguity the crate root
+    /// cannot settle — the tier narrows by crate, and a crate holding both is no narrower.
+    #[test]
+    fn settles_nothing_when_two_candidates_share_the_crate_the_name_is_bound_from() {
+        // Given two candidates from one crate and one from another
+        let offered = [
+            "Import `tddy_core::ParseError`",
+            "Import `tddy_core::json::ParseError`",
+            "Import `chrono::ParseError`",
+        ];
+
+        // When the file binds the name from the crate that offers two of them
+        let chosen = choose_import("use tddy_core::error::ParseError;\n", &offered);
+
+        // Then nothing is chosen, because the crate does not say which of its two was meant
+        assert_eq!(chosen, None);
+    }
+
+    /// The crate tier keys on a binding **of the same name**, not on any binding from that crate.
+    /// Keyed on any binding it would be worthless here: almost every file imports something from
+    /// `std`, so `std::string::ParseError` would match as readily as the one the file means, and the
+    /// tier would refuse every time it was needed.
+    #[test]
+    fn keys_the_crate_tier_on_a_binding_of_the_contested_name() {
+        // Given two candidates, one rooted in a crate this file imports other names from
+        let offered = [
+            "Import `tddy_core::ParseError`",
+            "Import `std::string::ParseError`",
+        ];
+
+        // When the file imports something unrelated from `std` and binds the name from `tddy_core`
+        let text = "use std::collections::HashMap;\nuse tddy_core::error::ParseError;\n";
+        let chosen = choose_import(text, &offered);
+
+        // Then the `std` import is not evidence about `ParseError`, and the binding of that name is
+        assert_eq!(chosen, Some("Import `tddy_core::ParseError`"));
     }
 
     #[test]
@@ -5675,13 +6125,13 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
 
         // Then the failure points at the range
         match error {
-            RestructureError::MalformedPlan(message) => {
+            RestructureError::SeamRefused(message) => {
                 assert!(message.contains("extract into function"), "{message}");
                 assert!(message.contains("given range"), "{message}");
                 // The evidence that separates a wrong title from an unrefactorable range.
                 assert!(message.contains("Extract into variable"), "{message}");
             }
-            other => panic!("expected MalformedPlan, got {other:?}"),
+            other => panic!("expected SeamRefused, got {other:?}"),
         }
     }
 

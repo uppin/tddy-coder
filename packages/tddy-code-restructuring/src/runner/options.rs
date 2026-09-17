@@ -16,6 +16,7 @@ usage:
   restructure check  <plan.jsonl> [--deep] [--budget LINES]
   restructure anchors <file.rs> --items A,B,C
   restructure verify --against <git-ref>
+  restructure snapshot <plan.jsonl>
 
   --dry-run     resolve every operation and print the edits without writing anything
   --resume      continue a plan whose journal already exists
@@ -38,6 +39,7 @@ pub enum Command {
     Check,
     Anchors,
     Verify,
+    Snapshot,
 }
 
 /// What a restructuring run was asked for, and where its live account goes.
@@ -49,8 +51,8 @@ pub enum Command {
 /// command-line front end.
 pub struct Options {
     pub command: Command,
-    /// The one positional argument: a plan for `apply`, `status` and `check`, a source file for
-    /// `anchors`, and nothing at all for `verify`.
+    /// The one positional argument: a plan for `apply`, `status`, `check` and `snapshot`, a
+    /// source file for `anchors`, and nothing at all for `verify`.
     pub target: Option<PathBuf>,
     pub dry_run: bool,
     pub resume: bool,
@@ -127,6 +129,7 @@ pub fn command_of(args: &[String]) -> Command {
         Some("check") => Command::Check,
         Some("anchors") => Command::Anchors,
         Some("verify") => Command::Verify,
+        Some("snapshot") => Command::Snapshot,
         _ => Command::Apply,
     }
 }

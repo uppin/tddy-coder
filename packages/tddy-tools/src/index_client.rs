@@ -32,8 +32,28 @@ const TDDY_INDEX_SOCKET: &str = "TDDY_INDEX_SOCKET";
 /// Run `args` against the warm daemon if one has been named, else against today's cold path.
 pub(crate) async fn run_restructure(args: RestructureArgs) -> Result<()> {
     match warm_index_socket(std::env::var(TDDY_INDEX_SOCKET).ok().as_deref()) {
-        Some(socket) => restructure_at(&socket, args).await,
-        None => tddy_code_restructuring::restructure_cli::run(args).await,
+        Some(socket) if !answered_without_an_index(&args.command) => {
+            restructure_at(&socket, args).await
+        }
+        _ => tddy_code_restructuring::restructure_cli::run(args).await,
+    }
+}
+
+/// Whether this process answers a command itself, whatever the environment names.
+///
+/// `snapshot` re-hashes the files a plan's header names against the working tree. There is no seam
+/// to resolve and no index behind it — nothing a warm daemon holds that this process does not — so
+/// it runs here rather than dialling a socket to be told what `sha256` already knows. Routed before
+/// the dial rather than as an arm of [`restructure_at`], because a run that failed to reach a
+/// daemon it never needed would be a refusal invented by this function.
+fn answered_without_an_index(command: &RestructureCommand) -> bool {
+    match command {
+        RestructureCommand::Snapshot(_) => true,
+        RestructureCommand::Apply(_)
+        | RestructureCommand::Status(_)
+        | RestructureCommand::Check(_)
+        | RestructureCommand::Anchors(_)
+        | RestructureCommand::Verify(_) => false,
     }
 }
 
@@ -73,6 +93,16 @@ async fn restructure_at(socket: &Path, args: RestructureArgs) -> Result<()> {
         RestructureCommand::Status(plan) => self::status(&mut client, root, plan).await,
         RestructureCommand::Anchors(anchors) => self::anchors(&mut client, root, anchors).await,
         RestructureCommand::Verify(verify) => self::verify(&mut client, root, verify).await,
+        // `answered_without_an_index` routes this away before the dial above, so a caller reaching
+        // here has asked this function directly. It still gets the answer, from the same place the
+        // routed path takes it: there is no `Snapshot` RPC to reach for, and inventing one would
+        // put a socket in front of a hash of a file this process can read.
+        RestructureCommand::Snapshot(snapshot) => {
+            tddy_code_restructuring::restructure_cli::run(RestructureArgs {
+                command: RestructureCommand::Snapshot(snapshot),
+            })
+            .await
+        }
     }
 }
 
@@ -138,7 +168,11 @@ async fn apply(
     while let Some(event) = events.message().await.map_err(refused)? {
         rendered.event(&event)?;
     }
-    Ok(())
+    // Draining the stream is not the same as the run having gone well, which is what this used to
+    // assume. A refused operation does end the stream with an error and reaches the `?` above, but
+    // an apply that performed nothing, or one whose terminal event never arrived, reached here and
+    // exited zero.
+    rendered.verdict_on_outcome()
 }
 
 /// How far a plan's journal got.

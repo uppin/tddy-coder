@@ -1,4 +1,4 @@
-//! `restructure` subcommands: apply/check/status/anchors/verify JSONL plans.
+//! `restructure` subcommands: apply/check/status/anchors/verify/snapshot JSONL plans.
 //!
 //! **The one module in this crate that prints.** The library returns its results and reports its
 //! live account into the sinks this module installs, because a front end that speaks a protocol on
@@ -31,7 +31,7 @@ use crate::runner::{Command, Options, Outcome};
 
 pub use crate::restructure_args::{
     RestructureAnchorsArgs, RestructureArgs, RestructureCheckArgs, RestructureCommand,
-    RestructurePlanArgs, RestructureVerifyArgs,
+    RestructurePlanArgs, RestructureSnapshotArgs, RestructureVerifyArgs,
 };
 
 pub async fn run(args: RestructureArgs) -> Result<()> {
@@ -104,6 +104,12 @@ fn verdict_on(outcome: &Outcome) -> Result<()> {
         Outcome::Checked(findings) if !findings.is_empty() => {
             Err(anyhow::anyhow!(console::findings_refusal(findings.len())))
         }
+        // `applied` under `total` is not the test: a resume and a `--from` both set out to do the
+        // operations left rather than the whole plan. Having applied *nothing*, without having
+        // been told to stop short, is — and it used to exit zero.
+        Outcome::Applied(summary) if summary.applied == 0 && !summary.stopped_early => Err(
+            anyhow::anyhow!(console::nothing_applied_refusal(summary.total)),
+        ),
         Outcome::Verified(comparison) if !comparison.holds() => {
             Err(anyhow::anyhow!(console::comparison_refusal(comparison)))
         }
@@ -264,7 +270,10 @@ fn needs_lsp_client(options: &Options) -> bool {
     match options.command {
         Command::Apply | Command::Anchors => true,
         Command::Check => options.deep,
-        Command::Status | Command::Verify => false,
+        // A snapshot re-hashes the files the plan's header names against the working tree. There
+        // is no seam to resolve and nothing to ask a server about, so starting one would cost
+        // minutes of indexing to produce an answer `sha256` already has.
+        Command::Status | Command::Verify | Command::Snapshot => false,
     }
 }
 
@@ -327,6 +336,68 @@ mod tests {
         assert!(!needs_lsp_client(&parse(&["check", "plan.jsonl"])));
         assert!(!needs_lsp_client(&parse(&["status", "plan.jsonl"])));
         assert!(!needs_lsp_client(&parse(&["verify", "--against", "HEAD"])));
+    }
+
+    /// The cold path's half of the same judgement the warm one makes in `verdict_on_outcome`.
+    /// Both front ends have to agree, or `TDDY_INDEX_SOCKET` changes whether a run that did
+    /// nothing is reported as a success.
+    #[test]
+    fn an_apply_that_performed_no_operation_is_a_failed_run() {
+        // Given a run that applied none of its three operations, unasked
+        let outcome = Outcome::Applied(crate::runner::RunSummary {
+            applied: 0,
+            total: 3,
+            stopped_early: false,
+        });
+
+        // Then the run failed, saying what it was asked for and what it did
+        assert_eq!(
+            verdict_on(&outcome)
+                .expect_err("an apply that did nothing fails")
+                .to_string(),
+            "0 of 3 operation(s) were applied, and the run was not asked to stop short"
+        );
+    }
+
+    /// `--stop-after` is the run doing what it was told, which the apply loop says in as many
+    /// words where it sets the flag. A partial run that was asked for is not a defective one.
+    #[test]
+    fn an_apply_stopped_where_it_was_told_to_stop_is_a_successful_run() {
+        // Given a run that stopped at the limit it was given
+        let outcome = Outcome::Applied(crate::runner::RunSummary {
+            applied: 1,
+            total: 3,
+            stopped_early: true,
+        });
+
+        // Then the run succeeded
+        assert!(verdict_on(&outcome).is_ok());
+    }
+
+    /// A resume and a `--from` set out to do the operations left, not the whole plan, so `applied`
+    /// under `total` is ordinary. Keying the verdict on that instead would fail every resume.
+    #[test]
+    fn an_apply_that_finished_the_operations_left_to_it_is_a_successful_run() {
+        // Given a resumed run that carried out the two operations remaining in a five-op plan
+        let outcome = Outcome::Applied(crate::runner::RunSummary {
+            applied: 2,
+            total: 5,
+            stopped_early: false,
+        });
+
+        // Then the run succeeded
+        assert!(verdict_on(&outcome).is_ok());
+    }
+
+    /// The whole point of the subcommand is that it is cheap. A snapshot reads bytes and hashes
+    /// them; starting rust-analyzer for it would cost the six-to-ten-minute crate-graph load this
+    /// command exists to let an author avoid paying twice.
+    #[test]
+    fn a_snapshot_needs_no_language_server() {
+        // Given a snapshot of a plan
+        // When it is asked whether it needs rust-analyzer
+        // Then it does not — it reads the tree and hashes it
+        assert!(!needs_lsp_client(&parse(&["snapshot", "plan.jsonl"])));
     }
 
     /// Kept as an assertion on the number because it is a policy, not an incidental default.

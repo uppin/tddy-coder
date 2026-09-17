@@ -23,12 +23,12 @@
 //! [`comparison_refusal`]) and the judgement stays with the caller that has to act on it.
 
 use crate::edit::{Range, VisibilityChange};
-use crate::runner::{Finding, Outcome, PlanProgress, RunSummary};
+use crate::runner::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 use crate::verify::Comparison;
 
 /// Every line a whole run's result amounts to, in the order a reader reads them.
 ///
-/// One arm per [`Outcome`] variant, because the five entry points answer five different questions.
+/// One arm per [`Outcome`] variant, because the six entry points answer six different questions.
 /// A front end holding an `Outcome` — from a library call, or folded out of a stream of events —
 /// writes these wherever it writes.
 pub fn outcome(outcome: &Outcome, rehearsal: bool) -> Vec<String> {
@@ -38,7 +38,26 @@ pub fn outcome(outcome: &Outcome, rehearsal: bool) -> Vec<String> {
         Outcome::Checked(found) => findings(found),
         Outcome::Anchored { file, range } => vec![anchor(file, *range)],
         Outcome::Verified(comparison) => self::comparison(comparison),
+        Outcome::Snapshotted(rewrite) => snapshot_rewrite(rewrite),
     }
+}
+
+/// What a `snapshot` did to a plan's header.
+///
+/// A plan that was already current says so rather than saying nothing: a silent no-op is
+/// indistinguishable from a subcommand that did not run, the reason [`NO_FINDINGS`] exists.
+pub fn snapshot_rewrite(rewrite: &SnapshotRewrite) -> Vec<String> {
+    vec![if rewrite.rewritten {
+        format!(
+            "rewrote the snapshot header of {} over {} file(s)",
+            rewrite.plan, rewrite.paths
+        )
+    } else {
+        format!(
+            "{} already snapshots the working tree over {} file(s)",
+            rewrite.plan, rewrite.paths
+        )
+    }]
 }
 
 /// What the whole run amounted to.
@@ -101,6 +120,28 @@ pub const NO_FINDINGS: &str = "no findings";
 pub fn findings_refusal(counted: usize) -> String {
     format!("{counted} finding(s) — see above. Nothing was written.")
 }
+
+/// Why an apply that carried out no operation is a failed run.
+///
+/// An apply used to be a successful run whenever nothing raised, so a run that performed nothing
+/// at all exited zero and a script could not tell it from one that did the work. `--stop-after` is
+/// excluded by its caller rather than here: a run that stopped where it was told to stop did what
+/// it was asked, which is the same judgement the apply loop makes where it sets that flag.
+///
+/// The wording is published and the judgement is not, exactly as for [`findings_refusal`]: both
+/// front ends mean the same by this sentence, and each decides for itself what it does about it.
+pub fn nothing_applied_refusal(total: usize) -> String {
+    format!("0 of {total} operation(s) were applied, and the run was not asked to stop short")
+}
+
+/// Why an apply whose account never arrived is a failed run.
+///
+/// Only the streaming front end can see this: the terminal event is a run's account of itself, and
+/// a stream that ends without one leaves its caller unable to say whether the plan ran. The same
+/// hole an event carrying no field at all would leave, and refused for the same reason.
+pub const NO_OUTCOME_REFUSAL: &str =
+    "the run ended without saying what it did — no outcome reached this caller, so whether the \
+     plan was applied is unknown";
 
 /// What holding the tree against a git ref found.
 ///

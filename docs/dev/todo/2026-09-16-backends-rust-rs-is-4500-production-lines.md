@@ -11,6 +11,14 @@ Measured on **production** lines (everything before the first `#[cfg(test)]`, at
 | `tddy-code-restructuring/src/backends/lsp_bridge.rs` | 99 | 72 |
 | `tddy-code-restructuring/src/backends/mod.rs` | 8 | 0 |
 
+**Update 2026-09-17:** now **4,757** production lines. The
+`2026-09-17-restructure-refusal-truth-and-authoring-gates` changeset added +186 — two refusal
+constructors, a third tier in `choose_import` with two helpers, two helpers behind
+`restore_visibility`, and `refuse_partial_relocation` with its own declaration reader. It moved and
+reorganised nothing, deliberately, so the seam table below still holds — though the line numbers in
+it have shifted by that much. This is the third consecutive change to grow the file without adding
+an operation.
+
 Nine times the ~500-line guideline, and it is the file every change to this crate lands in: the
 warm-daemon work grew it by 60 lines without adding a single operation, purely from publishing
 `ServerChatter` and threading the cancellation token to the bridge. `runner.rs` had the same shape

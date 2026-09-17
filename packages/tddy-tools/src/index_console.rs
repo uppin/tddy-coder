@@ -59,6 +59,9 @@ pub(crate) struct Rendered {
     /// True when the run was a rehearsal, which decides whether it "resolved" or "applied".
     rehearsal: bool,
     findings: usize,
+    /// The terminal event, once it has arrived. `None` is itself an answer — see
+    /// [`Self::verdict_on_outcome`].
+    outcome: Option<RunOutcome>,
     /// When this run last narrated something, which is what the next line's stamp is measured
     /// against.
     ///
@@ -74,6 +77,7 @@ impl Rendered {
         Self {
             rehearsal,
             findings: 0,
+            outcome: None,
             narrated: None,
         }
     }
@@ -138,7 +142,12 @@ impl Rendered {
     }
 
     /// What the whole run amounted to.
-    fn outcome(&self, outcome: &RunOutcome) {
+    ///
+    /// Kept as well as rendered, because it is what [`Self::verdict_on_outcome`] judges: a run
+    /// whose account never arrived and one that arrived saying nothing ran are different failures,
+    /// and both used to exit zero.
+    fn outcome(&mut self, outcome: &RunOutcome) {
+        self.outcome = Some(*outcome);
         for line in console::run_summary(&a_run_summary(outcome), self.rehearsal) {
             say(&line);
         }
@@ -147,6 +156,28 @@ impl Rendered {
     fn finding(&mut self, finding: &Finding) {
         self.findings += 1;
         say(&console::finding(&a_finding(finding)));
+    }
+
+    /// Whether an apply that ran to the end of its stream is a successful run.
+    ///
+    /// The counterpart of [`Self::verdict_on_findings`], and the reason an apply no longer ends on
+    /// `Ok(())` the moment its stream is drained. Two ways to fail, and neither raised before:
+    /// the account never arrived, or it arrived saying no operation ran.
+    ///
+    /// `applied` under `total` on its own is **not** a failure. A resume and a `--from` both set
+    /// out to do the operations left rather than the whole plan, and `RunOutcome` carries no way
+    /// to tell those from a truncated run — so the verdict keys on having done nothing at all,
+    /// which neither of them produces while there is work left.
+    pub(crate) fn verdict_on_outcome(&self) -> Result<()> {
+        let Some(outcome) = self.outcome else {
+            return Err(anyhow::anyhow!(console::NO_OUTCOME_REFUSAL));
+        };
+        if outcome.applied == 0 && !outcome.stopped_early {
+            return Err(anyhow::anyhow!(console::nothing_applied_refusal(
+                outcome.total as usize
+            )));
+        }
+        Ok(())
     }
 
     /// Whether a check that ran to the end of its stream is a successful run.
@@ -298,6 +329,98 @@ mod tests {
                 .contains("disagree about code_index.proto"),
             "the refusal did not name the schema disagreement"
         );
+    }
+
+    fn outcome_event(applied: u32, total: u32, stopped_early: bool) -> RestructureEvent {
+        RestructureEvent {
+            event: Some(restructure_event::Event::Outcome(RunOutcome {
+                applied,
+                total,
+                stopped_early,
+            })),
+        }
+    }
+
+    /// An apply used to end on `Ok(())` once its stream was drained, so its exit status came
+    /// entirely from the stream erroring. A run that performed no operation at all then reported
+    /// success, and a script could not tell it from one that did the work.
+    #[test]
+    fn an_apply_that_performed_no_operation_is_a_failed_run() {
+        // Given a rendered apply told that none of its three operations ran
+        let mut rendered = Rendered::new(false);
+        rendered
+            .event(&outcome_event(0, 3, false))
+            .expect("the event renders");
+
+        // When its verdict is read
+        let verdict = rendered.verdict_on_outcome();
+
+        // Then the run failed, saying what it was asked for and what it did
+        assert_eq!(
+            verdict
+                .expect_err("an apply that did nothing fails")
+                .to_string(),
+            "0 of 3 operation(s) were applied, and the run was not asked to stop short"
+        );
+    }
+
+    /// The terminal event is the run's account of itself. A stream that ends without one has left
+    /// the caller with no idea whether the plan ran, which is the same hole `event`'s `None` arm
+    /// refuses for a malformed event.
+    #[test]
+    fn an_apply_whose_stream_ended_without_an_outcome_is_a_failed_run() {
+        // Given a rendered apply that was told nothing at all
+        let rendered = Rendered::new(false);
+
+        // When its verdict is read
+        let verdict = rendered.verdict_on_outcome();
+
+        // Then the run failed, naming the missing account rather than the plan
+        assert!(verdict
+            .expect_err("a run with no outcome fails")
+            .to_string()
+            .contains("ended without saying what it did"));
+    }
+
+    #[test]
+    fn an_apply_that_carried_out_its_plan_is_a_successful_run() {
+        // Given a rendered apply that applied every operation
+        let mut rendered = Rendered::new(false);
+        rendered
+            .event(&outcome_event(3, 3, false))
+            .expect("the event renders");
+
+        // Then the run succeeded
+        assert!(rendered.verdict_on_outcome().is_ok());
+    }
+
+    /// `--stop-after` is the run doing what it was told, and a partial run asked for is not a
+    /// defective one — the apply loop states exactly that where it sets the flag.
+    #[test]
+    fn an_apply_stopped_where_it_was_told_to_stop_is_a_successful_run() {
+        // Given a rendered apply that stopped at the limit it was given
+        let mut rendered = Rendered::new(false);
+        rendered
+            .event(&outcome_event(1, 3, true))
+            .expect("the event renders");
+
+        // Then the run succeeded
+        assert!(rendered.verdict_on_outcome().is_ok());
+    }
+
+    /// A resume, or a `--from`, sets out to do the operations left rather than the whole plan, so
+    /// `applied` under `total` is ordinary there. The verdict keys on having done *nothing*, which
+    /// those cannot produce while there is anything left to do.
+    #[test]
+    fn an_apply_that_finished_the_operations_left_to_it_is_a_successful_run() {
+        // Given a rendered apply that carried out two of a five-operation plan's remaining work
+        let mut rendered = Rendered::new(false);
+        rendered
+            .event(&outcome_event(2, 5, false))
+            .expect("the event renders");
+
+        // Then the run succeeded
+        assert!(rendered.verdict_on_outcome().is_ok());
     }
 
     fn finding_event(operation: u32, detail: &str) -> RestructureEvent {

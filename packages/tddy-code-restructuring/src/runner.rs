@@ -19,9 +19,9 @@ mod outcome;
 mod rehearsal;
 
 pub use comparison::verify;
-pub use entry_points::{anchors, apply, check, dispatch, registry_for, run, status};
+pub use entry_points::{anchors, apply, check, dispatch, registry_for, run, snapshot, status};
 pub use options::{command_of, parse_options, Command, Options};
-pub use outcome::{Finding, Outcome, PlanProgress, RunSummary};
+pub use outcome::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 
 use crate::apply::{apply_workspace_edit, ensure_git_worktree, hash_touched_files};
 use crate::journal::{Journal, JournalRecord, ResumeDecision};

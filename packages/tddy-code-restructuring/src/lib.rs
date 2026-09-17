@@ -34,6 +34,23 @@ pub use registry::{BackendRegistry, LanguageBackend};
 pub enum RestructureError {
     #[error("plan is malformed: {0}")]
     MalformedPlan(String),
+    /// The plan is well formed and the code will not permit this cut.
+    ///
+    /// Kept apart from [`RestructureError::MalformedPlan`] for the reason
+    /// [`RestructureError::ServerNotSettled`] already states, applied to the other large family of
+    /// refusals: a malformed plan is fixed by editing the plan, and a seam the code refuses is fixed
+    /// by cutting it elsewhere or by changing the code. Stranded references, an `impl` cut in half,
+    /// a module name already taken, an import the file's own bindings cannot disambiguate — none of
+    /// them is a defect in the plan, and every one of them used to say it was.
+    #[error("this seam cannot be cut here: {0}")]
+    SeamRefused(String),
+    /// rust-analyzer answered, and the answer could not be used.
+    ///
+    /// An extraction produced before the types were inferred, a rewrite that came back mangled, a
+    /// response carrying no edits. The remedy is to retry against a warm server or to look at the
+    /// server, and neither is something an author does to a plan.
+    #[error("rust-analyzer's answer was unusable: {0}")]
+    ServerDefect(String),
     #[error("plan carries code text in field `{field}` — plans hold intents only")]
     CodeTextInPlan { field: String },
     #[error("snapshot mismatch for {path}: plan expected {expected}, working tree has {actual}")]

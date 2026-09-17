@@ -149,3 +149,43 @@ fix is local and belongs in the test file (bind the two names there), not in the
 longer uses either in its lib target — carrying them would trade a resolution error for an
 unused-import error. Worth knowing before the next seam: **check the extracted test modules, not
 only the lib, after a seam that moves proto converters.**
+
+## D10 — a re-exported path is a different string for the same item
+
+Found 2026-09-17, by the `#carve` node 2 spike on `packages/tddy-workflow-recipes/src/parser.rs`.
+The same shape as D8, and the entry above predicted it: *"the remaining obstacles are all in the
+import-restoration pass, not in the assist or the anchors."*
+
+Refused, and wrongly:
+
+```
+Error: plan is malformed: `ParseError` could be imported 3 ways and neither rust-analyzer nor this
+file's own imports say which the moved code meant: Import `tddy_core::ParseError`, Import
+`std::string::ParseError`, Import `chrono::ParseError`
+```
+
+The file imports `use tddy_core::error::ParseError;` — the canonical path. `tddy-core` also
+re-exports the type at its root (`packages/tddy-core/src/lib.rs:80`,
+`pub use error::{BackendError, ParseError, WorkflowError};`), and rust-analyzer offers the *shortest*
+path, `tddy_core::ParseError`. `choose_import` compared paths by **string equality**, so the exact
+tier missed; the module tier then compared `tddy_core` against `tddy_core::error` and missed too.
+One item under two names, read as two candidates.
+
+Where D8 was "the server offers a path that binds nothing", this is "the server offers a path that
+binds the same thing under another spelling". Both defeat a lexical comparison, and both are settled
+from evidence the file already carries.
+
+**Fixed** by a third tier in `choose_import`, tried only when the exact and module tiers both
+decline: prefer the candidate whose **crate root** matches the crate root of an in-scope binding
+**of that same name**. `tddy_core` beats `std` and `chrono` unambiguously.
+
+The "of that same name" keying is the whole of it. Keyed on any binding from the crate, almost every
+file imports something from `std`, so `std::string::ParseError` would match as readily as the one
+meant and the tier would refuse exactly when it was needed. Two candidates sharing the crate the name
+is bound from is still a refusal — the crate tier narrows by crate, and a crate holding both is no
+narrower.
+
+Worth knowing before the next seam: **fully qualifying the name inside the anchored range also
+settles it**, and that was the workaround the spike reached for. It costs a fully-qualified path
+written into production code permanently — six of them in that one seam — so it is the wrong first
+move. Read the refusal's candidates first.

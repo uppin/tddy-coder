@@ -30,6 +30,8 @@ pub enum RestructureCommand {
     Anchors(RestructureAnchorsArgs),
     /// Compare statement multisets against a git ref.
     Verify(RestructureVerifyArgs),
+    /// Rewrite a plan's snapshot header to the working tree as it stands.
+    Snapshot(RestructureSnapshotArgs),
 }
 
 #[derive(Parser)]
@@ -78,6 +80,15 @@ pub struct RestructureVerifyArgs {
     pub against: String,
 }
 
+/// A struct of its own rather than a second use of [`RestructurePlanArgs`]: `--dry-run`,
+/// `--resume`, `--from` and `--stop-after` all describe executing a plan, and a `snapshot` that
+/// accepted them would take a flag it then ignored.
+#[derive(Parser)]
+pub struct RestructureSnapshotArgs {
+    /// Path to the plan JSONL file whose header line is rewritten in place.
+    pub plan: PathBuf,
+}
+
 /// The parsed subcommand as the runner's own options.
 ///
 /// One `match` and no strings: this is what replaced `cli_vector`, which turned these same fields
@@ -117,6 +128,11 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
         RestructureCommand::Verify(verify) => Options {
             command: Command::Verify,
             against: Some(verify.against),
+            ..Options::default()
+        },
+        RestructureCommand::Snapshot(snapshot) => Options {
+            command: Command::Snapshot,
+            target: Some(snapshot.plan),
             ..Options::default()
         },
     }
@@ -220,6 +236,21 @@ mod tests {
         assert_eq!(options.command, Command::Verify);
         assert_eq!(options.against, Some("HEAD~1".to_string()));
         assert_eq!(options.target, None);
+    }
+
+    /// Every edit to a snapshotted file invalidates the plan's header, and recomputing it by hand is
+    /// a shell pipeline each author has to invent. `hash_file` is already public; what is missing is
+    /// a way to ask for it.
+    #[test]
+    fn accepts_a_snapshot_of_the_plan_whose_header_it_rewrites() {
+        // Given a snapshot of a plan
+        let parsed = RestructureArgs::try_parse_from(["restructure", "snapshot", "plan.jsonl"]);
+
+        // Then the command line accepts it, rather than leaving the author a shell pipeline to invent
+        assert!(
+            parsed.is_ok(),
+            "the command line has no way to ask for a snapshot"
+        );
     }
 
     /// The withdrawal is a breaking change to the command line, so it has to be a refusal rather

@@ -177,11 +177,17 @@ layered by hand.
 
   — a `tddy_daemon_livekit::` path spliced inside a `crate::{…}` group, which never resolves.
 
-- **Indexing this workspace costs ~20 minutes per plan**, and the default `--indexing-budget` of
-  600 s is not enough to reach the first operation: the run reports *"rust-analyzer had not
-  finished indexing after 600s"* and exits **0**. A budget overrun exiting zero is worth fixing on
-  its own — a script cannot tell it from success. With layering at one index per layer, the
-  budget is the dominant cost of using the operation at all.
+- **Indexing this workspace costs ~20 minutes per plan.** With layering at one index per layer, that
+  is the dominant cost of using the operation at all — now answered by `./run-index-daemon`, which
+  holds a warm index across runs so the cost is paid once per session rather than once per attempt.
+
+  ~~The default `--indexing-budget` of 600 s is not enough to reach the first operation, and a budget
+  overrun exits **0**.~~ **Both parts are stale.** `--indexing-budget` was withdrawn — a run now waits
+  until it succeeds or its caller stops it — so there is no budget to overrun. The exit-zero claim did
+  not reproduce either: both front ends return `Err` on a refusal and `tddy-tools::main` is
+  `-> Result<()>` with `?`. A 2026-09-17 investigation traced an identical-looking report to a shell
+  wrapper reading `tee`'s status instead of the binary's, and the same wrapper printed `exit 0` after
+  a *connection refused*. If a run is ever seen exiting zero on a refusal, check the wrapper first.
 
 ## `#unbundle` node 6 — `check --deep` and `apply` disagree about the same tree
 
@@ -206,10 +212,15 @@ node 2.
 
 Two consequences for whoever fixes this:
 
-- **`plan is malformed` is the wrong error class.** The plan was not malformed; the indexer did not
-  settle. A caller cannot distinguish a genuine schema problem from an indexing timeout, so the
-  advice "fix your plan" is actively misleading. This is the same shape as the budget-overrun
-  exiting zero, recorded above: the operation reports the wrong thing about its own failure.
+- ~~**`plan is malformed` is the wrong error class.**~~ **✅ Closed** by the
+  `2026-09-17-restructure-refusal-truth-and-authoring-gates` changeset. The specific case this
+  bullet named — an indexing timeout reported as a malformed plan — was already answered by
+  `RestructureError::ServerNotSettled`. What remained was that every *other* backend refusal went
+  through one constructor and came out `MalformedPlan` too. `RestructureError` now carries
+  `SeamRefused` ("this seam cannot be cut here") and `ServerDefect` ("rust-analyzer's answer was
+  unusable") beside it, and all 56 `RustBackend` call sites are routed by family — 10 seam, 24
+  server, 22 plan and transport. `status_of` maps them to `FailedPrecondition` and `Internal`, so
+  the class survives to every transport.
 - **The cost is paid before the refusal.** ~35 minutes elapsed before the error, on top of the
   ~20 minutes per plan this file already records. A node that tries the operation once and falls
   back to `git mv` has still spent an hour.
