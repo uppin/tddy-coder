@@ -99,6 +99,114 @@ Do not proceed to step 1 until this gate passes.
 **Invoke Subagent**: `refactor`
 - Fix production readiness issues
 
+### 3.5. File Length Gate → Restructure
+
+Check every non-test source file this PR touched against the **500-production-line budget** —
+`/analyze-clean-code`'s "File length" metric and the `oversized-file` category of the
+[`deferred-work`](../skills/deferred-work/SKILL.md) records — **before** quality scoring. This gate
+exists because per-PR growth is invisible in a diff review: a module reaches four thousand lines
+through twenty individually-wrapped PRs, each of which added eighty and looked fine.
+
+It diffs the **whole PR range**, never `HEAD~1`, and it measures the way this repo's records measure:
+**production lines only, counted to the first `#[cfg(test)]`** for Rust (`changeset.rs` is 964
+production lines of 1,627 total, and 964 is the number its record carries).
+
+```bash
+base=$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null || echo master)
+git fetch origin "$base" --quiet \
+  || { echo "GATE ERROR: cannot fetch origin/$base — fix before proceeding, do not skip" >&2; exit 1; }
+mb=$(git merge-base "origin/$base" HEAD) \
+  || { echo "GATE ERROR: no merge-base with origin/$base — fix before proceeding, do not skip" >&2; exit 1; }
+
+# Rust: lines before the first #[cfg(test)] (also matches #[cfg(all(test, …))], and does not
+# match #[cfg(feature = "testing")]). Everything else: the whole file.
+count_prod() {
+  case "$1" in
+    *.rs) awk '/^[[:space:]]*#\[cfg\(.*test[),]/ {exit} {n++} END {print n+0}' ;;
+    *)    awk 'END {print NR+0}' ;;
+  esac
+}
+
+changed=$(git diff --name-status -M "$mb"..HEAD -- \
+    '*.rs' '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs' '*.mts' '*.cts' '*.py' \
+    ':(exclude)*/src/gen/*' ':(exclude)*/tests/*' ':(exclude)*.test.ts' ':(exclude)*.test.tsx' \
+    ':(exclude)*.cy.ts' ':(exclude)*.cy.tsx' ':(exclude)*/cypress/*' ':(exclude)*/test-utils/*') \
+  || { echo "GATE ERROR: git diff against $mb failed — fix before proceeding, do not skip" >&2; exit 1; }
+
+printf '%s\n' "$changed" | while IFS=$'\t' read -r status old new; do
+    [ -n "${status:-}" ] || continue
+    f=${new:-$old}                                               # R/C rows carry old<TAB>new
+    [ -f "$f" ] || continue                                      # skip deletions
+    now=$(count_prod "$f" < "$f")
+    was=$(git show "$mb:$old" 2>/dev/null | count_prod "$f")      # 0 only for a true add
+    if [ "$now" -ge 500 ]; then printf '%s → %s\t%s\n' "$was" "$now" "$f"; fi
+  done
+```
+
+An empty or unresolvable base must **abort the gate loudly**, never let it pass vacuously — a missing
+`origin/$base` with an unguarded `merge-base` yields an empty range and a silently green gate.
+Renames are resolved (`--name-status -M`): an unchanged 600-line file renamed by this PR counts as
+`600 → 600` (alert-only below), not as a fake `0 → 600` crossing.
+
+**What the exclusions are for**, and why none of them is optional:
+
+- **`*/src/gen/*`** — committed `buf generate` output under the CI drift gate
+  (`scripts/generated-code.sh check`, `scripts/generated-code.manifest`). Four of those files are
+  already over a thousand lines; splitting one is reverted by the next regeneration and fails the
+  drift check.
+- **Test paths** (`*/tests/*`, `*.test.*`, `*.cy.*`, `*/cypress/*`, `*/test-utils/*`) — the budget is
+  a *non-test source* metric, and this repo writes acceptance suites one scenario per file. A test
+  file over the limit is a `duplicate-tests` or `misplaced-tests` question, not a decomposition.
+
+**Alert the user**: every file the loop prints appears in this step's output **and** in the final
+summary (step 9) as a 🔴 line with its before → after production-line counts — a clean quality score
+in step 4 never absorbs or silences this alert. Then act by case:
+
+| Case | Action |
+|------|--------|
+| This PR pushed the file past 500 production lines | 🔴 **Decompose now** |
+| File was already ≥ 500 and this PR grew it further | 🔴 **Decompose now** |
+| File was already ≥ 500 but this PR did not grow it | ⚠️ Alert only — record it as `packages/<pkg>/docs/code-issues/oversized-file-<slug>.md` (existing category, budget 500) and flag it in the summary |
+
+**Two repo-specific stops that override "decompose now".** Both are alert-plus-record, and neither is
+a silent pass:
+
+- **A stack branch where a parent or dependent PR also touches that file** — step 4's standing rule.
+  The rename fallout cascades through their diffs and turns every one into a conflict. Defer to a
+  follow-up branch after the stack lands, and say so in the summary (step 9).
+- **The file's code-issue record carries a `Claimed by:` line** — another PR is already in flight to
+  fix exactly this. Verify the claim is still open (`deferred-work` § claims), then follow
+  [AGENTS.md](../../AGENTS.md)'s claim protocol: **stop and ask** whether to proceed and add to the
+  debt, wait for that PR, or narrow scope. Do not decompose underneath it.
+
+**Decompose** — by language:
+
+- **Rust**: load the [`code-restructuring`](../skills/code-restructuring/SKILL.md) skill. You do not
+  write the moved code: plan intents, prove the seams with `restructure check --deep`, then apply.
+  `restructure check --budget LINES` takes the budget directly. Its execution discipline applies in
+  full — green baseline before (`./test -p <pkg>`), engine-driven intents, same green after.
+- **TypeScript (and anything else the skill rejects — v1 is Rust-only)**: split by hand under the same
+  discipline — green baseline before, mechanical moves only (no behaviour change), imports updated,
+  same green after.
+
+Either way the split lands **in this PR**: record the module layout and before → after production-line
+counts in a Restructuring section of this PR's existing changeset. When `code-restructuring` is
+entered from this gate, that section **stands in for** the skill's own `Type: Refactor` changeset and
+its initial-discovery companion — skip the skill's changeset step rather than opening a second
+changeset for the same PR.
+
+- Deferring a decomposition **this PR caused** requires **explicit developer consent**, recorded in
+  the summary with the reason **and** as a `docs/dev/todo/` entry
+  ([`deferred-work`](../skills/deferred-work/SKILL.md)). Silence is not deferral.
+- A file this PR did **not** grow is a `packages/*/docs/code-issues/` record and the next planner's
+  Step 2b problem — file it and move on. Step 7.5 re-measures it at wrap.
+
+**Calibration, measured 2026-09-18**: 191 non-test, non-generated source files in `packages/` are
+already at or over 500 production lines, 67 of them over 1,000, the largest at 7,028. So the
+alert-only row is the *common* case here, and for the multi-thousand-line modules the consent
+deferral above is the expected answer rather than an exception. What the gate buys is that the number
+is on the table every time, with the growth this PR caused attributed to it.
+
 ### 4. Code Quality → Refactor
 
 **Run Command**: `/analyze-clean-code`
@@ -294,7 +402,7 @@ gh pr view <N> --json isDraft,baseRefName,title   # expect isDraft=false, base s
 
 Present comprehensive summary with recommendations. On a stack branch, state the readiness-gate result,
 whether the title was corrected, whether the PR was marked ready, and any restructure deferred to a
-follow-up branch (step 4).
+follow-up branch (steps 3.5 and 4).
 
 ## Subagent Invocation Pattern
 
@@ -320,6 +428,7 @@ Use the `/validate-tests` command to check test quality.
 | `/validate-tests` | Check test quality |
 | `/validate-prod-ready` | Production readiness check |
 | `/analyze-clean-code` | Code quality metrics |
+| `code-restructuring` (skill) | Decompose files breaching the 500-production-line budget (step 3.5) |
 | `refactor` (subagent) | Fix identified issues |
 | `/wrap-context-docs` | Update/wrap documentation |
 | `/pr-stack-rebase` | Stack only: rebase this branch before any code diff (step 0) |
@@ -333,6 +442,7 @@ Create TODO list and mark each step complete:
 [ ] 1. /validate-changes → refactor
 [ ] 2. /validate-tests → refactor
 [ ] 3. /validate-prod-ready → refactor
+[ ] 3.5. File length gate (≥500 production lines) → alert + code-restructuring
 [ ] 4. /analyze-clean-code → refactor
 [ ] 5. Final validation
 [ ] 6. Linting & type checking
@@ -356,6 +466,7 @@ Create TODO list and mark each step complete:
 | 2 | refactor | ✅ |
 | 3 | /validate-prod-ready | ✅ |
 | 3 | refactor | ✅ |
+| 3.5 | file length gate → code-restructuring | ✅ / 🔴 N files ≥ 500 |
 | 4 | /analyze-clean-code | ✅ |
 | 4 | refactor | ✅ |
 | 5 | /validate-changes | ✅ |
@@ -363,6 +474,7 @@ Create TODO list and mark each step complete:
 | 8 | stack: title corrected → readiness gate → `gh pr ready` | ✅ / n/a |
 
 ### Summary
+- **File Length**: ✅ none ≥ 500 / 🔴 `<file>`: was → now production lines (decomposed / deferred: reason / claimed by #NNN)
 - **Code Quality**: X/10 ⭐
 - **Tests**: All passing ✅
 - **Production Ready**: ✅ Yes
@@ -396,12 +508,17 @@ Merging and repointing belong to `/merge-pr-stack`.
 - Provide changeset/PRD context to subagents
 - **Stack branches**: run `/pr-stack-rebase` before every code diff, correct the title before readying,
   and ready bottom-up
+- **Let step 3.5's alert reach the user** — a file at or over 500 production lines is reported in the
+  summary even when it was decomposed, claimed by another PR, or legitimately deferred; growth this PR
+  caused is never silently deferred
 
 ❌ **Don't:**
 - Don't skip validation steps
 - Don't wrap incomplete changesets
 - Don't proceed with failing tests
 - Don't ignore subagent recommendations
+- Don't decompose a generated file (`*/src/gen/*`) or a test suite to satisfy the gate — both are
+  excluded from it by design
 - Don't use `--no-verify` when committing or pushing
 - Don't leave a `docs/dev/todo/` entry standing for a defect this branch fixed — and don't delete one
   the changeset never marked ✅ RESOLVED HERE
@@ -416,5 +533,6 @@ Merging and repointing belong to `/merge-pr-stack`.
 ## Related
 
 **Related**: Subagent `refactor`, Commands `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`, `/wrap-context-docs`
+**Skill**: `code-restructuring` (`.agents/skills/code-restructuring/SKILL.md`) — engine-driven file decomposition for step 3.5
 **Commands**: `/pr` (next step), `/update-context-docs`
 **Stack**: Commands `/green`, `/validate-changes`, `/pr-stack-rebase` · Docs the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`), [ci.md](../../docs/dev/guides/ci.md)

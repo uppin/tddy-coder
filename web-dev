@@ -7,6 +7,22 @@
 #        ./web-dev -c my-config.yaml     # extra CLI for tddy-daemon (pass-through)
 #        ./web-dev --github-stub         # e.g. extra CLI overrides
 #        ./web-dev --headless            # daemon/worker only; no Vite dev server, no web bundle needed
+#        ./web-dev --build               # also build every binary the daemon can INVOKE, not just
+#                                          tddy-daemon itself: the session worker, the tool binary,
+#                                          the sandbox runner, the index daemon, the git shim and the
+#                                          worktree mirror (scripts/dev-runtime-binaries.sh). Each is
+#                                          resolved at runtime as a sibling of the daemon binary and
+#                                          then as a bare name on PATH with no existence check, so a
+#                                          stale or missing one fails later, as a session that will
+#                                          not start — never as a build error.
+#        ./web-dev --resolve-private-repo  # install the JS dependencies through the local private
+#                                          npm registry (LOCAL_REGISTRY_URL) instead of the public
+#                                          one, via `bun run local-registry-install`. Needed on a
+#                                          machine with no public registry access; it rewrites
+#                                          node_modules, so it is opt-in rather than automatic.
+#
+# Both flags are consumed here: everything else on the command line is passed through to
+# tddy-daemon, which would reject or misread them.
 #
 # Environment variables:
 #   WEB_HOST        — Address Vite listens on (default: 127.0.0.1). Use 0.0.0.0 for LAN. Separate from
@@ -20,6 +36,8 @@
 #   BUILD_TARGETS   — Space-separated cargo packages built (debug) before anything starts, so the
 #                     compile is not charged against the daemon readiness timeout.
 #                     Default: tddy-daemon. E.g. BUILD_TARGETS="tddy-daemon tddy-coder" ./web-dev
+#   LOCAL_REGISTRY_URL — Private npm registry used by --resolve-private-repo
+#                     (default: the one scripts/local-bun-install.sh declares).
 #   DAEMON_CONFIG   — YAML for tddy-daemon (default: dev.daemon.yaml at repo root).
 #                     CONFIG from .env is not used for the daemon backend; use DAEMON_CONFIG.
 #   TDDY_DAEMON_INSTANCE_ID — Override the daemon's LiveKit instance id (its participant identity in
@@ -34,6 +52,11 @@
 # Press Ctrl+C to stop both servers.
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# DEV_RUNTIME_PACKAGES + dev_runtime_cargo_args() — the one list of runtime-invocable packages,
+# shared with ./desktop-dev so the two launchers cannot drift apart.
+# shellcheck source=scripts/dev-runtime-binaries.sh
+source scripts/dev-runtime-binaries.sh
 
 # Load .env if present (does not override already-set env vars)
 if [ -f .env ]; then
@@ -50,16 +73,23 @@ if [ -f .env ]; then
   done < .env
 fi
 
-# --headless: launch only tddy-daemon (RPC/worker backend); skip the Vite dev server.
-# In this mode no web bundle is needed. The flag is consumed here and not passed to the daemon.
+# Flags this script owns. Each is consumed here and NOT passed to the daemon; everything else is
+# forwarded untouched (-c, --github-stub, ...).
+#   --headless              launch only tddy-daemon (RPC/worker backend); skip the Vite dev server.
+#                           In this mode no web bundle is needed.
+#   --build                 build the whole runtime-invocable set, not just BUILD_TARGETS.
+#   --resolve-private-repo  install JS deps through the local private npm registry first.
 HEADLESS=false
+WANT_BUILD=false
+RESOLVE_PRIVATE_REPO=false
 filtered_args=()
 for arg in "$@"; do
-  if [ "$arg" = "--headless" ]; then
-    HEADLESS=true
-  else
-    filtered_args+=("$arg")
-  fi
+  case "$arg" in
+    --headless) HEADLESS=true ;;
+    --build) WANT_BUILD=true ;;
+    --resolve-private-repo) RESOLVE_PRIVATE_REPO=true ;;
+    *) filtered_args+=("$arg") ;;
+  esac
 done
 set -- "${filtered_args[@]+"${filtered_args[@]}"}"
 
@@ -111,16 +141,38 @@ if [ "$HEADLESS" != "true" ] && [ ! -f packages/tddy-web/dist/index.html ]; then
   echo "=== Note: packages/tddy-web/dist/index.html missing — open the Vite URL above for HMR; optional: ./dev bun run build for daemon static bundle ===" >&2
 fi
 
+# --resolve-private-repo: resolve and install the JS dependencies against the private registry
+# before anything else, so Vite starts from a node_modules that exists. Delegates to the repo's
+# own two-step script (lock resolution, then a registry-pinned install) rather than reimplementing
+# it — see package.json's local-registry-install and scripts/local-bun-install.sh.
+if [ "$RESOLVE_PRIVATE_REPO" = "true" ]; then
+  echo "=== Installing JS dependencies from the private registry (${LOCAL_REGISTRY_URL:-default}) ==="
+  if ! ./dev bun run local-registry-install; then
+    echo "Error: private-registry install failed — not starting the daemon." >&2
+    exit 1
+  fi
+fi
+
 # Build first, while nothing is running yet: source changes are still picked up automatically,
 # but the compile time is not charged against the daemon readiness timeout further below.
 # BUILD_TARGETS (space-separated cargo package names) can extend what is built, e.g.
 #   BUILD_TARGETS="tddy-daemon tddy-coder" ./web-dev
+# --build adds every package whose binary the running daemon can invoke — see
+# scripts/dev-runtime-binaries.sh for why a missing one is not a build error.
 BUILD_TARGETS="${BUILD_TARGETS:-tddy-daemon}"
-build_pkg_args=()
-for pkg in $BUILD_TARGETS; do
-  build_pkg_args+=("-p" "$pkg")
-done
-echo "=== Building (debug): ${BUILD_TARGETS} ==="
+if [ "$WANT_BUILD" = "true" ]; then
+  # shellcheck disable=SC2086 # BUILD_TARGETS is a space-separated list of package names by design
+  dev_runtime_cargo_args $BUILD_TARGETS
+  build_pkg_args=("${DEV_RUNTIME_CARGO_ARGS[@]}")
+  build_display="${DEV_RUNTIME_CARGO_PACKAGES[*]}"
+else
+  build_pkg_args=()
+  for pkg in $BUILD_TARGETS; do
+    build_pkg_args+=("-p" "$pkg")
+  done
+  build_display="$BUILD_TARGETS"
+fi
+echo "=== Building (debug): ${build_display} ==="
 if ! ./dev cargo build "${build_pkg_args[@]}"; then
   echo "Error: build failed — not starting the daemon." >&2
   exit 1
