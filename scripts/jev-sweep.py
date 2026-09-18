@@ -37,6 +37,7 @@ import os
 import pathlib
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -177,9 +178,24 @@ PROPOSE_QUESTIONS = {
 FN_RE = re.compile(r"^(\s*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+([A-Za-z0-9_]+)")
 
 
+# A `#[cfg(test)]` module is skipped by the body scan below, but an integration test is
+# not gated by one -- `tests/foo.rs` is ordinary code to the compiler. Sweeping those
+# ranks test helpers alongside production functions and quietly pollutes every finding.
+NON_PRODUCTION_DIRS = {"tests", "benches", "examples", "target", "testkit"}
+
+
+def is_production(rs: pathlib.Path) -> bool:
+    return not (
+        NON_PRODUCTION_DIRS & set(rs.parts)
+        or rs.name.endswith("_test.rs")
+        or rs.name.endswith("_tests.rs")
+    )
+
+
 def iter_functions(path: pathlib.Path):
-    """Yield (file, name, line, body) for every fn outside a #[cfg(test)] module."""
-    for rs in sorted(path.rglob("*.rs")) if path.is_dir() else [path]:
+    """Yield (file, name, line, body) for every production fn outside a #[cfg(test)] module."""
+    found = sorted(path.rglob("*.rs")) if path.is_dir() else [path]
+    for rs in (f for f in found if is_production(f)):
         try:
             lines = rs.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
@@ -254,17 +270,39 @@ def resolve_key() -> str:
     )
 
 
+RETRY_STATUSES = {429, 500, 502, 503, 504}
+MAX_ATTEMPTS = 5
+
+
 def ask(state: dict, questions: dict, key: str) -> dict:
+    """POST one state plus its question set, retrying on rate limits and transient 5xx.
+
+    A repo-wide sweep is thousands of requests against a 1,200/min limit, so 429 is an
+    expected outcome rather than an error. `retry-after` wins when the response carries
+    one -- the limits move without notice, so the server's number beats our backoff.
+    """
     base = os.environ.get(BASE_URL_ENV, DEFAULT_BASE_URL).rstrip("/")
     model = os.environ.get(DEFAULT_MODEL_ENV, DEFAULT_MODEL)
     payload = json.dumps({"state": state, "model": model, "questions": questions}).encode()
-    req = urllib.request.Request(
-        f"{base}/v1/systemone",
-        data=payload,
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=90) as resp:
-        return json.load(resp)
+    for attempt in range(MAX_ATTEMPTS):
+        req = urllib.request.Request(
+            f"{base}/v1/systemone",
+            data=payload,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as e:
+            if e.code not in RETRY_STATUSES or attempt == MAX_ATTEMPTS - 1:
+                raise
+            delay = float(e.headers.get("retry-after") or 0) or min(2**attempt, 30)
+            time.sleep(delay)
+        except (urllib.error.URLError, TimeoutError):
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            time.sleep(min(2**attempt, 30))
+    raise RuntimeError("unreachable")
 
 
 def noul(ans: dict, k: str) -> float:
