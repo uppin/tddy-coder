@@ -23,7 +23,7 @@ docs/dev/todo/                        ← THE RECORD: deferred work, one file pe
 
 | Record | Path | One file is | Written by | Read by |
 |---|---|---|---|---|
-| **Code issue** | `packages/<pkg>/docs/code-issues/` | one analyzer finding against one symbol or file | `/analyze-code-issues` | planning Step 2b, `/code-restructuring` |
+| **Code issue** | `packages/<pkg>/docs/code-issues/` | one analyzer finding against one symbol or file | `/analyze-code-issues`, `/pr-wrap` 7.5, `/wrap-context-docs` | planning Step 2b, `/code-restructuring` |
 | **Changeset TODO** | `docs/dev/todo/` | one thing a changeset planned or discovered and **could not** finish | `/green`, `/plan-red`, `/plan-pr-stack`, `/pr-wrap` | planning Step 2b, `/pr-wrap` |
 
 **Code issues are per-package; TODOs are repo-wide.** A code issue names a file, so it belongs
@@ -116,9 +116,15 @@ never assume*.
 - **Record a partial fix as partial.** The record stays open, gains the improved numbers, and has
   its *What would close it* narrowed to the remainder. A partial fix written up as resolved hides
   the remainder from the next Step 2b — worse than not recording it.
-- **Wrap never deletes these files.** They are permanent package documentation, unlike
-  `docs/dev/1-WIP/`, which wrap empties. A wrap closes the ones the changeset resolved and leaves
-  the rest.
+- **Wrap reconciles code issues; it never deletes them.** `/pr-wrap` step 7.5 and
+  `/wrap-context-docs` **re-measure** every open issue in every package the PR touched — not only
+  the ones the changeset names — and then resolve, narrow or reopen. Re-measuring is what makes that
+  discovery safe: for a TODO "did this fix it?" is a judgement and inference is forbidden, but for a
+  code issue it is a number.
+  **The single delete is an analyzer false positive**, which has no history worth keeping.
+  Contrast `docs/dev/todo/`, whose resolved entries **are** deleted: a TODO is an event with no
+  further meaning once done, while a code issue is a standing property whose history is what makes
+  a later regression legible.
 - **Code issues are the one thing `/analyze-code-issues` may write into `packages/*/docs/`
   directly.** Everything else under a package's `docs/` goes through the changeset workflow in
   `docs/dev/1-WIP/` (CLAUDE.md's rule). A record is a standing measurement with its own

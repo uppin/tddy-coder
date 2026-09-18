@@ -13,6 +13,8 @@ Transfer knowledge from changesets and PRDs into permanent documentation, then c
 2. Update the actual permanent docs with that knowledge
 3. Add a changelog or changeset **index** entry (audit trail)—see merge hygiene below
 4. **Clear the `docs/dev/todo/` entries this change resolved** — see [TODO backlog entries](#wrapping-todo-backlog-entries)
+5. **Reconcile the `packages/*/docs/code-issues/` records this change affected** — re-measure and
+   resolve, narrow or reopen. **Kept, not deleted** — see [code issues](#wrapping-code-issues--reconcile-do-not-delete)
 5. Delete the working document
 
 Wrapping is **NOT** just adding changelog entries. It is a full knowledge transfer. In particular it is **not**:
@@ -20,6 +22,8 @@ Wrapping is **NOT** just adding changelog entries. It is a full knowledge transf
 - Leaving the feature/dev docs unchanged
 - Creating links to the deleted PRD/changeset files
 - Leaving a backlog entry in `docs/dev/todo/` describing a defect this change fixed
+- Leaving a code issue open whose measurement this change made clean — or **resolving one it only
+  partly fixed**, which hides the remainder from the next planner
 
 **State B, not delta**: the permanent docs must read as cohesive, unified documents with no trace of the change process — no "previously", "now", "changed from", or other temporal language.
 
@@ -125,7 +129,9 @@ For changesets in `docs/dev/1-WIP/`:
    - If the work is cross-package, create **one new file** in `docs/dev/changesets/` too.
    - Name every backlog entry this change resolved, by title and date-slug — that entry is about to be
      deleted, and this is its audit trail.
-4. **Clear the resolved `docs/dev/todo/` entries** the changeset's `## Prerequisites` marks
+4. **Reconcile the code issues** in every package this change touched — re-measure, then resolve,
+   narrow or reopen. See [code issues](#wrapping-code-issues--reconcile-do-not-delete).
+5. **Clear the resolved `docs/dev/todo/` entries** the changeset's `## Prerequisites` marks
    ✅ RESOLVED HERE — see [TODO backlog entries](#wrapping-todo-backlog-entries). Do this **before**
    deleting the changeset: the changeset is the list
 5. **Delete** the changeset file from `docs/dev/1-WIP/` (not archived)
@@ -177,6 +183,86 @@ Rules, in the order they matter:
   resolved with no changeset to wrap — a flaky test that a since-landed change fixed. When a change
   wraps, its resolved entries are deleted, not annotated.
 
+## Wrapping code issues — reconcile, do not delete
+
+`packages/<pkg>/docs/code-issues/` holds one file per analyzer or structural finding
+([`deferred-work`](../skills/deferred-work/SKILL.md)). **These are wrapped differently from TODOs,
+and the difference is not a style choice.**
+
+| | TODO | Code issue |
+|---|---|---|
+| What it is | an **event** — "we deferred X on this date" | a **standing property of the code** |
+| Once addressed | the event has no further meaning → **`git rm`** | the property has a *history* → **`Status: Resolved`, file kept** |
+| Wrap action | delete | reconcile |
+
+Three reasons the code issue is kept, and the first is the one that bites:
+
+1. **Regressions.** A split file that grows back over budget reopens as
+   `**Status:** Open — regressed <date>` with its `Measurement history` intact — 964 → 180 → 620
+   says the split did not hold. Delete the record and the regression reads as a first detection, and
+   whoever picks it up re-derives everything.
+2. **The history is the finding.** A CRAP score alone is a number; `1980 → 2704 → 2704` under active
+   change is a finding.
+3. **It costs nothing.** Every open-items query is `grep -L 'Status:** Resolved'`, so a resolved
+   record is already invisible to the next Step 2b. The "the file is now a lie" problem that forces
+   TODO deletion does not exist here.
+
+### Re-measure; do not infer
+
+A code issue carries a **reproducible measurement**, which is what makes discovery safe here even
+though it is forbidden for TODOs. Do not ask *"did this PR fix it?"* — **re-run the measurement in
+the record's `Detected:` line** and let the number decide.
+
+```bash
+PKG=packages/tddy-core
+sed -n '/^## Prerequisites/,/^## [^P]/p' "$CS"                 # what the changeset claimed
+grep -rL 'Status:\*\* Resolved' "$PKG/docs/code-issues/"        # every open issue in a touched package
+grep -rl "Claimed by:.*#$PR\b" packages/*/docs/code-issues/     # issues THIS PR claimed
+```
+
+**Scan every open issue in every package this PR touched, not only the ones the changeset names.**
+That is the *"did this PR address something pre-existing?"* question, and for a measured record it
+is answerable objectively — a file that is now 180 production lines is under budget whether or not
+anybody planned it.
+
+### What to write
+
+| Situation | What the wrap does |
+|---|---|
+| Measurement now clean | `**Status:** Resolved (YYYY-MM-DD, PR #NNN)` + a final `Measurement history` row. **Keep the file** |
+| **Partially** fixed | File stays **Open**. Add the improved row, and **narrow `## What would close it`** to the remainder. Never resolve a partial fix |
+| Measurement unchanged | Add a row saying so, if the PR touched that code. Silence and "unchanged" are different facts |
+| Worse | `**Status:** Open — regressed <date>` with the new numbers, and say what grew it |
+| The code **moved** | Rename the file to the new location and add `**Moved:**`. One record, not a resolved one plus a new one |
+| The PR **claimed** it (`Claimed by: #NNN`) and finished it | Resolve as above and drop `**Claimed by:**` |
+| The PR claimed it and did **not** finish it | Keep the claim, narrow the remainder, and say which follow-up owns it |
+| A finding that was never real | **This is the one delete.** An analyzer false positive has no history worth keeping — `git rm` it and say so in the report |
+
+### Rules
+
+- **Resolve in place. `git rm` is for a false positive only.** If you find yourself deleting a
+  record because the directory looks untidy, stop: the queries already hide it.
+- **A partial fix recorded as resolved is the failure mode here.** It drops the remainder out of
+  every open-items query and hides it from the next planner — worse than not recording it at all.
+  `#carve` 1/10 is the worked example: it closed two of four `move_module_to_crate` refusals, and
+  the record stayed open with its claim narrowed.
+- **Never resolve a `missing-tests` record by deleting the symbol.** Those symbols are referenced
+  from production.
+- **Append to `Verified by hand`, dated.** Never overwrite an earlier verification — it records what
+  the tool got wrong, and a fresh run cannot rediscover that.
+- **An issue this PR did not touch is left alone**, exactly as an unreferenced TODO is.
+- **Wrap never empties `packages/*/docs/code-issues/`.** It is permanent package documentation,
+  unlike `docs/dev/1-WIP/`. A wrap closes what this change closed and leaves the rest.
+
+### Stack mode
+
+A code issue is shared across every branch, like a TODO — so **only the PR whose own changeset
+claims it** reconciles it, and in a stack that means **bottom-up**. A node that resolves a record its
+parent also touches would put the parent's cleanup in its own diff.
+
+A record whose `**Claimed by:**` names a node **further up this stack** stays untouched: the claim
+is still true and the work is still coming.
+
 ## Wrapping PRDs
 
 For PRDs in `docs/ft/*/1-WIP/`:
@@ -225,6 +311,7 @@ because a stacked branch inherits their commits. Only this PR's are wrapped:
 | This branch's changeset | `docs/dev/1-WIP/YYYY-MM-DD-*.md` | **this PR** — the wrap this command performs |
 | This branch's PRD | `docs/ft/*/1-WIP/PRD-YYYY-MM-DD-*.md` | **this PR** |
 | A `docs/dev/todo/` entry | the shared backlog, present on every branch | **the one PR whose own changeset marks it ✅ RESOLVED HERE** |
+| A `packages/*/docs/code-issues/` record | permanent package docs, present on every branch | **the one PR whose own changeset claims it** — reconciled, never deleted, and bottom-up in a stack |
 | Permanent docs | `packages/*/docs/`, `docs/ft/<area>/` | reached **only** through a wrap |
 
 Consequences worth stating plainly:

@@ -144,11 +144,58 @@ cargo test
   changeset's `## Prerequisites` with what the branch actually did: an entry recorded ⚠ DURING or
   ⛔ BLOCKING that this work **fixed** is promoted to ✅ RESOLVED HERE, with its file link, so the wrap
   deletes it. Steps 1–5 are the last chance to notice that — after step 7 the changeset is gone
+- **Reconciles the `packages/*/docs/code-issues/` records this change affected** — see step 7.5,
+  which runs **before** the hand-off because the changeset is the instruction and it is about to be
+  deleted
 - Also cleans up `docs/superpowers/specs/` and `docs/superpowers/plans/` working docs once implementation is complete
 - **Stack branch**: it runs in **Stack Mode** (see `/wrap-context-docs` § Stack Mode) — it wraps only the
   documents this PR owns in `docs/dev/1-WIP/` and `docs/ft/*/1-WIP/`, never a parent's, and never the
   `docs/dev/1-WIP/` pair, and it deletes only the backlog entries **this PR's own** changeset claims.
   In a stack, wrap **bottom-up**
+
+### 7.5. Reconcile the code issues — re-measure, then resolve, narrow or reopen
+
+**Do this before `/wrap-context-docs` hands off**, and do it by **measuring**, not by asking
+yourself whether the PR fixed something. A code issue
+([`deferred-work`](../skills/deferred-work/SKILL.md)) carries a reproducible measurement in its
+`**Detected:**` line — re-run it and let the number decide.
+
+```bash
+PR=<this PR number>
+# every open issue in every package this PR touched — not only the ones the changeset names
+for PKG in $(git diff --name-only origin/master...HEAD | grep -oE '^packages/[^/]+' | sort -u); do
+  grep -rL 'Status:\*\* Resolved' "$PKG/docs/code-issues/" 2>/dev/null
+done
+grep -rl "Claimed by:.*#$PR\b" packages/*/docs/code-issues/      # the ones this PR promised to fix
+```
+
+**Scanning every open issue in a touched package — not just the claimed ones — is the point of this
+step.** A PR that splits a file may take it under budget without anybody planning that, and a
+measured record can confirm it objectively. This is discovery the TODO path explicitly forbids,
+and it is safe here **only** because the answer is a number rather than a judgement.
+
+| What the measurement says | Action |
+|---|---|
+| Clean | `**Status:** Resolved (date, PR #NNN)` + a final `Measurement history` row. **File kept** |
+| Better, not clean | Stays **Open**. Add the row and **narrow `## What would close it`** to the remainder |
+| Unchanged, but the PR touched that code | Add a row saying so — "unchanged" and silence are different facts |
+| Worse | `**Status:** Open — regressed <date>`, with what grew it |
+| The code moved | Rename the record and add `**Moved:**` — one record, not two |
+
+Then: if this PR carried `**Claimed by:** #<this PR>` and finished the work, drop the field with the
+resolution. If it did not finish it, **keep the claim and narrow the remainder**, naming the
+follow-up that owns it.
+
+⚠ **Resolving a partial fix is the failure mode here.** It drops the remainder out of every
+open-items query and hides it from the next planner. A record that went from four defects to two
+stays open with two.
+
+⚠ **Do not `git rm` a code issue.** They resolve in place — the `Measurement history` is what makes a
+later regression legible. The single exception is a finding that was never real (an analyzer false
+positive), which has no history worth keeping.
+
+**Stack branches:** reconcile only what **this PR's own** changeset claims, bottom-up. A record
+claimed by a node further up the stack is left alone — the claim is still true.
 
 ### 8. Stack Only: Correct the Title & Mark Ready for Review
 
