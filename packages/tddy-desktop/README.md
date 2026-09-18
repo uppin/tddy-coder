@@ -34,15 +34,27 @@ The application assembles the daemon with **`tddy_daemon::runtime::build`** unde
 minus the HTTP listener and systemd socket activation. The spawn worker is forked *before* any
 async runtime exists, because `fork` from a multi-threaded process can deadlock.
 
+Where the configuration comes from **depends on the build profile**, and the two have no fallback
+between them.
+
+**A release build** — what `./install --desktop` installs — reads **`~/.tddy/desktop.yaml`** and
+nothing else: no `TDDY_DAEMON_CONFIG`, no repo-root `dev.desktop.yaml`, no walk up the directory
+tree. An installed `.app` launched from the Dock has `/` for a working directory, so anything it
+found that way it would have found by accident. The file absent is a startup failure that names
+`./install --desktop`; `~/.tddy` is also the workspace root the application moves into.
+
+**A debug build** — `./desktop-dev`, `cargo run` — resolves from the checkout:
+
 1. **Workspace root**: **`TDDY_WORKSPACE_ROOT`**, else the nearest ancestor of the working
    directory (or of the executable) holding `dev.desktop.yaml`, or `Cargo.toml` next to
    `packages/tddy-desktop/package.json`. The application moves into it, so relative paths in the
    YAML mean what they mean for `./web-dev`.
-2. **`.env`**: repo-root **`.env`** is applied without replacing anything already exported — the
-   same rule as `./web-dev`.
-3. **Config**: **`TDDY_DAEMON_CONFIG`**, else repo-root **`dev.desktop.yaml`**. `CURRENT_USER` in
+2. **Config**: **`TDDY_DAEMON_CONFIG`**, else repo-root **`dev.desktop.yaml`**. `CURRENT_USER` in
    the YAML is substituted with the OS user, as `./web-dev` does. Neither found is a startup
    failure, not a default.
+
+Both profiles then apply the workspace root's **`.env`** without replacing anything already
+exported — the same rule as `./web-dev`.
 
 ### UI ↔ daemon
 

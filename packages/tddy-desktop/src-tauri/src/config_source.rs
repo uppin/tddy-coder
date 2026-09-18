@@ -1,13 +1,24 @@
 //! Where the embedded daemon's configuration comes from.
 //!
-//! The rules are the ones `./web-dev` and `scripts/desktop-dev.sh` follow, because a daemon this
-//! application hosts must be configurable exactly like one started from a shell: a workspace root,
-//! the repo `.env` loaded without overriding anything already set, and either
-//! `TDDY_DAEMON_CONFIG` or the repo-root `dev.desktop.yaml`.
+//! **The build profile decides, and the two profiles share nothing.**
 //!
-//! Nothing here guesses. A workspace root that cannot be found and a configuration file that does
-//! not exist are both errors that stop the application, because a desktop app that silently starts
-//! a daemon with a configuration nobody chose is worse than one that refuses to start.
+//! A *release* build is an installed application: it reads `~/.tddy/desktop.yaml` and nothing else.
+//! No `TDDY_DAEMON_CONFIG`, no repo-root `dev.desktop.yaml`, no walk up the directory tree looking
+//! for a checkout. An installed `.app` launched from the Dock has `/` for a working directory and
+//! lives under `~/Applications`, so every one of those rules could only ever find a checkout by
+//! accident — and a desktop application whose daemon configuration depends on which directory
+//! Finder happened to hand it is not configured, it is guessing. `./install --desktop` writes that
+//! one file.
+//!
+//! A *debug* build is a development run: the rules are the ones `./web-dev` and `./desktop-dev`
+//! follow, because a daemon hosted by a `cargo tauri dev` binary must be configurable exactly like
+//! one started from a shell — a workspace root, the repo `.env` loaded without overriding anything
+//! already set, and either `TDDY_DAEMON_CONFIG` or the repo-root `dev.desktop.yaml`.
+//!
+//! Nothing here guesses. A missing home directory, a workspace root that cannot be found and a
+//! configuration file that does not exist are all errors that stop the application, because a
+//! desktop app that silently starts a daemon with a configuration nobody chose is worse than one
+//! that refuses to start.
 
 use std::path::{Path, PathBuf};
 
@@ -16,10 +27,20 @@ use tddy_daemon::config::DaemonConfig;
 /// Repo-root filename used when `TDDY_DAEMON_CONFIG` is unset (desktop dev).
 const DESKTOP_DEV_CONFIG_FILENAME: &str = "dev.desktop.yaml";
 
+/// The installed application's directory under the operator's home. The same `~/.tddy` the daemon
+/// resolves as its data directory in a release build (`tddy_data_dir`), so an installed app keeps
+/// its configuration next to the sessions that configuration produces.
+const INSTALLED_DIRNAME: &str = ".tddy";
+
+/// The one file a release build reads its daemon configuration from, inside [`INSTALLED_DIRNAME`].
+/// Written by `./install --desktop` from the repo's `desktop.yaml.production` template.
+const INSTALLED_CONFIG_FILENAME: &str = "desktop.yaml";
+
 /// How far up a directory tree the workspace-root search walks before giving up.
 const MAX_UPWARD_STEPS: usize = 20;
 
 /// The workspace the daemon is configured from and runs in.
+#[derive(Debug)]
 pub struct DaemonConfigSource {
     /// The repo root. Also the process working directory once [`resolve`] has run, so relative
     /// paths in the YAML (`web_bundle_path`, log files, tool paths) mean what they mean for
@@ -29,26 +50,57 @@ pub struct DaemonConfigSource {
     pub config_path: PathBuf,
 }
 
-/// Resolve the workspace root, move into it, load its `.env`, and name the daemon's YAML.
+/// Resolve where the daemon is configured from, move into that directory, and load its `.env`.
 ///
 /// The working-directory change happens here rather than at the call site because everything after
-/// it — the `.env` path, the default config path, and every relative path inside the YAML — is
-/// resolved against the repo root.
+/// it — the `.env` path and every relative path inside the YAML — is resolved against it.
 pub fn resolve() -> anyhow::Result<DaemonConfigSource> {
-    // Read before the working directory moves: a relative `TDDY_DAEMON_CONFIG` names a file
+    // Both branches run *before* the working directory moves, because both read paths that are
     // relative to wherever the application was launched from.
+    let source = if cfg!(debug_assertions) {
+        development_source()?
+    } else {
+        installed_source(&home_directory()?)?
+    };
+
+    std::env::set_current_dir(&source.workspace_root).map_err(|error| {
+        anyhow::anyhow!(
+            "could not enter {}: {error}",
+            source.workspace_root.display()
+        )
+    })?;
+    load_dot_env_without_overriding(&source.workspace_root)?;
+
+    Ok(source)
+}
+
+/// An installed application: `~/.tddy/desktop.yaml`, and nothing else.
+///
+/// Takes the home directory as a parameter rather than reading it, so the rule is testable without
+/// process-wide state — the same reason `tddy_data_dir_for` in the daemon's runtime does.
+fn installed_source(home: &Path) -> anyhow::Result<DaemonConfigSource> {
+    let workspace_root = home.join(INSTALLED_DIRNAME);
+    let config_path = workspace_root.join(INSTALLED_CONFIG_FILENAME);
+    if !config_path.is_file() {
+        anyhow::bail!(
+            "no daemon configuration at {}: run `./install --desktop` from a tddy-coder checkout to write one",
+            config_path.display()
+        );
+    }
+    Ok(DaemonConfigSource {
+        workspace_root,
+        config_path,
+    })
+}
+
+/// A development run (`./desktop-dev`, `cargo tauri dev`): `TDDY_DAEMON_CONFIG`, else the repo-root
+/// `dev.desktop.yaml` of the checkout this binary was started from or built in.
+fn development_source() -> anyhow::Result<DaemonConfigSource> {
     let explicit_config = env_path("TDDY_DAEMON_CONFIG")
         .map(|path| absolutise(&path))
         .transpose()?;
 
     let workspace_root = workspace_root()?;
-    std::env::set_current_dir(&workspace_root).map_err(|error| {
-        anyhow::anyhow!(
-            "could not enter the workspace root {}: {error}",
-            workspace_root.display()
-        )
-    })?;
-    load_dot_env_without_overriding(&workspace_root)?;
 
     let config_path = match explicit_config {
         Some(path) => path,
@@ -73,6 +125,17 @@ pub fn resolve() -> anyhow::Result<DaemonConfigSource> {
     Ok(DaemonConfigSource {
         workspace_root,
         config_path,
+    })
+}
+
+/// The operator's home directory. A release build has nowhere else to look, so an unset `HOME` is a
+/// startup failure rather than a guess at `/root` or the current directory.
+fn home_directory() -> anyhow::Result<PathBuf> {
+    env_path("HOME").ok_or_else(|| {
+        anyhow::anyhow!(
+            "HOME names no directory, so the installed daemon configuration \
+             (~/{INSTALLED_DIRNAME}/{INSTALLED_CONFIG_FILENAME}) cannot be found"
+        )
     })
 }
 
@@ -305,5 +368,132 @@ mod tests {
 
         // Then nothing is read from it, rather than an empty name or value
         assert_eq!(assignment, None);
+    }
+
+    /// A throwaway home directory. Built the way `SubstitutedConfig` builds its own directory — a
+    /// named child of the system temp directory — so these tests add no dependency to a crate that
+    /// is shipped as an application.
+    struct FakeHome(PathBuf);
+
+    impl FakeHome {
+        fn new(label: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "tddy-desktop-config-source-{}-{label}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("create the fake home");
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+
+        /// Write `~/.tddy/desktop.yaml`, as `./install --desktop` does.
+        fn with_installed_config(self) -> Self {
+            let directory = self.0.join(INSTALLED_DIRNAME);
+            std::fs::create_dir_all(&directory).expect("create the installed directory");
+            std::fs::write(directory.join(INSTALLED_CONFIG_FILENAME), "users: []\n")
+                .expect("write the installed config");
+            self
+        }
+    }
+
+    impl Drop for FakeHome {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn an_installed_application_is_configured_from_the_one_file_under_the_home_directory() {
+        // Given a home directory holding the configuration `./install --desktop` writes
+        let home = FakeHome::new("installed").with_installed_config();
+
+        // When the installed application resolves where it is configured from
+        let source = installed_source(home.path()).expect("resolve the installed source");
+
+        // Then it is that file, and the directory holding it is what the process moves into, so the
+        // relative paths inside the YAML resolve against the same `~/.tddy` the sessions live in
+        assert_eq!(source.workspace_root, home.path().join(INSTALLED_DIRNAME));
+        assert_eq!(
+            source.config_path,
+            home.path()
+                .join(INSTALLED_DIRNAME)
+                .join(INSTALLED_CONFIG_FILENAME)
+        );
+    }
+
+    #[test]
+    fn an_installed_application_without_that_file_refuses_to_start_and_names_the_installer() {
+        // Given a home directory that has never had `./install --desktop` run against it
+        let home = FakeHome::new("uninstalled");
+
+        // When the installed application resolves where it is configured from
+        let error =
+            installed_source(home.path()).expect_err("an unconfigured home must not resolve");
+
+        // Then it fails naming the file it looked for and the command that writes it, rather than
+        // falling back to a checkout that happens to be above the working directory
+        let message = error.to_string();
+        assert!(
+            message.contains(INSTALLED_CONFIG_FILENAME),
+            "the error must name the file it looked for; got: {message}"
+        );
+        assert!(
+            message.contains("./install --desktop"),
+            "the error must name the command that writes it; got: {message}"
+        );
+    }
+
+    /// Sets an environment variable for the body of one test and puts the process back afterwards,
+    /// panic or not.
+    struct EnvGuard {
+        name: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(name: &'static str, value: &Path) -> Self {
+            let previous = std::env::var_os(name);
+            std::env::set_var(name, value);
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.name, value),
+                None => std::env::remove_var(self.name),
+            }
+        }
+    }
+
+    #[test]
+    fn an_installed_application_never_reads_the_development_configuration() {
+        // Given a home directory holding the installed configuration, and a checkout inside it
+        // that a development build would have preferred — named by both development variables
+        let home = FakeHome::new("ignores-dev-config").with_installed_config();
+        let checkout = home.path().join("some-checkout");
+        std::fs::create_dir_all(&checkout).expect("create the decoy checkout");
+        let decoy = checkout.join(DESKTOP_DEV_CONFIG_FILENAME);
+        std::fs::write(&decoy, "users: []\n").expect("write the decoy config");
+        let _config = EnvGuard::set("TDDY_DAEMON_CONFIG", &decoy);
+        let _root = EnvGuard::set("TDDY_WORKSPACE_ROOT", &checkout);
+
+        // When the installed application resolves where it is configured from
+        let source = installed_source(home.path()).expect("resolve the installed source");
+
+        // Then none of it is consulted: a release build reads `~/.tddy/desktop.yaml` and nothing
+        // else, so which directory Finder launched the bundle from cannot change its configuration
+        assert_eq!(
+            source.config_path,
+            home.path()
+                .join(INSTALLED_DIRNAME)
+                .join(INSTALLED_CONFIG_FILENAME)
+        );
+        assert_eq!(source.workspace_root, home.path().join(INSTALLED_DIRNAME));
     }
 }

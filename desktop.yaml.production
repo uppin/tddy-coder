@@ -1,0 +1,106 @@
+# Production template for Tddy Desktop's embedded tddy-daemon.
+#
+# `./install --desktop` renders this to __TDDY_DATA_DIR__/desktop.yaml, which is the ONLY file a
+# release build of the application reads (see packages/tddy-desktop/src-tauri/src/config_source.rs).
+# There is no fallback: no TDDY_DAEMON_CONFIG, no repo-root dev.desktop.yaml, no walk up the
+# directory tree looking for a checkout — an installed .app launched from the Dock has `/` for a
+# working directory, so anything it found that way it would have found by accident.
+#
+# Unknown keys are a STARTUP FAILURE, not an ignored setting: every key below is one
+# `tddy_daemon_kernel::config::DaemonConfig` declares.
+#
+# Placeholders replaced at install time:
+#   __TDDY_DATA_DIR__     — sessions, agent state and this file (default: $HOME/.tddy)
+#   __DAEMON_LOG_DIR__    — daemon file-log dir (default: $HOME/.tddy/logs)
+#   __AUTH_STORAGE_DIR__  — OAuth/token storage base (default: $HOME/.tddy; `/auth` is appended)
+#   __INSTALL_BIN_DIR__   — where ./install --desktop put the CLI binaries (default: $HOME/.local/bin)
+#
+# An existing __TDDY_DATA_DIR__/desktop.yaml is NEVER overwritten by a reinstall. Delete it to have
+# `./install --desktop` render this template again.
+
+# The application has no terminal when it is launched from the Dock, so the log goes to a file.
+# `output:` also takes `stderr`, `stdout`, `buffer`, `mute`, or a list — add `stderr` when you run
+# the app from a shell and want the lines there too.
+log:
+  loggers:
+    default:
+      output: { file: "__DAEMON_LOG_DIR__/daemon" }
+      format: "{timestamp} [{level}] [{target}] {message}"
+    webrtc:
+      output: { file: "__DAEMON_LOG_DIR__/webrtc" }
+      format: "{timestamp} [{level}] [{target}] {message}"
+  default:
+    level: info
+    logger: default
+  # Verbose WebRTC / LiveKit SDK chatter, kept out of the daemon log.
+  policies:
+    - selector: { target: libwebrtc* }
+      logger: webrtc
+    - selector: { target: livekit* }
+      logger: webrtc
+    - selector: { target: livekit_api* }
+      logger: webrtc
+
+# Sessions, agent state and the models database. Named explicitly rather than left to the release
+# default ($HOME/.tddy) so that moving the install with INSTALL_TDDY_HOME moves the data with it.
+tddy_data_dir: "__TDDY_DATA_DIR__"
+
+# Where a GitHub login's access token is retained (github-tokens.json, mode 0600). The daemon
+# REFUSES TO START when this is set and not writable, because a failed token write would fail every
+# login — ./install --desktop creates it mode 0700.
+auth_storage: "__AUTH_STORAGE_DIR__/auth"
+
+# NO `listen:` AND NO `web_bundle_path:` ON PURPOSE. The desktop application binds no TCP port at
+# all: the dashboard reaches the daemon over the webview's IPC bridge, and the web bundle is
+# embedded in the .app at build time. Adding either here configures a listener that is never built.
+
+# No `github:` block means no GitHub sign-in: the dashboard opens straight onto this machine's
+# sessions, which is what a single-operator desktop install wants. Add one — and a `users:` entry
+# mapping the login to this OS user — only to put a real login in front of it:
+#
+# github:
+#   client_id: "<your-github-oauth-app-client-id>"
+#   client_secret: "<secret>"
+#   redirect_uri: "http://localhost:8899/auth/callback"
+#
+# users:
+#   - github_user: "octocat"
+#     os_user: "<this machine's login name>"
+users: []
+
+# Optional. Reaches OTHER daemons — a LiveKit common room is how this application sees sessions
+# hosted elsewhere. Its own daemon is never reached this way.
+# livekit:
+#   url: ws://127.0.0.1:7880
+#   api_key: "<key>"
+#   api_secret: "<secret>"
+#   public_url: ws://your-host:7880
+#   common_room: tddy-lobby
+
+# Append `-<unix_ms>` to this daemon's LiveKit identity once per process, so the installed
+# application and a `./desktop-dev` run on the same machine do not collide with DuplicateIdentity.
+daemon_instance_id_append_startup_timestamp: true
+
+# The agent backends the dashboard offers. An id listed here still needs its CLI on PATH — the
+# daemon spawns `claude`, `codex`, `cursor-agent` and friends as this OS user. Discovered
+# assistants are added to these rows at runtime.
+allowed_agents:
+  - id: claude
+    label: "Claude"
+  - id: claude-acp
+    label: "Claude (ACP)"
+  - id: codex
+    label: "Codex"
+  - id: codex-acp
+    label: "Codex (ACP)"
+  - id: cursor
+    label: "Cursor"
+
+# The tools the daemon may spawn, at the absolute paths ./install --desktop copied them to. They are
+# also inside the .app next to the application binary, which is how tddy-sandbox-runner and
+# tddy-index-daemon are resolved (sibling of the running executable) without being listed here.
+allowed_tools:
+  - path: "__INSTALL_BIN_DIR__/tddy-coder"
+    label: "tddy-coder"
+  - path: "__INSTALL_BIN_DIR__/tddy-tools"
+    label: "tddy-tools"

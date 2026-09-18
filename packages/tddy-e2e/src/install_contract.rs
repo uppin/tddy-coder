@@ -113,6 +113,100 @@ pub fn verify_headless_flag_support(contents: &str) {
     );
 }
 
+/// `--desktop` installs the Tauri application instead of a systemd-managed daemon: it is its own
+/// deployment, mutually exclusive with `--systemd`, it installs no unit and no service user, and it
+/// renders `desktop.yaml.production` to the one file a release build reads.
+pub fn verify_desktop_flag_support(contents: &str) {
+    assert!(
+        contents.contains("--desktop"),
+        "install must accept --desktop"
+    );
+    assert!(
+        contents.contains("want_desktop"),
+        "install must gate on a --desktop flag (e.g. want_desktop)"
+    );
+    assert!(
+        contents.contains("$0 --desktop") || contents.contains("${0} --desktop"),
+        "install usage must mention --desktop, so an operator who runs the script bare is told \
+         both deployments exist"
+    );
+    // A machine cannot host both: the service daemon and the application's own daemon would
+    // contend for the same data directory and the same LiveKit identity.
+    assert!(
+        contents.contains("$want_systemd\" && \"$want_desktop")
+            || contents.contains("\"$want_desktop\" && \"$want_systemd"),
+        "install must reject --systemd and --desktop together"
+    );
+    assert!(
+        contents.contains("desktop.yaml.production"),
+        "install --desktop must render the desktop.yaml.production template"
+    );
+    // The release build reads exactly ~/.tddy/desktop.yaml and nothing else (see
+    // packages/tddy-desktop/src-tauri/src/config_source.rs), so that is where the render lands.
+    assert!(
+        contents.contains("desktop.yaml"),
+        "install --desktop must write the config as desktop.yaml"
+    );
+    assert!(
+        contents.contains("INSTALL_TDDY_HOME"),
+        "install --desktop must let INSTALL_TDDY_HOME relocate the application's home"
+    );
+    // The application's own process IS the daemon, so shipping a second daemon binary beside it
+    // would install a service nothing starts.
+    let desktop_binaries = contents
+        .lines()
+        .find(|l| l.trim_start().starts_with("DESKTOP_BINARIES="))
+        .expect("install must declare a DESKTOP_BINARIES list for the --desktop install");
+    for absent in ["tddy-daemon", "tddy-supervisor"] {
+        assert!(
+            !desktop_binaries.contains(absent),
+            "install --desktop must not ship {absent}: the application hosts the daemon in its \
+             own process ({desktop_binaries})"
+        );
+    }
+    for present in [
+        "tddy-coder",
+        "tddy-tools",
+        "tddy-sandbox-runner",
+        "tddy-index-daemon",
+    ] {
+        assert!(
+            desktop_binaries.contains(present),
+            "install --desktop must ship {present} ({desktop_binaries})"
+        );
+    }
+}
+
+/// `desktop.yaml.production` must declare no `listen:` and no `web_bundle_path:`: the desktop
+/// application binds no TCP port and embeds its dashboard at build time, so either key would
+/// configure a listener that is never built. Every placeholder it carries must be one `install`
+/// substitutes, or the installed config keeps a literal `__NAME__` the daemon then reads as a path.
+pub fn verify_desktop_config_template(install_contents: &str, desktop_yaml_production: &str) {
+    for absent in ["listen:", "web_bundle_path:"] {
+        assert!(
+            !desktop_yaml_production
+                .lines()
+                .any(|l| l.trim_start().starts_with(absent)),
+            "desktop.yaml.production must not declare {absent}: the application binds no port and \
+             embeds its dashboard"
+        );
+    }
+    let mut rest = desktop_yaml_production;
+    while let Some(start) = rest.find("__") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("__") else { break };
+        let name = &after[..end];
+        if name.chars().all(|c| c.is_ascii_uppercase() || c == '_') && !name.is_empty() {
+            assert!(
+                install_contents.contains(&format!("__{name}__")),
+                "desktop.yaml.production carries the placeholder __{name}__, which install never \
+                 substitutes: the rendered config would keep it literally"
+            );
+        }
+        rest = &after[end + 2..];
+    }
+}
+
 /// Optional `--build` runs the release script.
 pub fn verify_build_flag_invokes_release(contents: &str) {
     assert!(contents.contains("--build"), "install must accept --build");
@@ -303,6 +397,7 @@ pub fn verify_install_script_contracts(path: &Path, daemon_yaml_production_path:
     verify_build_flag_invokes_release(&contents);
     verify_user_flag_support(&contents);
     verify_headless_flag_support(&contents);
+    verify_desktop_flag_support(&contents);
     let prod = fs::read_to_string(daemon_yaml_production_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", daemon_yaml_production_path.display()));
     verify_install_deploys_web_static_assets(&contents, &prod);
@@ -313,6 +408,14 @@ pub fn verify_install_script_contracts(path: &Path, daemon_yaml_production_path:
     verify_supervisor_unit_is_verified_active(&contents);
     verify_legacy_daemon_units_are_masked_socket_first(&contents);
     verify_unit_templates_contain_no_command_substitution(&contents);
+    let desktop_prod = fs::read_to_string(
+        daemon_yaml_production_path
+            .parent()
+            .expect("daemon.yaml.production must live in the repo root")
+            .join("desktop.yaml.production"),
+    )
+    .expect("read desktop.yaml.production");
+    verify_desktop_config_template(&contents, &desktop_prod);
 }
 
 #[cfg(test)]
@@ -387,6 +490,27 @@ mod granular_tests {
     #[test]
     fn install_headless_flag_granular() {
         verify_headless_flag_support(&read_repo_install());
+    }
+
+    #[test]
+    fn install_desktop_flag_granular() {
+        verify_desktop_flag_support(&read_repo_install());
+    }
+
+    #[test]
+    fn desktop_template_configures_no_listener_and_no_unsubstituted_placeholder() {
+        // Given
+        let script = read_repo_install();
+        let template = std::fs::read_to_string(
+            repo_install_path()
+                .parent()
+                .expect("install must live in the repo root")
+                .join("desktop.yaml.production"),
+        )
+        .expect("read desktop.yaml.production");
+
+        // Then
+        verify_desktop_config_template(&script, &template);
     }
 
     #[test]
