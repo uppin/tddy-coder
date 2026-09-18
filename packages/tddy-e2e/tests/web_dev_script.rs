@@ -6,6 +6,10 @@
 use std::fs;
 use std::path::PathBuf;
 
+use tddy_e2e::dev_script_contract::{
+    verify_build_flag_uses_shared_runtime_list, verify_declares_and_consumes_new_flags,
+    verify_private_repo_flag_delegates_to_local_registry,
+};
 use tddy_e2e::web_dev_contract::{
     verify_daemon_binary_only, verify_default_dev_daemon_config, verify_syntax_and_no_legacy_branch,
 };
@@ -54,4 +58,36 @@ fn web_dev_default_config_is_dev_daemon_yaml() {
 
     // When / Then
     verify_default_dev_daemon_config(&contents);
+}
+
+/// `--build` and `--resolve-private-repo` must be documented and consumed here: every unrecognised
+/// argument is forwarded to `tddy-daemon`, which would reject or misread them.
+#[test]
+fn web_dev_declares_build_and_private_repo_flags() {
+    // Given
+    let contents = read_web_dev();
+
+    // When / Then
+    verify_declares_and_consumes_new_flags(&contents, "web-dev");
+}
+
+/// `--build` must build the shared runtime-invocable package list, not just the daemon the script
+/// launches itself.
+#[test]
+fn web_dev_build_flag_uses_shared_runtime_list() {
+    // Given
+    let contents = read_web_dev();
+
+    // When / Then
+    verify_build_flag_uses_shared_runtime_list(&contents, "web-dev");
+}
+
+/// `--resolve-private-repo` must go through `bun run local-registry-install`.
+#[test]
+fn web_dev_private_repo_flag_uses_local_registry() {
+    // Given
+    let contents = read_web_dev();
+
+    // When / Then
+    verify_private_repo_flag_delegates_to_local_registry(&contents, "web-dev");
 }

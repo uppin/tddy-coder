@@ -6,6 +6,18 @@ The repo root script **`./web-dev`** starts **`tddy-daemon`** (RPC backend) and 
 
 **Tddy Desktop (Electrobun):** **`bun run desktop:dev`** runs Vite plus the desktop shell. The embedded daemon defaults to repo-root **`dev.desktop.yaml`** when **`TDDY_DAEMON_CONFIG`** is unset (same shape as **`dev.daemon.yaml`**). Repo-root **`.env`** is loaded first (same “do not override existing env” rule as **`./web-dev`**); daemon env overrides still apply. See [packages/tddy-desktop/README.md](../../../packages/tddy-desktop/README.md).
 
+## Flags
+
+`./web-dev` consumes the flags below itself; **every other argument is passed through to `tddy-daemon`** (`-c`, `--github-stub`, …). `./desktop-dev` — the Tddy Desktop counterpart — takes the same `--build` and `--resolve-private-repo`, and passes the rest to `tauri dev`.
+
+| Flag | What it does |
+|------|--------------|
+| `--headless` | Start the daemon/worker backend only: no Vite dev server, and no web bundle needed. |
+| `--build` | Build **every binary the running stack can invoke**, not just the one process the script launches. The list lives in **`scripts/dev-runtime-binaries.sh`** (`DEV_RUNTIME_PACKAGES`): `tddy-coder`, `tddy-tools`, `tddy-sandbox-runner`, `tddy-index-daemon`, `tddy-remote-git-repo`, `tddy-session-sync`. Each is resolved at runtime as a **sibling of the daemon binary**, then as a bare name on `PATH`, **with no existence check** — so without this flag a missing or stale one is never a build error: it surfaces later as a session that will not start, or as a dev run silently driving whatever `./install` last put on `PATH`. `BUILD_TARGETS` still names the launcher's own backend (`tddy-daemon`) and is merged in. |
+| `--resolve-private-repo` | Install the JS dependencies through the **local private npm registry** instead of the public one, by delegating to `bun run local-registry-install` (lock resolution via `scripts/resolve-local-lock.ts`, then a registry-pinned `scripts/local-bun-install.sh`). Set **`LOCAL_REGISTRY_URL`** to override the registry. Opt-in rather than automatic because it rewrites `node_modules` and `bun.lock` resolution for the whole workspace. |
+
+`scripts/dev-runtime-binaries.sh` is the single source for that list, shared by both launchers. `packages/tddy-e2e/tests/dev_runtime_binaries.rs` fails if it stops covering every binary `install` ships as a daemon sibling (`DESKTOP_BINARIES`).
+
 ## Hot reload (HMR) — use the Vite URL
 
 `./web-dev` runs **two HTTP servers**:
@@ -65,7 +77,7 @@ Set `debug: ""` (or comment it out) in `dev.daemon.yaml` to disable. The legacy 
 
 ## Automated checks
 
-Static contract tests live in **`packages/tddy-e2e`** (`web_dev_contract` module and `tests/web_dev_script.rs`). Run:
+Static contract tests live in **`packages/tddy-e2e`** (`web_dev_contract` and `dev_script_contract` modules; `tests/web_dev_script.rs`, `tests/desktop_dev_script.rs`, `tests/dev_runtime_binaries.rs`). Run:
 
 ```bash
 ./dev cargo test -p tddy-e2e web_dev --no-fail-fast -- --test-threads=1

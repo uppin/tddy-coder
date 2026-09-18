@@ -8,6 +8,23 @@
 #
 # Usage: ./desktop-dev                   # dev.desktop.yaml at the repo root
 #        ./desktop-dev --release         # extra CLI for `tauri dev` (pass-through)
+#        ./desktop-dev --build           # also build every binary the app can INVOKE. `tauri dev`
+#                                          builds only tddy-desktop; the daemon it hosts then
+#                                          resolves the session worker, the tool binary, the sandbox
+#                                          runner, the index daemon, the git shim and the worktree
+#                                          mirror as siblings of that binary in target/debug, and
+#                                          falls back to a bare name on PATH with no existence check
+#                                          — so a missing one silently drives whatever ./install
+#                                          last put on PATH. See scripts/dev-runtime-binaries.sh.
+#        ./desktop-dev --resolve-private-repo
+#                                        # install the JS dependencies through the local private npm
+#                                          registry (LOCAL_REGISTRY_URL) instead of the public one,
+#                                          via `bun run local-registry-install`. Needed on a machine
+#                                          with no public registry access; it rewrites node_modules,
+#                                          so it is opt-in rather than automatic.
+#
+# Both flags are consumed here; every other argument is passed through to `tauri dev`, which accepts
+# neither.
 #
 # Environment variables:
 #   VITE_PORT       — Port for the Vite dev server (default: 5173)
@@ -17,6 +34,8 @@
 #   TDDY_DATA_DIR   — Where sessions and daemon state live (default: tmp/.tddy in the checkout).
 #                     An installed app defaults to ~/.tddy; this keeps a dev run out of it.
 #   TDDY_WORKSPACE_ROOT — The checkout the app resolves config and relative paths against.
+#   LOCAL_REGISTRY_URL — Private npm registry used by --resolve-private-repo (default: the one
+#                     scripts/local-bun-install.sh declares).
 #
 # Repo-root .env is loaded first and never overrides an already-set variable, the same rule
 # ./web-dev follows.
@@ -48,6 +67,25 @@ if [[ -z "${TDDY_DESKTOP_DEV_RESHELLED:-}" ]] \
   export TDDY_DESKTOP_DEV_RESHELLED=1
   exec nix develop --profile ./.nix-profile -c "$SCRIPT_DIR/desktop-dev" "$@"
 fi
+
+# Flags this script owns, parsed after the re-exec above so that exec still forwards the original
+# argv. Consumed here; everything else is passed through to `tauri dev`.
+WANT_BUILD=false
+RESOLVE_PRIVATE_REPO=false
+filtered_args=()
+for arg in "$@"; do
+  case "$arg" in
+    --build) WANT_BUILD=true ;;
+    --resolve-private-repo) RESOLVE_PRIVATE_REPO=true ;;
+    *) filtered_args+=("$arg") ;;
+  esac
+done
+set -- "${filtered_args[@]+"${filtered_args[@]}"}"
+
+# DEV_RUNTIME_PACKAGES + dev_runtime_cargo_args() — the one list of runtime-invocable packages,
+# shared with ./web-dev so the two launchers cannot drift apart.
+# shellcheck source=scripts/dev-runtime-binaries.sh
+source "$PROJECT_ROOT/scripts/dev-runtime-binaries.sh"
 
 # Load .env if present (does not override already-set env vars) — same as ./web-dev.
 if [[ -f .env ]]; then
@@ -106,6 +144,21 @@ stop_vite() {
 trap stop_vite EXIT
 trap 'stop_vite; exit 130' INT
 trap 'stop_vite; exit 143' TERM
+
+# --resolve-private-repo / --build: both run before anything is started, so a failure leaves no
+# half-started stack behind — and so the Vite readiness wait below is not charged for a cold build.
+if [[ "$RESOLVE_PRIVATE_REPO" == true ]]; then
+  echo "Installing JS dependencies from the private registry (${LOCAL_REGISTRY_URL:-default}) ..."
+  bun run local-registry-install
+fi
+
+if [[ "$WANT_BUILD" == true ]]; then
+  # tddy-desktop itself is left to `tauri dev`, which owns its build; these are the siblings it
+  # resolves at runtime and never builds.
+  dev_runtime_cargo_args
+  echo "Building (debug): ${DEV_RUNTIME_CARGO_PACKAGES[*]} ..."
+  cargo build "${DEV_RUNTIME_CARGO_ARGS[@]}"
+fi
 
 echo "Starting tddy-web Vite dev server on port ${VITE_PORT} ..."
 bun run --filter tddy-web dev &
