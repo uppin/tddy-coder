@@ -220,9 +220,14 @@ lookup that resolves `tddy-sandbox-runner` and `tddy-index-daemon`. That same lo
 binaries are installed twice on macOS — inside the bundle for the daemon to find, and in `$BIN_DIR`
 for `allowed_tools` and a hand-run `tddy-tools` to resolve.
 
-`--build` runs three builds in order — `./release`, then the `tddy-web` bundle, then `tauri build` —
-because the application *embeds* the bundle; building the app first produces a stale dashboard and no
-error. Without it the install preflights for the artifacts and fails naming the exact command.
+`./release --desktop` builds everything the install ships, in the one order that works: the CLI
+binaries, then the `tddy-web` bundle, then `tauri build`. The application *embeds* the bundle, so
+building the app first produces a stale dashboard and no error. `--build` runs that same script, and
+without it the install preflights for the artifacts and fails naming it.
+
+A `tauri build` that fails **after** producing the `.app` says so and names the bundle — on macOS the
+`dmg` target drives Finder over AppleScript and times out without Automation permission, long after
+the application itself is complete. `./install --desktop` then installs what is already built.
 
 The configuration is rendered from `desktop.yaml.production` and an existing one is **never**
 overwritten, so a reinstall keeps every choice the operator made. Overrides: `INSTALL_TDDY_HOME`,

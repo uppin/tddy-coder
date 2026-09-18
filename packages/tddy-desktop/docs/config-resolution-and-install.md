@@ -62,9 +62,16 @@ finds `tddy-sandbox-runner` and `tddy-index-daemon` read that path. The same loo
 two copies of the CLI binaries — the in-bundle set is what the daemon resolves, the `$BIN_DIR` set is
 what `allowed_tools` names and what an operator runs by hand.
 
-`--build` runs `./release`, then the `tddy-web` bundle, then `tauri build`, in that order, because the
-application embeds the bundle; building the app first yields a stale dashboard and no error. Without
-`--build` the install preflights for every artifact and fails naming the exact command.
+`./release --desktop` owns the build and its order: the CLI binaries, then the `tddy-web` bundle,
+then `tauri build`. The application embeds the bundle, so building the app first yields a stale
+dashboard and no error. `--build` delegates to that script rather than repeating the sequence, which
+is what keeps a build-then-install and a `--build` install producing the same artifacts; without
+`--build` the install preflights for every artifact and fails naming the script.
+
+`./release --desktop` distinguishes a failed application build from a failed *later* bundle target:
+if the `.app` is present it names it and points at `./install --desktop`, because on macOS the `dmg`
+target drives Finder over AppleScript and times out without Automation permission while the `.app`
+itself is valid.
 
 The config is rendered only when absent — a reinstall keeps the operator's file untouched — and the
 install warns when `INSTALL_TDDY_HOME` points away from `$HOME/.tddy`, since a release build has no

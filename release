@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# Build optimized production binary. Uses nix dev shell for consistent toolchain.
+# Build optimized production binaries. Uses nix dev shell for consistent toolchain.
 # Output: target/release/tddy-coder, target/release/tddy-tools, target/release/tddy-daemon,
 #         target/release/tddy-supervisor, target/release/tddy-remote-git-repo,
 #         target/release/tddy-session-sync, target/release/tddy-sandbox-runner,
 #         target/release/tddy-index-daemon
+#
+# Usage: ./release [--desktop]
+#
+#   --desktop   Additionally build everything `./install --desktop` ships: the tddy-web bundle and
+#               then the Tauri application. Output: packages/tddy-web/dist and, on macOS,
+#               target/release/bundle/macos/Tddy Desktop.app; on Linux target/release/tddy-desktop.
 #
 # tddy-sandbox-runner is the process every jail runs inside itself (sandboxed claude-cli and
 # cursor-cli sessions, and the workspace tool jail). tddy-index-daemon is the process that holds a
@@ -11,5 +17,72 @@
 # builds, so a package missing from this line is a binary missing from every installed host — and
 # ./install pre-flights every name in its INSTALLED_BINARIES array, so a name there and not here
 # fails the install rather than the build.
-set -e
-exec nix develop --profile ./.nix-profile -c cargo build --release -p tddy-coder -p tddy-tools -p tddy-sandbox-darwin -p tddy-sandbox-app -p tddy-sandbox-runner -p tddy-daemon -p tddy-supervisor -p tddy-remote-git-repo -p tddy-session-sync -p tddy-index-daemon
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+
+DESKTOP_APP_NAME="Tddy Desktop"
+
+usage() {
+  echo "Usage: $0 [--desktop]" >&2
+}
+
+want_desktop=false
+for arg in "$@"; do
+  case "$arg" in
+    --desktop) want_desktop=true ;;
+    -h|--help) usage; exit 0 ;;
+    *)
+      echo "release: unknown argument: $arg" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+in_shell() {
+  nix develop --profile ./.nix-profile -c "$@"
+}
+
+in_shell cargo build --release \
+  -p tddy-coder \
+  -p tddy-tools \
+  -p tddy-sandbox-darwin \
+  -p tddy-sandbox-app \
+  -p tddy-sandbox-runner \
+  -p tddy-daemon \
+  -p tddy-supervisor \
+  -p tddy-remote-git-repo \
+  -p tddy-session-sync \
+  -p tddy-index-daemon
+
+if [[ "$want_desktop" != true ]]; then
+  exit 0
+fi
+
+# Order matters and is not interchangeable: `frontendDist` in tauri.conf.json points at
+# packages/tddy-web/dist, and `tauri build` READS that directory rather than building it. Building
+# the application before the bundle bakes a stale dashboard into it, silently.
+echo "release: --desktop — building the tddy-web bundle (the application embeds it)"
+in_shell bun run build
+
+echo "release: --desktop — building the application (tauri build)"
+status=0
+in_shell bun run desktop:build || status=$?
+if [[ "$status" -eq 0 ]]; then
+  exit 0
+fi
+
+# Do not swallow this. On macOS the `dmg` bundle target drives Finder over AppleScript and fails
+# without Automation permission, LONG AFTER the .app itself is complete and valid — so say which of
+# the two happened instead of reporting a uniform failure the operator cannot act on.
+echo "release: tauri build failed (exit ${status})" >&2
+if [[ "$(uname -s)" == "Darwin" && -d "${ROOT_DIR}/target/release/bundle/macos/${DESKTOP_APP_NAME}.app" ]]; then
+  echo "release: the application bundle itself IS present and installable:" >&2
+  echo "release:   ${ROOT_DIR}/target/release/bundle/macos/${DESKTOP_APP_NAME}.app" >&2
+  echo "release: a later bundle target failed, not the app. On macOS the 'dmg' target drives Finder" >&2
+  echo "release:   over AppleScript and times out without Automation permission." >&2
+  echo "release: ./install --desktop (without --build) installs what is already built." >&2
+fi
+exit "$status"

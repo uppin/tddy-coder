@@ -175,6 +175,15 @@ pub fn verify_desktop_flag_support(contents: &str) {
             "install --desktop must ship {present} ({desktop_binaries})"
         );
     }
+    // `./release --desktop` owns the build order — CLI binaries, then the tddy-web bundle, then
+    // `tauri build` — because the application embeds the bundle at build time. If the install grew
+    // its own copy of that sequence the two would drift, and an app built by one path would carry a
+    // dashboard the other never rebuilt.
+    assert!(
+        contents.contains("release\" --desktop") || contents.contains("release --desktop"),
+        "install --desktop --build must delegate to ./release --desktop rather than running the \
+         bundle and tauri builds itself"
+    );
 }
 
 /// `desktop.yaml.production` must declare no `web_bundle_path:` — the application embeds its

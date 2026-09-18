@@ -42,9 +42,10 @@
 #               daemon spawns are installed too, ~/.tddy/desktop.yaml is rendered from
 #               desktop.yaml.production if it does not exist, and nothing already there is
 #               overwritten. See "desktop install" below for its own environment overrides.
-#   --build     Optional. Run ./release before copying binaries. With --desktop it additionally
-#               builds the tddy-web bundle and then the application itself (`tauri build`), because
-#               the .app embeds that bundle rather than reading it from disk.
+#   --build     Optional. Run ./release before copying binaries. With --desktop it runs
+#               ./release --desktop, which additionally builds the tddy-web bundle and then the
+#               application itself, because the .app embeds that bundle rather than reading it
+#               from disk.
 #   --user      Optional. Install as a per-user systemd service (systemctl --user) instead of a
 #               system service. No root required: paths default to XDG user locations
 #               (~/.local/bin, ~/.config/tddy, ~/.config/systemd/user, ...), the unit runs as the
@@ -776,17 +777,12 @@ install_desktop() {
   fi
 
   if "$want_build"; then
-    # Three builds, in this order and all of them required. The CLI binaries are what the embedded
-    # daemon spawns; the web bundle is what the application EMBEDS (frontendDist in tauri.conf.json
-    # points at packages/tddy-web/dist, and `tauri build` reads it rather than building it); the
-    # application build then bakes that bundle into the binary. Building the app before the bundle
-    # produces an application with a stale dashboard and no error.
-    echo "install: --build — running ${ROOT_DIR}/release (CLI binaries the embedded daemon spawns)"
-    "${ROOT_DIR}/release"
-    echo "install: --build — building the tddy-web bundle (the application embeds it)"
-    "${ROOT_DIR}/dev" bun run build
-    echo "install: --build — building the application (tauri build)"
-    "${ROOT_DIR}/dev" bun run desktop:build
+    # ./release --desktop owns the three builds and their order: the CLI binaries the embedded
+    # daemon spawns, the web bundle the application EMBEDS, and then the application itself. The
+    # sequence lives there rather than here so that building without installing produces exactly
+    # what this install pre-flights for, with no second copy of the order to drift.
+    echo "install: --build — running ${ROOT_DIR}/release --desktop"
+    "${ROOT_DIR}/release" --desktop
   fi
 
   local name src
@@ -803,13 +799,13 @@ install_desktop() {
     if [[ ! -d "$DESKTOP_MACOS_BUNDLE_SRC" ]]; then
       echo "install: missing the built application bundle: ${DESKTOP_MACOS_BUNDLE_SRC}" >&2
       echo "install: build it first, or pass --build:" >&2
-      echo "install:   ./dev bun run build && ./dev bun run desktop:build" >&2
+      echo "install:   ./release --desktop" >&2
       exit 1
     fi
   elif [[ ! -f "$DESKTOP_LINUX_BINARY_SRC" ]]; then
     echo "install: missing the built application binary: ${DESKTOP_LINUX_BINARY_SRC}" >&2
     echo "install: build it first, or pass --build:" >&2
-    echo "install:   ./dev bun run build && ./dev bun run desktop:build" >&2
+    echo "install:   ./release --desktop" >&2
     exit 1
   fi
 
