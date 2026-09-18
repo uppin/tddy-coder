@@ -5,20 +5,32 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::sync::Arc;
 
+use tddy_core::backend::{AgentOutputSink, ProgressSink};
 use tddy_core::changeset::{
-    get_session_for_tag, read_changeset, resolve_model, update_state, write_changeset, Changeset,
+    append_session_and_update_state, get_session_for_tag, read_changeset, resolve_model,
+    update_state, write_changeset, Changeset, SessionEntry,
 };
+use tddy_core::error::WorkflowError;
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::setup_worktree_for_session_with_optional_chain_base;
+use tddy_core::stream::ProgressEvent as StreamProgressEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::find_git_root;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::prepend_context_header;
 use tddy_core::workflow::recipe::WorkflowRecipe;
 
-use crate::tdd::green;
+use crate::parser::{
+    parse_green_response, parse_red_response, parse_refactor_response, parse_update_docs_response,
+    GreenOutput,
+};
 use crate::tdd::session_dir_resolve::resolve_existing_session_dir_for_plan;
+use crate::tdd::{green, refactor, update_docs};
+use crate::writer::{
+    update_acceptance_tests_file, update_progress_file, write_progress_file, write_red_output_file,
+};
 use crate::SessionArtifactManifest;
 
 /// Read primary planning document using recipe basename and migration-aware resolution.
@@ -254,4 +266,229 @@ pub(crate) fn before_green(
         write_changeset_logged(session_dir, &cs, "before_green GreenImplementing");
     }
     Ok(())
+}
+
+pub(crate) fn before_refactor(
+    session_dir: &Path,
+    context: &Context,
+    manifest: &dyn SessionArtifactManifest,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let refactor_plan = std::fs::read_to_string(session_dir.join("refactoring-plan.md"))
+        .map_err(|e| format!("read refactoring-plan.md: {}", e))?;
+    let prompt = refactor::build_prompt(&refactor_plan);
+    let repo_dir: Option<PathBuf> = context
+        .get_sync("worktree_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let ctx_artifacts = manifest.context_header_filenames();
+    let prompt = prepend_context_header(
+        prompt,
+        Some(session_dir),
+        repo_dir.as_deref(),
+        &ctx_artifacts,
+    );
+    let session_id = resolve_agent_session_id(session_dir)?;
+    context.set_sync("prompt", prompt);
+    context.set_sync("system_prompt", refactor::system_prompt());
+    context.set_sync("session_dir", session_dir.to_path_buf());
+    context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", true);
+    if let Ok(mut cs) = read_changeset(session_dir) {
+        update_state(&mut cs, WorkflowState::new("Refactoring"));
+        write_changeset_logged(session_dir, &cs, "before_refactor Refactoring");
+    }
+    Ok(())
+}
+
+pub(crate) fn before_update_docs(
+    manifest: &dyn SessionArtifactManifest,
+    session_dir: &Path,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let mut artifacts = Vec::new();
+    for (key, filename) in manifest.known_artifacts() {
+        let available = if *key == "prd" {
+            manifest
+                .primary_document_basename()
+                .map(|bn| {
+                    tddy_workflow::resolve_existing_session_artifact(session_dir, &bn).is_some()
+                })
+                .unwrap_or(false)
+        } else {
+            session_dir.join(filename).exists()
+                || session_dir.join("artifacts").join(filename).exists()
+        };
+        if available {
+            artifacts.push(format!("- {}: available", filename));
+        }
+    }
+    if session_dir.join("changeset.yaml").exists() {
+        artifacts.push("- changeset.yaml: available".to_string());
+    }
+    let artifacts_summary = if artifacts.is_empty() {
+        "No artifacts found.".to_string()
+    } else {
+        artifacts.join("\n")
+    };
+    let prompt = update_docs::build_prompt(&artifacts_summary);
+    context.set_sync("prompt", prompt);
+
+    let mut system_prompt = update_docs::system_prompt();
+    if let Ok(cs) = read_changeset(session_dir) {
+        if let Some(ref branch) = cs.branch {
+            system_prompt.push_str("\n\n**FINAL STEP**: After completing all documentation updates, commit all modifications with a descriptive message and push to the remote branch: ");
+            system_prompt.push_str(branch);
+            system_prompt.push('.');
+        }
+    }
+    context.set_sync("system_prompt", system_prompt);
+    context.set_sync("session_dir", session_dir.to_path_buf());
+    let session_id = resolve_agent_session_id(session_dir)?;
+    context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", true);
+    if let Ok(mut cs) = read_changeset(session_dir) {
+        update_state(&mut cs, WorkflowState::new("UpdatingDocs"));
+        write_changeset_logged(session_dir, &cs, "before_update_docs UpdatingDocs");
+    }
+    Ok(())
+}
+
+pub(crate) fn after_refactor(
+    session_dir: &Path,
+    output: &str,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let _ = parse_refactor_response(output).map_err(WorkflowError::ParseError)?;
+    if let Ok(mut cs) = read_changeset(session_dir) {
+        update_state(&mut cs, WorkflowState::new("RefactorComplete"));
+        write_changeset_logged(session_dir, &cs, "after_refactor RefactorComplete");
+    }
+    Ok(())
+}
+
+pub(crate) fn after_update_docs(
+    session_dir: &Path,
+    output: &str,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let _ = parse_update_docs_response(output).map_err(WorkflowError::ParseError)?;
+    if let Ok(mut cs) = read_changeset(session_dir) {
+        update_state(&mut cs, WorkflowState::new("DocsUpdated"));
+        write_changeset_logged(session_dir, &cs, "after_update_docs DocsUpdated");
+    }
+    Ok(())
+}
+
+/// The agent-output sink both workflows install in `on_enter_task`.
+pub(crate) fn agent_output_sink(
+    event_tx: Option<&mpsc::Sender<WorkflowEvent>>,
+) -> Option<AgentOutputSink> {
+    event_tx.map(|tx| {
+        let tx = tx.clone();
+        AgentOutputSink::new(move |s: &str| {
+            let _ = tx.send(WorkflowEvent::AgentOutput(s.to_string()));
+        })
+    })
+}
+
+/// `changeset_operation` carries the only difference between the two workflows: the operation each
+/// one records on its `RedTestsReady` changeset write.
+pub(crate) fn after_red(
+    session_dir: &Path,
+    output: &str,
+    context: &Context,
+    changeset_operation: &'static str,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let parsed = parse_red_response(output).map_err(WorkflowError::ParseError)?;
+    let _ = write_red_output_file(session_dir, &parsed);
+    let _ = write_progress_file(session_dir, &parsed);
+    let session_id: String = context
+        .get_sync("session_id")
+        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let backend_name: String = context
+        .get_sync("backend_name")
+        .unwrap_or_else(|| "claude".to_string());
+    let mut cs = read_changeset(session_dir).unwrap_or_default();
+    let session_exists = cs.sessions.iter().any(|s| s.id == session_id);
+    if session_exists {
+        update_state(&mut cs, WorkflowState::new("RedTestsReady"));
+    } else {
+        append_session_and_update_state(
+            &mut cs,
+            session_id,
+            "impl",
+            WorkflowState::new("RedTestsReady"),
+            &backend_name,
+            None,
+        );
+    }
+    write_changeset_logged(session_dir, &cs, changeset_operation);
+    Ok(())
+}
+
+/// The progress sink both workflows install in `on_enter_task`. `changeset_operation` carries the
+/// only difference: the operation each one records on the `SessionStarted` write.
+pub(crate) fn progress_sink(
+    context: &Context,
+    recipe: Arc<dyn WorkflowRecipe>,
+    event_tx: Option<mpsc::Sender<WorkflowEvent>>,
+    changeset_operation: &'static str,
+) -> Option<ProgressSink> {
+    let session_dir: Option<PathBuf> = context
+        .get_sync("session_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let task_id: Option<String> = context.get_sync("current_task_id");
+    let backend_name: String = context
+        .get_sync("backend_name")
+        .unwrap_or_else(|| "claude".to_string());
+
+    Some(ProgressSink::new(move |ev: &StreamProgressEvent| {
+        if let StreamProgressEvent::SessionStarted { session_id } = ev {
+            if let Some(ref dir) = session_dir {
+                if let Ok(mut cs) = read_changeset(dir) {
+                    let already_exists = cs.sessions.iter().any(|s| s.id == *session_id);
+                    if !already_exists {
+                        let tag = match task_id.as_deref() {
+                            Some("red") => "impl".to_string(),
+                            Some(t) => t.to_string(),
+                            None => recipe.start_goal().to_string(),
+                        };
+                        let now = chrono::Utc::now().to_rfc3339();
+                        cs.sessions.push(SessionEntry {
+                            id: session_id.clone(),
+                            agent: backend_name.clone(),
+                            tag,
+                            created_at: now,
+                            system_prompt_file: None,
+                        });
+                    }
+                    cs.state.session_id = Some(session_id.clone());
+                    write_changeset_logged(dir, &cs, changeset_operation);
+                }
+            }
+        }
+        if let Some(ref tx) = event_tx {
+            let _ = tx.send(WorkflowEvent::Progress(ev.clone()));
+        }
+    }))
+}
+
+/// The parse-and-persist opening of `after_green`, shared by both workflows. Returns the parsed
+/// output so each caller writes its own remaining artifacts in its own order.
+pub(crate) fn parse_green_and_update_progress(
+    session_dir: &Path,
+    output: &str,
+) -> Result<GreenOutput, Box<dyn Error + Send + Sync>> {
+    let parsed = parse_green_response(output).map_err(WorkflowError::ParseError)?;
+    let _ = update_progress_file(session_dir, &parsed);
+    let _ = update_acceptance_tests_file(session_dir, &parsed);
+    Ok(parsed)
+}
+
+/// The `GreenComplete` transition both workflows make once every test passes — the one piece of
+/// `after_green` whose silent drift `hooks_common` exists to prevent.
+pub(crate) fn complete_green_if_all_tests_passing(session_dir: &Path, parsed: &GreenOutput) {
+    if parsed.all_tests_passing() {
+        if let Ok(mut cs) = read_changeset(session_dir) {
+            update_state(&mut cs, WorkflowState::new("GreenComplete"));
+            write_changeset_logged(session_dir, &cs, "after_green GreenComplete");
+        }
+    }
 }

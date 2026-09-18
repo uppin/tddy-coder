@@ -15,15 +15,13 @@ use tddy_core::workflow::recipe::WorkflowRecipe;
 use tddy_core::workflow::task::TaskResult;
 
 use crate::parser::{
-    parse_acceptance_tests_response, parse_green_response, parse_planning_response_with_base,
-    parse_red_response, parse_refactor_response, parse_update_docs_response, PlanningOutput,
+    parse_acceptance_tests_response, parse_planning_response_with_base, PlanningOutput,
 };
 use crate::tdd::{hooks_common, interview};
 use crate::writer::write_artifacts;
 use crate::{
-    parse_evaluate_response, parse_validate_subagents_response, update_acceptance_tests_file,
-    update_progress_file, write_acceptance_tests_file, write_demo_results_file,
-    write_evaluation_report, write_progress_file, write_red_output_file, SessionArtifactManifest,
+    parse_evaluate_response, parse_validate_subagents_response, write_acceptance_tests_file,
+    write_demo_results_file, write_evaluation_report, SessionArtifactManifest,
 };
 
 pub(crate) fn after_interview(
@@ -142,55 +140,15 @@ pub(crate) fn after_acceptance_tests(
     hooks_common::write_changeset_logged(session_dir, &cs, "after_acceptance_tests");
     Ok(())
 }
-
-pub(crate) fn after_red(
-    session_dir: &Path,
-    output: &str,
-    context: &Context,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let parsed = parse_red_response(output).map_err(WorkflowError::ParseError)?;
-    let _ = write_red_output_file(session_dir, &parsed);
-    let _ = write_progress_file(session_dir, &parsed);
-    let session_id: String = context
-        .get_sync("session_id")
-        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-    let backend_name: String = context
-        .get_sync("backend_name")
-        .unwrap_or_else(|| "claude".to_string());
-    let mut cs = read_changeset(session_dir).unwrap_or_default();
-    let session_exists = cs.sessions.iter().any(|s| s.id == session_id);
-    if session_exists {
-        update_state(&mut cs, WorkflowState::new("RedTestsReady"));
-    } else {
-        append_session_and_update_state(
-            &mut cs,
-            session_id,
-            "impl",
-            WorkflowState::new("RedTestsReady"),
-            &backend_name,
-            None,
-        );
-    }
-    hooks_common::write_changeset_logged(session_dir, &cs, "after_red");
-    Ok(())
-}
-
 pub(crate) fn after_green(
     session_dir: &Path,
     output: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let parsed = parse_green_response(output).map_err(WorkflowError::ParseError)?;
-    let _ = update_progress_file(session_dir, &parsed);
-    let _ = update_acceptance_tests_file(session_dir, &parsed);
+    let parsed = hooks_common::parse_green_and_update_progress(session_dir, output)?;
     if let Some(ref demo) = parsed.demo_results {
         let _ = write_demo_results_file(session_dir, &demo.summary, demo.steps_completed);
     }
-    if parsed.all_tests_passing() {
-        if let Ok(mut cs) = read_changeset(session_dir) {
-            update_state(&mut cs, WorkflowState::new("GreenComplete"));
-            hooks_common::write_changeset_logged(session_dir, &cs, "after_green GreenComplete");
-        }
-    }
+    hooks_common::complete_green_if_all_tests_passing(session_dir, &parsed);
     Ok(())
 }
 
@@ -234,31 +192,6 @@ pub(crate) fn after_validate(
     }
     Ok(())
 }
-
-pub(crate) fn after_refactor(
-    session_dir: &Path,
-    output: &str,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let _ = parse_refactor_response(output).map_err(WorkflowError::ParseError)?;
-    if let Ok(mut cs) = read_changeset(session_dir) {
-        update_state(&mut cs, WorkflowState::new("RefactorComplete"));
-        hooks_common::write_changeset_logged(session_dir, &cs, "after_refactor RefactorComplete");
-    }
-    Ok(())
-}
-
-pub(crate) fn after_update_docs(
-    session_dir: &Path,
-    output: &str,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let _ = parse_update_docs_response(output).map_err(WorkflowError::ParseError)?;
-    if let Ok(mut cs) = read_changeset(session_dir) {
-        update_state(&mut cs, WorkflowState::new("DocsUpdated"));
-        hooks_common::write_changeset_logged(session_dir, &cs, "after_update_docs DocsUpdated");
-    }
-    Ok(())
-}
-
 pub(crate) fn after_demo(session_dir: &Path) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("DemoComplete"));
