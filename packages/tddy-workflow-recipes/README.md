@@ -42,6 +42,12 @@ the parent reaches them by path (`before::before_red(…)`), which is why it dec
 | `tdd_small/hooks/before.rs` | the `before_*` phase functions of the small TDD workflow |
 | `tdd_small/hooks/after.rs` | its `after_*` phase functions |
 
+What the two workflows share lives in `tdd/hooks_common/`, split the same way — `before.rs`,
+`after.rs` and `sinks.rs`, with the parent keeping the shared readers, writers and resolvers,
+`on_error`, and a facade so every `hooks_common::…` path resolves. A helper there takes whatever
+differs between the workflows as a parameter — a log target, a message prefix, a changeset operation
+tag — rather than inferring it, because each of those is observable output.
+
 ## Other modules
 
 `schema.rs`, `schema_manifest.rs`, `schema_pipeline.rs` (goal output schemas), `writer.rs`
