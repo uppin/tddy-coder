@@ -142,6 +142,79 @@ and carving it first means the manual work lands in files small enough to review
 - [ ] `/pr-wrap` — correct the title, ready for review
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
 
+## Validation Results — 2026-09-18 `/pr-wrap` step 1
+
+**Risk summary: 1 critical, 2 warnings.** Every stack-boundary check is clean; the critical finding
+is a **reachability gap**, not a defect in the code that was written.
+
+### 🔴 CRITICAL — FR1/FR2 are unreachable through the tool, so AC1/AC2 fail live
+
+`resolve_cluster` is correct and well tested, but **nothing can invoke it with more than one member**:
+
+- `RefactorOp` has no field for a co-moving set, and `src/plan.rs` is **untouched** by this PR, so a
+  `plan.jsonl` cannot declare a cluster.
+- The apply loop (`runner/entry_points.rs:149`) is `for (index, op) in plan.ops.iter()` — one op at a
+  time. Each resolves via `resolve()`, which builds a **one-member** cluster (`travelling_alone`).
+- So the only production call site passes a set of one, and `co_moving()` never contains a sibling.
+
+**Measured live**, on a throwaway git workspace with `spawner` ⇄ `spawn_worker` mutually referencing
+and *both* named in a 2-op plan:
+
+    $ tddy-tools restructure check plan.jsonl
+    no findings                                    # correct: nothing is stranded, both are in the plan
+
+    $ tddy-tools restructure apply plan.jsonl
+    Error: plan is malformed: `crates/origin/src/spawner.rs` still names `origin`
+    (origin::spawn_worker::Worker), so the destination would depend on the crate it left …
+
+**Moved: 0 of 2.** That is State A verbatim — the `#unbundle` node 3 failure this PR exists to fix,
+whose headline metric was "0 of 4". Nothing was written (the refusal fires before any edit), so the
+tool is safe; it simply cannot do the thing.
+
+Consequences:
+
+| Claim | Status |
+|---|---|
+| FR1 "`move_module_to_crate` accepts a set … resolved and applied atomically" | ❌ not through the tool; library-only |
+| FR2 "the header pass is told the co-moving set" | ❌ the set is never populated from a plan |
+| AC1 "a set of N mutually-referencing modules moves in one operation" | ❌ fails live |
+| AC2 "a `crate::<sibling>` path … re-pointed at the **destination**" | ❌ fails live |
+| AC4 "does not add the destination as a dependency of itself" | ✅ the refusal holds, nothing written |
+| FR3 / AC5 / AC6 plan-scoped state | ✅ delivered and reachable |
+| FR4 / AC7 `check` reports a partial cluster | ✅ delivered and reachable |
+| AC8 single-module unchanged | ✅ three live suites green |
+| PRD "What it unblocks" (nodes 6/9, 7/9, 9/9) | ❌ still blocked — they drive the tool with `plan.jsonl` |
+
+**What is missing** is the wiring, and it carries a design decision this changeset never took: the
+journal and ledger are **per operation**, while a cluster is **one edit spanning N ops**. Either a
+plan gains vocabulary for a set (one op, one journal entry) or the apply loop groups ops and the
+journal learns to span them.
+
+### ⚠️ WARNING — FR3 has one consumer still on the repo-scoped layout
+
+`packages/tddy-index-daemon/src/apply.rs:45` keeps `StatePaths::under(root)`. One line, but it
+invalidates a per-root-queue rationale stated in four doc comments and in that package's committed
+docs. Filed as `packages/tddy-index-daemon/docs/code-issues/stale-repo-scoped-restructure-state-apply.md`.
+
+### ⚠️ WARNING — two files are close to the 500-production-line gate
+
+`crate_move/cluster.rs` at 474 and `runner/entry_points.rs` at **493** (grew 482 → 493 here, 7 lines
+of headroom). Neither breaches the gate; both will on the next change.
+
+### Clean
+
+| Check | Result |
+|---|---|
+| Rebase + leak check (`origin/master..HEAD` is this PR only) | ✅ 4 commits, 21 files, all this PR's |
+| `## Dependencies` not implemented here | ✅ every node-1 function is byte-identical modulo module-path requalification and `pub(crate)` |
+| `## Boundaries` respected | ✅ no crate carved; both cosmetic-defect sites logic-identical (correctly **not** fixed) |
+| No dependent's behaviour, no unplanned deletions | ✅ |
+| Builds, clippy `--all-targets -D warnings`, `fmt --all --check` | ✅ both packages |
+| Tests | ✅ 380 passed / 0 failed, 14 targets |
+| Test quality | ✅ 13 new tests, 3 Given/When/Then each, named builders; `tests/cluster_move.rs` untouched |
+| Debug output / `#[allow]` / new TODO-FIXME | ✅ none |
+| File length gate | ✅ none ≥ 500; `crate_move.rs` 1,340 → 320 |
+
 ## Verification
 
 **The inherited red is gone.** That baseline (297 passed / 10 failed) was recorded while `#carve`
