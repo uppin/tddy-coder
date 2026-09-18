@@ -47,9 +47,33 @@ Document findings as **State A** (current state) — this becomes the baseline f
 State A in the changeset is distilled from the discovery file; do not dump grep traces into the
 changeset.
 
-## Step 2b: Cross-check the TODO backlog
+## Step 2b: Cross-check the deferred-work records
 
-**MANDATORY** — [`docs/dev/todo/`](../../../docs/dev/todo/) is a record of known defects, deferred
+**MANDATORY** — and it is now **two** records, not one. Follow
+[`deferred-work/references/planning-cross-check.md`](../../deferred-work/references/planning-cross-check.md)
+exactly; that reference owns the scan commands, the verdict table, the right-sizing table, the
+restructure-before-green contract, and the **wait-or-proceed fork for an issue already claimed by an
+in-flight PR**.
+
+| Record | Path | One file is |
+|---|---|---|
+| **Code issue** | `packages/<pkg>/docs/code-issues/` | one analyzer or structural finding against one symbol or file |
+| **Changeset TODO** | [`docs/dev/todo/`](../../../docs/dev/todo/) | one thing a changeset planned or discovered and could not finish |
+
+**The code-issue scan is the one that changes how you plan.** An issue carrying
+`**Claimed by:** #NNN` means a PR is already in flight to fix that exact code — this repo runs its
+large refactors as background stacks, so that is the normal state. When such an issue is in your
+change's path you **stop and ask the developer** whether to proceed on today's shape and accept the
+debt, wait for the named PR, or narrow the scope. Never pick one silently: proceeding grows the diff
+the refactor exists to shrink, and waiting stalls shippable work. The presentation format is in the
+reference.
+
+A package with **no** `docs/code-issues/` directory has not been analyzed, which is not the same as
+clean — name it in the changeset and consider `/analyze-code-issues`.
+
+### The TODO backlog
+
+[`docs/dev/todo/`](../../../docs/dev/todo/) is a record of known defects, deferred
 work and flagged debt, **one file per item**.
 Some of it will be sitting directly in the path of what you are about to plan, and discovering that
 during `/green` is late: by then the choice is between working around it, silently making it worse,
@@ -148,7 +172,7 @@ Include all required sections:
 - **Initial Discovery** — first content section after the header; link to
   `./{changeset-slug}-initial-discovery.md` (see `initial-discovery.md`). The discovery file
   must already exist from Step 2.
-- **Prerequisites** — `docs/dev/todo/` items this change runs into, with a verdict each (Step 2b).
+- **Prerequisites** — the code issues and `docs/dev/todo/` items this change runs into, with a verdict each (Step 2b). A 🚧 **Claimed** issue also records the developer's wait-or-proceed decision.
   Omit the section entirely when the scan found nothing relevant; an empty heading is noise
 - Affected packages (ALL packages with links to READMEs and docs)
 - Related feature documentation (link to PRD from Step 4)
@@ -181,7 +205,7 @@ Include all required sections:
 ## TODO
 
 - [x] Record initial discovery (`YYYY-MM-DD-feature-name-initial-discovery.md`)
-- [x] Cross-check `docs/dev/todo/` for items this change touches (Step 2b)
+- [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
 - [ ] Create failing acceptance tests

@@ -169,7 +169,22 @@ Create that file **before** the first Explore / Grep / Glob / Read, then persist
 as `## Exploration N` at the tail).
 
 Then run `.agents/skills/planning/references/planning-phase.md` **Step 2** (code analysis → State A),
-**Step 2b** (TODO backlog cross-check) and **Step 3** (product area), once for the whole body of work.
+**Step 2b** (deferred-work cross-check — **both** records) and **Step 3** (product area), once for
+the whole body of work.
+
+**Step 2b now scans two records**, per
+[`deferred-work/references/planning-cross-check.md`](../skills/deferred-work/references/planning-cross-check.md):
+`packages/<pkg>/docs/code-issues/` as well as `docs/dev/todo/`. Two consequences specific to a stack:
+
+- **A code issue this stack will fix is claimed by the node that fixes it.** After the stack's PRs
+  exist, add `**Claimed by:** #NNN — `#<slug> K/N`` and `**Lands after:**` to each such record, so a
+  concurrently-planned change finds the owner rather than re-planning the same refactor. Do this at
+  the **wave-1 checkpoint** (Step 5), which is the first moment every PR number exists.
+- **A code issue claimed by a *different*, already-running stack is a 🚧 Claimed verdict**, and it
+  forks the same way it does for a single PR: stop and ask the developer whether this stack proceeds
+  on today's shape, waits for the named PR, or cuts a node's scope to avoid the collision. A stack is
+  the *worse* place to guess, because the wrong answer is multiplied by every node above the
+  collision.
 Record which packages each node touches.
 
 **Step 2b matters more for a stack than for a single PR**, because a stack has somewhere to put the
