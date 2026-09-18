@@ -5,7 +5,8 @@
 **Detected:** 2026-09-15 by structural audit
 **Metrics:** **1,002** and **697 production lines** · 20 and 10 free phase functions · budget 500
 **Restructure:** required — `extract_module --to_file` × 4
-**Status:** Open — claimed by #489, in flight
+**Status:** Fixed on `feature/carve/recipe-parsers` — delete at #489's wrap, once the measurement
+below is in the change-history entry
 **Claimed by:** #489 — `#carve` 2/10 `recipe-parsers` · draft · `feature/carve/recipe-parsers`
 **Lands after:** #488
 
@@ -14,6 +15,7 @@
 | Run | tdd/hooks.rs | tdd_small/hooks.rs | Note |
 |---|---|---|---|
 | 2026-09-15 | 1,002 | 697 | first detection |
+| 2026-09-18 | **406** | **350** | split by #489 into `{before,after}.rs` at 391 · 284 and 191 · 230 production lines — largest 406, budget 500 |
 
 ## What the tool found
 
@@ -35,7 +37,16 @@ context.
 **No refusal risk here**, which is worth stating because the adjacent `Presenter` split has one: the
 phase functions are **free functions**, not `impl` members, so this is the *"path-reached item moves;
 the parent still names it"* geometry the plan schema records as **succeeding** — the assist rewrites
-the reference and the import pass restores the binding.
+the reference and the import pass restores the binding. Borne out: all four operations resolved and
+applied first time.
+
+**What this record got wrong was the shape, not the risk.** It reported `tdd/hooks.rs` as "eleven
+`before_*` and nine `after_*` free functions" in that order, which reads as two contiguous runs. It
+is not: `after_interview` sits at **207–228**, between `before_interview` and
+`before_plan_with_interview`, so the `before` half is two ranges and `extract_module`'s anchor is
+one. The same class of obstruction as `impl RedOutput` in `parser.rs`, and no ordering of the two
+operations reaches it — the fix is to relocate `after_interview` next to `after_plan` by hand first,
+which costs nothing because a free function is reached by name.
 
 ## If you are about to change this code
 
@@ -44,4 +55,12 @@ the reference and the import pass restores the binding.
 ## Verified by hand
 
 2026-09-15: listed every item with line numbers in both files; confirmed the phase functions are
-free functions and that `impl RunnerHooks` is their only caller.
+free functions and that `impl RunnerHooks` is their only caller. **That listing was read as two
+contiguous runs and it is not** — see the interleave above. A per-item outline is worth re-reading
+for ordering, not only for membership.
+
+2026-09-18 (`/green` of #489): both files split. The assist re-pointed every call site in
+`impl RunnerHooks` to `before::`/`after::`, which makes the glob facade it also wrote redundant —
+`cargo fix` removed it, and each parent now carries a bare `mod before; mod after;`. Twenty-nine
+phase functions came out `pub(crate)` rather than private, because the parent reaches them from
+outside their new module; that is the documented consequence of the seam, not a defect.

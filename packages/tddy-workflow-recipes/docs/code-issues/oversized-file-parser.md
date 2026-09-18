@@ -5,7 +5,8 @@
 **Detected:** 2026-09-15 by structural audit
 **Metrics:** **1,216 production lines** · 6 independent parsers · 1 shared symbol · budget 500
 **Restructure:** required — manual `impl` reorder, then `extract_module --to_file` × 6
-**Status:** Open — claimed by #489, in flight
+**Status:** Fixed on `feature/carve/recipe-parsers` — delete at #489's wrap, once the measurement
+below is in the change-history entry
 **Claimed by:** #489 — `#carve` 2/10 `recipe-parsers` · draft · `feature/carve/recipe-parsers`
 **Lands after:** #488
 
@@ -14,6 +15,7 @@
 | Run | Production lines | Parsers | Note |
 |---|---|---|---|
 | 2026-09-15 | 1,216 | 6 | first detection |
+| 2026-09-18 | **92** | 0 | split by #489; the six phases are now `parser/{planning,acceptance_tests,analyze,green,red,evaluate}.rs` at 145 · 135 · 51 · 216 · 341 · 265 production lines — largest 341, budget 500 |
 
 ## What the tool found
 
@@ -51,3 +53,18 @@ whichever module #489 moved that phase into.
 2026-09-15: listed every item with line numbers and confirmed the six phase boundaries and the
 `impl RedOutput` interleave. An earlier note claimed *"extract red before evaluate and the gap
 closes"* — that is **wrong**: extracting red at 553–807 does not move 887–974 at all.
+
+2026-09-18 (`/green` of #489): the `impl RedOutput` relocation was necessary exactly as recorded, and
+**two things this record did not predict** cost the most:
+
+- **Grouped test imports refuse the cut.** `green` and `red` both panicked rust-analyzer
+  (`assertion failed: check_disjoint_and_sort(indels)`) because `mod tests` held
+  `use super::{RedOutput, RedTestInfo, SkeletonInfo};` and
+  `use super::{GreenOutput, GreenTestResult, ImplementationInfo};` — three names of one `use` tree
+  re-pointed at once is three overlapping edits. Both were redundant under the module's own
+  `use super::*;`; splitting them one-per-line made both operations resolve. The seam was never at
+  fault, and the refusal's `plan is malformed:` class points the reader the wrong way.
+- **A banner comment belonging to no item was dropped.**
+  `// ── evaluate-changes output types ──` sat inside the evaluate range attached to nothing, so
+  rust-analyzer carried it nowhere. Only `restructure verify --against HEAD` saw it — not the
+  compiler, not the suite, not a diff of the moved lines. Restored by hand.

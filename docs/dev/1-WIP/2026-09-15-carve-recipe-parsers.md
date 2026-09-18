@@ -132,6 +132,53 @@ range each.
 This makes the node **manual → mechanical**, not mechanical-only, and the snapshot hash must be taken
 **after** the reorder — a plan written against the pre-reorder file will not verify.
 
+### The same obstruction in `tdd/hooks.rs` — found at `/green`
+
+The plan above named **one** interleaved item. There are **two**, and the second is in the file the
+plan called purely mechanical.
+
+`after_interview` sits at **207–228**, *between* `before_interview` (146–206) and
+`before_plan_with_interview` (229 onward) — so the `before` half is **two** ranges, 146–206 and
+229–532, and `extract_module`'s anchor is one. It is the identical geometry to `impl RedOutput`: the
+obstruction is *between* the halves rather than at either end, so no ordering of the two operations
+reaches it. A `before` op spanning 146–532 sweeps `after_interview` into the wrong half; one spanning
+146–206 abandons nine tenths of the seam.
+
+The fix is the same and just as cheap: move `after_interview` (207–228) down to sit immediately
+before `after_plan` (533) by hand, then both halves are one range each. A free function is reached by
+name, so like the `impl` this relocation causes **no caller churn** — `impl RunnerHooks` goes on
+calling it unchanged.
+
+So phase A′ is **two** relocations, not one, and the lesson generalises past this node: a "same shape,
+purely mechanical" file is worth a per-item outline before it is planned as one, because an interleave
+of this class is invisible in a summary that only counts `before_*` and `after_*`.
+
+### The grouped test imports that refuse the cut — phase B, found at `/green`
+
+`green` and `red` were the two seams whose operations **refused**, and neither the seam nor the plan
+was at fault:
+
+    plan is malformed: lsp: lsp server error -32603: request handler panicked:
+    assertion failed: check_disjoint_and_sort(indels)
+
+Two tests carried a **grouped** import of items the seam moves —
+`use super::{RedOutput, RedTestInfo, SkeletonInfo};` and
+`use super::{GreenOutput, GreenTestResult, ImplementationInfo};`. Re-pointing three names inside one
+`use` tree makes rust-analyzer emit three overlapping edits over the same span, and the assist panics
+rather than refusing. `acceptance_tests` carries the same kind of import for a **single** name
+(`use super::parse_acceptance_tests_response;`) and resolves fine, which is what isolates the group as
+the cause rather than the seam's size or its trailing `impl`.
+
+Both imports were already redundant — `use super::*;` at the top of `mod tests` binds all six — so
+splitting each into one `use` per line is behaviour-identical, and with that done both operations
+resolve. This is the phase the changeset reserved for "any import the restoration pass declines to
+reconstruct"; the reality is the inverse, an import shape that makes the assist unable to reconstruct
+anything.
+
+**Generalises to the rest of the stack:** before planning a seam, grep the file's test modules for
+`use super::{` naming more than one item the seam moves. It is a one-line pre-step and it is the
+difference between an operation that runs and one that panics.
+
 ## TODO
 
 - [x] Record initial discovery
@@ -144,26 +191,72 @@ This makes the node **manual → mechanical**, not mechanical-only, and the snap
     (`parser.rs` 1216, `tdd/hooks.rs` 1002, `tdd_small/hooks.rs` 697 production lines).
 - [x] Failing unit/integration tests — the shape assertions above are the whole contract here; there
   is no new API surface to unit-test, every symbol keeping its name, signature and path
-- [ ] Implement production code making tests pass (`/green`)
+- [x] Implement production code making tests pass (`/green`) — 10 `extract_module` operations in one
+  plan, all four `module_shape` tests green, largest produced file 406 production lines
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — correct the title, ready for review
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
 
 ## Verification
 
-**⚠ Pre-existing failure, not this node's.** The baseline on this branch is **560 passed, 1 failed**,
-and the failure reproduces on `master`:
+**⚠ Pre-existing failure, not this node's.** It reproduces on `master`:
 
     pr_stack_artifact_paths_acceptance::a_plan_left_at_the_legacy_session_root_is_still_advertised_to_the_agent
 
 `/green` must not mistake it for this node's red. It is untouched by this node's seams.
 
+Measured, both runs `./test -p tddy-workflow-recipes --no-fail-fast` over 59 suites:
+
+| Run | Passed | Failed |
+|---|---|---|
+| Baseline (with `tests/module_shape.rs` red) | 560 | 5 — the pre-existing one, plus this node's 4 |
+| After `/green` | **564** | **1** — the pre-existing one alone |
+
+The four that turned green are the only change to the count: 560 + 4 = 564, nothing else moved.
+
+**`--no-fail-fast` is not optional for this measurement.** `./test` does not pass it, so a plain run
+aborts at the first failing suite — and `module_shape` sorts early enough that the run stops there,
+reporting 341 of the 565 tests and none of the suites after it. The earlier "560 passed, 1 failed"
+figure in this document was measured before `tests/module_shape.rs` existed; it is consistent with the
+table above but was not comparable to a red-phase run.
+
 ```bash
-./test -p tddy-workflow-recipes
-cargo clippy -p tddy-workflow-recipes -- -D warnings
-cargo fmt --all --check
+./test -p tddy-workflow-recipes --no-fail-fast
+cargo clippy -p tddy-workflow-recipes --all-targets -- -D warnings
+cargo fmt --all -- --check
 tddy-tools restructure verify --against HEAD
 ```
 
 The test count must match the pre-change baseline exactly — a behaviour-preserving move that changes
 the count has moved logic.
+
+### What `restructure verify --against HEAD` reports, and why it is not zero
+
+It reports **205 statements lost, 235 gained**, and every one is accounted for. `verify` compares
+trimmed lines as multisets and excuses only the scaffolding a restructure is *supposed* to churn —
+`use`, `mod`, `impl` and bare braces (`verify.rs::is_structural`). It does not excuse the two things
+`extract_module` always does:
+
+- **134 visibility widenings** — `file: String,` → `pub(crate) file: String,` on the fields of the
+  private `…De` deserialization mirrors. The assist writes relocated items `pub(crate)`, and the
+  survey that restores visibility does not descend into a struct's fields. Documented in
+  `plan-schema.md`, reported by the run.
+- **39 reference re-points** — `before_interview(context)?` → `before::before_interview(context)?`,
+  which is the assist doing its job.
+- **32 further deltas are `rustfmt` reflowing lines the two above made longer**: nine `fn` signatures
+  that no longer fit on one line once prefixed `pub(crate) `, six `match` arms that gained a block for
+  the same reason, and the continuation lines of `use` groups the moves emptied (only a group's *first*
+  line starts with `use`, so `is_structural` does not filter the rest).
+
+`verify`'s own purpose — *"a comment attached to no item"* — **did** fire, and was the one real
+finding: `// ── evaluate-changes output types ──` sat between the two halves of the evaluate seam,
+belonged to no item, and so was carried nowhere. It was restored by hand in `parser/evaluate.rs` at
+the position it held, and no comment is unmatched now. Nothing else this node produced was
+hand-written.
+
+So the exit code cannot be zero for any `extract_module` that re-points a reference or widens a field,
+and reading the two lists is the gate rather than the status. The follow-up — teach `is_structural` to
+normalise a leading `pub(crate) ` on *any* line, and join physical lines into statements before
+comparing, which would have left the comment finding standing alone — is filed as
+[`2026-09-18-restructure-verify-cannot-exit-zero-for-an-extract-module`](../todo/2026-09-18-restructure-verify-cannot-exit-zero-for-an-extract-module.md)
+so it outlives this changeset's wrap.
