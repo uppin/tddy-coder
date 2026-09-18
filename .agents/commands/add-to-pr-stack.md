@@ -53,6 +53,13 @@ the `pr-stack` skill § *The PR boundary contract*.
 If the work the user described is a layer split, say so and propose the capability cut before creating
 anything.
 
+**Run the deferred-work cross-check for the new node before writing its changeset**, per
+[`planning-cross-check.md`](../skills/deferred-work/references/planning-cross-check.md) — both
+`packages/<pkg>/docs/code-issues/` and `docs/dev/todo/`. A node added on top of a stack is planned
+against the tip's structure, so an issue **claimed by a node already in this stack** is a
+sequencing fact to record, while one claimed by a **different** stack is a 🚧 fork: stop and ask
+whether this node proceeds on today's shape, waits, or narrows.
+
 **Clearing a `docs/dev/todo/` entry the stack itself deferred is a legitimate reason to add a node** —
 usually the highest-value one, because the fix is cheapest while the stack's context is still loaded
 (`pr-stack` § *The backlog delta a stack leaves*; `/merge-pr-stack` 1e and `/pr-wrap` step 8 are where

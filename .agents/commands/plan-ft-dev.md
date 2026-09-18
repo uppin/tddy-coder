@@ -48,6 +48,29 @@ Document the current state of the system as it relates to this feature, per affe
 - Current behavior, limitations, and integration points
 - Current test coverage
 
+### 2b. Cross-check the deferred-work records — MANDATORY
+
+Run this **after** State A, once you know which files the delta touches, and **before** State B is
+written. Follow
+[`deferred-work/references/planning-cross-check.md`](../skills/deferred-work/references/planning-cross-check.md).
+
+| Record | Path |
+|---|---|
+| **Code issue** | `packages/<pkg>/docs/code-issues/` — one analyzer or structural finding per file |
+| **Changeset TODO** | `docs/dev/todo/` — one deferral per file |
+
+Classify each hit ⛔ blocking / 🚧 claimed / ⚠ during / ℹ answered / — unrelated, and carry every
+relevant one into the changeset's `## Prerequisites` — including the ones you decide not to fix.
+
+**State B is exactly where a claimed issue bites.** A code issue carrying `**Claimed by:** #NNN` has
+a PR in flight against that code, so the target state you are about to describe may be obsolete
+before the work starts. **Stop and ask the developer** whether to proceed on today's shape, wait for
+the named PR, or narrow the delta — and never pick one yourself. Verify the claim is live and read
+its `**Lands after:**` first, so "wait" is a decision with a horizon attached rather than a guess.
+
+If a record's fix is large or marked `**Restructure:** required`, it becomes its own
+`Type: Refactor` changeset executed **before** green — not part of this delta.
+
 ### 3. Define State B (Target)
 
 Document the target state after the feature is implemented:

@@ -230,9 +230,18 @@ break.** What makes that safe rather than chaotic:
 
 ## Carry the verdicts into the changeset
 
-`## Prerequisites` has four columns and two authors. **Planning fills `Item`, `Verdict` and
-`Disposition`**; `/green` fills **`Outcome`**. Write a `Disposition` a later phase can be held to:
-"fixed here — see Scope" is checkable, "consider addressing" is not.
+`## Prerequisites` is a table with three columns — **Item**, **Verdict**, and what this change does
+about it. Write that third column so a later phase can be held to it: *"fixed here — see Scope"* is
+checkable, *"consider addressing"* is not.
+
+For a 🚧 **claimed** item the third column must record **the developer's decision and their words**,
+because that decision is the only evidence the debt was taken on knowingly rather than by accident.
 
 Reference each record **by path in backticks, not a Markdown link** — a code issue is renamed when
-the symbol it names moves, and a link rots silently.
+the symbol it names moves, and a link rots silently. A **TODO** still takes a relative link, because
+`/wrap-context-docs` deletes the file of anything marked ✅ RESOLVED HERE.
+
+> **Not yet wired:** qape-hq's version has `/green` fill a fourth `Outcome` column and `/pr-wrap`
+> refuse to wrap while one is a placeholder. This repo's `/green` does neither, so that contract is
+> deliberately **not** claimed here. What `/green` *does* execute is the restructure prerequisite
+> below — that much is wired.
