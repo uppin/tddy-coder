@@ -17,12 +17,19 @@ Two smaller corrections in the same script:
 
 - An unrecognised argument is an error with a usage line. `./release` previously ignored every
   argument it was given, so `./release --desktop` would have silently built only the CLI binaries.
-- A `tauri build` that fails **after** the `.app` exists reports which of the two happened, names the
-  bundle path and points at `./install --desktop`. On macOS the `dmg` bundle target drives Finder
-  over AppleScript and times out without Automation permission
-  ([2026-09-05-…-tauri-desktop-single-process-daemon.md](../todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md)),
-  long after the application itself is complete and valid. The script still exits non-zero — it
-  reports the distinction rather than swallowing the failure.
+- It builds only the bundle target the install consumes: `--bundles app` on macOS, `--no-bundle` on
+  Linux. `tauri.conf.json` lists four targets because it also describes distribution, and a local
+  install uses one of them per platform — the macOS `.app` copied into `~/Applications`, or the
+  Linux binary put on `PATH`. The Linux `.desktop` entry and icon come from
+  `packages/tddy-desktop/src-tauri/icons/`, not from a `deb` or an AppImage. This also removes a
+  failure rather than tolerating one: the `dmg` target runs `bundle_dmg.sh`, which drives Finder
+  over AppleScript and fails without Automation permission
+  ([2026-09-05-…-tauri-desktop-single-process-daemon.md](../todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md))
+  — after the `.app` is already complete, so the build reported failure while holding a valid
+  application.
+- A `tauri build` that fails **after** the artifact exists reports which of the two happened, names
+  the artifact and points at `./install --desktop`. The script still exits non-zero — it reports the
+  distinction rather than swallowing the failure.
 
 The script also resolves its own directory and `cd`s there, so it no longer depends on the caller's
 working directory being the repo root.

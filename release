@@ -67,22 +67,39 @@ fi
 echo "release: --desktop — building the tddy-web bundle (the application embeds it)"
 in_shell bun run build
 
-echo "release: --desktop — building the application (tauri build)"
+# Build ONLY the artifact `./install --desktop` consumes. tauri.conf.json lists four bundle targets
+# because it also describes distribution; a local install uses exactly one of them per platform, and
+# the others are pure cost or an outright failure:
+#
+#   macOS  --bundles app  the .app, which is what gets copied into ~/Applications. The `dmg` target
+#                         drives Finder over AppleScript via bundle_dmg.sh and fails without
+#                         Automation permission, AFTER the .app is already complete and valid.
+#   Linux  --no-bundle    target/release/tddy-desktop, the plain binary the install puts on PATH.
+#                         The .desktop entry and the icon come from the source tree
+#                         (packages/tddy-desktop/src-tauri/icons/), never from a deb or AppImage.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  desktop_bundle_args=(--bundles app)
+  desktop_artifact="${ROOT_DIR}/target/release/bundle/macos/${DESKTOP_APP_NAME}.app"
+else
+  desktop_bundle_args=(--no-bundle)
+  desktop_artifact="${ROOT_DIR}/target/release/tddy-desktop"
+fi
+
+echo "release: --desktop — building the application (tauri build ${desktop_bundle_args[*]})"
 status=0
-in_shell bun run desktop:build || status=$?
+in_shell bun run desktop:build "${desktop_bundle_args[@]}" || status=$?
 if [[ "$status" -eq 0 ]]; then
   exit 0
 fi
 
-# Do not swallow this. On macOS the `dmg` bundle target drives Finder over AppleScript and fails
-# without Automation permission, LONG AFTER the .app itself is complete and valid — so say which of
-# the two happened instead of reporting a uniform failure the operator cannot act on.
+# Do not swallow this. A tauri build can fail at a step that runs after the artifact is already
+# written, so say which of the two happened instead of reporting a uniform failure the operator
+# cannot act on. The exit status is still the build's.
 echo "release: tauri build failed (exit ${status})" >&2
-if [[ "$(uname -s)" == "Darwin" && -d "${ROOT_DIR}/target/release/bundle/macos/${DESKTOP_APP_NAME}.app" ]]; then
-  echo "release: the application bundle itself IS present and installable:" >&2
-  echo "release:   ${ROOT_DIR}/target/release/bundle/macos/${DESKTOP_APP_NAME}.app" >&2
-  echo "release: a later bundle target failed, not the app. On macOS the 'dmg' target drives Finder" >&2
-  echo "release:   over AppleScript and times out without Automation permission." >&2
-  echo "release: ./install --desktop (without --build) installs what is already built." >&2
+if [[ -e "$desktop_artifact" ]]; then
+  echo "release: the artifact ./install --desktop needs IS present:" >&2
+  echo "release:   ${desktop_artifact}" >&2
+  echo "release: a later step failed, not the application. ./install --desktop (without --build)" >&2
+  echo "release:   installs what is already built." >&2
 fi
 exit "$status"
