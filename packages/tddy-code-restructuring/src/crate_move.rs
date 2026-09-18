@@ -49,7 +49,7 @@ use std::path::Path;
 
 use crate::apply::byte_offset;
 use crate::edit::{FileEdit, Position, Range, TextEdit, WorkspaceEdit};
-use crate::plan::{Reexport, RefactorOp};
+use crate::plan::{Reexport, RefactorKind, RefactorOp};
 use crate::registry::Workspace;
 use crate::RestructureError;
 
@@ -241,9 +241,10 @@ pub fn resolve(
     let (moving, survey, rewrites) = planned(engine, workspace, op)?;
 
     let moved = workspace.read(&moving.source)?;
-    let header = repointed_header(&moved, &moving.origin.extern_name);
+    let header = repointed_header(workspace, &moved, &moving.origin)?;
+    let crates_named = crates_the_moved_code_names(workspace, &moving.origin, &header)?;
     let keeps_naming_it = crates_still_naming_the_module(workspace, &moving, &rewrites)?;
-    refuse_a_dependency_cycle(&moving, &header, &keeps_naming_it)?;
+    refuse_a_dependency_cycle(workspace, &moving, &header, &keeps_naming_it)?;
 
     let mut changes = vec![FileEdit::Rename {
         from: moving.source.clone(),
@@ -261,7 +262,7 @@ pub fn resolve(
         changes.extend(caller_changes(workspace, rewrites)?);
     }
 
-    changes.push(moving.destination_manifest(workspace, &header.crates_named)?);
+    changes.push(moving.destination_manifest(workspace, &crates_named)?);
     changes.extend(moving.dependents_on_the_destination(workspace, &keeps_naming_it)?);
     changes.extend(moving.workspace_members(workspace)?);
 
@@ -343,6 +344,8 @@ struct Move {
     source: String,
     /// The identifier the crate root declares — `host_registry`.
     module: String,
+    /// Where the module sits in its crate and which file declares it.
+    home: ModuleHome,
     /// The crate the module is leaving, read from its own manifest for the same reason the
     /// destination is: a caller's `use` path needs the declared name, not the directory's.
     origin: Destination,
@@ -356,7 +359,7 @@ impl Move {
     fn read(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<Move> {
         let source = op.anchor.file().to_string();
         let module = module_name(&source)?;
-        let origin_dir = source_crate_of(&source, &module)?;
+        let home = module_home(workspace, &source, &module)?;
         let destination = op.to.as_deref().ok_or_else(|| {
             malformed(
                 "`move_module_to_crate` needs `to`: the destination crate's directory, relative to \
@@ -365,11 +368,12 @@ impl Move {
         })?;
 
         Ok(Move {
-            origin: Destination::read(workspace.root, &origin_dir)?,
+            origin: Destination::read(workspace.root, &home.crate_dir)?,
             destination: Destination::read(workspace.root, destination)?,
             reexport: op.reexport.unwrap_or(Reexport::None),
             source,
             module,
+            home,
         })
     }
 
@@ -378,24 +382,24 @@ impl Move {
         format!("{}/src/{}.rs", self.destination.dir, self.module)
     }
 
-    /// The crate root that declares the module today.
-    fn origin_root(&self) -> String {
-        format!("{}/src/lib.rs", self.origin.dir)
-    }
-
     /// The crate root that has to declare it afterwards.
     fn destination_root(&self) -> String {
         format!("{}/src/lib.rs", self.destination.dir)
     }
 
-    /// The crate root the module left: its `mod` declaration replaced by the facade, or removed.
+    /// The file that declares the module today: its `mod` line is replaced by a facade, or removed.
     fn left_behind(&self, workspace: &Workspace<'_>, survey: &Survey) -> Result<FileEdit> {
-        let path = self.origin_root();
+        let path = self.home.declared_in.clone();
         let text = workspace.read(&path)?;
         let span = module_declaration(&text, &self.module).ok_or_else(|| {
+            let where_declared = if self.home.is_top_level() {
+                "crate root"
+            } else {
+                "parent module"
+            };
             malformed(format!(
-                "{path} declares no `mod {}` — a module this crate root does not declare is not \
-                 this crate's to move",
+                "{path} declares no `mod {}` — a module this {where_declared} does not declare is \
+                 not this crate's to move",
                 self.module
             ))
         })?;
@@ -571,13 +575,17 @@ fn caller_changes(
 /// pair with an error naming neither the module nor the operation that produced it. Refusing here
 /// names both, and names every path that forced it.
 fn refuse_a_dependency_cycle(
+    workspace: &Workspace<'_>,
     moving: &Move,
     header: &Header,
     keeps_naming_it: &BTreeSet<String>,
 ) -> Result<()> {
-    if !header.crates_named.contains(&moving.origin.extern_name)
-        || !keeps_naming_it.contains(&moving.origin.dir)
-    {
+    if !keeps_naming_it.contains(&moving.origin.dir) {
+        return Ok(());
+    }
+
+    let origin_dependencies = origin_named_dependencies(workspace, moving, header)?;
+    if origin_dependencies.is_empty() {
         return Ok(());
     }
 
@@ -587,8 +595,51 @@ fn refuse_a_dependency_cycle(
          module's own dependencies with it",
         moving.source,
         moving.origin.package,
-        header.origin_paths.join(", ")
+        origin_dependencies.join(", ")
     )))
+}
+
+/// Paths in the moved header that genuinely name the crate the module left, after re-export resolution.
+fn origin_named_dependencies(
+    workspace: &Workspace<'_>,
+    moving: &Move,
+    header: &Header,
+) -> Result<Vec<String>> {
+    let mut kept = Vec::new();
+    for path in &header.origin_paths {
+        match defining_crate(workspace, &moving.origin, path)? {
+            Some(defining) if defining == moving.destination.extern_name => {}
+            Some(defining) if defining == moving.origin.extern_name => kept.push(path.clone()),
+            Some(_) => {}
+            None => kept.push(path.clone()),
+        }
+    }
+    Ok(kept)
+}
+
+/// Every extern crate the moved code will need in its destination manifest.
+fn crates_the_moved_code_names(
+    workspace: &Workspace<'_>,
+    origin: &Destination,
+    header: &Header,
+) -> Result<BTreeSet<String>> {
+    let mut named = BTreeSet::new();
+    for path in &header.origin_paths {
+        match defining_crate(workspace, origin, path)? {
+            Some(defining) => {
+                named.insert(defining);
+            }
+            None => {
+                named.insert(origin.extern_name.clone());
+            }
+        }
+    }
+    for extern_name in &header.crates_named {
+        if extern_name != &origin.extern_name {
+            named.insert(extern_name.clone());
+        }
+    }
+    Ok(named)
 }
 
 /// Every crate directory that will name the destination once the move has been applied.
@@ -644,7 +695,7 @@ struct Header {
 /// Inside the module, `crate::` and a top-level `super::` both named the crate it is leaving; in the
 /// destination they would name the destination. Only the qualifier is rewritten, and only in a `use`
 /// declaration — see this module's own documentation for why that is the whole of the header pass.
-fn repointed_header(text: &str, origin_extern: &str) -> Header {
+fn repointed_header(workspace: &Workspace<'_>, text: &str, origin: &Destination) -> Result<Header> {
     let mut header = Header {
         edits: Vec::new(),
         crates_named: BTreeSet::new(),
@@ -666,11 +717,22 @@ fn repointed_header(text: &str, origin_extern: &str) -> Header {
 
         if matches!(qualifier, "crate" | "super") {
             let at = start + at;
+            let as_origin = format!("{}::{}", origin.extern_name, rest);
+            let (written_as, named) = match defining_crate(workspace, origin, &as_origin)? {
+                Some(defining) if defining != origin.extern_name => {
+                    (format!("{defining}::{rest}"), defining)
+                }
+                _ => (as_origin.clone(), origin.extern_name.clone()),
+            };
+            let new_qualifier = written_as
+                .split("::")
+                .next()
+                .unwrap_or(origin.extern_name.as_str());
             header
                 .edits
-                .push(replacement(text, at..at + qualifier.len(), origin_extern));
-            header.crates_named.insert(origin_extern.to_string());
-            header.origin_paths.push(format!("{origin_extern}::{rest}"));
+                .push(replacement(text, at..at + qualifier.len(), new_qualifier));
+            header.crates_named.insert(named);
+            header.origin_paths.push(written_as);
             continue;
         }
         if !matches!(qualifier, "self" | "std" | "core" | "alloc") {
@@ -678,7 +740,7 @@ fn repointed_header(text: &str, origin_extern: &str) -> Header {
         }
     }
 
-    header
+    Ok(header)
 }
 
 /// The path a top-level `use` declaration names, and where on the line it starts.
@@ -766,20 +828,275 @@ fn module_name(source: &str) -> Result<String> {
     Ok(stem.to_string())
 }
 
-/// The crate directory a module file belongs to.
+/// Where a module sits in its crate: the crate that owns it, and the file that declares it.
 ///
-/// Only a module the crate root declares can move: a nested module's `mod` line lives in another
-/// module's file, whose own path this operation would have to guess at. Refused rather than guessed.
-fn source_crate_of(source: &str, module: &str) -> Result<String> {
-    source
-        .strip_suffix(&format!("/src/{module}.rs"))
-        .map(str::to_string)
-        .ok_or_else(|| {
-            malformed(format!(
-                "`{source}` is not `<crate>/src/{module}.rs` — `move_module_to_crate` moves a \
-                 module the crate root itself declares"
-            ))
-        })
+/// Replaces the crate-root-only assumption [`source_crate_of`] encodes. A top-level module is
+/// declared by `<crate>/src/lib.rs`; a nested one by its parent's own module file, which Rust 2018
+/// allows to be either `<crate>/src/<parent>.rs` or `<crate>/src/<parent>/mod.rs`. Both are looked
+/// for, and the refusal survives only for a parent that exists as neither.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleHome {
+    /// The crate directory, relative to the repository root — `packages/tddy-daemon`.
+    pub crate_dir: String,
+    /// The file carrying this module's `mod` declaration. The crate root for a top-level module,
+    /// the parent's own module file otherwise.
+    pub declared_in: String,
+    /// The module path inside the crate, outermost first — `["model_registry", "store"]` for a
+    /// nested module, `["host_registry"]` for a top-level one.
+    pub path: Vec<String>,
+}
+
+impl ModuleHome {
+    /// Whether the crate root declares this module itself.
+    #[must_use]
+    pub fn is_top_level(&self) -> bool {
+        self.path.len() == 1
+    }
+}
+
+/// Resolve a module file to the crate that owns it and the file that declares it.
+///
+/// This is what lets a **directory-shaped** subsystem move. `source_crate_of` requires
+/// `<crate>/src/<module>.rs` and refuses everything deeper before rust-analyzer is spawned, which
+/// is not an edge case — it is the normal shape of a subsystem worth extracting.
+///
+/// The nesting is not guessed: the anchor already carries it, and the parent's declaring file is
+/// **located** on disk rather than assumed.
+///
+/// # Errors
+///
+/// Refuses when `source` is not under a crate's `src/`, and when the parent module exists as
+/// neither `<crate>/src/<parent>.rs` nor `<crate>/src/<parent>/mod.rs` — naming both paths it
+/// looked for.
+pub fn module_home(workspace: &Workspace<'_>, source: &str, module: &str) -> Result<ModuleHome> {
+    let crate_dir = crate_holding(workspace, source)?;
+    let src_prefix = format!("{crate_dir}/src/");
+    let within_src = source.strip_prefix(&src_prefix).ok_or_else(|| {
+        malformed(format!(
+            "`{source}` is not under `{src_prefix}` — `move_module_to_crate` moves a module \
+             inside a crate's `src/` tree"
+        ))
+    })?;
+
+    let path = module_path_within_src(within_src, module)?;
+    let declared_in = if path.len() == 1 {
+        format!("{crate_dir}/src/lib.rs")
+    } else {
+        parent_declaring_file(workspace, &crate_dir, &path[..path.len() - 1])?
+    };
+
+    Ok(ModuleHome {
+        crate_dir,
+        declared_in,
+        path,
+    })
+}
+
+/// The module path a file under `src/` carries, ending in `module`.
+fn module_path_within_src(within_src: &str, module: &str) -> Result<Vec<String>> {
+    let top_level = format!("{module}.rs");
+    if within_src == top_level {
+        return Ok(vec![module.to_string()]);
+    }
+
+    let nested_suffix = format!("/{module}.rs");
+    if let Some(parent) = within_src.strip_suffix(&nested_suffix) {
+        if parent.is_empty() {
+            return Err(malformed(format!(
+                "`{within_src}` is not a nested module file path this operation understands"
+            )));
+        }
+        let path = parent
+            .split('/')
+            .map(str::to_string)
+            .chain(std::iter::once(module.to_string()))
+            .collect();
+        return Ok(path);
+    }
+
+    Err(malformed(format!(
+        "`{within_src}` is not `<crate>/src/{module}.rs` or \
+         `<crate>/src/<parent>/…/{module}.rs`"
+    )))
+}
+
+/// The parent's own module file — `<parent>.rs` or `<parent>/mod.rs`.
+fn parent_declaring_file(
+    workspace: &Workspace<'_>,
+    crate_dir: &str,
+    parent: &[String],
+) -> Result<String> {
+    let parent_base = parent.join("/");
+    let as_rs = format!("{crate_dir}/src/{parent_base}.rs");
+    let as_mod = format!("{crate_dir}/src/{parent_base}/mod.rs");
+
+    if workspace.root.join(&as_rs).exists() {
+        return Ok(as_rs);
+    }
+    if workspace.root.join(&as_mod).exists() {
+        return Ok(as_mod);
+    }
+
+    Err(malformed(format!(
+        "no parent module file for `{parent_base}` — looked for `{as_rs}` and `{as_mod}`"
+    )))
+}
+
+/// The crate that **defines** what an origin-named path reaches, resolving one level of re-export.
+///
+/// A back-compat facade in the origin — `pub use tddy_daemon_kernel::config;` — makes
+/// rust-analyzer canonicalise a caller's `crate::config::DaemonConfig` as
+/// `tddy_daemon::config::DaemonConfig`. [`refuse_a_dependency_cycle`] reads that as the destination
+/// depending on the crate it left, and refuses a move that is in fact clean.
+///
+/// Returns the defining crate's **extern name** when `path` resolves through a re-export, and
+/// `None` when the origin genuinely defines the item — which is the case the refusal is for.
+///
+/// # Errors
+///
+/// Refuses when the origin's crate root cannot be read.
+pub fn defining_crate(
+    workspace: &Workspace<'_>,
+    origin: &Destination,
+    path: &str,
+) -> Result<Option<String>> {
+    let segments: Vec<&str> = path.split("::").collect();
+    if segments.is_empty() {
+        return Ok(None);
+    }
+
+    let head = segments[0];
+    if head != origin.extern_name {
+        return Ok(Some(head.to_string()));
+    }
+
+    let module = segments
+        .get(1)
+        .ok_or_else(|| malformed(format!("`{path}` names the crate but no module inside it")))?;
+
+    defining_module_in_crate(workspace, origin, module)
+}
+
+/// Whether `module` is defined in `origin` itself, or re-exported from another crate.
+///
+/// `None` when the origin's own sources define it; `Some(extern_name)` when a `pub use` brings it in.
+fn defining_module_in_crate(
+    workspace: &Workspace<'_>,
+    origin: &Destination,
+    module: &str,
+) -> Result<Option<String>> {
+    let lib = format!("{}/src/lib.rs", origin.dir);
+    let text = workspace.read(&lib)?;
+
+    if let Some(re_export) = re_export_target(&text, module) {
+        return Ok(Some(re_export));
+    }
+
+    if module_declaration(&text, module).is_some() {
+        return Ok(None);
+    }
+
+    Ok(None)
+}
+
+/// The extern crate a `pub use` in `text` re-exports `module` from, if any.
+fn re_export_target(text: &str, module: &str) -> Option<String> {
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let declaration = trimmed
+            .strip_prefix("pub use ")
+            .or_else(|| trimmed.strip_prefix("use "));
+        let Some(rest) = declaration else {
+            continue;
+        };
+        let rest = rest.trim_end_matches(';').trim();
+        let (path, alias) = match rest.split_once(" as ") {
+            Some((path, alias)) => (path.trim(), alias.trim()),
+            None => (rest, ""),
+        };
+
+        if !alias.is_empty() {
+            if alias == module {
+                return extern_crate_of_use_path(path);
+            }
+            continue;
+        }
+
+        if let Some(name) = path.rsplit("::").next() {
+            if name == module {
+                return extern_crate_of_use_path(path);
+            }
+        }
+
+        if let Some(inner) = path
+            .strip_prefix('{')
+            .and_then(|group| group.strip_suffix('}'))
+        {
+            for item in inner.split(',') {
+                let item = item.trim();
+                if item == module {
+                    return extern_crate_of_use_path(path);
+                }
+                if let Some((_, alias)) = item.split_once(" as ") {
+                    if alias.trim() == module {
+                        return extern_crate_of_use_path(path);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The first segment of a `use` path — the crate it names.
+fn extern_crate_of_use_path(path: &str) -> Option<String> {
+    path.split("::").next().map(str::to_string)
+}
+
+/// Every precondition [`resolve`] enforces before it consults rust-analyzer.
+///
+/// `restructure check` reported `no findings` on plans that `apply` then rejected outright — twice,
+/// on the nested-module refusal and on the cluster one. Both decisions are made before the server
+/// is spawned, so `check` can reach the same verdict statically and for free.
+///
+/// Returns one message per operation that cannot run, in plan order; empty when the plan's
+/// cross-crate moves are all viable.
+///
+/// # Errors
+///
+/// Refuses when a file the preconditions must read cannot be.
+pub fn unrunnable_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Result<Vec<String>> {
+    let mut findings = Vec::new();
+    for op in ops {
+        if op.op != RefactorKind::MoveModuleToCrate {
+            continue;
+        }
+        if let Err(refusal) = move_preconditions(workspace, op) {
+            findings.push(refusal.to_string());
+        }
+    }
+    Ok(findings)
+}
+
+/// Every check [`resolve`] runs before it consults rust-analyzer.
+pub(crate) fn move_preconditions(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<()> {
+    let moving = Move::read(workspace, op)?;
+    let text = workspace.read(&moving.home.declared_in)?;
+    if module_declaration(&text, &moving.module).is_none() {
+        let where_declared = if moving.home.is_top_level() {
+            "crate root"
+        } else {
+            "parent module"
+        };
+        return Err(malformed(format!(
+            "{declared_in} declares no `mod {module}` — a module this {where_declared} does not \
+             declare is not this crate's to move",
+            declared_in = moving.home.declared_in,
+            module = moving.module,
+            where_declared = where_declared
+        )));
+    }
+    Ok(())
 }
 
 /// The span of the `mod <module>;` line in a crate root, newline included.

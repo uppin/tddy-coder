@@ -6,6 +6,7 @@
 
 use crate::backends::rust::ProgressSink;
 use crate::backends::RustBackend;
+use crate::crate_move;
 use crate::journal::{Journal, OpStatus};
 use crate::plan::RefactorKind;
 use crate::registry::{BackendRegistry, Workspace};
@@ -348,6 +349,22 @@ pub fn check(
         "check: {total} operation(s){}",
         if options.deep { ", deep" } else { "" }
     ));
+
+    let static_workspace = Workspace {
+        root,
+        overlay: &Overlay::new(),
+    };
+    for (index, op) in plan.ops.iter().enumerate() {
+        if op.op != RefactorKind::MoveModuleToCrate {
+            continue;
+        }
+        if let Err(refusal) = crate_move::move_preconditions(&static_workspace, op) {
+            findings.push(Finding {
+                operation: index,
+                detail: refusal.to_string(),
+            });
+        }
+    }
 
     for (index, op) in plan.ops.iter().enumerate() {
         (options.progress)(&format!(

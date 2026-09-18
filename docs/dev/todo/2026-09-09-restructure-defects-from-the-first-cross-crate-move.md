@@ -17,11 +17,13 @@ what follows is the operational debt behind them.
   sibling that has already moved to the same crate: `tddy-host-service` and `tddy-worktree-service`
   each came out of layer 2 with `tddy-<self> = { path = "" }` in their own manifest, which cargo
   rejects as a cyclic package dependency.
-- **A `pub use` facade in the origin makes the dependency-cycle refusal fire spuriously.** After
-  `config` moved to `tddy-daemon-kernel`, `tddy-daemon` kept `pub use tddy_daemon_kernel::config;`,
-  so rust-analyzer canonicalises `crate::config::DaemonConfig` as `tddy_daemon::config::DaemonConfig`
-  and the refusal reads it as an origin dependency the destination would depend back on. Eight moving
-  modules had to be re-pointed at `tddy_daemon_kernel::config::` by hand first.
+- **A `pub use` facade in the origin made the dependency-cycle refusal fire spuriously** — **fixed
+  in [#488](https://github.com/uppin/tddy-coder/pull/488)** via `defining_crate` attribution.
+  Historical note: after `config` moved to `tddy-daemon-kernel`, `tddy-daemon` kept
+  `pub use tddy_daemon_kernel::config;`, so rust-analyzer canonicalised `crate::config::DaemonConfig`
+  as `tddy_daemon::config::DaemonConfig` and the refusal read it as an origin dependency the
+  destination would depend back on. Eight moving modules had to be re-pointed at
+  `tddy_daemon_kernel::config::` by hand first.
 - **Cosmetic**: the operation appends one `pub use <crate>::*;` to the origin's `lib.rs` **per
   operation** rather than one per destination — ten identical lines after a ten-op plan — and appends
   `pub mod` lines after whatever the destination's `lib.rs` already said, rather than in order.
@@ -32,36 +34,19 @@ what follows is the operational debt behind them.
 
 ## Added by `#unbundle` node 2 ([#471](https://github.com/uppin/tddy-coder/pull/471))
 
-- **A directory-shaped subsystem is entirely out of reach.** `move_module_to_crate` moved **0 of
-  13** `model_registry/` modules. `source_crate_of` (`crate_move.rs:773`) requires the anchor file
-  to be `<crate>/src/<module>.rs`, so every nested path is refused before rust-analyzer is ever
-  spawned:
+**Nested-module refusal and static `check` gap — fixed in [#488](https://github.com/uppin/tddy-coder/pull/488).**
+`module_home` accepts directory-shaped anchors; `restructure check` runs `move_preconditions` before
+rust-analyzer. Historical repro and cost record kept below for planners.
 
-      $ tddy-tools restructure apply plan.jsonl --dry-run
-      Error: plan is malformed: `packages/tddy-daemon/src/model_registry/error.rs` is not
-      `<crate>/src/error.rs` — `move_module_to_crate` moves a module the crate root itself declares
-
-  This is documented as a known limitation ("Only `<crate>/src/<module>.rs` moves"), but node 1's
-  experience understated its cost: it is not an edge case, it is the *common* shape for a
-  subsystem worth extracting. `model_registry/` was picked as node 2's opening move precisely
-  because it is the cleanest extraction in `tddy-daemon` — already directory-shaped, zero outbound
-  `crate::` edges, zero inline tests — and the operation could not touch a line of it. All 13 were
-  hand-moved.
-
-  What would fix it: take the destination's own module path from the anchor's `path` (already
-  `model_registry::store`, i.e. the operation is *told* the nesting) and locate the parent's `mod`
-  line by walking `<crate>/src/<parent>.rs` then `<crate>/src/<parent>/mod.rs`, rather than
-  guessing. Refusing only when neither exists would keep the refusal honest and admit the shape
-  that matters.
-- **`restructure check` does not catch it.** `check` on the same 13-op plan reported `no findings`;
-  the refusal surfaced only under `apply`. A static preflight that cannot tell you the whole plan
-  will be rejected is not doing the job `check` exists for.
 - **`verify --against` earns its keep.** It found all 91 changed statements repo-wide and made it
   checkable, line by line, that not one of them was moved *logic* — every one was a stub line being
   replaced, a `super::`/`crate::model_registry::` re-point, or the wiring collapsing into the two
   `build_*_entry` calls. Worth saying out loud alongside the defects.
 
 ### The facade-cycle refusal, seen a second time (`#unbundle` node 2, M3)
+
+**Defining-crate attribution — fixed in [#488](https://github.com/uppin/tddy-coder/pull/488).**
+Historical repro when the refusal still compared extern names only:
 
 `screen_sharing_service.rs` is exactly the shape `move_module_to_crate` supports —
 `packages/tddy-daemon/src/screen_sharing_service.rs`, declared by the crate root, no nesting — so it
