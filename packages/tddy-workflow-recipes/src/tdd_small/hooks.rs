@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 
 use tddy_core::backend::{AgentOutputSink, ProgressSink};
-use tddy_core::changeset::{read_changeset, update_state, write_changeset};
+use tddy_core::changeset::read_changeset;
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::ElicitationEvent;
@@ -281,31 +281,15 @@ impl RunnerHooks for TddSmallWorkflowHooks {
     }
 
     fn on_error(&self, _task_id: &str, context: &Context, error: &(dyn Error + Send + Sync)) {
-        log::error!("[tdd-small hooks] workflow task failed: {}", error);
-        let session_dir: Option<PathBuf> = context
-            .get_sync("session_dir")
-            .or_else(|| context.get_sync("output_dir"));
-        let Some(ref dir) = session_dir else {
-            return;
-        };
-        let Ok(mut cs) = read_changeset(dir) else {
-            return;
-        };
-        let from = cs.state.current.to_string();
-        update_state(&mut cs, WorkflowState::new("Failed"));
-        if let Err(e) = write_changeset(dir, &cs) {
-            log::warn!(
-                "[tdd-small hooks] on_error: could not persist Failed state: {} (session_dir={})",
-                e,
-                dir.display()
-            );
-            return;
-        }
-        if let Some(ref tx) = self.event_tx {
-            let _ = tx.send(WorkflowEvent::StateChange {
-                from,
-                to: "Failed".to_string(),
-            });
-        }
+        hooks_common::on_error(
+            context,
+            self.event_tx.as_ref(),
+            error,
+            hooks_common::OnErrorLabels {
+                log_target: "tddy_workflow_recipes::tdd_small::hooks",
+                task_failed_prefix: "[tdd-small hooks]",
+                persist_failed_prefix: "[tdd-small hooks]",
+            },
+        );
     }
 }

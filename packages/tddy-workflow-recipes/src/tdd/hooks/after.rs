@@ -5,24 +5,35 @@
 use std::error::Error;
 use std::path::Path;
 
-use tddy_core::changeset::{
-    append_session_and_update_state, read_changeset, update_state, BranchWorktreeIntent, Changeset,
-};
+use tddy_core::changeset::{append_session_and_update_state, read_changeset, update_state};
 use tddy_core::error::WorkflowError;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::recipe::WorkflowRecipe;
 use tddy_core::workflow::task::TaskResult;
 
-use crate::parser::{
-    parse_acceptance_tests_response, parse_planning_response_with_base, PlanningOutput,
-};
+use crate::parser::parse_acceptance_tests_response;
 use crate::tdd::{hooks_common, interview};
-use crate::writer::write_artifacts;
 use crate::{
     parse_evaluate_response, parse_validate_subagents_response, write_acceptance_tests_file,
     write_demo_results_file, write_evaluation_report, SessionArtifactManifest,
 };
+
+pub(crate) fn after_plan(
+    _recipe: &dyn WorkflowRecipe,
+    manifest: &dyn SessionArtifactManifest,
+    session_dir: &Path,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    hooks_common::after_plan(
+        manifest,
+        session_dir,
+        context,
+        "tddy_workflow_recipes::tdd::hooks",
+        "[tdd hooks]",
+        "plan",
+    )
+}
 
 pub(crate) fn after_interview(
     session_dir: &Path,
@@ -43,70 +54,6 @@ pub(crate) fn after_interview(
         update_state(&mut cs, WorkflowState::new("Interviewed"));
         hooks_common::write_changeset_logged(session_dir, &cs, "after_interview Interviewed");
     }
-    Ok(())
-}
-
-pub(crate) fn after_plan(
-    _recipe: &dyn WorkflowRecipe,
-    manifest: &dyn SessionArtifactManifest,
-    session_dir: &Path,
-    context: &Context,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let planning: PlanningOutput = context
-        .get_sync("parsed_planning")
-        .or_else(|| {
-            let output: String = context.get_sync("output")?;
-            parse_planning_response_with_base(&output, session_dir).ok()
-        })
-        .ok_or("plan after_task requires parsed_planning or parseable output in context")?;
-    let prd_bn = manifest
-        .primary_document_basename()
-        .ok_or("plan after_task requires primary session document basename (prd) in manifest")?;
-    log::info!(
-        "[tdd hooks] after_plan writing session document basename={:?} under {:?}",
-        prd_bn,
-        session_dir
-    );
-    write_artifacts(session_dir, &planning, &prd_bn)?;
-    let session_id: String = context
-        .get_sync("session_id")
-        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-    let backend_name: String = context
-        .get_sync("backend_name")
-        .unwrap_or_else(|| "claude".to_string());
-    let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
-    let mut cs = read_changeset(session_dir).unwrap_or_else(|_| Changeset::default());
-    cs.name = planning.name.clone();
-    cs.initial_prompt = Some(feature_input);
-    cs.discovery = planning.discovery.clone();
-    cs.branch_suggestion = planning.branch_suggestion.clone();
-    cs.worktree_suggestion = planning.worktree_suggestion.clone();
-    if cs.workflow.as_ref().and_then(|w| w.branch_worktree_intent)
-        == Some(BranchWorktreeIntent::NewBranchFromBase)
-    {
-        if let Some(ref b) = planning.branch_suggestion {
-            if !b.trim().is_empty() {
-                cs.workflow
-                    .get_or_insert_with(Default::default)
-                    .new_branch_name = Some(b.clone());
-            }
-        }
-    }
-    let session_exists = cs.sessions.iter().any(|s| s.id == session_id);
-    let plan_session_tag = "plan";
-    if session_exists {
-        update_state(&mut cs, WorkflowState::new("Planned"));
-    } else {
-        append_session_and_update_state(
-            &mut cs,
-            session_id,
-            plan_session_tag,
-            WorkflowState::new("Planned"),
-            &backend_name,
-            Some("system-prompt-plan.md".to_string()),
-        );
-    }
-    hooks_common::write_changeset_logged(session_dir, &cs, "after_plan Planned");
     Ok(())
 }
 
@@ -140,6 +87,7 @@ pub(crate) fn after_acceptance_tests(
     hooks_common::write_changeset_logged(session_dir, &cs, "after_acceptance_tests");
     Ok(())
 }
+
 pub(crate) fn after_green(
     session_dir: &Path,
     output: &str,
@@ -192,6 +140,7 @@ pub(crate) fn after_validate(
     }
     Ok(())
 }
+
 pub(crate) fn after_demo(session_dir: &Path) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("DemoComplete"));
