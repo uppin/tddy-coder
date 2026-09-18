@@ -225,9 +225,15 @@ binaries, then the `tddy-web` bundle, then `tauri build`. The application *embed
 building the app first produces a stale dashboard and no error. `--build` runs that same script, and
 without it the install preflights for the artifacts and fails naming it.
 
-A `tauri build` that fails **after** producing the `.app` says so and names the bundle — on macOS the
-`dmg` target drives Finder over AppleScript and times out without Automation permission, long after
-the application itself is complete. `./install --desktop` then installs what is already built.
+It builds one bundle target per platform, the one this install consumes: `--bundles app` on macOS,
+`--no-bundle` on Linux, where the binary goes on `PATH` and the `.desktop` entry and icon come from
+the source tree. `tauri.conf.json` keeps all four targets because it also describes distribution.
+Skipping `dmg` skips `bundle_dmg.sh`, which drives Finder over AppleScript and fails without
+Automation permission — after the `.app` is already complete, so it failed a build that had already
+succeeded.
+
+A build that fails **after** producing the artifact says so and names it; `./install --desktop` then
+installs what is already built.
 
 The configuration is rendered from `desktop.yaml.production` and an existing one is **never**
 overwritten, so a reinstall keeps every choice the operator made. Overrides: `INSTALL_TDDY_HOME`,

@@ -68,10 +68,13 @@ dashboard and no error. `--build` delegates to that script rather than repeating
 is what keeps a build-then-install and a `--build` install producing the same artifacts; without
 `--build` the install preflights for every artifact and fails naming the script.
 
-`./release --desktop` distinguishes a failed application build from a failed *later* bundle target:
-if the `.app` is present it names it and points at `./install --desktop`, because on macOS the `dmg`
-target drives Finder over AppleScript and times out without Automation permission while the `.app`
-itself is valid.
+It builds one bundle target per platform — `--bundles app` on macOS, `--no-bundle` on Linux — since
+those are the two artifacts this install consumes. The four targets in `tauri.conf.json` are for
+distribution; `dmg` in particular runs `bundle_dmg.sh`, which drives Finder over AppleScript and
+fails without Automation permission after the `.app` is already valid.
+
+If a build fails after the artifact exists, `./release --desktop` names it and points at
+`./install --desktop`.
 
 The config is rendered only when absent — a reinstall keeps the operator's file untouched — and the
 install warns when `INSTALL_TDDY_HOME` points away from `$HOME/.tddy`, since a release build has no
