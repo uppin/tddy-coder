@@ -6,8 +6,9 @@ an agent's structured output into typed Rust.
 ## Module layout
 
 Two areas are split by responsibility rather than held in one file, so a change to one phase is read
-against that phase alone. No public path changes at either seam — each parent publishes what it
-split out.
+against that phase alone. **No public path changed at either seam**, by two different routes: the
+parser parent re-exports what it split out, so every caller's path still resolves; the hooks parents
+split out functions that were private to begin with, so there was no path to keep.
 
 ### `parser/` — one module per goal phase
 
@@ -30,7 +31,9 @@ mirrors. Nothing crosses a seam but `ParseError`.
 ### `tdd/hooks/` and `tdd_small/hooks/` — split by lifecycle half
 
 Each hooks parent keeps its struct, that struct's inherent impl, and `impl RunnerHooks` — the only
-caller of the phase functions. The phase functions themselves live in the half they belong to:
+caller of the phase functions. The phase functions themselves live in the half they belong to, and
+the parent reaches them by path (`before::before_red(…)`), which is why it declares
+`mod before; mod after;` and re-exports neither: nothing outside the parent ever called them.
 
 | Module | Owns |
 |---|---|
