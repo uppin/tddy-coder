@@ -1,26 +1,21 @@
+//! The `before_*` phase functions of the full TDD workflow: each one prepares the context and
+//! prompt for one goal before its agent runs. `impl RunnerHooks` in the parent `hooks.rs` is their
+//! only caller.
+
+use std::error::Error;
+use std::path::{Path, PathBuf};
+
+use tddy_core::changeset::{read_changeset, resolve_model, update_state};
+use tddy_core::workflow::context::Context;
+use tddy_core::workflow::ids::WorkflowState;
+use tddy_core::workflow::prepend_context_header;
+use tddy_core::workflow::recipe::WorkflowRecipe;
+
 use crate::tdd::{
     acceptance_tests, demo, evaluate, hooks_common, interview, red, refactor, update_docs,
     validate_subagents,
 };
-use tddy_core::{changeset::resolve_model, workflow::prepend_context_header};
-
 use crate::SessionArtifactManifest;
-
-use tddy_core::workflow::recipe::WorkflowRecipe;
-
-use std::path::Path;
-
-use tddy_core::workflow::ids::WorkflowState;
-
-use tddy_core::changeset::update_state;
-
-use tddy_core::changeset::read_changeset;
-
-use std::path::PathBuf;
-
-use std::error::Error;
-
-use tddy_core::workflow::context::Context;
 
 pub(crate) fn before_interview(context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
     log::debug!(

@@ -1,3 +1,6 @@
+//! The `evaluate-changes` phase's parser: the `Evaluate*` report types and
+//! `parse_evaluate_response`.
+
 use tddy_core::ParseError;
 
 /// Build result entry from evaluate-changes output.

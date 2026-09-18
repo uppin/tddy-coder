@@ -15,7 +15,7 @@ below is in the change-history entry
 | Run | tdd/hooks.rs | tdd_small/hooks.rs | Note |
 |---|---|---|---|
 | 2026-09-15 | 1,002 | 697 | first detection |
-| 2026-09-18 | **406** | **350** | split by #489 into `{before,after}.rs` at 391 · 284 and 191 · 230 production lines — largest 406, budget 500 |
+| 2026-09-18 | **405** | **349** | split by #489 into `{before,after}.rs` at 385 · 268 and 179 · 212 production lines — largest 405, budget 500 |
 
 ## What the tool found
 

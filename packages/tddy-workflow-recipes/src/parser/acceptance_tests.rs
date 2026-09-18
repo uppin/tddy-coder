@@ -1,3 +1,6 @@
+//! The `acceptance-tests` phase's parser: `AcceptanceTestsOutput`, `AcceptanceTestInfo` and
+//! `parse_acceptance_tests_response`.
+
 use tddy_core::ParseError;
 
 /// Parsed acceptance tests output.

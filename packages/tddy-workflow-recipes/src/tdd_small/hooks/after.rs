@@ -1,46 +1,29 @@
-use crate::parser::parse_green_response;
-use crate::parser::parse_planning_response_with_base;
-use crate::parser::parse_red_response;
-use crate::parser::parse_update_docs_response;
-use crate::{parser::PlanningOutput, tdd::hooks_common, write_artifacts, EvaluateOutput};
-
-use crate::parser::parse_refactor_response;
-
-use crate::writer::write_evaluation_report;
-
-use crate::tdd_small::parse_post_green_review_response;
-
-use crate::writer::update_acceptance_tests_file;
-
-use crate::writer::update_progress_file;
-
-use crate::writer::write_progress_file;
-
-use crate::writer::write_red_output_file;
-
-use tddy_core::error::WorkflowError;
-
-use tddy_core::changeset::append_session_and_update_state;
-
-use tddy_core::workflow::ids::WorkflowState;
-
-use tddy_core::changeset::update_state;
-
-use tddy_core::changeset::BranchWorktreeIntent;
-
-use tddy_core::changeset::Changeset;
-
-use tddy_core::changeset::read_changeset;
+//! The `after_*` phase functions of the `tdd-small` workflow: each one parses a goal's structured
+//! output and writes its artifacts, including the single post-green review submit.
+//! `impl RunnerHooks` in the parent `hooks.rs` is their only caller.
 
 use std::error::Error;
-
-use tddy_core::workflow::context::Context;
-
 use std::path::Path;
 
-use crate::SessionArtifactManifest;
-
+use tddy_core::changeset::{
+    append_session_and_update_state, read_changeset, update_state, BranchWorktreeIntent, Changeset,
+};
+use tddy_core::error::WorkflowError;
+use tddy_core::workflow::context::Context;
+use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::recipe::WorkflowRecipe;
+
+use crate::parser::{
+    parse_green_response, parse_planning_response_with_base, parse_red_response,
+    parse_refactor_response, parse_update_docs_response, PlanningOutput,
+};
+use crate::tdd::hooks_common;
+use crate::tdd_small::parse_post_green_review_response;
+use crate::writer::{
+    update_acceptance_tests_file, update_progress_file, write_evaluation_report,
+    write_progress_file, write_red_output_file,
+};
+use crate::{write_artifacts, EvaluateOutput, SessionArtifactManifest};
 
 pub(crate) fn after_plan(
     recipe: &dyn WorkflowRecipe,

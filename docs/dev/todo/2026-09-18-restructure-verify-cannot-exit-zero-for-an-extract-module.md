@@ -16,7 +16,7 @@ On this node that was **205 lost / 235 gained**, exit 1, of which:
 
 | Class | Count |
 |---|---:|
-| `pub(crate) ` widenings on private `…De` mirror fields | 134 |
+| `pub(crate) ` widenings — 114 private `Structured…`/`…De` mirror fields, 20 unreflowed hook signatures | 134 |
 | reference re-points (`before_interview(…)` → `before::before_interview(…)`) | 39 |
 | `rustfmt` reflows of lines the two above made longer | 32 |
 

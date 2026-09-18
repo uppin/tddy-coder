@@ -1,3 +1,6 @@
+//! The `red` phase's parser: `RedOutput` with its `RedTestInfo`, `SkeletonInfo`, `MarkerInfo` and
+//! `MarkerResult` records, `parse_red_response` and `validate_red_marker_source_paths`.
+
 use tddy_core::{classify_rust_source_path, ParseError, RustSourcePathKind};
 
 /// Parsed red goal output.

@@ -3,7 +3,7 @@
 **Date**: 2026-09-15
 **Status**: 🚧 In Progress
 **Type**: Refactor
-**Stack**: `#carve` 2/9
+**Stack**: `#carve` 2/10
 **PR**: [#489](https://github.com/uppin/tddy-coder/pull/489)
 
 PRD: [`2026-09-15-carve-recipe-parsers-prd.md`](./2026-09-15-carve-recipe-parsers-prd.md)
@@ -192,10 +192,82 @@ difference between an operation that runs and one that panics.
 - [x] Failing unit/integration tests — the shape assertions above are the whole contract here; there
   is no new API surface to unit-test, every symbol keeping its name, signature and path
 - [x] Implement production code making tests pass (`/green`) — 10 `extract_module` operations in one
-  plan, all four `module_shape` tests green, largest produced file 406 production lines
-- [ ] `/validate-changes`
-- [ ] `/pr-wrap` — correct the title, ready for review
+  plan, all four `module_shape` tests green, largest produced file 405 production lines
+- [x] `/validate-changes` — plus `/validate-tests`, `/validate-prod-ready` and `/analyze-clean-code`;
+  results below
+- [x] `/pr-wrap` — title corrected, ready for review
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
+
+## Validation Results
+
+Four analyses over `git diff origin/master...HEAD`, plus my own checks. **Nothing blocking.** The
+mechanical-move claim was verified independently three times — a line-multiset comparison of each
+origin file against the union of its produced files, a reconciliation of all 440
+`restructure verify` entries, and a normalised diff per family — and the public surface is
+byte-identical (41 `pub` items each side, zero gained, zero lost).
+
+| Gate | Result |
+|---|---|
+| Build (`-p tddy-workflow-recipes`) | ✅ clean, no warnings |
+| Clippy (`--all-targets -- -D warnings`) | ✅ zero diagnostics, no `#[allow]` added |
+| `cargo fmt --all -- --check` | ✅ clean |
+| Tests (`--no-fail-fast`, 59 suites) | ✅ 564 passed / 1 failed — the pre-existing one |
+| Mock or fake code, dev fallbacks, env-conditional branches, debug output | ✅ none |
+| `TODO` / `FIXME` added by this branch | ✅ none |
+| Public surface change | ✅ none |
+| Over-exposure from the `pub(crate)` widening | ✅ none — every widened item is in a private module |
+| Files over the 500-production-line budget | ✅ 0 of 13, largest 405 |
+| Parameter counts | ✅ max 4 across 67 functions |
+| Magic values introduced | ✅ none |
+
+### Fixed during the wrap
+
+- **`parser.rs` had production code on both sides of a 295-line test module.** An artifact of the
+  split: the assist lifted the six phases out of the region *above* `mod tests` and left the test
+  module where it was, stranding 122 production lines below it. Both test modules were relocated to
+  the end of the file — a pure reordering, verified as a line-multiset identity — which also
+  restores the budget measure on this file (92 → 213; see the code-issues record).
+- **The four hooks halves opened with shredded import preludes** — 42 lines naming
+  `crate::parser::` six separate times in one case. Merged into the grouping style the parents and
+  `master` use, binding-for-binding identical.
+- **Ten of the eleven new modules had no `//!` header.** Added, sourced from the README's tables.
+- **`the_parser_parent_keeps_only_the_shared_error_and_a_facade` was the weakest of the four
+  contract assertions**: its `ParseError` check could not fail and its message claimed a coupling the
+  code does not have (the type lives in `tddy-core`), and its negative check covered one of six
+  phases. Strengthened to assert all six facades and all six absent definitions — strictly stronger,
+  nothing weakened. Developer-approved change to an approved test.
+- Two import-path inconsistencies (`tddy_core::error::ParseError` in the parent vs
+  `tddy_core::ParseError` in its six children) and `mod before; mod after;` buried mid-file in
+  `tdd/hooks.rs` while its sibling declares them at the top.
+- Published measurements corrected: both code-issues records were one line high per file, and the
+  parser record's "0 parsers" understated what the parent keeps (four of the file's ten).
+
+### Accepted, recorded, not changed
+
+- **114 inert `pub(crate)` field qualifiers** on the private `Structured…`/`…De` mirrors. Kept on the
+  developer's call so the diff stays a faithful record of what the assist did; written up in
+  `packages/tddy-workflow-recipes/docs/code-issues/oversized-file-parser.md` as an artifact the
+  remaining `#carve` nodes should expect.
+- **`src/parser/red.rs:16` carries a dead `#[allow(clippy::struct_excessive_bools)]`** — it sits on a
+  `Vec<MarkerInfo>` field, so it can never apply. Pre-existing (introduced in `576f73f1`) and moved
+  verbatim; removing it would edit moved code and cost the diff its pure-move property, which is
+  this PR's whole review contract.
+
+### Deferred to after the stack lands
+
+- **~280 lines of duplicated hook code.** Four functions are byte-identical across the two
+  workflows (`before_update_docs` 52 lines, `before_refactor` 30, `after_refactor` 11,
+  `after_update_docs` 11) and five more differ only in log strings. `src/tdd/hooks_common.rs` is
+  already the home. The split is what made them trivially extractable for the first time — but the
+  extraction touches four files three sibling PRs also touch, so it is a follow-up, not this node.
+- **The 15 parser unit tests still live in `parser.rs`** and reach across the seam into the six
+  modules; none of the six carries a test of its own. Moving them is 295 lines across six files that
+  siblings touch, for the same reason.
+- **The hooks seam is cut by lifecycle half, not by phase**, which separates the write and the read
+  of one artifact (`tdd/hooks/after.rs` writes `refactoring-plan.md`, `before.rs` reads it). Chosen
+  because it is the `extract_module` geometry that succeeds, and kept: the halves have no intra-half
+  coupling and `before`/`after` is the `RunnerHooks` vocabulary. Re-cutting would cascade through the
+  stack.
 
 ## Verification
 
@@ -238,9 +310,11 @@ trimmed lines as multisets and excuses only the scaffolding a restructure is *su
 `extract_module` always does:
 
 - **134 visibility widenings** — `file: String,` → `pub(crate) file: String,` on the fields of the
-  private `…De` deserialization mirrors. The assist writes relocated items `pub(crate)`, and the
-  survey that restores visibility does not descend into a struct's fields. Documented in
-  `plan-schema.md`, reported by the run.
+  private `Structured…` and `…De` mirrors (**114** of them), plus **20** hook function-signature
+  lines that gained the prefix without reflowing. The assist writes relocated items `pub(crate)`,
+  and the survey that restores visibility does not descend into a struct's fields. Documented in
+  `plan-schema.md`, reported by the run. The 114 field ones are inert and kept deliberately — see
+  `packages/tddy-workflow-recipes/docs/code-issues/oversized-file-parser.md`.
 - **39 reference re-points** — `before_interview(context)?` → `before::before_interview(context)?`,
   which is the assist doing its job.
 - **32 further deltas are `rustfmt` reflowing lines the two above made longer**: nine `fn` signatures

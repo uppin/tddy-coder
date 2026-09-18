@@ -1,4 +1,4 @@
-//! The shape `#carve` 2/9 delivers: one module per parser phase, and the TDD hooks split by
+//! The shape `#carve` 2/10 delivers: one module per parser phase, and the TDD hooks split by
 //! lifecycle half.
 //!
 //! These assertions are the node's contract. They read the tree rather than the type system
@@ -32,6 +32,22 @@ fn src(relative: &str) -> PathBuf {
 /// The budget the repo's backlog sets, and this node's AC6.
 const BUDGET: usize = 500;
 
+/// The six phases this node gives a module each, named once so no test can drift from another.
+const PHASES: [&str; 6] = [
+    "planning",
+    "acceptance_tests",
+    "analyze",
+    "green",
+    "red",
+    "evaluate",
+];
+
+fn parser_parent_source() -> String {
+    let parent = src("parser.rs");
+    std::fs::read_to_string(&parent)
+        .unwrap_or_else(|error| panic!("reading {}: {error}", parent.display()))
+}
+
 /// AC1 — each of the six parser phases is its own module.
 ///
 /// Nothing couples them: each owns its output struct, its private `Structured…` mirror, its `…De`
@@ -39,15 +55,8 @@ const BUDGET: usize = 500;
 /// one after another, and the only symbol crossing every seam is `ParseError`.
 #[test]
 fn each_parser_phase_is_its_own_module() {
-    // Given the six phases the parser actually has
-    let phases = [
-        "planning",
-        "acceptance_tests",
-        "analyze",
-        "green",
-        "red",
-        "evaluate",
-    ];
+    // Given the six phases this node gives a module each
+    let phases = PHASES;
 
     // When each is looked for as its own module
     let absent: Vec<&str> = phases
@@ -62,31 +71,44 @@ fn each_parser_phase_is_its_own_module() {
     );
 }
 
-/// AC1 — `parser.rs` keeps only what every phase shares, behind a facade.
+/// AC1 — `parser.rs` keeps the error every phase shares, publishes all six, and defines none.
 ///
 /// The facade is what keeps all nine external `tddy_workflow_recipes::parser::…` reference sites
-/// resolving, so not one of them is edited.
+/// resolving, so not one of them is edited. `ParseError` itself belongs to `tddy-core`; what the
+/// parent keeps is the *binding*, which its own remaining parsers (`validate`, `demo`, `refactor`,
+/// `update-docs`) still need.
 #[test]
 fn the_parser_parent_keeps_only_the_shared_error_and_a_facade() {
     // Given the parent after the split
-    let parent = src("parser.rs");
-    let text = std::fs::read_to_string(&parent)
-        .unwrap_or_else(|error| panic!("reading {}: {error}", parent.display()));
+    let parent = parser_parent_source();
 
-    // Then it still owns the one symbol every phase needs
+    // Then it still binds the error every phase returns
     assert!(
-        text.contains("ParseError"),
-        "`ParseError` is shared by every phase and must stay in the parent"
+        parent.contains("ParseError"),
+        "every phase returns `ParseError`, so the parent must still bind it"
     );
 
-    // And it publishes the phases rather than holding them
+    // When each phase is looked for as a published module rather than a definition
+    let unpublished: Vec<&str> = PHASES
+        .into_iter()
+        .filter(|phase| !parent.contains(&format!("pub use {phase}::*;")))
+        .collect();
+    let still_defined: Vec<&str> = PHASES
+        .into_iter()
+        .filter(|phase| parent.contains(&format!("pub fn parse_{phase}_response")))
+        .collect();
+
+    // Then every one is published
     assert!(
-        text.contains("pub use"),
-        "the parent declares no facade, so existing `parser::` paths would stop resolving"
+        unpublished.is_empty(),
+        "the parent declares no facade for these phases, so existing `parser::` paths would stop \
+         resolving: {unpublished:?}"
     );
+
+    // And none is still defined in the parent
     assert!(
-        !text.contains("pub fn parse_planning_response"),
-        "the parent still defines a phase parser instead of publishing it"
+        still_defined.is_empty(),
+        "the parent still defines these phase parsers instead of publishing them: {still_defined:?}"
     );
 }
 

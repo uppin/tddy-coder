@@ -1,33 +1,22 @@
-use crate::{
-    tdd::{hooks_common, refactor, update_docs},
-    tdd_small::{
-        post_green_review,
-        red::{build_merged_red_followup_prompt, build_merged_red_prompt},
-    },
-};
-use tddy_core::workflow::ids::WorkflowState;
-
-use tddy_core::changeset::update_state;
-
-use crate::tdd_small::red::merged_red_system_prompt;
-
-use tddy_core::workflow::prepend_context_header;
-
-use std::path::PathBuf;
-
-use tddy_core::changeset::resolve_model;
-
-use tddy_core::changeset::read_changeset;
+//! The `before_*` phase functions of the `tdd-small` workflow: each one prepares the context and
+//! prompt for one goal, including the merged red phase. `impl RunnerHooks` in the parent `hooks.rs`
+//! is their only caller.
 
 use std::error::Error;
+use std::path::{Path, PathBuf};
 
-use crate::SessionArtifactManifest;
-
+use tddy_core::changeset::{read_changeset, resolve_model, update_state};
+use tddy_core::workflow::context::Context;
+use tddy_core::workflow::ids::WorkflowState;
+use tddy_core::workflow::prepend_context_header;
 use tddy_core::workflow::recipe::WorkflowRecipe;
 
-use tddy_core::workflow::context::Context;
-
-use std::path::Path;
+use crate::tdd::{hooks_common, refactor, update_docs};
+use crate::tdd_small::{
+    post_green_review,
+    red::{build_merged_red_followup_prompt, build_merged_red_prompt, merged_red_system_prompt},
+};
+use crate::SessionArtifactManifest;
 
 pub(crate) fn before_merged_red(
     session_dir: &Path,

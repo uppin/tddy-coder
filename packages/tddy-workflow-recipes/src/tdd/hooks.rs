@@ -24,6 +24,10 @@ use tddy_core::workflow::task::TaskResult;
 
 use super::hooks_common;
 
+mod before;
+
+mod after;
+
 /// Hooks for the TDD workflow. Handles file I/O. Event emission for TUI when event_tx is set.
 pub struct TddWorkflowHooks {
     recipe: Arc<dyn WorkflowRecipe>,
@@ -124,10 +128,6 @@ impl TddWorkflowHooks {
         }))
     }
 }
-
-mod before;
-
-mod after;
 
 impl RunnerHooks for TddWorkflowHooks {
     fn on_enter_task(&self, _task_id: &str, context: &Context) {

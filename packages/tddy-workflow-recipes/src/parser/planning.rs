@@ -1,3 +1,6 @@
+//! The `plan` phase's parser: `PlanningOutput` with its demo-plan types (`DemoPlan`, `DemoStep`,
+//! `PortMap`, `DemoMode`) and `parse_planning_response[_with_base]`.
+
 use tddy_core::ParseError;
 
 /// Parsed planning output. PRD must include a `## TODO` section (implementation milestones).

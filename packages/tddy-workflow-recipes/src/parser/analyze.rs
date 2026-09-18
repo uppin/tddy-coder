@@ -1,3 +1,5 @@
+//! The bugfix pipeline's `analyze` phase parser: `AnalyzeOutput` and `parse_analyze_response`.
+
 use tddy_core::ParseError;
 
 /// Parsed output from the bugfix `analyze` goal (`tddy-tools submit --goal analyze`).

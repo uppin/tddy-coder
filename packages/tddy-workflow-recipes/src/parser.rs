@@ -4,7 +4,7 @@
 //! Parser functions accept pre-validated JSON strings and deserialize into typed structs.
 //! Questions are extracted from AskUserQuestion tool events in the NDJSON stream, not from text.
 
-use tddy_core::error::ParseError;
+use tddy_core::ParseError;
 
 mod planning;
 pub use planning::*;
@@ -88,6 +88,127 @@ pub fn parse_validate_subagents_response(s: &str) -> Result<ValidateSubagentsOut
         refactoring_plan_written: parsed.refactoring_plan_written.unwrap_or(false),
         refactoring_plan: parsed.refactoring_plan.filter(|s| !s.trim().is_empty()),
     })
+}
+
+/// Parse the standalone demo goal. JSON must come from tddy-tools submit.
+pub fn parse_demo_response(s: &str) -> Result<green::DemoOutput, ParseError> {
+    let s = s.trim();
+    let parsed: StructuredDemo = serde_json::from_str(s)
+        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
+    if parsed.goal.as_deref() != Some("demo") {
+        return Err(ParseError::Malformed(format!(
+            "goal is not demo, got: {:?}",
+            parsed.goal
+        )));
+    }
+    let summary = parsed
+        .summary
+        .filter(|x| !x.is_empty())
+        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+
+    log::debug!(
+        "[tddy-core] parse_demo_response: summary_len={}, steps={}",
+        summary.len(),
+        parsed.steps_completed.unwrap_or(0)
+    );
+
+    Ok(green::DemoOutput {
+        summary,
+        demo_type: parsed.demo_type.unwrap_or_else(|| "unknown".to_string()),
+        steps_completed: parsed.steps_completed.unwrap_or(0),
+        verification: parsed.verification.unwrap_or_default(),
+        share_url: parsed.share_url,
+    })
+}
+
+// ── refactor output types ────────────────────────────────────────────────────
+
+/// Parsed output from the refactor goal.
+#[derive(Debug, Clone)]
+pub struct RefactorOutput {
+    pub summary: String,
+    pub tasks_completed: u32,
+    pub tests_passing: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct StructuredRefactor {
+    goal: Option<String>,
+    summary: Option<String>,
+    #[serde(default)]
+    tasks_completed: Option<u32>,
+    #[serde(default)]
+    tests_passing: Option<bool>,
+}
+
+/// Parse LLM refactor response. JSON must come from tddy-tools submit.
+pub fn parse_refactor_response(s: &str) -> Result<RefactorOutput, ParseError> {
+    let s = s.trim();
+    let parsed: StructuredRefactor = serde_json::from_str(s)
+        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
+    if parsed.goal.as_deref() != Some("refactor") {
+        return Err(ParseError::Malformed(format!(
+            "goal is not refactor, got: {:?}",
+            parsed.goal
+        )));
+    }
+    let summary = parsed
+        .summary
+        .filter(|x| !x.is_empty())
+        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+    Ok(RefactorOutput {
+        summary,
+        tasks_completed: parsed.tasks_completed.unwrap_or(0),
+        tests_passing: parsed.tests_passing.unwrap_or(false),
+    })
+}
+
+// ── update-docs output types ─────────────────────────────────────────────────
+
+/// Parsed output from the update-docs goal.
+#[derive(Debug, Clone)]
+pub struct UpdateDocsOutput {
+    pub summary: String,
+    pub docs_updated: u32,
+}
+
+#[derive(serde::Deserialize)]
+struct StructuredUpdateDocs {
+    goal: Option<String>,
+    summary: Option<String>,
+    #[serde(default)]
+    docs_updated: Option<u32>,
+}
+
+/// Parse LLM update-docs response. JSON must come from tddy-tools submit.
+pub fn parse_update_docs_response(s: &str) -> Result<UpdateDocsOutput, ParseError> {
+    let s = s.trim();
+    let parsed: StructuredUpdateDocs = serde_json::from_str(s)
+        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
+    if parsed.goal.as_deref() != Some("update-docs") {
+        return Err(ParseError::Malformed(format!(
+            "goal is not update-docs, got: {:?}",
+            parsed.goal
+        )));
+    }
+    let summary = parsed
+        .summary
+        .filter(|x| !x.is_empty())
+        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+    Ok(UpdateDocsOutput {
+        summary,
+        docs_updated: parsed.docs_updated.unwrap_or(0),
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct StructuredDemo {
+    goal: Option<String>,
+    summary: Option<String>,
+    demo_type: Option<String>,
+    steps_completed: Option<u32>,
+    verification: Option<String>,
+    share_url: Option<String>,
 }
 
 #[cfg(test)]
@@ -384,127 +505,6 @@ mod tests {
         assert!(md.contains("timeout"));
         assert!(md.contains("- [x] Foo"));
     }
-}
-
-/// Parse the standalone demo goal. JSON must come from tddy-tools submit.
-pub fn parse_demo_response(s: &str) -> Result<green::DemoOutput, ParseError> {
-    let s = s.trim();
-    let parsed: StructuredDemo = serde_json::from_str(s)
-        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
-    if parsed.goal.as_deref() != Some("demo") {
-        return Err(ParseError::Malformed(format!(
-            "goal is not demo, got: {:?}",
-            parsed.goal
-        )));
-    }
-    let summary = parsed
-        .summary
-        .filter(|x| !x.is_empty())
-        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
-
-    log::debug!(
-        "[tddy-core] parse_demo_response: summary_len={}, steps={}",
-        summary.len(),
-        parsed.steps_completed.unwrap_or(0)
-    );
-
-    Ok(green::DemoOutput {
-        summary,
-        demo_type: parsed.demo_type.unwrap_or_else(|| "unknown".to_string()),
-        steps_completed: parsed.steps_completed.unwrap_or(0),
-        verification: parsed.verification.unwrap_or_default(),
-        share_url: parsed.share_url,
-    })
-}
-
-// ── refactor output types ────────────────────────────────────────────────────
-
-/// Parsed output from the refactor goal.
-#[derive(Debug, Clone)]
-pub struct RefactorOutput {
-    pub summary: String,
-    pub tasks_completed: u32,
-    pub tests_passing: bool,
-}
-
-#[derive(serde::Deserialize)]
-struct StructuredRefactor {
-    goal: Option<String>,
-    summary: Option<String>,
-    #[serde(default)]
-    tasks_completed: Option<u32>,
-    #[serde(default)]
-    tests_passing: Option<bool>,
-}
-
-/// Parse LLM refactor response. JSON must come from tddy-tools submit.
-pub fn parse_refactor_response(s: &str) -> Result<RefactorOutput, ParseError> {
-    let s = s.trim();
-    let parsed: StructuredRefactor = serde_json::from_str(s)
-        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
-    if parsed.goal.as_deref() != Some("refactor") {
-        return Err(ParseError::Malformed(format!(
-            "goal is not refactor, got: {:?}",
-            parsed.goal
-        )));
-    }
-    let summary = parsed
-        .summary
-        .filter(|x| !x.is_empty())
-        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
-    Ok(RefactorOutput {
-        summary,
-        tasks_completed: parsed.tasks_completed.unwrap_or(0),
-        tests_passing: parsed.tests_passing.unwrap_or(false),
-    })
-}
-
-// ── update-docs output types ─────────────────────────────────────────────────
-
-/// Parsed output from the update-docs goal.
-#[derive(Debug, Clone)]
-pub struct UpdateDocsOutput {
-    pub summary: String,
-    pub docs_updated: u32,
-}
-
-#[derive(serde::Deserialize)]
-struct StructuredUpdateDocs {
-    goal: Option<String>,
-    summary: Option<String>,
-    #[serde(default)]
-    docs_updated: Option<u32>,
-}
-
-/// Parse LLM update-docs response. JSON must come from tddy-tools submit.
-pub fn parse_update_docs_response(s: &str) -> Result<UpdateDocsOutput, ParseError> {
-    let s = s.trim();
-    let parsed: StructuredUpdateDocs = serde_json::from_str(s)
-        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
-    if parsed.goal.as_deref() != Some("update-docs") {
-        return Err(ParseError::Malformed(format!(
-            "goal is not update-docs, got: {:?}",
-            parsed.goal
-        )));
-    }
-    let summary = parsed
-        .summary
-        .filter(|x| !x.is_empty())
-        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
-    Ok(UpdateDocsOutput {
-        summary,
-        docs_updated: parsed.docs_updated.unwrap_or(0),
-    })
-}
-
-#[derive(serde::Deserialize)]
-struct StructuredDemo {
-    goal: Option<String>,
-    summary: Option<String>,
-    demo_type: Option<String>,
-    steps_completed: Option<u32>,
-    verification: Option<String>,
-    share_url: Option<String>,
 }
 
 #[cfg(test)]

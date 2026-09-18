@@ -1,3 +1,6 @@
+//! The `green` phase's parser: `GreenOutput` with its `GreenTestResult` and `ImplementationInfo`
+//! records, the `DemoOutput`/`DemoResults` demo types, and `parse_green_response`.
+
 use tddy_core::ParseError;
 
 /// Parsed green goal output.
