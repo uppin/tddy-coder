@@ -35,7 +35,8 @@ late: the choice by then is to work around it, silently make it worse, or stop.
 symbol it names moves, and a link would rot silently. A **TODO** still takes a relative link
 (`[2026-08-02-slug.md](../todo/2026-08-02-slug.md)`), because `/wrap-context-docs` deletes the file
 of anything marked `✅ RESOLVED HERE` and the link is the wrapping session's only memory of this
-scan. A code issue marked resolved is **closed in place**, not deleted.
+scan. A **closed code issue is deleted too** — at wrap, with its final measurement recorded in the
+change-history entry first — so an open record always means an open problem.
 
 #### 🚧 A claimed issue — stop and ask
 
@@ -145,8 +146,9 @@ reason is what tells the next planner whether it blocks them.
 - Each step is discrete and actionable
 - Cross-check **both** records — `packages/*/docs/code-issues/` and `docs/dev/todo/` — before
   writing the changeset; record every relevant item in `## Prerequisites` with a verdict, including
-  the ones you decide not to fix. TODOs take a relative link and the ✅ RESOLVED HERE ones are what
-  the wrap deletes; code issues take a **backticked path** and are closed in place
+  the ones you decide not to fix. TODOs take a relative link; code issues take a **backticked
+  path**. The wrap deletes both once closed — and **narrows** rather than deletes a code issue it
+  only partly fixed
 - **A 🚧 claimed issue is a question, not a verdict.** Present the proceed / wait / narrow fork and
   wait for the developer. Never default to either, and record their answer in the changeset
 - **A restructure prerequisite runs before green, in its own commit, and implements nothing** — with

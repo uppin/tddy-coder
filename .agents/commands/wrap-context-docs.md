@@ -13,8 +13,8 @@ Transfer knowledge from changesets and PRDs into permanent documentation, then c
 2. Update the actual permanent docs with that knowledge
 3. Add a changelog or changeset **index** entry (audit trail)—see merge hygiene below
 4. **Clear the `docs/dev/todo/` entries this change resolved** — see [TODO backlog entries](#wrapping-todo-backlog-entries)
-5. **Reconcile the `packages/*/docs/code-issues/` records this change affected** — re-measure and
-   resolve, narrow or reopen. **Kept, not deleted** — see [code issues](#wrapping-code-issues--reconcile-do-not-delete)
+5. **Reconcile the `packages/*/docs/code-issues/` records this change affected** — re-measure, then
+   **delete** the closed ones and **narrow** the partly-fixed ones — see [code issues](#wrapping-code-issues--delete-when-closed-narrow-when-partial)
 5. Delete the working document
 
 Wrapping is **NOT** just adding changelog entries. It is a full knowledge transfer. In particular it is **not**:
@@ -22,8 +22,8 @@ Wrapping is **NOT** just adding changelog entries. It is a full knowledge transf
 - Leaving the feature/dev docs unchanged
 - Creating links to the deleted PRD/changeset files
 - Leaving a backlog entry in `docs/dev/todo/` describing a defect this change fixed
-- Leaving a code issue open whose measurement this change made clean — or **resolving one it only
-  partly fixed**, which hides the remainder from the next planner
+- Leaving a code issue in place whose measurement this change made clean — or **deleting one it only
+  partly fixed**, which destroys the only description of what is left
 
 **State B, not delta**: the permanent docs must read as cohesive, unified documents with no trace of the change process — no "previously", "now", "changed from", or other temporal language.
 
@@ -129,8 +129,10 @@ For changesets in `docs/dev/1-WIP/`:
    - If the work is cross-package, create **one new file** in `docs/dev/changesets/` too.
    - Name every backlog entry this change resolved, by title and date-slug — that entry is about to be
      deleted, and this is its audit trail.
-4. **Reconcile the code issues** in every package this change touched — re-measure, then resolve,
-   narrow or reopen. See [code issues](#wrapping-code-issues--reconcile-do-not-delete).
+4. **Reconcile the code issues** in every package this change touched — re-measure, then delete the
+   closed ones, narrow the partly-fixed ones, and reopen anything that regressed. Record the final
+   measurement in the change-history entry **before** deleting. See
+   [code issues](#wrapping-code-issues--delete-when-closed-narrow-when-partial).
 5. **Clear the resolved `docs/dev/todo/` entries** the changeset's `## Prerequisites` marks
    ✅ RESOLVED HERE — see [TODO backlog entries](#wrapping-todo-backlog-entries). Do this **before**
    deleting the changeset: the changeset is the list
@@ -183,29 +185,22 @@ Rules, in the order they matter:
   resolved with no changeset to wrap — a flaky test that a since-landed change fixed. When a change
   wraps, its resolved entries are deleted, not annotated.
 
-## Wrapping code issues — reconcile, do not delete
+## Wrapping code issues — delete when closed, narrow when partial
 
 `packages/<pkg>/docs/code-issues/` holds one file per analyzer or structural finding
-([`deferred-work`](../skills/deferred-work/SKILL.md)). **These are wrapped differently from TODOs,
-and the difference is not a style choice.**
+([`deferred-work`](../skills/deferred-work/SKILL.md)). **A record whose problem this change closed
+is deleted**, exactly like a resolved TODO — not archived, not marked. A file that outlives its
+finding is read by the next Step 2b and planned around, which costs more than keeping it is worth.
 
-| | TODO | Code issue |
-|---|---|---|
-| What it is | an **event** — "we deferred X on this date" | a **standing property of the code** |
-| Once addressed | the event has no further meaning → **`git rm`** | the property has a *history* → **`Status: Resolved`, file kept** |
-| Wrap action | delete | reconcile |
+So **the listing is the open set**: no status filter, nothing to exclude.
 
-Three reasons the code issue is kept, and the first is the one that bites:
+**The audit trail is the changeset or changelog entry, and it must carry the final measurement.**
+That is what makes the deletion honest rather than lossy — the numbers survive in permanent docs
+even though the file does not. Write them **before** the `git rm`, in the same wrap.
 
-1. **Regressions.** A split file that grows back over budget reopens as
-   `**Status:** Open — regressed <date>` with its `Measurement history` intact — 964 → 180 → 620
-   says the split did not hold. Delete the record and the regression reads as a first detection, and
-   whoever picks it up re-derives everything.
-2. **The history is the finding.** A CRAP score alone is a number; `1980 → 2704 → 2704` under active
-   change is a finding.
-3. **It costs nothing.** Every open-items query is `grep -L 'Status:** Resolved'`, so a resolved
-   record is already invisible to the next Step 2b. The "the file is now a lie" problem that forces
-   TODO deletion does not exist here.
+Accepted cost, stated plainly: a later regression reads as a **first detection** rather than a
+recurrence, because the `Measurement history` went with the file. The changelog entry is where
+somebody would find the earlier numbers if they thought to look.
 
 ### Re-measure; do not infer
 
@@ -229,36 +224,40 @@ anybody planned it.
 
 | Situation | What the wrap does |
 |---|---|
-| Measurement now clean | `**Status:** Resolved (YYYY-MM-DD, PR #NNN)` + a final `Measurement history` row. **Keep the file** |
-| **Partially** fixed | File stays **Open**. Add the improved row, and **narrow `## What would close it`** to the remainder. Never resolve a partial fix |
+| Measurement now clean | Record the final numbers in the changeset/changelog entry, then **`git rm` the record** |
+| **Partially** fixed | **Keep the file.** Add the improved `Measurement history` row, set `**Status:** Open — partially fixed (<what remains>)`, and **narrow `## What would close it`** to the remainder |
 | Measurement unchanged | Add a row saying so, if the PR touched that code. Silence and "unchanged" are different facts |
 | Worse | `**Status:** Open — regressed <date>` with the new numbers, and say what grew it |
-| The code **moved** | Rename the file to the new location and add `**Moved:**`. One record, not a resolved one plus a new one |
-| The PR **claimed** it (`Claimed by: #NNN`) and finished it | Resolve as above and drop `**Claimed by:**` |
-| The PR claimed it and did **not** finish it | Keep the claim, narrow the remainder, and say which follow-up owns it |
-| A finding that was never real | **This is the one delete.** An analyzer false positive has no history worth keeping — `git rm` it and say so in the report |
+| The code **moved** | **Not a deletion.** Rename the record to the new location and add `**Moved:**` — the finding is not gone, it is elsewhere |
+| The PR **claimed** it and finished it | Delete as above; the claim goes with the file |
+| The PR claimed it and did **not** finish it | Keep the file, keep the claim, narrow the remainder, name the follow-up that owns it |
+| A finding that was never real | `git rm` it, and say in the report that it was a false positive rather than a fix — those are different outcomes |
 
 ### Rules
 
-- **Resolve in place. `git rm` is for a false positive only.** If you find yourself deleting a
-  record because the directory looks untidy, stop: the queries already hide it.
-- **A partial fix recorded as resolved is the failure mode here.** It drops the remainder out of
-  every open-items query and hides it from the next planner — worse than not recording it at all.
-  `#carve` 1/10 is the worked example: it closed two of four `move_module_to_crate` refusals, and
-  the record stayed open with its claim narrowed.
+- **Record the final measurement before deleting.** A `git rm` with no number left behind is the
+  one way this loses information that was worth keeping.
+- **A partial fix must never be deleted — this is the failure mode under hard delete.** A closed
+  record's information survives in the changelog; a partial one's *remainder* exists nowhere else,
+  so deleting it destroys the only description of what is left. The next analyzer run then
+  rediscovers a smaller problem with no idea it was once bigger or who narrowed it.
+  `#carve` 1/10 is the worked example: it closed two of four `move_module_to_crate` refusals, so the
+  record **stays**, narrowed, with its claim moved to #490.
+- **Re-measure before deleting.** Delete on a number, never on the changeset's claim that it was
+  fixed — the changeset is the instruction for *where to look*, not the evidence.
 - **Never resolve a `missing-tests` record by deleting the symbol.** Those symbols are referenced
   from production.
 - **Append to `Verified by hand`, dated.** Never overwrite an earlier verification — it records what
   the tool got wrong, and a fresh run cannot rediscover that.
 - **An issue this PR did not touch is left alone**, exactly as an unreferenced TODO is.
-- **Wrap never empties `packages/*/docs/code-issues/`.** It is permanent package documentation,
-  unlike `docs/dev/1-WIP/`. A wrap closes what this change closed and leaves the rest.
+- **Wrap deletes only what this change closed.** An issue this PR did not affect stays, even if it
+  is old and even if the directory would look tidier without it.
 
 ### Stack mode
 
 A code issue is shared across every branch, like a TODO — so **only the PR whose own changeset
-claims it** reconciles it, and in a stack that means **bottom-up**. A node that resolves a record its
-parent also touches would put the parent's cleanup in its own diff.
+claims it** reconciles it, and in a stack that means **bottom-up**. A node that deletes a record its
+parent also touches puts the parent's cleanup in its own diff, and collides when the parent wraps.
 
 A record whose `**Claimed by:**` names a node **further up this stack** stays untouched: the claim
 is still true and the work is still coming.
@@ -311,7 +310,7 @@ because a stacked branch inherits their commits. Only this PR's are wrapped:
 | This branch's changeset | `docs/dev/1-WIP/YYYY-MM-DD-*.md` | **this PR** — the wrap this command performs |
 | This branch's PRD | `docs/ft/*/1-WIP/PRD-YYYY-MM-DD-*.md` | **this PR** |
 | A `docs/dev/todo/` entry | the shared backlog, present on every branch | **the one PR whose own changeset marks it ✅ RESOLVED HERE** |
-| A `packages/*/docs/code-issues/` record | permanent package docs, present on every branch | **the one PR whose own changeset claims it** — reconciled, never deleted, and bottom-up in a stack |
+| A `packages/*/docs/code-issues/` record | package docs, present on every branch | **the one PR whose own changeset claims it** — deleted when closed, narrowed when partial, bottom-up in a stack |
 | Permanent docs | `packages/*/docs/`, `docs/ft/<area>/` | reached **only** through a wrap |
 
 Consequences worth stating plainly:

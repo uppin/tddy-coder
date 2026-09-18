@@ -47,8 +47,10 @@ what actually happened across `#unbundle`.
 2. **Repo-scoped run state.** `StatePaths::under(root)` still keys `.restructure/` by repository, so
    a completed plan blocks the next one.
 
-This record stays **open** until both land. It is deliberately not resolved: #488 fixed half, and a
-partial fix written up as resolved would drop the remainder out of every open-items query.
+This record stays until both land, and **is deliberately not deleted**. #488 fixed half — and a
+closed record's information survives in the changelog entry, whereas a partially-fixed one's
+*remainder* exists nowhere else. Deleting this at #488's wrap would have destroyed the only
+description of what #490 still owes.
 
 **`--indexing-budget` is already fixed** and its backlog section is stale — `request_timeout` reads
 the budget, `settle_budget_for` scales the per-operation wait, and `map_lsp_error(Timeout)` maps to

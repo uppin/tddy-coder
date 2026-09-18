@@ -49,7 +49,7 @@ copy. Identity is `(category, file, symbol)`, and the filename encodes it.
 **Detected:** YYYY-MM-DD by <the command, or `structural audit` for a hand-measured one>
 **Metrics:** 37 fields · 46 methods · 1,788 production lines · 35 dependent crates
 **Restructure:** required — `extract_module --to_file` × 6, `/code-restructuring` territory
-**Status:** Open | Open — claimed by #NNN, in flight | Open — regressed <date> | Resolved (date, PR #NNN)
+**Status:** Open | Open — claimed by #NNN, in flight | Open — partially fixed (<what remains>) | Open — regressed <date>
 <!-- only when it applies -->
 **Claimed by:** #NNN — `#<stack> K/N` `<node>` · draft · `feature/<stack>/<node>`
 **Lands after:** #MMM (its base), #LLL (…)
@@ -94,15 +94,20 @@ tier is not a finding, and "not measured" is not "clean".
 before new code lands on top of it, and a different skill executes it. Set it only where the fix is
 a `/code-restructuring` job — a split, an extraction, a move — rather than ordinary work.
 
-**`Status`** is what every query keys on. Open-items scans are `grep -L 'Status:\*\* Resolved'`, so
-**every closed state must contain the token `Resolved`**, with the reason after it. A superseded
-record whose status omits it comes back as an open prerequisite on the next scan.
+**`Status`** distinguishes degrees of **open**, and nothing else — a closed issue is deleted, so
+there is no closed status to encode. `Open — partially fixed (<what remains>)` is the value that
+earns its keep: it is the difference between "nobody has touched this" and "half of it landed in
+#NNN and this is the rest", and it is what stops a later wrap deleting a record whose problem is
+still there.
+
+**The listing is the open set.** No status filter is needed to enumerate open issues: `ls` does it.
 
 **`Claimed by`** is what makes this repo's records different, and it is the field a concurrent
 planner acts on. It names a **PR that is open and will fix this issue**. Three rules:
 
 1. **It is a fact about a PR, so verify it.** Check the PR is still open before relying on it. A
-   merged claim means the issue should already be `Resolved` — close it. A closed-unmerged claim
+   merged claim means the record should already be **gone** — re-measure, then delete it if the
+   finding is closed or narrow it if the merge went only part of the way. A closed-unmerged claim
    means the issue is open and unowned again — remove the field.
 2. **`Lands after` is what makes the claim actionable.** A claim on a stack node is only as near as
    the nodes beneath it, so a planner deciding whether to wait needs the whole chain, not just the
@@ -112,18 +117,30 @@ planner acts on. It names a **PR that is open and will fix this issue**. Three r
 
 ## Re-analysis reconciles; it never duplicates
 
-One open file per `(category, file, symbol)`, ever. On a re-run:
+One file per `(category, file, symbol)`, ever. On a re-run:
 
 - **Same finding, new numbers** → append a `Measurement history` row. Do not create a file.
-- **Finding gone** → `**Status:** Resolved (YYYY-MM-DD, PR #NNN)`, with the numbers that show it.
-- **Finding gone but the code merely moved** → keep one file, rename it to the new location, and add
-  `**Moved:**`. A new file at the new path plus a resolved one at the old path is two records of one
-  standing property.
-- **Partially fixed** → the record stays **open**, gains the improved numbers, and has its *What
-  would close it* narrowed to the remainder.
-- **Category changed** (an oversized file split into six, one of which is still oversized) →
-  resolve the old record with `Resolved — superseded by <file> (date)` and open the new one with
-  `**Supersedes:**`.
+- **Finding gone** → **`git rm` the file**, having first recorded the final measurement in the
+  changeset or changelog entry. That entry is the audit trail the file used to be.
+- **Finding gone but the code merely moved** → **do not delete.** Rename the file to the new
+  location and add `**Moved:**`. The finding is not gone; it is somewhere else.
+- **Partially fixed** → the record **stays**, gains the improved numbers, and has its *What would
+  close it* narrowed to the remainder. **Never delete a partial fix** — see below.
+- **Category changed** (an oversized file split into six, one of which is still oversized) → delete
+  the old record and open the new one with `**Supersedes:**` naming what it replaced, so the new
+  file explains why it appeared.
+
+### The deletion rule, and the one thing it must not swallow
+
+Deleting a closed record is deliberate: a record that outlives its problem is read by the next
+Step 2b and planned around, which costs more than the history was worth. The trade is that a later
+regression reads as a **first detection** rather than a recurrence — accepted, and mitigated by the
+changelog entry carrying the final numbers.
+
+**A partially-fixed record must never be deleted, and this is the failure mode to guard.** A closed
+record's information survives in the changelog; a partial one's *remainder* exists nowhere else.
+Deleting it destroys the only description of what is left, silently, and the next analyzer run
+rediscovers a smaller version of the problem with no idea it was once bigger or who narrowed it.
 
 ## Writing a record for a structural finding with no tool behind it
 

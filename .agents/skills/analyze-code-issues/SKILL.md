@@ -79,10 +79,16 @@ Then write one file per verified finding to **`packages/<pkg>/docs/code-issues/`
 packages/tddy-session-lifecycle/docs/code-issues/crap-telegram-bot-callback-handler.md
 ```
 
-**Reconcile, never duplicate.** One open file per `(category, file, symbol)`. A re-run appends a
+**Reconcile, never duplicate.** One file per `(category, file, symbol)`. A re-run appends a
 `Measurement history` row to the file that already names that symbol; it does not deposit a second
-copy. A finding that has gone becomes `**Status:** Resolved (date, PR #NNN)` — resolved in place,
-never deleted.
+copy.
+
+**A finding this run shows has gone is deleted** — but not by this skill. Closing a record is the
+wrap's job (`/pr-wrap` step 7.5), because the deletion has to be tied to the change that caused it
+and its final numbers recorded in that change's history entry. What this skill does on a re-run is
+**re-measure**: append the row, and narrow a record whose finding has shrunk. If a record's finding
+is gone with no change in flight to attribute it to, say so in the targeting note and let the
+developer decide.
 
 These records are what planning Step 2b reads, and they are the one thing this skill may write into
 `packages/*/docs/` directly.

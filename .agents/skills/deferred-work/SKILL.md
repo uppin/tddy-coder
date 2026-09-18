@@ -44,9 +44,17 @@ merge. Same reason `docs/dev/1-WIP/` and `docs/dev/changesets/` have none.
 | Because | a finding is a **standing property of the code** — re-running the analyzer must update the file that already names that symbol | a deferral is an **event** — it happened on a day, and a second deferral in the same area is a second file |
 | Identity | `(category, file, symbol)` | the date and the slug |
 
-Both resolve **in place** — `**Status:** Resolved (YYYY-MM-DD, PR #NNNN)` — rather than being
-deleted. The history is worth more than the tidiness, and a resolved file drops out of the
-open-items queries, which are all `grep -L 'Status:\*\* Resolved'`.
+**Both are deleted when closed** — `git rm` — not archived and not marked. A record whose problem
+is gone is a file the next planner's Step 2b reads and plans around, which is the one failure that
+costs more than the record was ever worth.
+
+So **the listing is the open set**, with no status filter needed. `Status` exists to distinguish
+`Open` from `Open — partially fixed` and `Open — regressed`, never to mean closed.
+
+The cost is real and worth naming: deleting a code issue takes its `Measurement history` with it, so
+a later regression reads as a first detection rather than as a recurrence. **The changeset or
+changelog entry written at wrap is the audit trail** — it must carry the final measurement, which is
+what makes the deletion recoverable as history even though the file is gone.
 
 ## The rule that comes before every format
 
@@ -110,21 +118,18 @@ never assume*.
   a closed one means the issue is open and unowned again.
 - **A restructure prerequisite runs before green, in its own commit, and implements nothing.**
 - **Never absorb a large restructure into a feature change or a feature stack node.**
-- **Resolve records, do not delete them.** `Resolved` is the token every closed state must carry,
-  because the open-items queries are all `grep -L 'Status:\*\* Resolved'`. Put the reason after the
-  token, never instead of it.
-- **Record a partial fix as partial.** The record stays open, gains the improved numbers, and has
-  its *What would close it* narrowed to the remainder. A partial fix written up as resolved hides
-  the remainder from the next Step 2b — worse than not recording it.
-- **Wrap reconciles code issues; it never deletes them.** `/pr-wrap` step 7.5 and
-  `/wrap-context-docs` **re-measure** every open issue in every package the PR touched — not only
-  the ones the changeset names — and then resolve, narrow or reopen. Re-measuring is what makes that
-  discovery safe: for a TODO "did this fix it?" is a judgement and inference is forbidden, but for a
-  code issue it is a number.
-  **The single delete is an analyzer false positive**, which has no history worth keeping.
-  Contrast `docs/dev/todo/`, whose resolved entries **are** deleted: a TODO is an event with no
-  further meaning once done, while a code issue is a standing property whose history is what makes
-  a later regression legible.
+- **Delete a record when its problem is gone** — `git rm`, in the wrap, with the final measurement
+  recorded in the changeset or changelog entry first. A record that outlives its problem is worse
+  than no record.
+- **A partial fix is NOT a deletion — this is the rule that matters most under hard delete.** The
+  record stays, gains the improved numbers, and has its *What would close it* narrowed to the
+  remainder. Deleting a partially-fixed record destroys the only description of what is left, and
+  unlike a resolved one there is nothing in the changelog to reconstruct it from.
+- **Wrap deletes the records this change closed, and narrows the ones it only improved.**
+  `/pr-wrap` step 7.5 and `/wrap-context-docs` **re-measure** every open issue in every package the
+  PR touched — not only the ones the changeset names — then delete, narrow or reopen. Re-measuring
+  is what makes that discovery safe: for a TODO "did this fix it?" is a judgement and inference is
+  forbidden, but for a code issue it is a number.
 - **Code issues are the one thing `/analyze-code-issues` may write into `packages/*/docs/`
   directly.** Everything else under a package's `docs/` goes through the changeset workflow in
   `docs/dev/1-WIP/` (CLAUDE.md's rule). A record is a standing measurement with its own

@@ -215,8 +215,10 @@ When a feature includes a demo (e.g. `demo-plan.md`), the demo must run **via a 
   the code, so a re-run updates the file that already names that symbol). Written by
   `/analyze-code-issues`, read by planning **Step 2b**. An issue carrying `**Claimed by:** #NNN` has
   a PR already in flight to fix it — a change landing in that code **stops and asks** the developer
-  whether to proceed and add to the debt, wait for that PR, or narrow scope. Resolved **in place**,
-  never deleted; wrap does not remove them. Policy: [`deferred-work`](.agents/skills/deferred-work/SKILL.md)
+  whether to proceed and add to the debt, wait for that PR, or narrow scope. **Deleted at wrap once
+  closed** — with the final measurement recorded in the change-history entry first — so the listing
+  is always the open set; a **partly** fixed record is narrowed, never deleted. Policy:
+  [`deferred-work`](.agents/skills/deferred-work/SKILL.md)
 - `docs/ft/` — Product requirements (WHAT) by product area
 - `docs/dev/1-WIP/` — Active changesets (cross-package deltas)
 - `docs/dev/changesets/` — Cross-package changeset history: **one file per changeset**, `YYYY-MM-DD-<slug>.md`. Add a new file; never append to an existing one, and never add an index

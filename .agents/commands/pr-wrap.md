@@ -153,7 +153,7 @@ cargo test
   `docs/dev/1-WIP/` pair, and it deletes only the backlog entries **this PR's own** changeset claims.
   In a stack, wrap **bottom-up**
 
-### 7.5. Reconcile the code issues — re-measure, then resolve, narrow or reopen
+### 7.5. Reconcile the code issues — re-measure, then delete, narrow or reopen
 
 **Do this before `/wrap-context-docs` hands off**, and do it by **measuring**, not by asking
 yourself whether the PR fixed something. A code issue
@@ -176,23 +176,26 @@ and it is safe here **only** because the answer is a number rather than a judgem
 
 | What the measurement says | Action |
 |---|---|
-| Clean | `**Status:** Resolved (date, PR #NNN)` + a final `Measurement history` row. **File kept** |
-| Better, not clean | Stays **Open**. Add the row and **narrow `## What would close it`** to the remainder |
+| Clean | Record the final numbers in the changeset/changelog entry, then **`git rm` the record** |
+| Better, not clean | **File stays.** Add the row, set `Status: Open — partially fixed (<what remains>)`, **narrow `## What would close it`** |
 | Unchanged, but the PR touched that code | Add a row saying so — "unchanged" and silence are different facts |
 | Worse | `**Status:** Open — regressed <date>`, with what grew it |
-| The code moved | Rename the record and add `**Moved:**` — one record, not two |
+| The code moved | **Not a deletion.** Rename the record and add `**Moved:**` — the finding is elsewhere, not gone |
 
-Then: if this PR carried `**Claimed by:** #<this PR>` and finished the work, drop the field with the
-resolution. If it did not finish it, **keep the claim and narrow the remainder**, naming the
-follow-up that owns it.
+Then: if this PR carried `**Claimed by:** #<this PR>` and finished the work, the claim goes with the
+deleted file. If it did **not** finish it, **keep the file, keep the claim, narrow the remainder**,
+and name the follow-up that owns it.
 
-⚠ **Resolving a partial fix is the failure mode here.** It drops the remainder out of every
-open-items query and hides it from the next planner. A record that went from four defects to two
-stays open with two.
+⚠ **Deleting a partial fix is the failure mode here.** A closed record's information survives in the
+changelog entry; a partial one's *remainder* exists nowhere else. A record that went from four
+defects to two **stays**, with two.
 
-⚠ **Do not `git rm` a code issue.** They resolve in place — the `Measurement history` is what makes a
-later regression legible. The single exception is a finding that was never real (an analyzer false
-positive), which has no history worth keeping.
+⚠ **Record the final measurement before the `git rm`.** A deletion with no number left behind is the
+one way this loses something worth keeping — and it is what makes a future regression traceable at
+all, since it will otherwise read as a first detection.
+
+⚠ **Delete on a number, never on the changeset's claim.** The changeset says where to look; the
+re-measurement is the evidence.
 
 **Stack branches:** reconcile only what **this PR's own** changeset claims, bottom-up. A record
 claimed by a node further up the stack is left alone — the claim is still true.

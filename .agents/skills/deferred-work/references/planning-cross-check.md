@@ -13,23 +13,22 @@ Called by `/plan-red`, `/plan-ft-dev`, `/plan-pr-stack` and `/add-to-pr-stack`, 
 ```bash
 PKG=packages/tddy-core            # one per package in scope
 
-# 1. This package's code issues — the listing is the index
+# 1. This package's code issues. A closed issue is DELETED, so the listing IS the open set —
+#    no status filter, and nothing to exclude.
 ls "$PKG/docs/code-issues/" 2>/dev/null
-grep -rL 'Status:\*\* Resolved' "$PKG/docs/code-issues/" 2>/dev/null      # EVERY open issue, first
-grep -rl 'Restructure:\*\* required' "$PKG/docs/code-issues/" 2>/dev/null | \
-  xargs grep -L 'Status:\*\* Resolved'                                    # …of those, the restructures
+grep -rl 'Restructure:\*\* required' "$PKG/docs/code-issues/" 2>/dev/null   # …of those, the restructures
+grep -rl 'partially fixed' "$PKG/docs/code-issues/" 2>/dev/null            # …and the half-done ones
 
 # 2. CLAIMED issues — the ones with a PR already in flight. Read these even when
 #    they are not in your change's path, because they tell you what is about to move.
-grep -rl 'Claimed by:' "$PKG/docs/code-issues/" 2>/dev/null | \
-  xargs grep -L 'Status:\*\* Resolved'
+grep -rl 'Claimed by:' "$PKG/docs/code-issues/" 2>/dev/null
 
 # 3. Issues against the exact files this change will edit, wherever they live
 grep -rl 'src/presenter/presenter_impl.rs' packages/*/docs/code-issues/ 2>/dev/null
 
 # 4. The repo-wide TODO backlog
 ls docs/dev/todo/ | sort -r | head -30
-grep -rL 'Status:\*\* Resolved' docs/dev/todo/ 2>/dev/null
+grep -rL 'Status:\*\* Resolved' docs/dev/todo/ 2>/dev/null   # TODOs may carry a Resolved marker
 grep -rl -iE '(presenter|changeset|<your-module>)' docs/dev/todo/ 2>/dev/null
 ```
 
