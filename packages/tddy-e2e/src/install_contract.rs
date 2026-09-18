@@ -177,20 +177,31 @@ pub fn verify_desktop_flag_support(contents: &str) {
     }
 }
 
-/// `desktop.yaml.production` must declare no `listen:` and no `web_bundle_path:`: the desktop
-/// application binds no TCP port and embeds its dashboard at build time, so either key would
-/// configure a listener that is never built. Every placeholder it carries must be one `install`
-/// substitutes, or the installed config keeps a literal `__NAME__` the daemon then reads as a path.
+/// `desktop.yaml.production` must declare no `web_bundle_path:` — the application embeds its
+/// dashboard at build time, so the key would name a directory nothing serves from.
+///
+/// It must declare `listen.web_port`, which is not the contradiction it looks like: the daemon binds
+/// no TCP port, and the value names the loopback port a GitHub sign-in comes back on. Absent,
+/// `tddy_daemon::runtime::build` refuses to assemble the daemon at all (`config.listen.web_port is
+/// required`), so an install without it produces an application that cannot start.
+///
+/// Every placeholder it carries must be one `install` substitutes, or the installed config keeps a
+/// literal `__NAME__` the daemon then reads as a path.
 pub fn verify_desktop_config_template(install_contents: &str, desktop_yaml_production: &str) {
-    for absent in ["listen:", "web_bundle_path:"] {
-        assert!(
-            !desktop_yaml_production
-                .lines()
-                .any(|l| l.trim_start().starts_with(absent)),
-            "desktop.yaml.production must not declare {absent}: the application binds no port and \
-             embeds its dashboard"
-        );
-    }
+    assert!(
+        !desktop_yaml_production
+            .lines()
+            .any(|l| l.trim_start().starts_with("web_bundle_path:")),
+        "desktop.yaml.production must not declare web_bundle_path: the application embeds its \
+         dashboard at build time"
+    );
+    assert!(
+        desktop_yaml_production
+            .lines()
+            .any(|l| l.trim_start().starts_with("web_port:")),
+        "desktop.yaml.production must declare listen.web_port: runtime::build refuses to assemble a \
+         daemon without it, so the installed application would not start"
+    );
     let mut rest = desktop_yaml_production;
     while let Some(start) = rest.find("__") {
         let after = &rest[start + 2..];
@@ -498,7 +509,7 @@ mod granular_tests {
     }
 
     #[test]
-    fn desktop_template_configures_no_listener_and_no_unsubstituted_placeholder() {
+    fn desktop_template_names_the_signin_callback_port_and_no_unsubstituted_placeholder() {
         // Given
         let script = read_repo_install();
         let template = std::fs::read_to_string(

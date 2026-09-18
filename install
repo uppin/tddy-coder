@@ -22,7 +22,7 @@
 #
 # --desktop IS A DIFFERENT DEPLOYMENT ENTIRELY, and is mutually exclusive with --systemd. It installs
 # Tddy Desktop — the Tauri application whose own process IS a tddy-daemon — for the invoking user,
-# with no service, no unit, no root and no listening port. Nothing is shared with the systemd modes
+# with no service, no unit, no root and no served port. Nothing is shared with the systemd modes
 # but this script's helpers: there is no daemon.yaml, no supervisor, no web bundle directory (the
 # application embeds its dashboard at build time) and no socket, because the dashboard reaches the
 # daemon over the webview's IPC bridge. Its one config file is ~/.tddy/desktop.yaml, which is also
@@ -828,9 +828,13 @@ install_desktop() {
   echo "install: paths — config ${DESKTOP_CONFIG_FILE} (the ONLY file a release build reads)"
   echo "install: logging — daemon file log (from desktop.yaml.production): ${DESKTOP_LOG_DIR}/daemon"
   echo "install: logging — OAuth/token storage (auth_storage, mode 0700): ${DESKTOP_AUTH_STORAGE_PATH}"
-  echo "install: no unit, no service user, no web bundle directory and no listening port: the"
+  echo "install: no unit, no service user, no web bundle directory and no served port: the"
   echo "install:   application hosts the daemon in its own process and the dashboard reaches it over"
-  echo "install:   the webview's IPC bridge."
+  echo "install:   the webview's IPC bridge. desktop.yaml names listen.web_port only as the loopback"
+  echo "install:   port a GitHub sign-in comes back on."
+  echo "install: sessions need an identity this install does not configure: add github:, users: and"
+  echo "install:   livekit.api_secret to ${DESKTOP_CONFIG_FILE} (it says how) before the dashboard"
+  echo "install:   shows anything but settings."
 
   mkdir -p "$TDDY_HOME" "$DESKTOP_LOG_DIR" "$DESKTOP_AUTH_STORAGE_PATH"
   # Retained GitHub access tokens live here (github-tokens.json, mode 0600), and the umask must not

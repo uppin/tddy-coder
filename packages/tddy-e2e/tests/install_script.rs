@@ -855,7 +855,7 @@ fn install_desktop_flag_documented() {
 }
 
 #[test]
-fn desktop_template_declares_no_listener_and_no_stray_placeholder() {
+fn desktop_template_names_the_signin_callback_port_and_no_stray_placeholder() {
     // Given
     let script = read_install();
     let template = fs::read_to_string(repo_root().join("desktop.yaml.production"))

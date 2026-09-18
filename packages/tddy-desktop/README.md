@@ -56,6 +56,20 @@ found that way it would have found by accident. The file absent is a startup fai
 Both profiles then apply the workspace root's **`.env`** without replacing anything already
 exported — the same rule as `./web-dev`.
 
+**`listen.web_port` is required** whichever profile is in play, although this application serves no
+HTTP: `runtime::build` refuses to assemble a daemon without it, and here the value names the loopback
+port a GitHub sign-in comes back on — `src-tauri/src/oauth_callback.rs` opens a one-path
+`/auth/callback` listener on 127.0.0.1 for the duration of a sign-in and closes it again.
+`github.redirect_uri` is derived from that port rather than read from the config.
+
+**Sessions need an identity**, and it is three blocks at once: `github:` (without it
+`build_auth_entries` returns no session-user resolver, and every session service is assembled behind
+one), `livekit.api_secret` (the only source of the token signer, required even with no common room)
+and `users:` (which OS user a login runs as, with no fallback). What `./install --desktop` renders
+leaves all three unset, so a fresh install starts onto its settings and offers no sessions until they
+are filled in — see
+[config-resolution-and-install.md](docs/config-resolution-and-install.md).
+
 ### UI ↔ daemon
 
 Three Tauri commands carry `rpc_envelope` frames as **raw bytes**:

@@ -27,5 +27,8 @@ Source changeset: the desktop app is `tddy-daemon` in one process. Features
 
 - The settings screen edits the **LiveKit block only**; everything else is read-only, so nothing in the UI can yet produce a `listen.web_port` change even though the daemon supports it and reports it as restart-required.
 - Runtime reconfiguration is LiveKit-only; every other changed field is reported as restart-required.
-- `./install` and `publish.sh` still do not ship a desktop app.
+- `publish.sh` still does not ship a desktop app. `./install --desktop` does — see
+  [2026-09-18-install-desktop.md](../changesets/2026-09-18-install-desktop.md) — but it configures no
+  identity, so what it installs starts onto its settings and offers no sessions:
+  [2026-09-18-desktop-install-configures-no-identity.md](./2026-09-18-desktop-install-configures-no-identity.md).
 - `packages/tddy-web/src/gen/sandbox_pb.ts` is stale relative to `sandbox.proto` (missing `in_jail_tool_request`/`in_jail_tool_response` from the landed workspace-tool-sandbox work). Found while regenerating for this changeset and reverted to keep the diff scoped; the fix is `bun run --filter tddy-web generate`.
