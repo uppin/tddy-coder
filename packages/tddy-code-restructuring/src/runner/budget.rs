@@ -3,7 +3,7 @@
 //! How long each file a plan names is in the tree as it stands, and which of them are over the
 //! budget — a record of where the tree stands rather than a verdict on the plan.
 
-use crate::{Plan, RestructureError, Result};
+use crate::{Anchor, Plan, RefactorOp, RestructureError, Result};
 use std::path::Path;
 
 /// One file a plan names, and how long it is in the tree as it stands.
@@ -17,10 +17,15 @@ pub(super) struct FileSize {
 ///
 /// The anchors are the plan's own statement of what it touches, so this is the set the budget is
 /// reported over — not the whole tree, which would bury this plan's outcome in the repository's.
+/// Every anchor of an operation, so a cluster's co-moving members are measured too.
 pub(super) fn files_named_by(plan: &Plan) -> Vec<String> {
     let mut named: Vec<String> = Vec::new();
-    for op in &plan.ops {
-        let file = op.anchor.file();
+    for file in plan
+        .ops
+        .iter()
+        .flat_map(RefactorOp::anchors)
+        .map(Anchor::file)
+    {
         if !named.iter().any(|seen| seen == file) {
             named.push(file.to_string());
         }
@@ -125,6 +130,7 @@ mod tests {
                     with_private_deps: false,
                     reexport: None,
                     to_file: false,
+                    also: Vec::new(),
                 })
                 .collect(),
         }

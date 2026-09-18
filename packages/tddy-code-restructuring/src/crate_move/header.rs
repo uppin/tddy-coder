@@ -32,11 +32,17 @@ pub(crate) struct Header {
 /// declaration — see this module's own documentation for why that is the whole of the header pass.
 ///
 /// Which crate a qualifier becomes is the co-moving set's to answer. A path reaching a module in
-/// `co_moving` is re-pointed at `destination`, because by the time the edit lands that module is
-/// there; one reaching a module staying behind is re-pointed at the origin, resolving a re-export as
-/// [`module_home::defining_crate`] does. Without that distinction a reference to a sibling that is
-/// also moving becomes a `destination → origin` edge the operation authors itself, which is the
-/// mechanic that made a mutually-referencing set unmovable.
+/// `co_moving` goes on saying `crate::`, because the destination *is* `crate` for a file that has
+/// arrived in it — naming the destination by its package name from inside it is `E0433`, which is
+/// what a live `cargo check` says about the only alternative. A path reaching a module staying
+/// behind is re-pointed at the origin, resolving a re-export as [`module_home::defining_crate`]
+/// does. Without that distinction a reference to a sibling that is also moving becomes a
+/// `destination → origin` edge the operation authors itself, which is the mechanic that made a
+/// mutually-referencing set unmovable.
+///
+/// The segment after `crate::` can still change: a **nested** member is declared at the
+/// destination's root under its own last segment, so `crate::model_registry::store` arrives as
+/// `crate::store`.
 ///
 /// A co-moving path is recorded in neither [`Header::crates_named`] nor [`Header::origin_paths`]:
 /// it names no crate the destination has to depend on — least of all itself — and it is not an
@@ -46,7 +52,6 @@ pub(crate) fn repointed_header(
     text: &str,
     origin: &destination::Destination,
     co_moving: &BTreeSet<String>,
-    destination: &destination::Destination,
 ) -> Result<Header> {
     let mut header = Header {
         edits: Vec::new(),
@@ -69,12 +74,17 @@ pub(crate) fn repointed_header(
 
         if matches!(qualifier, "crate" | "super") {
             let at = start + at;
-            if travels_with(rest, co_moving) {
-                header.edits.push(manifest_edits::replacement(
-                    text,
-                    at..at + qualifier.len(),
-                    &destination.extern_name,
-                ));
+            if let Some(member) = travels_with(rest, co_moving) {
+                let landing = member.rsplit("::").next().unwrap_or(member);
+                let written = format!("{qualifier}::{member}");
+                let arrives_as = format!("crate::{landing}");
+                if written != arrives_as {
+                    header.edits.push(manifest_edits::replacement(
+                        text,
+                        at..at + written.len(),
+                        &arrives_as,
+                    ));
+                }
                 continue;
             }
             let as_origin = format!("{}::{}", origin.extern_name, rest);
@@ -106,16 +116,17 @@ pub(crate) fn repointed_header(
     Ok(header)
 }
 
-/// Whether a `crate::`-relative path reaches a module that is travelling with this file.
+/// The member of the set a `crate::`-relative path reaches, if it reaches one — the caller
+/// needs which member, since that is what says where the path lands.
 ///
 /// The path is read the way the pass around it reads one: `rest` is what followed the qualifier,
 /// and a member is named by the path that reaches it or by anything inside it — `spawn_worker` and
 /// `spawn_worker::Worker` both travel with `spawn_worker`, and `spawn_worker_pool` travels with
 /// nothing.
-fn travels_with(rest: &str, co_moving: &BTreeSet<String>) -> bool {
+fn travels_with<'a>(rest: &str, co_moving: &'a BTreeSet<String>) -> Option<&'a String> {
     co_moving
         .iter()
-        .any(|member| rest == member || rest.starts_with(&format!("{member}::")))
+        .find(|member| rest == *member || rest.starts_with(&format!("{member}::")))
 }
 
 /// The path a top-level `use` declaration names, and where on the line it starts.

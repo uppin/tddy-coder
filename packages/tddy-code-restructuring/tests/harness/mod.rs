@@ -26,7 +26,8 @@ use tddy_code_restructuring::apply::apply_workspace_edit;
 use tddy_code_restructuring::backends::rust::discard;
 use tddy_code_restructuring::registry::{LanguageBackend, Workspace};
 use tddy_code_restructuring::{
-    client_capabilities, server_settings, Anchor, Overlay, RefactorKind, RefactorOp, WorkspaceEdit,
+    client_capabilities, server_settings, Anchor, Overlay, Reexport, RefactorKind, RefactorOp,
+    WorkspaceEdit,
 };
 use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspKey, LspRegistry};
 use tddy_task::TaskRegistry;
@@ -443,6 +444,71 @@ pub fn a_workspace_whose_origin_re_exports_what_moves_reaches() -> AFixtureWorks
         .tracked_by_git()
 }
 
+/// A workspace whose two modules **reference each other**, and a third they both leave behind.
+///
+/// This is the shape `move_module_to_crate` cannot move: whichever of the pair goes first, the
+/// other's `crate::` path is re-pointed at a crate its module is about to leave, and between the
+/// two operations the tree does not compile. `#unbundle` node 3 moved 0 of 4 modules of exactly
+/// this shape.
+///
+/// `limits` is not decoration. It is what makes "a path reaching a module staying behind still
+/// reads as the origin" a claim `cargo check` can settle, and it is what the destination has to
+/// gain a dependency on — while never gaining one on itself.
+pub fn a_workspace_whose_modules_reference_each_other() -> AFixtureWorkspace {
+    an_empty_fixture()
+        .writing(
+            "Cargo.toml",
+            "[workspace]\nresolver = \"2\"\nmembers = [\n    \"crates/origin\",\n    \
+             \"crates/destination\",\n]\n",
+        )
+        .writing(
+            "crates/origin/Cargo.toml",
+            "[package]\nname = \"origin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .writing(
+            "crates/origin/src/lib.rs",
+            "//! The crate the entangled pair leaves.\n\npub mod limits;\npub mod spawner;\n             pub mod spawn_worker;\n",
+        )
+        .writing("crates/origin/src/limits.rs", "pub struct Limit;\n")
+        .writing(
+            "crates/origin/src/spawner.rs",
+            "use crate::limits::Limit;\nuse crate::spawn_worker::Worker;\n\n             pub struct Spawner;\n\nimpl Spawner {\n    pub fn worker(&self) -> Worker {\n                     Worker\n    }\n\n    pub fn limit(&self) -> Limit {\n        Limit\n    }\n}\n",
+        )
+        .writing(
+            "crates/origin/src/spawn_worker.rs",
+            "use crate::spawner::Spawner;\n\npub struct Worker;\n\nimpl Worker {\n                 pub fn spawner(&self) -> Spawner {\n        Spawner\n    }\n}\n",
+        )
+        .writing(
+            "crates/destination/Cargo.toml",
+            "[package]\nname = \"destination\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .writing(
+            "crates/destination/src/lib.rs",
+            "//! The crate the set moves into.\n\n",
+        )
+        .tracked_by_git()
+}
+
+/// The cross-crate move of a whole set, anchored on the first module and naming the rest in `also`.
+pub fn a_cluster_move_of(modules: &[&str], reexport: Option<Reexport>) -> RefactorOp {
+    let mut anchors = modules.iter().map(|module| Anchor::Symbol {
+        file: format!("crates/origin/src/{module}.rs"),
+        path: (*module).to_string(),
+    });
+
+    RefactorOp {
+        op: RefactorKind::MoveClusterToCrate,
+        anchor: anchors.next().expect("a cluster names at least one module"),
+        name: None,
+        to: Some("crates/destination".to_string()),
+        variant: None,
+        with_private_deps: false,
+        reexport,
+        to_file: false,
+        also: anchors.collect(),
+    }
+}
+
 /// The cross-crate move of a module named by path, with or without a facade.
 pub fn a_move_of(
     file: &str,
@@ -461,6 +527,7 @@ pub fn a_move_of(
         with_private_deps: false,
         reexport,
         to_file: false,
+        also: Vec::new(),
     }
 }
 
@@ -488,6 +555,7 @@ pub fn a_move_of_the_host_registry(
         with_private_deps: false,
         reexport,
         to_file: false,
+        also: Vec::new(),
     }
 }
 
@@ -505,6 +573,7 @@ pub fn a_rename_of(symbol: &str, to: &str) -> RefactorOp {
         with_private_deps: false,
         reexport: None,
         to_file: false,
+        also: Vec::new(),
     }
 }
 

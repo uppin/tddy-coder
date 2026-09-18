@@ -135,6 +135,26 @@ impl PositionLedger {
         })
     }
 
+    /// The operation, addressed at current coordinates — its own anchor and every co-moving
+    /// member's.
+    ///
+    /// A cluster's members are anchors like the first, so a rename an earlier operation made has to
+    /// follow through to all of them; translating only `anchor` would address the rest at paths the
+    /// run has already moved.
+    ///
+    /// # Errors
+    ///
+    /// Refuses when an anchor's position cannot be translated into the current text.
+    pub fn translate_op(&self, op: &crate::plan::RefactorOp) -> Result<crate::plan::RefactorOp> {
+        let mut translated = op.with_anchor(self.translate_anchor(&op.anchor)?);
+        translated.also = op
+            .also
+            .iter()
+            .map(|member| self.translate_anchor(member))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(translated)
+    }
+
     /// Current path for a file that may have been moved during the run.
     pub fn current_path(&self, original: &Path) -> PathBuf {
         self.renames

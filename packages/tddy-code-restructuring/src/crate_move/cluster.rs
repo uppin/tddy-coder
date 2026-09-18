@@ -15,11 +15,9 @@ use crate::plan::Reexport;
 
 use super::module_home;
 
+use super::malformed;
 use crate::crate_move::{header, moving, refusals};
 use crate::edit::{FileEdit, TextEdit};
-use crate::plan::RefactorKind;
-
-use super::malformed;
 
 use std::path::Path;
 
@@ -70,6 +68,30 @@ pub(crate) fn travelling_alone(moving: &moving::Move) -> MovingCluster {
     }
 }
 
+/// The cluster a `move_cluster_to_crate` operation names: its anchor is the first member and
+/// `also` the rest, so every member is addressed the way a single move addresses its one module.
+///
+/// Read here rather than in the backend, so what a plan means stays where the plan's own
+/// vocabulary is honoured. Refuses for every reason resolving one member's home does, and for a
+/// destination the operation does not name.
+pub(crate) fn named_by(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<MovingCluster> {
+    let mut members = Vec::new();
+    for anchor in op.anchors() {
+        let source = anchor.file();
+        let module = module_home::module_name(source)?;
+        members.push(module_home::module_home(workspace, source, &module)?);
+    }
+    let to = op.to.as_deref().ok_or_else(|| {
+        malformed("`move_cluster_to_crate` needs `to`: the destination crate's directory")
+    })?;
+
+    Ok(MovingCluster {
+        members,
+        destination: destination::Destination::read(workspace.root, to)?,
+        reexport: op.reexport.unwrap_or(Reexport::None),
+    })
+}
+
 /// Resolve a whole cluster into one edit, applied all or not at all.
 ///
 /// Every member's callers are surveyed against the **post-move** shape of the set, so a reference to
@@ -104,13 +126,7 @@ pub fn resolve_cluster(
     for member in &members {
         let (survey, rewrites) = super::surveyed(engine, workspace, member, &travelling)?;
         let moved = workspace.read(&member.source)?;
-        let header = header::repointed_header(
-            workspace,
-            &moved,
-            &member.origin,
-            &co_moving,
-            &cluster.destination,
-        )?;
+        let header = header::repointed_header(workspace, &moved, &member.origin, &co_moving)?;
         let names = refusals::crates_the_moved_code_names(workspace, &member.origin, &header)?;
         let naming_it = refusals::crates_still_naming_the_module(workspace, member, &rewrites)?;
         refusals::refuse_a_dependency_cycle(workspace, member, &header, &naming_it)?;
@@ -303,7 +319,9 @@ struct MovingModule {
     destination: String,
 }
 
-/// Every cross-crate move in the plan whose module can be placed in a crate.
+/// Every module the plan's cross-crate moves take out of a crate — each member of a cluster
+/// operation, not only the one its anchor names, so a set moving together is not read as
+/// stranding itself.
 ///
 /// An operation whose module resolves to no home is left out rather than reported: that is exactly
 /// what [`move_preconditions`](super::move_preconditions) refuses, and naming it again here would
@@ -311,9 +329,10 @@ struct MovingModule {
 fn modules_the_plan_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Vec<MovingModule> {
     ops.iter()
         .enumerate()
-        .filter(|(_, op)| op.op == RefactorKind::MoveModuleToCrate)
-        .filter_map(|(index, op)| {
-            let source = op.anchor.file();
+        .filter(|(_, op)| op.op.moves_across_crates())
+        .flat_map(|(index, op)| op.anchors().map(move |anchor| (index, op, anchor)))
+        .filter_map(|(index, op, anchor)| {
+            let source = anchor.file();
             let module = module_home::module_name(source).ok()?;
             let home = module_home::module_home(workspace, source, &module).ok()?;
             Some(MovingModule {
@@ -476,7 +495,7 @@ fn rust_files_under(root: &Path, relative: &str) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::crate_move::{manifest_edits, ItemReferences, Reference};
-    use crate::plan::Anchor;
+    use crate::plan::{Anchor, RefactorKind};
 
     const ORIGIN: &str = "crates/origin";
     const ORIGIN_ROOT: &str = "crates/origin/src/lib.rs";
@@ -628,7 +647,12 @@ mod tests {
         }
     }
 
-    /// What a file contains once the cluster's edits for it are applied.
+    /// What a file reads as once the cluster's edits for it are applied — its own text where the
+    /// cluster authored none.
+    ///
+    /// Authoring nothing is a real outcome, not an absent one: a path that already says what it
+    /// has to say after the move is left alone, and an identity edit would make the journal hash a
+    /// file the operation did not touch. The assertion the caller makes is on the text either way.
     fn applied(edit: &WorkspaceEdit, path: &str, workspace: &AWorkspace) -> String {
         let edits = edit
             .changes
@@ -640,7 +664,7 @@ mod tests {
                 } if changed == path => Some(edits.clone()),
                 _ => None,
             })
-            .unwrap_or_else(|| panic!("the cluster changed nothing in {path}"));
+            .unwrap_or_default();
 
         crate::apply::edited(workspace.read(path), &edits).expect("the edits apply")
     }
@@ -687,8 +711,12 @@ mod tests {
         );
     }
 
-    /// AC2 — a path reaching a sibling that is coming along names the destination, because by the
-    /// time the edit lands that sibling is there.
+    /// AC2 — a path reaching a sibling that is coming along resolves in the destination, because by
+    /// the time the edit lands that sibling is there.
+    ///
+    /// Which is `crate::`, not the destination's package name: the destination *is* `crate` for a
+    /// file that has arrived in it, and `use destination::…` written inside crate `destination` is
+    /// `E0433`. The live suite settles that with `cargo check`; this pins the text it produces.
     #[test]
     fn points_a_path_reaching_a_co_moving_sibling_at_the_destination() {
         // Given a member whose header names a sibling in the same set
@@ -703,7 +731,7 @@ mod tests {
         // Then
         assert_eq!(
             applied(&edit, SPAWNER, &workspace),
-            "use destination::spawn_worker::Worker;\n\npub struct Spawner;\n"
+            "use crate::spawn_worker::Worker;\n\npub struct Spawner;\n"
         );
     }
 
@@ -723,10 +751,10 @@ mod tests {
         let edit = resolve_cluster(&mut engine, &workspace.workspace(), &cluster)
             .expect("a cluster with no facade resolves");
 
-        // Then only the co-moving path went to the destination
+        // Then only the path reaching a module staying behind was sent to the origin
         assert_eq!(
             applied(&edit, SPAWNER, &workspace),
-            "use origin::runtime::Clock;\nuse destination::spawn_worker::Worker;\n\n\
+            "use origin::runtime::Clock;\nuse crate::spawn_worker::Worker;\n\n\
              pub struct Spawner;\n"
         );
     }
@@ -814,15 +842,15 @@ mod tests {
         let edit = resolve_cluster(&mut engine, &workspace.workspace(), &cluster)
             .expect("a cluster with no facade resolves");
 
-        // Then the module outside the set names the destination, and each member's own header was
-        // re-pointed once rather than twice
+        // Then the module outside the set names the destination, and the member's own header was
+        // left to say `crate::` — re-pointing it here as well would author two edits over one span
         assert_eq!(
             applied(&edit, "crates/origin/src/runtime.rs", &workspace),
             "use destination::spawner::Spawner;\n\npub fn boot(spawner: &Spawner) {}\n"
         );
         assert_eq!(
             applied(&edit, WORKER, &workspace),
-            "use destination::spawner::Spawner;\n\npub struct Worker;\n"
+            "use crate::spawner::Spawner;\n\npub struct Worker;\n"
         );
     }
 
@@ -957,6 +985,7 @@ mod tests {
             with_private_deps: false,
             reexport: Some(Reexport::Glob),
             to_file: false,
+            also: Vec::new(),
         }
     }
 

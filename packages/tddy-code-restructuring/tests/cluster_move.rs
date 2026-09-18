@@ -82,6 +82,7 @@ fn a_move_of(module: &str) -> RefactorOp {
         with_private_deps: false,
         reexport: Some(Reexport::Glob),
         to_file: false,
+        also: Vec::new(),
     }
 }
 

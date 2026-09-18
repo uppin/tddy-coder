@@ -36,7 +36,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 8] = [
+const SUPPORTED: [RefactorKind; 9] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -45,6 +45,7 @@ const SUPPORTED: [RefactorKind; 8] = [
     RefactorKind::InlineMethod,
     RefactorKind::RenameSymbol,
     RefactorKind::MoveModuleToCrate,
+    RefactorKind::MoveClusterToCrate,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.
@@ -1267,6 +1268,20 @@ impl LanguageBackend for RustBackend {
         if op.op == RefactorKind::MoveModuleToCrate {
             (self.progress)("cross-crate move: surveying callers and building edits");
             return Ok(Resolution::of(crate_move::resolve(self, workspace, op)?));
+        }
+
+        // The same operation over a set, and one edit rather than one per member: a
+        // mutually-referencing set has no order in which the tree compiles between moves, so every
+        // member's callers are surveyed against where the whole set is going.
+        if op.op == RefactorKind::MoveClusterToCrate {
+            let cluster = crate_move::named_by(workspace, op)?;
+            (self.progress)(&format!(
+                "cross-crate move of {} modules: surveying callers and building edits",
+                cluster.members.len()
+            ));
+            return Ok(Resolution::of(crate_move::resolve_cluster(
+                self, workspace, &cluster,
+            )?));
         }
 
         self.start(workspace.root)?;

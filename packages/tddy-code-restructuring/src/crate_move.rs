@@ -346,6 +346,7 @@ mod tests {
             with_private_deps: false,
             reexport: None,
             to_file: false,
+            also: Vec::new(),
         }
     }
 

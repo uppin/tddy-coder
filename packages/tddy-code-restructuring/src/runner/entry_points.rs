@@ -162,16 +162,16 @@ pub fn apply(
             break;
         }
 
-        let anchor = ledger.translate_anchor(&op.anchor)?;
+        let at = ledger.translate_op(op)?;
         (options.progress)(&format!(
             "op {index} of {total}: resolving {:?} in `{}`",
             op.op,
-            anchor.file()
+            at.anchor.file()
         ));
         let resolved = registry
-            .backend_for(Path::new(anchor.file()), op.op)?
+            .backend_for(Path::new(at.anchor.file()), op.op)?
             .resolve(
-                &op.with_anchor(anchor),
+                &at,
                 &Workspace {
                     root,
                     overlay: &overlay,
@@ -358,16 +358,11 @@ pub fn check(
         root,
         overlay: &Overlay::new(),
     };
-    for (index, op) in plan.ops.iter().enumerate() {
-        if op.op != RefactorKind::MoveModuleToCrate {
-            continue;
-        }
-        if let Err(refusal) = crate_move::move_preconditions(&static_workspace, op) {
-            findings.push(Finding {
-                operation: index,
-                detail: refusal.to_string(),
-            });
-        }
+    // Every member of a cluster operation, not only the module its anchor names — otherwise
+    // `check` passes a set one of whose members `apply` then refuses, which is the parity this
+    // whole static pass exists to hold.
+    for (operation, detail) in crate_move::unrunnable(&static_workspace, &plan.ops)? {
+        findings.push(Finding { operation, detail });
     }
 
     // Read across the plan rather than per operation: whether a module's siblings come along is a

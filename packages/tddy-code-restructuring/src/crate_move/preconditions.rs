@@ -1,9 +1,6 @@
 use super::malformed;
 
-use crate::{
-    crate_move::{cluster, manifest_edits, moving},
-    plan::RefactorKind,
-};
+use crate::crate_move::{cluster, manifest_edits, moving};
 
 use super::Result;
 
@@ -28,16 +25,40 @@ use crate::registry::Workspace;
 ///
 /// Refuses when a file the preconditions must read cannot be.
 pub fn unrunnable_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Result<Vec<String>> {
+    let mut findings: Vec<String> = unrunnable(workspace, ops)?
+        .into_iter()
+        .map(|(_, refusal)| refusal)
+        .collect();
+    findings.extend(cluster::siblings_left_behind(workspace, ops)?);
+    Ok(findings)
+}
+
+/// [`unrunnable_moves`]'s per-operation half, with each refusal tied to the operation it is about.
+///
+/// A reader fixes a plan by operation index and `check` reports one, so the index is carried here
+/// and dropped by the published call — the same split [`cluster::stranded_siblings`] makes.
+///
+/// Every member of a cluster is checked, not only the module its anchor names: an operation moving
+/// a set is unrunnable when any one of them cannot move.
+///
+/// # Errors
+///
+/// Refuses when a file the preconditions must read cannot be.
+pub(crate) fn unrunnable(
+    workspace: &Workspace<'_>,
+    ops: &[RefactorOp],
+) -> Result<Vec<(usize, String)>> {
     let mut findings = Vec::new();
-    for op in ops {
-        if op.op != RefactorKind::MoveModuleToCrate {
+    for (index, op) in ops.iter().enumerate() {
+        if !op.op.moves_across_crates() {
             continue;
         }
-        if let Err(refusal) = move_preconditions(workspace, op) {
-            findings.push(refusal.to_string());
+        for anchor in op.anchors() {
+            if let Err(refusal) = move_preconditions(workspace, &op.with_anchor(anchor.clone())) {
+                findings.push((index, refusal.to_string()));
+            }
         }
     }
-    findings.extend(cluster::siblings_left_behind(workspace, ops)?);
     Ok(findings)
 }
 
