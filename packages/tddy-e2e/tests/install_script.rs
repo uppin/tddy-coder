@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tddy_e2e::install_contract::{
-    verify_build_flag_invokes_release, verify_env_override_references,
-    verify_headless_flag_support, verify_install_script_contracts, verify_no_systemctl_support,
-    verify_requires_systemd_flag, verify_root_check, verify_syntax,
+    verify_build_flag_invokes_release, verify_desktop_config_template, verify_desktop_flag_support,
+    verify_env_override_references, verify_headless_flag_support, verify_install_script_contracts,
+    verify_no_systemctl_support, verify_requires_systemd_flag, verify_root_check, verify_syntax,
     verify_update_systemd_unit_flag, verify_user_flag_support,
 };
 
@@ -122,7 +122,13 @@ fn copy_install_tree(dest: &Path) {
         perms.set_mode(0o755);
         fs::set_permissions(&dst_install, perms).unwrap();
     }
-    for template in ["daemon.yaml.production", "supervisor.yaml.production"] {
+    for template in [
+        "daemon.yaml.production",
+        "supervisor.yaml.production",
+        // `--desktop` renders this one; every test copies it so a desktop run never fails on a
+        // missing template rather than on what it is asserting.
+        "desktop.yaml.production",
+    ] {
         let prod = repo_root().join(template);
         fs::copy(&prod, dest.join(template)).unwrap_or_else(|e| {
             panic!(
@@ -738,5 +744,286 @@ fn install_without_headless_requires_web_bundle() {
     assert!(
         !st.success(),
         "install should fail without --headless when the tddy-web bundle is missing"
+    );
+}
+
+// --- `install --desktop`: the Tauri application, not a systemd-managed daemon ---------------------
+
+/// The artifacts `tauri build` leaves behind, on whichever platform the test is running: a `.app`
+/// bundle on macOS, a plain binary on Linux. `install --desktop` preflights for exactly one of
+/// these and refuses to install without it.
+fn write_fake_desktop_artifacts(root: &Path) {
+    let rel = root.join("target").join("release");
+    if cfg!(target_os = "macos") {
+        let macos = rel
+            .join("bundle")
+            .join("macos")
+            .join("Tddy Desktop.app")
+            .join("Contents")
+            .join("MacOS");
+        fs::create_dir_all(&macos).unwrap();
+        write_executable(&macos.join("tddy-desktop"), "fake-app\n");
+        fs::write(
+            macos.parent().unwrap().join("Info.plist"),
+            "<plist></plist>\n",
+        )
+        .unwrap();
+    } else {
+        write_executable(&rel.join("tddy-desktop"), "fake-app\n");
+    }
+    let icons = root
+        .join("packages")
+        .join("tddy-desktop")
+        .join("src-tauri")
+        .join("icons");
+    fs::create_dir_all(&icons).unwrap();
+    fs::write(icons.join("128x128.png"), b"\x89PNG\r\n").unwrap();
+}
+
+fn write_executable(path: &Path, body: &str) {
+    fs::write(path, body).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(path, perms).unwrap();
+    }
+}
+
+/// A tree with everything `--desktop` needs, and the env that redirects every path it writes into
+/// that tree. `HOME` is redirected too: the install derives `~/.tddy` from it, and a test that let
+/// the real one through would write into the developer's own install.
+struct DesktopFixture {
+    _tmp: tempfile::TempDir,
+    root: PathBuf,
+    home: PathBuf,
+    bin_dir: PathBuf,
+    tddy_home: PathBuf,
+    app_dir: PathBuf,
+    xdg_data_dir: PathBuf,
+}
+
+impl DesktopFixture {
+    fn new() -> Self {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().to_path_buf();
+        copy_install_tree(&root);
+        write_fake_release_binaries(&root);
+        write_fake_desktop_artifacts(&root);
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        Self {
+            bin_dir: root.join("desktop-bin"),
+            // The installed application reads $HOME/.tddy/desktop.yaml and nothing else, so the
+            // fixture keeps TDDY_HOME where the application would look under the redirected HOME.
+            tddy_home: home.join(".tddy"),
+            app_dir: root.join("Applications"),
+            xdg_data_dir: root.join("xdg-data"),
+            home,
+            root,
+            _tmp: tmp,
+        }
+    }
+
+    fn run(&self) -> std::process::ExitStatus {
+        run_install_args_in(
+            &self.root,
+            &["--desktop"],
+            &[
+                ("HOME", self.home.to_str().unwrap()),
+                ("INSTALL_BIN_DIR", self.bin_dir.to_str().unwrap()),
+                ("INSTALL_TDDY_HOME", self.tddy_home.to_str().unwrap()),
+                ("INSTALL_DESKTOP_APP_DIR", self.app_dir.to_str().unwrap()),
+                ("INSTALL_XDG_DATA_DIR", self.xdg_data_dir.to_str().unwrap()),
+            ],
+        )
+    }
+
+    fn config(&self) -> PathBuf {
+        self.tddy_home.join("desktop.yaml")
+    }
+}
+
+#[test]
+fn install_desktop_flag_documented() {
+    // Given
+    let script = read_install();
+
+    // When / Then
+    verify_desktop_flag_support(&script);
+}
+
+#[test]
+fn desktop_template_names_the_signin_callback_port_and_no_stray_placeholder() {
+    // Given
+    let script = read_install();
+    let template = fs::read_to_string(repo_root().join("desktop.yaml.production"))
+        .expect("read desktop.yaml.production");
+
+    // When / Then
+    verify_desktop_config_template(&script, &template);
+}
+
+#[test]
+fn install_desktop_puts_the_application_and_the_tools_it_spawns_on_path() {
+    // Given
+    let fx = DesktopFixture::new();
+
+    // When
+    let st = fx.run();
+
+    // Then — the application resolves by name…
+    assert!(st.success(), "install --desktop: {st:?}");
+    let launcher = fx.bin_dir.join("tddy-desktop");
+    assert!(
+        launcher.is_file(),
+        "expected the launcher at {}",
+        launcher.display()
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&launcher).unwrap().permissions().mode();
+        assert_eq!(mode & 0o111, 0o111, "the launcher must be executable");
+    }
+
+    // …and so do the binaries the embedded daemon spawns and desktop.yaml names by absolute path.
+    for name in [
+        "tddy-coder",
+        "tddy-tools",
+        "tddy-sandbox-runner",
+        "tddy-index-daemon",
+        "tddy-remote-git-repo",
+        "tddy-session-sync",
+    ] {
+        assert!(
+            fx.bin_dir.join(name).is_file(),
+            "expected {name} on PATH at {}",
+            fx.bin_dir.display()
+        );
+    }
+
+    // The application's own process IS the daemon: a second daemon binary would be a service
+    // nothing starts, contending for the same data directory.
+    for absent in ["tddy-daemon", "tddy-supervisor"] {
+        assert!(
+            !fx.bin_dir.join(absent).exists(),
+            "--desktop must not install {absent}"
+        );
+    }
+}
+
+#[test]
+fn install_desktop_renders_the_one_config_a_release_build_reads() {
+    // Given
+    let fx = DesktopFixture::new();
+
+    // When
+    let st = fx.run();
+
+    // Then — the config exists where the application looks, fully substituted.
+    assert!(st.success(), "install --desktop: {st:?}");
+    let config = fs::read_to_string(fx.config())
+        .unwrap_or_else(|e| panic!("read {}: {e}", fx.config().display()));
+    assert!(
+        !config.contains("__"),
+        "every placeholder must be substituted; got:\n{config}"
+    );
+    assert!(
+        config.contains(&format!("tddy_data_dir: \"{}\"", fx.tddy_home.display())),
+        "config must name the installed data dir; got:\n{config}"
+    );
+    assert!(
+        config.contains(&format!("{}/tddy-coder", fx.bin_dir.display())),
+        "allowed_tools must point at the binaries this run installed; got:\n{config}"
+    );
+
+    // Retained GitHub tokens land here, so the umask must not get a say.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let auth = fx.tddy_home.join("auth");
+        let mode = fs::metadata(&auth)
+            .unwrap_or_else(|e| panic!("stat {}: {e}", auth.display()))
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700, "auth storage must be 0700");
+    }
+}
+
+#[test]
+fn install_desktop_never_overwrites_an_operator_edited_config() {
+    // Given — an install, then an operator edit
+    let fx = DesktopFixture::new();
+    assert!(fx.run().success(), "first install");
+    let edited = format!(
+        "{}\n# operator edit\n",
+        fs::read_to_string(fx.config()).unwrap()
+    );
+    fs::write(fx.config(), &edited).unwrap();
+
+    // When — a reinstall
+    let st = fx.run();
+
+    // Then — the edit survives
+    assert!(st.success(), "reinstall: {st:?}");
+    assert_eq!(
+        fs::read_to_string(fx.config()).unwrap(),
+        edited,
+        "a reinstall must not overwrite the config"
+    );
+}
+
+#[test]
+fn install_desktop_refuses_when_the_application_has_not_been_built() {
+    // Given — a tree with the CLI binaries but no built application
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    copy_install_tree(root);
+    write_fake_release_binaries(root);
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    // When
+    let st = run_install_args_in(
+        root,
+        &["--desktop"],
+        &[
+            ("HOME", home.to_str().unwrap()),
+            ("INSTALL_BIN_DIR", root.join("b").to_str().unwrap()),
+            ("INSTALL_TDDY_HOME", home.join(".tddy").to_str().unwrap()),
+        ],
+    );
+
+    // Then — nothing is installed, rather than a launcher that runs a binary that is not there.
+    assert!(
+        !st.success(),
+        "--desktop must refuse without a built application"
+    );
+    assert!(
+        !root.join("b").join("tddy-desktop").exists(),
+        "a refused install must leave no launcher behind"
+    );
+}
+
+#[test]
+fn install_refuses_the_two_deployments_in_one_run() {
+    // Given
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    copy_install_tree(root);
+
+    // When
+    let st = run_install_args_in(
+        root,
+        &["--systemd", "--desktop"],
+        &[("INSTALL_NO_SYSTEMCTL", "1")],
+    );
+
+    // Then — two daemons on one machine would contend for the same data dir and LiveKit identity.
+    assert!(
+        !st.success(),
+        "--systemd and --desktop together must be an error"
     );
 }

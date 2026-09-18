@@ -161,14 +161,79 @@ very first page load lands.
 
 ## Configuration
 
-Resolved exactly as the Electrobun shell resolved it, so existing setups keep working:
+Resolution splits on the build profile, because a development run and an installed application have
+nothing in common about where they stand when they start.
 
-1. Repo-root `.env` is loaded first, **without overriding** already-set variables (the `./web-dev` rule).
-2. `TDDY_DAEMON_CONFIG`, else repo-root `dev.desktop.yaml`.
-3. `CURRENT_USER` in the YAML is substituted before the daemon reads it.
+A **development build** resolves it from the checkout, exactly as the Electrobun shell did, so
+existing setups keep working:
 
-The app `chdir`s to the workspace root so relative paths in the YAML keep the meaning they had when
-the daemon ran as a child process.
+1. `TDDY_DAEMON_CONFIG`, else repo-root `dev.desktop.yaml` found by walking up from the working
+   directory.
+2. `CURRENT_USER` in the YAML is substituted before the daemon reads it.
+
+A **release build** reads `~/.tddy/desktop.yaml` and nothing else. There is no `TDDY_DAEMON_CONFIG`,
+no `dev.desktop.yaml` and no upward walk: an installed `.app` launched from the Dock has `/` for a
+working directory and no checkout above it, so anything found that way would have been found by
+accident. When that file is absent the application refuses to start and names `./install --desktop`,
+which writes it.
+
+Both profiles then apply the workspace root's `.env` **without overriding** already-set variables
+(the `./web-dev` rule), and both `chdir` to the workspace root so relative paths in the YAML keep the
+meaning they had when the daemon ran as a child process.
+
+### What the configuration must carry
+
+`listen.web_port` is **required** even though the application serves no HTTP. It is the loopback port
+a GitHub sign-in comes back on — the application opens a one-path `/auth/callback` listener on
+127.0.0.1 for the duration of a sign-in and closes it again — and it is what the redirect URI handed
+to the provider is built from. `redirect_uri` in the configuration is ignored: the application
+derives it from this port so the callback reaches the listener it actually opened.
+
+`web_bundle_path` is absent on purpose. The dashboard is embedded in the application at build time,
+so there is no directory to serve it from.
+
+An **identity** is three blocks that stand or fall together, and without them the application starts
+onto its settings and nothing else — no sessions, no hosts, no screen sharing:
+
+| Block | Why it is required |
+|---|---|
+| `github:` | Absent, the daemon builds no session-user resolver, and every session service is assembled behind one. |
+| `livekit.api_secret` | The only source of the session-token signer. Absent, every token-gated RPC refuses — including the settings service an operator would repair the configuration from. `enabled:` governs the common room alone. |
+| `users:` | Which OS user a login runs sessions as. A login with no entry is refused `permission_denied: user not mapped to OS user`; there is no fallback to whoever the daemon runs as. Peers sharing a common room must name the same login on every side. |
+
+## Installing it
+
+`./install --desktop` installs the application for the invoking user. It is a **different deployment**
+from `./install --systemd`, not a variant of it — the application's own process *is* a `tddy-daemon`
+— so it writes no unit, creates no service user, deploys no web bundle directory and serves no port,
+and passing both flags in one run is an error.
+
+| | macOS | Linux |
+|---|---|---|
+| Application | `Tddy Desktop.app` in `~/Applications` | the binary in `$BIN_DIR`, plus a `.desktop` entry and a hicolor icon under `$XDG_DATA_HOME` |
+| `tddy-desktop` on `PATH` | a launcher script that `exec`s the binary *inside* the bundle | the installed binary |
+| CLI binaries | `Contents/MacOS` **and** `$BIN_DIR` | `$BIN_DIR` |
+
+The launcher is a script rather than a symlink deliberately: a symlink makes the process's executable
+path `$BIN_DIR/tddy-desktop`, which breaks both bundle identity and the sibling-of-`current_exe()`
+lookup that resolves `tddy-sandbox-runner` and `tddy-index-daemon`. That same lookup is why the CLI
+binaries are installed twice on macOS — inside the bundle for the daemon to find, and in `$BIN_DIR`
+for `allowed_tools` and a hand-run `tddy-tools` to resolve.
+
+`./release --desktop` builds everything the install ships, in the one order that works: the CLI
+binaries, then the `tddy-web` bundle, then `tauri build`. The application *embeds* the bundle, so
+building the app first produces a stale dashboard and no error. `--build` runs that same script, and
+without it the install preflights for the artifacts and fails naming it.
+
+A `tauri build` that fails **after** producing the `.app` says so and names the bundle — on macOS the
+`dmg` target drives Finder over AppleScript and times out without Automation permission, long after
+the application itself is complete. `./install --desktop` then installs what is already built.
+
+The configuration is rendered from `desktop.yaml.production` and an existing one is **never**
+overwritten, so a reinstall keeps every choice the operator made. Overrides: `INSTALL_TDDY_HOME`,
+`INSTALL_BIN_DIR`, `INSTALL_DESKTOP_APP_DIR`, `INSTALL_XDG_DATA_DIR`, `INSTALL_DAEMON_LOG_DIR`,
+`INSTALL_AUTH_STORAGE_DIR`. Moving `INSTALL_TDDY_HOME` away from `$HOME/.tddy` warns, because a
+release build has no second place to look.
 
 ## One bundle, two hosts
 

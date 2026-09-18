@@ -20,11 +20,32 @@
 # system-unit form of it), and it does NOT mask the legacy tddy-daemon.* units — in that mode the
 # tddy-daemon unit IS the deployment.
 #
+# --desktop IS A DIFFERENT DEPLOYMENT ENTIRELY, and is mutually exclusive with --systemd. It installs
+# Tddy Desktop — the Tauri application whose own process IS a tddy-daemon — for the invoking user,
+# with no service, no unit, no root and no served port. Nothing is shared with the systemd modes
+# but this script's helpers: there is no daemon.yaml, no supervisor, no web bundle directory (the
+# application embeds its dashboard at build time) and no socket, because the dashboard reaches the
+# daemon over the webview's IPC bridge. Its one config file is ~/.tddy/desktop.yaml, which is also
+# THE ONLY FILE a release build of the application reads — see
+# packages/tddy-desktop/src-tauri/src/config_source.rs.
+#
 # Usage: sudo ./install --systemd [--build] [--headless] [--update-systemd-unit]
 #        ./install --systemd --user [--build] [--headless] [--update-systemd-unit]
+#        ./install --desktop [--build]
 #
-#   --systemd   Required. Install release binaries, config templates, unit files; enable+start service.
-#   --build     Optional. Run ./release before copying binaries.
+#   --systemd   Install release binaries, config templates, unit files; enable+start service.
+#               Exactly one of --systemd / --desktop is required.
+#   --desktop   Install Tddy Desktop for the invoking user (no root, no service). macOS: the built
+#               .app is copied to ~/Applications and a `tddy-desktop` launcher goes on PATH in
+#               ${INSTALL_BIN_DIR}. Linux: the binary itself goes there, plus a .desktop entry and
+#               icon under the XDG data directory. In both cases the CLI binaries the embedded
+#               daemon spawns are installed too, ~/.tddy/desktop.yaml is rendered from
+#               desktop.yaml.production if it does not exist, and nothing already there is
+#               overwritten. See "desktop install" below for its own environment overrides.
+#   --build     Optional. Run ./release before copying binaries. With --desktop it runs
+#               ./release --desktop, which additionally builds the tddy-web bundle and then the
+#               application itself, because the .app embeds that bundle rather than reading it
+#               from disk.
 #   --user      Optional. Install as a per-user systemd service (systemctl --user) instead of a
 #               system service. No root required: paths default to XDG user locations
 #               (~/.local/bin, ~/.config/tddy, ~/.config/systemd/user, ...), the unit runs as the
@@ -99,6 +120,22 @@
 #   INSTALL_BUNDLE_CODEX_ACP=1  Always install ${BIN_DIR}/codex-acp from node_modules; fail if the
 #                        platform package or native binary is missing.
 #
+# Environment (desktop install — --desktop only). INSTALL_PREFIX / INSTALL_BIN_DIR apply as above and
+# default to the per-user locations ($HOME/.local, $HOME/.local/bin); the systemd-only variables
+# (INSTALL_CONFIG_DIR, INSTALL_SYSTEMD_DIR, INSTALL_WEB_BUNDLE_DIR, both socket paths) are unused.
+#   INSTALL_TDDY_HOME    The application's own directory (default: $HOME/.tddy). Holds desktop.yaml,
+#                        the sessions, the logs and the token storage. A RELEASE BUILD READS
+#                        $HOME/.tddy/desktop.yaml AND NOTHING ELSE, so overriding this installs a
+#                        config the application will not find unless tddy_data_dir is where you want
+#                        the data and $HOME/.tddy is where the file is.
+#   INSTALL_DESKTOP_APP_DIR  macOS only: where "Tddy Desktop.app" is installed (default:
+#                        $HOME/Applications). /Applications works too, with the write permission it
+#                        needs.
+#   INSTALL_XDG_DATA_DIR  Linux only: base for the .desktop entry and icon (default:
+#                        ${XDG_DATA_HOME:-$HOME/.local/share}).
+#   INSTALL_DAEMON_LOG_DIR / INSTALL_AUTH_STORAGE_DIR  As above, but they default to
+#                        ${INSTALL_TDDY_HOME}/logs and ${INSTALL_TDDY_HOME} in this mode.
+#
 # Nothing this script generates is ever overwritten in place: the configs, the unit files and the
 # AppArmor profile are rendered to a temp file and moved into place only once the whole content
 # exists, and an existing file is kept rather than replaced (see the guards below).
@@ -114,28 +151,65 @@ cd "$(dirname "$0")"
 ROOT_DIR="$(pwd)"
 
 want_systemd=false
+want_desktop=false
 want_build=false
 want_user=false
 want_headless=false
 want_update_unit=false
+usage() {
+  echo "Usage: $0 --systemd [--build] [--user] [--headless] [--update-systemd-unit]" >&2
+  echo "       $0 --desktop [--build]" >&2
+}
 for arg in "$@"; do
   case "$arg" in
     --systemd) want_systemd=true ;;
+    --desktop) want_desktop=true ;;
     --build) want_build=true ;;
     --user) want_user=true ;;
     --headless) want_headless=true ;;
     --update-systemd-unit) want_update_unit=true ;;
     *)
       echo "Unknown option: $arg" >&2
-      echo "Usage: $0 --systemd [--build] [--user] [--headless] [--update-systemd-unit]" >&2
+      usage
       exit 1
       ;;
   esac
 done
 
-if ! "$want_systemd"; then
-  echo "Usage: $0 --systemd [--build] [--user] [--headless] [--update-systemd-unit]" >&2
+if ! "$want_systemd" && ! "$want_desktop"; then
+  usage
   exit 1
+fi
+
+# The two modes install different things in different places for different lifecycles: --systemd
+# installs a daemon that a service manager owns, --desktop installs an application the operator
+# launches, whose own process IS a daemon. Run together they would put two daemons on one machine
+# fighting over ~/.tddy, the session vaults and the LiveKit identity — so this is an error rather
+# than an order of operations. Install one, then the other, if a host really wants both.
+if "$want_systemd" && "$want_desktop"; then
+  echo "install: --systemd and --desktop are different deployments and cannot be installed in one run." >&2
+  echo "install: --systemd installs a service-managed tddy-daemon; --desktop installs an application" >&2
+  echo "install: that hosts its own. Two on one machine contend for the same data directory and the" >&2
+  echo "install: same LiveKit identity. Run this script once per deployment." >&2
+  exit 1
+fi
+
+# Flags that only mean something to the systemd modes. Silently ignoring them would leave an
+# operator believing they had installed something they had not.
+if "$want_desktop"; then
+  for flag_name in want_user want_headless want_update_unit; do
+    if [[ "${!flag_name}" == "true" ]]; then
+      case "$flag_name" in
+        want_user) flag="--user" ;;
+        want_headless) flag="--headless" ;;
+        *) flag="--update-systemd-unit" ;;
+      esac
+      echo "install: ${flag} means nothing to --desktop: it installs no unit, no service user and no" >&2
+      echo "install: web bundle directory (the application is per-user by construction and embeds its" >&2
+      echo "install: dashboard at build time). Drop the flag." >&2
+      exit 1
+    fi
+  done
 fi
 
 # The single switch for "is this the supervised deployment": everything supervisor-shaped below hangs
@@ -143,7 +217,9 @@ fi
 # mutually exclusive (see the header). The assertion right after is not dead weight: a future flag
 # that sets want_supervisor on its own must fail here rather than half-install a rootless supervisor
 # that can broker nothing next to a daemon that dials it and fails every spawn.
-if "$want_user"; then
+# --desktop is out for the same structural reason and one more: the application has no unit to be a
+# managed child of, so there is nothing for a broker to supervise.
+if "$want_user" || "$want_desktop"; then
   want_supervisor=false
 else
   want_supervisor=true
@@ -157,9 +233,12 @@ if "$want_user" && "$want_supervisor"; then
   exit 1
 fi
 
-# Path defaults differ for a per-user install (--user): everything lands under XDG user locations
-# and needs no root. Explicit INSTALL_* env overrides always win in both modes.
-if "$want_user"; then
+# Path defaults differ for a per-user install (--user, and --desktop, which is per-user by
+# construction): everything lands under XDG user locations and needs no root. Explicit INSTALL_* env
+# overrides always win in every mode. A --desktop run uses BIN_DIR from here — that is the PATH
+# directory the `tddy-desktop` launcher lands in — and ignores the rest, which describe a service it
+# does not install.
+if "$want_user" || "$want_desktop"; then
   XDG_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
   XDG_DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
   XDG_STATE="${XDG_STATE_HOME:-$HOME/.local/state}"
@@ -264,6 +343,42 @@ APPARMOR_PROFILE_PATH="${APPARMOR_DIR}/tddy-daemon"
 # How many times the installed unit's state is sampled (one second apart) after enable+start before
 # install accepts it as running. See verify_unit_running.
 UNIT_SETTLE_SAMPLES=5
+
+# --- desktop install paths ----------------------------------------------------------------------
+#
+# Only --desktop reads these. TDDY_HOME is the application's whole world: the config it is started
+# from, the sessions it produces, its logs and its token storage. A RELEASE BUILD READS
+# $HOME/.tddy/desktop.yaml AND NOTHING ELSE (config_source.rs), so INSTALL_TDDY_HOME is here for
+# tests and for moving the *data*, not for teaching the application to look somewhere else.
+TDDY_HOME="${INSTALL_TDDY_HOME:-${HOME:-}/.tddy}"
+DESKTOP_CONFIG_FILE="${TDDY_HOME}/desktop.yaml"
+DESKTOP_CONFIG_TEMPLATE="${ROOT_DIR}/desktop.yaml.production"
+# Defaults inside TDDY_HOME rather than the XDG locations the --user daemon uses: everything this
+# application writes should be removable by deleting one directory.
+DESKTOP_LOG_DIR="${INSTALL_DAEMON_LOG_DIR:-${TDDY_HOME}/logs}"
+DESKTOP_AUTH_STORAGE_DIR="${INSTALL_AUTH_STORAGE_DIR:-${TDDY_HOME}}"
+# desktop.yaml.production appends `/auth`; that child is the directory the daemon opens, and it
+# refuses to start when it cannot write there.
+DESKTOP_AUTH_STORAGE_PATH="${DESKTOP_AUTH_STORAGE_DIR}/auth"
+# macOS: where the .app goes. ~/Applications needs no admin and Spotlight/Launchpad index it.
+DESKTOP_APP_DIR="${INSTALL_DESKTOP_APP_DIR:-${HOME:-}/Applications}"
+# Linux: base for the .desktop entry and the icon.
+DESKTOP_XDG_DATA_DIR="${INSTALL_XDG_DATA_DIR:-${XDG_DATA_HOME:-${HOME:-}/.local/share}}"
+# The productName in packages/tddy-desktop/src-tauri/tauri.conf.json, which is what `tauri build`
+# names the macOS bundle. Changing it there changes the path this script copies from.
+DESKTOP_APP_NAME="Tddy Desktop"
+DESKTOP_MACOS_BUNDLE_SRC="${ROOT_DIR}/target/release/bundle/macos/${DESKTOP_APP_NAME}.app"
+DESKTOP_LINUX_BINARY_SRC="${ROOT_DIR}/target/release/tddy-desktop"
+
+# The CLI binaries the embedded daemon spawns. tddy-daemon itself is deliberately absent: the
+# application's own process IS the daemon, and a second one on PATH is a second daemon one
+# double-click away from the same data directory. tddy-supervisor is absent for the same reason it
+# is absent from --user — a rootless broker brokers nothing.
+#
+# tddy-sandbox-runner and tddy-index-daemon are resolved as SIBLINGS OF THE RUNNING EXECUTABLE, which
+# for a macOS install is inside the .app, not BIN_DIR — so they are copied into both. On Linux the
+# executable IS in BIN_DIR and one copy serves both roles.
+DESKTOP_BINARIES=(tddy-coder tddy-tools tddy-sandbox-runner tddy-index-daemon tddy-remote-git-repo tddy-session-sync)
 
 # --- generated files --------------------------------------------------------------------------
 #
@@ -514,6 +629,256 @@ warn_unless_file_declares() {
   echo "install:   than created, so nothing was substituted into it — the two sides of the socket" >&2
   echo "install:   handover disagree. ${remedy}" >&2
 }
+
+# --- desktop install ------------------------------------------------------------------------------
+#
+# Self-contained: it shares this script's helpers (atomically_write, render_template,
+# harden_installed_path) and its INSTALL_PREFIX/INSTALL_BIN_DIR defaults, and nothing else. It runs
+# and exits before a single line of the systemd flow, because none of that flow applies — there is no
+# unit to write, no service user to create, no socket to hand over and no web bundle to deploy.
+
+# desktop_warn_unless_on_path DIR — say so when the launcher just installed is not reachable by name.
+#
+# A launcher in a directory that is not on PATH satisfies the letter of "installed" and none of its
+# point. This warns rather than editing the operator's shell profile: which file to touch depends on
+# the shell, and silently rewriting a login script is not this installer's business.
+desktop_warn_unless_on_path() {
+  local dir="$1"
+  case ":${PATH}:" in
+    *":${dir}:"*) return 0 ;;
+  esac
+  echo "install:   WARNING: ${dir} is not on your PATH, so \`tddy-desktop\` will not resolve by name." >&2
+  echo "install:   Add it — e.g. for zsh:" >&2
+  echo "install:     echo 'export PATH=\"${dir}:\$PATH\"' >> ~/.zshrc && exec zsh" >&2
+}
+
+# desktop_install_binaries DIR — copy the CLI binaries the embedded daemon spawns into DIR.
+desktop_install_binaries() {
+  local dir="$1" name
+  mkdir -p "$dir"
+  for name in "${DESKTOP_BINARIES[@]}"; do
+    install -m 0755 "${ROOT_DIR}/target/release/${name}" "${dir}/${name}"
+    echo "install:   updated ${dir}/${name}"
+  done
+}
+
+# desktop_install_macos — copy the .app, then put a launcher for it on PATH.
+#
+# The launcher is a script that `exec`s the binary INSIDE the bundle rather than a symlink to it. A
+# symlink is what the kernel execs, so the process's executable path would be ${BIN_DIR}/tddy-desktop
+# — and both things that matter here are resolved from that path: macOS finds Info.plist by walking
+# up from the executable to the enclosing .app (a launcher outside one has no bundle identity, no
+# icon and no name in the menu bar), and the daemon resolves tddy-sandbox-runner and
+# tddy-index-daemon as siblings of it. Exec'ing the real path keeps both correct.
+desktop_install_macos() {
+  local bundle="${DESKTOP_APP_DIR}/${DESKTOP_APP_NAME}.app"
+  local staged="${DESKTOP_APP_DIR}/.${DESKTOP_APP_NAME}.app.incoming"
+
+  mkdir -p "$DESKTOP_APP_DIR"
+  echo "install: installing ${DESKTOP_MACOS_BUNDLE_SRC} -> ${bundle}"
+  # Staged, then swapped: a half-copied .app left behind by an interrupted run is a bundle macOS
+  # will happily try to launch. `cp -R` (not `-a`) for the same reason the web bundle uses it —
+  # BSD cp rejects --no-preserve, and the copy should belong to whoever is installing it.
+  rm -rf "$staged"
+  if ! cp -R "$DESKTOP_MACOS_BUNDLE_SRC" "$staged"; then
+    rm -rf "$staged"
+    echo "install: failed copying the application bundle; ${bundle} is left unchanged" >&2
+    exit 1
+  fi
+  # The CLI binaries go INSIDE the bundle as well, next to the application binary, because that is
+  # where the daemon looks for the two it spawns by sibling path.
+  desktop_install_binaries "${staged}/Contents/MacOS"
+  rm -rf "$bundle"
+  mv "$staged" "$bundle"
+  echo "install:   application bundle installed"
+
+  # And again into BIN_DIR. Not a duplicate of the copy inside the bundle: that one exists so the
+  # daemon's sibling-of-current_exe lookup finds tddy-sandbox-runner and tddy-index-daemon, this one
+  # exists because desktop.yaml's allowed_tools name ${BIN_DIR}/tddy-coder and ${BIN_DIR}/tddy-tools
+  # — and because tddy-remote-git-repo and tddy-session-sync are run by hand, from a shell, by name.
+  # A macOS .app is not on anyone's PATH, so without this the config points at nothing.
+  echo "install: installing the CLI binaries on PATH -> ${BIN_DIR}/"
+  desktop_install_binaries "$BIN_DIR"
+
+  local launcher="${BIN_DIR}/tddy-desktop"
+  echo "install: installing launcher -> ${launcher}"
+  mkdir -p "$BIN_DIR"
+  atomically_write "$launcher" <<EOF
+#!/bin/sh
+# Installed by ./install --desktop. Runs the application binary inside the bundle, so macOS resolves
+# the bundle's Info.plist and the daemon resolves its sibling binaries, both from the real path.
+exec "${bundle}/Contents/MacOS/tddy-desktop" "\$@"
+EOF
+  chmod 0755 "$launcher"
+  echo "install:   \`tddy-desktop\` on PATH runs ${bundle}"
+}
+
+# desktop_install_linux — the binary itself goes on PATH, plus a .desktop entry and an icon.
+#
+# No bundle exists on Linux: `tauri build` leaves target/release/tddy-desktop next to the .deb and
+# AppImage it also produces, and this installs that binary directly. BIN_DIR is therefore both the
+# PATH directory and the sibling directory the daemon resolves its spawned binaries from, so one
+# copy serves both roles.
+desktop_install_linux() {
+  echo "install: installing ${DESKTOP_LINUX_BINARY_SRC} -> ${BIN_DIR}/tddy-desktop"
+  mkdir -p "$BIN_DIR"
+  install -m 0755 "$DESKTOP_LINUX_BINARY_SRC" "${BIN_DIR}/tddy-desktop"
+  desktop_install_binaries "$BIN_DIR"
+
+  local icon_dir="${DESKTOP_XDG_DATA_DIR}/icons/hicolor/128x128/apps"
+  local icon_src="${ROOT_DIR}/packages/tddy-desktop/src-tauri/icons/128x128.png"
+  if [[ -f "$icon_src" ]]; then
+    echo "install: installing icon -> ${icon_dir}/tddy-desktop.png"
+    mkdir -p "$icon_dir"
+    install -m 0644 "$icon_src" "${icon_dir}/tddy-desktop.png"
+  else
+    echo "install:   WARNING: no icon at ${icon_src}; the launcher entry will have none" >&2
+  fi
+
+  local entry="${DESKTOP_XDG_DATA_DIR}/applications/tddy-desktop.desktop"
+  echo "install: installing desktop entry -> ${entry}"
+  mkdir -p "$(dirname "$entry")"
+  # Regenerated every run, unlike the config: it holds no operator choices, only the paths this run
+  # resolved, and a stale Exec= pointing at a moved BIN_DIR is a launcher that silently does nothing.
+  atomically_write "$entry" <<EOF
+[Desktop Entry]
+Type=Application
+Name=${DESKTOP_APP_NAME}
+Comment=Tddy Desktop — the dashboard and the daemon in one process
+Exec=${BIN_DIR}/tddy-desktop
+Icon=tddy-desktop
+Terminal=false
+Categories=Development;
+StartupWMClass=tddy-desktop
+EOF
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$(dirname "$entry")" >/dev/null 2>&1 || true
+  fi
+}
+
+install_desktop() {
+  local os
+  os="$(uname -s)"
+  case "$os" in
+    Darwin | Linux) ;;
+    *)
+      echo "install: --desktop supports macOS and Linux; this is ${os}." >&2
+      echo "install: Windows is a declared non-goal (docs/ft/desktop/tddy-desktop-tauri.md): the" >&2
+      echo "install: daemon's local socket and sandbox runner are unix-only." >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ -z "${HOME:-}" ]]; then
+    echo "install: HOME is unset, so there is no ~/.tddy to install into and no home the application" >&2
+    echo "install: could read its configuration from. Set HOME, or set INSTALL_TDDY_HOME and" >&2
+    echo "install: INSTALL_BIN_DIR explicitly." >&2
+    exit 1
+  fi
+
+  if "$want_build"; then
+    # ./release --desktop owns the three builds and their order: the CLI binaries the embedded
+    # daemon spawns, the web bundle the application EMBEDS, and then the application itself. The
+    # sequence lives there rather than here so that building without installing produces exactly
+    # what this install pre-flights for, with no second copy of the order to drift.
+    echo "install: --build — running ${ROOT_DIR}/release --desktop"
+    "${ROOT_DIR}/release" --desktop
+  fi
+
+  local name src
+  for name in "${DESKTOP_BINARIES[@]}"; do
+    src="${ROOT_DIR}/target/release/${name}"
+    if [[ ! -f "$src" ]]; then
+      echo "install: missing release binary: ${src}" >&2
+      echo "install: run ./release first or use --build" >&2
+      exit 1
+    fi
+  done
+
+  if [[ "$os" == "Darwin" ]]; then
+    if [[ ! -d "$DESKTOP_MACOS_BUNDLE_SRC" ]]; then
+      echo "install: missing the built application bundle: ${DESKTOP_MACOS_BUNDLE_SRC}" >&2
+      echo "install: build it first, or pass --build:" >&2
+      echo "install:   ./release --desktop" >&2
+      exit 1
+    fi
+  elif [[ ! -f "$DESKTOP_LINUX_BINARY_SRC" ]]; then
+    echo "install: missing the built application binary: ${DESKTOP_LINUX_BINARY_SRC}" >&2
+    echo "install: build it first, or pass --build:" >&2
+    echo "install:   ./release --desktop" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "$DESKTOP_CONFIG_TEMPLATE" ]]; then
+    echo "install: missing ${DESKTOP_CONFIG_TEMPLATE}" >&2
+    exit 1
+  fi
+
+  echo "install: paths — BIN_DIR=${BIN_DIR} (the \`tddy-desktop\` launcher and the CLI binaries)"
+  echo "install: paths — TDDY_HOME=${TDDY_HOME} (desktop.yaml, sessions, logs, token storage)"
+  if [[ "$os" == "Darwin" ]]; then
+    echo "install: paths — DESKTOP_APP_DIR=${DESKTOP_APP_DIR} (${DESKTOP_APP_NAME}.app)"
+  else
+    echo "install: paths — DESKTOP_XDG_DATA_DIR=${DESKTOP_XDG_DATA_DIR} (.desktop entry, icon)"
+  fi
+  echo "install: paths — config ${DESKTOP_CONFIG_FILE} (the ONLY file a release build reads)"
+  echo "install: logging — daemon file log (from desktop.yaml.production): ${DESKTOP_LOG_DIR}/daemon"
+  echo "install: logging — OAuth/token storage (auth_storage, mode 0700): ${DESKTOP_AUTH_STORAGE_PATH}"
+  echo "install: no unit, no service user, no web bundle directory and no served port: the"
+  echo "install:   application hosts the daemon in its own process and the dashboard reaches it over"
+  echo "install:   the webview's IPC bridge. desktop.yaml names listen.web_port only as the loopback"
+  echo "install:   port a GitHub sign-in comes back on."
+  echo "install: sessions need an identity this install does not configure: add github:, users: and"
+  echo "install:   livekit.api_secret to ${DESKTOP_CONFIG_FILE} (it says how) before the dashboard"
+  echo "install:   shows anything but settings."
+
+  mkdir -p "$TDDY_HOME" "$DESKTOP_LOG_DIR" "$DESKTOP_AUTH_STORAGE_PATH"
+  # Retained GitHub access tokens live here (github-tokens.json, mode 0600), and the umask must not
+  # get a say — the same rule the systemd modes apply to their own auth storage.
+  chmod 0700 "$DESKTOP_AUTH_STORAGE_PATH"
+  harden_installed_path "$TDDY_HOME"
+
+  if [[ "$os" == "Darwin" ]]; then
+    desktop_install_macos
+  else
+    desktop_install_linux
+  fi
+
+  # The config is the one thing a reinstall must not touch: it is where every choice the operator
+  # made about this install lives. Same guard as daemon.yaml in the systemd modes.
+  if [[ -f "$DESKTOP_CONFIG_FILE" ]]; then
+    echo "install: keeping existing config (not overwriting): ${DESKTOP_CONFIG_FILE}"
+    echo "install:   delete it to have this script render ${DESKTOP_CONFIG_TEMPLATE} again"
+  else
+    echo "install: writing config -> ${DESKTOP_CONFIG_FILE}"
+    render_template "$DESKTOP_CONFIG_TEMPLATE" "$DESKTOP_CONFIG_FILE" \
+      "__TDDY_DATA_DIR__=${TDDY_HOME}" \
+      "__DAEMON_LOG_DIR__=${DESKTOP_LOG_DIR}" \
+      "__AUTH_STORAGE_DIR__=${DESKTOP_AUTH_STORAGE_DIR}" \
+      "__INSTALL_BIN_DIR__=${BIN_DIR}"
+  fi
+  harden_installed_path "$DESKTOP_CONFIG_FILE"
+
+  # A release build reads $HOME/.tddy/desktop.yaml and has no second place to look, so an
+  # INSTALL_TDDY_HOME pointing elsewhere installs a config the application will never open. Worth
+  # saying out loud rather than leaving to a startup failure the operator sees as a crash on launch.
+  if [[ "$TDDY_HOME" != "${HOME}/.tddy" ]]; then
+    echo "install:   WARNING: a release build reads ${HOME}/.tddy/desktop.yaml and nothing else, but" >&2
+    echo "install:   this run installed the config at ${DESKTOP_CONFIG_FILE}. The application will" >&2
+    echo "install:   refuse to start until ${HOME}/.tddy/desktop.yaml exists." >&2
+  fi
+
+  desktop_warn_unless_on_path "$BIN_DIR"
+
+  echo "install: done. Launch it by name (\`tddy-desktop\`), or from the desktop environment."
+  echo "install:   logs: ${DESKTOP_LOG_DIR}/daemon"
+  echo "install:   config: ${DESKTOP_CONFIG_FILE} (edit it, then restart the application)"
+}
+
+if "$want_desktop"; then
+  install_desktop
+  exit 0
+fi
 
 if "$want_supervisor" && [[ "$DAEMON_USER" == "root" ]]; then
   echo "install: INSTALL_DAEMON_USER=root is not supported: tddy-supervisor rejects a root-run managed" >&2

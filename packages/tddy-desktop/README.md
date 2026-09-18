@@ -34,15 +34,41 @@ The application assembles the daemon with **`tddy_daemon::runtime::build`** unde
 minus the HTTP listener and systemd socket activation. The spawn worker is forked *before* any
 async runtime exists, because `fork` from a multi-threaded process can deadlock.
 
+Where the configuration comes from **depends on the build profile**, and the two have no fallback
+between them.
+
+**A release build** — what `./install --desktop` installs — reads **`~/.tddy/desktop.yaml`** and
+nothing else: no `TDDY_DAEMON_CONFIG`, no repo-root `dev.desktop.yaml`, no walk up the directory
+tree. An installed `.app` launched from the Dock has `/` for a working directory, so anything it
+found that way it would have found by accident. The file absent is a startup failure that names
+`./install --desktop`; `~/.tddy` is also the workspace root the application moves into.
+
+**A debug build** — `./desktop-dev`, `cargo run` — resolves from the checkout:
+
 1. **Workspace root**: **`TDDY_WORKSPACE_ROOT`**, else the nearest ancestor of the working
    directory (or of the executable) holding `dev.desktop.yaml`, or `Cargo.toml` next to
    `packages/tddy-desktop/package.json`. The application moves into it, so relative paths in the
    YAML mean what they mean for `./web-dev`.
-2. **`.env`**: repo-root **`.env`** is applied without replacing anything already exported — the
-   same rule as `./web-dev`.
-3. **Config**: **`TDDY_DAEMON_CONFIG`**, else repo-root **`dev.desktop.yaml`**. `CURRENT_USER` in
+2. **Config**: **`TDDY_DAEMON_CONFIG`**, else repo-root **`dev.desktop.yaml`**. `CURRENT_USER` in
    the YAML is substituted with the OS user, as `./web-dev` does. Neither found is a startup
    failure, not a default.
+
+Both profiles then apply the workspace root's **`.env`** without replacing anything already
+exported — the same rule as `./web-dev`.
+
+**`listen.web_port` is required** whichever profile is in play, although this application serves no
+HTTP: `runtime::build` refuses to assemble a daemon without it, and here the value names the loopback
+port a GitHub sign-in comes back on — `src-tauri/src/oauth_callback.rs` opens a one-path
+`/auth/callback` listener on 127.0.0.1 for the duration of a sign-in and closes it again.
+`github.redirect_uri` is derived from that port rather than read from the config.
+
+**Sessions need an identity**, and it is three blocks at once: `github:` (without it
+`build_auth_entries` returns no session-user resolver, and every session service is assembled behind
+one), `livekit.api_secret` (the only source of the token signer, required even with no common room)
+and `users:` (which OS user a login runs as, with no fallback). What `./install --desktop` renders
+leaves all three unset, so a fresh install starts onto its settings and offers no sessions until they
+are filled in — see
+[config-resolution-and-install.md](docs/config-resolution-and-install.md).
 
 ### UI ↔ daemon
 
