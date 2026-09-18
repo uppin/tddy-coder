@@ -45,11 +45,9 @@
 //! when the callers are ready.
 
 use std::collections::BTreeSet;
-use std::path::Path;
 
-use crate::apply::byte_offset;
-use crate::edit::{FileEdit, Position, Range, TextEdit, WorkspaceEdit};
-use crate::plan::{Reexport, RefactorKind, RefactorOp};
+use crate::edit::{FileEdit, Position, WorkspaceEdit};
+use crate::plan::{Reexport, RefactorOp};
 use crate::registry::Workspace;
 use crate::RestructureError;
 
@@ -97,72 +95,8 @@ pub struct Reference {
     pub at: Position,
 }
 
-/// Where a module is going, resolved from the plan's `to` and the destination's own manifest.
-///
-/// The crate *name* is never taken from the directory name: `packages/tddy-daemon-kernel` could
-/// declare any `[package] name`, and a caller's `use` path needs the declared one with its hyphens
-/// turned into underscores. Reading the manifest is the only correct source.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Destination {
-    /// The destination crate's directory, relative to the repository root, as the plan gave it.
-    pub dir: String,
-    /// `[package] name` from the destination's `Cargo.toml` — e.g. `tddy-daemon-kernel`.
-    pub package: String,
-    /// The identifier a `use` path needs — `package` with `-` replaced by `_`.
-    pub extern_name: String,
-}
-
-impl Destination {
-    /// Read a destination from its `Cargo.toml`.
-    ///
-    /// Refuses a directory with no manifest rather than creating one: a plan that names a crate
-    /// which does not exist is a plan defect, and scaffolding a crate is authoring, not moving.
-    pub fn read(root: &Path, dir: &str) -> Result<Destination> {
-        let manifest = root.join(dir).join("Cargo.toml");
-        let text = std::fs::read_to_string(&manifest).map_err(|error| {
-            RestructureError::MalformedPlan(format!(
-                "`{dir}` is not a crate: {} could not be read ({error})",
-                manifest.display()
-            ))
-        })?;
-        let package = declared_package_name(&text).ok_or_else(|| {
-            RestructureError::MalformedPlan(format!(
-                "{} declares no `[package] name`",
-                manifest.display()
-            ))
-        })?;
-
-        Ok(Destination {
-            dir: dir.to_string(),
-            package: package.to_string(),
-            extern_name: package.replace('-', "_"),
-        })
-    }
-}
-
-/// The `[package] name` a manifest declares, read without a TOML parser.
-///
-/// One key of one table is all this needs, and the shape it has to survive is a workspace manifest
-/// where `[dependencies]` and `[[bin]]` also carry a `name`. Scoping the search to the lines between
-/// `[package]` and the next table header is what keeps those out; a dependency's name being returned
-/// as the crate's would produce a `use` path that compiles nowhere.
-fn declared_package_name(manifest: &str) -> Option<&str> {
-    manifest
-        .lines()
-        .map(str::trim)
-        .skip_while(|line| *line != "[package]")
-        .skip(1)
-        .take_while(|line| !line.starts_with('['))
-        .filter_map(|line| line.split_once('='))
-        .find(|(key, _)| key.trim() == "name")
-        .and_then(|(_, value)| quoted(value))
-}
-
-/// The contents of the first double-quoted string in `value`, or `None` if it is not one.
-fn quoted(value: &str) -> Option<&str> {
-    let opened = value.trim_start().strip_prefix('"')?;
-    opened.find('"').map(|end| &opened[..end])
-}
+mod destination;
+pub use destination::*;
 
 /// One caller this move has to re-point, and the path it needs afterwards.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,7 +124,7 @@ pub struct Survey {
     /// The module file being moved, relative to the repository root.
     pub source: String,
     /// Where it is going.
-    pub destination: Destination,
+    pub destination: destination::Destination,
     /// Public items in the module that something outside it reaches.
     pub reached_from_outside: Vec<String>,
     /// Every caller found by `textDocument/references`, with its new path.
@@ -241,10 +175,10 @@ pub fn resolve(
     let (moving, survey, rewrites) = planned(engine, workspace, op)?;
 
     let moved = workspace.read(&moving.source)?;
-    let header = repointed_header(workspace, &moved, &moving.origin)?;
-    let crates_named = crates_the_moved_code_names(workspace, &moving.origin, &header)?;
-    let keeps_naming_it = crates_still_naming_the_module(workspace, &moving, &rewrites)?;
-    refuse_a_dependency_cycle(workspace, &moving, &header, &keeps_naming_it)?;
+    let header = header::repointed_header(workspace, &moved, &moving.origin)?;
+    let crates_named = refusals::crates_the_moved_code_names(workspace, &moving.origin, &header)?;
+    let keeps_naming_it = refusals::crates_still_naming_the_module(workspace, &moving, &rewrites)?;
+    refusals::refuse_a_dependency_cycle(workspace, &moving, &header, &keeps_naming_it)?;
 
     let mut changes = vec![FileEdit::Rename {
         from: moving.source.clone(),
@@ -259,7 +193,7 @@ pub fn resolve(
     changes.push(moving.declared_in_destination(workspace)?);
 
     if moving.reexport == Reexport::None {
-        changes.extend(caller_changes(workspace, rewrites)?);
+        changes.extend(moving::caller_changes(workspace, rewrites)?);
     }
 
     changes.push(moving.destination_manifest(workspace, &crates_named)?);
@@ -281,8 +215,8 @@ fn planned(
     engine: &mut dyn ModuleReferences,
     workspace: &Workspace<'_>,
     op: &RefactorOp,
-) -> Result<(Move, Survey, Vec<PlannedRewrite>)> {
-    let moving = Move::read(workspace, op)?;
+) -> Result<(moving::Move, Survey, Vec<PlannedRewrite>)> {
+    let moving = moving::Move::read(workspace, op)?;
 
     let mut reached = Vec::new();
     let mut callers = Vec::new();
@@ -296,12 +230,12 @@ fn planned(
 
         for reference in item.referenced_at {
             let text = workspace.read(&reference.path)?;
-            let written = written_path_at(&text, reference.at)?;
+            let written = header::written_path_at(&text, reference.at)?;
 
             // A reference reached through a name the file bound earlier writes no path to rewrite:
             // its own `use` declaration is a reference too, and re-pointing that one is what moves
             // the binding. Rewriting the bare name here would rewrite an identifier, not a path.
-            let Some(to) = repointed(&written.text, &moving) else {
+            let Some(to) = header::repointed(&written.text, &moving) else {
                 continue;
             };
 
@@ -332,1052 +266,30 @@ fn planned(
 }
 
 /// One path a caller writes, and the span of it to replace.
-struct PlannedRewrite {
-    path: String,
-    span: std::ops::Range<usize>,
-    to: String,
+pub(crate) struct PlannedRewrite {
+    pub(crate) path: String,
+    pub(crate) span: std::ops::Range<usize>,
+    pub(crate) to: String,
 }
 
-/// Everything the two entry points read out of the plan and the two manifests.
-struct Move {
-    /// The module file, relative to the repository root.
-    source: String,
-    /// The identifier the crate root declares — `host_registry`.
-    module: String,
-    /// Where the module sits in its crate and which file declares it.
-    home: ModuleHome,
-    /// The crate the module is leaving, read from its own manifest for the same reason the
-    /// destination is: a caller's `use` path needs the declared name, not the directory's.
-    origin: Destination,
-    /// The crate it is arriving in.
-    destination: Destination,
-    /// What to leave behind in the crate it left.
-    reexport: Reexport,
-}
+mod moving;
+pub(crate) use moving::*;
 
-impl Move {
-    fn read(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<Move> {
-        let source = op.anchor.file().to_string();
-        let module = module_name(&source)?;
-        let home = module_home(workspace, &source, &module)?;
-        let destination = op.to.as_deref().ok_or_else(|| {
-            malformed(
-                "`move_module_to_crate` needs `to`: the destination crate's directory, relative to \
-                 the repository root",
-            )
-        })?;
+mod refusals;
+pub(crate) use refusals::*;
 
-        Ok(Move {
-            origin: Destination::read(workspace.root, &home.crate_dir)?,
-            destination: Destination::read(workspace.root, destination)?,
-            reexport: op.reexport.unwrap_or(Reexport::None),
-            source,
-            module,
-            home,
-        })
-    }
+mod header;
 
-    /// Where the module file lands.
-    fn moved_to(&self) -> String {
-        format!("{}/src/{}.rs", self.destination.dir, self.module)
-    }
+mod module_home;
+pub use module_home::*;
 
-    /// The crate root that has to declare it afterwards.
-    fn destination_root(&self) -> String {
-        format!("{}/src/lib.rs", self.destination.dir)
-    }
+mod preconditions;
+pub use preconditions::*;
 
-    /// The file that declares the module today: its `mod` line is replaced by a facade, or removed.
-    fn left_behind(&self, workspace: &Workspace<'_>, survey: &Survey) -> Result<FileEdit> {
-        let path = self.home.declared_in.clone();
-        let text = workspace.read(&path)?;
-        let span = module_declaration(&text, &self.module).ok_or_else(|| {
-            let where_declared = if self.home.is_top_level() {
-                "crate root"
-            } else {
-                "parent module"
-            };
-            malformed(format!(
-                "{path} declares no `mod {}` — a module this {where_declared} does not declare is \
-                 not this crate's to move",
-                self.module
-            ))
-        })?;
+mod cluster;
+pub use cluster::*;
 
-        let facade = facade_line(
-            &self.destination,
-            self.reexport,
-            &survey.reached_from_outside,
-        );
-        let line = match facade {
-            // The declaration's line goes entirely, newline included, when nothing replaces it.
-            None => String::new(),
-            Some(facade) => format!("{facade}\n"),
-        };
-
-        Ok(FileEdit::Change {
-            path,
-            edits: vec![replacement(&text, span, &line)],
-        })
-    }
-
-    /// The destination crate root, declaring the module it is about to receive.
-    ///
-    /// `pub mod`, not `mod`: the module keeps its name and its callers keep writing it, which only
-    /// resolves from another crate if the module is public. That is also what a glob facade needs
-    /// to re-export.
-    fn declared_in_destination(&self, workspace: &Workspace<'_>) -> Result<FileEdit> {
-        let path = self.destination_root();
-        let text = workspace.read(&path)?;
-        let declaration = format!("pub mod {};\n", self.module);
-        let at = after_last_module_declaration(&text);
-
-        Ok(FileEdit::Change {
-            path,
-            edits: vec![replacement(&text, at..at, &declaration)],
-        })
-    }
-
-    /// The destination's manifest, gaining every crate the moved code names.
-    ///
-    /// Each dependency is copied from the manifest that already declares it rather than written
-    /// here: a version this operation invented would be a fact about the world it has no way to
-    /// know. The one it does author is the path back to the crate the module left, which is a fact
-    /// about this repository's own layout.
-    fn destination_manifest(
-        &self,
-        workspace: &Workspace<'_>,
-        named: &BTreeSet<String>,
-    ) -> Result<FileEdit> {
-        let path = format!("{}/Cargo.toml", self.destination.dir);
-        let text = workspace.read(&path)?;
-        let origin = workspace.read(&format!("{}/Cargo.toml", self.origin.dir))?;
-
-        let mut lines = Vec::new();
-        for extern_name in named {
-            if declares_dependency(&text, extern_name) {
-                continue;
-            }
-            if *extern_name == self.origin.extern_name {
-                lines.push(format!(
-                    "{} = {{ path = \"{}\" }}",
-                    self.origin.package,
-                    relative_from(&self.destination.dir, &self.origin.dir)
-                ));
-                continue;
-            }
-            let declared = dependency_line(&origin, extern_name).ok_or_else(|| {
-                malformed(format!(
-                    "the moved module names `{extern_name}`, which {}/Cargo.toml does not declare \
-                     — there is nothing to carry across",
-                    self.origin.dir
-                ))
-            })?;
-            lines.push(re_anchored(
-                &declared,
-                &self.origin.dir,
-                &self.destination.dir,
-            ));
-        }
-
-        Ok(FileEdit::Change {
-            path,
-            edits: with_dependencies(&text, &lines),
-        })
-    }
-
-    /// Every manifest that has to gain a dependency on the destination.
-    ///
-    /// Without this a move produces a tree that reads correctly and does not build: the facade, or
-    /// the caller this operation re-pointed, names a crate the manifest never heard of. It is the
-    /// one edit no unit test caught and the first `cargo check` did.
-    fn dependents_on_the_destination(
-        &self,
-        workspace: &Workspace<'_>,
-        crates: &BTreeSet<String>,
-    ) -> Result<Vec<FileEdit>> {
-        let mut changes = Vec::new();
-        for directory in crates {
-            let path = format!("{directory}/Cargo.toml");
-            let text = workspace.read(&path)?;
-            if declares_dependency(&text, &self.destination.extern_name) {
-                continue;
-            }
-
-            let line = format!(
-                "{} = {{ path = \"{}\" }}",
-                self.destination.package,
-                relative_from(directory, &self.destination.dir)
-            );
-            changes.push(FileEdit::Change {
-                path,
-                edits: with_dependencies(&text, &[line]),
-            });
-        }
-        Ok(changes)
-    }
-
-    /// The workspace root's `members`, gaining the destination when it is not already listed.
-    ///
-    /// Nothing is emitted when the root manifest declares no `members` array: there is no list for
-    /// the crate to be missing from, and inventing one would be authoring a workspace rather than
-    /// moving a module.
-    fn workspace_members(&self, workspace: &Workspace<'_>) -> Result<Vec<FileEdit>> {
-        let path = "Cargo.toml".to_string();
-        if !workspace.root.join(&path).exists() {
-            return Ok(Vec::new());
-        }
-
-        let text = workspace.read(&path)?;
-        let Some(members) = members_list(&text) else {
-            return Ok(Vec::new());
-        };
-        if text[members.clone()].contains(&format!("\"{}\"", self.destination.dir)) {
-            return Ok(Vec::new());
-        }
-
-        let entry = format!("    \"{}\",\n", self.destination.dir);
-        Ok(vec![FileEdit::Change {
-            path,
-            edits: vec![replacement(&text, members.end..members.end, &entry)],
-        }])
-    }
-}
-
-/// One `FileEdit::Change` per caller, carrying every path in that file at once.
-fn caller_changes(
-    workspace: &Workspace<'_>,
-    rewrites: Vec<PlannedRewrite>,
-) -> Result<Vec<FileEdit>> {
-    let paths: BTreeSet<String> = rewrites
-        .iter()
-        .map(|rewrite| rewrite.path.clone())
-        .collect();
-
-    let mut changes = Vec::new();
-    for path in paths {
-        let text = workspace.read(&path)?;
-        let edits = rewrites
-            .iter()
-            .filter(|rewrite| rewrite.path == path)
-            .map(|rewrite| replacement(&text, rewrite.span.clone(), &rewrite.to))
-            .collect();
-        changes.push(FileEdit::Change { path, edits });
-    }
-    Ok(changes)
-}
-
-/// A move that would make the two crates depend on each other is refused rather than written.
-///
-/// The crate the module left goes on naming it either way — through a facade, or through the
-/// callers this operation re-points — so it gains a dependency on the destination. If the moved
-/// code still names the crate it left, the destination depends on it back, and cargo refuses that
-/// pair with an error naming neither the module nor the operation that produced it. Refusing here
-/// names both, and names every path that forced it.
-fn refuse_a_dependency_cycle(
-    workspace: &Workspace<'_>,
-    moving: &Move,
-    header: &Header,
-    keeps_naming_it: &BTreeSet<String>,
-) -> Result<()> {
-    if !keeps_naming_it.contains(&moving.origin.dir) {
-        return Ok(());
-    }
-
-    let origin_dependencies = origin_named_dependencies(workspace, moving, header)?;
-    if origin_dependencies.is_empty() {
-        return Ok(());
-    }
-
-    Err(malformed(format!(
-        "`{}` still names `{}` ({}), so the destination would depend on the crate it left while \
-         that crate goes on naming the module it lost — move what those paths reach, or move the \
-         module's own dependencies with it",
-        moving.source,
-        moving.origin.package,
-        origin_dependencies.join(", ")
-    )))
-}
-
-/// Paths in the moved header that genuinely name the crate the module left, after re-export resolution.
-fn origin_named_dependencies(
-    workspace: &Workspace<'_>,
-    moving: &Move,
-    header: &Header,
-) -> Result<Vec<String>> {
-    let mut kept = Vec::new();
-    for path in &header.origin_paths {
-        match defining_crate(workspace, &moving.origin, path)? {
-            Some(defining) if defining == moving.destination.extern_name => {}
-            Some(defining) if defining == moving.origin.extern_name => kept.push(path.clone()),
-            Some(_) => {}
-            None => kept.push(path.clone()),
-        }
-    }
-    Ok(kept)
-}
-
-/// Every extern crate the moved code will need in its destination manifest.
-fn crates_the_moved_code_names(
-    workspace: &Workspace<'_>,
-    origin: &Destination,
-    header: &Header,
-) -> Result<BTreeSet<String>> {
-    let mut named = BTreeSet::new();
-    for path in &header.origin_paths {
-        match defining_crate(workspace, origin, path)? {
-            Some(defining) => {
-                named.insert(defining);
-            }
-            None => {
-                named.insert(origin.extern_name.clone());
-            }
-        }
-    }
-    for extern_name in &header.crates_named {
-        if extern_name != &origin.extern_name {
-            named.insert(extern_name.clone());
-        }
-    }
-    Ok(named)
-}
-
-/// Every crate directory that will name the destination once the move has been applied.
-///
-/// A facade keeps the crate the module left naming it. A re-pointed caller does the same from
-/// whichever crate it sits in, which need not be that one — a workspace-wide move re-points callers
-/// in crates the plan never mentioned, and each of them needs the dependency or stops compiling.
-fn crates_still_naming_the_module(
-    workspace: &Workspace<'_>,
-    moving: &Move,
-    rewrites: &[PlannedRewrite],
-) -> Result<BTreeSet<String>> {
-    let mut crates = BTreeSet::new();
-    if moving.reexport != Reexport::None {
-        crates.insert(moving.origin.dir.clone());
-        return Ok(crates);
-    }
-
-    for rewrite in rewrites {
-        crates.insert(crate_holding(workspace, &rewrite.path)?);
-    }
-    Ok(crates)
-}
-
-/// The crate directory a file belongs to — the nearest ancestor with a `Cargo.toml`.
-fn crate_holding(workspace: &Workspace<'_>, file: &str) -> Result<String> {
-    let mut directory = Path::new(file).parent();
-    while let Some(candidate) = directory {
-        if workspace.root.join(candidate).join("Cargo.toml").exists() {
-            return Ok(candidate.display().to_string());
-        }
-        directory = candidate.parent();
-    }
-
-    Err(malformed(format!(
-        "`{file}` is in no crate — no `Cargo.toml` stands above it, so there is no manifest to \
-         give the dependency its re-pointed path needs"
-    )))
-}
-
-/// What the moved file's `use` header says about the crates it needs.
-struct Header {
-    /// The edits that re-point it, empty when it names nothing that moved.
-    edits: Vec<TextEdit>,
-    /// Every crate the header names once re-pointed, by extern name.
-    crates_named: BTreeSet<String>,
-    /// The paths that now name the crate the module left, for a refusal that has to list them.
-    origin_paths: Vec<String>,
-}
-
-/// The moved file's own `use` header, re-pointed at the crate it left.
-///
-/// Inside the module, `crate::` and a top-level `super::` both named the crate it is leaving; in the
-/// destination they would name the destination. Only the qualifier is rewritten, and only in a `use`
-/// declaration — see this module's own documentation for why that is the whole of the header pass.
-fn repointed_header(workspace: &Workspace<'_>, text: &str, origin: &Destination) -> Result<Header> {
-    let mut header = Header {
-        edits: Vec::new(),
-        crates_named: BTreeSet::new(),
-        origin_paths: Vec::new(),
-    };
-
-    let mut offset = 0usize;
-    for line in text.split_inclusive('\n') {
-        let start = offset;
-        offset += line.len();
-
-        let Some((at, path)) = use_path(line) else {
-            continue;
-        };
-        let (qualifier, rest) = match path.split_once("::") {
-            Some(split) => split,
-            None => (path, ""),
-        };
-
-        if matches!(qualifier, "crate" | "super") {
-            let at = start + at;
-            let as_origin = format!("{}::{}", origin.extern_name, rest);
-            let (written_as, named) = match defining_crate(workspace, origin, &as_origin)? {
-                Some(defining) if defining != origin.extern_name => {
-                    (format!("{defining}::{rest}"), defining)
-                }
-                _ => (as_origin.clone(), origin.extern_name.clone()),
-            };
-            let new_qualifier = written_as
-                .split("::")
-                .next()
-                .unwrap_or(origin.extern_name.as_str());
-            header
-                .edits
-                .push(replacement(text, at..at + qualifier.len(), new_qualifier));
-            header.crates_named.insert(named);
-            header.origin_paths.push(written_as);
-            continue;
-        }
-        if !matches!(qualifier, "self" | "std" | "core" | "alloc") {
-            header.crates_named.insert(qualifier.to_string());
-        }
-    }
-
-    Ok(header)
-}
-
-/// The path a top-level `use` declaration names, and where on the line it starts.
-///
-/// An indented `use` belongs to a nested module or a function body; only the file's own header is
-/// this operation's to rewrite.
-fn use_path(line: &str) -> Option<(usize, &str)> {
-    let trimmed = line.trim_end();
-    if trimmed.starts_with(char::is_whitespace) {
-        return None;
-    }
-    for keyword in ["pub use ", "use "] {
-        if let Some(path) = trimmed.strip_prefix(keyword) {
-            return Some((keyword.len(), path.trim_end_matches(';')));
-        }
-    }
-    None
-}
-
-/// The path this caller writes, ending at the identifier the server reported.
-struct WrittenPath {
-    text: String,
-    span: std::ops::Range<usize>,
-}
-
-/// Read the whole `a::b::C` a reference sits at the end of.
-///
-/// The server reports where the item's own name is; what has to be replaced is everything leading
-/// to it, which is only readable from the caller's text.
-fn written_path_at(text: &str, at: Position) -> Result<WrittenPath> {
-    let start = byte_offset(text, at.line, at.col)?;
-    let end = start
-        + text[start..]
-            .find(|character: char| !is_path_character(character))
-            .unwrap_or(text.len() - start);
-
-    let mut first = start;
-    while let Some(head) = text[..first].strip_suffix("::") {
-        let segment = head.trim_end_matches(is_path_character);
-        if segment.len() == head.len() {
-            break;
-        }
-        first = segment.len();
-    }
-
-    Ok(WrittenPath {
-        text: text[first..end].to_string(),
-        span: first..end,
-    })
-}
-
-fn is_path_character(character: char) -> bool {
-    character.is_alphanumeric() || character == '_'
-}
-
-/// The same path, written from outside the crate the module is leaving.
-///
-/// `None` when the path never names the module: the caller reaches the item through a name bound
-/// somewhere else in its own file, and that binding is a reference of its own.
-fn repointed(written: &str, moving: &Move) -> Option<String> {
-    let segments: Vec<&str> = written.split("::").collect();
-    let at = segments
-        .iter()
-        .position(|segment| *segment == moving.module)?;
-    Some(format!(
-        "{}::{}",
-        moving.destination.extern_name,
-        segments[at..].join("::")
-    ))
-}
-
-/// The module file's own name — the identifier `mod` declares.
-fn module_name(source: &str) -> Result<String> {
-    let stem = Path::new(source)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .ok_or_else(|| malformed(format!("`{source}` is not a Rust module file")))?;
-
-    if matches!(stem, "lib" | "main" | "mod") {
-        return Err(malformed(format!(
-            "`{source}` is a crate or module root, not a module — moving one moves everything it \
-             declares, which is a plan of its own"
-        )));
-    }
-    Ok(stem.to_string())
-}
-
-/// Where a module sits in its crate: the crate that owns it, and the file that declares it.
-///
-/// Replaces the crate-root-only assumption [`source_crate_of`] encodes. A top-level module is
-/// declared by `<crate>/src/lib.rs`; a nested one by its parent's own module file, which Rust 2018
-/// allows to be either `<crate>/src/<parent>.rs` or `<crate>/src/<parent>/mod.rs`. Both are looked
-/// for, and the refusal survives only for a parent that exists as neither.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModuleHome {
-    /// The crate directory, relative to the repository root — `packages/tddy-daemon`.
-    pub crate_dir: String,
-    /// The file carrying this module's `mod` declaration. The crate root for a top-level module,
-    /// the parent's own module file otherwise.
-    pub declared_in: String,
-    /// The module path inside the crate, outermost first — `["model_registry", "store"]` for a
-    /// nested module, `["host_registry"]` for a top-level one.
-    pub path: Vec<String>,
-}
-
-impl ModuleHome {
-    /// Whether the crate root declares this module itself.
-    #[must_use]
-    pub fn is_top_level(&self) -> bool {
-        self.path.len() == 1
-    }
-}
-
-/// Resolve a module file to the crate that owns it and the file that declares it.
-///
-/// This is what lets a **directory-shaped** subsystem move. `source_crate_of` requires
-/// `<crate>/src/<module>.rs` and refuses everything deeper before rust-analyzer is spawned, which
-/// is not an edge case — it is the normal shape of a subsystem worth extracting.
-///
-/// The nesting is not guessed: the anchor already carries it, and the parent's declaring file is
-/// **located** on disk rather than assumed.
-///
-/// # Errors
-///
-/// Refuses when `source` is not under a crate's `src/`, and when the parent module exists as
-/// neither `<crate>/src/<parent>.rs` nor `<crate>/src/<parent>/mod.rs` — naming both paths it
-/// looked for.
-pub fn module_home(workspace: &Workspace<'_>, source: &str, module: &str) -> Result<ModuleHome> {
-    let crate_dir = crate_holding(workspace, source)?;
-    let src_prefix = format!("{crate_dir}/src/");
-    let within_src = source.strip_prefix(&src_prefix).ok_or_else(|| {
-        malformed(format!(
-            "`{source}` is not under `{src_prefix}` — `move_module_to_crate` moves a module \
-             inside a crate's `src/` tree"
-        ))
-    })?;
-
-    let path = module_path_within_src(within_src, module)?;
-    let declared_in = if path.len() == 1 {
-        format!("{crate_dir}/src/lib.rs")
-    } else {
-        parent_declaring_file(workspace, &crate_dir, &path[..path.len() - 1])?
-    };
-
-    Ok(ModuleHome {
-        crate_dir,
-        declared_in,
-        path,
-    })
-}
-
-/// The module path a file under `src/` carries, ending in `module`.
-fn module_path_within_src(within_src: &str, module: &str) -> Result<Vec<String>> {
-    let top_level = format!("{module}.rs");
-    if within_src == top_level {
-        return Ok(vec![module.to_string()]);
-    }
-
-    let nested_suffix = format!("/{module}.rs");
-    if let Some(parent) = within_src.strip_suffix(&nested_suffix) {
-        if parent.is_empty() {
-            return Err(malformed(format!(
-                "`{within_src}` is not a nested module file path this operation understands"
-            )));
-        }
-        let path = parent
-            .split('/')
-            .map(str::to_string)
-            .chain(std::iter::once(module.to_string()))
-            .collect();
-        return Ok(path);
-    }
-
-    Err(malformed(format!(
-        "`{within_src}` is not `<crate>/src/{module}.rs` or \
-         `<crate>/src/<parent>/…/{module}.rs`"
-    )))
-}
-
-/// The parent's own module file — `<parent>.rs` or `<parent>/mod.rs`.
-fn parent_declaring_file(
-    workspace: &Workspace<'_>,
-    crate_dir: &str,
-    parent: &[String],
-) -> Result<String> {
-    let parent_base = parent.join("/");
-    let as_rs = format!("{crate_dir}/src/{parent_base}.rs");
-    let as_mod = format!("{crate_dir}/src/{parent_base}/mod.rs");
-
-    if workspace.root.join(&as_rs).exists() {
-        return Ok(as_rs);
-    }
-    if workspace.root.join(&as_mod).exists() {
-        return Ok(as_mod);
-    }
-
-    Err(malformed(format!(
-        "no parent module file for `{parent_base}` — looked for `{as_rs}` and `{as_mod}`"
-    )))
-}
-
-/// The crate that **defines** what an origin-named path reaches, resolving one level of re-export.
-///
-/// A back-compat facade in the origin — `pub use tddy_daemon_kernel::config;` — makes
-/// rust-analyzer canonicalise a caller's `crate::config::DaemonConfig` as
-/// `tddy_daemon::config::DaemonConfig`. [`refuse_a_dependency_cycle`] reads that as the destination
-/// depending on the crate it left, and refuses a move that is in fact clean.
-///
-/// Returns the defining crate's **extern name** when `path` resolves through a re-export, and
-/// `None` when the origin genuinely defines the item — which is the case the refusal is for.
-///
-/// # Errors
-///
-/// Refuses when the origin's crate root cannot be read.
-pub fn defining_crate(
-    workspace: &Workspace<'_>,
-    origin: &Destination,
-    path: &str,
-) -> Result<Option<String>> {
-    let segments: Vec<&str> = path.split("::").collect();
-    if segments.is_empty() {
-        return Ok(None);
-    }
-
-    let head = segments[0];
-    if head != origin.extern_name {
-        return Ok(Some(head.to_string()));
-    }
-
-    let module = segments
-        .get(1)
-        .ok_or_else(|| malformed(format!("`{path}` names the crate but no module inside it")))?;
-
-    defining_module_in_crate(workspace, origin, module)
-}
-
-/// Whether `module` is defined in `origin` itself, or re-exported from another crate.
-///
-/// `None` when the origin's own sources define it; `Some(extern_name)` when a `pub use` brings it in.
-fn defining_module_in_crate(
-    workspace: &Workspace<'_>,
-    origin: &Destination,
-    module: &str,
-) -> Result<Option<String>> {
-    let lib = format!("{}/src/lib.rs", origin.dir);
-    let text = workspace.read(&lib)?;
-
-    if let Some(re_export) = re_export_target(&text, module) {
-        return Ok(Some(re_export));
-    }
-
-    if module_declaration(&text, module).is_some() {
-        return Ok(None);
-    }
-
-    Ok(None)
-}
-
-/// The extern crate a `pub use` in `text` re-exports `module` from, if any.
-fn re_export_target(text: &str, module: &str) -> Option<String> {
-    for line in text.lines() {
-        let trimmed = line.trim();
-        let declaration = trimmed
-            .strip_prefix("pub use ")
-            .or_else(|| trimmed.strip_prefix("use "));
-        let Some(rest) = declaration else {
-            continue;
-        };
-        let rest = rest.trim_end_matches(';').trim();
-        let (path, alias) = match rest.split_once(" as ") {
-            Some((path, alias)) => (path.trim(), alias.trim()),
-            None => (rest, ""),
-        };
-
-        if !alias.is_empty() {
-            if alias == module {
-                return extern_crate_of_use_path(path);
-            }
-            continue;
-        }
-
-        if let Some(name) = path.rsplit("::").next() {
-            if name == module {
-                return extern_crate_of_use_path(path);
-            }
-        }
-
-        if let Some(inner) = path
-            .strip_prefix('{')
-            .and_then(|group| group.strip_suffix('}'))
-        {
-            for item in inner.split(',') {
-                let item = item.trim();
-                if item == module {
-                    return extern_crate_of_use_path(path);
-                }
-                if let Some((_, alias)) = item.split_once(" as ") {
-                    if alias.trim() == module {
-                        return extern_crate_of_use_path(path);
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-/// The first segment of a `use` path — the crate it names.
-fn extern_crate_of_use_path(path: &str) -> Option<String> {
-    path.split("::").next().map(str::to_string)
-}
-
-/// Every precondition [`resolve`] enforces before it consults rust-analyzer.
-///
-/// `restructure check` reported `no findings` on plans that `apply` then rejected outright — twice,
-/// on the nested-module refusal and on the cluster one. Both decisions are made before the server
-/// is spawned, so `check` can reach the same verdict statically and for free.
-///
-/// Returns one message per operation that cannot run, in plan order; empty when the plan's
-/// cross-crate moves are all viable.
-///
-/// # Errors
-///
-/// Refuses when a file the preconditions must read cannot be.
-pub fn unrunnable_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Result<Vec<String>> {
-    let mut findings = Vec::new();
-    for op in ops {
-        if op.op != RefactorKind::MoveModuleToCrate {
-            continue;
-        }
-        if let Err(refusal) = move_preconditions(workspace, op) {
-            findings.push(refusal.to_string());
-        }
-    }
-    Ok(findings)
-}
-
-/// Every check [`resolve`] runs before it consults rust-analyzer.
-pub(crate) fn move_preconditions(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<()> {
-    let moving = Move::read(workspace, op)?;
-    let text = workspace.read(&moving.home.declared_in)?;
-    if module_declaration(&text, &moving.module).is_none() {
-        let where_declared = if moving.home.is_top_level() {
-            "crate root"
-        } else {
-            "parent module"
-        };
-        return Err(malformed(format!(
-            "{declared_in} declares no `mod {module}` — a module this {where_declared} does not \
-             declare is not this crate's to move",
-            declared_in = moving.home.declared_in,
-            module = moving.module,
-            where_declared = where_declared
-        )));
-    }
-    Ok(())
-}
-
-/// A set of modules that move to one destination **as a single unit**.
-///
-/// `move_module_to_crate` models one module, and that is why a mutually-referencing subsystem
-/// cannot move: the header pass re-points every `crate::` path at the *origin*, so a reference to a
-/// sibling that is also moving becomes a `destination → origin` edge; and the reference survey runs
-/// against a tree where the siblings have not moved, so moving one rewrites the others' callers
-/// before they are correct. Between the first operation and the last the tree does not compile,
-/// which is why there is no intermediate state to verify against.
-///
-/// `#unbundle` node 3 moved **0 of 4** entangled modules for exactly this reason.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MovingCluster {
-    /// Every module in the set, in the order the plan named them.
-    pub members: Vec<ModuleHome>,
-    /// Where they are all going.
-    pub destination: Destination,
-    /// What each leaves behind in the crate it left.
-    pub reexport: Reexport,
-}
-
-impl MovingCluster {
-    /// The module paths moving together, as a `crate::`-relative path would write them.
-    ///
-    /// This is what the header pass needs in order to tell a sibling that is coming along from one
-    /// that is staying behind — the distinction the single-module model cannot express.
-    #[must_use]
-    pub fn co_moving(&self) -> BTreeSet<String> {
-        self.members
-            .iter()
-            .map(|member| member.path.join("::"))
-            .collect()
-    }
-}
-
-/// Resolve a whole cluster into one edit, applied all or not at all.
-///
-/// Every member's callers are surveyed against the **post-move** shape of the set, so a reference to
-/// a co-moving sibling is re-pointed at the destination rather than at the crate it left. The
-/// returned edit is the union: there is no ordering in which the tree is half-moved.
-///
-/// # Errors
-///
-/// Refuses for every reason a single move does, plus: a member that names a crate outside the set
-/// which the destination cannot depend on, and a set whose members do not share one destination.
-pub fn resolve_cluster(
-    _engine: &mut dyn ModuleReferences,
-    _workspace: &Workspace<'_>,
-    _cluster: &MovingCluster,
-) -> Result<WorkspaceEdit> {
-    // TODO(restructure-clusters): implement
-    todo!("resolve_cluster: move a mutually-referencing set as one unit")
-}
-
-/// The modules a plan's cross-crate moves leave behind that still reference what moved.
-///
-/// The cluster defect's worse half is that `check` cannot see it: a four-operation plan reported
-/// `no findings` and was then rejected by `apply`. This names, for a plan that moves some of a
-/// mutually-referencing set, the members it left behind — which is the finding that would have made
-/// that plan legible before it ran.
-///
-/// Empty when every move's siblings either come along or do not reference it.
-///
-/// # Errors
-///
-/// Refuses when a file the check must read cannot be.
-pub fn siblings_left_behind(
-    _workspace: &Workspace<'_>,
-    _ops: &[RefactorOp],
-) -> Result<Vec<String>> {
-    // TODO(restructure-clusters): implement
-    todo!("siblings_left_behind: name the members a partial cluster move would strand")
-}
-
-/// The span of the `mod <module>;` line in a crate root, newline included.
-fn module_declaration(text: &str, module: &str) -> Option<std::ops::Range<usize>> {
-    let mut offset = 0usize;
-    for line in text.split_inclusive('\n') {
-        let start = offset;
-        offset += line.len();
-
-        let declaration = line.trim();
-        let declaration = declaration.strip_prefix("pub ").unwrap_or(declaration);
-        if declaration == format!("mod {module};") {
-            return Some(start..offset);
-        }
-    }
-    None
-}
-
-/// Where a new `mod` declaration goes in a crate root: after the last one already there, and after
-/// the file's own header when it declares none.
-///
-/// Placed rather than sorted in, because a crate root's `mod` order is the author's and nothing
-/// here knows what it means.
-fn after_last_module_declaration(text: &str) -> usize {
-    let mut offset = 0usize;
-    let mut header_ends = 0usize;
-    let mut in_header = true;
-    let mut last_declaration = None;
-
-    for line in text.split_inclusive('\n') {
-        offset += line.len();
-        let trimmed = line.trim();
-
-        if in_header
-            && (trimmed.is_empty() || trimmed.starts_with("//!") || trimmed.starts_with("#!"))
-        {
-            header_ends = offset;
-        } else {
-            in_header = false;
-        }
-
-        let declaration = trimmed.strip_prefix("pub ").unwrap_or(trimmed);
-        if declaration.starts_with("mod ") && declaration.ends_with(';') {
-            last_declaration = Some(offset);
-        }
-    }
-
-    last_declaration.unwrap_or(header_ends)
-}
-
-/// Whether a manifest already declares a dependency on the crate with this extern name.
-fn declares_dependency(manifest: &str, extern_name: &str) -> bool {
-    dependency_line(manifest, extern_name).is_some()
-}
-
-/// The line declaring one dependency, verbatim, out of a manifest that has it.
-fn dependency_line(manifest: &str, extern_name: &str) -> Option<String> {
-    dependencies_of(manifest)
-        .into_iter()
-        .find(|line| {
-            line.split('=')
-                .next()
-                .map(|key| key.trim().replace('-', "_") == extern_name)
-                .unwrap_or_default()
-        })
-        .map(str::to_string)
-}
-
-/// The lines of a manifest's `[dependencies]` table.
-fn dependencies_of(manifest: &str) -> Vec<&str> {
-    manifest
-        .lines()
-        .map(str::trim_end)
-        .skip_while(|line| line.trim() != "[dependencies]")
-        .skip(1)
-        .take_while(|line| !line.trim_start().starts_with('['))
-        .filter(|line| line.contains('='))
-        .collect()
-}
-
-/// The manifest with `lines` added to its `[dependencies]` table.
-fn with_dependencies(manifest: &str, lines: &[String]) -> Vec<TextEdit> {
-    if lines.is_empty() {
-        return Vec::new();
-    }
-
-    let added = lines.join("\n") + "\n";
-    match end_of_dependencies(manifest) {
-        Some(at) => vec![replacement(manifest, at..at, &added)],
-        // A manifest with no `[dependencies]` gains the table the moved code needs, at the end
-        // where a table cannot land inside another one.
-        None => vec![replacement(
-            manifest,
-            manifest.len()..manifest.len(),
-            &format!("\n[dependencies]\n{added}"),
-        )],
-    }
-}
-
-/// Where a manifest's `[dependencies]` table ends, or `None` when it declares none.
-fn end_of_dependencies(manifest: &str) -> Option<usize> {
-    let mut offset = 0usize;
-    let mut found = None;
-    let mut inside = false;
-
-    for line in manifest.split_inclusive('\n') {
-        offset += line.len();
-
-        let trimmed = line.trim();
-        if trimmed == "[dependencies]" {
-            inside = true;
-            found = Some(offset);
-            continue;
-        }
-        if inside {
-            if trimmed.starts_with('[') {
-                return found;
-            }
-            if !trimmed.is_empty() {
-                found = Some(offset);
-            }
-        }
-    }
-    found
-}
-
-/// The span of a workspace manifest's `members` array, between its brackets.
-fn members_list(manifest: &str) -> Option<std::ops::Range<usize>> {
-    let opened = manifest.find("members")?;
-    let start = manifest[opened..].find('[')? + opened + 1;
-    let end = manifest[start..].find(']')? + start;
-    Some(start..end)
-}
-
-/// A copied dependency line, with a relative `path` re-anchored on the crate receiving it.
-///
-/// `path = "../tddy-lsp"` means different crates read from different directories. Copying the line
-/// verbatim is how a manifest ends up pointing at a crate that is not the one it was copied from —
-/// or at nothing, which at least fails loudly.
-fn re_anchored(declared: &str, from: &str, to: &str) -> String {
-    let Some((head, rest)) = declared.split_once("path = \"") else {
-        return declared.to_string();
-    };
-    let Some((path, tail)) = rest.split_once('"') else {
-        return declared.to_string();
-    };
-    if path.starts_with('/') {
-        return declared.to_string();
-    }
-
-    let target = normalized(&format!("{from}/{path}"));
-    format!("{head}path = \"{}\"{tail}", relative_from(to, &target))
-}
-
-/// A slash-separated path with its `.` and `..` components resolved.
-fn normalized(path: &str) -> String {
-    let mut parts: Vec<&str> = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            part => parts.push(part),
-        }
-    }
-    parts.join("/")
-}
-
-/// The path from one directory to another, both relative to the repository root.
-fn relative_from(from: &str, to: &str) -> String {
-    let from: Vec<&str> = from.split('/').filter(|part| !part.is_empty()).collect();
-    let to: Vec<&str> = to.split('/').filter(|part| !part.is_empty()).collect();
-    let shared = from
-        .iter()
-        .zip(&to)
-        .take_while(|(left, right)| left == right)
-        .count();
-
-    let up = std::iter::repeat_n("..", from.len() - shared);
-    up.chain(to[shared..].iter().copied())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-/// A replacement of one byte span, in the coordinates [`crate::apply`] reads edits back in.
-fn replacement(text: &str, span: std::ops::Range<usize>, new_text: &str) -> TextEdit {
-    TextEdit {
-        range: Range {
-            start: position_of(text, span.start),
-            end: position_of(text, span.end),
-        },
-        new_text: new_text.to_string(),
-    }
-}
-
-/// The one-based line/column a byte offset sits at.
-fn position_of(text: &str, offset: usize) -> Position {
-    let before = &text[..offset];
-    Position {
-        line: before.matches('\n').count() as u32 + 1,
-        col: before
-            .rsplit('\n')
-            .next()
-            .map_or(0, |line| line.chars().count()) as u32
-            + 1,
-    }
-}
+mod manifest_edits;
 
 /// The `pub use` line a facade leaves in the crate the module left.
 ///
@@ -1387,7 +299,7 @@ fn position_of(text: &str, offset: usize) -> Position {
 /// reaches, which the survey already knows. [`Reexport::None`] leaves nothing, and then every caller
 /// in the survey is rewritten instead.
 pub fn facade_line(
-    destination: &Destination,
+    destination: &destination::Destination,
     reexport: Reexport,
     reached: &[String],
 ) -> Option<String> {
@@ -1442,8 +354,8 @@ mod tests {
         }
     }
 
-    fn a_destination_named(package: &str) -> Destination {
-        Destination {
+    fn a_destination_named(package: &str) -> destination::Destination {
+        destination::Destination {
             dir: format!("packages/{package}"),
             package: package.to_string(),
             extern_name: package.replace('-', "_"),
@@ -1542,7 +454,7 @@ mod tests {
                 .match_indices(item)
                 .map(|(offset, _)| Reference {
                     path: file.to_string(),
-                    at: position_of(&text, offset),
+                    at: manifest_edits::position_of(&text, offset),
                 })
                 .collect(),
         }
@@ -1598,7 +510,7 @@ mod tests {
         std::fs::create_dir_all(root.path().join("packages/tddy-host-service")).unwrap();
 
         // When
-        let outcome = Destination::read(root.path(), "packages/tddy-host-service");
+        let outcome = destination::Destination::read(root.path(), "packages/tddy-host-service");
 
         // Then
         assert_refusal(outcome)
@@ -1621,7 +533,7 @@ mod tests {
         .unwrap();
 
         // When
-        let destination = Destination::read(root.path(), "packages/host-svc").unwrap();
+        let destination = destination::Destination::read(root.path(), "packages/host-svc").unwrap();
 
         // Then
         assert_eq!(destination.package, "tddy-host-service");
@@ -1969,7 +881,11 @@ mod tests {
         let declared = "tddy-lsp = { path = \"../tddy-lsp\" }";
 
         // When
-        let carried = re_anchored(declared, "packages/tddy-daemon", "packages/services/hosts");
+        let carried = manifest_edits::re_anchored(
+            declared,
+            "packages/tddy-daemon",
+            "packages/services/hosts",
+        );
 
         // Then
         assert_eq!(carried, "tddy-lsp = { path = \"../../tddy-lsp\" }");
