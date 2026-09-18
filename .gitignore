@@ -91,3 +91,6 @@ local.bun.lock
 # capture writes its normalized output under coverage/.
 *.profraw
 /coverage/
+
+.codegraph
+
