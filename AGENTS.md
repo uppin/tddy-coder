@@ -168,6 +168,9 @@ Without the env var, tests start a fresh container via testcontainers (default).
 - Use `--no-verify` flag when committing or pushing
 - Commit secrets, tokens, or `.env` files
 - Modify `packages/*/docs/` directly — use changeset workflow via `docs/dev/1-WIP/`
+  (**one exception**: `packages/*/docs/code-issues/` records, which `/analyze-code-issues` and
+  `/green` write straight in — they are standing measurements with their own reconciliation
+  contract, and routing one through a changeset would delete it at the next wrap)
 
 **ASK**
 - Before adding external dependencies
@@ -207,6 +210,15 @@ When a feature includes a demo (e.g. `demo-plan.md`), the demo must run **via a 
 ## Documentation Hierarchy
 
 - `packages/*/docs/` — Technical implementation (HOW) per package
+- **`packages/*/docs/code-issues/`** — **Standing analyzer and structural findings**, one file per
+  issue, named `<category>-<file-slug>[-<symbol>].md` with **no date** (a finding is a property of
+  the code, so a re-run updates the file that already names that symbol). Written by
+  `/analyze-code-issues`, read by planning **Step 2b**. An issue carrying `**Claimed by:** #NNN` has
+  a PR already in flight to fix it — a change landing in that code **stops and asks** the developer
+  whether to proceed and add to the debt, wait for that PR, or narrow scope. **Deleted at wrap once
+  closed** — with the final measurement recorded in the change-history entry first — so the listing
+  is always the open set; a **partly** fixed record is narrowed, never deleted. Policy:
+  [`deferred-work`](.agents/skills/deferred-work/SKILL.md)
 - `docs/ft/` — Product requirements (WHAT) by product area
 - `docs/dev/1-WIP/` — Active changesets (cross-package deltas)
 - `docs/dev/changesets/` — Cross-package changeset history: **one file per changeset**, `YYYY-MM-DD-<slug>.md`. Add a new file; never append to an existing one, and never add an index

@@ -62,13 +62,46 @@ tddy-tools analyze duplicate-tests --coverage-dir coverage
 
 Writes `coverage/duplicate-tests/duplicate-tests.html` and `subset-tests.html`.
 
-### 6. Produce a targeting note
+### 6. Verify by hand, then persist a record per finding
+
+`coverage/` is **gitignored scratch**. A finding that stays there is gone by the next session, which
+is why the CRAP scores this repo has produced before reached planning only when somebody
+transcribed them into `docs/dev/todo/` by hand.
+
+**Verify first.** Every analyzer has blind spots. Open the function, check the score is about what
+you think it is about, and record what the tool got wrong. An unverified finding is a lead, not an
+issue.
+
+Then write one file per verified finding to **`packages/<pkg>/docs/code-issues/`**, following
+[`deferred-work/references/code-issue-record.md`](../deferred-work/references/code-issue-record.md):
+
+```
+packages/tddy-session-lifecycle/docs/code-issues/crap-telegram-bot-callback-handler.md
+```
+
+**Reconcile, never duplicate.** One file per `(category, file, symbol)`. A re-run appends a
+`Measurement history` row to the file that already names that symbol; it does not deposit a second
+copy.
+
+**A finding this run shows has gone is deleted** — but not by this skill. Closing a record is the
+wrap's job (`/pr-wrap` step 7.5), because the deletion has to be tied to the change that caused it
+and its final numbers recorded in that change's history entry. What this skill does on a re-run is
+**re-measure**: append the row, and narrow a record whose finding has shrunk. If a record's finding
+is gone with no change in flight to attribute it to, say so in the targeting note and let the
+developer decide.
+
+These records are what planning Step 2b reads, and they are the one thing this skill may write into
+`packages/*/docs/` directly.
+
+### 7. Produce a targeting note
 
 Summarize for the developer:
 
 - Top CRAP functions from `report.html` (complex **and** untested)
 - Join rate from stderr (low join → complexity/coverage path mismatch)
 - Duplicate signature groups (if run)
+- The records written or reconciled, by path
+- Whether any finding is already **claimed** by an open PR — if so it stays open, and say which PR
 - **Hand off** — do not start restructuring in this skill
 
 ## CRAP formula
@@ -79,5 +112,6 @@ Join key is `(file, declaration line)`, never function name.
 
 ## References
 
+- [`deferred-work`](../deferred-work/SKILL.md) — the record this skill writes, and the policy around it
 - [Rust code analysis](../../docs/ft/coder/rust-code-analysis.md)
 - [`tddy-code-analysis` README](../../packages/tddy-code-analysis/README.md)

@@ -21,6 +21,32 @@ rebase, dependency and boundary rules that step 0 below only enforces.
 
 **Test style note**: `fluent-tests` is the mandatory test style for this repo. Tests are normally left unchanged in green phase. If a test adjustment is truly necessary, the edited test must remain compliant with `.agents/skills/fluent-tests/` (Given/When/Then, one behavior per test, named helpers, meaningful fixtures). Never weaken test structure to force passage.
 
+
+## Step 0.5: Execute the restructure prerequisite — BEFORE any implementation
+
+If the changeset's `## Prerequisites` carries a **Restructure Prerequisite** block
+([`deferred-work`](../skills/deferred-work/references/planning-cross-check.md)), run it **first**, in
+its **own commit**, and implement nothing in it.
+
+Implementing on top of a structure you are about to change means writing the code twice and
+reviewing a diff that is both at once.
+
+Three contract points:
+
+1. **The baseline is carved out.** `/code-restructuring` demands a green baseline and calls a red one
+   a stop — but a changeset from `/plan-red` **has red tests by design**. The restructure changeset's
+   `## Baseline` lists those by name as known-red; anything red that is **not** on that list is still
+   a stop.
+2. **This changeset's own red tests get rewritten** by the restructure, mechanically, and that is
+   correct. They must still fail **for the same reason** afterwards — a red test that stops failing
+   during a restructure has been broken, not fixed. Verify it.
+3. **It stays behaviour-preserving.** If a seam turns out to need the feature's behaviour to exist
+   first, that is a planning error: stop and re-sequence rather than sliding implementation into the
+   restructure commit.
+
+Then close or narrow the code issues the restructure addressed — **narrow, if the fix was partial**.
+A partial fix written up as resolved drops the remainder out of every open-items query.
+
 ## Workflow
 
 ### 0. If This PR Is Part of a Stack — Pre-run (HARD GATE)
