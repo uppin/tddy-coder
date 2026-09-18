@@ -60,6 +60,31 @@ impl Move {
         })
     }
 
+    /// The move of one member of a cluster, whose home the set already carries.
+    ///
+    /// [`Move::read`] resolves a home out of a plan's anchor. A cluster's members arrive already
+    /// resolved, and deriving each one back out of a synthetic anchor would be inventing a plan in
+    /// order to read it again.
+    pub(crate) fn of(
+        workspace: &Workspace<'_>,
+        home: &module_home::ModuleHome,
+        destination: &destination::Destination,
+        reexport: Reexport,
+    ) -> Result<Move> {
+        let module = home.path.last().cloned().ok_or_else(|| {
+            malformed("a cluster member names no module — a module path is at least one identifier")
+        })?;
+
+        Ok(Move {
+            origin: destination::Destination::read(workspace.root, &home.crate_dir)?,
+            destination: destination.clone(),
+            reexport,
+            source: format!("{}/src/{}.rs", home.crate_dir, home.path.join("/")),
+            module,
+            home: home.clone(),
+        })
+    }
+
     /// Where the module file lands.
     pub(crate) fn moved_to(&self) -> String {
         format!("{}/src/{}.rs", self.destination.dir, self.module)

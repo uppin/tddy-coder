@@ -1,7 +1,7 @@
 use super::malformed;
 
 use crate::{
-    crate_move::{manifest_edits, moving},
+    crate_move::{cluster, manifest_edits, moving},
     plan::RefactorKind,
 };
 
@@ -17,8 +17,12 @@ use crate::registry::Workspace;
 /// on the nested-module refusal and on the cluster one. Both decisions are made before the server
 /// is spawned, so `check` can reach the same verdict statically and for free.
 ///
-/// Returns one message per operation that cannot run, in plan order; empty when the plan's
-/// cross-crate moves are all viable.
+/// Returns one message per operation that cannot run, in plan order, and then what the plan as a
+/// whole would strand; empty when the plan's cross-crate moves are all viable.
+///
+/// The second half is read across the plan rather than per operation, because that is the question:
+/// whether a module's siblings are named by the *plan*, not by the operation moving it. An
+/// operation is viable on its own and leaves a mutually-referencing set half moved.
 ///
 /// # Errors
 ///
@@ -33,6 +37,7 @@ pub fn unrunnable_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Result
             findings.push(refusal.to_string());
         }
     }
+    findings.extend(cluster::siblings_left_behind(workspace, ops)?);
     Ok(findings)
 }
 

@@ -3,7 +3,12 @@
 **Date**: 2026-09-15
 **Status**: 🚧 In Progress
 **Type**: Feature (tooling capability)
-**Stack**: `#carve` 3/9
+**Stack**: `#carve` 3/10
+
+> **Numbering note.** These documents were written when the stack was planned as **9** nodes and say
+> `3/9` throughout; the stack is now **10**, which is what the PR titles and the merged
+> `#carve 1/10` / `#carve 2/10` subjects on `master` say. `N` is the live number — renumbering the
+> prose is `/pr-wrap`'s title pass, not green's.
 **PR**: [#490](https://github.com/uppin/tddy-coder/pull/490)
 
 PRD: [`2026-09-15-carve-restructure-clusters-prd.md`](./2026-09-15-carve-restructure-clusters-prd.md)
@@ -131,23 +136,44 @@ and carving it first means the manual work lands in files small enough to review
   - `tests/cluster_move.rs` — 4 failing on `siblings_left_behind` and `state_directory_for_plan`;
     `names_the_modules_travelling_together` passes, pinning the data shape the rest builds on.
 - [x] Failing unit/integration tests — covered by the same suite; neither decision needs a server, which is the point
-- [ ] Implement production code making tests pass (`/green`)
-- [ ] Re-file the two cosmetic restructure defects as their own todo entry
+- [x] Implement production code making tests pass (`/green`) — 380 passed / 0 failed across 14 targets
+- [x] Re-file the two cosmetic restructure defects as their own todo entry — [`2026-09-18-cross-crate-move-cosmetic-facade-and-mod-ordering.md`](../todo/2026-09-18-cross-crate-move-cosmetic-facade-and-mod-ordering.md)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — correct the title, ready for review
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
 
 ## Verification
 
-**Inherited red from `#carve` 1/9:** this branch's baseline is **297 passed, 10 failed** — node 1's
-own failing tests, which it has not been greened on yet. They are its red, not this node's.
+**The inherited red is gone.** That baseline (297 passed / 10 failed) was recorded while `#carve`
+1/9 was un-greened below this branch. 1/9 merged as [#488](https://github.com/uppin/tddy-coder/pull/488)
+and 2/9 as [#489](https://github.com/uppin/tddy-coder/pull/489), so this branch was rebased onto
+`master` with `--onto` and its range is now this node's commits only.
+
+**Measure this crate with `--no-fail-fast`.** `./test` does not pass it, and `tests/cluster_move.rs`
+is only the 3rd of 13 suites alphabetically, so while it was red a plain `./test` aborted there and
+**silently skipped nine suites**. The honest baseline was **362 passed / 4 failed** across 14 targets;
+green is **380 / 0**.
 
 ```bash
-./test -p tddy-code-restructuring
-cargo clippy -p tddy-code-restructuring -- -D warnings
+cargo test -p tddy-code-restructuring --all-targets --no-fail-fast
+cargo clippy -p tddy-code-restructuring -p tddy-index-daemon --all-targets -- -D warnings
 cargo fmt --all --check
 ```
 
 Plus a **live** cluster apply against this workspace. The backlog records that the refusals are
 unit-tested only, and that this is exactly what let both defects reach a real stack — so AC1 and AC5
 are proven against a real rust-analyzer, not a double.
+
+⚠️ **Outstanding for `/validate-changes`, and deliberately not done in green:**
+
+- **No live cluster apply.** A live run would move files in this workspace's own crates, which
+  `## Boundaries` forbid. AC1–AC4 are covered by unit tests over real temp workspaces, and AC8 by
+  three real-rust-analyzer acceptance suites (`move_module_to_crate_acceptance` 2,
+  `nested_module_move_acceptance` 4, `facade_cycle_acceptance` 3). A rehearsal on a throwaway tree is
+  still owed.
+- **AC5 end-to-end is argued, not tested.** Two plans applied back to back is reasoned from the
+  directory being empty, not pinned by a test; such a test needs a git worktree and a live server.
+- **FR3 has one consumer still opting out.** `packages/tddy-index-daemon/src/apply.rs:45` keeps
+  `StatePaths::under(root)`. One line, but it invalidates the per-root queue rationale in four doc
+  comments and in that package's committed docs, which is changeset work in another package — filed
+  as [`stale-repo-scoped-restructure-state-apply.md`](../../../packages/tddy-index-daemon/docs/code-issues/stale-repo-scoped-restructure-state-apply.md).

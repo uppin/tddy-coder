@@ -25,15 +25,28 @@ pub(crate) struct Header {
     pub(crate) origin_paths: Vec<String>,
 }
 
-/// The moved file's own `use` header, re-pointed at the crate it left.
+/// The moved file's own `use` header, re-pointed at the crates its paths will name afterwards.
 ///
 /// Inside the module, `crate::` and a top-level `super::` both named the crate it is leaving; in the
 /// destination they would name the destination. Only the qualifier is rewritten, and only in a `use`
 /// declaration — see this module's own documentation for why that is the whole of the header pass.
+///
+/// Which crate a qualifier becomes is the co-moving set's to answer. A path reaching a module in
+/// `co_moving` is re-pointed at `destination`, because by the time the edit lands that module is
+/// there; one reaching a module staying behind is re-pointed at the origin, resolving a re-export as
+/// [`module_home::defining_crate`] does. Without that distinction a reference to a sibling that is
+/// also moving becomes a `destination → origin` edge the operation authors itself, which is the
+/// mechanic that made a mutually-referencing set unmovable.
+///
+/// A co-moving path is recorded in neither [`Header::crates_named`] nor [`Header::origin_paths`]:
+/// it names no crate the destination has to depend on — least of all itself — and it is not an
+/// origin edge for a refusal to list.
 pub(crate) fn repointed_header(
     workspace: &Workspace<'_>,
     text: &str,
     origin: &destination::Destination,
+    co_moving: &BTreeSet<String>,
+    destination: &destination::Destination,
 ) -> Result<Header> {
     let mut header = Header {
         edits: Vec::new(),
@@ -56,6 +69,14 @@ pub(crate) fn repointed_header(
 
         if matches!(qualifier, "crate" | "super") {
             let at = start + at;
+            if travels_with(rest, co_moving) {
+                header.edits.push(manifest_edits::replacement(
+                    text,
+                    at..at + qualifier.len(),
+                    &destination.extern_name,
+                ));
+                continue;
+            }
             let as_origin = format!("{}::{}", origin.extern_name, rest);
             let (written_as, named) =
                 match module_home::defining_crate(workspace, origin, &as_origin)? {
@@ -83,6 +104,18 @@ pub(crate) fn repointed_header(
     }
 
     Ok(header)
+}
+
+/// Whether a `crate::`-relative path reaches a module that is travelling with this file.
+///
+/// The path is read the way the pass around it reads one: `rest` is what followed the qualifier,
+/// and a member is named by the path that reaches it or by anything inside it — `spawn_worker` and
+/// `spawn_worker::Worker` both travel with `spawn_worker`, and `spawn_worker_pool` travels with
+/// nothing.
+fn travels_with(rest: &str, co_moving: &BTreeSet<String>) -> bool {
+    co_moving
+        .iter()
+        .any(|member| rest == member || rest.starts_with(&format!("{member}::")))
 }
 
 /// The path a top-level `use` declaration names, and where on the line it starts.
@@ -134,7 +167,11 @@ pub(crate) fn written_path_at(text: &str, at: Position) -> Result<WrittenPath> {
     })
 }
 
-fn is_path_character(character: char) -> bool {
+/// Whether `character` can appear inside a path segment.
+///
+/// `pub(crate)` because the sibling scan reads a path out of a file's text the same way, and two
+/// notions of where a path ends would disagree about `spawn_worker_pool`.
+pub(crate) fn is_path_character(character: char) -> bool {
     character.is_alphanumeric() || character == '_'
 }
 

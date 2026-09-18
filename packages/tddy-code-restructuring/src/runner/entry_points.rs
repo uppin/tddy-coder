@@ -21,8 +21,8 @@ use super::comparison::verify;
 use super::options::usage;
 use super::rehearsal::{survey_lines, Rehearsal};
 use super::{
-    commit_operation, open_run, parse_options, restore_ledger, Command, Finding, Options, Outcome,
-    PlanProgress, RunSummary, SnapshotRewrite, StatePaths,
+    commit_operation, open_run, parse_options, refuse_repo_scoped_state, restore_ledger, Command,
+    Finding, Options, Outcome, PlanProgress, RunSummary, SnapshotRewrite, StatePaths,
 };
 
 /// Dispatch a restructuring subcommand given a raw command line.
@@ -124,8 +124,9 @@ pub fn apply(
     let client = client.ok_or_else(|| {
         RestructureError::MalformedPlan("apply requires a rust-analyzer LSP session".into())
     })?;
-    let plan = read_plan(&options.plan()?)?;
-    let paths = StatePaths::under(root);
+    let plan_path = options.plan()?;
+    let plan = read_plan(&plan_path)?;
+    let paths = StatePaths::for_plan(root, &plan_path)?;
 
     let mut journal = open_run(&plan, root, &paths, &options)?;
     let mut ledger = restore_ledger(&journal, &paths)?;
@@ -294,8 +295,11 @@ pub fn snapshot(root: &Path, options: Options) -> Result<SnapshotRewrite> {
 /// `in_flight` discounts the operations that went on to complete — the journal holds a record of
 /// each — and `pending` is what the plan still has left.
 pub fn status(root: &Path, options: Options) -> Result<PlanProgress> {
-    let plan = read_plan(&options.plan()?)?;
-    let journal = Journal::load(&StatePaths::under(root).journal)?;
+    let plan_path = options.plan()?;
+    let plan = read_plan(&plan_path)?;
+    let paths = StatePaths::for_plan(root, &plan_path)?;
+    refuse_repo_scoped_state(root, &paths)?;
+    let journal = Journal::load(&paths.journal)?;
     let counted = |wanted: OpStatus| {
         journal
             .records
@@ -364,6 +368,13 @@ pub fn check(
                 detail: refusal.to_string(),
             });
         }
+    }
+
+    // Read across the plan rather than per operation: whether a module's siblings come along is a
+    // question about the plan, and an operation that is viable on its own is exactly how a
+    // mutually-referencing set gets left half moved.
+    for (operation, detail) in crate_move::stranded_siblings(&static_workspace, &plan.ops)? {
+        findings.push(Finding { operation, detail });
     }
 
     for (index, op) in plan.ops.iter().enumerate() {

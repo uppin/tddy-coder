@@ -46,7 +46,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::edit::{FileEdit, Position, WorkspaceEdit};
+use crate::edit::{Position, WorkspaceEdit};
 use crate::plan::{Reexport, RefactorOp};
 use crate::registry::Workspace;
 use crate::RestructureError;
@@ -167,44 +167,17 @@ pub fn survey(
 /// Edits are addressed in the coordinates of the tree as it stands, including (2), which names the
 /// module at the path it is moving *from*: [`crate::apply`] applies creations, then changes, then
 /// renames, so the file is still where the plan found it when its own text is rewritten.
+///
+/// A single module is a cluster of one, so this is [`resolve_cluster`] over a set with one member.
+/// The set is what tells a `crate::<sibling>` path that is coming along from one staying behind, and
+/// a module travelling alone answers that question too — with "nothing else is coming".
 pub fn resolve(
     engine: &mut dyn ModuleReferences,
     workspace: &Workspace<'_>,
     op: &RefactorOp,
 ) -> Result<WorkspaceEdit> {
-    let (moving, survey, rewrites) = planned(engine, workspace, op)?;
-
-    let moved = workspace.read(&moving.source)?;
-    let header = header::repointed_header(workspace, &moved, &moving.origin)?;
-    let crates_named = refusals::crates_the_moved_code_names(workspace, &moving.origin, &header)?;
-    let keeps_naming_it = refusals::crates_still_naming_the_module(workspace, &moving, &rewrites)?;
-    refusals::refuse_a_dependency_cycle(workspace, &moving, &header, &keeps_naming_it)?;
-
-    let mut changes = vec![FileEdit::Rename {
-        from: moving.source.clone(),
-        to: moving.moved_to(),
-    }];
-
-    changes.push(FileEdit::Change {
-        path: moving.source.clone(),
-        edits: header.edits,
-    });
-    changes.push(moving.left_behind(workspace, &survey)?);
-    changes.push(moving.declared_in_destination(workspace)?);
-
-    if moving.reexport == Reexport::None {
-        changes.extend(moving::caller_changes(workspace, rewrites)?);
-    }
-
-    changes.push(moving.destination_manifest(workspace, &crates_named)?);
-    changes.extend(moving.dependents_on_the_destination(workspace, &keeps_naming_it)?);
-    changes.extend(moving.workspace_members(workspace)?);
-
-    // A change with no edits names a file the operation did not touch, and the journal would hash
-    // it as one it did.
-    changes.retain(|change| !matches!(change, FileEdit::Change { edits, .. } if edits.is_empty()));
-
-    Ok(WorkspaceEdit { changes })
+    let moving = moving::Move::read(workspace, op)?;
+    resolve_cluster(engine, workspace, &cluster::travelling_alone(&moving))
 }
 
 /// The survey, plus the exact spans each caller rewrite replaces.
@@ -217,25 +190,47 @@ fn planned(
     op: &RefactorOp,
 ) -> Result<(moving::Move, Survey, Vec<PlannedRewrite>)> {
     let moving = moving::Move::read(workspace, op)?;
+    let travelling = BTreeSet::from([moving.source.clone()]);
+    let (survey, rewrites) = surveyed(engine, workspace, &moving, &travelling)?;
+    Ok((moving, survey, rewrites))
+}
 
+/// One module's callers, surveyed against the **post-move** shape of the set it travels in.
+///
+/// `travelling` is every file the operation is moving, the module's own included. A reference
+/// sitting in one of them is not a caller to re-point: that file is moving too, and its own header
+/// pass is what re-points the path — re-pointing it here as well would author two edits over the
+/// same span. For a module travelling alone the set is its own file, which the engine already
+/// leaves out, so nothing about a single-module move changes.
+pub(crate) fn surveyed(
+    engine: &mut dyn ModuleReferences,
+    workspace: &Workspace<'_>,
+    moving: &moving::Move,
+    travelling: &BTreeSet<String>,
+) -> Result<(Survey, Vec<PlannedRewrite>)> {
     let mut reached = Vec::new();
     let mut callers = Vec::new();
     let mut rewrites = Vec::new();
 
     for item in engine.outside_references(workspace, &moving.source)? {
-        if item.referenced_at.is_empty() {
+        let outside_the_set: Vec<Reference> = item
+            .referenced_at
+            .into_iter()
+            .filter(|reference| !travelling.contains(&reference.path))
+            .collect();
+        if outside_the_set.is_empty() {
             continue;
         }
         reached.push(item.item.clone());
 
-        for reference in item.referenced_at {
+        for reference in outside_the_set {
             let text = workspace.read(&reference.path)?;
             let written = header::written_path_at(&text, reference.at)?;
 
             // A reference reached through a name the file bound earlier writes no path to rewrite:
             // its own `use` declaration is a reference too, and re-pointing that one is what moves
             // the binding. Rewriting the bare name here would rewrite an identifier, not a path.
-            let Some(to) = header::repointed(&written.text, &moving) else {
+            let Some(to) = header::repointed(&written.text, moving) else {
                 continue;
             };
 
@@ -262,7 +257,7 @@ fn planned(
         callers,
     };
 
-    Ok((moving, survey, rewrites))
+    Ok((survey, rewrites))
 }
 
 /// One path a caller writes, and the span of it to replace.
@@ -326,7 +321,7 @@ pub fn facade_line(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edit::WorkspaceEdit;
+    use crate::edit::{FileEdit, WorkspaceEdit};
     use crate::plan::{Anchor, RefactorKind};
 
     const ROOT_MANIFEST: &str = "Cargo.toml";

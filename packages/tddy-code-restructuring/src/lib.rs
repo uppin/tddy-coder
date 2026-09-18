@@ -79,6 +79,17 @@ pub enum RestructureError {
     CheckpointDivergence { op: usize },
     #[error("a journal already exists for this plan — pass --resume to continue it")]
     JournalExists,
+    /// A journal keyed by the repository rather than by a plan is standing over this plan's own.
+    ///
+    /// Run state is keyed by the plan ([`runner::state_directory_for_plan`]); a journal at
+    /// `<root>/.restructure/` is whatever ran last under this root, and nothing in it says which
+    /// plan that was. Adopting it for the plan in hand would let `--resume` replay another plan's
+    /// operations against these coordinates, which is the one outcome worse than refusing.
+    #[error(
+        "{path} is a repository-scoped journal, which belongs to no plan this run can name — \
+         archive or remove it, or pass --resume to continue it as this plan's own journal"
+    )]
+    RepoScopedJournal { path: String },
     #[error("the language server is still catching up with an earlier change")]
     ServerCatchingUp,
     /// The server stayed unable to answer one method, as distinct from the plan being wrong.

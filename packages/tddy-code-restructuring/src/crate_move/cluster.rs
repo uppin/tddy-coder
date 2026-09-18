@@ -9,11 +9,19 @@ use crate::registry::Workspace;
 
 use super::ModuleReferences;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::plan::Reexport;
 
 use super::module_home;
+
+use crate::crate_move::{header, moving, refusals};
+use crate::edit::{FileEdit, TextEdit};
+use crate::plan::RefactorKind;
+
+use super::malformed;
+
+use std::path::Path;
 
 /// A set of modules that move to one destination **as a single unit**.
 ///
@@ -49,23 +57,174 @@ impl MovingCluster {
     }
 }
 
+/// The cluster a single module makes on its own.
+///
+/// A module travelling alone still has to answer the co-moving question — with "nothing else is
+/// coming" — so [`resolve`](super::resolve) is this cluster resolved rather than a second
+/// implementation of the same operation beside it.
+pub(crate) fn travelling_alone(moving: &moving::Move) -> MovingCluster {
+    MovingCluster {
+        members: vec![moving.home.clone()],
+        destination: moving.destination.clone(),
+        reexport: moving.reexport,
+    }
+}
+
 /// Resolve a whole cluster into one edit, applied all or not at all.
 ///
 /// Every member's callers are surveyed against the **post-move** shape of the set, so a reference to
 /// a co-moving sibling is re-pointed at the destination rather than at the crate it left. The
 /// returned edit is the union: there is no ordering in which the tree is half-moved.
 ///
+/// Each member contributes what [`resolve`](super::resolve) describes for one module — a rename, its
+/// own re-pointed header, the declaration it leaves behind and the one it gains. The three edits
+/// that belong to the *set* rather than to a member are made once over the union: the destination's
+/// manifest gains every crate the whole set names, each crate that goes on naming any member gains
+/// a dependency on the destination, and the workspace `members` list gains the destination at most
+/// once. Computing them per member would write a dependency line, and a members entry, once each.
+///
 /// # Errors
 ///
-/// Refuses for every reason a single move does, plus: a member that names a crate outside the set
-/// which the destination cannot depend on, and a set whose members do not share one destination.
+/// Refuses for every reason a single move does, plus: an empty set, a member named twice, and a set
+/// whose members do not all leave the same crate — `crate::<module>` is written relative to one
+/// crate root, so a set spanning two of them has no single co-moving vocabulary to be read in.
 pub fn resolve_cluster(
-    _engine: &mut dyn ModuleReferences,
-    _workspace: &Workspace<'_>,
-    _cluster: &MovingCluster,
+    engine: &mut dyn ModuleReferences,
+    workspace: &Workspace<'_>,
+    cluster: &MovingCluster,
 ) -> Result<WorkspaceEdit> {
-    // TODO(restructure-clusters): implement
-    todo!("resolve_cluster: move a mutually-referencing set as one unit")
+    let members = read_members(workspace, cluster)?;
+    let co_moving = cluster.co_moving();
+    let travelling: BTreeSet<String> = members.iter().map(|member| member.source.clone()).collect();
+
+    let mut merged = MergedChanges::default();
+    let mut crates_named = BTreeSet::new();
+    let mut keeps_naming_it = BTreeSet::new();
+
+    for member in &members {
+        let (survey, rewrites) = super::surveyed(engine, workspace, member, &travelling)?;
+        let moved = workspace.read(&member.source)?;
+        let header = header::repointed_header(
+            workspace,
+            &moved,
+            &member.origin,
+            &co_moving,
+            &cluster.destination,
+        )?;
+        let names = refusals::crates_the_moved_code_names(workspace, &member.origin, &header)?;
+        let naming_it = refusals::crates_still_naming_the_module(workspace, member, &rewrites)?;
+        refusals::refuse_a_dependency_cycle(workspace, member, &header, &naming_it)?;
+
+        merged.absorb(FileEdit::Rename {
+            from: member.source.clone(),
+            to: member.moved_to(),
+        });
+        merged.add(member.source.clone(), header.edits);
+        merged.absorb(member.left_behind(workspace, &survey)?);
+        merged.absorb(member.declared_in_destination(workspace)?);
+        if member.reexport == Reexport::None {
+            for change in moving::caller_changes(workspace, rewrites)? {
+                merged.absorb(change);
+            }
+        }
+
+        crates_named.extend(names);
+        keeps_naming_it.extend(naming_it);
+    }
+
+    // Read off the first member because every member shares them: `read_members` refuses a set
+    // whose members leave different crates, and the destination is the set's own field.
+    let across_the_set = &members[0];
+    merged.absorb(across_the_set.destination_manifest(workspace, &crates_named)?);
+    for change in across_the_set.dependents_on_the_destination(workspace, &keeps_naming_it)? {
+        merged.absorb(change);
+    }
+    for change in across_the_set.workspace_members(workspace)? {
+        merged.absorb(change);
+    }
+
+    Ok(WorkspaceEdit {
+        changes: merged.changes(),
+    })
+}
+
+/// Every member as the move it is, refusing a set that cannot be resolved as one.
+fn read_members(workspace: &Workspace<'_>, cluster: &MovingCluster) -> Result<Vec<moving::Move>> {
+    let Some(first) = cluster.members.first() else {
+        return Err(malformed(
+            "a moving cluster names no modules — there is nothing to move",
+        ));
+    };
+    if cluster.co_moving().len() != cluster.members.len() {
+        return Err(malformed(
+            "a moving cluster names the same module twice — it would be moved, declared and \
+             depended on twice over",
+        ));
+    }
+
+    let mut members = Vec::new();
+    for home in &cluster.members {
+        if home.crate_dir != first.crate_dir {
+            return Err(malformed(format!(
+                "`{}` and `{}` are in different crates, so the set has no one crate root for its \
+                 `crate::` paths to be read against — move one crate's modules at a time",
+                first.crate_dir, home.crate_dir
+            )));
+        }
+        members.push(moving::Move::of(
+            workspace,
+            home,
+            &cluster.destination,
+            cluster.reexport,
+        )?);
+    }
+    Ok(members)
+}
+
+/// The edits a cluster makes, with each file changed exactly once.
+///
+/// Every member addresses its edits in the coordinates of the tree as it stands, so the whole set
+/// shares one coordinate space per file — and [`crate::apply::edited`] folds one file's edits
+/// last-first within that space. Two `FileEdit::Change`s for one path would instead be applied in
+/// sequence, the second against text the first had already shifted.
+#[derive(Default)]
+struct MergedChanges {
+    /// The paths in the order they were first changed, which is the order they are reported in.
+    order: Vec<String>,
+    edits: BTreeMap<String, Vec<TextEdit>>,
+    /// Renames and creations, which carry no text to merge.
+    resources: Vec<FileEdit>,
+}
+
+impl MergedChanges {
+    fn add(&mut self, path: String, edits: Vec<TextEdit>) {
+        if !self.edits.contains_key(&path) {
+            self.order.push(path.clone());
+        }
+        self.edits.entry(path).or_default().extend(edits);
+    }
+
+    fn absorb(&mut self, change: FileEdit) {
+        match change {
+            FileEdit::Change { path, edits } => self.add(path, edits),
+            resource => self.resources.push(resource),
+        }
+    }
+
+    /// The resource operations, then one change per file.
+    ///
+    /// A change with no edits names a file the operation did not touch, and the journal would hash
+    /// it as one it did.
+    fn changes(mut self) -> Vec<FileEdit> {
+        let mut changes = self.resources;
+        for path in self.order {
+            let edits = self.edits.remove(&path).unwrap_or_default();
+            if !edits.is_empty() {
+                changes.push(FileEdit::Change { path, edits });
+            }
+        }
+        changes
+    }
 }
 
 /// The modules a plan's cross-crate moves leave behind that still reference what moved.
@@ -80,10 +239,745 @@ pub fn resolve_cluster(
 /// # Errors
 ///
 /// Refuses when a file the check must read cannot be.
-pub fn siblings_left_behind(
-    _workspace: &Workspace<'_>,
-    _ops: &[RefactorOp],
-) -> Result<Vec<String>> {
-    // TODO(restructure-clusters): implement
-    todo!("siblings_left_behind: name the members a partial cluster move would strand")
+pub fn siblings_left_behind(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Result<Vec<String>> {
+    Ok(stranded_siblings(workspace, ops)?
+        .into_iter()
+        .map(|(_, finding)| finding)
+        .collect())
+}
+
+/// [`siblings_left_behind`], with each finding tied to the operation it is about.
+///
+/// A reader fixes a plan by operation index, and `check` reports one, so the index is carried here
+/// and dropped by the published call — which answers "what would this plan strand" rather than
+/// "which operation does it".
+pub(crate) fn stranded_siblings(
+    workspace: &Workspace<'_>,
+    ops: &[RefactorOp],
+) -> Result<Vec<(usize, String)>> {
+    let moving = modules_the_plan_moves(workspace, ops);
+
+    // Read each crate's sources once rather than once per module moving out of it: a plan that
+    // moves five modules out of one crate asks the same question of the same files five times.
+    let mut sources = BTreeMap::new();
+    for crate_dir in moving
+        .iter()
+        .map(|module| module.crate_dir.clone())
+        .collect::<BTreeSet<String>>()
+    {
+        let read = sources_of(workspace, &crate_dir)?;
+        sources.insert(crate_dir, read);
+    }
+
+    let mut findings = Vec::new();
+    for module in &moving {
+        for sibling in siblings_naming(&sources[&module.crate_dir], module, &moving) {
+            findings.push((
+                module.op,
+                format!(
+                    "`{sibling}` stays behind in `{origin}` and names `{named}`, which operation \
+                     {op} moves to `{destination}` — a path re-pointed at a crate the module \
+                     holding it is not in. Move `{sibling}` with the set, or leave `{named}` where \
+                     it is",
+                    origin = module.crate_dir,
+                    named = module.path.join("::"),
+                    op = module.op,
+                    destination = module.destination,
+                ),
+            ));
+        }
+    }
+
+    Ok(findings)
+}
+
+/// One module a plan moves out of the crate that holds it.
+struct MovingModule {
+    /// Which operation moves it, by index in the plan.
+    op: usize,
+    /// The crate it is leaving.
+    crate_dir: String,
+    /// Its module path inside that crate, outermost first.
+    path: Vec<String>,
+    /// The destination directory the operation names.
+    destination: String,
+}
+
+/// Every cross-crate move in the plan whose module can be placed in a crate.
+///
+/// An operation whose module resolves to no home is left out rather than reported: that is exactly
+/// what [`move_preconditions`](super::move_preconditions) refuses, and naming it again here would
+/// report one defect twice under two descriptions.
+fn modules_the_plan_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Vec<MovingModule> {
+    ops.iter()
+        .enumerate()
+        .filter(|(_, op)| op.op == RefactorKind::MoveModuleToCrate)
+        .filter_map(|(index, op)| {
+            let source = op.anchor.file();
+            let module = module_home::module_name(source).ok()?;
+            let home = module_home::module_home(workspace, source, &module).ok()?;
+            Some(MovingModule {
+                op: index,
+                crate_dir: home.crate_dir,
+                path: home.path,
+                destination: op.to.clone()?,
+            })
+        })
+        .collect()
+}
+
+/// One file of a crate's `src/` tree: where it is, which module it is, and what it says.
+struct CrateSource {
+    /// The file, relative to the repository root.
+    path: String,
+    /// The module path the file carries inside its crate — `[]` for the crate root.
+    home: Vec<String>,
+    text: String,
+}
+
+/// Every source file of a crate, read once, in path order.
+///
+/// # Errors
+///
+/// Refuses when a file under the crate's `src/` cannot be read.
+fn sources_of(workspace: &Workspace<'_>, crate_dir: &str) -> Result<Vec<CrateSource>> {
+    let src = format!("{crate_dir}/src");
+    let mut sources = Vec::new();
+
+    for path in rust_files_under(workspace.root, &src) {
+        let home = module_path_of(
+            path.strip_prefix(&format!("{src}/"))
+                .unwrap_or(path.as_str()),
+        );
+        sources.push(CrateSource {
+            text: workspace.read(&path)?,
+            path,
+            home,
+        });
+    }
+
+    sources.sort_by(|one, other| one.path.cmp(&other.path));
+    Ok(sources)
+}
+
+/// The files staying behind in `module`'s crate that name it, in path order.
+fn siblings_naming(
+    sources: &[CrateSource],
+    module: &MovingModule,
+    moving: &[MovingModule],
+) -> Vec<String> {
+    sources
+        .iter()
+        .filter(|source| !travelling(&source.home, module, moving))
+        .filter(|source| names_the_module(&source.text, &module.path, &source.home))
+        .map(|source| source.path.clone())
+        .collect()
+}
+
+/// Whether the file at module path `home` is moving with the set — itself, or as part of a member.
+fn travelling(home: &[String], module: &MovingModule, moving: &[MovingModule]) -> bool {
+    moving
+        .iter()
+        .filter(|other| other.crate_dir == module.crate_dir)
+        .any(|other| home.starts_with(&other.path))
+}
+
+/// The module path a file under a crate's `src/` carries — `[]` for the crate root.
+fn module_path_of(within_src: &str) -> Vec<String> {
+    let mut path: Vec<String> = within_src.split('/').map(str::to_string).collect();
+    match path
+        .pop()
+        .as_deref()
+        .and_then(|last| last.strip_suffix(".rs"))
+    {
+        // `lib.rs`, `main.rs` and a directory's `mod.rs` all name the module their directory is.
+        Some("lib" | "main" | "mod") | None => path,
+        Some(module) => {
+            path.push(module.to_string());
+            path
+        }
+    }
+}
+
+/// Whether `text` writes a path that reaches the module at `target`.
+///
+/// Read from the text rather than from an index, which is the point: the decision is available
+/// before rust-analyzer is spawned, and `check` reported `no findings` on a plan `apply` then
+/// rejected because it was not read at all. A `crate::` path is absolute within the crate; a
+/// `super::` one is read against the module holding the file, which is what makes
+/// `super::spawner` in `supervisor/client.rs` a reference to `supervisor::spawner` rather than to
+/// the crate-root `spawner`.
+fn names_the_module(text: &str, target: &[String], home: &[String]) -> bool {
+    let above = home.split_last().map(|(_, above)| above).unwrap_or(&[]);
+    for (qualifier, base) in [("crate::", &[] as &[String]), ("super::", above)] {
+        for (at, _) in text.match_indices(qualifier) {
+            if text[..at]
+                .chars()
+                .next_back()
+                .is_some_and(header::is_path_character)
+            {
+                continue;
+            }
+            let mut named = base.to_vec();
+            named.extend(segments_at(&text[at + qualifier.len()..]));
+            if named.starts_with(target) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// The `a::b::C` a path continues with, from the first segment onwards.
+fn segments_at(text: &str) -> Vec<String> {
+    let mut rest = text;
+    let mut segments = Vec::new();
+    loop {
+        let end = rest
+            .find(|character: char| !header::is_path_character(character))
+            .unwrap_or(rest.len());
+        if end == 0 {
+            return segments;
+        }
+        segments.push(rest[..end].to_string());
+        match rest[end..].strip_prefix("::") {
+            Some(next) => rest = next,
+            None => return segments,
+        }
+    }
+}
+
+/// Every `.rs` file under `relative`, relative to the repository root, deepest paths included.
+///
+/// A directory that cannot be read contributes nothing: the scan is over a crate's own `src/`, and
+/// a crate whose sources are unreadable is refused by the move itself with the file it could not
+/// read named, which is a better report than this one could give.
+fn rust_files_under(root: &Path, relative: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root.join(relative)) else {
+        return Vec::new();
+    };
+
+    let mut files = Vec::new();
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let path = format!("{relative}/{name}");
+        if entry.path().is_dir() {
+            files.extend(rust_files_under(root, &path));
+        } else if name.ends_with(".rs") {
+            files.push(path);
+        }
+    }
+    files
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crate_move::{manifest_edits, ItemReferences, Reference};
+    use crate::plan::Anchor;
+
+    const ORIGIN: &str = "crates/origin";
+    const ORIGIN_ROOT: &str = "crates/origin/src/lib.rs";
+    const SPAWNER: &str = "crates/origin/src/spawner.rs";
+    const WORKER: &str = "crates/origin/src/spawn_worker.rs";
+    const DESTINATION: &str = "crates/destination";
+    const DESTINATION_ROOT: &str = "crates/destination/src/lib.rs";
+    const DESTINATION_MANIFEST: &str = "crates/destination/Cargo.toml";
+
+    /// A crate whose two modules name each other, the crate they are going to, and a workspace
+    /// root that lists neither.
+    ///
+    /// Every file is real because everything the operation decides, it reads: the declared package
+    /// names, the `mod` lines it replaces, the headers it re-points and both manifests. The pair
+    /// referencing each other is the shape that defeated `#unbundle` node 3.
+    struct AWorkspace {
+        root: tempfile::TempDir,
+        overlay: crate::Overlay,
+    }
+
+    fn a_workspace_with_an_entangled_pair() -> AWorkspace {
+        AWorkspace {
+            root: tempfile::tempdir().expect("a temporary directory"),
+            overlay: crate::Overlay::default(),
+        }
+        .with(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\n    \"crates/origin\",\n]\n",
+        )
+        .with(
+            "crates/origin/Cargo.toml",
+            "[package]\nname = \"origin\"\n\n[dependencies]\nshared = { path = \"../shared\" }\n",
+        )
+        .with(
+            ORIGIN_ROOT,
+            "//! The origin.\n\nmod spawner;\nmod spawn_worker;\nmod runtime;\n",
+        )
+        .with(
+            SPAWNER,
+            "use crate::spawn_worker::Worker;\n\npub struct Spawner;\n",
+        )
+        .with(
+            WORKER,
+            "use crate::spawner::Spawner;\n\npub struct Worker;\n",
+        )
+        .with("crates/origin/src/runtime.rs", "pub struct Clock;\n")
+        .with(
+            "crates/destination/Cargo.toml",
+            "[package]\nname = \"destination\"\n\n[dependencies]\n",
+        )
+        .with(DESTINATION_ROOT, "//! The destination.\n\n")
+    }
+
+    impl AWorkspace {
+        fn with(self, path: &str, text: &str) -> Self {
+            let absolute = self.root.path().join(path);
+            std::fs::create_dir_all(absolute.parent().expect("a parent")).expect("directories");
+            std::fs::write(absolute, text).expect("the file is written");
+            self
+        }
+
+        fn read(&self, path: &str) -> String {
+            std::fs::read_to_string(self.root.path().join(path)).expect("the file is read")
+        }
+
+        fn workspace(&self) -> Workspace<'_> {
+            Workspace {
+                root: self.root.path(),
+                overlay: &self.overlay,
+            }
+        }
+    }
+
+    /// A reference set standing in for `textDocument/references`.
+    ///
+    /// A fake rather than a mock: it answers the one question the engine answers — which places
+    /// outside a module's own file name each of its items — and the deciding half under test cannot
+    /// tell it from the Rust backend's own implementation.
+    #[derive(Default)]
+    struct AKnownReferenceSet {
+        by_module: BTreeMap<String, Vec<ItemReferences>>,
+    }
+
+    fn nothing_reaches_the_set() -> AKnownReferenceSet {
+        AKnownReferenceSet::default()
+    }
+
+    impl AKnownReferenceSet {
+        /// Every place each of `referring` names `item`, which `module` declares — the import that
+        /// binds the name and each use of it, as the server reports them.
+        fn reaching(
+            mut self,
+            item: &str,
+            in_module: &str,
+            from: &[&str],
+            workspace: &AWorkspace,
+        ) -> Self {
+            let referenced_at = from
+                .iter()
+                .flat_map(|file| {
+                    let text = workspace.read(file);
+                    text.match_indices(item)
+                        .map(|(offset, _)| Reference {
+                            path: (*file).to_string(),
+                            at: manifest_edits::position_of(&text, offset),
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+
+            self.by_module
+                .entry(in_module.to_string())
+                .or_default()
+                .push(ItemReferences {
+                    item: item.to_string(),
+                    referenced_at,
+                });
+            self
+        }
+    }
+
+    impl ModuleReferences for AKnownReferenceSet {
+        fn outside_references(
+            &mut self,
+            _workspace: &Workspace<'_>,
+            file: &str,
+        ) -> Result<Vec<ItemReferences>> {
+            Ok(self.by_module.get(file).cloned().unwrap_or_default())
+        }
+    }
+
+    fn a_member(module: &str) -> module_home::ModuleHome {
+        module_home::ModuleHome {
+            crate_dir: ORIGIN.to_string(),
+            declared_in: ORIGIN_ROOT.to_string(),
+            path: vec![module.to_string()],
+        }
+    }
+
+    fn a_cluster_of(members: &[&str], reexport: Reexport) -> MovingCluster {
+        MovingCluster {
+            members: members.iter().map(|module| a_member(module)).collect(),
+            destination: destination::Destination {
+                dir: DESTINATION.to_string(),
+                package: "destination".to_string(),
+                extern_name: "destination".to_string(),
+            },
+            reexport,
+        }
+    }
+
+    /// What a file contains once the cluster's edits for it are applied.
+    fn applied(edit: &WorkspaceEdit, path: &str, workspace: &AWorkspace) -> String {
+        let edits = edit
+            .changes
+            .iter()
+            .find_map(|change| match change {
+                FileEdit::Change {
+                    path: changed,
+                    edits,
+                } if changed == path => Some(edits.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("the cluster changed nothing in {path}"));
+
+        crate::apply::edited(workspace.read(path), &edits).expect("the edits apply")
+    }
+
+    fn renames(edit: &WorkspaceEdit) -> Vec<(&str, &str)> {
+        edit.changes
+            .iter()
+            .filter_map(|change| match change {
+                FileEdit::Rename { from, to } => Some((from.as_str(), to.as_str())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn changed(edit: &WorkspaceEdit) -> Vec<&str> {
+        edit.changes
+            .iter()
+            .filter_map(|change| match change {
+                FileEdit::Change { path, .. } => Some(path.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// AC1 — the whole set moves in one edit, so the tree is never left half-moved.
+    #[test]
+    fn moves_every_member_of_a_mutually_referencing_set_in_one_edit() {
+        // Given a pair of modules that name each other, moving together
+        let workspace = a_workspace_with_an_entangled_pair();
+        let mut engine = nothing_reaches_the_set();
+        let cluster = a_cluster_of(&["spawner", "spawn_worker"], Reexport::Glob);
+
+        // When the set is resolved
+        let edit = resolve_cluster(&mut engine, &workspace.workspace(), &cluster)
+            .expect("a cluster resolves");
+
+        // Then both files move, in the one edit
+        assert_eq!(
+            renames(&edit),
+            vec![
+                (SPAWNER, "crates/destination/src/spawner.rs"),
+                (WORKER, "crates/destination/src/spawn_worker.rs"),
+            ]
+        );
+    }
+
+    /// AC2 — a path reaching a sibling that is coming along names the destination, because by the
+    /// time the edit lands that sibling is there.
+    #[test]
+    fn points_a_path_reaching_a_co_moving_sibling_at_the_destination() {
+        // Given a member whose header names a sibling in the same set
+        let workspace = a_workspace_with_an_entangled_pair();
+        let mut engine = nothing_reaches_the_set();
+        let cluster = a_cluster_of(&["spawner", "spawn_worker"], Reexport::Glob);
+
+        // When
+        let edit = resolve_cluster(&mut engine, &workspace.workspace(), &cluster)
+            .expect("a cluster resolves");
+
+        // Then
+        assert_eq!(
+            applied(&edit, SPAWNER, &workspace),
+            "use destination::spawn_worker::Worker;\n\npub struct Spawner;\n"
+        );
+    }
+
+    /// AC3 — a path reaching a module staying behind names the origin, exactly as a single-module
+    /// move leaves it.
+    #[test]
+    fn points_a_path_reaching_a_module_staying_behind_at_the_origin() {
+        // Given a member whose header names a module the set does not include
+        let workspace = a_workspace_with_an_entangled_pair().with(
+            SPAWNER,
+            "use crate::runtime::Clock;\nuse crate::spawn_worker::Worker;\n\npub struct Spawner;\n",
+        );
+        let mut engine = nothing_reaches_the_set();
+        let cluster = a_cluster_of(&["spawner", "spawn_worker"], Reexport::None);
+
+        // When
+        let edit = resolve_cluster(&mut engine, &workspace.workspace(), &cluster)
+            .expect("a cluster with no facade resolves");
+
+        // Then only the co-moving path went to the destination
+        assert_eq!(
+            applied(&edit, SPAWNER, &workspace),
+            "use origin::runtime::Clock;\nuse destination::spawn_worker::Worker;\n\n\
+             pub struct Spawner;\n"
+        );
+    }
+
+    /// AC4 — a co-moving reference is not an outbound dependency, so the destination is never made
+    /// to depend on itself. Cargo's own error for that names neither the module nor the operation.
+    #[test]
+    fn does_not_make_the_destination_depend_on_itself() {
+        // Given a set whose every `crate::` path reaches another member
+        let workspace = a_workspace_with_an_entangled_pair();
+        let mut engine = nothing_reaches_the_set();
+        let cluster = a_cluster_of(&["spawner", "spawn_worker"], Reexport::Glob);
+
+        // When
+        let edit = resolve_cluster(&mut engine, &workspace.workspace(), &cluster)
+            .expect("a cluster resolves");
+
+        // Then the destination's manifest gained nothing at all
+        assert!(
+            !changed(&edit).contains(&DESTINATION_MANIFEST),
+            "the destination's manifest was edited for a set that names no other crate: {:?}",
+            changed(&edit)
+        );
+    }
+
+    /// AC1 — the destination declares every member, so the set arrives whole.
+    #[test]
+    fn declares_every_member_in_the_crate_they_arrive_in() {
+        // Given
+        let workspace = a_workspace_with_an_entangled_pair();
+        let mut engine = nothing_reaches_the_set();
+        let cluster = a_cluster_of(&["spawner", "spawn_worker"], Reexport::Glob);
+
+        // When
+        let edit = resolve_cluster(&mut engine, &workspace.workspace(), &cluster)
+            .expect("a cluster resolves");
+
+        // Then
+        assert_eq!(
+            applied(&edit, DESTINATION_ROOT, &workspace),
+            "//! The destination.\n\npub mod spawner;\npub mod spawn_worker;\n"
+        );
+    }
+
+    /// The workspace `members` list gains the destination **once**, however many modules moved:
+    /// a list with the same crate in it twice is a manifest cargo refuses to read.
+    #[test]
+    fn adds_the_destination_to_the_workspace_members_once_for_the_whole_set() {
+        // Given a set of two moving into a crate the workspace does not list
+        let workspace = a_workspace_with_an_entangled_pair();
+        let mut engine = nothing_reaches_the_set();
+        let cluster = a_cluster_of(&["spawner", "spawn_worker"], Reexport::Glob);
+
+        // When
+        let edit = resolve_cluster(&mut engine, &workspace.workspace(), &cluster)
+            .expect("a cluster resolves");
+
+        // Then
+        assert_eq!(
+            applied(&edit, "Cargo.toml", &workspace),
+            "[workspace]\nmembers = [\n    \"crates/origin\",\n    \"crates/destination\",\n]\n"
+        );
+    }
+
+    /// A caller outside the set is re-pointed once, from the file it sits in — and a reference
+    /// inside the set is left to the member's own header pass, which is already moving it.
+    #[test]
+    fn re_points_a_caller_outside_the_set_without_touching_one_inside_it() {
+        // Given a module staying behind that names a member, and members that name each other
+        let workspace = a_workspace_with_an_entangled_pair().with(
+            "crates/origin/src/runtime.rs",
+            "use crate::spawner::Spawner;\n\npub fn boot(spawner: &Spawner) {}\n",
+        );
+        let mut engine = nothing_reaches_the_set()
+            .reaching(
+                "Spawner",
+                SPAWNER,
+                &["crates/origin/src/runtime.rs", WORKER],
+                &workspace,
+            )
+            .reaching("Worker", WORKER, &[SPAWNER], &workspace);
+        let cluster = a_cluster_of(&["spawner", "spawn_worker"], Reexport::None);
+
+        // When
+        let edit = resolve_cluster(&mut engine, &workspace.workspace(), &cluster)
+            .expect("a cluster with no facade resolves");
+
+        // Then the module outside the set names the destination, and each member's own header was
+        // re-pointed once rather than twice
+        assert_eq!(
+            applied(&edit, "crates/origin/src/runtime.rs", &workspace),
+            "use destination::spawner::Spawner;\n\npub fn boot(spawner: &Spawner) {}\n"
+        );
+        assert_eq!(
+            applied(&edit, WORKER, &workspace),
+            "use destination::spawner::Spawner;\n\npub struct Worker;\n"
+        );
+    }
+
+    /// `crate::<module>` is written against one crate root, so a set spanning two crates has no
+    /// single vocabulary to read its co-moving paths in.
+    #[test]
+    fn refuses_a_set_whose_members_leave_different_crates() {
+        // Given a set naming a module in another crate
+        let workspace = a_workspace_with_an_entangled_pair();
+        let mut engine = nothing_reaches_the_set();
+        let mut cluster = a_cluster_of(&["spawner"], Reexport::Glob);
+        cluster.members.push(module_home::ModuleHome {
+            crate_dir: "crates/elsewhere".to_string(),
+            declared_in: "crates/elsewhere/src/lib.rs".to_string(),
+            path: vec!["spawn_worker".to_string()],
+        });
+
+        // When
+        let outcome = resolve_cluster(&mut engine, &workspace.workspace(), &cluster);
+
+        // Then
+        assert_refusal(outcome).naming("different crates");
+    }
+
+    /// A member named twice would be moved, declared and depended on twice over.
+    #[test]
+    fn refuses_a_set_naming_the_same_module_twice() {
+        // Given
+        let workspace = a_workspace_with_an_entangled_pair();
+        let mut engine = nothing_reaches_the_set();
+        let cluster = a_cluster_of(&["spawner", "spawner"], Reexport::Glob);
+
+        // When
+        let outcome = resolve_cluster(&mut engine, &workspace.workspace(), &cluster);
+
+        // Then
+        assert_refusal(outcome).naming("same module twice");
+    }
+
+    /// An empty set is a plan defect rather than a move of nothing: every edit the operation makes
+    /// beyond a member's own is read off the set, and there would be nothing to read.
+    #[test]
+    fn refuses_a_set_with_no_members() {
+        // Given
+        let workspace = a_workspace_with_an_entangled_pair();
+        let mut engine = nothing_reaches_the_set();
+        let cluster = a_cluster_of(&[], Reexport::Glob);
+
+        // When
+        let outcome = resolve_cluster(&mut engine, &workspace.workspace(), &cluster);
+
+        // Then
+        assert_refusal(outcome).naming("no modules");
+    }
+
+    /// The scan reads paths, not substrings: `spawner_pool` is a module of its own, and reporting
+    /// it as a reference to `spawner` is the kind of finding that teaches a reader to skip them.
+    #[test]
+    fn does_not_read_a_longer_module_name_as_a_reference() {
+        // Given text naming a module whose name begins with the moving one's
+        let text = "use crate::spawner_pool::Pool;\n";
+
+        // When
+        let names = names_the_module(text, &["spawner".to_string()], &["other".to_string()]);
+
+        // Then
+        assert!(
+            !names,
+            "`spawner_pool` was read as a reference to `spawner`"
+        );
+    }
+
+    /// A `super::` path is read against the module holding the file, so a nested sibling's
+    /// reference is attributed to the module it actually reaches.
+    #[test]
+    fn reads_a_super_path_against_the_module_holding_the_file() {
+        // Given a file in `supervisor/`, naming its own sibling
+        let text = "use super::spawner::Spawner;\n";
+
+        // When it is read for a reference to `supervisor::spawner`, and to the crate-root one
+        let nested = names_the_module(
+            text,
+            &["supervisor".to_string(), "spawner".to_string()],
+            &["supervisor".to_string(), "client".to_string()],
+        );
+        let at_the_root = names_the_module(
+            text,
+            &["spawner".to_string()],
+            &["supervisor".to_string(), "client".to_string()],
+        );
+
+        // Then
+        assert!(
+            nested,
+            "`super::spawner` did not reach `supervisor::spawner`"
+        );
+        assert!(
+            !at_the_root,
+            "`super::spawner` was read as reaching the crate-root `spawner`"
+        );
+    }
+
+    /// AC7 — the finding names the operation it is about, so a reader can fix the plan by index.
+    #[test]
+    fn ties_a_stranded_sibling_to_the_operation_that_would_strand_it() {
+        // Given a plan whose second operation moves half of a mutually-referencing pair
+        let workspace = a_workspace_with_an_entangled_pair();
+        let plan = [a_move_of("runtime"), a_move_of("spawner")];
+
+        // When
+        let findings = stranded_siblings(&workspace.workspace(), &plan)
+            .expect("the check reads the workspace");
+
+        // Then
+        assert_eq!(
+            findings.iter().map(|(op, _)| *op).collect::<Vec<_>>(),
+            vec![1],
+            "the findings are not the second operation's: {findings:?}"
+        );
+    }
+
+    fn a_move_of(module: &str) -> RefactorOp {
+        RefactorOp {
+            op: RefactorKind::MoveModuleToCrate,
+            anchor: Anchor::Symbol {
+                file: format!("{ORIGIN}/src/{module}.rs"),
+                path: module.to_string(),
+            },
+            name: None,
+            to: Some(DESTINATION.to_string()),
+            variant: None,
+            with_private_deps: false,
+            reexport: Some(Reexport::Glob),
+            to_file: false,
+        }
+    }
+
+    /// A refusal is only useful if it names what made it refuse.
+    struct ARefusal(crate::RestructureError);
+
+    fn assert_refusal<T: std::fmt::Debug>(outcome: Result<T>) -> ARefusal {
+        match outcome {
+            Err(error) => ARefusal(error),
+            Ok(value) => panic!("expected a refusal but the cluster resolved: {value:?}"),
+        }
+    }
+
+    impl ARefusal {
+        fn naming(self, fragment: &str) -> Self {
+            let said = self.0.to_string();
+            assert!(
+                said.contains(fragment),
+                "expected the refusal to name `{fragment}`, it said: {said}"
+            );
+            self
+        }
+    }
 }
