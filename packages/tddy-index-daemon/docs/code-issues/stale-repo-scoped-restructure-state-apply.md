@@ -50,6 +50,11 @@ concurrency story into a diff that is already the largest in its stack.
 
 ## Related
 
-The tool-side history is the standing record in
-[`packages/tddy-code-restructuring/docs/code-issues/blocking-nested-and-cluster-moves.md`](../../../tddy-code-restructuring/docs/code-issues/blocking-nested-and-cluster-moves.md),
-which stays open **because of this call site** — it is the last consumer on the old layout.
+The tool-side record, `blocking-nested-and-cluster-moves.md`, was **closed and deleted** when #490
+wrapped: all four refusals it tracked are gone, and its final measurement (2 of 2 entangled modules
+moved in one operation, `cargo check` clean) is in
+`packages/tddy-code-restructuring/docs/changesets/2026-09-19-cluster-moves-and-plan-scoped-state.md`.
+
+This record is the remainder, and it is **the last consumer on the repository-scoped layout** — which
+is why it is filed here, in the package that owns the call site, rather than left as a footnote on a
+closed record in another package.

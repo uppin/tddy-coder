@@ -4,6 +4,49 @@
 **Source:** `#unbundle` node 1, [#470](https://github.com/uppin/tddy-coder/pull/470) — applying
 `move_module_to_crate` to 21 `tddy-daemon` modules on its first live use
 
+
+## Status — narrowed 2026-09-19, **not** resolved
+
+`#carve` 3/10 ([#490](https://github.com/uppin/tddy-coder/pull/490)) claimed this entry as
+✅ RESOLVED HERE, on the reading that only the nested-module half, the facade-cycle half and the
+repo-scoped journal were left. **That reading was wrong**: this file has accreted sections from
+`#unbundle` nodes 2, 4 and 6, and four of their defects are untouched. The entry is therefore
+**kept and narrowed** rather than deleted — a deleted entry whose problems still exist is the one
+failure that destroys information.
+
+**Closed, and why they are still readable below:**
+
+| Item | Closed by |
+|---|---|
+| Flat modules only / nested-module refusal | [#488](https://github.com/uppin/tddy-coder/pull/488) |
+| Origin facades read as cycles (defining-crate attribution) | [#488](https://github.com/uppin/tddy-coder/pull/488) |
+| `check` not running `apply`'s preconditions | [#488](https://github.com/uppin/tddy-coder/pull/488) |
+| One module at a time / a plan carrying two modules that name each other | [#490](https://github.com/uppin/tddy-coder/pull/490) — `move_cluster_to_crate`; measured 2 of 2 entangled modules moved with `cargo check` clean |
+| Repo-scoped journal | [#490](https://github.com/uppin/tddy-coder/pull/490) for the tool's own `apply`/`status`; **`tddy-index-daemon`'s apply loop still opts out** — `packages/tddy-index-daemon/docs/code-issues/stale-repo-scoped-restructure-state-apply.md` |
+| `--indexing-budget`, `plan is malformed` as the wrong error class, ~20 min per plan | withdrawn / `SeamRefused`+`ServerDefect` / `./run-index-daemon` |
+| The two cosmetic defects | **re-filed**, unfixed, as [`2026-09-18-cross-crate-move-cosmetic-facade-and-mod-ordering.md`](./2026-09-18-cross-crate-move-cosmetic-facade-and-mod-ordering.md) |
+
+**Open — this is what the entry is now for.** Each was verified still absent from the code on
+2026-09-19:
+
+1. **No vocabulary for a seam split.** The operation's unit is a whole module; there is no
+   `move_items_to_crate { from, items }` and no item-list anchor, so a subsystem whose centre cannot
+   leave has nothing to hand the operation. `move_cluster_to_crate` moves *whole modules together*
+   and does not address this. See § *No vocabulary for a seam split*.
+2. **`git mv` means an uncommitted file cannot move at all**, and the failure leaves the tree
+   inconsistent because `pub mod` was already appended. One `git ls-files` in the preflight would
+   catch it; the preflight has none (`ls-files` appears only in `runner/comparison.rs`).
+3. **The `pub(crate)` widening a cross-crate move forces is not reported.** `extract_module` reports
+   its widenings; a cross-crate move, where the question actually bites, does not — it surfaced as
+   four `E0603`s at the next build.
+4. **A caller re-point can be spliced inside a grouped import**, producing
+   `use crate::{a, tddy_daemon_livekit::x::Y, b};`, which never resolves.
+
+Also unresolved in kind: **the refusals are still mostly unit-tested**, though `facade_cycle_acceptance`
+and the new `cluster_move_acceptance` now prove two of them against a live server.
+
+---
+
 The operation moved **13 of the 21**; the other 8 were hand-moved. What stopped it, and what made the
 13 more expensive than they should have been. The user-visible limitations are documented in
 [`docs/ft/coder/rust-code-restructuring.md` § Known limitations](../../ft/coder/rust-code-restructuring.md#known-limitations);
