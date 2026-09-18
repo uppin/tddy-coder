@@ -5,1150 +5,26 @@
 //! Questions are extracted from AskUserQuestion tool events in the NDJSON stream, not from text.
 
 use tddy_core::error::ParseError;
-use tddy_core::source_path::{classify_rust_source_path, RustSourcePathKind};
 
-/// Parsed planning output. PRD must include a `## TODO` section (implementation milestones).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PlanningOutput {
-    pub prd: String,
-    /// PRD/feature name from plan agent (e.g. "Auth Feature").
-    pub name: Option<String>,
-    /// Discovery data (toolchain, scripts, doc locations) from plan goal.
-    pub discovery: Option<tddy_core::changeset::DiscoveryData>,
-    /// Demo plan for user verification.
-    pub demo_plan: Option<DemoPlan>,
-    /// Daemon mode: suggested git branch name for the feature.
-    pub branch_suggestion: Option<String>,
-    /// Daemon mode: suggested worktree directory name (e.g. "feature-auth").
-    pub worktree_suggestion: Option<String>,
-    /// Code-discovery knowledge (Code Map, diagrams, docs) to persist as `artifacts/exploration.md`.
-    pub exploration: Option<String>,
-}
+mod planning;
+pub use planning::*;
 
-/// Demo execution mode: how the running app is presented to the user.
-///
-/// `PortForward` — HTTP port inside the guest is forwarded to a host port; share link is
-/// `http://localhost:<host_port>`. `ScreenShare` — VNC framebuffer → LiveKit H264 track;
-/// share link is a LiveKit viewer URL. Mode is decided by the `plan` step.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DemoMode {
-    PortForward,
-    ScreenShare,
-}
-
-/// A single host ↔ guest port mapping for QEMU slirp `hostfwd`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PortMap {
-    pub host_port: u16,
-    pub guest_port: u16,
-}
-
-/// Demo plan for presenting the feature to the user.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DemoPlan {
-    pub demo_type: String,
-    pub setup_instructions: String,
-    pub steps: Vec<DemoStep>,
-    pub verification: String,
-    /// Execution mode for the demo (port-forward or screen-share). Decided during plan.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode: Option<DemoMode>,
-    /// Host ↔ guest port mappings for QEMU slirp hostfwd (beyond SSH).
-    #[serde(default)]
-    pub hostfwd: Vec<PortMap>,
-    /// Shell commands to run inside the guest (via SSH) after boot to deploy the app.
-    #[serde(default)]
-    pub deploy_steps: Vec<String>,
-    /// Command to run inside the guest to assert the app is healthy after deploy.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub verify_command: Option<String>,
-    /// The build target id (from BUILD.yaml) that produces the guest qcow2 image.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub build_target: Option<String>,
-}
-
-/// A single demo step.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DemoStep {
-    pub description: String,
-    pub command_or_action: String,
-    pub expected_result: String,
-}
-
-#[derive(serde::Deserialize)]
-struct StructuredPlan {
-    goal: Option<String>,
-    name: Option<String>,
-    prd: Option<String>,
-    discovery: Option<tddy_core::changeset::DiscoveryData>,
-    demo_plan: Option<DemoPlan>,
-    branch_suggestion: Option<String>,
-    worktree_suggestion: Option<String>,
-    exploration: Option<String>,
-}
-
-/// Parse LLM planning response. JSON must come from tddy-tools submit (no inline parsing).
-pub fn parse_planning_response(s: &str) -> Result<PlanningOutput, ParseError> {
-    parse_planning_response_impl(s, None)
-}
-
-/// Like parse_planning_response but resolves `prd` when it is a path to an MD file (relative to base_path).
-pub fn parse_planning_response_with_base(
-    s: &str,
-    _base_path: &std::path::Path,
-) -> Result<PlanningOutput, ParseError> {
-    parse_planning_response_impl(s, Some(_base_path))
-}
-
-/// Heuristic: `prd` is a relative markdown file reference, not inline PRD body (which has newlines).
-fn prd_value_looks_like_md_file_path(prd: &str) -> bool {
-    const MAX_PRD_FILE_PATH_REF_LEN: usize = 260;
-    let t = prd.trim();
-    t.len() <= MAX_PRD_FILE_PATH_REF_LEN
-        && !t.contains('\n')
-        && !t.contains('\r')
-        && t.ends_with(".md")
-}
-
-fn parse_planning_response_impl(
-    s: &str,
-    _base_path: Option<&std::path::Path>,
-) -> Result<PlanningOutput, ParseError> {
-    let s = s.trim();
-    let parsed: StructuredPlan = serde_json::from_str(s)
-        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
-    if parsed.goal.as_deref() != Some("plan") {
-        return Err(ParseError::Malformed("goal is not plan".into()));
-    }
-    let mut prd = parsed
-        .prd
-        .filter(|x| !x.trim().is_empty())
-        .ok_or_else(|| ParseError::Malformed("prd missing or empty".into()))?;
-    if let Some(base) = _base_path {
-        let path = base.join(prd.trim());
-        if path.exists() && path.is_file() {
-            prd = std::fs::read_to_string(&path).map_err(|e| {
-                ParseError::Malformed(format!("failed to read prd file {}: {}", path.display(), e))
-            })?;
-        } else if prd_value_looks_like_md_file_path(&prd) {
-            return Err(ParseError::Malformed(format!(
-                "prd references markdown file {:?} but no such file was found under {}",
-                prd.trim(),
-                base.display()
-            )));
-        }
-    }
-    Ok(PlanningOutput {
-        prd,
-        name: parsed.name.filter(|s| !s.is_empty()),
-        discovery: parsed.discovery,
-        demo_plan: parsed.demo_plan,
-        branch_suggestion: parsed.branch_suggestion.filter(|s| !s.is_empty()),
-        worktree_suggestion: parsed.worktree_suggestion.filter(|s| !s.is_empty()),
-        exploration: parsed.exploration.filter(|s| !s.trim().is_empty()),
-    })
-}
-
-/// Parsed acceptance tests output.
-#[derive(Debug, Clone)]
-pub struct AcceptanceTestsOutput {
-    pub summary: String,
-    pub tests: Vec<AcceptanceTestInfo>,
-    /// How to run the tests, derived from project (e.g. "cargo test", "npm test").
-    pub test_command: Option<String>,
-    /// Prerequisite actions before running tests (e.g. "None" or "Run cargo build first"). Use cheapest way: omit if test script already builds.
-    pub prerequisite_actions: Option<String>,
-    /// How to run a single or selected tests (e.g. "cargo test <name>", "pytest -k <pattern>").
-    pub run_single_or_selected_tests: Option<String>,
-    /// How to run tests sequentially (e.g. "cargo test -- --test-threads=1").
-    pub sequential_command: Option<String>,
-    /// How to run tests with logging (e.g. "RUST_LOG=debug cargo test").
-    pub logging_command: Option<String>,
-    /// Metric reporting hooks (e.g. "cargo test -- --format json").
-    pub metric_hooks: Option<String>,
-    /// Execution feedback options (e.g. "cargo test 2>&1 | tee test-output.txt").
-    pub feedback_options: Option<String>,
-}
-
-/// Info about a single acceptance test.
-#[derive(Debug, Clone)]
-pub struct AcceptanceTestInfo {
-    pub name: String,
-    pub file: String,
-    pub line: Option<u32>,
-    pub status: String,
-}
-
-impl AcceptanceTestsOutput {
-    /// Render acceptance tests output as markdown for acceptance-tests.md artifact.
-    pub fn to_markdown(&self) -> String {
-        let mut out = String::from("# Acceptance Tests\n\n");
-        out.push_str("## Summary\n\n");
-        out.push_str(&self.summary);
-        out.push_str("\n\n## How to run tests\n\n");
-        out.push_str(
-            self.test_command
-                .as_deref()
-                .unwrap_or("(Inspect the project to determine the test command, e.g. `cargo test`, `npm test`, `pytest`)"),
-        );
-        out.push_str("\n\n## Prerequisite actions\n\n");
-        out.push_str(
-            self.prerequisite_actions
-                .as_deref()
-                .unwrap_or("None. Use the cheapest approach: if the test command already builds or bundles, do not run a separate build."),
-        );
-        out.push_str("\n\n## How to run a single or selected tests\n\n");
-        out.push_str(
-            self.run_single_or_selected_tests
-                .as_deref()
-                .unwrap_or("(Inspect the project: e.g. `cargo test <name>`, `pytest -k <pattern>`, `npm test -- --testNamePattern=<pattern>`)"),
-        );
-        out.push_str("\n\n## Tests\n\n");
-        for t in &self.tests {
-            out.push_str(&format!("### {}\n", t.name));
-            out.push_str(&format!("- **File**: {}\n", t.file));
-            out.push_str(&format!("- **Line**: {}\n", t.line.unwrap_or(0)));
-            out.push_str(&format!("- **Status**: {}\n", t.status));
-            out.push_str(&format!(
-                "- **Validates**: {}\n\n",
-                t.name.replace('_', " ")
-            ));
-        }
-        out
-    }
-}
-
-#[derive(serde::Deserialize)]
-struct StructuredAcceptanceTests {
-    goal: Option<String>,
-    summary: Option<String>,
-    tests: Option<Vec<AcceptanceTestInfoDe>>,
-    test_command: Option<String>,
-    prerequisite_actions: Option<String>,
-    run_single_or_selected_tests: Option<String>,
-    #[serde(default)]
-    sequential_command: Option<String>,
-    #[serde(default)]
-    logging_command: Option<String>,
-    #[serde(default)]
-    metric_hooks: Option<String>,
-    #[serde(default)]
-    feedback_options: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct AcceptanceTestInfoDe {
-    name: String,
-    file: String,
-    line: Option<u32>,
-    status: String,
-}
-
-/// Parse LLM acceptance tests response. JSON must come from tddy-tools submit.
-pub fn parse_acceptance_tests_response(s: &str) -> Result<AcceptanceTestsOutput, ParseError> {
-    let s = s.trim();
-    let parsed: StructuredAcceptanceTests = serde_json::from_str(s)
-        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
-    if parsed.goal.as_deref() != Some("acceptance-tests") {
-        return Err(ParseError::Malformed("goal is not acceptance-tests".into()));
-    }
-    let summary = parsed
-        .summary
-        .filter(|x| !x.is_empty())
-        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
-    let tests = parsed
-        .tests
-        .unwrap_or_default()
-        .into_iter()
-        .map(|t| AcceptanceTestInfo {
-            name: t.name,
-            file: t.file,
-            line: t.line,
-            status: t.status,
-        })
-        .collect();
-    Ok(AcceptanceTestsOutput {
-        summary,
-        tests,
-        test_command: parsed.test_command.filter(|x| !x.is_empty()),
-        prerequisite_actions: parsed.prerequisite_actions.filter(|x| !x.is_empty()),
-        run_single_or_selected_tests: parsed
-            .run_single_or_selected_tests
-            .filter(|x| !x.is_empty()),
-        sequential_command: parsed.sequential_command.filter(|x| !x.is_empty()),
-        logging_command: parsed.logging_command.filter(|x| !x.is_empty()),
-        metric_hooks: parsed.metric_hooks.filter(|x| !x.is_empty()),
-        feedback_options: parsed.feedback_options.filter(|x| !x.is_empty()),
-    })
-}
+mod acceptance_tests;
+pub use acceptance_tests::*;
 
 // ── analyze output (bugfix pipeline) ─────────────────────────────────────────
 
-/// Parsed output from the bugfix `analyze` goal (`tddy-tools submit --goal analyze`).
-#[derive(Debug, Clone)]
-pub struct AnalyzeOutput {
-    pub branch_suggestion: String,
-    pub worktree_suggestion: String,
-    pub name: Option<String>,
-    pub summary: Option<String>,
-    /// Code-discovery knowledge to persist as `artifacts/exploration.md` (analyze is bugfix's discovery step).
-    pub exploration: Option<String>,
-}
+mod analyze;
+pub use analyze::*;
 
-#[derive(serde::Deserialize)]
-struct StructuredAnalyze {
-    goal: Option<String>,
-    branch_suggestion: Option<String>,
-    worktree_suggestion: Option<String>,
-    name: Option<String>,
-    summary: Option<String>,
-    exploration: Option<String>,
-}
+mod green;
+pub use green::*;
 
-/// Parse LLM analyze response. JSON must come from tddy-tools submit.
-pub fn parse_analyze_response(s: &str) -> Result<AnalyzeOutput, ParseError> {
-    let s = s.trim();
-    let parsed: StructuredAnalyze = serde_json::from_str(s)
-        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
-    if parsed.goal.as_deref() != Some("analyze") {
-        return Err(ParseError::Malformed(format!(
-            "goal is not analyze, got: {:?}",
-            parsed.goal
-        )));
-    }
-    let branch_suggestion = parsed
-        .branch_suggestion
-        .filter(|x| !x.is_empty())
-        .ok_or_else(|| ParseError::Malformed("branch_suggestion missing or empty".into()))?;
-    let worktree_suggestion = parsed
-        .worktree_suggestion
-        .filter(|x| !x.is_empty())
-        .ok_or_else(|| ParseError::Malformed("worktree_suggestion missing or empty".into()))?;
-    Ok(AnalyzeOutput {
-        branch_suggestion,
-        worktree_suggestion,
-        name: parsed.name.filter(|x| !x.is_empty()),
-        summary: parsed.summary.filter(|x| !x.is_empty()),
-        exploration: parsed.exploration.filter(|x| !x.trim().is_empty()),
-    })
-}
+mod red;
+pub use red::*;
 
-/// Parsed green goal output.
-#[derive(Debug, Clone)]
-pub struct GreenOutput {
-    pub summary: String,
-    pub tests: Vec<GreenTestResult>,
-    pub implementations: Vec<ImplementationInfo>,
-    pub test_command: Option<String>,
-    pub prerequisite_actions: Option<String>,
-    pub run_single_or_selected_tests: Option<String>,
-    /// Demo results when demo-plan.md was present and green completed.
-    pub demo_results: Option<DemoResults>,
-}
-
-/// Demo execution results from green goal.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DemoResults {
-    pub summary: String,
-    pub steps_completed: u32,
-}
-
-/// Parsed output from the standalone demo goal.
-#[derive(Debug, Clone)]
-pub struct DemoOutput {
-    pub summary: String,
-    pub demo_type: String,
-    pub steps_completed: u32,
-    pub verification: String,
-    /// Shareable URL produced by the demo (e.g. `http://localhost:8080` for PortForward,
-    /// or a LiveKit viewer URL for ScreenShare). `None` if the demo did not produce a link.
-    pub share_url: Option<String>,
-}
-
-/// Info about a single test result from the green goal.
-#[derive(Debug, Clone)]
-pub struct GreenTestResult {
-    pub name: String,
-    pub file: String,
-    pub line: Option<u32>,
-    pub status: String,
-    pub reason: Option<String>,
-}
-
-/// Info about an implementation (method, struct, etc.) from the green goal.
-#[derive(Debug, Clone)]
-pub struct ImplementationInfo {
-    pub name: String,
-    pub file: String,
-    pub line: Option<u32>,
-    pub kind: String,
-}
-
-#[derive(serde::Deserialize)]
-struct StructuredGreen {
-    goal: Option<String>,
-    summary: Option<String>,
-    tests: Option<Vec<GreenTestResultDe>>,
-    implementations: Option<Vec<ImplementationInfoDe>>,
-    test_command: Option<String>,
-    prerequisite_actions: Option<String>,
-    run_single_or_selected_tests: Option<String>,
-    #[serde(default)]
-    demo_results: Option<DemoResultsDe>,
-}
-
-#[derive(serde::Deserialize)]
-struct DemoResultsDe {
-    summary: String,
-    steps_completed: u32,
-}
-
-#[derive(serde::Deserialize)]
-struct GreenTestResultDe {
-    name: String,
-    file: String,
-    line: Option<u32>,
-    status: String,
-    #[serde(default)]
-    reason: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct ImplementationInfoDe {
-    name: String,
-    file: String,
-    line: Option<u32>,
-    kind: String,
-}
-
-/// Parse LLM green goal response. JSON must come from tddy-tools submit.
-pub fn parse_green_response(s: &str) -> Result<GreenOutput, ParseError> {
-    let s = s.trim();
-    let parsed: StructuredGreen = serde_json::from_str(s)
-        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
-    if parsed.goal.as_deref() != Some("green") {
-        return Err(ParseError::Malformed("goal is not green".into()));
-    }
-    let summary = parsed
-        .summary
-        .filter(|x| !x.is_empty())
-        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
-    let tests = parsed
-        .tests
-        .unwrap_or_default()
-        .into_iter()
-        .map(|t| GreenTestResult {
-            name: t.name,
-            file: t.file,
-            line: t.line,
-            status: t.status,
-            reason: t.reason,
-        })
-        .collect();
-    let implementations = parsed
-        .implementations
-        .unwrap_or_default()
-        .into_iter()
-        .map(|i| ImplementationInfo {
-            name: i.name,
-            file: i.file,
-            line: i.line,
-            kind: i.kind,
-        })
-        .collect();
-    let demo_results = parsed.demo_results.map(|d| DemoResults {
-        summary: d.summary,
-        steps_completed: d.steps_completed,
-    });
-    Ok(GreenOutput {
-        summary,
-        tests,
-        implementations,
-        test_command: parsed.test_command.filter(|x| !x.is_empty()),
-        prerequisite_actions: parsed.prerequisite_actions.filter(|x| !x.is_empty()),
-        run_single_or_selected_tests: parsed
-            .run_single_or_selected_tests
-            .filter(|x| !x.is_empty()),
-        demo_results,
-    })
-}
-
-impl GreenOutput {
-    /// Render updated progress.md with [x] for passing, [!] for failing.
-    pub fn to_updated_progress_markdown(&self) -> String {
-        let mut out = String::from("# Progress\n\n");
-        out.push_str("Unfilled milestones. Mark each as done [x], skipped, or failed.\n\n");
-        out.push_str("## Failed Tests\n\n");
-        for t in &self.tests {
-            let loc = t
-                .line
-                .map(|l| format!("{}:{}", t.file, l))
-                .unwrap_or_else(|| t.file.clone());
-            let marker = if t.status == "passing" { "[x]" } else { "[!]" };
-            let reason = t
-                .reason
-                .as_deref()
-                .map(|r| format!(" — {}", r))
-                .unwrap_or_default();
-            out.push_str(&format!("- {} {} ({}){}\n", marker, t.name, loc, reason));
-        }
-        out.push_str("\n## Skeletons\n\n");
-        for i in &self.implementations {
-            let loc = i
-                .line
-                .map(|l| format!("{}:{}", i.file, l))
-                .unwrap_or_else(|| i.file.clone());
-            out.push_str(&format!("- [x] {} ({}) — {}\n", i.name, loc, i.kind));
-        }
-        out
-    }
-
-    /// Update acceptance-tests.md content: replace "failing" with "passing" for passing tests.
-    pub fn update_acceptance_tests_content(&self, content: &str) -> String {
-        let passing: std::collections::HashSet<&str> = self
-            .tests
-            .iter()
-            .filter(|t| t.status == "passing")
-            .map(|t| t.name.as_str())
-            .collect();
-        if passing.is_empty() {
-            return content.to_string();
-        }
-        let mut out = String::new();
-        let sections: Vec<&str> = content.split("\n### ").collect();
-        for (i, section) in sections.iter().enumerate() {
-            if i == 0 {
-                out.push_str(section);
-                if sections.len() > 1 {
-                    out.push_str("\n### ");
-                }
-                continue;
-            }
-            let (name, rest) = section.split_once('\n').unwrap_or((section, ""));
-            let test_name = name.trim();
-            let updated_rest = if passing.contains(test_name) {
-                rest.replace("- **Status**: failing", "- **Status**: passing")
-            } else {
-                rest.to_string()
-            };
-            out.push_str(test_name);
-            out.push('\n');
-            out.push_str(&updated_rest);
-            if i < sections.len() - 1 {
-                out.push_str("\n### ");
-            }
-        }
-        out
-    }
-
-    /// Returns true if all tests are passing.
-    pub fn all_tests_passing(&self) -> bool {
-        self.tests.iter().all(|t| t.status == "passing")
-    }
-}
-
-/// Parsed red goal output.
-#[derive(Debug, Clone)]
-pub struct RedOutput {
-    pub summary: String,
-    pub tests: Vec<RedTestInfo>,
-    pub skeletons: Vec<SkeletonInfo>,
-    /// How to run the tests, derived from project (e.g. "cargo test", "npm test").
-    pub test_command: Option<String>,
-    /// Prerequisite actions before running tests. Use cheapest way: omit if test script already builds.
-    pub prerequisite_actions: Option<String>,
-    /// How to run a single or selected tests (e.g. "cargo test <name>", "pytest -k <pattern>").
-    pub run_single_or_selected_tests: Option<String>,
-    /// Logging markers added to skeleton code.
-    #[allow(clippy::struct_excessive_bools)]
-    pub markers: Vec<MarkerInfo>,
-    /// Which markers were collected from test output.
-    pub marker_results: Vec<MarkerResult>,
-    /// Path to captured test output file.
-    pub test_output_file: Option<String>,
-    /// How to run tests sequentially.
-    pub sequential_command: Option<String>,
-    /// How to run tests with logging.
-    pub logging_command: Option<String>,
-    /// Metric reporting hooks.
-    pub metric_hooks: Option<String>,
-    /// Execution feedback options.
-    pub feedback_options: Option<String>,
-}
-
-/// Logging marker definition (JSON format with scope data).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MarkerInfo {
-    pub marker_id: String,
-    pub test_name: String,
-    pub scope: String,
-    pub data: serde_json::Value,
-    /// File where the marker was placed (production skeleton entry point), when provided.
-    #[serde(default)]
-    pub source_file: Option<String>,
-}
-
-/// Result of marker collection verification.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MarkerResult {
-    pub marker_id: String,
-    pub test_name: String,
-    pub scope: String,
-    pub collected: bool,
-    pub investigation: Option<String>,
-}
-
-/// Info about a single test created by the red goal.
-#[derive(Debug, Clone)]
-pub struct RedTestInfo {
-    pub name: String,
-    pub file: String,
-    pub line: Option<u32>,
-    pub status: String,
-}
-
-/// Info about a skeleton (trait, struct, method, function, module) created by the red goal.
-#[derive(Debug, Clone)]
-pub struct SkeletonInfo {
-    pub name: String,
-    pub file: String,
-    pub line: Option<u32>,
-    pub kind: String,
-}
-
-#[derive(serde::Deserialize)]
-struct StructuredRed {
-    goal: Option<String>,
-    summary: Option<String>,
-    tests: Option<Vec<RedTestInfoDe>>,
-    skeletons: Option<Vec<SkeletonInfoDe>>,
-    test_command: Option<String>,
-    prerequisite_actions: Option<String>,
-    run_single_or_selected_tests: Option<String>,
-    #[serde(default)]
-    markers: Option<Vec<MarkerInfoDe>>,
-    #[serde(default)]
-    marker_results: Option<Vec<MarkerResultDe>>,
-    #[serde(default)]
-    test_output_file: Option<String>,
-    #[serde(default)]
-    sequential_command: Option<String>,
-    #[serde(default)]
-    logging_command: Option<String>,
-    #[serde(default)]
-    metric_hooks: Option<String>,
-    #[serde(default)]
-    feedback_options: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct MarkerInfoDe {
-    marker_id: String,
-    test_name: String,
-    scope: String,
-    #[serde(default)]
-    data: serde_json::Value,
-    #[serde(default)]
-    source_file: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct MarkerResultDe {
-    marker_id: String,
-    test_name: String,
-    scope: String,
-    collected: bool,
-    investigation: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct RedTestInfoDe {
-    name: String,
-    file: String,
-    line: Option<u32>,
-    status: String,
-}
-
-#[derive(serde::Deserialize)]
-struct SkeletonInfoDe {
-    name: String,
-    file: String,
-    line: Option<u32>,
-    kind: String,
-}
-
-/// Parse LLM red goal response. JSON must come from tddy-tools submit.
-pub fn parse_red_response(s: &str) -> Result<RedOutput, ParseError> {
-    log::info!(target: "tddy_workflow_recipes::parser", "parse_red_response: parsing red goal JSON");
-    let s = s.trim();
-    let parsed: StructuredRed = serde_json::from_str(s)
-        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
-    if parsed.goal.as_deref() != Some("red") {
-        return Err(ParseError::Malformed("goal is not red".into()));
-    }
-    let summary = parsed
-        .summary
-        .filter(|x| !x.is_empty())
-        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
-    let tests = parsed
-        .tests
-        .unwrap_or_default()
-        .into_iter()
-        .map(|t| RedTestInfo {
-            name: t.name,
-            file: t.file,
-            line: t.line,
-            status: t.status,
-        })
-        .collect();
-    let skeletons = parsed
-        .skeletons
-        .unwrap_or_default()
-        .into_iter()
-        .map(|s| SkeletonInfo {
-            name: s.name,
-            file: s.file,
-            line: s.line,
-            kind: s.kind,
-        })
-        .collect();
-    let markers = parsed
-        .markers
-        .unwrap_or_default()
-        .into_iter()
-        .map(|m| MarkerInfo {
-            marker_id: m.marker_id,
-            test_name: m.test_name,
-            scope: m.scope,
-            data: m.data,
-            source_file: m.source_file.filter(|s| !s.is_empty()),
-        })
-        .collect();
-    let marker_results = parsed
-        .marker_results
-        .unwrap_or_default()
-        .into_iter()
-        .map(|m| MarkerResult {
-            marker_id: m.marker_id,
-            test_name: m.test_name,
-            scope: m.scope,
-            collected: m.collected,
-            investigation: m.investigation,
-        })
-        .collect();
-    let output = RedOutput {
-        summary,
-        tests,
-        skeletons,
-        markers,
-        marker_results,
-        test_command: parsed.test_command.filter(|x| !x.is_empty()),
-        prerequisite_actions: parsed.prerequisite_actions.filter(|x| !x.is_empty()),
-        test_output_file: parsed.test_output_file.filter(|x| !x.is_empty()),
-        run_single_or_selected_tests: parsed
-            .run_single_or_selected_tests
-            .filter(|x| !x.is_empty()),
-        sequential_command: parsed.sequential_command.filter(|x| !x.is_empty()),
-        logging_command: parsed.logging_command.filter(|x| !x.is_empty()),
-        metric_hooks: parsed.metric_hooks.filter(|x| !x.is_empty()),
-        feedback_options: parsed.feedback_options.filter(|x| !x.is_empty()),
-    };
-    log::debug!(
-        target: "tddy_workflow_recipes::parser",
-        "parse_red_response: deserialized ({} markers); validating marker source_file paths",
-        output.markers.len()
-    );
-    validate_red_marker_source_paths(&output)?;
-    log::debug!(
-        target: "tddy_workflow_recipes::parser",
-        "parse_red_response: marker placement validation ok"
-    );
-    Ok(output)
-}
-
-/// Validate that red output markers with `source_file` are only associated with production paths.
-///
-/// Callers invoke this after [`parse_red_response`] when enforcing production-only marker placement.
-/// [`parse_red_response`] already runs this check; calling again is idempotent.
-pub fn validate_red_marker_source_paths(output: &RedOutput) -> Result<(), ParseError> {
-    log::debug!(
-        target: "tddy_workflow_recipes::parser",
-        "validate_red_marker_source_paths: checking {} markers for source_file paths",
-        output.markers.len()
-    );
-    for m in &output.markers {
-        let Some(ref path) = m.source_file else {
-            log::debug!(
-                target: "tddy_workflow_recipes::parser",
-                "validate_red_marker_source_paths: marker {} has no source_file; skipping placement check",
-                m.marker_id
-            );
-            continue;
-        };
-        if classify_rust_source_path(path) == RustSourcePathKind::Test {
-            let msg = format!(
-                "red marker {}: source_file {:?} is test-only; logging markers MUST NOT appear in test code — place markers only on production/skeleton entry points",
-                m.marker_id, path
-            );
-            log::debug!(
-                target: "tddy_workflow_recipes::parser",
-                "validate_red_marker_source_paths: rejected marker_id={} test-only source_file={:?}",
-                m.marker_id,
-                path
-            );
-            return Err(ParseError::Malformed(msg));
-        }
-    }
-    Ok(())
-}
-
-/// Build result entry from evaluate-changes output.
-#[derive(Debug, Clone)]
-pub struct EvaluateBuildResult {
-    pub package: String,
-    pub status: String,
-    pub notes: Option<String>,
-}
-
-/// An issue found during evaluation.
-#[derive(Debug, Clone)]
-pub struct EvaluateIssue {
-    pub severity: String,
-    pub category: String,
-    pub file: String,
-    pub line: Option<u32>,
-    pub description: String,
-    pub suggestion: Option<String>,
-}
-
-/// Changeset sync status from evaluate-changes output.
-#[derive(Debug, Clone)]
-pub struct EvaluateChangesetSync {
-    pub status: String,
-    pub items_updated: u32,
-    pub items_added: u32,
-}
-
-/// File analyzed entry from evaluate-changes output.
-#[derive(Debug, Clone)]
-pub struct EvaluateFileAnalyzed {
-    pub file: String,
-    pub lines_changed: Option<u32>,
-    pub changeset_item: Option<String>,
-}
-
-/// Test impact summary from evaluate-changes output.
-#[derive(Debug, Clone)]
-pub struct EvaluateTestImpact {
-    pub tests_affected: u32,
-    pub new_tests_needed: u32,
-}
-
-#[derive(serde::Deserialize)]
-struct EvaluateBuildResultDe {
-    package: String,
-    status: String,
-    notes: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct EvaluateIssueDe {
-    severity: String,
-    category: String,
-    file: String,
-    line: Option<u32>,
-    description: String,
-    suggestion: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct EvaluateChangesetSyncDe {
-    status: String,
-    #[serde(default)]
-    items_updated: u32,
-    #[serde(default)]
-    items_added: u32,
-}
-
-#[derive(serde::Deserialize)]
-struct EvaluateFileAnalyzedDe {
-    file: String,
-    lines_changed: Option<u32>,
-    changeset_item: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct EvaluateTestImpactDe {
-    tests_affected: u32,
-    new_tests_needed: u32,
-}
-
-impl RedOutput {
-    /// Render red goal output as markdown for red-output.md artifact.
-    pub fn to_markdown(&self) -> String {
-        let mut out = String::from("# Red Phase Output\n\n");
-        out.push_str("## Summary\n\n");
-        out.push_str(&self.summary);
-        out.push_str("\n\n## How to run tests\n\n");
-        out.push_str(
-            self.test_command
-                .as_deref()
-                .unwrap_or("(Inspect the project to determine the test command, e.g. `cargo test`, `npm test`, `pytest`)"),
-        );
-        out.push_str("\n\n## Prerequisite actions\n\n");
-        out.push_str(
-            self.prerequisite_actions
-                .as_deref()
-                .unwrap_or("None. Use the cheapest approach: if the test command already builds or bundles, do not run a separate build."),
-        );
-        out.push_str("\n\n## How to run a single or selected tests\n\n");
-        out.push_str(
-            self.run_single_or_selected_tests
-                .as_deref()
-                .unwrap_or("(Inspect the project: e.g. `cargo test <name>`, `pytest -k <pattern>`, `npm test -- --testNamePattern=<pattern>`)"),
-        );
-        out.push_str("\n\n## Tests\n\n");
-        for t in &self.tests {
-            out.push_str(&format!("### {}\n", t.name));
-            out.push_str(&format!("- **File**: {}\n", t.file));
-            out.push_str(&format!("- **Line**: {}\n", t.line.unwrap_or(0)));
-            out.push_str(&format!("- **Status**: {}\n\n", t.status));
-        }
-        out.push_str("## Skeletons\n\n");
-        for s in &self.skeletons {
-            out.push_str(&format!("### {}\n", s.name));
-            out.push_str(&format!("- **File**: {}\n", s.file));
-            out.push_str(&format!("- **Line**: {}\n", s.line.unwrap_or(0)));
-            out.push_str(&format!("- **Kind**: {}\n\n", s.kind));
-        }
-        if !self.markers.is_empty() {
-            out.push_str("## Logging Markers\n\n");
-            for m in &self.markers {
-                out.push_str(&format!(
-                    "- **{}** (scope: {}): {}\n",
-                    m.marker_id, m.scope, m.test_name
-                ));
-            }
-        }
-        if !self.marker_results.is_empty() {
-            out.push_str("\n## Marker Verification\n\n");
-            for r in &self.marker_results {
-                out.push_str(&format!(
-                    "- **{}**: collected={}\n",
-                    r.marker_id, r.collected
-                ));
-            }
-        }
-        out
-    }
-
-    /// Render progress.md with unfilled checkboxes for failed tests and skeletons.
-    /// Next goal uses this to mark items as done, skipped, or failed.
-    pub fn to_progress_markdown(&self) -> String {
-        let mut out = String::from("# Progress\n\n");
-        out.push_str("Unfilled milestones. Mark each as done [x], skipped, or failed.\n\n");
-        out.push_str("## Failed Tests\n\n");
-        for t in &self.tests {
-            let loc = t
-                .line
-                .map(|l| format!("{}:{}", t.file, l))
-                .unwrap_or_else(|| t.file.clone());
-            out.push_str(&format!("- [ ] {} ({})\n", t.name, loc));
-        }
-        out.push_str("\n## Skeletons\n\n");
-        for s in &self.skeletons {
-            let loc = s
-                .line
-                .map(|l| format!("{}:{}", s.file, l))
-                .unwrap_or_else(|| s.file.clone());
-            out.push_str(&format!("- [ ] {} ({}) — {}\n", s.name, loc, s.kind));
-        }
-        out
-    }
-}
-
-// ── evaluate-changes output types ────────────────────────────────────────────
-
-/// A changed file entry in an evaluate-changes report.
-#[derive(Debug, Clone)]
-pub struct EvaluateChangedFile {
-    pub path: String,
-    pub change_type: String,
-    pub lines_added: i64,
-    pub lines_removed: i64,
-}
-
-/// An affected test entry in an evaluate-changes report.
-#[derive(Debug, Clone)]
-pub struct EvaluateAffectedTest {
-    pub path: String,
-    pub status: String,
-    pub description: String,
-}
-
-/// Parsed output from the evaluate-changes goal.
-#[derive(Debug, Clone)]
-pub struct EvaluateOutput {
-    pub summary: String,
-    pub risk_level: String,
-    pub build_results: Vec<EvaluateBuildResult>,
-    pub issues: Vec<EvaluateIssue>,
-    pub changeset_sync: Option<EvaluateChangesetSync>,
-    pub files_analyzed: Vec<EvaluateFileAnalyzed>,
-    pub test_impact: Option<EvaluateTestImpact>,
-    pub changed_files: Vec<EvaluateChangedFile>,
-    pub affected_tests: Vec<EvaluateAffectedTest>,
-    pub validity_assessment: String,
-}
-
-#[derive(serde::Deserialize)]
-struct StructuredEvaluate {
-    goal: Option<String>,
-    summary: Option<String>,
-    risk_level: Option<String>,
-    #[serde(default)]
-    build_results: Option<Vec<EvaluateBuildResultDe>>,
-    #[serde(default)]
-    issues: Option<Vec<EvaluateIssueDe>>,
-    #[serde(default)]
-    changeset_sync: Option<EvaluateChangesetSyncDe>,
-    #[serde(default)]
-    files_analyzed: Option<Vec<EvaluateFileAnalyzedDe>>,
-    #[serde(default)]
-    test_impact: Option<EvaluateTestImpactDe>,
-    #[serde(default)]
-    changed_files: Option<Vec<EvaluateChangedFileDe>>,
-    #[serde(default)]
-    affected_tests: Option<Vec<EvaluateAffectedTestDe>>,
-    #[serde(default)]
-    validity_assessment: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct EvaluateChangedFileDe {
-    path: String,
-    change_type: String,
-    #[serde(default)]
-    lines_added: i64,
-    #[serde(default)]
-    lines_removed: i64,
-}
-
-#[derive(serde::Deserialize)]
-struct EvaluateAffectedTestDe {
-    path: String,
-    status: String,
-    #[serde(default)]
-    description: String,
-}
-
-/// Parse LLM evaluate-changes response. JSON must come from tddy-tools submit.
-pub fn parse_evaluate_response(s: &str) -> Result<EvaluateOutput, ParseError> {
-    let s = s.trim();
-    let parsed: StructuredEvaluate = serde_json::from_str(s)
-        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
-    if parsed.goal.as_deref() != Some("evaluate-changes") {
-        return Err(ParseError::Malformed(format!(
-            "goal is not evaluate-changes, got: {:?}",
-            parsed.goal
-        )));
-    }
-    let summary = parsed
-        .summary
-        .filter(|x| !x.is_empty())
-        .unwrap_or_else(|| "No summary provided.".to_string());
-    let risk_level = parsed
-        .risk_level
-        .filter(|x| !x.is_empty())
-        .unwrap_or_else(|| "unknown".to_string());
-    let build_results = parsed
-        .build_results
-        .unwrap_or_default()
-        .into_iter()
-        .map(|b| EvaluateBuildResult {
-            package: b.package,
-            status: b.status,
-            notes: b.notes,
-        })
-        .collect();
-    let issues = parsed
-        .issues
-        .unwrap_or_default()
-        .into_iter()
-        .map(|i| EvaluateIssue {
-            severity: i.severity,
-            category: i.category,
-            file: i.file,
-            line: i.line,
-            description: i.description,
-            suggestion: i.suggestion,
-        })
-        .collect();
-    let changeset_sync = parsed.changeset_sync.map(|c| EvaluateChangesetSync {
-        status: c.status,
-        items_updated: c.items_updated,
-        items_added: c.items_added,
-    });
-    let files_analyzed = parsed
-        .files_analyzed
-        .unwrap_or_default()
-        .into_iter()
-        .map(|f| EvaluateFileAnalyzed {
-            file: f.file,
-            lines_changed: f.lines_changed,
-            changeset_item: f.changeset_item,
-        })
-        .collect();
-    let test_impact = parsed.test_impact.map(|t| EvaluateTestImpact {
-        tests_affected: t.tests_affected,
-        new_tests_needed: t.new_tests_needed,
-    });
-    let changed_files: Vec<_> = parsed
-        .changed_files
-        .unwrap_or_default()
-        .into_iter()
-        .map(|c| EvaluateChangedFile {
-            path: c.path,
-            change_type: c.change_type,
-            lines_added: c.lines_added,
-            lines_removed: c.lines_removed,
-        })
-        .collect();
-    let affected_tests: Vec<_> = parsed
-        .affected_tests
-        .unwrap_or_default()
-        .into_iter()
-        .map(|a| EvaluateAffectedTest {
-            path: a.path,
-            status: a.status,
-            description: a.description,
-        })
-        .collect();
-    let validity_assessment = parsed
-        .validity_assessment
-        .filter(|s| !s.is_empty())
-        .unwrap_or_default();
-
-    log::debug!(
-        "[tddy-core] parse_evaluate_response: parsed {} changed_files, {} affected_tests",
-        changed_files.len(),
-        affected_tests.len()
-    );
-
-    Ok(EvaluateOutput {
-        summary,
-        risk_level,
-        build_results,
-        issues,
-        changeset_sync,
-        files_analyzed,
-        test_impact,
-        changed_files,
-        affected_tests,
-        validity_assessment,
-    })
-}
+mod evaluate;
+pub use evaluate::*;
 
 // ── validate (subagents) output types ─────────────────────────────────────────
 
@@ -1224,7 +100,7 @@ mod tests {
         let input = "{\"goal\":\"plan\",\"prd\":\"# PRD\\n\\n## Summary\\nFeature X\\n\\n## TODO\\n\\n- [ ] Task 1\"}";
 
         // When
-        let out = parse_planning_response(input).expect("should parse");
+        let out = planning::parse_planning_response(input).expect("should parse");
 
         // Then
         assert!(out.prd.contains("Feature X"));
@@ -1234,7 +110,7 @@ mod tests {
     #[test]
     fn parse_planning_response_rejects_non_json() {
         // When
-        let err = parse_planning_response("Some random text without JSON").unwrap_err();
+        let err = planning::parse_planning_response("Some random text without JSON").unwrap_err();
 
         // Then
         assert!(matches!(err, ParseError::Malformed(_)));
@@ -1243,7 +119,7 @@ mod tests {
     #[test]
     fn parse_planning_response_rejects_wrong_goal() {
         // When
-        let err = parse_planning_response(
+        let err = planning::parse_planning_response(
             "{\"goal\":\"red\",\"prd\":\"# PRD\\n\\n## TODO\\n\\n- [ ] T1\"}",
         )
         .unwrap_err();
@@ -1255,7 +131,7 @@ mod tests {
     #[test]
     fn parse_planning_response_rejects_empty_prd() {
         // When
-        let err = parse_planning_response(r#"{"goal":"plan","prd":"   "}"#).unwrap_err();
+        let err = planning::parse_planning_response(r#"{"goal":"plan","prd":"   "}"#).unwrap_err();
 
         // Then
         assert!(matches!(err, ParseError::Malformed(_)));
@@ -1263,10 +139,10 @@ mod tests {
 
     #[test]
     fn converting_red_output_to_progress_markdown_produces_unfilled_checkboxes() {
-        use super::{RedOutput, RedTestInfo, SkeletonInfo};
+        use super::red::{RedTestInfo, SkeletonInfo};
 
         // Given
-        let out = RedOutput {
+        let out = red::RedOutput {
             summary: "Created skeletons.".into(),
             tests: vec![
                 RedTestInfo {
@@ -1317,7 +193,7 @@ mod tests {
         let input = r#"{"goal":"red","summary":"Created 2 skeletons and 1 failing test.","tests":[{"name":"test_foo","file":"src/foo.rs","line":10,"status":"failing"}],"skeletons":[{"name":"Foo","file":"src/foo.rs","line":5,"kind":"struct"},{"name":"bar","file":"src/foo.rs","line":8,"kind":"method"}]}"#;
 
         // When
-        let out = super::parse_red_response(input).expect("should parse");
+        let out = super::red::parse_red_response(input).expect("should parse");
 
         // Then
         assert!(out.summary.contains("2 skeletons"));
@@ -1339,7 +215,7 @@ mod tests {
         let input = r#"{"goal":"red","summary":"Created skeletons.","tests":[],"skeletons":[],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}"#;
 
         // When
-        let out = super::parse_red_response(input).expect("should parse");
+        let out = super::red::parse_red_response(input).expect("should parse");
 
         // Then
         assert_eq!(out.test_command.as_deref(), Some("cargo test"));
@@ -1353,7 +229,7 @@ mod tests {
     #[test]
     fn validate_red_marker_source_paths_accepts_production_only_markers() {
         // Given
-        let out = RedOutput {
+        let out = red::RedOutput {
             summary: "s".into(),
             tests: vec![],
             skeletons: vec![],
@@ -1376,18 +252,17 @@ mod tests {
         };
 
         // When / Then — must not error
-        validate_red_marker_source_paths(&out).expect("production-only markers should validate");
+        red::validate_red_marker_source_paths(&out)
+            .expect("production-only markers should validate");
     }
 
     #[test]
     fn parse_acceptance_tests_response_extracts_summary_and_tests() {
-        use super::parse_acceptance_tests_response;
-
         // Given
         let input = r#"{"goal":"acceptance-tests","summary":"Created 2 acceptance tests. All failing (Red state) as expected.","tests":[{"name":"login_stores_session_token","file":"packages/auth/tests/session.it.rs","line":15,"status":"failing"},{"name":"logout_clears_session","file":"packages/auth/tests/session.it.rs","line":28,"status":"failing"}]}"#;
 
         // When
-        let out = parse_acceptance_tests_response(input).expect("should parse");
+        let out = acceptance_tests::parse_acceptance_tests_response(input).expect("should parse");
 
         // Then
         assert!(out.summary.contains("Created 2 acceptance tests"));
@@ -1404,7 +279,8 @@ mod tests {
         let input = r#"{"goal":"acceptance-tests","summary":"Created 2 tests.","tests":[{"name":"t1","file":"t.rs","line":1,"status":"failing"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}"#;
 
         // When
-        let out = super::parse_acceptance_tests_response(input).expect("should parse");
+        let out =
+            super::acceptance_tests::parse_acceptance_tests_response(input).expect("should parse");
 
         // Then
         assert_eq!(out.test_command.as_deref(), Some("cargo test"));
@@ -1421,7 +297,7 @@ mod tests {
         let input = r#"{"goal":"green","summary":"Implemented 2 methods. All tests passing.","tests":[{"name":"test_foo","file":"src/foo.rs","line":10,"status":"passing"},{"name":"test_bar","file":"src/bar.rs","line":20,"status":"failing","reason":"timeout"}],"implementations":[{"name":"AuthService::validate","file":"src/service.rs","line":15,"kind":"method"}]}"#;
 
         // When
-        let out = parse_green_response(input).expect("should parse");
+        let out = green::parse_green_response(input).expect("should parse");
 
         // Then
         assert!(out.summary.contains("All tests passing"));
@@ -1441,7 +317,7 @@ mod tests {
         let input = r#"{"goal":"green","summary":"Implemented.","tests":[],"implementations":[],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}"#;
 
         // When
-        let out = parse_green_response(input).expect("should parse");
+        let out = green::parse_green_response(input).expect("should parse");
 
         // Then
         assert_eq!(out.test_command.as_deref(), Some("cargo test"));
@@ -1455,7 +331,7 @@ mod tests {
     #[test]
     fn parse_green_response_errors_on_wrong_goal() {
         // When
-        let err = parse_green_response(
+        let err = green::parse_green_response(
             r#"{"goal":"red","summary":"Wrong goal.","tests":[],"implementations":[]}"#,
         )
         .unwrap_err();
@@ -1466,10 +342,10 @@ mod tests {
 
     #[test]
     fn converting_green_output_to_progress_markdown_marks_passing_and_failing() {
-        use super::{GreenOutput, GreenTestResult, ImplementationInfo};
+        use super::green::{GreenTestResult, ImplementationInfo};
 
         // Given
-        let out = GreenOutput {
+        let out = green::GreenOutput {
             summary: "Implemented.".into(),
             tests: vec![
                 GreenTestResult {
@@ -1511,7 +387,7 @@ mod tests {
 }
 
 /// Parse the standalone demo goal. JSON must come from tddy-tools submit.
-pub fn parse_demo_response(s: &str) -> Result<DemoOutput, ParseError> {
+pub fn parse_demo_response(s: &str) -> Result<green::DemoOutput, ParseError> {
     let s = s.trim();
     let parsed: StructuredDemo = serde_json::from_str(s)
         .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
@@ -1532,7 +408,7 @@ pub fn parse_demo_response(s: &str) -> Result<DemoOutput, ParseError> {
         parsed.steps_completed.unwrap_or(0)
     );
 
-    Ok(DemoOutput {
+    Ok(green::DemoOutput {
         summary,
         demo_type: parsed.demo_type.unwrap_or_else(|| "unknown".to_string()),
         steps_completed: parsed.steps_completed.unwrap_or(0),
@@ -1641,7 +517,7 @@ mod exploration_artifact_tests {
         let json = r##"{"goal":"plan","prd":"# PRD\n## TODO\n- [ ] t","exploration":"# Exploration\n\n## Code Map\n\n- `src/lib.rs:10:1` — entry point"}"##;
 
         // When
-        let parsed = parse_planning_response(json).expect("plan response should parse");
+        let parsed = planning::parse_planning_response(json).expect("plan response should parse");
 
         // Then — serialize back: the exploration knowledge must survive the round-trip
         let value = serde_json::to_value(&parsed).expect("serialize planning output");
