@@ -9,7 +9,9 @@
 //! and a secret never reaches an RPC response path — are login-level, and live in
 //! `tddy-daemon-auth`'s `login_opens_the_credential_store_acceptance.rs`.
 
-use tddy_credentials::{AccountId, CredentialRecord, CredentialStore, ProviderId, VaultError};
+use tddy_credentials::{
+    AccountId, CredentialRecord, CredentialStore, ProviderId, VaultError, FIRST_VERSION,
+};
 
 const THE_OPERATOR: &str = "operator";
 const THE_LOGIN_CREDENTIAL: &[u8] = b"gho_the_token_this_login_granted";
@@ -230,6 +232,7 @@ fn a_github_credential() -> CredentialRecord {
         secret: THE_SECRET.to_string(),
         metadata: [("scopes".to_string(), THE_METADATA_VALUE.to_string())].into(),
         updated_at: 1_758_240_000,
+        version: FIRST_VERSION,
     }
 }
 
@@ -241,6 +244,7 @@ fn a_second_github_credential() -> CredentialRecord {
         secret: "gho_the_other_one".to_string(),
         metadata: Default::default(),
         updated_at: 1_758_240_001,
+        version: FIRST_VERSION,
     }
 }
 
@@ -252,6 +256,7 @@ fn a_cloudflare_credential() -> CredentialRecord {
         secret: "cf_an_api_token".to_string(),
         metadata: Default::default(),
         updated_at: 1_758_240_002,
+        version: FIRST_VERSION,
     }
 }
 
