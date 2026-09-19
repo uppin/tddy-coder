@@ -64,7 +64,7 @@ A new component in `tddy-daemon::worktrees` owns the size lifecycle. It is creat
 ## Testing plan
 
 - **Level:** Rust integration (daemon library) + Cypress component (web).
-- **Rust:** `packages/tddy-daemon/tests/worktree_size_calculator_acceptance.rs` — status model, `None→Calculating→Cached` transitions with recorded timestamp, semaphore-bounded concurrency (=2) via a gated injectable sizer, persistence-without-recompute, single-worktree recalculation isolation. Run: `cargo test -p tddy-daemon --test worktree_size_calculator_acceptance`.
+- **Rust:** `packages/tddy-worktree-service/tests/worktree_size_calculator_acceptance.rs` — status model, `None→Calculating→Cached` transitions with recorded timestamp, semaphore-bounded concurrency (=2) via a gated injectable sizer, persistence-without-recompute, single-worktree recalculation isolation. Run: `cargo test -p tddy-worktree-service --test worktree_size_calculator_acceptance`.
 - **Web:** `packages/tddy-web/cypress/component/WorktreesScreenDiskUsage.cy.tsx` — status rendering (None/Calculating/Cached + last-calculated label), Recalculate all, per-row Calculate. Run: `bun run cypress:component`.
 - **Deferred to `/red` (needs proto regen):** wire-level `StreamWorktreeStats` daemon RPC test (snapshot-first + per-worktree increments, `recalculate_all`) and the `useWorktreeStatsStream` streaming-hook test — both depend on the regenerated `connection_pb.ts` / prost types and land with the green proto change.
 

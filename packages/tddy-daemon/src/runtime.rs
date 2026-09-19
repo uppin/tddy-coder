@@ -231,7 +231,7 @@ pub struct RuntimeTasks {
     lsp_idle_reaper: Option<tddy_lsp::LspRegistry>,
     index_daemon: Option<crate::index_daemon::IndexDaemonRegistry>,
     relay_idle_monitor: Option<(
-        Arc<crate::relay_idle::IdleTimeoutTracker>,
+        Arc<tddy_session_lifecycle::relay_idle::IdleTimeoutTracker>,
         tokio::sync::oneshot::Sender<()>,
     )>,
     telegram_inbound: Option<TelegramInbound>,
@@ -635,7 +635,9 @@ pub async fn build(
     // Relay mode: an idle tracker the RPC surface touches, plus the channel its monitor fires.
     let (idle_tracker, relay_idle_monitor, relay_shutdown) = match options.relay_idle_timeout {
         Some(timeout) => {
-            let tracker = Arc::new(crate::relay_idle::IdleTimeoutTracker::new(timeout));
+            let tracker = Arc::new(tddy_session_lifecycle::relay_idle::IdleTimeoutTracker::new(
+                timeout,
+            ));
             let (tx, rx) = tokio::sync::oneshot::channel::<()>();
             (Some(Arc::clone(&tracker)), Some((tracker, tx)), Some(rx))
         }
@@ -731,7 +733,7 @@ pub async fn build(
         let sessions_base_resolver: tddy_daemon_kernel::SessionsBaseResolver = {
             let dd = tddy_data_dir.clone();
             Arc::new(move |user: &str| {
-                crate::user_sessions_path::sessions_base_for_user(user, Some(&dd))
+                tddy_session_lifecycle::user_sessions_path::sessions_base_for_user(user, Some(&dd))
             })
         };
         let ss_user_resolver = user_resolver.clone();
@@ -741,7 +743,7 @@ pub async fn build(
         let projects_dir_resolver: tddy_session_lifecycle::remote_git_service::ProjectsDirResolver = {
             let dd = tddy_data_dir.clone();
             Arc::new(move |user: &str| {
-                crate::user_sessions_path::projects_path_for_user(user, Some(&dd))
+                tddy_session_lifecycle::user_sessions_path::projects_path_for_user(user, Some(&dd))
             })
         };
         // Session-addressed BSP resolver: reproduce the ExecuteTool preamble (token → os_user →
@@ -1005,7 +1007,7 @@ pub async fn build(
                 .and_then(|lk| lk.api_secret.clone())
                 .map(|s| tddy_github::SessionTokenSigner::new(s.as_bytes()));
             let uid_to_username: tddy_session_lifecycle::local_token_tonic_adapter::UidToUsername =
-                Arc::new(crate::user_sessions_path::username_for_uid);
+                Arc::new(tddy_session_lifecycle::user_sessions_path::username_for_uid);
             tasks.local_socket = Some(LocalSocketTransport {
                 socket_path: config_arc.local_socket_path(),
                 services: crate::local_socket_server::LocalSocketServices {
@@ -1254,7 +1256,7 @@ pub async fn build(
         // config-only tddy data dir every other per-user store here resolves from.
         let vm_library = {
             let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
-            let base = crate::user_sessions_path::tddy_data_root_matching_child(
+            let base = tddy_session_lifecycle::user_sessions_path::tddy_data_root_matching_child(
                 &user,
                 Some(&tddy_data_dir),
             )
@@ -1289,7 +1291,7 @@ pub async fn build(
         let ss_sessions_base: tddy_screen_sharing::SessionsBase = {
             let dd = tddy_data_dir.clone();
             Arc::new(move |user: &str| {
-                crate::user_sessions_path::sessions_base_for_user(user, Some(&dd))
+                tddy_session_lifecycle::user_sessions_path::sessions_base_for_user(user, Some(&dd))
             })
         };
         // Host scope, alongside the host registry rather than under any session: a desktop belongs
@@ -1416,22 +1418,23 @@ fn build_telegram(
         },
     );
 
-    let sessions_base = match crate::user_sessions_path::tddy_data_root_matching_child(
-        &user,
-        Some(tddy_data_dir),
-    ) {
-        Some(base) => base,
-        None => {
-            log::warn!(
-                target: "tddy_daemon",
-                "telegram inbound session control disabled: could not resolve sessions base for USER={user}"
-            );
-            return TelegramWiring {
-                hooks: Some(hooks),
-                inbound: None,
-            };
-        }
-    };
+    let sessions_base =
+        match tddy_session_lifecycle::user_sessions_path::tddy_data_root_matching_child(
+            &user,
+            Some(tddy_data_dir),
+        ) {
+            Some(base) => base,
+            None => {
+                log::warn!(
+                    target: "tddy_daemon",
+                    "telegram inbound session control disabled: could not resolve sessions base for USER={user}"
+                );
+                return TelegramWiring {
+                    hooks: Some(hooks),
+                    inbound: None,
+                };
+            }
+        };
 
     #[cfg(unix)]
     let spawn_for_tg = options

@@ -7,13 +7,17 @@ lifecycle, projects, tools, hosts, or any other subsystem RPC.
 
 ## What stays in this crate
 
-Roughly twelve source modules under `src/`: `main`, `lib`, `server`, `startup`, `runtime`, `config`,
-`daemon_settings`, `daemon_config_service`, `local_socket_server`, `user_sessions_path`,
-`tddy_user_config`, `relay_idle`, plus PR-stack handlers in `pr_stack_rpc.rs` (family P stays on the
-daemon by dependency design).
+Eleven source modules under `src/`: `main`, `lib`, `server`, `startup`, `runtime`, `config`,
+`daemon_settings`, `daemon_config_service`, `local_socket_server`, `index_daemon` (with
+`index_daemon_body`). `src/lib.rs` declares those and nothing else — it carries no re-export facade,
+and `config` is the single forwarding module, to `tddy-daemon-kernel`, which owns the configuration
+this crate loads.
 
 `runtime.rs` derives each `ServiceEntry` from configuration and returns handles; nothing that listens,
 dials, or runs forever is started there.
+
+`tests/` holds only the suites that exercise this composition — see
+[test-placement.md](./test-placement.md).
 
 ## Local Unix socket
 

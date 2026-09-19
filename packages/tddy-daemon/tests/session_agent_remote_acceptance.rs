@@ -23,9 +23,6 @@ use tddy_connectrpc::connect_router;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::DaemonSessionHost;
-use tddy_daemon::remote_git_service::{ProjectsDirResolver, RemoteGitServiceImpl};
-use tddy_daemon::test_util::{TestDaemon, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, MultiRpcService, Request, RpcBridge, RpcService, ServiceEntry};
@@ -42,6 +39,9 @@ use tddy_service::proto::session_agents_svc::{
 use tddy_service::{
     LiveKitTokenServiceServer, RemoteGitServiceServer, SessionAdmissionServiceServer,
 };
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::{TestDaemon, TEST_TOKEN};
+use tddy_worktree_service::remote_git_service::{ProjectsDirResolver, RemoteGitServiceImpl};
 
 const ROOM: &str = "agent-roster-common-room";
 const DAEMON_B: &str = "agent-roster-daemon-b";
@@ -266,7 +266,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             None,
             None,
             None,
-            Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
+            Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
         );
 
         tddy_daemon::runtime::spawn_common_room_discovery_task(
@@ -286,9 +286,12 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         // whole reason that helper exists.
         let service_arc = Arc::new(service);
         service_arc.install_sandbox_rpc_bridge();
-        let run =
-            tddy_daemon::test_util::serve_daemon_rpc_participant(&ws_url, &token, &service_arc)
-                .await;
+        let run = tddy_session_lifecycle::test_util::serve_daemon_rpc_participant(
+            &ws_url,
+            &token,
+            &service_arc,
+        )
+        .await;
 
         running_peers.push(PeerDaemon {
             instance_id: instance_id.to_string(),
@@ -322,7 +325,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     let livekit_token_entry = tddy_rpc::ServiceEntry {
         name: "auth.LiveKitTokenService",
         service: Arc::new(LiveKitTokenServiceServer::new(
-            tddy_daemon::auth::LiveKitTokenServiceImpl::new(
+            tddy_daemon_auth::auth::LiveKitTokenServiceImpl::new(
                 user_resolver.clone(),
                 Arc::new(config_a.clone()),
             ),
@@ -355,7 +358,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         registry.clone(),
         room_slot.clone(),
     );
-    let eligible: Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource> = Arc::new(
+    let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
             config_arc,
             registry,
@@ -375,7 +378,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             },
         ),
         None,
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     );
 
     // A's RPC LiveKit participant serving `remote_git.RemoteGitService` and
@@ -400,7 +403,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         Arc::new(config_a.clone()),
     ));
     let admission_server = SessionAdmissionServiceServer::new(
-        tddy_daemon::session_admission_service::SessionAdmissionServiceImpl::new(
+        tddy_session_lifecycle::session_admission_service::SessionAdmissionServiceImpl::new(
             user_resolver,
             Arc::new(config_a.clone()),
             session_admissions,
@@ -421,8 +424,9 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         },
     ]);
     let instance_id_a =
-        tddy_daemon::livekit_peer_discovery::local_instance_id_for_config(&config_a);
-    let rpc_identity_a = tddy_daemon::livekit_peer_discovery::daemon_rpc_identity(&instance_id_a);
+        tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config(&config_a);
+    let rpc_identity_a =
+        tddy_daemon_livekit::livekit_peer_discovery::daemon_rpc_identity(&instance_id_a);
     let rpc_token_a = livekit
         .generate_token(ROOM, &rpc_identity_a)
         .expect("A RPC participant token");
@@ -569,9 +573,9 @@ livekit:
 
 fn write_project_registry(tddy_data_dir: &Path, repo_path: &Path) {
     let projects_dir = tddy_data_dir.join("projects");
-    tddy_daemon::project_storage::write_projects(
+    tddy_projects::project_storage::write_projects(
         &projects_dir,
-        &[tddy_daemon::project_storage::ProjectData {
+        &[tddy_projects::project_storage::ProjectData {
             project_id: PROJECT_ID.to_string(),
             name: "agent-roster".to_string(),
             git_url: "https://example.invalid/agent-roster.git".to_string(),

@@ -86,6 +86,63 @@ pub enum RefactorKind {
     /// leaves `pub use <new_crate>::…;` behind so a move can have zero caller diff — the same
     /// principle as `extract_module`'s facade, one level up.
     MoveModuleToCrate,
+    /// Moves **a set of modules** to one crate as a single operation — the same transformation as
+    /// `move_module_to_crate` over more than one module, applied all or not at all.
+    ///
+    /// A mutually-referencing set cannot move one module at a time: the first operation re-points a
+    /// sibling's `crate::` path at the crate it is itself about to leave, and between the first
+    /// operation and the last the tree does not compile. Naming the whole set in one operation is
+    /// what lets a `crate::<sibling>` path that is coming along be told from one staying behind.
+    ///
+    /// The anchor is the first member and `also` names the rest. One operation is one journal
+    /// entry and one edit, so `--resume`, `--from` and `--stop-after` keep meaning what they mean:
+    /// a cluster is never half applied.
+    MoveClusterToCrate,
+    /// Moves a **test binary** — `<crate>/tests/<name>.rs` — to the crate whose code it exercises.
+    ///
+    /// A sibling of [`Self::MoveModuleToCrate`] rather than a generalisation of it, because a test
+    /// binary is a different shape in the two ways that matter, and both make it *simpler*:
+    ///
+    /// - **Cargo auto-discovers `tests/*.rs`**, so there is no `mod` declaration anywhere to find,
+    ///   remove or rewrite. A module move's whole `left_behind` pass has nothing to do here.
+    /// - **Nothing can reference a test binary**, so there is no caller to keep resolving and
+    ///   therefore no facade. `reexport` is refused rather than ignored.
+    ///
+    /// What it does share is the header pass — and it needs the strongest form of it, because a
+    /// test's `use` path may reach its subject through **two** re-export facades before it lands on
+    /// the crate that defines the item.
+    ///
+    /// Takes `to`, the destination crate's directory. The destination's `[dev-dependencies]` gain
+    /// what the moved test names, not its `[dependencies]`.
+    MoveTestBinaryToCrate,
+}
+
+impl RefactorKind {
+    /// Whether this operation moves modules out of the crate that holds them.
+    ///
+    /// The two cross-crate moves differ only in how many modules travel, so every decision taken
+    /// about one — the destination it must name, the facade it may leave, the preconditions read
+    /// before a server is spawned — is taken about both.
+    ///
+    /// [`RefactorKind::MoveTestBinaryToCrate`] crosses a crate boundary too and is still **not**
+    /// one of these, because this predicate does not mean "crosses a boundary" — it means "moves a
+    /// *module*", and every caller reads it that way. Each of the three refusals it gates is
+    /// already made for a test binary, earlier and in words about a test binary; and the fourth
+    /// caller, [`unrunnable_moves`](crate::unrunnable_moves), reads each anchor as
+    /// `<crate>/src/<module>.rs` to find the `mod` line it is about. A test binary has no `mod`
+    /// line anywhere and does not live under `src/`, so admitting it here would report every
+    /// well-formed test-binary move as an operation that cannot run.
+    ///
+    /// TODO(carve-test-homes): give `check` a static preflight for a test-binary move of its own —
+    /// the anchor's shape and both crates' manifests are all readable before a server is spawned,
+    /// so `apply`'s refusals are reachable statically the way a module move's are.
+    #[must_use]
+    pub fn moves_across_crates(self) -> bool {
+        matches!(
+            self,
+            RefactorKind::MoveModuleToCrate | RefactorKind::MoveClusterToCrate
+        )
+    }
 }
 
 /// What a module extraction leaves in the parent so a path that reached the moved items still
@@ -137,6 +194,13 @@ pub struct RefactorOp {
     /// so the recipe a real split needs drops from four plans to two.
     #[serde(default)]
     pub to_file: bool,
+    /// The modules travelling with the anchor's, for `move_cluster_to_crate`.
+    ///
+    /// Anchors rather than module names, so every member is addressed exactly the way the first one
+    /// is and the [`crate::PositionLedger`] translates them all the same way. The anchor stays the
+    /// first member so nothing that reads `op.anchor` has to learn about sets.
+    #[serde(default)]
+    pub also: Vec<Anchor>,
 }
 
 impl RefactorOp {
@@ -146,6 +210,14 @@ impl RefactorOp {
             anchor,
             ..self.clone()
         }
+    }
+
+    /// Every place this operation applies: its own anchor first, then each co-moving member's.
+    ///
+    /// One operation addressed at one anchor is this over a set of one, which is what lets the
+    /// preconditions and the stranded-sibling check read a cluster without a second code path.
+    pub fn anchors(&self) -> impl Iterator<Item = &Anchor> {
+        std::iter::once(&self.anchor).chain(self.also.iter())
     }
 }
 
@@ -256,13 +328,33 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
     // `move_module_to_crate` writes the same kind of facade one level up — `pub use <crate>::…;` in
     // the crate the module left — so it honours the field for the same reason and with the same
     // failure mode if the field were ignored.
-    if op.reexport.is_some()
-        && op.op != RefactorKind::ExtractModule
-        && op.op != RefactorKind::MoveModuleToCrate
+    //
+    // A test binary can have no facade at all, and the reason is worth its own refusal rather than
+    // the generic one above: a facade exists to keep a *caller* resolving, and **nothing can
+    // reference a test binary**. Cargo builds each `tests/*.rs` as its own crate root; no `use` path
+    // anywhere in the workspace can name one. So `reexport` here is not merely unhonourable, it is
+    // meaningless, and saying so is what stops a plan author reaching for it by analogy.
+    if op.op == RefactorKind::MoveTestBinaryToCrate && op.reexport.is_some() {
+        return Err(malformed(
+            "`move_test_binary_to_crate` cannot write a facade: a facade keeps a caller resolving, \
+             and nothing can reference a test binary — cargo builds each `tests/*.rs` as its own \
+             crate root, so no `use` path anywhere can name it",
+        ));
+    }
+
+    // The destination is what the whole operation is for.
+    if op.op == RefactorKind::MoveTestBinaryToCrate && op.to.is_none() {
+        return Err(malformed(
+            "`move_test_binary_to_crate` needs `to`: the destination crate's directory, relative \
+             to the repository root",
+        ));
+    }
+
+    if op.reexport.is_some() && op.op != RefactorKind::ExtractModule && !op.op.moves_across_crates()
     {
         return Err(malformed(format!(
             "`reexport` asks for a facade where the moved items used to live, which only \
-             `extract_module` and `move_module_to_crate` write — `{:?}` cannot honour one",
+             `extract_module` and the cross-crate moves write — `{:?}` cannot honour one",
             op.op
         )));
     }
@@ -275,19 +367,40 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
     // `pub use <crate>::*;` re-exports the destination's `pub mod <module>` under its own name.
     // Refusing follows this file's own rule that a vocabulary advertising what it cannot perform is
     // worse than a smaller one.
-    if op.op == RefactorKind::MoveModuleToCrate && op.reexport == Some(Reexport::Named) {
+    if op.op.moves_across_crates() && op.reexport == Some(Reexport::Named) {
         return Err(malformed(
-            "`move_module_to_crate` cannot write a named facade: a caller writes              `crate::<module>::Item`, and a named re-export puts the items at the crate root, so              every caller would stop resolving — use `glob`, which re-exports the module itself",
+            "a cross-crate move cannot write a named facade: a caller writes              `crate::<module>::Item`, and a named re-export puts the items at the crate root, so              every caller would stop resolving — use `glob`, which re-exports the module itself",
         ));
     }
 
     // A cross-crate move with no destination has nowhere to go, and defaulting one would guess at a
     // crate — the one thing a plan of intents must never do on the author's behalf.
-    if op.op == RefactorKind::MoveModuleToCrate && op.to.is_none() {
+    if op.op.moves_across_crates() && op.to.is_none() {
+        return Err(malformed(format!(
+            "`{:?}` needs `to`: the destination crate's directory, relative to the repository root",
+            op.op
+        )));
+    }
+
+    // A set of one is `move_module_to_crate`, and accepting it here would give that operation a
+    // second name — the vocabulary refuses one for the same reason it refuses a name for what no
+    // engine performs.
+    if op.op == RefactorKind::MoveClusterToCrate && op.also.is_empty() {
         return Err(malformed(
-            "`move_module_to_crate` needs `to`: the destination crate's directory, relative to the \
-             repository root",
+            "`move_cluster_to_crate` needs `also`: the other modules travelling with the anchor's \
+             — a set of one module is `move_module_to_crate`",
         ));
+    }
+
+    // Ignoring the field would move the anchor's module alone and re-point its siblings' paths at
+    // the crate it just left, which is the defect this operation exists to remove — and the author
+    // would read the resulting refusal as the set having been named wrongly.
+    if !op.also.is_empty() && op.op != RefactorKind::MoveClusterToCrate {
+        return Err(malformed(format!(
+            "`also` names the other modules moving in the same operation, which only \
+             `move_cluster_to_crate` honours — `{:?}` cannot",
+            op.op
+        )));
     }
 
     if op.to_file && op.op != RefactorKind::ExtractModule {
@@ -636,6 +749,82 @@ mod tests {
             reason.contains("glob"),
             "the refusal must name the alternative: {reason}"
         );
+    }
+
+    /// The operation the cluster defect needs: one intent naming the whole set, so no member is
+    /// re-pointed at a crate its siblings are about to leave.
+    #[test]
+    fn reads_every_member_of_a_cluster_move() {
+        let plan = Plan::parse(&plan_with(
+            r#"{"op":"move_cluster_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-daemon/src/spawner.rs","path":"spawner"},"also":[{"kind":"symbol","file":"packages/tddy-daemon/src/spawn_worker.rs","path":"spawn_worker"}],"to":"packages/tddy-host-service"}"#,
+        ))
+        .unwrap();
+
+        assert_eq!(plan.ops[0].op, RefactorKind::MoveClusterToCrate);
+        assert_eq!(
+            plan.ops[0]
+                .anchors()
+                .map(Anchor::file)
+                .collect::<Vec<&str>>(),
+            vec![
+                "packages/tddy-daemon/src/spawner.rs",
+                "packages/tddy-daemon/src/spawn_worker.rs"
+            ]
+        );
+    }
+
+    /// A set of one is `move_module_to_crate`. Accepting it here would give that operation a second
+    /// name, which is exactly what this vocabulary refuses to grow.
+    #[test]
+    fn refuses_a_cluster_move_that_names_no_second_module() {
+        let error = Plan::parse(&plan_with(
+            r#"{"op":"move_cluster_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-daemon/src/spawner.rs","path":"spawner"},"to":"packages/tddy-host-service"}"#,
+        ))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("`also`"), "{error}");
+        assert!(error.contains("move_module_to_crate"), "{error}");
+    }
+
+    /// A cluster with nowhere to go is refused for the reason a single move is: defaulting one
+    /// would guess at a crate.
+    #[test]
+    fn refuses_a_cluster_move_with_no_destination() {
+        let error = Plan::parse(&plan_with(
+            r#"{"op":"move_cluster_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-daemon/src/spawner.rs","path":"spawner"},"also":[{"kind":"symbol","file":"packages/tddy-daemon/src/spawn_worker.rs","path":"spawn_worker"}]}"#,
+        ))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("`to`"), "{error}");
+    }
+
+    /// Ignoring `also` would move the anchor's module alone and re-point its siblings at the crate
+    /// it just left — the defect the operation exists to remove, reported as something else.
+    #[test]
+    fn refuses_co_moving_members_on_an_operation_that_moves_one_module() {
+        let error = Plan::parse(&plan_with(
+            r#"{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-daemon/src/spawner.rs","path":"spawner"},"also":[{"kind":"symbol","file":"packages/tddy-daemon/src/spawn_worker.rs","path":"spawn_worker"}],"to":"packages/tddy-host-service"}"#,
+        ))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("MoveModuleToCrate"), "{error}");
+        assert!(error.contains("`also`"), "{error}");
+    }
+
+    /// A cluster leaves the same facade a single move does, and refuses the named one for the same
+    /// reason: `crate::<module>::Item` stops resolving at the crate root.
+    #[test]
+    fn refuses_a_named_facade_on_a_cluster_move() {
+        let error = Plan::parse(&plan_with(
+            r#"{"op":"move_cluster_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-daemon/src/spawner.rs","path":"spawner"},"also":[{"kind":"symbol","file":"packages/tddy-daemon/src/spawn_worker.rs","path":"spawn_worker"}],"to":"packages/tddy-host-service","reexport":"named"}"#,
+        ))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("glob"), "{error}");
     }
 
     /// Every plan written before the field existed has to go on meaning what it meant.

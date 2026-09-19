@@ -2,13 +2,13 @@
 
 **Product area:** Coder / tddy-tools  
 **Status:** Active  
-**Updated:** 2026-09-16
+**Updated:** 2026-09-19
 
 ## Summary
 
 `tddy-tools restructure` replays a JSONL **plan of named intents** (never source text) against rust-analyzer through `tddy-lsp`. The library crate is `tddy-code-restructuring`; there is no separate binary.
 
-**v1 scope:** Rust only — eight operations, five subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
+**v1 scope:** Rust only — ten operations, five subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
 
 A green baseline is required; a red tree is a stop.
 
@@ -50,8 +50,9 @@ there is no budget to state. See [Waiting](#waiting).
 | Subcommand | Role |
 |---|---|
 | `apply` | Execute the plan; `--dry-run` rehearses in an overlay; `--resume` continues from the journal |
+| | Run state is **keyed by the plan** — `<root>/.restructure/<plan stem>-<digest>/` — so a completed plan does not block the next one under the same root, and `--resume` resumes the plan it was given rather than whichever ran last. Every multi-layer restructuring is several plans in one repository, which is why this is not an implementation detail. A journal left at `<root>/.restructure/` by an older run is adopted when resuming, and otherwise refused by name; it is never silently taken over by a different plan |
 | `status` | completed / in_flight / pending / failed |
-| `check` | All findings, no writes; `--deep` resolves through the same path as apply; `--budget LINES` additionally reports which of the files the plan's **anchors** name exceed that many lines — a report, never a gate |
+| `check` | All findings, no writes; `--deep` resolves through the same path as apply; `--budget LINES` additionally reports which of the files the plan names — every member of a cluster, not only its anchor — exceed that many lines — a report, never a gate |
 | `snapshot` | Rewrite the plan's line-1 `sha256:` header from the working tree, leaving every operation line byte-identical. No index, no language server |
 | `anchors` | Emit a correct range covering named items (including trivia) |
 
@@ -82,6 +83,8 @@ See [`.agents/skills/code-restructuring/references/plan-schema.md`](../../../.ag
 | `extract_trait` | Extract trait from impl |
 | `inline_method` | Inline callee |
 | `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite its own `use crate::…` / `use super::…` header, re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves `pub use <dest_crate>::*;` in the origin, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
+| `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate` |
+| `move_test_binary_to_crate` | Move `<crate>/tests/<name>.rs` into the crate it exercises: `git mv` the file, re-point **every** path in it that opens with the origin's extern name, and extend the destination's `[dev-dependencies]`. `to` is required; `reexport` is **refused**, because nothing can reference a test binary. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the crate the test left never named it. Each path is resolved to the crate that **defines** what it reaches, through however many re-export facades stand in the way |
 
 Invariants: moves that need history use `git mv`; visibility widenings are reviewable output
 (journal plus the caller's sink), not silent; **nothing in the library writes to stdout** — progress
@@ -235,15 +238,13 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
   imports, so a child module reaching names through `use super::*` loses any name that was a parent
   *import* consumed by moved code. Bind those in the child, or under `#[cfg(test)]` in the parent when
   only its test modules need them.
-- **A cross-crate move is planned one op at a time, against the pre-move tree.** Each
-  `move_module_to_crate` op is evaluated as if none of its siblings had run, so a multi-op plan is
-  never seen as a whole: a plan that moves `host_registry` and `multi_host` to the same destination
-  is refused on the first, because `host_registry` still names `tddy_daemon::multi_host::…`. Layer
-  the plan by dependency depth and run it once per layer — and budget for a full rust-analyzer index
-  per layer.
-- **A cyclic module group cannot be moved at any layering.** The operation moves one module per op,
-  so a mutually-dependent pair (`host_tooling ⇄ ssh_agent`) is unreachable: each op sees the other
-  module still in the origin crate. Cut the cycle by hand first, or move the group by hand.
+- **A set that moves together must say so.** `move_module_to_crate` is evaluated as if none of its
+  siblings had run, so a multi-op plan moving `host_registry` and `multi_host` to one destination is
+  still refused on the first — `host_registry` names `tddy_daemon::multi_host::…`, which would make
+  the destination depend on the crate it left. Declare the set with `move_cluster_to_crate` instead
+  of layering the plan; a mutually-dependent pair (`host_tooling ⇄ ssh_agent`) is reachable only that
+  way, because no layering of one-module ops can order a cycle. `check` names the sibling a partial
+  set would strand, statically, before any index is paid.
 - **A nested module moves when its parent is locatable.** Anchors at
   `<crate>/src/<parent>/<module>.rs` or `<crate>/src/<parent>/mod.rs` take the destination path from
   the plan's `path` and locate the parent's `mod` line in `<crate>/src/<parent>.rs` then
@@ -269,5 +270,11 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
   naming neither the module nor the operation. The refusal names every path that forced it. Paths that
   resolve through a back-compat `pub use` facade in the origin are attributed to the **defining**
   crate, not the origin, so a re-export alone does not read as an origin dependency.
+- **A test binary's string literals are never rewritten.** A suite reading
+  `concat!(env!("CARGO_MANIFEST_DIR"), "/../<crate>/src/<file>.rs")` resolves from its new crate only
+  by coincidence, and a path written in a string is a hand edit after the move. This is deliberate:
+  what a string holds is data the suite asserts on, and rewriting it would change the assertion.
+- **`check` has no static preflight for `move_test_binary_to_crate`.** The plan's vocabulary refusals
+  are reported; the anchor's path shape and the facade walk are resolved at apply time.
 - Restructuring tests that start rust-analyzer are load-sensitive; run affected suites with `--test-threads=1` when binding a server.
 - Typed `tddy-lsp` assist methods are not yet first-class; restructuring uses `request_raw` / `notify_raw`.

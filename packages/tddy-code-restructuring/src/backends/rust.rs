@@ -36,7 +36,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 8] = [
+const SUPPORTED: [RefactorKind; 10] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -45,6 +45,8 @@ const SUPPORTED: [RefactorKind; 8] = [
     RefactorKind::InlineMethod,
     RefactorKind::RenameSymbol,
     RefactorKind::MoveModuleToCrate,
+    RefactorKind::MoveClusterToCrate,
+    RefactorKind::MoveTestBinaryToCrate,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.
@@ -1267,6 +1269,35 @@ impl LanguageBackend for RustBackend {
         if op.op == RefactorKind::MoveModuleToCrate {
             (self.progress)("cross-crate move: surveying callers and building edits");
             return Ok(Resolution::of(crate_move::resolve(self, workspace, op)?));
+        }
+
+        // The same operation over a set, and one edit rather than one per member: a
+        // mutually-referencing set has no order in which the tree compiles between moves, so every
+        // member's callers are surveyed against where the whole set is going.
+        if op.op == RefactorKind::MoveClusterToCrate {
+            let cluster = crate_move::named_by(workspace, op)?;
+            (self.progress)(&format!(
+                "cross-crate move of {} modules: surveying callers and building edits",
+                cluster.members.len()
+            ));
+            return Ok(Resolution::of(crate_move::resolve_cluster(
+                self, workspace, &cluster,
+            )?));
+        }
+
+        // The same move with the reference survey taken out of it: cargo builds each `tests/*.rs`
+        // as its own crate root, so nothing in the workspace can name a test binary and there is
+        // no caller to ask the server about. What is left is the file, its own `use` header, and
+        // the manifest that has to compile it — all of which this backend reads for itself.
+        if op.op == RefactorKind::MoveTestBinaryToCrate {
+            let moving = crate_move::read_test_binary_move(workspace, op)?;
+            (self.progress)(&format!(
+                "moving test binary `{}` to {}",
+                moving.name, moving.destination.package
+            ));
+            return Ok(Resolution::of(crate_move::resolve_test_binary_move(
+                workspace, &moving,
+            )?));
         }
 
         self.start(workspace.root)?;

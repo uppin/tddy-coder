@@ -26,6 +26,7 @@ pub use outcome::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 use crate::apply::{apply_workspace_edit, ensure_git_worktree, hash_touched_files};
 use crate::journal::{Journal, JournalRecord, ResumeDecision};
 use crate::{LedgerCheckpoint, Plan, PositionLedger, RestructureError, Result};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 // The run state — the `.restructure/` write-ahead sequence — stays in this module rather than
@@ -87,11 +88,14 @@ pub fn commit_operation(
 /// already there and the run did not say it was continuing one (`--resume`, or `--from`). A caller
 /// that passes either takes over the journal it finds, whatever wrote it.
 ///
-/// And because [`StatePaths`] is keyed by `root` alone, that gate is repo-scoped rather than
-/// plan-scoped: a *completed* plan's journal refuses the next plan under the same root, and a resume
-/// would resume the journal on disk rather than the plan that was named. A host serving several
-/// callers therefore has to serialize them per root itself — this call cannot do it, and a run that
-/// starts anyway will write into another run's journal.
+/// The gate is as wide as the [`StatePaths`] it is given. With [`StatePaths::for_plan`] it is
+/// plan-scoped: a *completed* plan's journal no longer refuses the next plan under the same root,
+/// and a resume resumes the plan that was named. With [`StatePaths::under`] it stays repo-scoped —
+/// one journal for every plan under one root — so a host driving the loop that way has to serialize
+/// its runs per root itself.
+///
+/// A journal left at `<root>/.restructure/` by a run made before run state was keyed by the plan is
+/// adopted or refused, never stepped over: see [`adopt_or_refuse_repo_scoped_state`].
 ///
 /// Also refused: a root that is not a git worktree (the edits are applied with git), and a journal
 /// whose last record cannot be decided either way ([`RestructureError::IndeterminateJournal`]).
@@ -106,8 +110,10 @@ pub fn open_run(
     ensure_git_worktree(root)?;
     paths.ensure_self_ignoring()?;
 
-    let journal = Journal::load(&paths.journal)?;
     let continuing = options.resume || options.from.is_some();
+    adopt_or_refuse_repo_scoped_state(root, paths, continuing, &options.progress)?;
+
+    let journal = Journal::load(&paths.journal)?;
 
     if !journal.records.is_empty() && !continuing {
         return Err(RestructureError::JournalExists);
@@ -136,17 +142,17 @@ pub fn restore_ledger(journal: &Journal, paths: &StatePaths) -> Result<PositionL
     Ok(journal.fold())
 }
 
-/// Where a run's write-ahead state lives: `<root>/.restructure/`.
+/// Where a run's write-ahead state lives, under `<root>/.restructure/`.
 ///
-/// Keyed by `root` and nothing else — no plan identity is in the path — so every plan run under one
-/// root shares one journal and one ledger. That is what makes [`open_run`]'s refusal repo-scoped,
-/// and it is why a host must not run two plans against the same root at once.
+/// [`StatePaths::for_plan`] puts a run's journal and ledger in a directory of the plan's own, which
+/// is what lets one plan follow another under a single root. [`StatePaths::under`] is the
+/// repository-scoped layout that came before it, kept for a host driving the loop itself with no
+/// plan path to key on — and it is why [`open_run`]'s refusal is repo-scoped for such a host.
+///
 /// The file names are **private**, so `.restructure/`'s layout is this crate's own business: a
-/// host drives the apply loop through [`StatePaths::under`], [`open_run`], [`restore_ledger`] and
-/// [`commit_operation`] and never re-derives a path. That is what keeps the change re-keying the
-/// journal to a plan identity — recorded in
-/// `docs/dev/todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md` — from being
-/// a breaking change for anything outside.
+/// host drives the apply loop through [`StatePaths::for_plan`], [`open_run`], [`restore_ledger`]
+/// and [`commit_operation`] and never re-derives a path. That is what kept re-keying the journal to
+/// a plan identity from being a breaking change for anything outside.
 pub struct StatePaths {
     /// The append-only event journal — the record of what a run has done.
     journal: PathBuf,
@@ -154,13 +160,188 @@ pub struct StatePaths {
     ledger: PathBuf,
 }
 
+/// The directory under `.restructure/` that every run's state lives in.
+const STATE_DIRECTORY: &str = ".restructure";
+/// The append-only event journal's file name within a run's state directory.
+const JOURNAL_FILE: &str = "journal.jsonl";
+/// The position-ledger checkpoint's file name within a run's state directory.
+const LEDGER_FILE: &str = "ledger.json";
+
+/// Where a plan's run state lives, keyed by the plan rather than by the repository.
+///
+/// [`StatePaths::under`] puts the journal and ledger at `<root>/.restructure/`, one set per
+/// repository — so a **completed** plan blocks the next one with *"a journal already exists for this
+/// plan — pass `--resume`"*, and `--resume` would resume the wrong plan against the new plan's
+/// coordinates. The backlog calls this the single largest tax on a multi-layer move, and every
+/// `#carve` node is multi-layer by construction: one plan carves a flat module, the next moves it.
+///
+/// The directory is `<root>/.restructure/<plan stem>-<digest>`: the stem is there so a person
+/// reading `.restructure/` can tell which run is which, and the digest is what actually keys it,
+/// because two plans in different directories may share a stem. A **relative** plan path is read
+/// against `root` and the result normalised lexically — no disk is touched, so a plan that has not
+/// been written yet still has a state directory — which is what makes `restructure apply
+/// tmp/plan.jsonl` and `restructure apply /repo/tmp/plan.jsonl` the same run to `--resume`.
+///
+/// # Errors
+///
+/// Refuses a path that names no plan file — `/` or one ending in `..` — because there is no stable
+/// key in it, and a run whose state directory depended on the process's directory would resume
+/// somebody else's journal.
+pub fn state_directory_for_plan(root: &Path, plan: &Path) -> Result<PathBuf> {
+    Ok(root.join(STATE_DIRECTORY).join(plan_key(root, plan)?))
+}
+
+/// The directory name a plan's state lives under: its own stem, and the digest that keys it.
+fn plan_key(root: &Path, plan: &Path) -> Result<String> {
+    let identity = plan_identity(root, plan);
+    let stem = identity
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(readable)
+        .filter(|stem| !stem.is_empty())
+        .ok_or_else(|| {
+            RestructureError::MalformedPlan(format!(
+                "`{}` names no plan file, so a run of it has no state directory to be keyed by — \
+                 name the plan itself",
+                plan.display()
+            ))
+        })?;
+
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(identity.to_string_lossy().as_bytes())
+    );
+    Ok(format!("{stem}-{}", &digest[..16]))
+}
+
+/// The plan path as this root sees it: absolute, and lexically normalised.
+///
+/// Lexical rather than canonical because a plan is keyed before it is read — `restructure snapshot`
+/// writes one, and a `check` of a plan that does not exist has to refuse for *that* reason rather
+/// than for a state directory it could not name.
+fn plan_identity(root: &Path, plan: &Path) -> PathBuf {
+    let absolute = if plan.is_absolute() {
+        plan.to_path_buf()
+    } else {
+        root.join(plan)
+    };
+
+    let mut normalised = PathBuf::new();
+    for part in absolute.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalised.pop();
+            }
+            other => normalised.push(other),
+        }
+    }
+    normalised
+}
+
+/// `stem` with everything a directory name should not carry replaced by `_`.
+fn readable(stem: &str) -> String {
+    stem.chars()
+        .map(|character| match character {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => character,
+            _ => '_',
+        })
+        .take(40)
+        .collect()
+}
+
+/// Adopt or refuse a journal a run made before run state was keyed by the plan.
+///
+/// A repository-scoped journal cannot be attributed to a plan: it is whatever ran last under this
+/// root. Adopting one silently is the failure this change exists to prevent — `--resume` would
+/// replay another plan's operations against these coordinates — so it is adopted only when the run
+/// says it is continuing a journal and this plan has none of its own, and it says so when it does.
+/// Otherwise it is refused, naming the file, because leaving it in place would make a later
+/// `--resume` reach for it again.
+fn adopt_or_refuse_repo_scoped_state(
+    root: &Path,
+    paths: &StatePaths,
+    continuing: bool,
+    progress: &crate::backends::rust::ProgressSink,
+) -> Result<()> {
+    let Some(legacy) = repo_scoped_journal(root, paths)? else {
+        return Ok(());
+    };
+
+    if continuing && Journal::load(&paths.journal)?.records.is_empty() {
+        std::fs::rename(&legacy, &paths.journal)?;
+        let ledger = root.join(STATE_DIRECTORY).join(LEDGER_FILE);
+        if ledger.exists() {
+            std::fs::rename(&ledger, &paths.ledger)?;
+        }
+        progress(&format!(
+            "adopted the repository-scoped journal {} as this plan's own, at {}",
+            legacy.display(),
+            paths.journal.display()
+        ));
+        return Ok(());
+    }
+
+    Err(RestructureError::RepoScopedJournal {
+        path: legacy.display().to_string(),
+    })
+}
+
+/// The repository-scoped journal standing above a plan's own state, when there is one to reckon
+/// with.
+///
+/// Loaded rather than merely looked for: a journal whose records cannot be read is a refusal of its
+/// own, and reporting it as state belonging to an unknown plan would hide what is actually wrong
+/// with it.
+fn repo_scoped_journal(root: &Path, paths: &StatePaths) -> Result<Option<PathBuf>> {
+    let legacy = root.join(STATE_DIRECTORY).join(JOURNAL_FILE);
+    if legacy == paths.journal || !legacy.exists() {
+        return Ok(None);
+    }
+    if Journal::load(&legacy)?.records.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(legacy))
+}
+
+/// Refuse a run that would read past a repository-scoped journal, for the entry points that only
+/// read.
+///
+/// `status` reports a plan's progress out of that plan's journal, and a repository-scoped one
+/// standing beside it belongs to nothing this call can name — so it is reported rather than stepped
+/// over, which is the same decision [`adopt_or_refuse_repo_scoped_state`] makes for a run that
+/// writes.
+pub(super) fn refuse_repo_scoped_state(root: &Path, paths: &StatePaths) -> Result<()> {
+    match repo_scoped_journal(root, paths)? {
+        None => Ok(()),
+        Some(legacy) => Err(RestructureError::RepoScopedJournal {
+            path: legacy.display().to_string(),
+        }),
+    }
+}
+
 impl StatePaths {
     /// The state paths for a run against `root`. Derives paths only; touches no disk.
+    ///
+    /// Repository-scoped: see [`StatePaths::for_plan`] for the layout a run that knows its plan
+    /// uses, and [`state_directory_for_plan`] for why keying by the root alone is a tax.
     pub fn under(root: &Path) -> Self {
-        let dir = root.join(".restructure");
+        Self::in_directory(&root.join(STATE_DIRECTORY))
+    }
+
+    /// The state paths for a run of `plan` against `root`. Derives paths only; touches no disk.
+    ///
+    /// # Errors
+    ///
+    /// Refuses for the one reason [`state_directory_for_plan`] does: a path that names no plan file.
+    pub fn for_plan(root: &Path, plan: &Path) -> Result<Self> {
+        Ok(Self::in_directory(&state_directory_for_plan(root, plan)?))
+    }
+
+    fn in_directory(dir: &Path) -> Self {
         Self {
-            journal: dir.join("journal.jsonl"),
-            ledger: dir.join("ledger.json"),
+            journal: dir.join(JOURNAL_FILE),
+            ledger: dir.join(LEDGER_FILE),
         }
     }
 
@@ -171,6 +352,14 @@ impl StatePaths {
             .expect("state paths live in a directory");
         std::fs::create_dir_all(dir)?;
         std::fs::write(dir.join(".gitignore"), "*\n")?;
+        // A plan's own directory sits inside `.restructure/`, and a `.gitignore` in it says
+        // nothing about the directory holding it.
+        if let Some(above) = dir
+            .parent()
+            .filter(|above| above.ends_with(STATE_DIRECTORY))
+        {
+            std::fs::write(above.join(".gitignore"), "*\n")?;
+        }
         Ok(())
     }
 }

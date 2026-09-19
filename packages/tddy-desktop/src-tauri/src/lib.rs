@@ -19,9 +19,9 @@ use std::sync::Arc;
 
 use tauri::webview::{PageLoadEvent, PageLoadPayload};
 use tauri::{Manager, RunEvent, Url, Webview, WebviewUrl, WebviewWindowBuilder};
-use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::runtime::{self, RuntimeOptions, RuntimeTaskHandles};
 use tddy_rpc::MultiRpcService;
+use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_tauri_rpc::MultiConnectionHost;
 
 /// The window the dashboard is loaded into.

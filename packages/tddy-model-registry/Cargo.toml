@@ -47,3 +47,6 @@ tddy-testing-commons = { path = "../tddy-testing-commons" }
 # `list_assistants`. Cargo permits a cycle through `[dev-dependencies]`; the production edge runs
 # one way only, from `tddy-daemon` to here.
 tddy-daemon = { path = "../tddy-daemon" }
+# `agent_list_mapping` is defined here, and was reached as `tddy_daemon::agent_list_mapping`
+# until `#carve` 4/10 removed that facade.
+tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }

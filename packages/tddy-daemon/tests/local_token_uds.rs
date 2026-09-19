@@ -30,12 +30,7 @@ use std::time::{Duration, Instant};
 
 use hyper_util::rt::TokioIo;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::host_tonic_adapter::HostServiceTonicAdapter;
 use tddy_daemon::local_socket_server::{serve_connection_uds, LocalSocketServices};
-use tddy_daemon::local_token_tonic_adapter::{LocalTokenUdsTonicAdapter, UidToUsername};
-use tddy_daemon::test_util::{test_service, TEST_TOKEN};
-use tddy_daemon::user_sessions_path::username_for_uid;
-use tddy_daemon::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_daemon_livekit::{build_livekit_service, RoomRoster, RosterError};
 use tddy_github::{SessionTokenSigner, TokenKind};
@@ -60,6 +55,11 @@ use tddy_service::proto::worktree::{
 };
 use tddy_service::tonic_host::host_service_client::HostServiceClient;
 use tddy_service::tonic_worktree::worktree_service_client::WorktreeServiceClient;
+use tddy_session_lifecycle::host_tonic_adapter::HostServiceTonicAdapter;
+use tddy_session_lifecycle::local_token_tonic_adapter::{LocalTokenUdsTonicAdapter, UidToUsername};
+use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
+use tddy_session_lifecycle::user_sessions_path::username_for_uid;
+use tddy_session_lifecycle::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
 use tddy_terminal_rpc::proto::terminal_session::{
     ClaimTerminalControlRequest, SessionTerminalInput, TerminalSessionServiceTonicAdapter,
 };
@@ -108,7 +108,7 @@ fn start_local_socket_server(
         SessionServiceTonicAdapter::new(Arc::new(connection.session_lifecycle_service()));
     let project_adapter = ProjectServiceTonicAdapter::new(Arc::new(connection.project_service()));
     let demo_vm_adapter = DemoVmServiceTonicAdapter::new(Arc::new(
-        tddy_daemon::connection_service::DemoVmServiceImpl::new(Arc::clone(&connection)),
+        tddy_session_lifecycle::connection_service::DemoVmServiceImpl::new(Arc::clone(&connection)),
     ));
     let local_token_adapter =
         LocalTokenUdsTonicAdapter::new(Arc::new(config.clone()), signer, uid_to_username);

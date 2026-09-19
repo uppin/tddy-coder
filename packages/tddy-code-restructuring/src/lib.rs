@@ -22,7 +22,9 @@ pub mod verify;
 
 pub use backends::rust::{client_capabilities, server_settings};
 pub use crate_move::{
-    defining_crate, module_home, unrunnable_moves, CallerRewrite, Destination, ModuleHome, Survey,
+    defining_crate, module_home, read_test_binary_move, resolve_cluster, resolve_test_binary_move,
+    siblings_left_behind, unrunnable_moves, CallerRewrite, Destination, ModuleHome, MovingCluster,
+    Survey, TestBinaryMove,
 };
 pub use edit::{FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit};
 pub use journal::{Journal, JournalRecord, OpStatus};
@@ -30,6 +32,7 @@ pub use ledger::{LedgerCheckpoint, PositionLedger};
 pub use overlay::Overlay;
 pub use plan::{Anchor, Plan, Reexport, RefactorKind, RefactorOp};
 pub use registry::{BackendRegistry, LanguageBackend};
+pub use runner::state_directory_for_plan;
 
 /// Errors surfaced by the executor. Every variant is fatal — the executor never falls back.
 #[derive(Debug, thiserror::Error)]
@@ -77,6 +80,17 @@ pub enum RestructureError {
     CheckpointDivergence { op: usize },
     #[error("a journal already exists for this plan — pass --resume to continue it")]
     JournalExists,
+    /// A journal keyed by the repository rather than by a plan is standing over this plan's own.
+    ///
+    /// Run state is keyed by the plan ([`runner::state_directory_for_plan`]); a journal at
+    /// `<root>/.restructure/` is whatever ran last under this root, and nothing in it says which
+    /// plan that was. Adopting it for the plan in hand would let `--resume` replay another plan's
+    /// operations against these coordinates, which is the one outcome worse than refusing.
+    #[error(
+        "{path} is a repository-scoped journal, which belongs to no plan this run can name — \
+         archive or remove it, or pass --resume to continue it as this plan's own journal"
+    )]
+    RepoScopedJournal { path: String },
     #[error("the language server is still catching up with an earlier change")]
     ServerCatchingUp,
     /// The server stayed unable to answer one method, as distinct from the plan being wrong.

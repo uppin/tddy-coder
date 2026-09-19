@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The **`tddy_daemon::telegram_session_control`** module defines the **inbound** side of Telegram-driven workflow control: command and callback parsing, plan text chunking for Telegram message size limits, presenter input byte encodings aligned with the web client, and a **`TelegramSessionControlHarness`** used in automated tests (and suitable for future wiring from a teloxide update loop).
+The **`tddy_session_lifecycle::telegram_session_control`** module defines the **inbound** side of Telegram-driven workflow control: command and callback parsing, plan text chunking for Telegram message size limits, presenter input byte encodings aligned with the web client, and a **`TelegramSessionControlHarness`** used in automated tests (and suitable for future wiring from a teloxide update loop).
 
 This surface is **distinct** from **[Telegram session notifications](telegram-notifications.md)**, which cover **outbound** status and elicitation hints from the daemon's observer path.
 
@@ -12,7 +12,7 @@ When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the
 
 ## Telegram user ↔ GitHub identity
 
-The library module **`tddy_telegram::telegram_github_link`** (re-exported as **`tddy_daemon::telegram_github_link`**) binds a **Telegram user id** to a **GitHub login** (JSON store on disk, HMAC-signed OAuth **`state`**, stub OAuth exchange for tests). **`resolved_os_user_for_telegram_workflow`** resolves **`daemon.yaml`** **`users:`** the same way as web OAuth flows.
+The library module **`tddy_telegram::telegram_github_link`** (re-exported as **`tddy_session_lifecycle::telegram_github_link`**) binds a **Telegram user id** to a **GitHub login** (JSON store on disk, HMAC-signed OAuth **`state`**, stub OAuth exchange for tests). **`resolved_os_user_for_telegram_workflow`** resolves **`daemon.yaml`** **`users:`** the same way as web OAuth flows.
 
 **`TelegramSessionControlHarness::with_telegram_github_link`** accepts a mapping file path. When that path is set, **`handle_start_workflow`** requires a stored GitHub login for the Telegram **`user_id`** before it creates a session directory. If the user is not linked, the handler fails with a message that instructs the operator to complete GitHub linking (including reference to **`/link-github`** in the error text).
 
@@ -74,7 +74,7 @@ Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`T
 - **`enter:<session_id>`** callbacks establish **per-chat tracking**: the Telegram **`chat_id`** binds to that workflow **`session_id`** inside a **`SharedTelegramTrackedSessionCoordinator`** shared with **`TelegramSessionWatcher`**, so outbound presenter keyboards and inbound elicitation gates agree on the operator’s chosen session.
 - After a successful **Enter**, the control path **replays** pending presenter elicitation for that session when cached presenter state indicates an outstanding gate (test harnesses may attach a **`TelegramElicitationReplayBridge`** for the same replay contract without the full daemon graph).
 - **Session delete** clears the tracked association when the deleted session id matches the chat’s tracked id. **WorkflowComplete** clears when the completed session matches the tracked pair.
-- Integration coverage lives in **`packages/tddy-daemon/tests/telegram_tracked_session_acceptance.rs`** together with existing concurrent-elicitation and multi-select suites that bind tracking where full keyboards are asserted.
+- Integration coverage lives in **`packages/tddy-session-lifecycle/tests/telegram_tracked_session_acceptance.rs`** together with existing concurrent-elicitation and multi-select suites that bind tracking where full keyboards are asserted.
 
 ### Clarification (select, text, multi)
 
@@ -204,15 +204,15 @@ PTY output is not streamed into Telegram; attach via web terminal or `pty-relay`
 ## Tests
 
 - **Unit tests** live in **`telegram_session_control.rs`** (`#[cfg(test)]`): parsers, chunking, presenter bytes.
-- **Integration tests** live in **`packages/tddy-daemon/tests/telegram_session_control_integration.rs`**: start workflow, recipe **`changeset.yaml`**, branch/worktree intent keyboard and persistence, plan chunk markers, elicitation mapping, unauthorized denial, chain workflow parent picker and **`tcp:`** parent tap (**`telegram_chain_workflow_shows_parent_pick_first`**, **`telegram_chain_parent_tap_persists_previous_session_id_on_child`**, **`parent_candidates_page_for_chain_picker_excludes_child_and_caps_page`**, **`telegram_chain_parent_callback_rejects_invalid_child_session_id_segment`**).
-- **Chain wiring / merge acceptance** lives in **`packages/tddy-daemon/tests/session_chaining_phase2_acceptance.rs`**, **`session_chaining_phase2_unit.rs`**.
+- **Integration tests** live in **`packages/tddy-session-lifecycle/tests/telegram_session_control_integration.rs`**: start workflow, recipe **`changeset.yaml`**, branch/worktree intent keyboard and persistence, plan chunk markers, elicitation mapping, unauthorized denial, chain workflow parent picker and **`tcp:`** parent tap (**`telegram_chain_workflow_shows_parent_pick_first`**, **`telegram_chain_parent_tap_persists_previous_session_id_on_child`**, **`parent_candidates_page_for_chain_picker_excludes_child_and_caps_page`**, **`telegram_chain_parent_callback_rejects_invalid_child_session_id_segment`**).
+- **Chain wiring / merge acceptance** lives in **`packages/tddy-session-lifecycle/tests/session_chaining_phase2_acceptance.rs`**, **`session_chaining_phase2_unit.rs`**.
 - **TUI chain parity** lives in **`packages/tddy-tui/tests/chain_phase2_acceptance.rs`**, **`chain_phase2_unit.rs`**.
-- **Telegram ↔ GitHub linking** integration and unit tests live in **`packages/tddy-daemon/tests/telegram_github_link.rs`** and **`telegram_github_link.rs`** (`#[cfg(test)]`): OAuth state round-trip, mapping persistence, unlinked **`handle_start_workflow`** error path, stub exchange.
-- **Concurrent elicitation** scenarios (single chat, multiple sessions, active token) live in **`packages/tddy-daemon/tests/telegram_concurrent_elicitation_integration.rs`**.
-- **Multi-select shortcuts** (outbound keyboards, parser, metadata gating) live in **`packages/tddy-daemon/tests/telegram_multi_select_acceptance.rs`**.
-- **Telegram-tracked session gate and replay** live in **`packages/tddy-daemon/tests/telegram_tracked_session_acceptance.rs`**.
-- **`/start-claude` acceptance** (`project → branch → model → PTY spawn`) lives in **`packages/tddy-daemon/tests/telegram_start_claude_acceptance.rs`**: `start_claude_creates_session_with_initial_prompt_and_marker`, `start_claude_project_then_branch_routes_to_model_keyboard`, `start_claude_model_callback_launches_claude_cli`, `start_claude_uses_shared_manager`.
-- **`/start-cursor` acceptance** lives in **`packages/tddy-daemon/tests/telegram_start_cursor_acceptance.rs`**: project/branch routing to `tcur:` keyboard, model callback spawn, hooks installed in worktree.
+- **Telegram ↔ GitHub linking** integration and unit tests live in **`packages/tddy-session-lifecycle/tests/telegram_github_link.rs`** and **`telegram_github_link.rs`** (`#[cfg(test)]`): OAuth state round-trip, mapping persistence, unlinked **`handle_start_workflow`** error path, stub exchange.
+- **Concurrent elicitation** scenarios (single chat, multiple sessions, active token) live in **`packages/tddy-session-lifecycle/tests/telegram_concurrent_elicitation_integration.rs`**.
+- **Multi-select shortcuts** (outbound keyboards, parser, metadata gating) live in **`packages/tddy-session-lifecycle/tests/telegram_multi_select_acceptance.rs`**.
+- **Telegram-tracked session gate and replay** live in **`packages/tddy-session-lifecycle/tests/telegram_tracked_session_acceptance.rs`**.
+- **`/start-claude` acceptance** (`project → branch → model → PTY spawn`) lives in **`packages/tddy-session-lifecycle/tests/telegram_start_claude_acceptance.rs`**: `start_claude_creates_session_with_initial_prompt_and_marker`, `start_claude_project_then_branch_routes_to_model_keyboard`, `start_claude_model_callback_launches_claude_cli`, `start_claude_uses_shared_manager`.
+- **`/start-cursor` acceptance** lives in **`packages/tddy-session-lifecycle/tests/telegram_start_cursor_acceptance.rs`**: project/branch routing to `tcur:` keyboard, model callback spawn, hooks installed in worktree.
 
 ## Related documentation
 

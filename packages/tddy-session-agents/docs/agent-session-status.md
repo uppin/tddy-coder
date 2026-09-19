@@ -117,7 +117,7 @@ life.
 
 ## Tests
 
-`packages/tddy-daemon/tests/agent_session_status_inference_unit.rs` and
+`packages/tddy-session-agents/tests/agent_session_status_inference_unit.rs` and
 `…_acceptance.rs` stayed in `tddy-daemon` and drive the store through the daemon's re-export, which
 is also the path production takes. Nothing exercises this module from inside `tddy-session-agents`.
 

@@ -128,7 +128,7 @@ fn main() -> anyhow::Result<()> {
         // created and deleted while the daemon runs, so no snapshot could stay right about them —
         // `ListAgents` is their live source, and it reads the registry on every call.
         let allowed_agents: Vec<tddy_coder::web_server::ClientAllowedAgent> =
-            tddy_daemon::agent_list_mapping::agent_allowlist_rows(&daemon.config, &[])
+            tddy_session_lifecycle::agent_list_mapping::agent_allowlist_rows(&daemon.config, &[])
                 .into_iter()
                 .map(|row| tddy_coder::web_server::ClientAllowedAgent {
                     id: row.id,
@@ -136,7 +136,9 @@ fn main() -> anyhow::Result<()> {
                 })
                 .collect();
         let daemon_instance_id =
-            tddy_daemon::livekit_peer_discovery::local_instance_id_for_config(&daemon.config);
+            tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config(
+                &daemon.config,
+            );
 
         // The children this daemon will have to reap, captured before `tasks` moves out of the
         // runtime below.

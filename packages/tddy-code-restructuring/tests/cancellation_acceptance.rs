@@ -181,6 +181,7 @@ fn an_extraction_of_the_function_body() -> RefactorOp {
         with_private_deps: false,
         reexport: None,
         to_file: false,
+        also: Vec::new(),
     }
 }
 

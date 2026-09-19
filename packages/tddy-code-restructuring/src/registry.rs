@@ -263,6 +263,7 @@ mod tests {
             with_private_deps: true,
             reexport: None,
             to_file: false,
+            also: Vec::new(),
         };
         let root = PathBuf::from("/tmp/workspace");
 

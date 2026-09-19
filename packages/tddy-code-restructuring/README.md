@@ -37,14 +37,32 @@ Two properties make that possible, and both are load-bearing:
 
 ## Operations (v1)
 
-`extract_method`, `extract_variable`, `rename_symbol`, `extract_module` (`reexport`, `to_file`), `extract_module_to_file`, `extract_trait`, `inline_method`, `move_module_to_crate` (`to`, `reexport`).
+`extract_method`, `extract_variable`, `rename_symbol`, `extract_module` (`reexport`, `to_file`),
+`extract_module_to_file`, `extract_trait`, `inline_method`, `move_module_to_crate` (`to`,
+`reexport`), `move_cluster_to_crate` (`also`, `to`, `reexport`), `move_test_binary_to_crate` (`to`).
+
+`move_cluster_to_crate` moves a **set** of modules as one unit — `anchor` is the first member and
+`also` names the rest — in a single edit, so the tree is never half-moved. That is what makes a
+mutually-referencing group movable at all: moved one at a time, each module's reference to a sibling
+still in the origin would make the destination depend on the crate it left, and no ordering of
+one-module operations can resolve a cycle.
+
+`move_test_binary_to_crate` moves `<crate>/tests/<name>.rs` to the crate it exercises. A test binary
+is a different shape from a module — cargo auto-discovers it, so there is no `mod` line to remove;
+nothing can reference it, so `reexport` is refused; and the destination gains
+`[dev-dependencies]`, not `[dependencies]`. See
+[docs/test-binary-moves.md](docs/test-binary-moves.md).
+
+Run state is keyed by the **plan**, at `<root>/.restructure/<plan stem>-<digest>/`, so one plan
+follows another under the same root without hand-archiving and `--resume` resumes the plan it was
+given.
 
 ## Authored transformations
 
 Most operations delegate to a rust-analyzer assist; three are written here, because no assist
-performs them: `extract_class`, the facade `use` line, and `move_module_to_crate`.
+performs them: `extract_class`, the facade `use` line, and the cross-crate moves.
 
-rust-analyzer has no cross-crate move, so `move_module_to_crate` has nothing to delegate to. What
+rust-analyzer has no cross-crate move, so these have nothing to delegate to. What
 keeps it honest is that it is engine-**informed**: every caller it rewrites comes from a real
 `textDocument/references` result, never a text search, and every acceptance test ends in
 `cargo check` — because a tree that reads correctly and does not compile is exactly the failure an

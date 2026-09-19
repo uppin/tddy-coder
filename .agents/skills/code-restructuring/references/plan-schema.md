@@ -33,6 +33,9 @@ Both kinds are expressed in the coordinates of the snapshot, never adjusted for 
 | `rename_symbol` | symbol or range | `name` | ✅ | ✅ |
 | `extract_module` | range over a selection of items | `name`, `reexport` = `glob` \| `named` \| `none`, `to_file` | — | ✅ |
 | `extract_module_to_file` | range at the `mod` keyword | — | — | ✅ |
+| `move_module_to_crate` | symbol | `to`, `reexport` = `glob` \| `none` | — | ✅ |
+| `move_cluster_to_crate` | symbol (first member) | `also` (the other members' anchors), `to`, `reexport` | — | ✅ |
+| `move_test_binary_to_crate` | the test binary's path | `to` | — | ✅ |
 | `extract_trait` | range at the `impl` keyword | `name` | — | ✅ |
 | `inline_method` | symbol | — | — | ✅ |
 | `organize_imports` | symbol | — | ✅ | — |
@@ -52,6 +55,35 @@ not define is refused rather than ignored.
   `with_private_deps: false` is refused rather than silently ignored.
 - **Rust has no whole-symbol move.** To split a Rust file, group the items with `extract_module` and
   then run `extract_module_to_file`, whose anchor is a caret on the `mod` keyword.
+- **A mutually-referencing set moves with `move_cluster_to_crate`, not with several
+  `move_module_to_crate` ops.** `anchor` is the first member and `also` carries the rest, as anchors
+  of the same shape. The whole set resolves into **one** edit, so the tree is never half-moved — and
+  that is not a nicety: moved one at a time, each module's reference to a sibling still in the origin
+  makes the destination depend on the crate it left, and the operation refuses. No ordering fixes a
+  cycle, which is why layering a plan by dependency depth cannot substitute.
+
+  A path reaching a **co-moving** member keeps `crate::` — the destination *is* `crate` for a file
+  that has arrived in it, and naming the destination crate there is `E0433` plus a self-dependency.
+  A path reaching a module **staying behind** is re-pointed at the origin, exactly as a single move
+  does. A set of one is refused: that is `move_module_to_crate`.
+
+  A plain `check` names the sibling a **partial** set would strand, statically and with no index —
+  which is the finding that used to be discovered only when `apply` refused.
+- **A test binary moves with `move_test_binary_to_crate`, never with `move_module_to_crate`.** The
+  anchor is `<crate>/tests/<name>.rs` and `to` is the destination crate's directory. `reexport` is
+  refused — nothing can reference a test binary, so a facade would keep nothing resolving — and
+  there is no origin edit at all, because cargo auto-discovers `tests/*.rs` and the crate the test
+  left never named it. The destination gains `[dev-dependencies]`, not `[dependencies]`.
+
+  Every path in the moved file that opens with the origin's extern name is re-pointed, bodies
+  included, and each is resolved to the crate that **defines** what it reaches rather than to the
+  first crate that re-exports it. `crate::`, `super::` and the file's own `mod` names are left
+  alone: a test binary already is its own crate root, so they mean the same thing in the
+  destination. A path continuing into a group or a glob (`origin::{a, b}`) is refused — split the
+  declaration first. String literals are never rewritten, so a `CARGO_MANIFEST_DIR`-relative path to
+  a sibling crate's source is a hand edit after the move. `tests/common/mod.rs` is not a test binary
+  and is refused as an anchor; it is a module of whichever binaries declare it.
+
 - **`to_file: true` does both steps in one operation, and is the way to do this.** `extract_module`
   groups the items and gives the module its file without ever naming the intermediate `mod` keyword, so
   the constraint below does not arise. The parent's edit is measured against what was on disk, so one

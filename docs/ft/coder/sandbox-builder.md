@@ -113,7 +113,7 @@ needs" set lives in one reviewable recipe; and a non-leaking secret channel deli
 | `records_a_declared_secret_without_placing_its_value_in_the_env_map` | same | Secret value absent from `env.vars`. |
 | `claude_required_reads_include_the_dyld_root_literal` | `packages/tddy-sandbox-recipes` | Recipe contains the `(literal "/")` DyldRoot read. |
 | `claude_required_copies_seed_only_the_credentials_file` | same | Only `.credentials.json`; no `settings.json`. |
-| Action sandbox (tddy-coder, build RO mount, escape denial, PTY) | `packages/tddy-daemon/tests/action_sandbox_acceptance.rs` | Confined process and runner-PTY actions; unsupported platform returns `failed_precondition`. |
+| Action sandbox (tddy-coder, build RO mount, escape denial, PTY) | `packages/tddy-session-lifecycle/tests/action_sandbox_acceptance.rs` | Confined process and runner-PTY actions; unsupported platform returns `failed_precondition`. |
 | `rendered_profile_omits_the_blanket_file_read_wildcard` | `packages/tddy-sandbox-darwin/src/profile.rs` | `(allow file-read*)\n` blanket absent. |
 | `rendered_profile_emits_each_declared_read_as_an_explicit_rule` | same | Each declared read present as literal/subpath/regex. |
 | `rendered_profile_emits_the_dyld_root_literal` | same | `(literal "/")` present. |
