@@ -252,7 +252,12 @@ async fn a_daemon(
     let config_arc = Arc::new(config.clone());
     let registry = Arc::new(CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-    spawn_common_room_discovery_task(config_arc.clone(), registry.clone(), room_slot.clone());
+    spawn_common_room_discovery_task(
+        config_arc.clone(),
+        registry.clone(),
+        room_slot.clone(),
+        Default::default(),
+    );
     let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
     );
