@@ -27,10 +27,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
-use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
-use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::DaemonSessionHost;
-use tddy_daemon::test_util::TestDaemon;
+use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_sandbox::workspace_tool_sandbox::RUNNER_PID_FILE;
 use tddy_github::{GitHubUser, SessionTokenSigner};
@@ -169,9 +169,9 @@ fn a_git_repo_with_origin() -> tempfile::TempDir {
 }
 
 fn register_project(sessions_base: &Path, repo_path: &Path) {
-    tddy_daemon::project_storage::write_projects(
+    tddy_projects::project_storage::write_projects(
         &sessions_base.join("projects"),
-        &[tddy_daemon::project_storage::ProjectData {
+        &[tddy_projects::project_storage::ProjectData {
             project_id: PROJECT_ID.to_string(),
             name: "sandboxed-codebase-seatbelt".to_string(),
             git_url: String::new(),

@@ -34,14 +34,14 @@ use std::sync::{Arc, OnceLock};
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
-use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
-use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::{
+use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_session_lifecycle::connection_service::{
     classify_placement, CodebasePlacement, DaemonSessionHost, PlacementRequest,
 };
-use tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles;
-use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
-use tddy_daemon::test_util::TestDaemon;
+use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
+use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
+use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_github::{GitHubUser, SessionTokenSigner};
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
@@ -139,9 +139,9 @@ fn a_git_repo_with_origin_at(path: &Path) {
 }
 
 fn register_project(sessions_base: &Path, repo_path: &Path) {
-    tddy_daemon::project_storage::write_projects(
+    tddy_projects::project_storage::write_projects(
         &sessions_base.join("projects"),
-        &[tddy_daemon::project_storage::ProjectData {
+        &[tddy_projects::project_storage::ProjectData {
             project_id: PROJECT_ID.to_string(),
             name: "sandboxed-codebase".to_string(),
             git_url: String::new(),
