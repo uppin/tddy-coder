@@ -6,7 +6,7 @@ import { useAuthContext } from "../../hooks/authProvider";
 import { useHostConnector } from "../../rpc/connections/registry";
 import { useDaemonClient, useDaemons } from "../../rpc/selectedDaemon";
 import { AppShell } from "../shell/AppShell";
-import { ProjectsScreen } from "./ProjectsScreen";
+import { ProjectsScreen, type AssignableAccount } from "./ProjectsScreen";
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -87,8 +87,35 @@ function useProjectsRpc(
     [client, sessionToken],
   );
 
-  return { projects, createProject, addProjectToHost, setDefaultBranch, loadProjectBranches };
+  const setProjectAccounts = useCallback(
+    (input: {
+      projectId: string;
+      accounts: { provider: string; accountId: string }[];
+      daemonInstanceId: string;
+    }) => {
+      if (!client) return;
+      client
+        .setProjectAccounts({ sessionToken, ...input })
+        .then(() => loadProjects())
+        .catch(() => {});
+    },
+    [client, sessionToken, loadProjects],
+  );
+
+  return {
+    projects,
+    createProject,
+    addProjectToHost,
+    setDefaultBranch,
+    loadProjectBranches,
+    setProjectAccounts,
+  };
 }
+
+// TODO(#keyring 5/9): read the assignable accounts from `AccountsService.listAccounts` (4/9) over
+// the selected daemon and flatten the provider groups into this list. Until then the Projects
+// screen is offered nothing to assign, so it renders no assignment rows.
+const NOT_YET_FETCHED: AssignableAccount[] = [];
 
 /**
  * Data container for the dedicated Projects screen (`/projects`). RPC wiring lives in
@@ -110,8 +137,14 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
       connectHost(instanceId)?.clientFor(ProjectService) ?? null,
     [connectHost],
   );
-  const { projects, createProject, addProjectToHost, setDefaultBranch, loadProjectBranches } =
-    useProjectsRpc(client, clientForHost, sessionToken ?? "");
+  const {
+    projects,
+    createProject,
+    addProjectToHost,
+    setDefaultBranch,
+    loadProjectBranches,
+    setProjectAccounts,
+  } = useProjectsRpc(client, clientForHost, sessionToken ?? "");
 
   return (
     <AppShell title="Projects" onNavigate={onNavigate} variant="scroll">
@@ -122,6 +155,8 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
         onAddProjectToHost={addProjectToHost}
         onSetDefaultBranch={setDefaultBranch}
         loadProjectBranches={loadProjectBranches}
+        accounts={NOT_YET_FETCHED}
+        onSetProjectAccounts={setProjectAccounts}
       />
     </AppShell>
   );

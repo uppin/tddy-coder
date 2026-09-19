@@ -163,6 +163,7 @@ impl ProjectRpcHandler {
             main_branch_ref: None,
             remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
+            accounts: Vec::new(),
         };
         let repo_root = PathBuf::from(&project.main_repo_path);
         let default_remote = entries::resolve_default_remote_or_empty(
@@ -342,6 +343,7 @@ impl ProjectRpcHandler {
             main_branch_ref,
             remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
+            accounts: Vec::new(),
         };
         let (stored, _created) = project_storage::add_or_get_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -458,6 +460,22 @@ impl ProjectRpcHandler {
                 default_remote,
             ))?),
         }))
+    }
+
+    /// Replace which account a project uses at each provider, on this host or a peer owning the
+    /// same `project_id`.
+    ///
+    /// Same routing as [`Self::set_project_default_branch_at_project_coordinate`]: the assignment is
+    /// a property of the logical project, so every host holding a row for it has to learn about it.
+    pub(crate) async fn set_project_accounts_at_project_coordinate(
+        &self,
+        request: Request<tddy_service::proto::project::SetProjectAccountsRequest>,
+    ) -> Result<Response<tddy_service::proto::project::SetProjectAccountsResponse>, Status> {
+        let _ = request;
+        todo!(
+            "(#keyring 5/9): authenticate, route local-or-forward, refuse a repeated provider, \
+             then replace the row's account set"
+        )
     }
 
     pub(crate) async fn list_project_branches_at_project_coordinate(

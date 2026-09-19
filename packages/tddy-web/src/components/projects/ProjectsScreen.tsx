@@ -28,6 +28,31 @@ export interface ProjectsScreenProps {
     projectId: string;
     daemonInstanceId: string;
   }) => Promise<{ branches: string[]; defaultRemote: string }>;
+  /**
+   * Every account the caller's vault holds, in the order the daemon grouped them. The assignment
+   * rows a project card offers are exactly the providers present here — a provider with no linked
+   * account has nothing to assign, so it gets no row.
+   */
+  accounts: AssignableAccount[];
+  /**
+   * Replace a project's whole assignment set. Not a merge: the set sent is the set stored, which is
+   * how an assignment is cleared (send the remaining ones without it).
+   */
+  onSetProjectAccounts: (input: {
+    projectId: string;
+    accounts: { provider: string; accountId: string }[];
+    daemonInstanceId: string;
+  }) => void;
+}
+
+/**
+ * One account a project can be assigned, flattened from `ListAccountsResponse`. An account id is
+ * unique only **within** its provider, so both halves travel together everywhere.
+ */
+export interface AssignableAccount {
+  provider: string;
+  accountId: string;
+  label: string;
 }
 
 interface ProjectGroup {
@@ -35,6 +60,7 @@ interface ProjectGroup {
   name: string;
   gitUrl: string;
   mainBranchRef: string;
+  accounts: { provider: string; accountId: string }[];
   hosts: { daemonInstanceId: string; mainRepoPath: string }[];
 }
 
@@ -50,6 +76,7 @@ function groupByProject(projects: ProjectEntry[]): ProjectGroup[] {
         name: p.name,
         gitUrl: p.gitUrl,
         mainBranchRef: p.mainBranchRef,
+        accounts: p.accounts.map((a) => ({ provider: a.provider, accountId: a.accountId })),
         hosts: [],
       };
       byId.set(p.projectId, group);
@@ -80,6 +107,8 @@ export function ProjectsScreen({
   onAddProjectToHost,
   onSetDefaultBranch,
   loadProjectBranches,
+  accounts,
+  onSetProjectAccounts,
 }: ProjectsScreenProps) {
   const groups = useMemo(() => groupByProject(projects), [projects]);
 
@@ -158,6 +187,8 @@ export function ProjectsScreen({
             onAddProjectToHost={onAddProjectToHost}
             onSetDefaultBranch={onSetDefaultBranch}
             loadProjectBranches={loadProjectBranches}
+            accounts={accounts}
+            onSetProjectAccounts={onSetProjectAccounts}
           />
         ))}
       </div>
@@ -171,13 +202,23 @@ function ProjectCard({
   onAddProjectToHost,
   onSetDefaultBranch,
   loadProjectBranches,
+  accounts,
+  onSetProjectAccounts,
 }: {
   group: ProjectGroup;
   daemons: DaemonHost[];
   onAddProjectToHost: ProjectsScreenProps["onAddProjectToHost"];
   onSetDefaultBranch: ProjectsScreenProps["onSetDefaultBranch"];
   loadProjectBranches: ProjectsScreenProps["loadProjectBranches"];
+  accounts: ProjectsScreenProps["accounts"];
+  onSetProjectAccounts: ProjectsScreenProps["onSetProjectAccounts"];
 }) {
+  // TODO(#keyring 5/9): render one assignment row per provider present in `accounts`, each a
+  // `<select>` whose empty-valued option is "no account assigned" and whose change replaces the
+  // project's whole set via `onSetProjectAccounts`. Until then a project card offers no assignment
+  // control, so every project stays unassigned from the screen's point of view.
+  void accounts;
+  void onSetProjectAccounts;
   const hostingIds = useMemo(
     () => new Set(group.hosts.map((h) => h.daemonInstanceId)),
     [group.hosts],

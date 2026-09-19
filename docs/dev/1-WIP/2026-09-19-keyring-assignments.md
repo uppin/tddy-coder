@@ -257,6 +257,91 @@ pass every other test in this plan.
 single spec and story under change** — a full Cypress e2e run is ~50 minutes over 207 specs and
 belongs to CI. Whole-workspace green comes from CI via `scripts/ci-status.sh`.
 
+### Contract refinement (wave 2)
+
+The contract above drafted `ProjectData.accounts` as `Vec<String>`. It is published as
+`Vec<AccountAssignment>`, with `AccountAssignment { provider, account_id }` — mirrored by
+`project.proto`'s `AccountAssignment` and by `ProjectsScreen`'s `AssignableAccount`.
+
+**Why:** 4/9 made an `account_id` unique only *within* its provider, so a bare id does not identify an
+account and an assignment has to name both halves. The typed pair also makes the same-provider
+refusal expressible without parsing a string, and it is what lets the Projects screen offer one row
+per provider rather than one flat list. The proto field numbers are unchanged.
+
+⚠ **Cross-stack touch — `RESIDUAL_METHODS`.** `tddy-service`'s
+`unbundle_service_split::connection_service_ends_at_exactly_the_residual` asserts that the RPCs
+declared across `session.proto`, `project.proto`, `demo_vm.proto` and `local_token.proto` are
+**exactly** the `#unbundle` stack's 17-method residual. The list is closed on purpose — its own doc
+comment says a method "added while the stack was in flight" must fail there rather than survive
+quietly. `SetProjectAccounts` is a legitimate `ProjectService` method and a direct sibling of
+`SetProjectDefaultBranch`, which is already on the list, so this node **registers it**: the list
+becomes 18 entries and the count message says the residual grows by whatever is deliberately added
+after the stack. That is the tripwire's intended outcome, not a workaround; it is the first addition
+since `#unbundle` closed.
+
+### Measured red state (wave 2)
+
+Scoped to the packages this commit changes behaviourally. Whole-workspace green is CI's answer, via
+`scripts/ci-status.sh`.
+
+| Run | Command | Passed | Failed |
+|---|---|---|---|
+| Baseline, before this commit | `./test -p tddy-projects -p tddy-accounts -p tddy-service --no-fail-fast` | 160 | 9 |
+| After this commit | same | 163 | 22 |
+| New acceptance target | `./test -p tddy-session-lifecycle --test set_project_accounts_acceptance` | 1 | 6 |
+| Web acceptance | `cypress run --component --spec cypress/component/ProjectAccountsAcceptance.cy.tsx` | 1 | 7 |
+| Web regression | `cypress run --component --spec cypress/component/ProjectsScreenAcceptance.cy.tsx` | 13 | 0 |
+
+The baseline's **9 failures are inherited**, not this node's: they are 4/9's `AccountsServiceImpl`
+`todo!()` bodies in `accounts_service_acceptance.rs`, and they are still exactly 9 afterwards. This
+node's own delta is **+3 passed and +13 failed** in the scoped trio, plus **6** in
+`tddy-session-lifecycle` and **7** in Cypress — **26 failing tests** in total.
+
+- **7 of 7** in `tddy-accounts`' `account_resolution_acceptance.rs`, every one on `resolve_account`'s
+  `todo!()`. Nothing passes here, which is right: the whole file tests a function with no body.
+- **6 of 9** in `tddy-projects`' `project_accounts_storage.rs`, all on
+  `project_storage::set_project_accounts`'s `todo!()`.
+- **3 of 9 pass**, and genuinely so: `a_row_carries_its_account_assignments_through_a_write_and_a_read`,
+  `a_row_written_by_a_daemon_that_had_no_accounts_field_reads_as_unassigned` and
+  `an_unassigned_row_writes_no_accounts_key_at_all`. The contract says `accounts` ships as a **real**
+  serde field, because stubbing a field would mean stubbing `serde` — so its round-trip, its
+  `#[serde(default)]` read and its `skip_serializing_if` hold from this commit on.
+- **6 of 7** in `set_project_accounts_acceptance.rs`, all on the `todo!()` at
+  `project_coordinate_handlers.rs:482`, whose message names the four things the body still owes:
+  authenticate, route local-or-forward, refuse a repeated provider, replace the set.
+- **7 of 8** in `ProjectAccountsAcceptance.cy.tsx`, each `Expected to find element:
+  [data-testid='project-account-select-proj-alpha-github'], but never found it` — `ProjectCard`
+  publishes the two props and a `TODO(#keyring 5/9)`, so no assignment row exists yet.
+- **`ProjectsScreenAcceptance.cy.tsx` stays 13/13.** The two new required props did not disturb the
+  inherited green.
+
+⚠ **Two vacuous passes, named so they are not mistaken for coverage.**
+`a_project_nobody_assigned_an_account_to_is_listed_as_unassigned` (Rust) and
+`holds no assignment row for a provider the vault has no account at` (Cypress) both assert an
+*absence*, and absence is what an unimplemented surface produces for free. Neither is evidence of
+anything until the bodies land; both are kept because they stop being vacuous the moment they can
+fail.
+
+⚠ **Inherited, not this node's** — `packages/tddy-rust-typescript-tests/gen/auth_pb.ts` is still 197
+lines behind `auth.proto`, because 2/9 regenerated only the `tddy-web` copy. It is reverted out of
+this commit for the same reason 4/9 reverted it: the file belongs in 2/9's diff. Fixed by amending
+2/9 during the stack's closing cascade.
+
+### Verification scope for this commit
+
+- **Behavioural**, measured above: `tddy-projects`, `tddy-accounts`, `tddy-service`,
+  `tddy-session-lifecycle` (the one new target), and the two `tddy-web` specs.
+- **Mechanical**, compile-checked only: `tddy-session-files`, `tddy-worktree-service`,
+  `tddy-daemon`, `tddy-daemon-livekit`, `tddy-livekit`, `tddy-github` — every edit there is a
+  `ProjectData` or `ProjectEntry` literal gaining `accounts: Vec::new()`. The gate is
+  **`cargo check --all-targets -p …`** over all nine consumer packages, not `cargo build -p …`:
+  `build` does not compile `#[cfg(test)]` code or integration-test targets, so it reported success
+  while seven literals — one of them inside `tddy-daemon-livekit`'s own unit tests — did not compile.
+  Their suites are still CI's; what is proven here is that every target *builds*.
+- `./dev cargo clippy -p tddy-projects -p tddy-accounts -p tddy-service -p tddy-session-lifecycle
+  --all-targets -- -D warnings` — clean.
+- `tsc` is not a gate in this repo, and a full Cypress e2e run (~50 min, 207 specs) belongs to CI.
+
 ## Acceptance Criteria
 
 - [ ] `accounts` round-trips through `projects.yaml`; an absent field reads as empty
@@ -273,7 +358,7 @@ belongs to CI. Whole-workspace green comes from CI via `scripts/ci-status.sh`.
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Publish the draft-PR contract — wave 2
+- [x] Publish the draft-PR contract — wave 2
 - [ ] M1–M7
 - [ ] Package documentation for `tddy-projects`, `tddy-accounts`, `tddy-web`
 - [ ] `/wrap-context-docs` — this node claims **no** backlog entry and **no** code-issue record

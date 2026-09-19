@@ -10,7 +10,39 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file project.proto.
  */
 export const file_project: GenFile = /*@__PURE__*/
-  fileDesc("Cg1wcm9qZWN0LnByb3RvEgdwcm9qZWN0IrQBChdBZGRQcm9qZWN0VG9Ib3N0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRIPCgdnaXRfdXJsGAQgASgJEhcKD21haW5fYnJhbmNoX3JlZhgFIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYBiABKAkSGgoSdXNlcl9yZWxhdGl2ZV9wYXRoGAcgASgJIkIKGEFkZFByb2plY3RUb0hvc3RSZXNwb25zZRImCgdwcm9qZWN0GAEgASgLMhUucHJvamVjdC5Qcm9qZWN0RW50cnkiaAoUQ3JlYXRlUHJvamVjdFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJEg8KB2dpdF91cmwYAyABKAkSGgoSdXNlcl9yZWxhdGl2ZV9wYXRoGAQgASgJIj8KFUNyZWF0ZVByb2plY3RSZXNwb25zZRImCgdwcm9qZWN0GAEgASgLMhUucHJvamVjdC5Qcm9qZWN0RW50cnkiYwoaTGlzdFByb2plY3RCcmFuY2hlc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSJHChtMaXN0UHJvamVjdEJyYW5jaGVzUmVzcG9uc2USEAoIYnJhbmNoZXMYASADKAkSFgoOZGVmYXVsdF9yZW1vdGUYAiABKAkiQAoTTGlzdFByb2plY3RzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCmxvY2FsX29ubHkYAiABKAgiPwoUTGlzdFByb2plY3RzUmVzcG9uc2USJwoIcHJvamVjdHMYASADKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSKmAQoMUHJvamVjdEVudHJ5EhIKCnByb2plY3RfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhYKDm1haW5fcmVwb19wYXRoGAQgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgFIAEoCRIXCg9tYWluX2JyYW5jaF9yZWYYBiABKAkSFgoOZGVmYXVsdF9yZW1vdGUYByABKAkigAEKHlNldFByb2plY3REZWZhdWx0QnJhbmNoUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFwoPbWFpbl9icmFuY2hfcmVmGAMgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgEIAEoCSJJCh9TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeTLWAwoOUHJvamVjdFNlcnZpY2USSwoMTGlzdFByb2plY3RzEhwucHJvamVjdC5MaXN0UHJvamVjdHNSZXF1ZXN0Gh0ucHJvamVjdC5MaXN0UHJvamVjdHNSZXNwb25zZRJOCg1DcmVhdGVQcm9qZWN0Eh0ucHJvamVjdC5DcmVhdGVQcm9qZWN0UmVxdWVzdBoeLnByb2plY3QuQ3JlYXRlUHJvamVjdFJlc3BvbnNlElcKEEFkZFByb2plY3RUb0hvc3QSIC5wcm9qZWN0LkFkZFByb2plY3RUb0hvc3RSZXF1ZXN0GiEucHJvamVjdC5BZGRQcm9qZWN0VG9Ib3N0UmVzcG9uc2USYAoTTGlzdFByb2plY3RCcmFuY2hlcxIjLnByb2plY3QuTGlzdFByb2plY3RCcmFuY2hlc1JlcXVlc3QaJC5wcm9qZWN0Lkxpc3RQcm9qZWN0QnJhbmNoZXNSZXNwb25zZRJsChdTZXRQcm9qZWN0RGVmYXVsdEJyYW5jaBInLnByb2plY3QuU2V0UHJvamVjdERlZmF1bHRCcmFuY2hSZXF1ZXN0GigucHJvamVjdC5TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("Cg1wcm9qZWN0LnByb3RvEgdwcm9qZWN0IjkKEUFjY291bnRBc3NpZ25tZW50EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkitAEKF0FkZFByb2plY3RUb0hvc3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEg8KB2dpdF91cmwYBCABKAkSFwoPbWFpbl9icmFuY2hfcmVmGAUgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgGIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYByABKAkiQgoYQWRkUHJvamVjdFRvSG9zdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJoChRDcmVhdGVQcm9qZWN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHZ2l0X3VybBgDIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYBCABKAkiPwoVQ3JlYXRlUHJvamVjdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJjChpMaXN0UHJvamVjdEJyYW5jaGVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIkcKG0xpc3RQcm9qZWN0QnJhbmNoZXNSZXNwb25zZRIQCghicmFuY2hlcxgBIAMoCRIWCg5kZWZhdWx0X3JlbW90ZRgCIAEoCSJAChNMaXN0UHJvamVjdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKbG9jYWxfb25seRgCIAEoCCI/ChRMaXN0UHJvamVjdHNSZXNwb25zZRInCghwcm9qZWN0cxgBIAMoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5ItQBCgxQcm9qZWN0RW50cnkSEgoKcHJvamVjdF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg8KB2dpdF91cmwYAyABKAkSFgoObWFpbl9yZXBvX3BhdGgYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEhcKD21haW5fYnJhbmNoX3JlZhgGIAEoCRIWCg5kZWZhdWx0X3JlbW90ZRgHIAEoCRIsCghhY2NvdW50cxgIIAMoCzIaLnByb2plY3QuQWNjb3VudEFzc2lnbm1lbnQigAEKHlNldFByb2plY3REZWZhdWx0QnJhbmNoUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFwoPbWFpbl9icmFuY2hfcmVmGAMgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgEIAEoCSJJCh9TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSKQAQoZU2V0UHJvamVjdEFjY291bnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSLAoIYWNjb3VudHMYAyADKAsyGi5wcm9qZWN0LkFjY291bnRBc3NpZ25tZW50EhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgEIAEoCSJEChpTZXRQcm9qZWN0QWNjb3VudHNSZXNwb25zZRImCgdwcm9qZWN0GAEgASgLMhUucHJvamVjdC5Qcm9qZWN0RW50cnkytQQKDlByb2plY3RTZXJ2aWNlEksKDExpc3RQcm9qZWN0cxIcLnByb2plY3QuTGlzdFByb2plY3RzUmVxdWVzdBodLnByb2plY3QuTGlzdFByb2plY3RzUmVzcG9uc2USTgoNQ3JlYXRlUHJvamVjdBIdLnByb2plY3QuQ3JlYXRlUHJvamVjdFJlcXVlc3QaHi5wcm9qZWN0LkNyZWF0ZVByb2plY3RSZXNwb25zZRJXChBBZGRQcm9qZWN0VG9Ib3N0EiAucHJvamVjdC5BZGRQcm9qZWN0VG9Ib3N0UmVxdWVzdBohLnByb2plY3QuQWRkUHJvamVjdFRvSG9zdFJlc3BvbnNlEmAKE0xpc3RQcm9qZWN0QnJhbmNoZXMSIy5wcm9qZWN0Lkxpc3RQcm9qZWN0QnJhbmNoZXNSZXF1ZXN0GiQucHJvamVjdC5MaXN0UHJvamVjdEJyYW5jaGVzUmVzcG9uc2USbAoXU2V0UHJvamVjdERlZmF1bHRCcmFuY2gSJy5wcm9qZWN0LlNldFByb2plY3REZWZhdWx0QnJhbmNoUmVxdWVzdBooLnByb2plY3QuU2V0UHJvamVjdERlZmF1bHRCcmFuY2hSZXNwb25zZRJdChJTZXRQcm9qZWN0QWNjb3VudHMSIi5wcm9qZWN0LlNldFByb2plY3RBY2NvdW50c1JlcXVlc3QaIy5wcm9qZWN0LlNldFByb2plY3RBY2NvdW50c1Jlc3BvbnNlYgZwcm90bzM");
+
+/**
+ * One provider's account, as assigned to a project.
+ *
+ * An account id is minted by the daemon that holds the credential and is unique only **within its
+ * provider**, so an assignment names both. Carries no secret and no label: it is a reference into a
+ * daemon's vault, resolved against `accounts.AccountsService` when it is needed.
+ *
+ * @generated from message project.AccountAssignment
+ */
+export type AccountAssignment = Message<"project.AccountAssignment"> & {
+  /**
+   * Provider this assignment is for ("github", "cloudflare", ...).
+   *
+   * @generated from field: string provider = 1;
+   */
+  provider: string;
+
+  /**
+   * Account at that provider, as `accounts.AccountSummary.account_id` reports it.
+   *
+   * @generated from field: string account_id = 2;
+   */
+  accountId: string;
+};
+
+/**
+ * Describes the message project.AccountAssignment.
+ * Use `create(AccountAssignmentSchema)` to create a new message.
+ */
+export const AccountAssignmentSchema: GenMessage<AccountAssignment> = /*@__PURE__*/
+  messageDesc(file_project, 0);
 
 /**
  * @generated from message project.AddProjectToHostRequest
@@ -65,7 +97,7 @@ export type AddProjectToHostRequest = Message<"project.AddProjectToHostRequest">
  * Use `create(AddProjectToHostRequestSchema)` to create a new message.
  */
 export const AddProjectToHostRequestSchema: GenMessage<AddProjectToHostRequest> = /*@__PURE__*/
-  messageDesc(file_project, 0);
+  messageDesc(file_project, 1);
 
 /**
  * @generated from message project.AddProjectToHostResponse
@@ -84,7 +116,7 @@ export type AddProjectToHostResponse = Message<"project.AddProjectToHostResponse
  * Use `create(AddProjectToHostResponseSchema)` to create a new message.
  */
 export const AddProjectToHostResponseSchema: GenMessage<AddProjectToHostResponse> = /*@__PURE__*/
-  messageDesc(file_project, 1);
+  messageDesc(file_project, 2);
 
 /**
  * @generated from message project.CreateProjectRequest
@@ -119,7 +151,7 @@ export type CreateProjectRequest = Message<"project.CreateProjectRequest"> & {
  * Use `create(CreateProjectRequestSchema)` to create a new message.
  */
 export const CreateProjectRequestSchema: GenMessage<CreateProjectRequest> = /*@__PURE__*/
-  messageDesc(file_project, 2);
+  messageDesc(file_project, 3);
 
 /**
  * @generated from message project.CreateProjectResponse
@@ -136,7 +168,7 @@ export type CreateProjectResponse = Message<"project.CreateProjectResponse"> & {
  * Use `create(CreateProjectResponseSchema)` to create a new message.
  */
 export const CreateProjectResponseSchema: GenMessage<CreateProjectResponse> = /*@__PURE__*/
-  messageDesc(file_project, 3);
+  messageDesc(file_project, 4);
 
 /**
  * @generated from message project.ListProjectBranchesRequest
@@ -163,7 +195,7 @@ export type ListProjectBranchesRequest = Message<"project.ListProjectBranchesReq
  * Use `create(ListProjectBranchesRequestSchema)` to create a new message.
  */
 export const ListProjectBranchesRequestSchema: GenMessage<ListProjectBranchesRequest> = /*@__PURE__*/
-  messageDesc(file_project, 4);
+  messageDesc(file_project, 5);
 
 /**
  * @generated from message project.ListProjectBranchesResponse
@@ -189,7 +221,7 @@ export type ListProjectBranchesResponse = Message<"project.ListProjectBranchesRe
  * Use `create(ListProjectBranchesResponseSchema)` to create a new message.
  */
 export const ListProjectBranchesResponseSchema: GenMessage<ListProjectBranchesResponse> = /*@__PURE__*/
-  messageDesc(file_project, 5);
+  messageDesc(file_project, 6);
 
 /**
  * @generated from message project.ListProjectsRequest
@@ -214,7 +246,7 @@ export type ListProjectsRequest = Message<"project.ListProjectsRequest"> & {
  * Use `create(ListProjectsRequestSchema)` to create a new message.
  */
 export const ListProjectsRequestSchema: GenMessage<ListProjectsRequest> = /*@__PURE__*/
-  messageDesc(file_project, 6);
+  messageDesc(file_project, 7);
 
 /**
  * @generated from message project.ListProjectsResponse
@@ -231,7 +263,7 @@ export type ListProjectsResponse = Message<"project.ListProjectsResponse"> & {
  * Use `create(ListProjectsResponseSchema)` to create a new message.
  */
 export const ListProjectsResponseSchema: GenMessage<ListProjectsResponse> = /*@__PURE__*/
-  messageDesc(file_project, 7);
+  messageDesc(file_project, 8);
 
 /**
  * @generated from message project.ProjectEntry
@@ -281,6 +313,15 @@ export type ProjectEntry = Message<"project.ProjectEntry"> & {
    * @generated from field: string default_remote = 7;
    */
   defaultRemote: string;
+
+  /**
+   * Accounts this project is assigned at each provider. Empty means **unassigned**, which is a
+   * final answer rather than an invitation to guess: with no assignment the daemon resolves no
+   * credential and the operation that wanted one fails. At most one entry per provider.
+   *
+   * @generated from field: repeated project.AccountAssignment accounts = 8;
+   */
+  accounts: AccountAssignment[];
 };
 
 /**
@@ -288,7 +329,7 @@ export type ProjectEntry = Message<"project.ProjectEntry"> & {
  * Use `create(ProjectEntrySchema)` to create a new message.
  */
 export const ProjectEntrySchema: GenMessage<ProjectEntry> = /*@__PURE__*/
-  messageDesc(file_project, 8);
+  messageDesc(file_project, 9);
 
 /**
  * @generated from message project.SetProjectDefaultBranchRequest
@@ -320,7 +361,7 @@ export type SetProjectDefaultBranchRequest = Message<"project.SetProjectDefaultB
  * Use `create(SetProjectDefaultBranchRequestSchema)` to create a new message.
  */
 export const SetProjectDefaultBranchRequestSchema: GenMessage<SetProjectDefaultBranchRequest> = /*@__PURE__*/
-  messageDesc(file_project, 9);
+  messageDesc(file_project, 10);
 
 /**
  * @generated from message project.SetProjectDefaultBranchResponse
@@ -337,7 +378,61 @@ export type SetProjectDefaultBranchResponse = Message<"project.SetProjectDefault
  * Use `create(SetProjectDefaultBranchResponseSchema)` to create a new message.
  */
 export const SetProjectDefaultBranchResponseSchema: GenMessage<SetProjectDefaultBranchResponse> = /*@__PURE__*/
-  messageDesc(file_project, 10);
+  messageDesc(file_project, 11);
+
+/**
+ * @generated from message project.SetProjectAccountsRequest
+ */
+export type SetProjectAccountsRequest = Message<"project.SetProjectAccountsRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * The project's whole assignment set after this call. An empty list clears every assignment,
+   * which is how a project is returned to "unassigned" — there is no separate clear RPC.
+   *
+   * @generated from field: repeated project.AccountAssignment accounts = 3;
+   */
+  accounts: AccountAssignment[];
+
+  /**
+   * Host to apply this to. Empty or matching the local instance = local; otherwise forwarded.
+   *
+   * @generated from field: string daemon_instance_id = 4;
+   */
+  daemonInstanceId: string;
+};
+
+/**
+ * Describes the message project.SetProjectAccountsRequest.
+ * Use `create(SetProjectAccountsRequestSchema)` to create a new message.
+ */
+export const SetProjectAccountsRequestSchema: GenMessage<SetProjectAccountsRequest> = /*@__PURE__*/
+  messageDesc(file_project, 12);
+
+/**
+ * @generated from message project.SetProjectAccountsResponse
+ */
+export type SetProjectAccountsResponse = Message<"project.SetProjectAccountsResponse"> & {
+  /**
+   * @generated from field: project.ProjectEntry project = 1;
+   */
+  project?: ProjectEntry;
+};
+
+/**
+ * Describes the message project.SetProjectAccountsResponse.
+ * Use `create(SetProjectAccountsResponseSchema)` to create a new message.
+ */
+export const SetProjectAccountsResponseSchema: GenMessage<SetProjectAccountsResponse> = /*@__PURE__*/
+  messageDesc(file_project, 13);
 
 /**
  * @generated from service project.ProjectService
@@ -390,6 +485,20 @@ export const ProjectService: GenService<{
     methodKind: "unary";
     input: typeof SetProjectDefaultBranchRequestSchema;
     output: typeof SetProjectDefaultBranchResponseSchema;
+  },
+  /**
+   * Set which account a project uses at each provider (logical-project scope: forwarded to peer
+   * hosts owning the same project_id, exactly as SetProjectDefaultBranch is). The list REPLACES the
+   * stored one, so two people editing concurrently cannot interleave into a set neither chose. At
+   * most one account per provider; a second is refused rather than silently winning. See
+   * `#keyring` 5/9.
+   *
+   * @generated from rpc project.ProjectService.SetProjectAccounts
+   */
+  setProjectAccounts: {
+    methodKind: "unary";
+    input: typeof SetProjectAccountsRequestSchema;
+    output: typeof SetProjectAccountsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_project, 0);

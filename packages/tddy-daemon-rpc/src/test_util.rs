@@ -169,6 +169,16 @@ impl ProjectService for TestDaemon {
             .set_project_default_branch(request)
             .await
     }
+
+    async fn set_project_accounts(
+        &self,
+        request: Request<SetProjectAccountsRequest>,
+    ) -> Result<Response<SetProjectAccountsResponse>, Status> {
+        self.handlers
+            .project_service()
+            .set_project_accounts(request)
+            .await
+    }
 }
 
 #[async_trait]

@@ -95,6 +95,7 @@ fn register_project(sessions_base: &Path, repo_path: &Path, main_branch_ref: Opt
             main_branch_ref: main_branch_ref.map(str::to_string),
             remote_name: None,
             host_repo_paths: Default::default(),
+            accounts: Vec::new(),
         }],
     )
     .expect("register project");
