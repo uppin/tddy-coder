@@ -31,8 +31,8 @@ use tddy_service::proto::pr_stack::{
 use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ProjectService, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse,
+    ListProjectsResponse, ProjectService, SetProjectAccountsRequest, SetProjectAccountsResponse,
+    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
 };
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
@@ -283,6 +283,16 @@ impl ProjectService for TestDaemon {
         self.inner
             .project_service()
             .set_project_default_branch(request)
+            .await
+    }
+
+    async fn set_project_accounts(
+        &self,
+        request: Request<SetProjectAccountsRequest>,
+    ) -> Result<Response<SetProjectAccountsResponse>, Status> {
+        self.inner
+            .project_service()
+            .set_project_accounts(request)
             .await
     }
 }

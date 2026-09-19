@@ -46,6 +46,7 @@ function aProject(overrides: Partial<ProjectEntry>): ProjectEntry {
     daemonInstanceId: LOCAL_HOST,
     mainBranchRef: "",
     defaultRemote: "",
+    accounts: [],
     ...overrides,
   } as ProjectEntry;
 }
@@ -168,6 +169,8 @@ it("adds a project to the selected host reusing the project's existing id", () =
       onAddProjectToHost={onAddProjectToHost}
       onSetDefaultBranch={cy.stub()}
       loadProjectBranches={noBranches}
+      accounts={[]}
+      onSetProjectAccounts={cy.stub()}
     />,
   );
 
@@ -192,6 +195,8 @@ it("offers only hosts that do not already host the project as add-to-host target
       onAddProjectToHost={cy.stub()}
       onSetDefaultBranch={cy.stub()}
       loadProjectBranches={noBranches}
+      accounts={[]}
+      onSetProjectAccounts={cy.stub()}
     />,
   );
 
@@ -241,6 +246,8 @@ it("adds the project to the chosen host at the entered clone location", () => {
       onAddProjectToHost={onAddProjectToHost}
       onSetDefaultBranch={cy.stub()}
       loadProjectBranches={noBranches}
+      accounts={[]}
+      onSetProjectAccounts={cy.stub()}
     />,
   );
 
@@ -270,6 +277,8 @@ it("shows the base clone location advertised by a hosting daemon", () => {
       onAddProjectToHost={cy.stub()}
       onSetDefaultBranch={cy.stub()}
       loadProjectBranches={noBranches}
+      accounts={[]}
+      onSetProjectAccounts={cy.stub()}
     />,
   );
 
@@ -293,6 +302,8 @@ it("shows the project's stored default branch as the selected branch", () => {
       loadProjectBranches={() =>
         Promise.resolve({ branches: ["origin/master", "origin/main", "origin/dev"], defaultRemote: "origin" })
       }
+      accounts={[]}
+      onSetProjectAccounts={cy.stub()}
     />,
   );
 
@@ -312,6 +323,8 @@ it("pre-selects origin/master when a project has no stored default and master ex
       loadProjectBranches={() =>
         Promise.resolve({ branches: ["origin/main", "origin/master", "origin/dev"], defaultRemote: "origin" })
       }
+      accounts={[]}
+      onSetProjectAccounts={cy.stub()}
     />,
   );
 
@@ -329,6 +342,8 @@ it("pre-selects origin/main when a project has no stored default and no master e
       onAddProjectToHost={cy.stub()}
       onSetDefaultBranch={cy.stub()}
       loadProjectBranches={() => Promise.resolve({ branches: ["origin/dev", "origin/main"], defaultRemote: "origin" })}
+      accounts={[]}
+      onSetProjectAccounts={cy.stub()}
     />,
   );
 
@@ -348,6 +363,8 @@ it("offers every remote branch, including slash-containing names, as a selectabl
       loadProjectBranches={() =>
         Promise.resolve({ branches: ["origin/main", "origin/master", "origin/release/2025"], defaultRemote: "origin" })
       }
+      accounts={[]}
+      onSetProjectAccounts={cy.stub()}
     />,
   );
 
@@ -391,6 +408,8 @@ it("pre-selects <remote>/master for a project whose default remote is not origin
       loadProjectBranches={() =>
         Promise.resolve({ branches: ["upstream/main", "upstream/master", "upstream/dev"], defaultRemote: "upstream" })
       }
+      accounts={[]}
+      onSetProjectAccounts={cy.stub()}
     />,
   );
 

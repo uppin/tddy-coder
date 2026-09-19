@@ -550,7 +550,12 @@ const PR_STACK_METHODS: [&str; 8] = [
 /// runs the demo VM, and mints a local token over a peer-credentialled socket. A
 /// `connection.ConnectionService` of zero methods would mean inventing a ninth service for the one
 /// thing the daemon genuinely is.
-const RESIDUAL_METHODS: [&str; 17] = [
+///
+/// The list is **closed**, which is the point: a method the `#unbundle` stack forgot to move and a
+/// method somebody adds afterwards both fail here rather than surviving quietly. A genuinely new
+/// method on one of these four services joins the list deliberately, in the change that adds it —
+/// `SetProjectAccounts` (`#keyring` 5/9) is the first to do so.
+const RESIDUAL_METHODS: [&str; 18] = [
     "ListSessions",
     "StartSession",
     "StreamStartSession",
@@ -564,6 +569,7 @@ const RESIDUAL_METHODS: [&str; 17] = [
     "AddProjectToHost",
     "ListProjectBranches",
     "SetProjectDefaultBranch",
+    "SetProjectAccounts",
     "StartDemoVm",
     "StopDemoVm",
     "GetDemoVmStatus",
@@ -646,7 +652,8 @@ fn connection_service_ends_at_exactly_the_residual() {
     assert_eq!(
         declared.len(),
         RESIDUAL_METHODS.len(),
-        "the stack moves 73 of 90 methods, leaving 17"
+        "the stack moves 73 of 90 methods, leaving 17, plus every method deliberately added to \
+         the residual services since"
     );
 }
 

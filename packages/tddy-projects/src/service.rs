@@ -7,8 +7,8 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ProjectService, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse,
+    ListProjectsResponse, ProjectService, SetProjectAccountsRequest, SetProjectAccountsResponse,
+    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
 };
 
 use crate::handler::ProjectHandler;
@@ -60,6 +60,13 @@ impl<H: ProjectHandler + 'static> ProjectService for ProjectServiceImpl<H> {
         request: Request<SetProjectDefaultBranchRequest>,
     ) -> Result<Response<SetProjectDefaultBranchResponse>, Status> {
         self.host.set_project_default_branch(request).await
+    }
+
+    async fn set_project_accounts(
+        &self,
+        request: Request<SetProjectAccountsRequest>,
+    ) -> Result<Response<SetProjectAccountsResponse>, Status> {
+        self.host.set_project_accounts(request).await
     }
 }
 
