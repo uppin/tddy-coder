@@ -8,8 +8,8 @@ pub mod progress;
 pub use claude::process_ndjson_stream;
 pub use progress::ProgressEvent;
 
-use crate::backend::{ClarificationQuestion, QuestionOption};
 use serde::Deserialize;
+use tddy_workflow::questions::{ClarificationQuestion, QuestionOption};
 
 /// Result of processing an NDJSON stream from an agent CLI.
 ///
