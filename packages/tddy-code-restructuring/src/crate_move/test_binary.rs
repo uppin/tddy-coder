@@ -23,7 +23,7 @@ pub struct TestBinaryMove {
     pub source: String,
     /// The binary's name, which is its file stem. Cargo derives it the same way.
     pub name: String,
-    /// The crate the test is leaving. Needed only to resolve its `use` header.
+    /// The crate the test is leaving. Needed only to resolve the paths it writes.
     pub origin: Destination,
     /// The crate whose code it actually exercises.
     pub destination: Destination,
@@ -103,13 +103,13 @@ fn test_binary_in_a_crate(source: &str) -> Result<(String, String)> {
 
 /// Resolve the move of a test binary to the crate whose code it exercises.
 ///
-/// Three edits, and no more: the rename, the moved file's own `use` header, and the destination's
+/// Three edits, and no more: the rename, the moved file's own text, and the destination's
 /// `[dev-dependencies]`. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the
 /// crate the test left never named it and has nothing to stop naming.
 ///
-/// The header pass is where this differs from a module move in substance rather than shape. A test
-/// reaches its subject through whatever path compiled at the time it was written, which in this
-/// workspace may be **two** re-export facades deep: `tddy_daemon::host_registry` is
+/// The re-pointing pass is where this differs from a module move in substance rather than shape. A
+/// test reaches its subject through whatever path compiled at the time it was written, which in
+/// this workspace may be **two** re-export facades deep: `tddy_daemon::host_registry` is
 /// `tddy-session-lifecycle`'s re-export of `tddy-host-service`'s module. Re-pointing it one hop
 /// short produces a test that compiles and still names the wrong crate, so every path is resolved
 /// with [`defining_crate`](module_home::defining_crate).
@@ -123,7 +123,7 @@ pub fn resolve_test_binary_move(
     moving: &TestBinaryMove,
 ) -> Result<WorkspaceEdit> {
     let text = workspace.read(&moving.source)?;
-    let header = repointed_header(workspace, &text, &moving.origin)?;
+    let repointed = repointed_references(workspace, &text, &moving.origin)?;
 
     Ok(WorkspaceEdit {
         changes: vec![
@@ -136,24 +136,24 @@ pub fn resolve_test_binary_move(
             // rewritten.
             FileEdit::Change {
                 path: moving.source.clone(),
-                edits: header.edits,
+                edits: repointed.edits,
             },
-            destination_dev_dependencies(workspace, moving, &header.named)?,
+            destination_dev_dependencies(workspace, moving, &repointed.named)?,
         ],
     })
 }
 
-/// What the moved test's header says about the crates it will name in its new home.
-struct Header {
+/// What the moved test says about the crates it will name in its new home.
+struct References {
     /// The edits that re-point it, empty when every path it writes means the same thing in the
     /// destination as it did in the crate it left.
     edits: Vec<TextEdit>,
-    /// Every crate the header names once re-pointed, by extern name, carrying that crate's own
-    /// directory when the walk to it stayed inside this workspace.
+    /// Every crate the moved test's code names once re-pointed, by extern name, carrying that
+    /// crate's own directory when the walk to it stayed inside this workspace.
     named: BTreeMap<String, Option<Destination>>,
 }
 
-/// The moved test's `use` header, re-pointed at the crates that actually define what it reaches.
+/// The moved test's references, re-pointed at the crates that actually define what they reach.
 ///
 /// Only a path naming the origin **by its extern name** changes, because that is the only kind
 /// whose meaning the move alters. A test binary already is its own crate: `crate::` and `super::`
@@ -166,14 +166,77 @@ struct Header {
 /// backed by `tests/common/mod.rs`, and in Rust 2018 an unqualified first segment resolves to a
 /// crate-root item before it resolves to an extern crate. Reading it as one would send the walk
 /// looking for a crate nobody declares and then refuse a plan that is correct.
-fn repointed_header(workspace: &Workspace<'_>, text: &str, origin: &Destination) -> Result<Header> {
-    let mut header = Header {
+///
+/// **Every** occurrence of the origin's extern name is re-pointed, not just the ones in the leading
+/// `use` header — and this is the second place a test binary parts company with a module move. A
+/// moved module keeps its own `crate::`, so a path in a function body means the same thing
+/// afterwards and is deliberately left alone. A test binary takes the whole file out, and
+/// `tddy_daemon::project_storage::add_project(…)` in a body is an extern-crate path naming a crate
+/// the destination need not depend on at all: 110 such paths, and one `use` indented inside a
+/// `mod tests { … }`, survived a pass that read the header alone.
+///
+/// The crates named — which is what the destination's `[dev-dependencies]` are built from — are
+/// collected from code only. See [`readable_spans`] for what that means and why prose is re-pointed
+/// but never counted.
+fn repointed_references(
+    workspace: &Workspace<'_>,
+    text: &str,
+    origin: &Destination,
+) -> Result<References> {
+    let mut references = References {
         edits: Vec::new(),
         named: BTreeMap::new(),
     };
+
+    record_crates_declared_in_the_header(text, origin, &mut references.named);
+
+    for occurrence in origin_named_paths(text, &origin.extern_name) {
+        let (qualifier, rest) = match occurrence.path.split_once("::") {
+            Some(split) => split,
+            None => (occurrence.path, ""),
+        };
+        // A group or a glob in prose is not a declaration to split: there is no `use` to write one
+        // path per, and no single crate name that could stand for every member of the group.
+        if occurrence.prose == Prose::Comment && (rest.starts_with('{') || rest.starts_with('*')) {
+            continue;
+        }
+
+        let defining = defining_home(workspace, origin, occurrence.path, rest)?;
+        if defining.extern_name != origin.extern_name {
+            references.edits.push(manifest_edits::replacement(
+                text,
+                occurrence.at..occurrence.at + qualifier.len(),
+                &defining.extern_name,
+            ));
+        }
+        if occurrence.prose == Prose::Code {
+            record(&mut references.named, defining.extern_name, defining.home);
+        }
+    }
+
+    Ok(references)
+}
+
+/// The crates the moved test's `use` header names that are somebody else's to resolve.
+///
+/// `tokio`, `serde_json`, and the origin itself where a bare `use tddy_daemon;` names no module to
+/// resolve: each has to travel to the destination's `[dev-dependencies]`, and none of them is
+/// re-pointed. Every path that *does* name the origin and a module inside it is left to the
+/// whole-file pass, which reaches this same declaration and would otherwise edit it twice.
+///
+/// A declaration is the only place another crate can be *recognised*. The origin's extern name is
+/// known, so `tddy_daemon::…` is a crate path wherever it is written; nothing else is —
+/// `PermissionMode::Plan` and `tokio::time::sleep` are the same shape, and only a type checker can
+/// say which of them names a crate. So a crate reached from a body with no declaration of its own
+/// is beyond a text pass either way, and this is where the crates to depend on are read from.
+fn record_crates_declared_in_the_header(
+    text: &str,
+    origin: &Destination,
+    named: &mut BTreeMap<String, Option<Destination>>,
+) {
     let own_modules = modules_declared_in(text);
 
-    for (at, path) in header::use_declarations(text) {
+    for (_, path) in header::use_declarations(text) {
         let (qualifier, rest) = match path.split_once("::") {
             Some(split) => split,
             None => (path, ""),
@@ -187,22 +250,242 @@ fn repointed_header(workspace: &Workspace<'_>, text: &str, origin: &Destination)
             continue;
         }
         if qualifier != origin.extern_name {
-            record(&mut header.named, qualifier.to_string(), None);
+            record(named, qualifier.to_string(), None);
+        } else if rest.is_empty() {
+            record(named, origin.extern_name.clone(), Some(origin.clone()));
+        }
+    }
+}
+
+/// Whether a stretch of a file is code the compiler resolves, or prose written beside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Prose {
+    Code,
+    Comment,
+}
+
+/// One path in the moved test that opens with the origin's extern name.
+struct Occurrence<'a> {
+    /// Where the extern name starts, as a byte offset into the whole file.
+    at: usize,
+    /// The path as written, from the extern name to the end of its last segment.
+    path: &'a str,
+    /// Whether the compiler reads it, which is what says whether it is a dependency as well as a
+    /// rewrite.
+    prose: Prose,
+}
+
+/// Every path in the moved test that opens with the origin's extern name, in the order written.
+///
+/// A path is only one if the extern name is a **whole** first segment. `tddy_daemon_kernel::config`
+/// opens with a longer identifier and is another crate's path entirely; `crate::tddy_daemon` names
+/// something else again. Both are excluded by reading what sits either side of the match — and
+/// `tddy-daemon-kernel` is a real crate here, named by 8 of the 95 suites in the first plan.
+///
+/// Only a name followed by `::` is reported. A bare `tddy_daemon` names no module, so there is
+/// nothing to resolve and nothing to re-point — the one place it matters, `use tddy_daemon;`, is a
+/// declaration and is read as one by [`record_crates_declared_in_the_header`].
+fn origin_named_paths<'a>(text: &'a str, extern_name: &str) -> Vec<Occurrence<'a>> {
+    let mut found = Vec::new();
+
+    for (span, prose) in readable_spans(text) {
+        let mut searched = span.start;
+        while let Some(offset) = text[searched..span.end].find(extern_name) {
+            let at = searched + offset;
+            searched = at + extern_name.len();
+
+            if !is_a_whole_first_segment(text, at, extern_name, span.end) {
+                continue;
+            }
+            let path = written_path_from(text, at, span.end);
+            if !path.contains("::") {
+                continue;
+            }
+            found.push(Occurrence { at, path, prose });
+        }
+    }
+    found
+}
+
+/// Whether the match at `at` is the whole of the first segment of the path it sits in.
+fn is_a_whole_first_segment(text: &str, at: usize, extern_name: &str, limit: usize) -> bool {
+    let before = &text[..at];
+
+    !before.ends_with(header::is_path_character)
+        && !before.ends_with("::")
+        && segment_length(&text[at..limit]) == extern_name.len()
+}
+
+/// The whole `a::b::C` written from `at`, stopping at `limit`.
+///
+/// A group or a glob is reported as the one character that says which — `tddy_daemon::{` — because
+/// that is all its reader has to tell apart, and reading to the closing brace would mean matching
+/// nesting in prose that need not have any.
+fn written_path_from(text: &str, at: usize, limit: usize) -> &str {
+    let mut end = at + segment_length(&text[at..limit]);
+
+    while let Some(behind) = text[end..limit].strip_prefix("::") {
+        let length = segment_length(behind);
+        if length > 0 {
+            end += "::".len() + length;
             continue;
         }
-
-        let defining = defining_home(workspace, origin, path, rest)?;
-        if defining.extern_name != origin.extern_name {
-            header.edits.push(manifest_edits::replacement(
-                text,
-                at..at + qualifier.len(),
-                &defining.extern_name,
-            ));
+        if behind.starts_with('{') || behind.starts_with('*') {
+            end += "::".len() + 1;
         }
-        record(&mut header.named, defining.extern_name, defining.home);
+        break;
+    }
+    &text[at..end]
+}
+
+/// How much of `text` the path segment at its start occupies.
+fn segment_length(text: &str) -> usize {
+    text.find(|character: char| !header::is_path_character(character))
+        .unwrap_or(text.len())
+}
+
+/// The file split into the stretches a path may be read out of, each labelled with what it is.
+///
+/// Three kinds of text name crates and only two of them are this operation's to read:
+///
+/// - **Code** is re-pointed and counted. A path there is resolved by the compiler, so leaving it
+///   naming the origin is a file that does not build in its new home.
+/// - **Comments** are re-pointed and not counted. A sentence describing what a suite exercises is
+///   wrong the moment the suite exercises it from somewhere else, and a comment naming a crate the
+///   file no longer uses is exactly the debt this operation exists to pay off. It is prose, not a
+///   declaration, so it is no reason for the destination to gain a dependency.
+/// - **String literals are left alone entirely.** What is written in one is data the suite asserts
+///   on — an error message, a fixture, a path — produced by whatever emits it rather than resolved
+///   from this file's imports. Rewriting it would change what the test asserts.
+fn readable_spans(text: &str) -> Vec<(std::ops::Range<usize>, Prose)> {
+    let bytes = text.as_bytes();
+    let mut spans = Vec::new();
+    let mut code_from = 0usize;
+    let mut at = 0usize;
+
+    fn code_before(spans: &mut Vec<(std::ops::Range<usize>, Prose)>, from: usize, at: usize) {
+        if from < at {
+            spans.push((from..at, Prose::Code));
+        }
     }
 
-    Ok(header)
+    while at < bytes.len() {
+        if bytes[at..].starts_with(b"//") {
+            code_before(&mut spans, code_from, at);
+            let end = text[at..]
+                .find('\n')
+                .map_or(text.len(), |newline| at + newline);
+            spans.push((at..end, Prose::Comment));
+            at = end;
+        } else if bytes[at..].starts_with(b"/*") {
+            code_before(&mut spans, code_from, at);
+            let end = block_comment_end(text, at);
+            spans.push((at..end, Prose::Comment));
+            at = end;
+        } else if let Some(end) = literal_end(text, at) {
+            code_before(&mut spans, code_from, at);
+            at = end;
+        } else {
+            at += 1;
+            continue;
+        }
+        code_from = at;
+    }
+
+    code_before(&mut spans, code_from, bytes.len());
+    spans
+}
+
+/// Where the block comment opening at `at` closes, counting the nesting Rust allows in one.
+fn block_comment_end(text: &str, at: usize) -> usize {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut cursor = at;
+
+    while cursor < bytes.len() {
+        if bytes[cursor..].starts_with(b"/*") {
+            depth += 1;
+            cursor += 2;
+        } else if bytes[cursor..].starts_with(b"*/") {
+            depth -= 1;
+            cursor += 2;
+            if depth == 0 {
+                return cursor;
+            }
+        } else {
+            cursor += 1;
+        }
+    }
+    bytes.len()
+}
+
+/// Where the literal starting at `at` ends, if one starts there at all.
+///
+/// Every shape a Rust literal takes, because each of them can hold the two characters that would
+/// otherwise be read as code: an ordinary or byte string, a raw string of any hash depth, and a
+/// character literal. The last is the delicate one — `'` opens a lifetime far more often than it
+/// opens a literal, so it counts only when a closing quote follows one character or one escape.
+fn literal_end(text: &str, at: usize) -> Option<usize> {
+    let rest = &text[at..];
+
+    if let Some(hashes) = raw_string_hashes(rest) {
+        let terminator = format!("\"{}", "#".repeat(hashes));
+        let opened = at + rest.find('"')? + 1;
+        return Some(match text[opened..].find(&terminator) {
+            Some(closed) => opened + closed + terminator.len(),
+            None => text.len(),
+        });
+    }
+    if rest.starts_with('"') || rest.starts_with("b\"") {
+        return Some(string_end(text, at + rest.find('"')? + 1));
+    }
+    if rest.starts_with('\'') || rest.starts_with("b'") {
+        return character_literal_end(text, at + rest.find('\'')?);
+    }
+    None
+}
+
+/// How many hashes the raw string starting here opens with, if it is one.
+fn raw_string_hashes(rest: &str) -> Option<usize> {
+    let after_prefix = rest.strip_prefix("br").or_else(|| rest.strip_prefix('r'))?;
+    let hashes = after_prefix.len() - after_prefix.trim_start_matches('#').len();
+
+    after_prefix[hashes..].starts_with('"').then_some(hashes)
+}
+
+/// Where the ordinary string opened just before `from` closes, honouring backslash escapes.
+fn string_end(text: &str, from: usize) -> usize {
+    let bytes = text.as_bytes();
+    let mut cursor = from;
+
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'\\' => cursor += 2,
+            b'"' => return cursor + 1,
+            _ => cursor += 1,
+        }
+    }
+    bytes.len()
+}
+
+/// Where the character literal at `at` closes, or `None` when the quote opens a lifetime.
+fn character_literal_end(text: &str, at: usize) -> Option<usize> {
+    let rest = &text[at + 1..];
+    let mut characters = rest.chars();
+    let first = characters.next()?;
+
+    let body = if first == '\\' {
+        match characters.next()? {
+            'u' => rest.find('}')? + 1,
+            escaped => '\\'.len_utf8() + escaped.len_utf8(),
+        }
+    } else {
+        first.len_utf8()
+    };
+
+    rest[body..]
+        .starts_with('\'')
+        .then_some(at + 1 + body + '\''.len_utf8())
 }
 
 /// The modules the moved file declares itself, which its own paths can name without a crate.

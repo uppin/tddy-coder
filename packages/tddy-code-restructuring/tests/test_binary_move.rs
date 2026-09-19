@@ -252,3 +252,361 @@ fn added_to(edit: &WorkspaceEdit, path: &str) -> String {
         .map(|edit| edit.new_text.clone())
         .collect()
 }
+
+/// A path written inside a function body is an extern-crate path once the file leaves the crate.
+///
+/// This is where a test binary parts company with a module move. A module keeps its own `crate::`,
+/// so an in-body path means the same thing after the move and is deliberately left alone. A test
+/// binary takes the *whole* file out, and `daemon::project_storage` in a body names a crate the
+/// destination need not depend on at all — 110 such paths survived the first pass over this
+/// workspace, in files whose `use` headers were re-pointed perfectly.
+#[test]
+fn re_points_a_crate_path_the_moved_test_writes_inside_a_function_body() {
+    // Given a suite reaching the daemon from a body, where there is no `use` declaration to rewrite
+    let directory = a_workspace_whose_moved_test_reads(
+        r#"use daemon::claude_cli::PermissionMode;
+
+#[test]
+fn records_the_project_it_was_launched_in() {
+    daemon::project_storage::add_project("demo");
+    assert_eq!(PermissionMode::Plan, PermissionMode::Plan);
+}
+"#,
+    );
+
+    // When the move is resolved
+    let moved = the_moved_test_after_resolving(&directory);
+
+    // Then the body path names the crate that defines what it reaches, as the header already did
+    assert_eq!(
+        moved,
+        r#"use session_lifecycle::claude_cli::PermissionMode;
+
+#[test]
+fn records_the_project_it_was_launched_in() {
+    session_lifecycle::project_storage::add_project("demo");
+    assert_eq!(PermissionMode::Plan, PermissionMode::Plan);
+}
+"#
+    );
+}
+
+/// A `use` inside `mod tests { … }` is indented, which is the one thing the header scanner rejects.
+///
+/// `packages/tddy-daemon-kernel/tests/relay_mode_acceptance.rs` opens its inline module with
+/// `use tddy_daemon::config::RelayConfig;`. Left alone it is a declaration naming a crate the
+/// destination does not depend on — the same defect as the header case, hidden one indent deeper.
+#[test]
+fn re_points_a_use_declaration_inside_a_nested_module() {
+    // Given a `use` indented inside an inline module, which the header pass does not see
+    let directory = a_workspace_whose_moved_test_reads(
+        r#"mod tests {
+    use daemon::claude_cli::PermissionMode;
+
+    #[test]
+    fn reports_the_mode_it_was_launched_with() {
+        assert_eq!(PermissionMode::Plan, PermissionMode::Plan);
+    }
+}
+"#,
+    );
+
+    // When the move is resolved
+    let moved = the_moved_test_after_resolving(&directory);
+
+    // Then it is re-pointed exactly as a top-level one would be
+    assert_eq!(
+        moved,
+        r#"mod tests {
+    use session_lifecycle::claude_cli::PermissionMode;
+
+    #[test]
+    fn reports_the_mode_it_was_launched_with() {
+        assert_eq!(PermissionMode::Plan, PermissionMode::Plan);
+    }
+}
+"#
+    );
+}
+
+/// Prose naming a crate the file no longer uses is the debt this operation is paying off.
+///
+/// A moved suite's `//!` header describes what it exercises, and after the move the daemon is not
+/// it. The path resolves through the same walk as a declaration, so the comment and the code cannot
+/// drift apart.
+#[test]
+fn re_points_a_crate_path_named_in_a_doc_comment() {
+    // Given a module comment naming the facade the suite reached its subject through
+    let directory = a_workspace_whose_moved_test_reads(
+        r#"//! Exercising `daemon::claude_cli`, a module the daemon only passes on.
+
+#[test]
+fn reports_the_mode_it_was_launched_with() {}
+"#,
+    );
+
+    // When the move is resolved
+    let moved = the_moved_test_after_resolving(&directory);
+
+    // Then the prose names the crate that defines it
+    assert_eq!(
+        moved,
+        r#"//! Exercising `session_lifecycle::claude_cli`, a module the daemon only passes on.
+
+#[test]
+fn reports_the_mode_it_was_launched_with() {}
+"#
+    );
+}
+
+/// A group in prose is not a declaration, so it neither refuses the move nor is rewritten.
+///
+/// `use daemon::{a, b};` is refused because the two members need not be defined by the same crate
+/// and splitting the declaration is the plan author's call. A sentence saying the suite once
+/// consumed `daemon::{sandbox_session, tool_engine}` asks nothing of the operation: there is no
+/// declaration to split, and one name cannot stand for both answers.
+#[test]
+fn leaves_a_group_named_in_a_comment_alone_without_refusing_the_move() {
+    // Given a comment naming a group, above a declaration that does resolve
+    let directory = a_workspace_whose_moved_test_reads(
+        r#"//! It consumed `daemon::{claude_cli, project_storage}` before the carve.
+
+use daemon::claude_cli::PermissionMode;
+"#,
+    );
+
+    // When the move is resolved
+    let moved = the_moved_test_after_resolving(&directory);
+
+    // Then the declaration is re-pointed and the sentence is left as written
+    assert_eq!(
+        moved,
+        r#"//! It consumed `daemon::{claude_cli, project_storage}` before the carve.
+
+use session_lifecycle::claude_cli::PermissionMode;
+"#
+    );
+}
+
+/// Text inside a string literal is data the suite asserts on, not a path the compiler resolves.
+///
+/// A suite that checks an error message naming a module would start failing on its own fixture if
+/// the crate name in it were rewritten, and the rewrite would be wrong: the message is produced by
+/// whatever emits it, not by this file's imports.
+#[test]
+fn leaves_a_crate_path_inside_a_string_literal_alone() {
+    // Given a suite asserting on a message that names the daemon
+    let directory = a_workspace_whose_moved_test_reads(
+        r#"use daemon::claude_cli::PermissionMode;
+
+#[test]
+fn names_the_crate_the_mode_was_read_from() {
+    assert_eq!(PermissionMode::Plan.source(), "daemon::claude_cli");
+}
+"#,
+    );
+
+    // When the move is resolved
+    let moved = the_moved_test_after_resolving(&directory);
+
+    // Then only the declaration moves
+    assert_eq!(
+        moved,
+        r#"use session_lifecycle::claude_cli::PermissionMode;
+
+#[test]
+fn names_the_crate_the_mode_was_read_from() {
+    assert_eq!(PermissionMode::Plan.source(), "daemon::claude_cli");
+}
+"#
+    );
+}
+
+/// A crate only a body path names still has to be declared, or the moved suite does not compile.
+///
+/// The dependency question and the rewrite question have the same answer for every occurrence, so
+/// they are answered in the same pass: a path re-pointed at `host-service` is a path that needs
+/// `host-service` in the destination's `[dev-dependencies]`.
+#[test]
+fn gives_the_destination_a_dependency_for_a_crate_only_a_body_path_names() {
+    // Given a suite whose only reference to the host registry is inside a body
+    let directory = a_workspace_whose_moved_test_reads(
+        r#"#[test]
+fn registers_the_host_it_was_given() {
+    daemon::host_registry::register("localhost");
+}
+"#,
+    );
+
+    // When the move is resolved
+    let edit = the_resolved_move_in(&directory);
+
+    // Then the destination declares the crate that body path now names
+    assert_eq!(
+        added_to(&edit, &format!("{DESTINATION}/Cargo.toml")),
+        "\n[dev-dependencies]\nhost-service = { path = \"../host-service\" }\n"
+    );
+}
+
+/// The grouped-declaration refusal is deliberate, and reaching further into the file does not end
+/// it: a group is still a group wherever it is declared.
+#[test]
+fn refuses_a_grouped_declaration_reaching_several_modules_of_the_origin() {
+    // Given a suite that imports two of the daemon's modules at once
+    let directory =
+        a_workspace_whose_moved_test_reads("use daemon::{claude_cli, project_storage};\n");
+    let overlay = Overlay::new();
+    let workspace = Workspace {
+        root: directory.path(),
+        overlay: &overlay,
+    };
+    let moving = read_test_binary_move(&workspace, &a_move_of(MOVED_TEST, DESTINATION))
+        .expect("the anchor is a test binary");
+
+    // When the move is resolved
+    let refusal = resolve_test_binary_move(&workspace, &moving)
+        .expect_err("a group reaching several modules at once is refused");
+
+    // Then the refusal asks for the declaration to be split
+    assert!(
+        refusal.to_string().contains("write one `use` per path"),
+        "the refusal does not say what to do about the group: {refusal}"
+    );
+}
+
+/// A crate whose name merely opens with the origin's is another crate, and not this pass's to touch.
+///
+/// `tddy-daemon-kernel` is a real crate in this workspace and 8 of the 95 suites in the first plan
+/// name it. Read as a prefix of `tddy_daemon`, a grouped `tddy_daemon_kernel::{…}` refuses the move
+/// on a rule about a declaration it is not — and the quieter half is worse: `daemon_kernel::x` is
+/// re-pointed at whatever defines the *daemon's* module `x`, which is a crate it never named.
+#[test]
+fn leaves_a_crate_whose_name_merely_opens_with_the_origins_alone() {
+    // Given a suite naming the kernel, whose extern name has the daemon's as a prefix
+    let directory = a_workspace_whose_moved_test_reads(
+        r#"use daemon_kernel::{config, relay};
+
+#[test]
+fn reads_the_relay_it_was_configured_with() {
+    daemon_kernel::claude_cli::PermissionMode::Plan;
+}
+"#,
+    );
+
+    // When the move is resolved
+    let moved = the_moved_test_after_resolving(&directory);
+
+    // Then every path it writes is left exactly as written
+    assert_eq!(
+        moved,
+        r#"use daemon_kernel::{config, relay};
+
+#[test]
+fn reads_the_relay_it_was_configured_with() {
+    daemon_kernel::claude_cli::PermissionMode::Plan;
+}
+"#
+    );
+}
+
+/// Three crates and the suite moving between them: the daemon, which defines none of what the test
+/// reaches; the crate it passes `claude_cli` and `project_storage` on from, which is where the test
+/// is going; and a third that defines `host_registry`, which the destination has to gain a
+/// dependency on.
+///
+/// The moved test's own text is the scenario, so each test writes the file it is about.
+fn a_workspace_whose_moved_test_reads(text: &str) -> tempfile::TempDir {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+
+    for (relative, contents) in [
+        (
+            "packages/daemon/Cargo.toml",
+            "[package]\nname = \"daemon\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\nsession-lifecycle = { path = \"../session-lifecycle\" }\n\
+             host-service = { path = \"../host-service\" }\n\
+             daemon-kernel = { path = \"../daemon-kernel\" }\n",
+        ),
+        (
+            "packages/daemon/src/lib.rs",
+            "//! The crate the suite is leaving, which defines none of what it reaches.\n\n\
+             pub use host_service::host_registry;\n\
+             pub use session_lifecycle::{claude_cli, project_storage};\n",
+        ),
+        (MOVED_TEST, text),
+        (
+            "packages/session-lifecycle/Cargo.toml",
+            "[package]\nname = \"session-lifecycle\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        ),
+        (
+            "packages/session-lifecycle/src/lib.rs",
+            "//! The crate that defines what the suite exercises.\n\n\
+             pub mod claude_cli;\npub mod project_storage;\n",
+        ),
+        (
+            "packages/host-service/Cargo.toml",
+            "[package]\nname = \"host-service\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        ),
+        (
+            "packages/host-service/src/lib.rs",
+            "//! The crate that defines the host registry.\n\npub mod host_registry;\n",
+        ),
+        (
+            "packages/daemon-kernel/Cargo.toml",
+            "[package]\nname = \"daemon-kernel\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        ),
+        (
+            "packages/daemon-kernel/src/lib.rs",
+            "//! A crate whose extern name opens with the daemon's, and is not the daemon.\n\n\
+             pub mod claude_cli;\npub mod config;\npub mod relay;\n",
+        ),
+    ] {
+        let absolute = directory.path().join(relative);
+        std::fs::create_dir_all(absolute.parent().expect("a parent directory"))
+            .expect("the directory is created");
+        std::fs::write(absolute, contents).expect("the file is written");
+    }
+    directory
+}
+
+/// The resolved move of the workspace's test binary to the crate that defines what it exercises.
+fn the_resolved_move_in(directory: &tempfile::TempDir) -> WorkspaceEdit {
+    let overlay = Overlay::new();
+    let workspace = Workspace {
+        root: directory.path(),
+        overlay: &overlay,
+    };
+    let moving = read_test_binary_move(&workspace, &a_move_of(MOVED_TEST, DESTINATION))
+        .expect("the anchor is a test binary");
+
+    resolve_test_binary_move(&workspace, &moving).expect("the move resolves")
+}
+
+/// The moved test's own text with the resolved edits folded into it — what lands in the
+/// destination's `tests/`.
+fn the_moved_test_after_resolving(directory: &tempfile::TempDir) -> String {
+    let overlay = Overlay::new();
+    let workspace = Workspace {
+        root: directory.path(),
+        overlay: &overlay,
+    };
+    let edit = the_resolved_move_in(directory);
+    let before = workspace.read(MOVED_TEST).expect("the moved test reads");
+
+    tddy_code_restructuring::apply::edited(before, &edits_to(&edit, MOVED_TEST))
+        .expect("the edits fold into the text they were measured against")
+}
+
+/// Every text edit a resolved move addresses to one file.
+fn edits_to(edit: &WorkspaceEdit, path: &str) -> Vec<tddy_code_restructuring::TextEdit> {
+    edit.changes
+        .iter()
+        .filter_map(|change| match change {
+            FileEdit::Change {
+                path: changed,
+                edits,
+            } if changed == path => Some(edits.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
