@@ -30,3 +30,5 @@ futures-util = "0.3"
 pretty_assertions = { workspace = true }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "process"] }
+tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
+tddy-testing-commons = { path = "../tddy-testing-commons" }

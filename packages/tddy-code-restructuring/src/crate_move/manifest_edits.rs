@@ -50,14 +50,36 @@ pub(crate) fn after_last_module_declaration(text: &str) -> usize {
     last_declaration.unwrap_or(header_ends)
 }
 
+/// Which dependency table of a manifest an edit reads or writes.
+///
+/// A module arrives in its destination's `src/`, so what it names is a `[dependencies]` entry; a
+/// test binary arrives in its `tests/`, which cargo compiles against `[dev-dependencies]` as well.
+/// The distinction belongs to the manifest rather than to either operation, so the helpers take it
+/// instead of each growing a copy shaped for its own table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Table {
+    Dependencies,
+    DevDependencies,
+}
+
+impl Table {
+    /// The table header, as it stands on its own line in a manifest.
+    fn header(self) -> &'static str {
+        match self {
+            Table::Dependencies => "[dependencies]",
+            Table::DevDependencies => "[dev-dependencies]",
+        }
+    }
+}
+
 /// Whether a manifest already declares a dependency on the crate with this extern name.
-pub(crate) fn declares_dependency(manifest: &str, extern_name: &str) -> bool {
-    dependency_line(manifest, extern_name).is_some()
+pub(crate) fn declares_dependency(manifest: &str, table: Table, extern_name: &str) -> bool {
+    dependency_line(manifest, table, extern_name).is_some()
 }
 
 /// The line declaring one dependency, verbatim, out of a manifest that has it.
-pub(crate) fn dependency_line(manifest: &str, extern_name: &str) -> Option<String> {
-    dependencies_of(manifest)
+pub(crate) fn dependency_line(manifest: &str, table: Table, extern_name: &str) -> Option<String> {
+    dependencies_of(manifest, table)
         .into_iter()
         .find(|line| {
             line.split('=')
@@ -68,39 +90,61 @@ pub(crate) fn dependency_line(manifest: &str, extern_name: &str) -> Option<Strin
         .map(str::to_string)
 }
 
-/// The lines of a manifest's `[dependencies]` table.
-fn dependencies_of(manifest: &str) -> Vec<&str> {
+/// Whether a manifest declares a dependency on this crate in **either** of its tables.
+///
+/// The question a test binary asks, because cargo compiles one against `[dependencies]` and
+/// `[dev-dependencies]` alike: a crate declared in either is already reachable from the test, and
+/// declaring it a second time would be a second version to keep in step.
+pub(crate) fn declares_dependency_in_either_table(manifest: &str, extern_name: &str) -> bool {
+    dependency_line_from_either_table(manifest, extern_name).is_some()
+}
+
+/// The line declaring one dependency, verbatim, out of **either** of a manifest's tables.
+///
+/// `[dependencies]` is asked first and answers alone where it has the crate: a manifest declaring
+/// the same crate in both tables is declaring one dependency twice, and the ordinary table is the
+/// one a reader means by it.
+pub(crate) fn dependency_line_from_either_table(
+    manifest: &str,
+    extern_name: &str,
+) -> Option<String> {
+    dependency_line(manifest, Table::Dependencies, extern_name)
+        .or_else(|| dependency_line(manifest, Table::DevDependencies, extern_name))
+}
+
+/// The lines of one of a manifest's dependency tables.
+fn dependencies_of(manifest: &str, table: Table) -> Vec<&str> {
     manifest
         .lines()
         .map(str::trim_end)
-        .skip_while(|line| line.trim() != "[dependencies]")
+        .skip_while(|line| line.trim() != table.header())
         .skip(1)
         .take_while(|line| !line.trim_start().starts_with('['))
         .filter(|line| line.contains('='))
         .collect()
 }
 
-/// The manifest with `lines` added to its `[dependencies]` table.
-pub(crate) fn with_dependencies(manifest: &str, lines: &[String]) -> Vec<TextEdit> {
+/// The manifest with `lines` added to one of its dependency tables.
+pub(crate) fn with_dependencies(manifest: &str, table: Table, lines: &[String]) -> Vec<TextEdit> {
     if lines.is_empty() {
         return Vec::new();
     }
 
     let added = lines.join("\n") + "\n";
-    match end_of_dependencies(manifest) {
+    match end_of_dependencies(manifest, table) {
         Some(at) => vec![replacement(manifest, at..at, &added)],
-        // A manifest with no `[dependencies]` gains the table the moved code needs, at the end
-        // where a table cannot land inside another one.
+        // A manifest without the table gains it, at the end where a table cannot land inside
+        // another one.
         None => vec![replacement(
             manifest,
             manifest.len()..manifest.len(),
-            &format!("\n[dependencies]\n{added}"),
+            &format!("\n{}\n{added}", table.header()),
         )],
     }
 }
 
-/// Where a manifest's `[dependencies]` table ends, or `None` when it declares none.
-fn end_of_dependencies(manifest: &str) -> Option<usize> {
+/// Where one of a manifest's dependency tables ends, or `None` when it declares none.
+fn end_of_dependencies(manifest: &str, table: Table) -> Option<usize> {
     let mut offset = 0usize;
     let mut found = None;
     let mut inside = false;
@@ -109,7 +153,7 @@ fn end_of_dependencies(manifest: &str) -> Option<usize> {
         offset += line.len();
 
         let trimmed = line.trim();
-        if trimmed == "[dependencies]" {
+        if trimmed == table.header() {
             inside = true;
             found = Some(offset);
             continue;
@@ -140,22 +184,31 @@ pub(crate) fn members_list(manifest: &str) -> Option<std::ops::Range<usize>> {
 /// verbatim is how a manifest ends up pointing at a crate that is not the one it was copied from —
 /// or at nothing, which at least fails loudly.
 pub(crate) fn re_anchored(declared: &str, from: &str, to: &str) -> String {
-    let Some((head, rest)) = declared.split_once("path = \"") else {
+    let Some(path) = declared_path(declared) else {
         return declared.to_string();
     };
-    let Some((path, tail)) = rest.split_once('"') else {
-        return declared.to_string();
-    };
-    if path.starts_with('/') {
-        return declared.to_string();
-    }
 
     let target = normalized(&format!("{from}/{path}"));
-    format!("{head}path = \"{}\"{tail}", relative_from(to, &target))
+    declared.replacen(
+        &format!("path = \"{path}\""),
+        &format!("path = \"{}\"", relative_from(to, &target)),
+        1,
+    )
+}
+
+/// The directory a dependency line reaches by `path`, relative to the crate declaring it.
+///
+/// `None` when the line declares no path — a registry dependency is the same crate wherever it is
+/// read from — and when it declares an absolute one, which is already the same directory for every
+/// reader and so is nothing to re-anchor or to follow.
+pub(crate) fn declared_path(declared: &str) -> Option<&str> {
+    let (_, rest) = declared.split_once("path = \"")?;
+    let (path, _) = rest.split_once('"')?;
+    (!path.starts_with('/')).then_some(path)
 }
 
 /// A slash-separated path with its `.` and `..` components resolved.
-fn normalized(path: &str) -> String {
+pub(crate) fn normalized(path: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
     for part in path.split('/') {
         match part {

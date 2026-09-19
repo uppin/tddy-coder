@@ -80,7 +80,7 @@ listen:
 #[test]
 fn idle_timeout_tracker_not_expired_when_recently_active() {
     use std::time::Duration;
-    use tddy_daemon::relay_idle::IdleTimeoutTracker;
+    use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
 
     // Given
     let tracker = IdleTimeoutTracker::new(Duration::from_secs(300));
@@ -99,7 +99,7 @@ fn idle_timeout_tracker_not_expired_when_recently_active() {
 #[test]
 fn idle_timeout_tracker_expired_after_timeout_duration() {
     use std::time::Duration;
-    use tddy_daemon::relay_idle::IdleTimeoutTracker;
+    use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
 
     // Given
     // Use a 1ms timeout — any real code path will exceed it.

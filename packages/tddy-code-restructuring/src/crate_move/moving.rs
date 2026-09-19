@@ -167,7 +167,11 @@ impl Move {
 
         let mut lines = Vec::new();
         for extern_name in named {
-            if manifest_edits::declares_dependency(&text, extern_name) {
+            if manifest_edits::declares_dependency(
+                &text,
+                manifest_edits::Table::Dependencies,
+                extern_name,
+            ) {
                 continue;
             }
             if *extern_name == self.origin.extern_name {
@@ -178,14 +182,18 @@ impl Move {
                 ));
                 continue;
             }
-            let declared =
-                manifest_edits::dependency_line(&origin, extern_name).ok_or_else(|| {
-                    malformed(format!(
+            let declared = manifest_edits::dependency_line(
+                &origin,
+                manifest_edits::Table::Dependencies,
+                extern_name,
+            )
+            .ok_or_else(|| {
+                malformed(format!(
                     "the moved module names `{extern_name}`, which {}/Cargo.toml does not declare \
                      — there is nothing to carry across",
                     self.origin.dir
                 ))
-                })?;
+            })?;
             lines.push(manifest_edits::re_anchored(
                 &declared,
                 &self.origin.dir,
@@ -195,7 +203,11 @@ impl Move {
 
         Ok(FileEdit::Change {
             path,
-            edits: manifest_edits::with_dependencies(&text, &lines),
+            edits: manifest_edits::with_dependencies(
+                &text,
+                manifest_edits::Table::Dependencies,
+                &lines,
+            ),
         })
     }
 
@@ -213,7 +225,11 @@ impl Move {
         for directory in crates {
             let path = format!("{directory}/Cargo.toml");
             let text = workspace.read(&path)?;
-            if manifest_edits::declares_dependency(&text, &self.destination.extern_name) {
+            if manifest_edits::declares_dependency(
+                &text,
+                manifest_edits::Table::Dependencies,
+                &self.destination.extern_name,
+            ) {
                 continue;
             }
 
@@ -224,7 +240,11 @@ impl Move {
             );
             changes.push(FileEdit::Change {
                 path,
-                edits: manifest_edits::with_dependencies(&text, &[line]),
+                edits: manifest_edits::with_dependencies(
+                    &text,
+                    manifest_edits::Table::Dependencies,
+                    &[line],
+                ),
             });
         }
         Ok(changes)

@@ -1,3 +1,4 @@
+use crate::crate_move::manifest_edits;
 use crate::RestructureError;
 
 use super::Result;
@@ -44,6 +45,37 @@ impl Destination {
             package: package.to_string(),
             extern_name: package.replace('-', "_"),
         })
+    }
+
+    /// The crate this one reaches under `extern_name` by a **path** dependency, if it declares one.
+    ///
+    /// This is what lets a chain of re-exports be followed: resolving one hop yields a crate name,
+    /// and reading the next hop needs that crate's own directory. Both dependency tables are read,
+    /// because a facade a test reaches through may be declared in either.
+    ///
+    /// `None` when the dependency is not declared, or is declared without a path — a registry
+    /// crate's sources are not in this workspace to read a further re-export out of, and its
+    /// dependency line has to be carried across verbatim rather than authored.
+    pub(crate) fn path_dependency(
+        &self,
+        root: &Path,
+        extern_name: &str,
+    ) -> Result<Option<Destination>> {
+        let manifest = root.join(&self.dir).join("Cargo.toml");
+        let text = std::fs::read_to_string(&manifest).map_err(|error| {
+            RestructureError::MalformedPlan(format!(
+                "{} could not be read ({error})",
+                manifest.display()
+            ))
+        })?;
+
+        let declared = manifest_edits::dependency_line_from_either_table(&text, extern_name);
+        let Some(relative) = declared.as_deref().and_then(manifest_edits::declared_path) else {
+            return Ok(None);
+        };
+
+        let dir = manifest_edits::normalized(&format!("{}/{relative}", self.dir));
+        Destination::read(root, &dir).map(Some)
     }
 }
 

@@ -98,6 +98,23 @@ pub enum RefactorKind {
     /// entry and one edit, so `--resume`, `--from` and `--stop-after` keep meaning what they mean:
     /// a cluster is never half applied.
     MoveClusterToCrate,
+    /// Moves a **test binary** — `<crate>/tests/<name>.rs` — to the crate whose code it exercises.
+    ///
+    /// A sibling of [`Self::MoveModuleToCrate`] rather than a generalisation of it, because a test
+    /// binary is a different shape in the two ways that matter, and both make it *simpler*:
+    ///
+    /// - **Cargo auto-discovers `tests/*.rs`**, so there is no `mod` declaration anywhere to find,
+    ///   remove or rewrite. A module move's whole `left_behind` pass has nothing to do here.
+    /// - **Nothing can reference a test binary**, so there is no caller to keep resolving and
+    ///   therefore no facade. `reexport` is refused rather than ignored.
+    ///
+    /// What it does share is the header pass — and it needs the strongest form of it, because a
+    /// test's `use` path may reach its subject through **two** re-export facades before it lands on
+    /// the crate that defines the item.
+    ///
+    /// Takes `to`, the destination crate's directory. The destination's `[dev-dependencies]` gain
+    /// what the moved test names, not its `[dependencies]`.
+    MoveTestBinaryToCrate,
 }
 
 impl RefactorKind {
@@ -106,6 +123,19 @@ impl RefactorKind {
     /// The two cross-crate moves differ only in how many modules travel, so every decision taken
     /// about one — the destination it must name, the facade it may leave, the preconditions read
     /// before a server is spawned — is taken about both.
+    ///
+    /// [`RefactorKind::MoveTestBinaryToCrate`] crosses a crate boundary too and is still **not**
+    /// one of these, because this predicate does not mean "crosses a boundary" — it means "moves a
+    /// *module*", and every caller reads it that way. Each of the three refusals it gates is
+    /// already made for a test binary, earlier and in words about a test binary; and the fourth
+    /// caller, [`unrunnable_moves`](crate::unrunnable_moves), reads each anchor as
+    /// `<crate>/src/<module>.rs` to find the `mod` line it is about. A test binary has no `mod`
+    /// line anywhere and does not live under `src/`, so admitting it here would report every
+    /// well-formed test-binary move as an operation that cannot run.
+    ///
+    /// TODO(carve-test-homes): give `check` a static preflight for a test-binary move of its own —
+    /// the anchor's shape and both crates' manifests are all readable before a server is spawned,
+    /// so `apply`'s refusals are reachable statically the way a module move's are.
     #[must_use]
     pub fn moves_across_crates(self) -> bool {
         matches!(
@@ -298,6 +328,28 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
     // `move_module_to_crate` writes the same kind of facade one level up — `pub use <crate>::…;` in
     // the crate the module left — so it honours the field for the same reason and with the same
     // failure mode if the field were ignored.
+    //
+    // A test binary can have no facade at all, and the reason is worth its own refusal rather than
+    // the generic one above: a facade exists to keep a *caller* resolving, and **nothing can
+    // reference a test binary**. Cargo builds each `tests/*.rs` as its own crate root; no `use` path
+    // anywhere in the workspace can name one. So `reexport` here is not merely unhonourable, it is
+    // meaningless, and saying so is what stops a plan author reaching for it by analogy.
+    if op.op == RefactorKind::MoveTestBinaryToCrate && op.reexport.is_some() {
+        return Err(malformed(
+            "`move_test_binary_to_crate` cannot write a facade: a facade keeps a caller resolving, \
+             and nothing can reference a test binary — cargo builds each `tests/*.rs` as its own \
+             crate root, so no `use` path anywhere can name it",
+        ));
+    }
+
+    // The destination is what the whole operation is for.
+    if op.op == RefactorKind::MoveTestBinaryToCrate && op.to.is_none() {
+        return Err(malformed(
+            "`move_test_binary_to_crate` needs `to`: the destination crate's directory, relative \
+             to the repository root",
+        ));
+    }
+
     if op.reexport.is_some() && op.op != RefactorKind::ExtractModule && !op.op.moves_across_crates()
     {
         return Err(malformed(format!(

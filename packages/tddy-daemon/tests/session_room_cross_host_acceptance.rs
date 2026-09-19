@@ -23,13 +23,11 @@ use prost::Message;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::DaemonSessionHost;
-use tddy_daemon::livekit_peer_discovery::{
+use tddy_daemon::runtime::spawn_common_room_discovery_task;
+use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
-use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_daemon::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
-use tddy_daemon::test_util::{self, wait_until_peer_discovered};
+use tddy_daemon_livekit::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
 use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
@@ -37,6 +35,8 @@ use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered};
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_env};
 use tddy_testing_commons::wait::eventually_awaiting;
 
@@ -253,7 +253,7 @@ async fn a_daemon(
     let registry = Arc::new(CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
     spawn_common_room_discovery_task(config_arc.clone(), registry.clone(), room_slot.clone());
-    let eligible: Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource> = Arc::new(
+    let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
     );
 
@@ -268,7 +268,7 @@ async fn a_daemon(
             common_room_livekit_room: room_slot,
         }),
         None,
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     );
 
     Daemon {

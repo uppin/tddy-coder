@@ -1,7 +1,7 @@
 use super::crate_holding;
 
 use crate::{
-    crate_move::{destination, manifest_edits},
+    crate_move::{destination, header, manifest_edits},
     registry::Workspace,
 };
 
@@ -178,7 +178,9 @@ pub fn defining_crate(
 
 /// Whether `module` is defined in `origin` itself, or re-exported from another crate.
 ///
-/// `None` when the origin's own sources define it; `Some(extern_name)` when a `pub use` brings it in.
+/// `None` when the origin's own sources define it; `Some(extern_name)` when a `pub use` brings it
+/// in — by a re-export in the crate root, or by a module file that is nothing but a forwarding
+/// address.
 fn defining_module_in_crate(
     workspace: &Workspace<'_>,
     origin: &destination::Destination,
@@ -192,62 +194,271 @@ fn defining_module_in_crate(
     }
 
     if manifest_edits::module_declaration(&text, module).is_some() {
-        return Ok(None);
+        return Ok(forwarded_by_the_module_file(workspace, origin, module));
     }
 
     Ok(None)
 }
 
+/// The crate a declared module's own file does nothing but forward to.
+///
+/// A `mod` line in the crate root is not proof that the crate defines anything:
+/// `packages/tddy-daemon/src/config.rs` is a doc comment and `pub use tddy_daemon_kernel::config::*;`,
+/// declared by the root as `pub mod config;`. Reading the root alone answers "the daemon defines
+/// it", and a test re-pointed on that answer goes on naming the crate the carving was supposed to
+/// take it out of.
+///
+/// Only the whole-file shape counts: one `pub use <crate>::<module>::*;` and nothing else. A file
+/// that forwards *and* declares something of its own is a module of this crate with a re-export in
+/// it, and calling the other crate its home would send a dependency to a crate holding half of what
+/// the caller names. A partial re-export — a group, or a single item — is the same story.
+fn forwarded_by_the_module_file(
+    workspace: &Workspace<'_>,
+    origin: &destination::Destination,
+    module: &str,
+) -> Option<String> {
+    let text = module_file(workspace, origin, module)?;
+    let items = items_of(&text);
+    let [only] = items.as_slice() else {
+        return None;
+    };
+
+    let forwarded = only
+        .strip_prefix("pub use ")?
+        .trim()
+        .strip_suffix(';')?
+        .trim()
+        .strip_suffix("::*")?;
+    let (crate_named, forwarded_module) = forwarded.split_once("::")?;
+
+    (forwarded_module == module).then(|| crate_named.to_string())
+}
+
+/// A declared module's own file, as either shape Rust 2018 allows it to take.
+fn module_file(
+    workspace: &Workspace<'_>,
+    origin: &destination::Destination,
+    module: &str,
+) -> Option<String> {
+    workspace
+        .read(&format!("{}/src/{module}.rs", origin.dir))
+        .or_else(|_| workspace.read(&format!("{}/src/{module}/mod.rs", origin.dir)))
+        .ok()
+}
+
+/// The lines of a file that declare something, with its documentation and attributes left out.
+///
+/// What is being asked is whether a file holds *only* a re-export, so everything that is not an
+/// item has to stop counting — otherwise the shim's own `//!` line makes it look like a module with
+/// contents.
+fn items_of(text: &str) -> Vec<&str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("//") && !line.starts_with('#'))
+        .collect()
+}
+
 /// The extern crate a `pub use` in `text` re-exports `module` from, if any.
 fn re_export_target(text: &str, module: &str) -> Option<String> {
+    use_paths(text)
+        .into_iter()
+        .find(|path| re_exports(path, module))
+        .and_then(|path| extern_crate_of_use_path(&path))
+}
+
+/// The path of every `use` and `pub use` in a file, each read whole.
+///
+/// A declaration is not a line. Both facades in this workspace are braced groups spread over
+/// several lines, and the first of those lines — `pub use tddy_session_lifecycle::{` — names no
+/// member at all: read a line at a time, a group of forty re-exports looks like a re-export of
+/// nothing, and every module in it is reported as defined by the crate that merely passes it on.
+/// So a declaration is accumulated to the `;` that ends it before anything is matched against it.
+fn use_paths(text: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut opened: Option<String> = None;
+
     for line in text.lines() {
-        let trimmed = line.trim();
-        let declaration = trimmed
-            .strip_prefix("pub use ")
-            .or_else(|| trimmed.strip_prefix("use "));
-        let Some(rest) = declaration else {
-            continue;
+        // A trailing `//` comment is not part of the path, and left in it would swallow the `;`
+        // this scan ends a declaration on.
+        let trimmed = line.split("//").next().unwrap_or_default().trim();
+        let continued = opened.take();
+        let fragment = match continued {
+            Some(_) => trimmed,
+            None => match trimmed
+                .strip_prefix("pub use ")
+                .or_else(|| trimmed.strip_prefix("use "))
+            {
+                Some(rest) => rest,
+                None => continue,
+            },
         };
-        let rest = rest.trim_end_matches(';').trim();
-        let (path, alias) = match rest.split_once(" as ") {
-            Some((path, alias)) => (path.trim(), alias.trim()),
-            None => (rest, ""),
+
+        let declaration = match continued {
+            Some(started) => format!("{started} {fragment}"),
+            None => fragment.to_string(),
         };
-
-        if !alias.is_empty() {
-            if alias == module {
-                return extern_crate_of_use_path(path);
-            }
-            continue;
-        }
-
-        if let Some(name) = path.rsplit("::").next() {
-            if name == module {
-                return extern_crate_of_use_path(path);
-            }
-        }
-
-        if let Some(inner) = path
-            .strip_prefix('{')
-            .and_then(|group| group.strip_suffix('}'))
-        {
-            for item in inner.split(',') {
-                let item = item.trim();
-                if item == module {
-                    return extern_crate_of_use_path(path);
-                }
-                if let Some((_, alias)) = item.split_once(" as ") {
-                    if alias.trim() == module {
-                        return extern_crate_of_use_path(path);
-                    }
-                }
-            }
+        match declaration.trim_end().strip_suffix(';') {
+            Some(path) => paths.push(path.trim().to_string()),
+            None => opened = Some(declaration),
         }
     }
-    None
+    paths
+}
+
+/// Whether a `use` path brings `module` into the crate writing it.
+fn re_exports(path: &str, module: &str) -> bool {
+    match group_members(path) {
+        Some(members) => members.split(',').any(|member| arrives_as(member, module)),
+        None => arrives_as(path, module),
+    }
+}
+
+/// Whether one item of a `use` — a whole path, or one member of a group — arrives as `module`.
+fn arrives_as(item: &str, module: &str) -> bool {
+    let item = item.trim();
+    let name = match item.split_once(" as ") {
+        Some((_, alias)) => alias.trim(),
+        None => item.rsplit("::").next().unwrap_or(item),
+    };
+    name == module
+}
+
+/// What a `use` path's braced group holds, when it has one.
+fn group_members(path: &str) -> Option<&str> {
+    let opened = path.find('{')?;
+    let closed = path.rfind('}')?;
+    (opened < closed).then(|| &path[opened + 1..closed])
 }
 
 /// The first segment of a `use` path — the crate it names.
+///
+/// `None` for a path rooted in the crate writing it: `crate`, `self` and `super` name no crate this
+/// one could depend on, and reporting one of them as a defining crate would author a dependency
+/// line on a keyword.
 fn extern_crate_of_use_path(path: &str) -> Option<String> {
-    path.split("::").next().map(str::to_string)
+    let head = path.split("::").next()?.trim();
+    let named = !matches!(head, "crate" | "self" | "super")
+        && !head.is_empty()
+        && head.chars().all(header::is_path_character);
+
+    named.then(|| head.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::overlay::Overlay;
+
+    /// One crate on disk: the root a test hands it, and whatever module files it writes.
+    struct ACrate {
+        directory: tempfile::TempDir,
+    }
+
+    /// A crate named `daemon` whose root says what the test needs it to say.
+    fn a_crate_whose_root_declares(lib: &str) -> ACrate {
+        let crate_under_test = ACrate {
+            directory: tempfile::tempdir().expect("a temporary directory"),
+        };
+        crate_under_test
+            .writing(
+                "packages/daemon/Cargo.toml",
+                "[package]\nname = \"daemon\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            )
+            .writing("packages/daemon/src/lib.rs", lib)
+    }
+
+    impl ACrate {
+        /// The module file the crate root declares, with the text this test gives it.
+        fn holding(self, module: &str, text: &str) -> Self {
+            self.writing(&format!("packages/daemon/src/{module}.rs"), text)
+        }
+
+        /// Which crate defines what `daemon::<module>` reaches — `None` when this crate does.
+        fn crate_defining(&self, module: &str) -> Option<String> {
+            let overlay = Overlay::new();
+            let workspace = Workspace {
+                root: self.directory.path(),
+                overlay: &overlay,
+            };
+            let origin = destination::Destination::read(self.directory.path(), "packages/daemon")
+                .expect("the crate has a manifest");
+
+            defining_crate(&workspace, &origin, &format!("daemon::{module}"))
+                .expect("the crate root reads")
+        }
+
+        fn writing(self, relative: &str, text: &str) -> Self {
+            let absolute = self.directory.path().join(relative);
+            std::fs::create_dir_all(absolute.parent().expect("a parent directory"))
+                .expect("the directory is created");
+            std::fs::write(absolute, text).expect("the file is written");
+            self
+        }
+    }
+
+    /// A re-export is a declaration, not a line.
+    ///
+    /// Every facade in this workspace is a braced group spread over several lines, and the line
+    /// naming the crate — `pub use tddy_session_lifecycle::{` — names no member at all. Matched a
+    /// line at a time, a group of forty re-exports looks like a re-export of nothing, and every
+    /// module in it is reported as defined by the crate that merely passes it on.
+    #[test]
+    fn resolves_a_module_named_inside_a_multi_line_re_export_group() {
+        // Given a crate root that re-exports three modules across three lines
+        let daemon = a_crate_whose_root_declares(
+            "//! The endpoint crate.\n\npub use session_lifecycle::{\n    action_service,\n    \
+             base_sync_cache, connection_service,\n};\n",
+        );
+
+        // When the crate defining one of the group's members is asked for
+        let defining = daemon.crate_defining("base_sync_cache");
+
+        // Then it is the crate on the other side of the group
+        assert_eq!(defining, Some("session_lifecycle".to_string()));
+    }
+
+    /// A `mod` line in the crate root is not proof that the crate defines anything.
+    ///
+    /// `packages/tddy-daemon/src/config.rs` is a doc comment and one glob re-export; the root
+    /// declares it as `pub mod config;`. Reading the root alone answers "the daemon defines it",
+    /// and a caller re-pointed on that answer goes on naming the crate it was moving away from.
+    #[test]
+    fn resolves_a_declared_module_whose_file_only_forwards_to_another_crate() {
+        // Given a declared module that is nothing but a forwarding address
+        let daemon = a_crate_whose_root_declares("//! The endpoint crate.\n\npub mod config;\n")
+            .holding(
+                "config",
+                "//! Configuration, owned by the kernel.\npub use daemon_kernel::config::*;\n",
+            );
+
+        // When the crate defining it is asked for
+        let defining = daemon.crate_defining("config");
+
+        // Then it is the crate the file forwards to
+        assert_eq!(defining, Some("daemon_kernel".to_string()));
+    }
+
+    /// The other half of the same question: a module with code in it stays where it is.
+    ///
+    /// Over-resolving is the worse failure. A module this crate really defines, sent to a crate
+    /// that merely appears in its header, would move a caller's dependency to a crate that does not
+    /// hold what it names.
+    #[test]
+    fn leaves_a_module_the_crate_itself_defines_unresolved() {
+        // Given a declared module with contents of its own
+        let daemon = a_crate_whose_root_declares(
+            "//! The endpoint crate.\n\npub mod connection_service;\n",
+        )
+        .holding(
+            "connection_service",
+            "use daemon_kernel::config::DaemonConfig;\n\npub struct ConnectionService {\n  \
+                     config: DaemonConfig,\n}\n",
+        );
+
+        // When the crate defining it is asked for
+        let defining = daemon.crate_defining("connection_service");
+
+        // Then the crate that declares it is the one that defines it
+        assert_eq!(defining, None);
+    }
 }

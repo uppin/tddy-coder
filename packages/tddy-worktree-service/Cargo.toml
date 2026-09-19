@@ -35,3 +35,12 @@ libc = "0.2"
 uuid = { version = "1", features = ["v4", "v7"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
+tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+serial_test = "3"
+tddy-daemon-auth = { path = "../tddy-daemon-auth" }
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
+axum = "0.8"
+tddy-connectrpc = { path = "../tddy-connectrpc" }
+tddy-github = { path = "../tddy-github" }

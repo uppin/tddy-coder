@@ -599,7 +599,8 @@ async fn lists_a_created_assistant_among_the_daemons_selectable_agents() {
         .list_assistants()
         .await
         .expect("list assistants");
-    let rows = tddy_daemon::agent_list_mapping::agent_allowlist_rows(&config, &assistants);
+    let rows =
+        tddy_session_lifecycle::agent_list_mapping::agent_allowlist_rows(&config, &assistants);
     let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
     assert_eq!(
         ids,

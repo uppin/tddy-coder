@@ -33,3 +33,4 @@ pretty_assertions = { workspace = true }
 # `tddy-vm`'s library, and only `tddy-vm`'s *tests* depend back on the testkit, so nothing
 # shipped links against it.
 tddy-vm-testkit = { path = "../tddy-vm-testkit" }
+prost = "0.13"

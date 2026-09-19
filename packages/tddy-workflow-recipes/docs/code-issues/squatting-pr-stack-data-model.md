@@ -7,7 +7,7 @@
 **Restructure:** required — extract to a new `tddy-pr-stack`
 **Status:** Open — claimed by #496, in flight
 **Claimed by:** #496 — `#carve` 10/10 `pr-stack-crate` · draft · `feature/carve/pr-stack-crate`
-**Supersedes:** `docs/dev/todo/2026-09-15-stack-progress-contract-acceptance-tests-only-tddy-core.md` — same finding, filed first as a TODO; a standing measurement belongs in this record, and #498 already claims the TODO
+**Supersedes:** a backlog entry filed first as a TODO, `2026-09-15-stack-progress-contract-acceptance-tests-only-tddy-core` — same finding; a standing measurement belongs in this record. #498 resolved and deleted that entry when it moved the suite to `packages/tddy-core/tests/` (see `docs/dev/changesets/2026-09-19-carve-test-homes.md`); the squatting measurement below is unaffected
 **Lands after:** #488, #489, #490, #498, #491, #492, #493, #494, #495 — **the stack tip**
 
 ## Measurement history

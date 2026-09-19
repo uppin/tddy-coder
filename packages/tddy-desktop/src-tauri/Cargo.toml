@@ -21,6 +21,9 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 # The daemon this application is a host for: one process, one service roster.
 tddy-daemon = { path = "../../tddy-daemon" }
+# `CliSessionManager` is defined here, and was reached as `tddy_daemon::cli_session_manager`
+# until `#carve` 4/10 removed that facade.
+tddy-session-lifecycle = { path = "../../tddy-session-lifecycle" }
 # The pre-tokio spawn-worker fork, which happens here before Tauri builds its runtime for exactly
 # the reason it happens before the daemon builds its own. Extracted from `tddy-daemon`.
 tddy-spawn = { path = "../../tddy-spawn" }

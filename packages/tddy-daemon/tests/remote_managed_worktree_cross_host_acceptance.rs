@@ -31,12 +31,10 @@ use async_trait::async_trait;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::DaemonSessionHost;
-use tddy_daemon::livekit_peer_discovery::{
+use tddy_daemon::runtime::spawn_common_room_discovery_task;
+use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
-use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_daemon::test_util::{self, wait_until_peer_discovered, TestDaemon};
 use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
@@ -52,6 +50,8 @@ use tddy_service::proto::session::{
     DeleteSessionRequest, ListSessionsRequest, SessionService as SessionServiceTrait,
     StartSessionRequest,
 };
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered, TestDaemon};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -223,7 +223,7 @@ async fn a_daemon(
     let registry = Arc::new(CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
     spawn_common_room_discovery_task(config_arc.clone(), registry.clone(), room_slot.clone());
-    let eligible: Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource> = Arc::new(
+    let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
     );
 
@@ -238,7 +238,7 @@ async fn a_daemon(
             common_room_livekit_room: room_slot,
         }),
         None,
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     );
     let service = match codebase_provisioner {
         Some(provisioner) => service.with_workspace_sandbox_provisioner(provisioner),

@@ -59,21 +59,13 @@ pub(crate) fn repointed_header(
         origin_paths: Vec::new(),
     };
 
-    let mut offset = 0usize;
-    for line in text.split_inclusive('\n') {
-        let start = offset;
-        offset += line.len();
-
-        let Some((at, path)) = use_path(line) else {
-            continue;
-        };
+    for (at, path) in use_declarations(text) {
         let (qualifier, rest) = match path.split_once("::") {
             Some(split) => split,
             None => (path, ""),
         };
 
         if matches!(qualifier, "crate" | "super") {
-            let at = start + at;
             if let Some(member) = travels_with(rest, co_moving) {
                 let landing = member.rsplit("::").next().unwrap_or(member);
                 let written = format!("{qualifier}::{member}");
@@ -127,6 +119,27 @@ fn travels_with<'a>(rest: &str, co_moving: &'a BTreeSet<String>) -> Option<&'a S
     co_moving
         .iter()
         .find(|member| rest == *member || rest.starts_with(&format!("{member}::")))
+}
+
+/// Every top-level `use` declaration in a file, as the byte offset of its path and the path itself.
+///
+/// `pub(crate)` because a test binary's header is read the same way and re-pointed by different
+/// rules: what a moved test names and what a moved module names are different questions, but
+/// *which* text answers either is one question, and two scanners would disagree about an indented
+/// `use` before long.
+pub(crate) fn use_declarations(text: &str) -> Vec<(usize, &str)> {
+    let mut declarations = Vec::new();
+    let mut offset = 0usize;
+
+    for line in text.split_inclusive('\n') {
+        let start = offset;
+        offset += line.len();
+
+        if let Some((at, path)) = use_path(line) {
+            declarations.push((start + at, path));
+        }
+    }
+    declarations
 }
 
 /// The path a top-level `use` declaration names, and where on the line it starts.
