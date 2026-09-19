@@ -61,6 +61,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 // `## Decisions & Trade-offs`.
 pub mod config;
 pub mod daemon_identity;
+pub mod first_login_enrolment;
 pub mod peer_forwarding;
 pub mod privilege_drop;
 pub mod spawn_as_user;

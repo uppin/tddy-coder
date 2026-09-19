@@ -9,8 +9,9 @@ use crate::provider::{GitHubOAuthProvider, GitHubUser};
 use tddy_service::proto::auth::{
     AuthService as AuthServiceTrait, ExchangeCodeRequest, ExchangeCodeResponse,
     GetAuthStatusRequest, GetAuthStatusResponse, GetAuthUrlRequest, GetAuthUrlResponse,
-    GitHubUser as ProtoGitHubUser, LogoutRequest, LogoutResponse, RefreshSessionRequest,
-    RefreshSessionResponse,
+    GitHubUser as ProtoGitHubUser, LogoutRequest, LogoutResponse, PollDeviceLoginRequest,
+    PollDeviceLoginResponse, RefreshSessionRequest, RefreshSessionResponse,
+    StartDeviceLoginRequest, StartDeviceLoginResponse,
 };
 
 fn to_proto_user(user: &GitHubUser) -> ProtoGitHubUser {
@@ -219,6 +220,26 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
         // token). There is nothing to invalidate server-side.
         let _ = request.into_inner();
         Ok(Response::new(LogoutResponse {}))
+    }
+
+    async fn start_device_login(
+        &self,
+        _request: Request<StartDeviceLoginRequest>,
+    ) -> Result<Response<StartDeviceLoginResponse>, Status> {
+        // TODO(desktop-login): delegate to `GitHubOAuthProvider::start_device_login` and carry the
+        // five fields straight through. Nothing is remembered here — the device code is the
+        // client's to hold and present again.
+        todo!("AuthServiceImpl::start_device_login")
+    }
+
+    async fn poll_device_login(
+        &self,
+        _request: Request<PollDeviceLoginRequest>,
+    ) -> Result<Response<PollDeviceLoginResponse>, Status> {
+        // TODO(desktop-login): map `DeviceLoginPoll` onto `DeviceLoginState`, and on `Complete`
+        // mint the same access + refresh pair `exchange_code` mints and retain the GitHub token
+        // through the same store.
+        todo!("AuthServiceImpl::poll_device_login")
     }
 }
 
