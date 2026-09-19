@@ -26,6 +26,7 @@ impl DaemonSessionHost {
         &self,
         os_user: &str,
         session_id: &str,
+        sessions_base: &Path,
         session_dir: PathBuf,
         meta: tddy_core::SessionMetadata,
         // The caller's token, re-exported to a split session's agent as TDDY_REMOTE_SESSION_TOKEN:
@@ -44,7 +45,13 @@ impl DaemonSessionHost {
         // token, since the original is scoped to a lifetime that may well have elapsed while the
         // session was stopped.
         let split = self
-            .resume_split_wiring(&meta, &session_dir, session_id, session_token)
+            .resume_split_wiring(
+                &meta,
+                sessions_base,
+                &session_dir,
+                session_id,
+                session_token,
+            )
             .await?;
         let worktree_path = split
             .as_ref()
@@ -152,6 +159,7 @@ impl DaemonSessionHost {
     pub(crate) async fn resume_split_wiring(
         &self,
         meta: &tddy_core::SessionMetadata,
+        sessions_base: &Path,
         session_dir: &Path,
         session_id: &str,
         session_token: &str,
@@ -160,6 +168,25 @@ impl DaemonSessionHost {
         else {
             return Ok(None);
         };
+
+        // A **jailed-codebase** session is paired with a `workspace` session on this very daemon,
+        // so none of the remote re-wiring below applies: there is no room to rejoin and no peer to
+        // read from. What it does need is its jail back — the registry is in-process, so a daemon
+        // restart emptied it while the metadata saying the checkout is sandboxed survived.
+        if codebase_daemon
+            == crate::livekit_peer_discovery::local_instance_id_for_config(&self.config)
+        {
+            return self
+                .resume_colocated_jail_wiring(
+                    sessions_base,
+                    session_dir,
+                    session_id,
+                    codebase_session,
+                    session_token,
+                )
+                .await
+                .map(Some);
+        }
 
         let withdrawals = self
             .split_withdrawals_from_codebase_host(session_token, codebase_session, codebase_daemon)

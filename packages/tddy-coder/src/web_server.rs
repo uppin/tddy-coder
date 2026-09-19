@@ -15,6 +15,22 @@ pub struct ClientAllowedAgent {
     pub label: String,
 }
 
+/// What the serving daemon's `--workspace-tools` jail confines, as [`ClientConfig`] reports it.
+///
+/// The same wire shape the common-room advertisement publishes
+/// (`tddy_daemon_livekit::livekit_peer_discovery::SandboxedCodebaseSupport`), deliberately: the web
+/// reads one key, `sandboxed_codebase: { confines_filesystem }`, whichever source described the
+/// host. This is a separate type only because `tddy-coder` does not depend on the daemon's LiveKit
+/// crate, and a web server that served a page would not be able to name it if it did not.
+#[derive(Clone, Copy, serde::Serialize)]
+pub struct ClientSandboxedCodebaseSupport {
+    /// Whether the jail confines filesystem writes outside the checkout. **True on macOS**, where
+    /// Seatbelt denies paths outside the trees the jail holds; **false on Linux**, where the
+    /// cgroups jail shares the host filesystem root. The web turns this into the caveat it shows
+    /// beside the control, so getting it backwards promises confinement the kernel does not give.
+    pub confines_filesystem: bool,
+}
+
 /// Client-visible server config, served at /api/config.
 #[derive(Clone, serde::Serialize)]
 pub struct ClientConfig {
@@ -47,6 +63,20 @@ pub struct ClientConfig {
     /// for the standalone (non-daemon) tddy-coder web server, which has no such switch.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub livekit_enabled: Option<bool>,
+    /// What this daemon's `--workspace-tools` jail confines, so the page can offer the **sandboxed
+    /// codebase** placement — and say what it does not guarantee.
+    ///
+    /// The common room advertises the same capability, but a daemon with no common room advertises
+    /// nothing, and that is the deployment the placement was designed for. This is the serving
+    /// daemon's own self-description, so the page can read the capability of the host that handed
+    /// it to it with no LiveKit configured at all.
+    ///
+    /// `None` is a host that does not serve the placement: a daemon that predates this key, an OS
+    /// with no sandbox backend, or the standalone (non-daemon) tddy-coder web server. The key is
+    /// left off the wire entirely then, so a reader cannot mistake absent for "present and confines
+    /// nothing" — the control is disabled with the reason rather than offered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandboxed_codebase: Option<ClientSandboxedCodebaseSupport>,
 }
 
 /// Serve static files from `bundle_path` on the given `host` and `port`.
@@ -133,6 +163,7 @@ mod tests {
             debug: None,
             daemon_instance_id: None,
             livekit_enabled: None,
+            sandboxed_codebase: None,
         }
     }
 
@@ -180,6 +211,64 @@ mod tests {
         assert_eq!(
             json.get("daemon_instance_id").and_then(|v| v.as_str()),
             Some("udoo")
+        );
+    }
+
+    /// The jail capability the web gates the **sandboxed codebase** placement on. A daemon with no
+    /// common room advertises it nowhere else, so this key is that deployment's only source.
+    #[test]
+    fn the_jail_capability_is_omitted_from_api_config_when_none() {
+        // Given a host that serves no jailed-codebase placement
+        let cfg = empty_config();
+
+        // When it describes itself to the page it serves
+        let json = serde_json::to_value(cfg).expect("serialize");
+
+        // Then the key is off the wire entirely, so absent cannot be read as "confines nothing"
+        assert!(
+            json.get("sandboxed_codebase").is_none(),
+            "sandboxed_codebase must be skipped when None: {json}"
+        );
+    }
+
+    #[test]
+    fn a_jail_that_confines_the_filesystem_is_serialized_as_the_advertisement_spells_it() {
+        // Given a host whose jail denies writes outside the checkout
+        let cfg = ClientConfig {
+            sandboxed_codebase: Some(ClientSandboxedCodebaseSupport {
+                confines_filesystem: true,
+            }),
+            ..empty_config()
+        };
+
+        // When it describes itself to the page it serves
+        let json = serde_json::to_value(cfg).expect("serialize");
+
+        // Then it uses the one wire shape the web reads, whichever source described the host
+        assert_eq!(
+            json.get("sandboxed_codebase"),
+            Some(&serde_json::json!({ "confines_filesystem": true }))
+        );
+    }
+
+    #[test]
+    fn a_jail_that_shares_the_filesystem_root_is_serialized_as_confining_nothing_of_it() {
+        // Given a host whose jail confines process and network but not writes
+        let cfg = ClientConfig {
+            sandboxed_codebase: Some(ClientSandboxedCodebaseSupport {
+                confines_filesystem: false,
+            }),
+            ..empty_config()
+        };
+
+        // When it describes itself to the page it serves
+        let json = serde_json::to_value(cfg).expect("serialize");
+
+        // Then the boolean is carried honestly rather than skipped as a falsy default — the page
+        // turns it into the caveat it shows, and a dropped `false` would read as unadvertised
+        assert_eq!(
+            json.get("sandboxed_codebase"),
+            Some(&serde_json::json!({ "confines_filesystem": false }))
         );
     }
 }

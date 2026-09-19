@@ -81,6 +81,36 @@ function anHttpDaemonWithItsCommonRoomSwitchedOff(): HttpEndpoint {
   return { fetched: () => fetched };
 }
 
+/**
+ * A daemon whose macOS jail confines the filesystem, answering over RPC.
+ *
+ * The desktop deployment: no HTTP origin to fetch `/api/config` from, and — being a daemon hosted
+ * by the application itself — no common room to advertise the capability in either.
+ */
+function aDaemonWhoseJailConfinesTheFilesystem(): InMemoryRpcBackend {
+  return anInMemoryRpcBackend().onUnary(DaemonConfigService.method.getClientConfig, () =>
+    create(GetClientConfigResponseSchema, {
+      daemonMode: true,
+      daemonInstanceId: "udoo",
+      sandboxedCodebase: { confinesFilesystem: true },
+    }),
+  );
+}
+
+/** The same daemon on Linux, whose cgroups jail shares the host filesystem root, over HTTP. */
+function anHttpDaemonWhoseJailSharesTheFilesystemRoot(): HttpEndpoint {
+  const fetched: string[] = [];
+  spyOn(globalThis, "fetch").mockImplementation(async (url: RequestInfo | URL) => {
+    fetched.push(String(url));
+    return Response.json({
+      daemon_mode: true,
+      daemon_instance_id: "udoo",
+      sandboxed_codebase: { confines_filesystem: false },
+    });
+  });
+  return { fetched: () => fetched };
+}
+
 /** A daemon whose web server has no configuration to serve. */
 function anHttpDaemonServingNoClientConfig(): HttpEndpoint {
   const fetched: string[] = [];
@@ -155,6 +185,50 @@ describe("the startup configuration the daemon hands its web bundle", () => {
     expect(daemon.fetched()).toEqual(["/api/config"]);
   });
 
+  it("reads the serving daemon's jail capability from /api/config", async () => {
+    // Given — a browser page served by a Linux daemon that joins no common room
+    anHttpDaemonWhoseJailSharesTheFilesystemRoot();
+    const host = aBrowserPageServedFrom("https://daemon.example");
+
+    // When — the bundle reads its startup configuration
+    const config = await loadClientConfig(
+      createDefaultDaemonTransport(undefined, undefined, host),
+      host,
+    );
+
+    // Then — it learns what that daemon's jail confines, with no common room to advertise it in
+    expect(config?.sandboxedCodebase).toEqual({ confinesFilesystem: false });
+  });
+
+  it("reads the serving daemon's jail capability over RPC when the page has no HTTP origin", async () => {
+    // Given — a desktop page, hosting its own daemon whose jail confines the filesystem
+    const daemon = aDaemonWhoseJailConfinesTheFilesystem();
+    const host = aTauriHostedPage(DaemonConfigService, daemon.transport());
+
+    // When — the bundle reads its startup configuration
+    const config = await loadClientConfig(
+      createDefaultDaemonTransport(undefined, undefined, host),
+      host,
+    );
+
+    // Then — the RPC mirror of `/api/config` carries the same capability the endpoint would have
+    expect(config?.sandboxedCodebase).toEqual({ confinesFilesystem: true });
+  });
+
+  it("leaves the jail capability absent when the daemon describes none", async () => {
+    // Given — a daemon that predates the capability, or an OS with no sandbox backend
+    anHttpDaemonServingItsClientConfig();
+    const host = aBrowserPageServedFrom("https://daemon.example");
+
+    // When — the bundle reads its startup configuration
+    const config = await loadClientConfig(
+      createDefaultDaemonTransport(undefined, undefined, host),
+      host,
+    );
+
+    // Then — absent stays absent, never a default the form could mistake for a capability
+    expect(config?.sandboxedCodebase).toBeUndefined();
+  });
   it("carries the auth gate's session token when it is asked for over RPC", async () => {
     // Given — a desktop page whose auth provider has installed a token resolver
     const daemon = aDaemonServingItsClientConfig();

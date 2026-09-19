@@ -29,7 +29,7 @@ use super::resolve_split_agent_placement;
 
 use super::resolve_caller_chosen_session_id;
 
-use super::classify_codebase_placement;
+use super::{classify_placement, PlacementRequest};
 
 use crate::livekit_peer_discovery::local_instance_id_for_config;
 
@@ -136,13 +136,17 @@ impl DaemonSessionHost {
         // refused split is a malformed request, so it is classified before anything is created and
         // before the project is provisioned — a session whose codebase host is wrong should not
         // leave a clone behind on the way to being rejected.
-        let placement = classify_codebase_placement(
-            &local_id,
-            &req.codebase_daemon_instance_id,
-            &eligible_ids,
-            req.managed_codebase,
-            req.session_type.trim(),
-        )
+        let placement = classify_placement(&PlacementRequest {
+            local_instance_id: local_id.clone(),
+            requested_codebase_id: req.codebase_daemon_instance_id.clone(),
+            eligible_ids: eligible_ids.clone(),
+            managed_codebase: req.managed_codebase,
+            sandbox: req.sandbox,
+            sandboxed_codebase: req.sandboxed_codebase,
+            session_type: req.session_type.trim().to_string(),
+            recipe: req.recipe.clone(),
+            dangerously_skip_permissions: req.dangerously_skip_permissions,
+        })
         .map_err(|msg| {
             log::info!("StartSession: rejected codebase placement: {msg}");
             Status::invalid_argument(msg)
@@ -174,16 +178,24 @@ impl DaemonSessionHost {
             ));
         }
 
-        // A split session has no repository here, so it skips the project auto-provision below and
-        // the whole worktree-bearing dispatch: the codebase host resolves the project against its
-        // own filesystem.
-        if let CodebasePlacement::Split {
-            codebase_instance_id,
-        } = &placement
-        {
-            return self
-                .start_split_claude_cli_session(os_user, codebase_instance_id, &req, progress)
-                .await;
+        // Neither placement below puts a repository where the agent runs, so both skip the project
+        // auto-provision and the whole worktree-bearing dispatch that follows: a split resolves the
+        // project on the codebase host's filesystem, and a jailed codebase resolves it on this one
+        // but inside a `workspace` session of its own.
+        match &placement {
+            CodebasePlacement::Split {
+                codebase_instance_id,
+            } => {
+                return self
+                    .start_split_claude_cli_session(os_user, codebase_instance_id, &req, progress)
+                    .await;
+            }
+            CodebasePlacement::SandboxedCodebase => {
+                return self
+                    .start_sandboxed_codebase_session(os_user, &req, progress)
+                    .await;
+            }
+            CodebasePlacement::CoLocated => {}
         }
 
         // Auto-provision the project's working copy on this host before dispatching to any session

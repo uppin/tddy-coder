@@ -21,6 +21,34 @@ use tddy_service::proto::sandbox::{EchoRequest, EchoResponse};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// A spawned jail that is torn down on every exit from the test, a failed assertion included.
+///
+/// [`SandboxHandle`] wraps a [`std::process::Child`], which neither kills nor reaps on drop, so
+/// dropping a handle is not teardown — and teardown written on the last line of the test is not
+/// teardown either, because the assertions above it panic exactly in the case that leaves a jail
+/// running. The runner is put in its own process group, so it is reparented to the init process
+/// when this binary exits and nothing else ever reaps it.
+struct SpawnedJail {
+    handle: SandboxHandle,
+}
+
+impl SpawnedJail {
+    fn new(handle: SandboxHandle) -> Self {
+        Self { handle }
+    }
+
+    fn handle_mut(&mut self) -> &mut SandboxHandle {
+        &mut self.handle
+    }
+}
+
+impl Drop for SpawnedJail {
+    fn drop(&mut self) {
+        self.handle.child_mut().kill().ok();
+        self.handle.child_mut().wait().ok();
+    }
+}
+
 fn sandbox_runner_binary() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_tddy-sandbox-runner")
         .map(PathBuf::from)
@@ -121,7 +149,7 @@ async fn round_trips_an_echo_over_stdio_through_a_real_seatbelt_jail() {
     let shim_port = pick_free_loopback_port().expect("egress shim port");
     let profile_path = project.join("profile.sb");
 
-    let mut handle = spawn_sandbox_runner(SandboxRunnerSpawn {
+    let mut jail = SpawnedJail::new(spawn_sandbox_runner(SandboxRunnerSpawn {
         project_root: project.clone(),
         scratch_dir: scratch,
         egress_dir: egress,
@@ -134,7 +162,7 @@ async fn round_trips_an_echo_over_stdio_through_a_real_seatbelt_jail() {
         host_home: None,
         cgroup: Default::default(),
     })
-    .expect("spawn sandbox-runner");
+    .expect("spawn sandbox-runner"));
 
     // Wait for the ready marker (`--stdio` mode writes "stdio" instead of a port number) — same
     // polling pattern as `sandbox_runner_spawn_smoke.rs`, so a jail that fails to boot (e.g. an
@@ -145,7 +173,7 @@ async fn round_trips_an_echo_over_stdio_through_a_real_seatbelt_jail() {
         if ready_marker.exists() {
             break;
         }
-        if let Some(reason) = handle.try_exit_diagnostic() {
+        if let Some(reason) = jail.handle_mut().try_exit_diagnostic() {
             panic!("sandbox child died before ready marker: {reason}");
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -153,7 +181,7 @@ async fn round_trips_an_echo_over_stdio_through_a_real_seatbelt_jail() {
     assert!(ready_marker.exists(), "ready marker must appear");
 
     // When bridging the jailed process's piped stdio into an RPC client and calling Echo
-    let (client, _run_handle) = bridge_sandbox_stdio(&mut handle, NoCallbackService)
+    let (client, _run_handle) = bridge_sandbox_stdio(jail.handle_mut(), NoCallbackService)
         .await
         .expect("bridge sandbox stdio");
     let request = EchoRequest {
@@ -172,8 +200,6 @@ async fn round_trips_an_echo_over_stdio_through_a_real_seatbelt_jail() {
     let response = EchoResponse::decode(response_bytes.as_slice()).expect("decode EchoResponse");
     assert_eq!(response.message, "hello-through-seatbelt");
 
-    handle.child_mut().kill().ok();
-    handle.child_mut().wait().ok();
 }
 
 /// A `HostToolHandler` that returns a fixed marker result — enough to prove a `ToolRequest`
@@ -272,7 +298,7 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
     let shim_port = pick_free_loopback_port().expect("egress shim port");
     let profile_path = project.join("profile.sb");
 
-    let mut handle = spawn_sandbox_runner(SandboxRunnerSpawn {
+    let mut jail = SpawnedJail::new(spawn_sandbox_runner(SandboxRunnerSpawn {
         project_root: project.clone(),
         scratch_dir: scratch,
         egress_dir: egress.clone(),
@@ -285,7 +311,7 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
         host_home: None,
         cgroup: Default::default(),
     })
-    .expect("spawn sandbox-runner");
+    .expect("spawn sandbox-runner"));
 
     let deadline = Duration::from_secs(15);
     let start = std::time::Instant::now();
@@ -293,7 +319,7 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
         if ready_marker.exists() {
             break;
         }
-        if let Some(reason) = handle.try_exit_diagnostic() {
+        if let Some(reason) = jail.handle_mut().try_exit_diagnostic() {
             panic!("sandbox child died before ready marker: {reason}");
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -301,7 +327,7 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
     assert!(ready_marker.exists(), "ready marker must appear");
 
     // When bridging the jailed process's piped stdio, driving it via the real run_host_relay
-    let (client, _run_handle) = bridge_sandbox_stdio(&mut handle, NoCallbackService)
+    let (client, _run_handle) = bridge_sandbox_stdio(jail.handle_mut(), NoCallbackService)
         .await
         .expect("bridge sandbox stdio");
     let stdio_client = tddy_sandbox_runner::StdioSandboxClient::new(client);
@@ -340,6 +366,4 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
     );
     assert_eq!(parsed.get("tool").and_then(|v| v.as_str()), Some("Read"));
 
-    handle.child_mut().kill().ok();
-    handle.child_mut().wait().ok();
 }

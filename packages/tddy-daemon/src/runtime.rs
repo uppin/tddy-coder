@@ -147,6 +147,12 @@ pub struct DaemonRuntime {
     /// The claude-cli sessions this daemon owns. The host kills them when it is shutting down —
     /// they outlive the RPC surface otherwise.
     pub cli_sessions: Arc<tddy_session_lifecycle::cli_session_manager::CliSessionManager>,
+    /// The session host this runtime assembled, or `None` for a daemon built without
+    /// authentication — which serves no session RPCs and therefore has no session children.
+    ///
+    /// Held so the host can reach [`DaemonChildren`]: the CLI sessions *and* the workspace jails,
+    /// the second of which nothing outside this process would ever stop.
+    pub session_host: Option<Arc<tddy_session_lifecycle::connection_service::DaemonSessionHost>>,
     /// The Telegram chat that gets the "started"/"stopped" messages, when a bot is configured.
     pub lifecycle_telegram: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
     /// Relay mode: fires once the idle timeout expires, for a server that shuts down gracefully.
@@ -168,6 +174,49 @@ impl DaemonRuntime {
     /// The names of the services this runtime hosts, in registration order.
     pub fn service_names(&self) -> Vec<&str> {
         self.entries.iter().map(|entry| entry.name).collect()
+    }
+
+    /// The child processes this daemon spawned, as a handle a signal task can own.
+    ///
+    /// Cloneable and independent of the runtime, because the shutdown path needs it in two places
+    /// at once: a task waiting on SIGTERM, and the graceful return from `run_server`.
+    pub fn children(&self) -> DaemonChildren {
+        DaemonChildren {
+            cli_sessions: Arc::clone(&self.cli_sessions),
+            session_host: self.session_host.clone(),
+            index_daemon: self.index_daemon.clone(),
+        }
+    }
+}
+
+/// Everything a running daemon spawned that must not outlive it.
+///
+/// Named rather than left inline in the signal handler because a shutdown that reaches only some
+/// of these is indistinguishable, from the outside, from one that reached all of them — which is
+/// how the workspace jails came to be missed entirely
+/// (`docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md`).
+#[derive(Clone)]
+pub struct DaemonChildren {
+    cli_sessions: Arc<tddy_session_lifecycle::cli_session_manager::CliSessionManager>,
+    session_host: Option<Arc<tddy_session_lifecycle::connection_service::DaemonSessionHost>>,
+    index_daemon: Option<crate::index_daemon::IndexDaemonRegistry>,
+}
+
+impl DaemonChildren {
+    /// Stop all of them. Idempotent, so the SIGTERM path and the graceful return can both call it.
+    pub async fn shut_down(&self) {
+        match &self.session_host {
+            // Reaches the CLI sessions *and* the workspace jails — a jail is a
+            // `tddy-sandbox-runner` holding a checkout open, and the in-process registry is its
+            // only holder, so a daemon that exits without this leaves it running on the host.
+            Some(host) => host.shut_down_children().await,
+            None => self.cli_sessions.kill_all().await,
+        }
+        // Stopped explicitly rather than left to `tasks.abort_all()`: aborting the reaper that
+        // would have stopped it is exactly how a sandbox runner gets orphaned.
+        if let Some(index_daemon) = &self.index_daemon {
+            index_daemon.shutdown().await;
+        }
     }
 }
 
@@ -602,6 +651,14 @@ pub async fn build(
     // branch that has the task registry to run it on.
     let mut index_daemon_registry: Option<crate::index_daemon::IndexDaemonRegistry> = None;
 
+    // The session host, so the runtime's own host can reach the children it holds at shutdown —
+    // notably the workspace jails, each a `tddy-sandbox-runner` process nothing else would stop
+    // (`docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md`). `None`
+    // for a daemon built without authentication, which hosts no sessions to have children.
+    let mut session_host: Option<
+        Arc<tddy_session_lifecycle::connection_service::DaemonSessionHost>,
+    > = None;
+
     let mut tasks = RuntimeTasks {
         common_room: None,
         oauth_loopback_tunnel: None,
@@ -887,6 +944,7 @@ pub async fn build(
         // started over the socket is visible over every other transport.
         let connection_arc = Arc::new(connection_impl);
         connection_arc.install_sandbox_rpc_bridge();
+        session_host = Some(Arc::clone(&connection_arc));
         // Get the shared TaskRegistry before handing the impl to the servers.
         let task_registry = connection_arc.task_registry();
         // The admission registry is shared with the SessionAdmissionService served on the
@@ -1295,6 +1353,7 @@ pub async fn build(
         entries: rpc_entries,
         config,
         cli_sessions: shared_claude_cli_manager,
+        session_host,
         lifecycle_telegram,
         relay_shutdown,
         index_daemon: index_daemon_registry,

@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file daemon_config.proto.
  */
 export const file_daemon_config: GenFile = /*@__PURE__*/
-  fileDesc("ChNkYWVtb25fY29uZmlnLnByb3RvEg1kYWVtb25fY29uZmlnIikKEEdldENvbmZpZ1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJZChFHZXRDb25maWdSZXNwb25zZRIvCghzZXR0aW5ncxgBIAEoCzIdLmRhZW1vbl9jb25maWcuRGFlbW9uU2V0dGluZ3MSEwoLY29uZmlnX3BhdGgYAiABKAkiXQoTVXBkYXRlQ29uZmlnUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEi8KCHNldHRpbmdzGAIgASgLMh0uZGFlbW9uX2NvbmZpZy5EYWVtb25TZXR0aW5ncyIwChRVcGRhdGVDb25maWdSZXNwb25zZRIYChByZXN0YXJ0X3JlcXVpcmVkGAEgAygJIi8KFkdldENsaWVudENvbmZpZ1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSKGAwoXR2V0Q2xpZW50Q29uZmlnUmVzcG9uc2USGAoLbGl2ZWtpdF91cmwYASABKAlIAIgBARIZCgxsaXZla2l0X3Jvb20YAiABKAlIAYgBARIYCgtjb21tb25fcm9vbRgDIAEoCUgCiAEBEhgKC2RhZW1vbl9tb2RlGAQgASgISAOIAQESOQoOYWxsb3dlZF9hZ2VudHMYBSADKAsyIS5kYWVtb25fY29uZmlnLkNsaWVudEFsbG93ZWRBZ2VudBISCgVkZWJ1ZxgGIAEoCUgEiAEBEh8KEmRhZW1vbl9pbnN0YW5jZV9pZBgHIAEoCUgFiAEBEhwKD2xpdmVraXRfZW5hYmxlZBgIIAEoCEgGiAEBQg4KDF9saXZla2l0X3VybEIPCg1fbGl2ZWtpdF9yb29tQg4KDF9jb21tb25fcm9vbUIOCgxfZGFlbW9uX21vZGVCCAoGX2RlYnVnQhUKE19kYWVtb25faW5zdGFuY2VfaWRCEgoQX2xpdmVraXRfZW5hYmxlZCIvChJDbGllbnRBbGxvd2VkQWdlbnQSCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkicAoORGFlbW9uU2V0dGluZ3MSLwoHbGl2ZWtpdBgBIAEoCzIeLmRhZW1vbl9jb25maWcuTGl2ZUtpdFNldHRpbmdzEi0KBmxpc3RlbhgCIAEoCzIdLmRhZW1vbl9jb25maWcuTGlzdGVuU2V0dGluZ3Mi8AEKD0xpdmVLaXRTZXR0aW5ncxIQCgN1cmwYASABKAlIAIgBARIXCgpwdWJsaWNfdXJsGAIgASgJSAGIAQESFAoHYXBpX2tleRgDIAEoCUgCiAEBEhcKCmFwaV9zZWNyZXQYBCABKAlIA4gBARIYCgtjb21tb25fcm9vbRgFIAEoCUgEiAEBEhYKDmFwaV9zZWNyZXRfc2V0GAYgASgIEg8KB2VuYWJsZWQYByABKAhCBgoEX3VybEINCgtfcHVibGljX3VybEIKCghfYXBpX2tleUINCgtfYXBpX3NlY3JldEIOCgxfY29tbW9uX3Jvb20iWAoOTGlzdGVuU2V0dGluZ3MSFQoId2ViX3BvcnQYASABKA1IAIgBARIVCgh3ZWJfaG9zdBgCIAEoCUgBiAEBQgsKCV93ZWJfcG9ydEILCglfd2ViX2hvc3QyoAIKE0RhZW1vbkNvbmZpZ1NlcnZpY2USTgoJR2V0Q29uZmlnEh8uZGFlbW9uX2NvbmZpZy5HZXRDb25maWdSZXF1ZXN0GiAuZGFlbW9uX2NvbmZpZy5HZXRDb25maWdSZXNwb25zZRJXCgxVcGRhdGVDb25maWcSIi5kYWVtb25fY29uZmlnLlVwZGF0ZUNvbmZpZ1JlcXVlc3QaIy5kYWVtb25fY29uZmlnLlVwZGF0ZUNvbmZpZ1Jlc3BvbnNlEmAKD0dldENsaWVudENvbmZpZxIlLmRhZW1vbl9jb25maWcuR2V0Q2xpZW50Q29uZmlnUmVxdWVzdBomLmRhZW1vbl9jb25maWcuR2V0Q2xpZW50Q29uZmlnUmVzcG9uc2ViBnByb3RvMw");
+  fileDesc("ChNkYWVtb25fY29uZmlnLnByb3RvEg1kYWVtb25fY29uZmlnIikKEEdldENvbmZpZ1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJZChFHZXRDb25maWdSZXNwb25zZRIvCghzZXR0aW5ncxgBIAEoCzIdLmRhZW1vbl9jb25maWcuRGFlbW9uU2V0dGluZ3MSEwoLY29uZmlnX3BhdGgYAiABKAkiXQoTVXBkYXRlQ29uZmlnUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEi8KCHNldHRpbmdzGAIgASgLMh0uZGFlbW9uX2NvbmZpZy5EYWVtb25TZXR0aW5ncyIwChRVcGRhdGVDb25maWdSZXNwb25zZRIYChByZXN0YXJ0X3JlcXVpcmVkGAEgAygJIi8KFkdldENsaWVudENvbmZpZ1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSLnAwoXR2V0Q2xpZW50Q29uZmlnUmVzcG9uc2USGAoLbGl2ZWtpdF91cmwYASABKAlIAIgBARIZCgxsaXZla2l0X3Jvb20YAiABKAlIAYgBARIYCgtjb21tb25fcm9vbRgDIAEoCUgCiAEBEhgKC2RhZW1vbl9tb2RlGAQgASgISAOIAQESOQoOYWxsb3dlZF9hZ2VudHMYBSADKAsyIS5kYWVtb25fY29uZmlnLkNsaWVudEFsbG93ZWRBZ2VudBISCgVkZWJ1ZxgGIAEoCUgEiAEBEh8KEmRhZW1vbl9pbnN0YW5jZV9pZBgHIAEoCUgFiAEBEhwKD2xpdmVraXRfZW5hYmxlZBgIIAEoCEgGiAEBEkgKEnNhbmRib3hlZF9jb2RlYmFzZRgJIAEoCzInLmRhZW1vbl9jb25maWcuU2FuZGJveGVkQ29kZWJhc2VTdXBwb3J0SAeIAQFCDgoMX2xpdmVraXRfdXJsQg8KDV9saXZla2l0X3Jvb21CDgoMX2NvbW1vbl9yb29tQg4KDF9kYWVtb25fbW9kZUIICgZfZGVidWdCFQoTX2RhZW1vbl9pbnN0YW5jZV9pZEISChBfbGl2ZWtpdF9lbmFibGVkQhUKE19zYW5kYm94ZWRfY29kZWJhc2UiNwoYU2FuZGJveGVkQ29kZWJhc2VTdXBwb3J0EhsKE2NvbmZpbmVzX2ZpbGVzeXN0ZW0YASABKAgiLwoSQ2xpZW50QWxsb3dlZEFnZW50EgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJInAKDkRhZW1vblNldHRpbmdzEi8KB2xpdmVraXQYASABKAsyHi5kYWVtb25fY29uZmlnLkxpdmVLaXRTZXR0aW5ncxItCgZsaXN0ZW4YAiABKAsyHS5kYWVtb25fY29uZmlnLkxpc3RlblNldHRpbmdzIvABCg9MaXZlS2l0U2V0dGluZ3MSEAoDdXJsGAEgASgJSACIAQESFwoKcHVibGljX3VybBgCIAEoCUgBiAEBEhQKB2FwaV9rZXkYAyABKAlIAogBARIXCgphcGlfc2VjcmV0GAQgASgJSAOIAQESGAoLY29tbW9uX3Jvb20YBSABKAlIBIgBARIWCg5hcGlfc2VjcmV0X3NldBgGIAEoCBIPCgdlbmFibGVkGAcgASgIQgYKBF91cmxCDQoLX3B1YmxpY191cmxCCgoIX2FwaV9rZXlCDQoLX2FwaV9zZWNyZXRCDgoMX2NvbW1vbl9yb29tIlgKDkxpc3RlblNldHRpbmdzEhUKCHdlYl9wb3J0GAEgASgNSACIAQESFQoId2ViX2hvc3QYAiABKAlIAYgBAUILCglfd2ViX3BvcnRCCwoJX3dlYl9ob3N0MqACChNEYWVtb25Db25maWdTZXJ2aWNlEk4KCUdldENvbmZpZxIfLmRhZW1vbl9jb25maWcuR2V0Q29uZmlnUmVxdWVzdBogLmRhZW1vbl9jb25maWcuR2V0Q29uZmlnUmVzcG9uc2USVwoMVXBkYXRlQ29uZmlnEiIuZGFlbW9uX2NvbmZpZy5VcGRhdGVDb25maWdSZXF1ZXN0GiMuZGFlbW9uX2NvbmZpZy5VcGRhdGVDb25maWdSZXNwb25zZRJgCg9HZXRDbGllbnRDb25maWcSJS5kYWVtb25fY29uZmlnLkdldENsaWVudENvbmZpZ1JlcXVlc3QaJi5kYWVtb25fY29uZmlnLkdldENsaWVudENvbmZpZ1Jlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message daemon_config.GetConfigRequest
@@ -173,6 +173,16 @@ export type GetClientConfigResponse = Message<"daemon_config.GetClientConfigResp
    * @generated from field: optional bool livekit_enabled = 8;
    */
   livekitEnabled?: boolean;
+
+  /**
+   * What this daemon's `--workspace-tools` jail confines, so a page hosted by it can offer the
+   * sandboxed-codebase placement with no common room to advertise it in. Absent is a host that
+   * does not serve the placement at all — a daemon that predates this field, or an OS with no
+   * sandbox backend — and the page disables the control with the reason rather than offering it.
+   *
+   * @generated from field: optional daemon_config.SandboxedCodebaseSupport sandboxed_codebase = 9;
+   */
+  sandboxedCodebase?: SandboxedCodebaseSupport;
 };
 
 /**
@@ -181,6 +191,31 @@ export type GetClientConfigResponse = Message<"daemon_config.GetClientConfigResp
  */
 export const GetClientConfigResponseSchema: GenMessage<GetClientConfigResponse> = /*@__PURE__*/
   messageDesc(file_daemon_config, 5);
+
+/**
+ * What a daemon's workspace jail confines, as that daemon describes itself. Mirrors the
+ * `sandboxed_codebase` key of the common-room advertisement, so one capability has one shape
+ * whichever source the web read the host from.
+ *
+ * @generated from message daemon_config.SandboxedCodebaseSupport
+ */
+export type SandboxedCodebaseSupport = Message<"daemon_config.SandboxedCodebaseSupport"> & {
+  /**
+   * Whether the jail confines filesystem writes outside the checkout: true on macOS Seatbelt,
+   * false on the Linux cgroups jail, which shares the host filesystem root and so confines process
+   * and network only. The web turns this into the caveat it shows beside the control.
+   *
+   * @generated from field: bool confines_filesystem = 1;
+   */
+  confinesFilesystem: boolean;
+};
+
+/**
+ * Describes the message daemon_config.SandboxedCodebaseSupport.
+ * Use `create(SandboxedCodebaseSupportSchema)` to create a new message.
+ */
+export const SandboxedCodebaseSupportSchema: GenMessage<SandboxedCodebaseSupport> = /*@__PURE__*/
+  messageDesc(file_daemon_config, 6);
 
 /**
  * @generated from message daemon_config.ClientAllowedAgent
@@ -202,7 +237,7 @@ export type ClientAllowedAgent = Message<"daemon_config.ClientAllowedAgent"> & {
  * Use `create(ClientAllowedAgentSchema)` to create a new message.
  */
 export const ClientAllowedAgentSchema: GenMessage<ClientAllowedAgent> = /*@__PURE__*/
-  messageDesc(file_daemon_config, 6);
+  messageDesc(file_daemon_config, 7);
 
 /**
  * The subset of the daemon's YAML the UI reads and writes. Sections not represented here are
@@ -227,7 +262,7 @@ export type DaemonSettings = Message<"daemon_config.DaemonSettings"> & {
  * Use `create(DaemonSettingsSchema)` to create a new message.
  */
 export const DaemonSettingsSchema: GenMessage<DaemonSettings> = /*@__PURE__*/
-  messageDesc(file_daemon_config, 7);
+  messageDesc(file_daemon_config, 8);
 
 /**
  * @generated from message daemon_config.LiveKitSettings
@@ -285,7 +320,7 @@ export type LiveKitSettings = Message<"daemon_config.LiveKitSettings"> & {
  * Use `create(LiveKitSettingsSchema)` to create a new message.
  */
 export const LiveKitSettingsSchema: GenMessage<LiveKitSettings> = /*@__PURE__*/
-  messageDesc(file_daemon_config, 8);
+  messageDesc(file_daemon_config, 9);
 
 /**
  * @generated from message daemon_config.ListenSettings
@@ -307,7 +342,7 @@ export type ListenSettings = Message<"daemon_config.ListenSettings"> & {
  * Use `create(ListenSettingsSchema)` to create a new message.
  */
 export const ListenSettingsSchema: GenMessage<ListenSettings> = /*@__PURE__*/
-  messageDesc(file_daemon_config, 9);
+  messageDesc(file_daemon_config, 10);
 
 /**
  * The daemon's own configuration, read and written by its UI.

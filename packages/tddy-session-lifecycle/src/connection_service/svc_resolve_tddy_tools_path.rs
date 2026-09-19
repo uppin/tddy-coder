@@ -141,10 +141,14 @@ impl DaemonSessionHost {
     }
 
     /// Install the in-jail family-B relay once this service lives behind an `Arc` (see `runtime::build`).
+    ///
+    /// The handler holds a [`std::sync::Weak`] back to this host, never an `Arc`: the bridge it is
+    /// stored in is a field of the host, so a strong reference would be a cycle that keeps the
+    /// daemon — and therefore every jail in its `WorkspaceSandboxRegistry` — alive forever.
     pub fn install_sandbox_rpc_bridge(self: &Arc<Self>) {
         let handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler> =
             Arc::new(super::DaemonRpcHandler {
-                conn: Arc::clone(self),
+                conn: Arc::downgrade(self),
             });
         let _ = self.sandbox_rpc_bridge.set(handler);
     }

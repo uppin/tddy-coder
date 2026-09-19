@@ -3,7 +3,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tddy_coder::web_server::{serve_web_bundle_with_shutdown, ClientAllowedAgent, ClientConfig};
+use tddy_coder::web_server::{
+    serve_web_bundle_with_shutdown, ClientAllowedAgent, ClientConfig,
+    ClientSandboxedCodebaseSupport,
+};
 use tddy_connectrpc::connect_router;
 use tddy_rpc::{MultiRpcService, RpcBridge};
 
@@ -35,6 +38,11 @@ pub struct RunServerOptions {
     pub livekit_enabled: bool,
     /// This daemon's own instance id, so the page can tell which common-room daemon served it.
     pub daemon_instance_id: String,
+    /// What this daemon's `--workspace-tools` jail confines, so the page it serves can offer the
+    /// sandboxed-codebase placement on a daemon with no common room to advertise it in. `None` is
+    /// a host that does not serve the placement at all, and the key is then left off `/api/config`.
+    /// Built by [`serving_sandboxed_codebase_support`], never restated from a platform string.
+    pub sandboxed_codebase: Option<ClientSandboxedCodebaseSupport>,
     /// Startup snapshot of the agent allowlist, for the UI before `ListAgents` hydrates it.
     pub allowed_agents: Vec<ClientAllowedAgent>,
     /// Browser `DEBUG` mask served at `/api/config` (daemon `debug`). `None` = off.
@@ -44,6 +52,20 @@ pub struct RunServerOptions {
     /// Lets an external task (e.g. an idle-timeout monitor) trigger graceful shutdown without
     /// ctrl_c or SIGTERM. When `None`, only OS signals shut the server down.
     pub shutdown_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+}
+
+/// This daemon's jail capability in the shape `/api/config` serves it.
+///
+/// One translation of [`tddy_daemon_livekit::livekit_peer_discovery::sandboxed_codebase_support`]
+/// into the web server's vocabulary, so the serving payload and the common-room advertisement
+/// answer the same question from the same place. A second `cfg!(target_os = ...)` here would be a
+/// second answer, and `confines_filesystem` is the boolean the UI turns into a confinement promise.
+pub fn serving_sandboxed_codebase_support() -> Option<ClientSandboxedCodebaseSupport> {
+    tddy_daemon_livekit::livekit_peer_discovery::sandboxed_codebase_support().map(|support| {
+        ClientSandboxedCodebaseSupport {
+            confines_filesystem: support.confines_filesystem,
+        }
+    })
 }
 
 /// Start the web server with static bundle and RPC services.
@@ -57,6 +79,7 @@ pub async fn run_server(options: RunServerOptions) -> anyhow::Result<()> {
         common_room,
         livekit_enabled,
         daemon_instance_id,
+        sandboxed_codebase,
         allowed_agents,
         debug,
         lifecycle_telegram,
@@ -85,6 +108,7 @@ pub async fn run_server(options: RunServerOptions) -> anyhow::Result<()> {
         debug,
         daemon_instance_id: Some(daemon_instance_id),
         livekit_enabled: Some(livekit_enabled),
+        sandboxed_codebase,
     };
 
     let shutdown_copy = lifecycle_telegram.clone();

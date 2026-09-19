@@ -10,8 +10,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::json;
-use tddy_coder::web_server::ClientAllowedAgent;
-use tddy_daemon::server::{run_server, RunServerOptions};
+use tddy_coder::web_server::{ClientAllowedAgent, ClientSandboxedCodebaseSupport};
+use tddy_daemon::server::{run_server, serving_sandboxed_codebase_support, RunServerOptions};
+use tddy_daemon_sandbox::workspace_tool_sandbox::workspace_sandbox_platform_support;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, ServiceEntry};
 use tddy_testing_commons::wait::eventually_awaiting;
 use tempfile::TempDir;
@@ -50,6 +51,9 @@ fn options_serving(bundle: &Path, port: u16) -> RunServerOptions {
         common_room: Some("tddy-lobby".to_string()),
         livekit_enabled: true,
         daemon_instance_id: "udoo".to_string(),
+        // A host that holds no jail, so the exact-payload test below stays a statement about the
+        // keys the options carry. The capability's own tests set it explicitly.
+        sandboxed_codebase: None,
         allowed_agents: vec![ClientAllowedAgent {
             id: "codex-acp".to_string(),
             label: "Codex ACP".to_string(),
@@ -246,6 +250,118 @@ async fn tells_the_page_livekit_is_off_when_the_options_disable_it() {
     // Then
     assert_eq!(config.get("livekit_enabled"), Some(&json!(false)));
     server.stop().await;
+}
+
+#[tokio::test]
+async fn serves_the_jail_capability_the_options_carry_at_api_config() {
+    // Given a daemon whose workspace jail confines filesystem writes outside the checkout
+    let bundle = a_web_bundle();
+    let port = a_free_tcp_port().await;
+    let server = a_server_running_with(RunServerOptions {
+        sandboxed_codebase: Some(ClientSandboxedCodebaseSupport {
+            confines_filesystem: true,
+        }),
+        ..options_serving(bundle.path(), port)
+    })
+    .await;
+
+    // When the page it serves reads the configuration it starts up with
+    let config: serde_json::Value = serde_json::from_str(&body_of(server.url("/api/config")).await)
+        .expect("/api/config did not serve JSON");
+
+    // Then the capability is there under the same key the common-room advertisement publishes, so
+    // a deployment with no common room can still offer the sandboxed-codebase placement
+    assert_eq!(
+        config.get("sandboxed_codebase"),
+        Some(&json!({ "confines_filesystem": true }))
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn serves_the_jail_capability_of_a_host_whose_jail_shares_the_filesystem_root() {
+    // Given a daemon whose jail confines process and network but not writes outside the checkout
+    let bundle = a_web_bundle();
+    let port = a_free_tcp_port().await;
+    let server = a_server_running_with(RunServerOptions {
+        sandboxed_codebase: Some(ClientSandboxedCodebaseSupport {
+            confines_filesystem: false,
+        }),
+        ..options_serving(bundle.path(), port)
+    })
+    .await;
+
+    // When the page it serves reads the configuration it starts up with
+    let config: serde_json::Value = serde_json::from_str(&body_of(server.url("/api/config")).await)
+        .expect("/api/config did not serve JSON");
+
+    // Then it is offered the placement with the honest boolean, not withheld: what such a jail does
+    // not confine is a caveat beside an enabled control, never a silent promise of confinement
+    assert_eq!(
+        config.get("sandboxed_codebase"),
+        Some(&json!({ "confines_filesystem": false }))
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn omits_the_jail_capability_entirely_for_a_host_that_can_hold_no_jail() {
+    // Given a daemon on a platform with no sandbox backend to hold a jail
+    let bundle = a_web_bundle();
+    let port = a_free_tcp_port().await;
+    let server = a_server_running_with(RunServerOptions {
+        sandboxed_codebase: None,
+        ..options_serving(bundle.path(), port)
+    })
+    .await;
+
+    // When the page it serves reads the configuration it starts up with
+    let config: serde_json::Value = serde_json::from_str(&body_of(server.url("/api/config")).await)
+        .expect("/api/config did not serve JSON");
+
+    // Then the key is off the wire altogether, so a reader cannot mistake absent for "present and
+    // confines nothing" — absent is a host that does not serve the placement
+    assert_eq!(config.get("sandboxed_codebase"), None);
+    server.stop().await;
+}
+
+#[test]
+fn advertises_a_jail_capability_exactly_when_this_platform_can_hold_one() {
+    // Given the platform check the start path itself consults before provisioning a jail
+    let can_hold_a_jail = workspace_sandbox_platform_support().is_ok();
+
+    // When the serving daemon describes itself to the page it hands out
+    let advertised = serving_sandboxed_codebase_support().is_some();
+
+    // Then it advertises the placement on exactly the hosts that would serve it, because both read
+    // that one function — a host advertising a placement it would then refuse is not expressible
+    assert_eq!(advertised, can_hold_a_jail);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn tells_the_page_a_macos_jail_confines_writes_outside_the_checkout() {
+    // Given a macOS host, whose Seatbelt jail denies paths outside the trees it holds
+
+    // When the serving daemon describes its jail to the page it hands out
+    let support = serving_sandboxed_codebase_support().expect("macOS holds a workspace jail");
+
+    // Then the page is told the filesystem is confined
+    assert!(support.confines_filesystem);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn tells_the_page_a_linux_jail_does_not_confine_writes_outside_the_checkout() {
+    // Given a Linux host, whose cgroups jail shares the host filesystem root
+    // (docs/dev/todo/2026-06-28-tddy-sandbox-cgroups.md)
+
+    // When the serving daemon describes its jail to the page it hands out
+    let support = serving_sandboxed_codebase_support().expect("Linux holds a workspace jail");
+
+    // Then the page is told the filesystem is not confined, so it states the caveat rather than
+    // promising confinement the kernel does not give
+    assert!(!support.confines_filesystem);
 }
 
 #[tokio::test]

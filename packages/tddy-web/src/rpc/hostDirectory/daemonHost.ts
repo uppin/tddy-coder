@@ -29,6 +29,9 @@ export function hostDescriptorOf(host: DaemonHost, sourceId: string): HostDescri
     ...(host.maxAttachmentBytes !== undefined
       ? { maxAttachmentBytes: host.maxAttachmentBytes }
       : {}),
+    ...(host.sandboxedCodebase !== undefined
+      ? { sandboxedCodebase: host.sandboxedCodebase }
+      : {}),
   };
 }
 
@@ -40,6 +43,9 @@ export function daemonHostOf(descriptor: HostDescriptor): DaemonHost {
     ...(descriptor.reposBasePath !== undefined ? { reposBasePath: descriptor.reposBasePath } : {}),
     ...(descriptor.maxAttachmentBytes !== undefined
       ? { maxAttachmentBytes: descriptor.maxAttachmentBytes }
+      : {}),
+    ...(descriptor.sandboxedCodebase !== undefined
+      ? { sandboxedCodebase: { confinesFilesystem: descriptor.sandboxedCodebase.confinesFilesystem } }
       : {}),
   };
 }

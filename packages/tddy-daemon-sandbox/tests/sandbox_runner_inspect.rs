@@ -29,7 +29,13 @@ fn tools_binary() -> PathBuf {
         })
 }
 
+/// A debugging script, not an assertion: it spawns a jail and prints the rendered plan, the
+/// probe exits and the seatbelt diagnostics, so a spawn failure can be read by a human. It
+/// asserts nothing, so it can never fail — and running it on every `cargo test` would pay for a
+/// real Seatbelt spawn to produce output nobody reads. Run it deliberately:
+/// `cargo test -p tddy-daemon-sandbox --test sandbox_runner_inspect -- --ignored --nocapture`.
 #[test]
+#[ignore = "debugging script: prints seatbelt spawn diagnostics, asserts nothing"]
 fn sandbox_runner_inspect_seatbelt_spawn() {
     let tmp = tempfile::tempdir().unwrap();
     let project = tmp.path().join("project");
@@ -175,4 +181,9 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
     let exit = handle.child_mut().try_wait().ok().flatten();
     eprintln!("child try_wait after 2s: {exit:?}");
     eprintln!("{}", format_sandbox_diagnostics(&egress, Some(&project)));
+
+    // Tear the jail down: `SandboxHandle` wraps a `std::process::Child`, which neither kills nor
+    // reaps on drop, so a run that ended here left a `tddy-sandbox-runner` alive on the host.
+    handle.child_mut().kill().ok();
+    handle.child_mut().wait().ok();
 }

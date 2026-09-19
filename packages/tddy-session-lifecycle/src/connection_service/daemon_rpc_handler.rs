@@ -18,6 +18,15 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
     async fn handle_rpc(&self, service: &str, method: &str, payload: &[u8]) -> tddy_rpc::RpcResult {
         use prost::Message;
         use tddy_rpc::Request;
+        // The bridge holds the daemon weakly (a strong reference would be a cycle through the
+        // host's own `sandbox_rpc_bridge` field), so the host is resolved once per call. A host
+        // that is gone is a refusal, never a silent empty answer — and the variant it is wrapped
+        // in does not matter: the relay turns `Unary(Err)` and `ServerStream(Err)` into the same
+        // terminal `RpcStreamFrame` with `error` set (`host_relay.rs`).
+        let conn = match self.host() {
+            Ok(conn) => conn,
+            Err(status) => return tddy_rpc::RpcResult::Unary(Err(status)),
+        };
         // Only the RPCs the runner forwards ride this bridge; anything else is a wiring bug
         // (the runner's `ToolExecService` would not forward it) and is refused with `not_found`
         // rather than reaching arbitrary `SessionAgentService` surface from inside a jail.
@@ -33,8 +42,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                         ));
                     }
                 };
-                match self
-                    .conn
+                match conn
                     .session_agents_service()
                     .stream_session_agents(Request::new(req))
                     .await
@@ -68,8 +76,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                         ));
                     }
                 };
-                match self
-                    .conn
+                match conn
                     .session_agents_service()
                     .open_agent_conversation(Request::new(req))
                     .await
@@ -89,8 +96,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                         ));
                     }
                 };
-                match self
-                    .conn
+                match conn
                     .session_agents_service()
                     .prompt_agent_conversation(Request::new(req))
                     .await
@@ -122,8 +128,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                         ));
                     }
                 };
-                match self
-                    .conn
+                match conn
                     .session_agents_service()
                     .cancel_agent_conversation(Request::new(req))
                     .await
@@ -143,8 +148,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                         ));
                     }
                 };
-                match self
-                    .conn
+                match conn
                     .session_agents_service()
                     .report_agent_conversation_state(Request::new(req))
                     .await

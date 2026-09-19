@@ -342,7 +342,10 @@ pub fn split_claude_extra_args(
 /// (`auth::build_auth_entries`), which is exactly why the codebase daemon will accept what is minted
 /// here. Every failure is a refusal rather than a fallback to forwarding the caller's token: an
 /// expired, forged or malformed credential must not buy a session-length one.
-fn mint_agent_session_token(api_secret: &str, caller_token: &str) -> Result<String, Status> {
+pub(crate) fn mint_agent_session_token(
+    api_secret: &str,
+    caller_token: &str,
+) -> Result<String, Status> {
     let signer = SessionTokenSigner::new(api_secret.as_bytes());
     let caller = verified_caller(&signer, caller_token)?;
     Ok(signer.mint(&caller, SPLIT_AGENT_TOKEN_TTL))
@@ -472,6 +475,43 @@ pub fn split_remote_tool_env(
         server_identity: Some(livekit.host_identity.clone()),
         livekit_token: Some(token),
     })
+}
+
+/// Build the `TDDY_REMOTE_*` environment for a **sandboxed codebase** agent — the placement whose
+/// jailed checkout is held by this very daemon.
+///
+/// The sibling of [`split_remote_tool_env`], with its central reasoning inverted. There, this
+/// daemon's own URL is deliberately left empty because it would answer from the wrong host's
+/// filesystem; here it is exactly the right route, because the workspace session holding the
+/// jailed checkout is one this daemon serves. So the HTTP transport is the only one configured,
+/// and **every LiveKit field is left unset**: the placement has no peer hop, so it needs no common
+/// room, no peer discovery and no join token, and a half-configured transport is how a daemon that
+/// has never joined a room would start failing to serve it.
+///
+/// `checkout_session_id` is the **workspace session** holding the worktree, not the agent's own —
+/// the same rule the split path follows, and here it is decisive twice over: the agent's own id
+/// resolves to a session with no worktree, and one `exec_tool_route` answers `HostWorktree` for,
+/// running every tool call outside the jail.
+///
+/// `agent_session_token` is minted for the agent (see [`mint_agent_session_token`]); the caller's
+/// own credential is proof of who asked and is never forwarded.
+pub fn colocated_jail_tool_env(
+    this_daemon_url: &str,
+    checkout_session_id: &str,
+    agent_session_token: &str,
+) -> RemoteToolEnv {
+    RemoteToolEnv {
+        daemon_url: this_daemon_url.to_string(),
+        session_id: checkout_session_id.to_string(),
+        session_token: agent_session_token.to_string(),
+        // No peer to forward to: `daemon_instance_id` is the hop a split takes to reach another
+        // host, and both halves of this placement are here.
+        daemon_instance_id: None,
+        livekit_url: None,
+        livekit_room: None,
+        server_identity: None,
+        livekit_token: None,
+    }
 }
 
 /// The room a split session's agent joins, and the credentials to mint its token.
@@ -1291,6 +1331,219 @@ mod tests {
         assert!(
             claude_md.contains("Grep \u{2014} handled by the `explorer` subagent"),
             "the notice must tie the withdrawn tool to the agent serving it; got:\n{claude_md}"
+        );
+    }
+}
+
+/// Unit tests for the **co-located jailed-codebase** tool env — the one seam the sandboxed-codebase
+/// placement adds beside [`split_remote_tool_env`].
+///
+/// These live here rather than in a `tddy-daemon` acceptance suite because the env is a `pub`
+/// construction over no I/O: asserting it directly reads better than standing a daemon up, and the
+/// assertion that matters is *which fields are left unset*, which an integration test can only
+/// observe indirectly.
+///
+/// PRD: docs/ft/daemon/amendments/PRD-2026-09-18-sandboxed-codebase-from-the-web.md
+#[cfg(test)]
+mod colocated_jail_tool_env_tests {
+    use super::colocated_jail_tool_env;
+
+    const THIS_DAEMON_URL: &str = "http://127.0.0.1:8787";
+    const AGENT_SESSION: &str = "019d105b-ac0f-78d3-9a89-409731145a36";
+    const CHECKOUT_SESSION: &str = "019d105b-ac0f-78d3-9a89-409731145a99";
+    const AGENT_TOKEN: &str = "a-token-minted-for-the-agent";
+
+    #[test]
+    fn a_jailed_codebase_agent_reaches_its_checkout_over_this_daemons_own_url() {
+        // Given a jailed checkout held by this daemon
+        // When
+        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN);
+
+        // Then this daemon's own URL is the route. `split_remote_tool_env` blanks it for the
+        // opposite reason — there the URL answers, but from the wrong host's filesystem.
+        assert_eq!(env.daemon_url, THIS_DAEMON_URL);
+    }
+
+    #[test]
+    fn a_jailed_codebase_agent_is_pointed_at_the_workspace_session_not_its_own() {
+        // Given an agent session and the workspace session holding its checkout
+        // When
+        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN);
+
+        // Then the agent's MCP addresses the checkout. Its own id resolves to a session with no
+        // worktree, and — decisively — one that `exec_tool_route` would answer `HostWorktree` for,
+        // running every tool call unconfined.
+        assert_eq!(env.session_id, CHECKOUT_SESSION);
+        assert_ne!(env.session_id, AGENT_SESSION);
+    }
+
+    #[test]
+    fn a_jailed_codebase_agent_is_given_no_livekit_transport() {
+        // Given both halves on this host
+        // When
+        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN);
+
+        // Then nothing LiveKit is configured — the placement must start on a daemon that has never
+        // joined a common room, and a half-set transport is how it would silently stop doing so.
+        assert_eq!(env.livekit_url, None);
+        assert_eq!(env.livekit_room, None);
+        assert_eq!(env.server_identity, None);
+        assert_eq!(env.livekit_token, None);
+    }
+
+    #[test]
+    fn a_jailed_codebase_agent_names_no_peer_daemon() {
+        // Given both halves on this host
+        // When
+        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN);
+
+        // Then there is no forwarding hint: `daemon_instance_id` is the hop a split takes to reach
+        // another host, and this placement has no hop to make.
+        assert_eq!(env.daemon_instance_id, None);
+    }
+
+    #[test]
+    fn a_jailed_codebase_agent_carries_its_own_minted_token() {
+        // Given a token minted for the agent, not the caller's own credential
+        // When
+        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN);
+
+        // Then it is what the agent presents — the caller's token is proof of who asked and is
+        // never forwarded, exactly as on the split path.
+        assert_eq!(env.session_token, AGENT_TOKEN);
+    }
+
+    #[test]
+    fn a_jailed_codebase_agents_env_exports_no_livekit_variables() {
+        // Given the env as the spawner will export it
+        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN);
+
+        // When
+        let exported: Vec<String> = env.env_pairs().into_iter().map(|(key, _)| key).collect();
+
+        // Then no TDDY_REMOTE_LIVEKIT_* reaches the process. `env_pairs` skips `None`, so this is
+        // the end-to-end form of the assertion above: a field set by mistake would appear here.
+        assert!(
+            !exported.iter().any(|key| key.contains("LIVEKIT")),
+            "a co-located jailed checkout needs no LiveKit; exported {exported:?}"
+        );
+        assert!(
+            exported.iter().any(|key| key == "TDDY_REMOTE_DAEMON_URL"),
+            "the HTTP route to this daemon must be exported; exported {exported:?}"
+        );
+    }
+}
+
+/// The withdrawal contract the **sandboxed codebase** placement rests on.
+///
+/// That placement runs `claude` unconfined on this host and puts the checkout in a jail, so the
+/// only thing standing between the agent and the host filesystem is `--disallowedTools`. It reuses
+/// [`split_claude_extra_args`] verbatim, because a split agent needs exactly the same argv for
+/// exactly the same reason — the difference between the two placements is where the checkout is,
+/// not what the agent is allowed to touch.
+///
+/// **These pass today.** They are a regression guard, not a specification of new behaviour: they
+/// exist so that narrowing `NATIVE_FILESYSTEM_TOOLS`, or making the allowlist conditional, fails
+/// here rather than silently un-confining a placement whose whole claim is this list. Without
+/// them, the jailed-codebase placement would depend on a shared builder with no test asserting the
+/// dependency.
+///
+/// PRD: docs/ft/daemon/amendments/PRD-2026-09-18-sandboxed-codebase-from-the-web.md
+#[cfg(test)]
+mod withdrawal_contract_tests {
+    use super::split_claude_extra_args;
+    use std::path::Path;
+
+    /// Every native route to a filesystem or a shell. An unconfined agent that kept any one of
+    /// these could reach around the jail holding its checkout.
+    const EVERY_NATIVE_ROUTE_TO_THE_HOST: &[&str] = &[
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "NotebookEdit",
+        "Grep",
+        "Glob",
+        "LS",
+        "Bash",
+        "BashOutput",
+        "KillShell",
+    ];
+
+    fn args_for_a_session_with_no_roster(session_dir: &Path) -> Vec<String> {
+        split_claude_extra_args(session_dir, "/usr/bin/tddy-tools", &[])
+            .expect("building the withdrawal argv must not fail")
+    }
+
+    fn values_of(flag: &str, args: &[String]) -> Vec<String> {
+        args.windows(2)
+            .filter(|pair| pair[0] == flag)
+            .map(|pair| pair[1].clone())
+            .collect()
+    }
+
+    #[test]
+    fn the_agent_argv_withdraws_every_native_route_to_the_host() {
+        // Given a session directory to write the MCP config into
+        let session = tempfile::tempdir().expect("session tempdir");
+
+        // When
+        let args = args_for_a_session_with_no_roster(session.path());
+
+        // Then not one native filesystem or shell tool survives
+        let disallowed = values_of("--disallowedTools", &args);
+        for tool in EVERY_NATIVE_ROUTE_TO_THE_HOST {
+            assert!(
+                disallowed.iter().any(|t| t == tool),
+                "{tool} must be withdrawn — it is a route to the host the jail does not cover; \
+                 --disallowedTools carried {disallowed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_agent_argv_keeps_the_mcp_tool_forms_it_is_left_with() {
+        // Given a session directory
+        let session = tempfile::tempdir().expect("session tempdir");
+
+        // When
+        let args = args_for_a_session_with_no_roster(session.path());
+
+        // Then the proxied forms survive. Withdrawing these too would leave the agent no route to
+        // the checkout at all, which is a broken session rather than a confined one.
+        let disallowed = values_of("--disallowedTools", &args);
+        assert!(
+            !disallowed
+                .iter()
+                .any(|tool| tool.starts_with("mcp__tddy-tools__")),
+            "the MCP forms are the only route left to the code; --disallowedTools carried \
+             {disallowed:?}"
+        );
+        let allowed = values_of("--allowedTools", &args);
+        assert!(
+            allowed
+                .iter()
+                .any(|tool| tool.starts_with("mcp__tddy-tools__")),
+            "the MCP forms must be pre-approved, or every tool call meets a permission prompt; \
+             --allowedTools carried {allowed:?}"
+        );
+    }
+
+    #[test]
+    fn the_agent_loads_no_mcp_configuration_but_its_own() {
+        // Given a session directory
+        let session = tempfile::tempdir().expect("session tempdir");
+
+        // When
+        let args = args_for_a_session_with_no_roster(session.path());
+
+        // Then `--strict-mcp-config` is present. Without it the operator's own user-scoped MCP
+        // servers load beside `tddy-tools` — on *this* host, under `mcp__*` names the disallowlist
+        // does not cover, which is a route around the jail that no tool list can close.
+        assert!(
+            args.iter().any(|arg| arg == "--strict-mcp-config"),
+            "the withdrawal must be impossible to route around, not merely the default; got \
+             {args:?}"
         );
     }
 }

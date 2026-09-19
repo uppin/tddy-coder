@@ -539,6 +539,13 @@ message StartSessionRequest {
   // failure (`BatchMode=yes`), never a passphrase prompt and never a fallback to LocalShell.
   // See docs/ft/web/1-WIP/PRD-2026-09-14-ssh-exec.md.
   string ssh_config_host = 38;
+  // Jail this session's own checkout and run the agent beside it, unconfined, with its native
+  // filesystem and shell tools withdrawn — the inverted placement of
+  // docs/ft/coder/sandboxed-codebase-mode.md, served by this daemon rather than by
+  // tddy-sandbox-app. Requires session_type = "claude-cli". Mutually exclusive with
+  // managed_codebase (which jails the agent instead), with sandbox (same), and with
+  // codebase_daemon_instance_id (that is the same inversion across two hosts, already served).
+  bool sandboxed_codebase = 39;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

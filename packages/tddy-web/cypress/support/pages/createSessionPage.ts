@@ -132,6 +132,10 @@ export const createSessionPage = {
     byTestId(TEST_IDS.createSessionSshConfigSelect).should("not.exist");
   },
 
+  /** The "Managed codebase" checkbox — jails the agent and leaves the checkout on the host. */
+  managedCodebaseToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle, { timeout: 5000, ...options }),
+
   /** Open the "Managed codebase" section, which is where split placement is configured. */
   enableManagedCodebase() {
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
@@ -244,6 +248,38 @@ export const createSessionPage = {
   /** The "Semantic index" checkbox — indexes a worktree on the session's own daemon before launch. */
   semanticIndexToggle: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionSemanticIndexToggle, { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Sandboxed codebase — the inverted placement: the checkout is jailed, the agent is not.
+  // See docs/ft/daemon/amendments/PRD-2026-09-18-sandboxed-codebase-from-the-web.md
+  // ---------------------------------------------------------------------------
+
+  /** The "Sandboxed codebase" checkbox — jails the checkout and runs the agent beside it. */
+  sandboxedCodebaseToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionSandboxedCodebaseToggle, { timeout: 5000, ...options }),
+
+  /** Choose the sandboxed-codebase placement. */
+  enableSandboxedCodebase() {
+    byTestId(TEST_IDS.createSessionSandboxedCodebaseToggle).check();
+  },
+
+  /** Choose the Sandbox placement — jails the agent on the session's own daemon. */
+  enableSandbox() {
+    byTestId(TEST_IDS.createSessionSandboxToggle).check();
+  },
+
+  /** The placement is not offered at all in the current form state. */
+  expectNoSandboxedCodebaseToggle() {
+    byTestId(TEST_IDS.createSessionSandboxedCodebaseToggle).should("not.exist");
+  },
+
+  /** The reason the selected host cannot serve the sandboxed-codebase placement. */
+  sandboxedCodebaseUnavailableReason: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionSandboxedCodebaseUnavailable, { timeout: 5000, ...options }),
+
+  /** What the selected host's jail does not confine, stated beside an enabled toggle. */
+  sandboxedCodebaseCaveat: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionSandboxedCodebaseCaveat, { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------
   // PR stack parent — the orchestrator a child session is stacked under

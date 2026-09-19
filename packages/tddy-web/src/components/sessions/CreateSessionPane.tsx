@@ -1,14 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
-import type { Client } from "@connectrpc/connect";
-import type { BranchConflict, SessionService, SessionEntry } from "../../gen/session_pb";
-import type { ProjectService, ProjectEntry } from "../../gen/project_pb";
-import { CatalogService, type ToolInfo } from "../../gen/catalog_pb";
-import type { SessionFilesService } from "../../gen/session_files_pb";
-import type { WorktreeService } from "../../gen/worktree_pb";
-import { localBranchName } from "../../lib/branchNames";
+import type { BranchConflict } from "../../gen/session_pb";
 import { projectSelectOptions } from "../../lib/projectSelectOptions";
-import { safeTestIdPart } from "../../lib/testId";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 import {
   startSessionOverridesFor,
@@ -24,14 +17,32 @@ import {
   type SessionAttachmentInit,
   type StartSessionRequestInit,
 } from "../../hooks/useSessionAttachments";
-import { Button } from "../ui/button";
 import { useAvailableAgents } from "./useAvailableAgents";
-import { CreateSessionAgentSelect } from "./CreateSessionAgentSelect";
-import {
-  CreateSessionSshConfigSelect,
-  sshConfigListDaemonId,
-} from "./CreateSessionSshConfigSelect";
+import { sshConfigListDaemonId } from "./CreateSessionSshConfigSelect";
 import { inputClass, labelClass } from "./createSessionFormStyles";
+import { WORKFLOW_RECIPES } from "./createSessionRecipes";
+import { buildStartSessionRequest, type SessionType } from "./createSessionRequest";
+import { CreateSessionTypeToggle } from "./CreateSessionTypeToggle";
+import { CreateSessionModelField } from "./CreateSessionModelField";
+import { CreateSessionAgentPickerSection } from "./CreateSessionAgentPickerSection";
+import { CreateSessionToolFields } from "./CreateSessionToolFields";
+import { CreateSessionCursorCliFields } from "./CreateSessionCursorCliFields";
+import { CreateSessionSandboxedCodebaseToggle } from "./CreateSessionSandboxedCodebaseToggle";
+import { CreateSessionManagedCodebaseFields } from "./CreateSessionManagedCodebaseFields";
+import { CreateSessionBranchFields } from "./CreateSessionBranchFields";
+import { CreateSessionHostAndProjectFields } from "./CreateSessionHostAndProjectFields";
+import { CreateSessionAttachmentsSection } from "./CreateSessionAttachmentsSection";
+import { CreateSessionPermissionFields } from "./CreateSessionPermissionFields";
+import { CreateSessionActions } from "./CreateSessionActions";
+import { CreateSessionStackParentSelect } from "./CreateSessionStackParentSelect";
+import { useProjectBranches } from "./useProjectBranches";
+import { useCreateSessionCatalogs } from "./useCreateSessionCatalogs";
+import type { CreateSessionPaneProps } from "./createSessionPaneProps";
+import {
+  placementAfterToggling,
+  sandboxedCodebaseUnavailability,
+  type CodebasePlacementChoice,
+} from "./codebasePlacement";
 import { useSelectableAgents } from "./useSelectableAgents";
 import {
   agentForHost,
@@ -39,121 +50,17 @@ import {
   selectableAgentValue,
 } from "./selectableAgentOptions";
 import { BranchConflictDialog } from "./BranchConflictDialog";
-import { AttachmentDropZone } from "./attachments/AttachmentDropZone";
-import type { InitialAttachment } from "./attachments/pendingAttachment";
-import { HostDocumentPicker } from "./attachments/HostDocumentPicker";
-import { SessionAttachmentList } from "./attachments/SessionAttachmentList";
 
 /** Pseudo-agent key used to fetch the claude-cli session type's model catalog. */
 const CLAUDE_CLI_AGENT = "claude-cli";
 const CURSOR_CLI_AGENT = "cursor-cli";
 
-const WORKFLOW_RECIPES = [
-  "tdd",
-  "tdd-small",
-  "bugfix",
-  "free-prompting",
-  "grill-me",
-  "review",
-  "merge-pr",
-  "pr-stack",
-] as const;
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type ConnectionClient = Client<typeof SessionService>;
-type ProjectClient = Client<typeof ProjectService>;
-type CatalogClient = Client<typeof CatalogService>;
-type SessionFilesClient = Client<typeof SessionFilesService>;
-type WorktreeClient = Client<typeof WorktreeService>;
-
-type SessionType = "tool" | "claude-cli" | "cursor-cli";
 type BranchIntent = BranchWorktreeIntent;
 
-/**
- * Optional pre-fill for the form's fields. Used when the pane is opened from a context that already
- * knows what the session should look like (e.g. the PR-stack "Start session" flow pre-fills the
- * branch, prompt, and stack parent). Any field left unset keeps the form's own default.
- */
-export type CreateSessionInitialValues = Partial<{
-  sessionType: SessionType;
-  projectId: string;
-  recipe: string;
-  model: string;
-  permissionMode: string;
-  dangerouslySkipPermissions: boolean;
-  stackParent: string;
-  /**
-   * The planned node in {@link stackParent}'s stack that this session materializes. Sent as
-   * `StartSessionRequest.stack_node_id` so the daemon links the node by identity instead of matching
-   * on the branch the spawn creates (D34) — the operator can rename that branch in this very form
-   * before confirming, and a daemon on another host than the orchestrator cannot read its stack to
-   * derive anything from it. Empty for every other caller, which keeps the branch-derived local
-   * lookup the agent's own `spawn-child` relies on.
-   */
-  stackNodeId: string;
-  branchIntent: BranchIntent;
-  newBranchName: string;
-  /**
-   * Existing branch to pre-select in "Work on existing branch" mode — e.g. the branch a planned PR
-   * already owns, which is resumed rather than re-created. Survives the async `ListProjectBranches`
-   * load, which would otherwise auto-select the project's first branch.
-   *
-   * Named the way the rest of the domain names a branch (`feature/x`); the picker's own options are
-   * remote-tracking refs (`origin/feature/x`) and are matched on the local name behind them.
-   */
-  selectedBranch: string;
-  /** Pre-check state for the "Create Remote Branch" toggle (new-branch mode). Defaults to checked. */
-  createRemoteBranch: boolean;
-  /** Concrete base branch shown in the new-branch option: "New branch from base: <baseBranchLabel>". */
-  baseBranchLabel: string;
-  /**
-   * Ordered base-branch options for the "Base branch" selector (planned-PR child sessions). Each
-   * option carries the ref it submits and its caption separately: a legacy project's project default
-   * is the empty ref the daemon resolves itself, which needs a label naming it rather than a blank
-   * option (see `baseBranchChoice`).
-   */
-  baseBranchOptions: BaseBranchOption[];
-  /**
-   * Pre-selected base branch in the "Base branch" selector — the caller's derived base, which is
-   * always one of `baseBranchOptions`.
-   */
-  selectedBaseBranch: string;
-  initialPrompt: string;
-  daemonInstanceId: string;
-  /**
-   * Documents the form opens with already attached — a *default* the operator can drop, not an
-   * invariant. Used by the PR-stack Start-session flow, which pre-attaches the planned node's own
-   * PRD and changeset plus the stack's shared documents (docs/ft/coder/pr-stack-docs.md).
-   */
-  attachments: InitialAttachment[];
-}>;
-
-export interface CreateSessionPaneProps {
-  client: ConnectionClient;
-  /** `project.ProjectService` on the same host as `client` — project registry reads. */
-  projectClient: ProjectClient;
-  /** `catalog.CatalogService` on the same host as `client` — tools, agents and model probes. */
-  catalogClient: CatalogClient;
-  /**
-   * The session-files service on the same host as `client` — the form stages its local attachments
-   * and lists the upload scope through it. Required for the reason `worktreeClient` is: without one
-   * a staged upload silently has nowhere to go.
-   */
-  sessionFilesClient: SessionFilesClient;
-  /**
-   * The worktree service on the same host as `client` — the host-document picker's tree scopes
-   * browse through it. Required for the reason `HostDocumentPicker.worktreeClient` is: without one
-   * the tree scopes list nothing, and nothing is what an empty worktree looks like.
-   */
-  worktreeClient: WorktreeClient;
-  sessionToken: string;
-  onCancel: () => void;
-  onCreated: (sessionId: string) => void;
-  initialValues?: CreateSessionInitialValues;
-}
+export type {
+  CreateSessionInitialValues,
+  CreateSessionPaneProps,
+} from "./createSessionPaneProps";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -228,13 +135,24 @@ export function CreateSessionPane({
     initialValues?.daemonInstanceId || selectedInstanceId || "",
   );
 
-  const [projects, setProjects] = useState<ProjectEntry[]>([]);
-  const [tools, setTools] = useState<ToolInfo[]>([]);
+  const { projects, sessions } = useCreateSessionCatalogs({
+    client,
+    projectClient,
+    catalogClient,
+    sessionToken,
+    setToolPath,
+    setProjectId,
+  });
+
   // The qualified ids (`name@daemon_instance_id`) of the agents to attach at start. Qualified rather
   // than bare names because the picker lists every host's agents and two hosts routinely offer a def
   // of the same name — a bare name cannot say which of them was picked.
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
   const [managedCodebase, setManagedCodebase] = useState(false);
+  // The inverted placement: this session's own checkout inside a `--workspace-tools` jail, with the
+  // agent beside it, unconfined and stripped of its native filesystem and shell tools.
+  // See docs/ft/daemon/amendments/PRD-2026-09-18-sandboxed-codebase-from-the-web.md.
+  const [sandboxedCodebase, setSandboxedCodebase] = useState(false);
   const [semanticIndex, setSemanticIndex] = useState(false);
   // Which daemon's filesystem holds the worktree. Empty means "same as host" — the co-located
   // placement every session had before docs/ft/daemon/remote-managed-worktree.md.
@@ -276,8 +194,6 @@ export function CreateSessionPane({
   // The whole session list as the daemon reported it. Kept raw because two pickers draw different
   // views of it — the orchestrators that can parent this session, and the sessions that own a branch
   // a stack can be seeded from — and one fetch feeds both.
-  const [sessions, setSessions] = useState<SessionEntry[]>([]);
-  const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Set when the daemon refused a creation because another session already owns the requested branch.
@@ -324,6 +240,79 @@ export function CreateSessionPane({
    * sending `daemonInstanceId` exactly as the form holds it.
    */
   const agentHostInstanceId = hostRunningSession(daemonInstanceId, connectedInstanceId);
+
+  /** The directory's entry for the host running this session, or `null` when it names none. */
+  const sessionHost = daemons.find((d) => d.instanceId === agentHostInstanceId) ?? null;
+
+  /**
+   * Why that host cannot jail this session's checkout, or `null` when it can.
+   *
+   * Read off the host's own advertisement rather than guessed from a platform: a daemon too old to
+   * advertise the capability would answer the request field by starting an ordinary, unconfined
+   * session. A host the directory does not name at all is no advertisement either.
+   */
+  const sandboxedCodebaseUnavailableReason = sandboxedCodebaseUnavailability(sessionHost);
+
+  /** What that host's jail leaves unconfined, when it says so. Absent = nothing to caveat. */
+  const jailSharesTheFilesystemRoot =
+    sessionHost?.sandboxedCodebase?.confinesFilesystem === false;
+
+  // A placement the selected host cannot serve is one the form must not hold: the host is pickable
+  // after the placement is, and a request carrying a choice the disabled control would never have
+  // allowed is how a session comes back unconfined with nothing said.
+  useEffect(() => {
+    if (sandboxedCodebaseUnavailableReason !== null) setSandboxedCodebase(false);
+  }, [sandboxedCodebaseUnavailableReason]);
+
+  /**
+   * The placement the form currently holds, as the rules module names it.
+   *
+   * `Sandbox` and `Managed codebase` coexist — on a split placement the sandbox confines the
+   * codebase host, so the daemon admits the pair — and either of them means the codebase is not
+   * jailed, which is all the rule needs from them. Their order here is therefore immaterial.
+   */
+  const currentPlacement: CodebasePlacementChoice = sandboxedCodebase
+    ? "sandboxedCodebase"
+    : managedCodebase
+      ? "managed"
+      : sandbox
+        ? "sandbox"
+        : "none";
+
+  /**
+   * Apply the placement rule for the control the operator just toggled.
+   *
+   * Only the jailed codebase is exclusive with *both* of the others, so this owns exactly that
+   * axis: the two older toggles keep their own state, and choosing either of them clears the jail.
+   * Choosing the jail clears them, together with everything only the managed section could offer —
+   * a selection the operator can no longer see is one the form must no longer hold.
+   */
+  /**
+   * Whether this placement withdraws `--dangerously-skip-permissions`.
+   *
+   * Both placements that withdraw it confine the agent the same way — by taking its native
+   * filesystem and shell tools off its argv — so on both, the deny list *is* the confinement.
+   * Whether that list survives the bypass flag is not something this repo pins, so the control is
+   * withheld rather than the combination assumed safe, and the daemon refuses each by name. A
+   * split session withdraws it because it has no local worktree for the flag to be about; a
+   * jailed codebase withdraws it because the flag would be about the one thing keeping the agent
+   * out of the host's filesystem.
+   * See docs/ft/daemon/amendments/PRD-2026-09-18-sandboxed-codebase-from-the-web.md
+   * § What's staying the same.
+   */
+  const placementWithdrawsPermissionBypass = isSplitCodebase || sandboxedCodebase;
+
+  const applyPlacement = (toggled: CodebasePlacementChoice, on: boolean) => {
+    const next = placementAfterToggling(currentPlacement, toggled, on);
+    setSandboxedCodebase(next === "sandboxedCodebase");
+    if (next === "sandboxedCodebase") {
+      setSandbox(false);
+      setManagedCodebase(false);
+      setSemanticIndex(false);
+      setSelectedAgentIds([]);
+      setCodebaseDaemonInstanceId("");
+    }
+  };
 
   /**
    * Host whose `~/.ssh/config` the SSH dropdown lists. Co-located: the session host. Split: the
@@ -384,91 +373,16 @@ export function CreateSessionPane({
     );
   };
 
-  // Load data on mount
-  useEffect(() => {
-    let cancelled = false;
-
-    // Fetch sessions separately so a network failure doesn't block the rest of the form.
-    client
-      .listSessions({ sessionToken })
-      .then((resp) => {
-        if (cancelled) return;
-        setSessions(resp.sessions as SessionEntry[]);
-      })
-      .catch(() => {
-        // Session list is best-effort; failing to fetch it just leaves the stack-parent and
-        // stack-base pickers with nothing to offer.
-      });
-
-    // Agents are not read here: they are fanned out across every host by `useSelectableAgents`,
-    // since one daemon's answer speaks only for itself.
-    Promise.all([projectClient.listProjects({ sessionToken }), catalogClient.listTools({})])
-      .then(([projectsResp, toolsResp]) => {
-        if (cancelled) return;
-
-        const loadedProjects = projectsResp.projects as ProjectEntry[];
-        const loadedTools = toolsResp.tools as ToolInfo[];
-
-        setProjects(loadedProjects);
-        setTools(loadedTools);
-
-        // Auto-select toolPath.
-        if (loadedTools.length > 0) {
-          setToolPath(loadedTools[0]!.path);
-        }
-        // Auto-select projectId when there is exactly one choice — no meaningful decision. Counted
-        // in offered options, not rows: a single project carried by two hosts is still one choice.
-        const loadedOptions = projectSelectOptions(loadedProjects);
-        if (loadedOptions.length === 1) {
-          setProjectId(loadedOptions[0]!.projectId);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          console.debug("[CreateSessionPane] load error", err);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [client, projectClient, catalogClient, sessionToken]);
-
-  // Load branches when projectId changes and intent is work_on_selected_branch
-  useEffect(() => {
-    if (!projectId || branchIntent !== "work_on_selected_branch") return;
-    let cancelled = false;
-    projectClient
-      .listProjectBranches({ sessionToken, projectId, daemonInstanceId })
-      .then((resp) => {
-        if (!cancelled) {
-          setRemoteBranches(resp.branches);
-          if (resp.branches.length > 0) {
-            // A pre-filled branch wins over the default first entry, but only while the project
-            // actually offers it — otherwise the <select> would hold a value none of its options
-            // match, and submit would send a branch this project does not have.
-            //
-            // Matched on the *local* branch name behind each option, because `ListProjectBranches`
-            // lists remote-tracking refs (`<remote>/<branch>`) while callers name the branch the way
-            // the rest of the domain does. Comparing the raw strings never matches, and the
-            // pre-fill then degrades silently into an unrelated branch — the operator resumes the
-            // wrong branch with no warning. The remote is the daemon-resolved default
-            // (`resp.defaultRemote`), so a non-`origin` project strips the right prefix.
-            const remote = resp.defaultRemote || "origin";
-            const wanted = localBranchName(preFilledBranchToWorkOn, remote);
-            const offered = resp.branches.find((b) => localBranchName(b, remote) === wanted);
-            setSelectedBranchToWorkOn(offered ?? resp.branches[0]!);
-          }
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          console.debug("[CreateSessionPane] listProjectBranches error", err);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [client, sessionToken, projectId, branchIntent, daemonInstanceId, preFilledBranchToWorkOn]);
+  const remoteBranches = useProjectBranches({
+    client,
+    projectClient,
+    sessionToken,
+    projectId,
+    branchIntent,
+    daemonInstanceId,
+    preFilledBranchToWorkOn,
+    setSelectedBranchToWorkOn,
+  });
 
   // The sessions whose branch can seed this orchestrator's stack — scoped to the project and host
   // the form will actually create it on, because a base session in another repository (or on another
@@ -489,29 +403,21 @@ export function CreateSessionPane({
   // The attach rows and everything that follows from them: the effective size cap, the refusal shown
   // next to a bad row, the upload of local files on submit, and the streamed start that reports the
   // host's materialization progress.
-  const {
-    attachments,
-    progress: attachmentProgress,
-    stagingDaemonInstanceId,
-    problem: attachmentProblem,
-    pickRefusal,
-    hostDocPickerOpen,
-    attachFiles,
-    attachHostDocument,
-    renameAttachment,
-    removeAttachment,
-    openHostDocPicker,
-    closeHostDocPicker,
-    resetProgress: resetAttachmentProgress,
-    stageAttachments,
-    startSessionStreamed,
-  } = useSessionAttachments({
+  const sessionAttachments = useSessionAttachments({
     client,
     sessionFilesClient,
     sessionToken,
     sessionDaemonInstanceId: daemonInstanceId,
     initialAttachments: initialValues?.attachments,
   });
+  // The four the pane itself reads; the rest are the attachments section's, which takes the whole
+  // hook result rather than fifteen props.
+  const {
+    problem: attachmentProblem,
+    resetProgress: resetAttachmentProgress,
+    stageAttachments,
+    startSessionStreamed,
+  } = sessionAttachments;
 
   const isSubmitEnabled = (() => {
     if (submitting) return false;
@@ -526,113 +432,46 @@ export function CreateSessionPane({
     return Boolean(projectId && model);
   })();
 
-  /**
-   * Build one `StartSession` request for the current form state, with the branch fields optionally
-   * overridden by a branch-conflict resolution (which re-runs the same creation under different
-   * branch fields).
-   */
+  /** Build one `StartSession` request for the current form state. */
   const startSessionRequest = (
     branchOverrides: BranchFieldOverrides | null,
     requestAttachments: SessionAttachmentInit[],
-  ): StartSessionRequestInit => {
-    const commonParams = {
-      sessionToken,
-      projectId,
-      branchWorktreeIntent: branchIntent,
-      newBranchName,
-      createRemoteBranch,
-      selectedIntegrationBaseRef: selectedBaseBranch,
-      selectedBranchToWorkOn,
-      daemonInstanceId,
-      // Ask to be refused rather than silently given `<branch>-1` when another session owns the
-      // branch: this form has an operator to prompt. See docs/ft/daemon/session-branch-conflict.md.
-      onBranchConflict: "reject",
-      // Documents the daemon materializes before the agent starts. Empty for a form with nothing
-      // attached, which is byte-for-byte the request this pane has always sent.
-      attachments: requestAttachments,
-      ...branchOverrides,
-    };
-    if (sessionType === "tool") {
-      return {
-        ...commonParams,
+  ): StartSessionRequestInit =>
+    buildStartSessionRequest(
+      {
+        sessionToken,
+        projectId,
+        branchIntent,
+        newBranchName,
+        createRemoteBranch,
+        selectedBaseBranch,
+        selectedBranchToWorkOn,
+        daemonInstanceId,
+        sessionType,
         toolPath,
-        // The bare id the host knows it by — the option's value is qualified for the select's sake
-        // only, and `daemonInstanceId` already carries the host beside it.
-        agent: selectedAgentId,
+        selectedAgentId,
         recipe,
         stackParent,
         stackNodeId,
-        // No owning host: a tool session's chain base is resolved by the `tddy-coder` the daemon
-        // spawns, against that process's own sessions tree, not by the daemon at start. Sending a
-        // host here would name a routing the start never performs.
-        stackParentDaemonInstanceId: "",
-        // Only the tool branch can create an orchestrator, so only it can name a session to seed the
-        // orchestrator's stack from. Sent only for the recipe whose picker offered it — the daemon
-        // refuses a base session named beside any other recipe rather than dropping it silently, so a
-        // choice made before switching recipes must not leak into the request.
-        prStackBaseSessionId: recipe === "pr-stack" ? prStackBaseSessionId : "",
-        sessionType: "",
-        model,
-        permissionMode: "",
-        initialPrompt: "",
-        sandbox: false,
-      };
-    }
-    if (sessionType === "cursor-cli") {
-      return {
-        ...commonParams,
-        toolPath: "",
-        agent: "",
-        recipe: managedCodebase ? recipe : "",
-        stackParent,
         stackParentDaemonInstanceId,
-        stackNodeId,
-        sessionType: "cursor-cli",
+        prStackBaseSessionId,
         model,
-        permissionMode: "",
+        permissionMode,
+        dangerouslySkipPermissions,
+        placementWithdrawsPermissionBypass,
         initialPrompt,
         sandbox,
         managedCodebase,
-        specializedAgents: selectedAgentIds,
+        sandboxedCodebase,
+        isSplitCodebase,
+        selectedAgentIds,
         semanticIndex,
-        // cursor-agent has no tool allowlist, so a split codebase could only be suggested to it,
-        // never enforced — the daemon refuses such a request. Both managed-codebase blocks share
-        // state, so a host picked while the form was claude-cli must not survive the switch here.
-        codebaseDaemonInstanceId: "",
-      };
-    }
-    return {
-      ...commonParams,
-      toolPath: "",
-      agent: "",
-      // A recipe's tooling runs against a repository on the daemon hosting the agent, which a
-      // split session does not have — the daemon refuses the combination. The form defaults
-      // `recipe` to a non-empty value, so without this a split session would be created as a
-      // request that cannot succeed.
-      recipe: managedCodebase && !isSplitCodebase ? recipe : "",
-      stackParent,
-      stackParentDaemonInstanceId,
-      stackNodeId,
-      sessionType: "claude-cli",
-      model,
-      permissionMode,
-      dangerouslySkipPermissions: isSplitCodebase ? false : dangerouslySkipPermissions,
-      initialPrompt,
-      sandbox,
-      managedCodebase,
-      // Both ride along on any placement, split or not — an agent reads the codebase through its
-      // own placement, and the index is built wherever the worktree is. Only `managedCodebase`
-      // gates them: without a managed codebase there is nothing to index and no worktree to give
-      // an agent, and the picker and toggle are hidden, so neither value may leak into the request.
-      specializedAgents: selectedAgentIds,
-      semanticIndex,
-      // A remote worktree is reachable only through the mcp__tddy-tools__* proxy that managed
-      // codebase installs, so a placement chosen before the toggle was switched off would name a
-      // combination the daemon refuses.
-      codebaseDaemonInstanceId: isSplitCodebase ? codebaseDaemonInstanceId : "",
-      sshConfigHost,
-    };
-  };
+        codebaseDaemonInstanceId,
+        sshConfigHost,
+      },
+      branchOverrides,
+      requestAttachments,
+    );
 
   const submitCreation = async (branchOverrides: BranchFieldOverrides | null) => {
     // Use flushSync to commit the submitting state synchronously before the async fetch starts.
@@ -695,81 +534,16 @@ export function CreateSessionPane({
     void submitCreation(branchOverrides);
   };
 
-  // Model selector — shared by both session types, populated from the daemon-advertised catalog for
-  // the current backend. While the probe is in flight it shows a loading line; a failed probe shows
-  // an inline error and renders no select (so `model` stays empty and Create is disabled).
   const modelField = (
-    <div>
-      <label className={labelClass} htmlFor="create-session-model">
-        Model
-      </label>
-      {agentModels.loading ? (
-        <p data-testid="create-session-model-loading" className="text-sm text-muted-foreground">
-          Loading models…
-        </p>
-      ) : agentModels.error !== null ? (
-        <p data-testid="create-session-model-error" className="text-sm text-destructive">
-          {agentModels.error}
-        </p>
-      ) : (
-        <select
-          id="create-session-model"
-          data-testid="create-session-model-select"
-          className={inputClass}
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-        >
-          {agentModels.models.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-      )}
-    </div>
+    <CreateSessionModelField agentModels={agentModels} model={model} setModel={setModel} />
   );
 
-  // The specialized-agent multi-select, shared by the cursor-cli and claude-cli managed-codebase
-  // blocks. Every host's agents are listed together, so each option names the host that offers it
-  // and submits the qualified id — picking "explorer" here cannot silently start another host's
-  // agent of the same name. A host that could not be listed is one row; the rest stay on offer.
   const agentPickerSection = (
-    <div data-testid="create-session-managed-codebase-section" className="space-y-1">
-      {availableAgents.failures.map((failure) => (
-        <p
-          key={failure.daemonInstanceId}
-          data-testid={`create-session-agent-host-error-${safeTestIdPart(failure.daemonInstanceId)}`}
-          className="text-sm text-destructive"
-        >
-          {`${failure.daemonInstanceId}: ${failure.message}`}
-        </p>
-      ))}
-      {availableAgents.agents.length === 0 && availableAgents.failures.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No specialized agents available</p>
-      ) : (
-        availableAgents.agents.map((agent) => (
-          <label
-            key={agent.agentId}
-            className="flex items-center gap-2 text-sm text-muted-foreground"
-          >
-            <input
-              data-testid={`create-session-agent-${safeTestIdPart(agent.agentId)}`}
-              type="checkbox"
-              className="h-4 w-4 rounded border-input"
-              checked={selectedAgentIds.includes(agent.agentId)}
-              onChange={() => toggleAgent(agent.agentId)}
-            />
-            <span>{agent.label || agent.name}</span>
-            <span
-              data-testid={`create-session-agent-${safeTestIdPart(agent.agentId)}-host`}
-              className="text-xs"
-            >
-              {agent.daemonInstanceId}
-            </span>
-          </label>
-        ))
-      )}
-    </div>
+    <CreateSessionAgentPickerSection
+      availableAgents={availableAgents}
+      selectedAgentIds={selectedAgentIds}
+      toggleAgent={toggleAgent}
+    />
   );
 
   return (
@@ -780,246 +554,53 @@ export function CreateSessionPane({
       <h2 className="text-sm font-semibold">New session</h2>
 
       {/* Session type toggle */}
-      <div className="flex gap-2">
-        <button
-          type="button"
-          data-testid="create-session-type-tool"
-          aria-pressed={sessionType === "tool"}
-          onClick={() => setSessionType("tool")}
-          className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
-            sessionType === "tool"
-              ? "bg-primary text-primary-foreground border-primary"
-              : "bg-background text-foreground border-input hover:bg-muted"
-          }`}
-        >
-          Tool
-        </button>
-        <button
-          type="button"
-          data-testid="create-session-type-claude-cli"
-          aria-pressed={sessionType === "claude-cli"}
-          onClick={() => setSessionType("claude-cli")}
-          className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
-            sessionType === "claude-cli"
-              ? "bg-primary text-primary-foreground border-primary"
-              : "bg-background text-foreground border-input hover:bg-muted"
-          }`}
-        >
-          Claude CLI
-        </button>
-        <button
-          type="button"
-          data-testid="create-session-type-cursor-cli"
-          aria-pressed={sessionType === "cursor-cli"}
-          onClick={() => setSessionType("cursor-cli")}
-          className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
-            sessionType === "cursor-cli"
-              ? "bg-primary text-primary-foreground border-primary"
-              : "bg-background text-foreground border-input hover:bg-muted"
-          }`}
-        >
-          Cursor CLI
-        </button>
-      </div>
+      <CreateSessionTypeToggle sessionType={sessionType} setSessionType={setSessionType} />
 
-      {/* Host — which daemon runs the session. Only shown when the common room advertises daemons. */}
-      {daemons.length > 0 && (
-        <div>
-          <label className={labelClass} htmlFor="create-session-host">
-            Host
-          </label>
-          <select
-            id="create-session-host"
-            data-testid="create-session-host-select"
-            className={inputClass}
-            value={daemonInstanceId}
-            onChange={(e) => setDaemonInstanceId(e.target.value)}
-          >
-            {daemons.map((d) => (
-              <option key={d.instanceId} value={d.instanceId}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      <div>
-        <label className={labelClass} htmlFor="create-session-project">
-          Project
-        </label>
-        <select
-          id="create-session-project"
-          data-testid="create-session-project-select"
-          className={inputClass}
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-        >
-          <option value="" disabled>
-            {projects.length === 0 ? "No projects available" : "Select a project…"}
-          </option>
-          {projectOptions.map((option) => (
-            <option key={option.projectId} value={option.projectId}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
+      <CreateSessionHostAndProjectFields
+        daemons={daemons}
+        daemonInstanceId={daemonInstanceId}
+        setDaemonInstanceId={setDaemonInstanceId}
+        projects={projects}
+        projectOptions={projectOptions}
+        projectId={projectId}
+        setProjectId={setProjectId}
+      />
 
       {/* Tool session fields */}
       {sessionType === "tool" && (
-        <>
-          <CreateSessionAgentSelect
-            agents={offeredAgents}
-            failures={offeredHostFailures}
-            hostsAdvertised={hostsAdvertised}
-            selectedValue={selectedAgentValue}
-            onPick={(picked) => {
-              setAgent(picked.id);
-              // The session runs where its agent is resolvable, so picking one names its host.
-              setDaemonInstanceId(picked.daemonInstanceId);
-            }}
-          />
-
-          <div>
-            <label className={labelClass} htmlFor="create-session-recipe">
-              Recipe
-            </label>
-            <select
-              id="create-session-recipe"
-              data-testid="create-session-recipe-select"
-              className={inputClass}
-              value={recipe}
-              onChange={(e) => setRecipe(e.target.value)}
-            >
-              {WORKFLOW_RECIPES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Base the stack on — seeds the new orchestrator's stack with one existing session's
-              branch as its single root node, instead of leaving the agent to plan a stack it cannot
-              know about. Hangs off the recipe rather than the branch mode: an orchestrator has no
-              branch of its own, so there is no branch mode for the control to qualify. */}
-          {recipe === "pr-stack" && (
-            <div>
-              <label className={labelClass} htmlFor="create-session-pr-stack-base-session">
-                Base the stack on
-              </label>
-              <select
-                id="create-session-pr-stack-base-session"
-                data-testid="create-session-pr-stack-base-session-select"
-                className={inputClass}
-                value={prStackBaseSessionId}
-                onChange={(e) => setPrStackBaseSessionId(e.target.value)}
-              >
-                <option value="">None (agent plans the stack)</option>
-                {/* Labelled by the branch as well as the id: the branch is what the seeded node is
-                    bound to, and what every descendant is based on. */}
-                {stackBaseSessionOptions.map((s) => (
-                  <option key={s.sessionId} value={s.sessionId}>
-                    {`${s.sessionId} — ${s.branch}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {modelField}
-        </>
+        <CreateSessionToolFields
+          offeredAgents={offeredAgents}
+          offeredHostFailures={offeredHostFailures}
+          hostsAdvertised={hostsAdvertised}
+          selectedAgentValue={selectedAgentValue}
+          setAgent={setAgent}
+          setDaemonInstanceId={setDaemonInstanceId}
+          recipe={recipe}
+          setRecipe={setRecipe}
+          prStackBaseSessionId={prStackBaseSessionId}
+          setPrStackBaseSessionId={setPrStackBaseSessionId}
+          stackBaseSessionOptions={stackBaseSessionOptions}
+          modelField={modelField}
+        />
       )}
 
       {/* Cursor CLI session fields */}
       {sessionType === "cursor-cli" && (
-        <>
-          {modelField}
-          <div>
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              <input
-                data-testid="create-session-sandbox-toggle"
-                type="checkbox"
-                className="h-4 w-4 rounded border-input"
-                checked={sandbox}
-                onChange={(e) => setSandbox(e.target.checked)}
-              />
-              Sandbox
-            </label>
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="create-session-initial-prompt">
-              Initial prompt
-            </label>
-            <textarea
-              id="create-session-initial-prompt"
-              data-testid="create-session-initial-prompt-input"
-              className={`${inputClass} resize-y`}
-              rows={3}
-              value={initialPrompt}
-              onChange={(e) => setInitialPrompt(e.target.value)}
-              placeholder="Optional initial prompt"
-            />
-          </div>
-          <div>
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              <input
-                data-testid="create-session-managed-codebase-toggle"
-                type="checkbox"
-                className="h-4 w-4 rounded border-input"
-                checked={managedCodebase}
-                onChange={(e) => {
-                  setManagedCodebase(e.target.checked);
-                  // Closing the section clears what only it could offer, rather than leaving the
-                  // values to be stripped at submit: a selection the operator can no longer see is
-                  // one the form must no longer hold, and a request that disagrees with the screen
-                  // is how a picked agent went missing without an error.
-                  if (!e.target.checked) {
-                    setSemanticIndex(false);
-                    setSelectedAgentIds([]);
-                  }
-                }}
-              />
-              Managed codebase
-            </label>
-            {managedCodebase && (
-              <div className="mt-2 space-y-3 pl-4">
-                <div>
-                  <label className={labelClass} htmlFor="create-session-recipe">
-                    Recipe
-                  </label>
-                  <select
-                    id="create-session-recipe"
-                    data-testid="create-session-recipe-select"
-                    className={inputClass}
-                    value={recipe}
-                    onChange={(e) => setRecipe(e.target.value)}
-                  >
-                    {WORKFLOW_RECIPES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {agentPickerSection}
-                <div>
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <input
-                      data-testid="create-session-semantic-index-toggle"
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-input"
-                      checked={semanticIndex}
-                      onChange={(e) => setSemanticIndex(e.target.checked)}
-                    />
-                    Semantic index
-                  </label>
-                </div>
-              </div>
-            )}
-          </div>
-        </>
+        <CreateSessionCursorCliFields
+          modelField={modelField}
+          agentPickerSection={agentPickerSection}
+          sandbox={sandbox}
+          setSandbox={setSandbox}
+          initialPrompt={initialPrompt}
+          setInitialPrompt={setInitialPrompt}
+          managedCodebase={managedCodebase}
+          setManagedCodebase={setManagedCodebase}
+          setSemanticIndex={setSemanticIndex}
+          setSelectedAgentIds={setSelectedAgentIds}
+          recipe={recipe}
+          setRecipe={setRecipe}
+          semanticIndex={semanticIndex}
+        />
       )}
 
       {/* Claude CLI session fields */}
@@ -1027,61 +608,23 @@ export function CreateSessionPane({
         <>
           {modelField}
 
-          <div>
-            <label className={labelClass} htmlFor="create-session-permission-mode">
-              Permission mode
-            </label>
-            <select
-              id="create-session-permission-mode"
-              data-testid="create-session-permission-mode-select"
-              className={inputClass}
-              value={permissionMode}
-              onChange={(e) => setPermissionMode(e.target.value)}
-              disabled={dangerouslySkipPermissions}
-            >
-              <option value="auto">auto</option>
-              <option value="default">default</option>
-              <option value="acceptEdits">acceptEdits</option>
-              <option value="plan">plan</option>
-              <option value="bypassPermissions">bypassPermissions</option>
-            </select>
-          </div>
+          <CreateSessionPermissionFields
+            permissionMode={permissionMode}
+            setPermissionMode={setPermissionMode}
+            dangerouslySkipPermissions={dangerouslySkipPermissions}
+            setDangerouslySkipPermissions={setDangerouslySkipPermissions}
+            placementWithdrawsPermissionBypass={placementWithdrawsPermissionBypass}
+            sandbox={sandbox}
+            setSandbox={setSandbox}
+            applyPlacement={applyPlacement}
+          />
 
-          {/* A split session runs unjailed on this host, and its entire "no route to the local
-              filesystem" guarantee rests on the agent's deny list. Whether that list survives
-              --dangerously-skip-permissions is not something this repo pins, so the combination is
-              withdrawn rather than assumed safe. */}
-          {!isSplitCodebase && (
-            <div>
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  data-testid="create-session-dangerously-skip-permissions-toggle"
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-input"
-                  checked={dangerouslySkipPermissions}
-                  onChange={(e) => setDangerouslySkipPermissions(e.target.checked)}
-                />
-                Dangerously skip permissions
-              </label>
-            </div>
-          )}
-
-          {/* On a co-located placement the sandbox confines the agent on this daemon. On a split
-              placement it confines the codebase host — the jail runs on the daemon holding the
-              checkout, not the agent host. The combination with codebase_daemon_instance_id is
-              admitted and the jail is placed on the codebase host. */}
-          <div>
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              <input
-                data-testid="create-session-sandbox-toggle"
-                type="checkbox"
-                className="h-4 w-4 rounded border-input"
-                checked={sandbox}
-                onChange={(e) => setSandbox(e.target.checked)}
-              />
-              Sandbox
-            </label>
-          </div>
+          <CreateSessionSandboxedCodebaseToggle
+            sandboxedCodebase={sandboxedCodebase}
+            sandboxedCodebaseUnavailableReason={sandboxedCodebaseUnavailableReason}
+            jailSharesTheFilesystemRoot={jailSharesTheFilesystemRoot}
+            applyPlacement={applyPlacement}
+          />
 
           <div>
             <label className={labelClass} htmlFor="create-session-initial-prompt">
@@ -1118,279 +661,76 @@ export function CreateSessionPane({
                     setSemanticIndex(false);
                     setSelectedAgentIds([]);
                   }
+                  applyPlacement("managed", e.target.checked);
                 }}
               />
               Managed codebase
             </label>
             {managedCodebase && (
-              <div className="mt-2 space-y-3 pl-4">
-                {/* A recipe's tooling runs against a repository on the daemon hosting the agent, and
-                    a split session has none — the daemon refuses the combination. Withdrawing the
-                    control is honest about that; leaving it visible would offer a choice whose only
-                    effect is to turn a valid placement into a refusal. */}
-                {!isSplitCodebase && (
-                  <div>
-                    <label className={labelClass} htmlFor="create-session-recipe">
-                      Recipe
-                    </label>
-                    <select
-                      id="create-session-recipe"
-                      data-testid="create-session-recipe-select"
-                      className={inputClass}
-                      value={recipe}
-                      onChange={(e) => setRecipe(e.target.value)}
-                    >
-                      {WORKFLOW_RECIPES.map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                {/* Codebase host — which daemon's filesystem holds the worktree. Offered only in the
-                    claude-cli copy of this block: only claude-cli can be *prevented* from touching a
-                    local filesystem (--allowedTools/--disallowedTools), so it is the only session
-                    type the daemon accepts a split placement for.
-                    See docs/ft/daemon/remote-managed-worktree.md. */}
-                {canChooseCodebaseHost && (
-                  <div>
-                    <label className={labelClass} htmlFor="create-session-codebase-host">
-                      Codebase host
-                    </label>
-                    <select
-                      id="create-session-codebase-host"
-                      data-testid="create-session-codebase-host-select"
-                      className={inputClass}
-                      value={codebaseDaemonInstanceId}
-                      onChange={(e) => setCodebaseDaemonInstanceId(e.target.value)}
-                    >
-                      <option value="">Same as host</option>
-                      {daemons.map((d) => (
-                        <option key={d.instanceId} value={d.instanceId}>
-                          {d.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                {sessionType === "claude-cli" && (
-                  <CreateSessionSshConfigSelect
-                    key={sshListDaemonId}
-                    sessionToken={sessionToken}
-                    listDaemonInstanceId={sshListDaemonId}
-                    value={sshConfigHost}
-                    onChange={setSshConfigHost}
-                  />
-                )}
-                {/* No split guard: an agent is placeable on any host, and the placement only
-                    decides how it reads the codebase — an agent on the codebase host reads that
-                    worktree directly, one anywhere else reads a clone the session's worktree sync
-                    keeps current. So the picker offers the same roster either way. */}
-                {agentPickerSection}
-                {/* No split guard: the index is built wherever the worktree is, which on a split
-                    session is the codebase host. */}
-                <div>
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <input
-                      data-testid="create-session-semantic-index-toggle"
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-input"
-                      checked={semanticIndex}
-                      onChange={(e) => setSemanticIndex(e.target.checked)}
-                    />
-                    Semantic index
-                  </label>
-                </div>
-              </div>
+              <CreateSessionManagedCodebaseFields
+                isSplitCodebase={isSplitCodebase}
+                recipe={recipe}
+                setRecipe={setRecipe}
+                canChooseCodebaseHost={canChooseCodebaseHost}
+                codebaseDaemonInstanceId={codebaseDaemonInstanceId}
+                setCodebaseDaemonInstanceId={setCodebaseDaemonInstanceId}
+                daemons={daemons}
+                sessionType={sessionType}
+                sshListDaemonId={sshListDaemonId}
+                sessionToken={sessionToken}
+                sshConfigHost={sshConfigHost}
+                setSshConfigHost={setSshConfigHost}
+                agentPickerSection={agentPickerSection}
+                semanticIndex={semanticIndex}
+                setSemanticIndex={setSemanticIndex}
+              />
             )}
           </div>
         </>
       )}
 
-      {/* PR stack parent picker — shown for both session types when orchestrators are available. */}
-      {stackParentOptions.length > 0 && (
-        <div>
-          <label className={labelClass} htmlFor="create-session-stack-parent">
-            PR stack parent
-          </label>
-          <select
-            id="create-session-stack-parent"
-            data-testid="create-session-stack-parent-select"
-            className={inputClass}
-            value={stackParent}
-            onChange={(e) => setStackParent(e.target.value)}
-          >
-            <option value="">None (standalone session)</option>
-            {stackParentOptions.map((s) => (
-              <option key={s.sessionId} value={s.sessionId}>
-                {s.sessionId}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+      <CreateSessionStackParentSelect
+        stackParentOptions={stackParentOptions}
+        stackParent={stackParent}
+        setStackParent={setStackParent}
+      />
 
-      <div>
-        <label className={labelClass} htmlFor="create-session-branch-intent">
-          Branch mode
-        </label>
-        <select
-          id="create-session-branch-intent"
-          data-testid="create-session-branch-intent-select"
-          className={inputClass}
-          value={branchIntent}
-          onChange={(e) => setBranchIntent(e.target.value as BranchIntent)}
-        >
-          <option value="new_branch_from_base">
-            {`New branch from base${
-              initialValues?.baseBranchLabel ? `: ${initialValues.baseBranchLabel}` : ""
-            }`}
-          </option>
-          <option value="work_on_selected_branch">Work on existing branch</option>
-        </select>
-      </div>
+      <CreateSessionBranchFields
+        branchIntent={branchIntent}
+        setBranchIntent={setBranchIntent}
+        baseBranchLabel={initialValues?.baseBranchLabel}
+        initialStackParent={initialValues?.stackParent}
+        baseBranchOptions={baseBranchOptions}
+        selectedBaseBranch={selectedBaseBranch}
+        setSelectedBaseBranch={setSelectedBaseBranch}
+        newBranchName={newBranchName}
+        setNewBranchName={setNewBranchName}
+        sessionType={sessionType}
+        createRemoteBranch={createRemoteBranch}
+        setCreateRemoteBranch={setCreateRemoteBranch}
+        remoteBranches={remoteBranches}
+        selectedBranchToWorkOn={selectedBranchToWorkOn}
+        setSelectedBranchToWorkOn={setSelectedBranchToWorkOn}
+      />
 
-      {initialValues?.stackParent && baseBranchOptions.length > 0 && (
-        <div>
-          <label className={labelClass} htmlFor="create-session-base-branch">
-            Base branch
-          </label>
-          <select
-            id="create-session-base-branch"
-            data-testid="create-session-base-branch-select"
-            className={inputClass}
-            value={selectedBaseBranch}
-            onChange={(e) => setSelectedBaseBranch(e.target.value)}
-          >
-            {baseBranchOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+      <CreateSessionAttachmentsSection
+        sessionAttachments={sessionAttachments}
+        client={client}
+        sessionFilesClient={sessionFilesClient}
+        worktreeClient={worktreeClient}
+        sessionToken={sessionToken}
+        submitting={submitting}
+        projects={projects}
+        projectId={projectId}
+      />
 
-      {branchIntent === "new_branch_from_base" && (
-        <div>
-          <label className={labelClass} htmlFor="create-session-new-branch-name">
-            New branch name
-          </label>
-          <input
-            id="create-session-new-branch-name"
-            data-testid="create-session-new-branch-name-input"
-            type="text"
-            className={inputClass}
-            value={newBranchName}
-            onChange={(e) => setNewBranchName(e.target.value)}
-            placeholder="e.g. feature/my-work"
-          />
-          {/* Only the claude-cli / cursor-cli spawn paths create the worktree in-daemon and can push
-              it; a "tool" session spawns tddy-coder, which owns its own worktree — so we don't offer
-              the toggle there rather than show a checked box that silently does nothing. */}
-          {(sessionType === "claude-cli" || sessionType === "cursor-cli") && (
-            <label className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-              <input
-                data-testid="create-session-create-remote-branch-toggle"
-                type="checkbox"
-                className="h-4 w-4"
-                checked={createRemoteBranch}
-                onChange={(e) => setCreateRemoteBranch(e.target.checked)}
-              />
-              Create Remote Branch
-            </label>
-          )}
-        </div>
-      )}
-
-      {branchIntent === "work_on_selected_branch" && (
-        <div>
-          <label className={labelClass} htmlFor="create-session-branch-to-work-on">
-            Branch to work on
-          </label>
-          <select
-            id="create-session-branch-to-work-on"
-            data-testid="create-session-branch-to-work-on-select"
-            className={inputClass}
-            value={selectedBranchToWorkOn}
-            onChange={(e) => setSelectedBranchToWorkOn(e.target.value)}
-          >
-            {remoteBranches.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* Attachments — documents the daemon materializes into artifacts/attachments/ before the
-          agent starts. Shown for every session type, because the daemon materializes them for all
-          of them. See docs/ft/coder/session-attachments.md. */}
-      <AttachmentDropZone
-        onFilesPicked={attachFiles}
-        onPickHostDocument={openHostDocPicker}
-        disabled={submitting}
-      >
-        <SessionAttachmentList
-          attachments={attachments}
-          progress={attachmentProgress}
-          onRename={renameAttachment}
-          onRemove={removeAttachment}
-          disabled={submitting}
-        />
-        {(attachmentProblem ?? pickRefusal) !== null && (
-          <p data-testid="create-session-attachment-error" className="text-sm text-destructive">
-            {attachmentProblem ?? pickRefusal}
-          </p>
-        )}
-        {hostDocPickerOpen && (
-          // `browsedDaemonInstanceId` must name the host `client` enumerates from, because every ref
-          // the picker yields is stamped with it. It is `stagingDaemonInstanceId` because both derive
-          // from the connected daemon — the host whose documents are listed is the host stamped. It is
-          // deliberately NOT the session host: a document is read where it lives, and the session host
-          // fetches it from there.
-          <HostDocumentPicker
-            client={client}
-            sessionFilesClient={sessionFilesClient}
-            worktreeClient={worktreeClient}
-            sessionToken={sessionToken}
-            browsedDaemonInstanceId={stagingDaemonInstanceId}
-            project={projects.find((p) => p.projectId === projectId)}
-            onPick={attachHostDocument}
-            onClose={closeHostDocPicker}
-          />
-        )}
-      </AttachmentDropZone>
-
-      {/* Error */}
-      {error !== null && (
-        <p data-testid="create-session-error" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
-
-      {/* Actions */}
-      <div className="flex gap-2 pt-2">
-        <Button
-          type="button"
-          data-testid="create-session-cancel-btn"
-          variant="outline"
-          onClick={onCancel}
-          disabled={submitting}
-        >
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          data-testid="create-session-submit-btn"
-          disabled={!isSubmitEnabled}
-          onClick={handleSubmit}
-        >
-          Create session
-        </Button>
-      </div>
+      <CreateSessionActions
+        error={error}
+        submitting={submitting}
+        isSubmitEnabled={isSubmitEnabled}
+        onCancel={onCancel}
+        handleSubmit={handleSubmit}
+      />
 
       {/* Branch-conflict prompt — an overlay over this form, which stays mounted with its values so
           cancelling returns the operator to what they typed. */}

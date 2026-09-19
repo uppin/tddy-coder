@@ -95,6 +95,8 @@ fn a_relay_server_stopped_by(
         common_room: None,
         livekit_enabled: false, // relay mode joins no common room
         daemon_instance_id: "test-instance".to_string(),
+        // Relay mode serves no page and provisions no jail, so it advertises no placement.
+        sandboxed_codebase: None,
         allowed_agents: vec![],
         debug: None,
         lifecycle_telegram: None,

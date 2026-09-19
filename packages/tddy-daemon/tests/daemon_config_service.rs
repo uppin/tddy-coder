@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use tddy_daemon::config::{DaemonConfig, LiveKitConfig};
 use tddy_daemon::daemon_config_service::{CommonRoomSupervisor, DaemonConfigServiceImpl};
+use tddy_daemon::server::serving_sandboxed_codebase_support;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::daemon_config::{
     ClientAllowedAgent, DaemonConfigService as DaemonConfigServiceTrait, DaemonSettings,
@@ -381,6 +382,32 @@ async fn returns_the_client_config_the_web_bundle_otherwise_fetches_over_http() 
             id: "stub".to_string(),
             label: "Stub".to_string(),
         }]
+    );
+}
+
+#[tokio::test]
+async fn returns_the_jail_capability_the_web_bundle_otherwise_reads_from_api_config() {
+    // Given a daemon hosting a page that has no HTTP origin to fetch `/api/config` from — the
+    // desktop deployment, which is also the one with no common room to advertise the capability in
+    let daemon = a_daemon_config_service();
+
+    // When that page asks for the configuration it starts up with
+    let response = daemon
+        .service
+        .get_client_config(Request::new(GetClientConfigRequest {
+            session_token: VALID_TOKEN.to_string(),
+        }))
+        .await
+        .expect("the client config was not served")
+        .into_inner();
+
+    // Then it is told exactly what `/api/config` would have told it: the two descriptions of one
+    // host read the same function, so the desktop cannot be offered a placement the browser is not
+    assert_eq!(
+        response
+            .sandboxed_codebase
+            .map(|support| support.confines_filesystem),
+        serving_sandboxed_codebase_support().map(|support| support.confines_filesystem)
     );
 }
 

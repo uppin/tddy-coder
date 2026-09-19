@@ -12196,6 +12196,7 @@ dependencies = [
  "serial_test",
  "tddy-core",
  "tddy-daemon-kernel",
+ "tddy-daemon-sandbox",
  "tddy-host-service",
  "tddy-livekit",
  "tddy-livekit-testkit",

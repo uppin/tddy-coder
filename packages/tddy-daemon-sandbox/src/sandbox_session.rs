@@ -75,12 +75,35 @@ impl SandboxSessionState {
     }
 
     pub fn stop(&self) {
-        if let Some(mut handle) = self.handle.lock().unwrap().take() {
+        // A poisoned lock is a thread that panicked while holding the handle, not a reason to
+        // leave the jail running: `stop` is reached from `Drop`, and panicking here would orphan a
+        // `tddy-sandbox-runner` onto the host — the very thing this method exists to prevent.
+        let taken = self
+            .handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(mut handle) = taken {
             let _ = handle.child_mut().kill();
             let _ = handle.child_mut().wait();
         } else {
             terminate_sandbox_process(self.pid);
         }
+    }
+}
+
+/// Stop the session's jail when the state itself goes away.
+///
+/// `DeleteSession` calls [`Self::stop`] explicitly, but nothing else does: a session state that is
+/// simply dropped — every harness that starts a sandboxed session and lets its daemon fall out of
+/// scope — would otherwise leave the `tddy-sandbox-runner` alive, reparented to `launchd` in its
+/// own process group. `stop` is idempotent (the handle is taken out of the mutex), so the explicit
+/// delete path and this one do not fight.
+///
+/// Mirrors `JailedWorkspaceSandbox`'s `Drop` in `workspace_tool_sandbox.rs`.
+impl Drop for SandboxSessionState {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 

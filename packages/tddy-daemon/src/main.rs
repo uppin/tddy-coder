@@ -9,7 +9,6 @@
 //! service manager sends it.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use clap::Parser;
 use tddy_daemon::runtime::{self, RuntimeOptions};
@@ -139,21 +138,20 @@ fn main() -> anyhow::Result<()> {
         let daemon_instance_id =
             tddy_daemon::livekit_peer_discovery::local_instance_id_for_config(&daemon.config);
 
+        // The children this daemon will have to reap, captured before `tasks` moves out of the
+        // runtime below.
+        let children = daemon.children();
+
         // Start what the runtime assembled but left to its host: the local socket, the common-room
         // participant, peer discovery, the Telegram dispatcher and the background loops.
         let tasks = daemon.tasks.spawn();
 
-        // Spawn a task that SIGTERMs claude-cli sessions as soon as the daemon receives
-        // SIGTERM, independent of how long the HTTP server takes to drain open connections.
-        // This prevents orphaned Claude processes when systemd escalates to SIGKILL.
-        let kill_on_signal_manager = Arc::clone(&daemon.cli_sessions);
-        // The index daemon goes with them, and for the same reason: it is a child of this process
-        // holding a rust-analyzer per workspace root, so a SIGKILL escalation that arrives before
-        // the HTTP server has drained would leave it behind. Stopped explicitly here rather than
-        // left to `tasks.abort_all()` — aborting the reaper that would have stopped it is exactly
-        // how `dial_and_bridge` orphans a sandbox runner
+        // Spawn a task that reaps this daemon's children as soon as it receives SIGTERM,
+        // independent of how long the HTTP server takes to drain open connections. This prevents
+        // orphaned Claude processes, orphaned workspace jails and an orphaned index daemon when
+        // systemd escalates to SIGKILL
         // (`docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md`).
-        let index_daemon_on_signal = daemon.index_daemon.clone();
+        let children_on_signal = children.clone();
         let _kill_on_signal_task = tokio::spawn(async move {
             #[cfg(unix)]
             {
@@ -163,12 +161,9 @@ fn main() -> anyhow::Result<()> {
                     sig.recv().await;
                     log::info!(
                         target: "tddy_daemon",
-                        "SIGTERM received — killing all claude-cli sessions"
+                        "SIGTERM received — stopping every child this daemon spawned"
                     );
-                    kill_on_signal_manager.kill_all().await;
-                    if let Some(index_daemon) = index_daemon_on_signal {
-                        index_daemon.shutdown().await;
-                    }
+                    children_on_signal.shut_down().await;
                 }
             }
         });
@@ -182,6 +177,10 @@ fn main() -> anyhow::Result<()> {
             common_room,
             livekit_enabled,
             daemon_instance_id,
+            // The same capability the common-room advertisement publishes, read from the same
+            // function — so a daemon with no common room still tells the page it serves whether it
+            // can hold a jailed checkout, and what that jail confines.
+            sandboxed_codebase: tddy_daemon::server::serving_sandboxed_codebase_support(),
             allowed_agents,
             debug: web_debug,
             lifecycle_telegram: daemon.lifecycle_telegram,
@@ -189,15 +188,10 @@ fn main() -> anyhow::Result<()> {
         })
         .await;
 
-        // Also call kill_all after the server finishes (covers graceful ctrl-c shutdown
-        // and any sessions started while the first kill_all was already running).
-        daemon.cli_sessions.kill_all().await;
-        // The same second pass for the index daemon: a graceful ctrl-c never delivered the SIGTERM
-        // above, and a request served while the first shutdown ran could have started one. Before
-        // `abort_all`, because the reaper it aborts is not what stops this process.
-        if let Some(index_daemon) = &daemon.index_daemon {
-            index_daemon.shutdown().await;
-        }
+        // The same reap after the server finishes: a graceful ctrl-c never delivered the SIGTERM
+        // above, and a session — or a jail — started while the first pass ran would otherwise be
+        // left behind. Before `abort_all`, because the reaper it aborts is not what stops these.
+        children.shut_down().await;
 
         tasks.abort_all();
         res

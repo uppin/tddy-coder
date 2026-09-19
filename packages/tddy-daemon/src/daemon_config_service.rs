@@ -13,8 +13,8 @@ use tokio::sync::Mutex;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::daemon_config::{
     ClientAllowedAgent, DaemonConfigService as DaemonConfigServiceTrait, GetClientConfigRequest,
-    GetClientConfigResponse, GetConfigRequest, GetConfigResponse, UpdateConfigRequest,
-    UpdateConfigResponse,
+    GetClientConfigResponse, GetConfigRequest, GetConfigResponse, SandboxedCodebaseSupport,
+    UpdateConfigRequest, UpdateConfigResponse,
 };
 
 use crate::config::DaemonConfig;
@@ -218,6 +218,15 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
             livekit_enabled: Some(crate::config::LiveKitConfig::common_room_enabled(
                 config.livekit.as_ref(),
             )),
+            // The same capability `/api/config` carries, from the same function the common-room
+            // advertisement reads — a desktop page has no HTTP origin to fetch that endpoint from,
+            // and is exactly the deployment with no common room to learn it from instead.
+            sandboxed_codebase:
+                tddy_daemon_livekit::livekit_peer_discovery::sandboxed_codebase_support().map(
+                    |support| SandboxedCodebaseSupport {
+                        confines_filesystem: support.confines_filesystem,
+                    },
+                ),
         }))
     }
 }

@@ -29,9 +29,17 @@ export const SERVING_SOURCE_ID = "serving";
  *
  * `idle` with no hosts when there is no id, which is what a bundle served by something that is not
  * a daemon (a static file server, a Storybook build) reports.
+ *
+ * `sandboxedCodebase` is the serving daemon's own account of what its `--workspace-tools` jail
+ * confines (`/api/config`'s `sandboxed_codebase`). The common room advertises the same capability,
+ * but a daemon with no common room advertises nothing — and that is the deployment the
+ * sandboxed-codebase placement was designed for, so a source that dropped it here would leave the
+ * control disabled on exactly the host that serves it. Absent stays absent: a capability nobody
+ * described is one the Start-Session form may not assume.
  */
 export function useServingHostDirectorySource(
   servingInstanceId: string | undefined,
+  sandboxedCodebase?: { confinesFilesystem: boolean },
 ): HostDirectorySource {
   return useMemo<HostDirectorySource>(() => {
     const hostId = servingInstanceId?.trim() ?? "";
@@ -42,10 +50,14 @@ export function useServingHostDirectorySource(
       error: null,
       hosts: [
         hostDescriptorOf(
-          { instanceId: hostId, label: `${hostId}${SELF_LABEL_SUFFIX}` },
+          {
+            instanceId: hostId,
+            label: `${hostId}${SELF_LABEL_SUFFIX}`,
+            ...(sandboxedCodebase !== undefined ? { sandboxedCodebase } : {}),
+          },
           SERVING_SOURCE_ID,
         ),
       ],
     };
-  }, [servingInstanceId]);
+  }, [servingInstanceId, sandboxedCodebase]);
 }

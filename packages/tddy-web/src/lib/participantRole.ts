@@ -18,6 +18,9 @@ export interface DaemonHost {
   /** The largest single session attachment this host will serve (`max_attachment_bytes`), as
    *  advertised in the common room. Optional: older daemons don't advertise it. */
   maxAttachmentBytes?: number;
+  /** What this host's workspace jail confines, as advertised in the common room. Absent = the host
+   *  does not serve the sandboxed-codebase placement at all. */
+  sandboxedCodebase?: { confinesFilesystem: boolean };
 }
 
 /**
@@ -45,6 +48,7 @@ export function parseDaemonAdvertisement(metadata: string): DaemonHost | null {
       label?: unknown;
       repos_base_path?: unknown;
       max_attachment_bytes?: unknown;
+      sandboxed_codebase?: unknown;
     };
     if (typeof o.instance_id !== "string" || !o.instance_id.trim()) return null;
     // `includes`, not `endsWith`: a daemon may append its own trailing detail after the suffix, and
@@ -58,6 +62,14 @@ export function parseDaemonAdvertisement(metadata: string): DaemonHost | null {
     const cap = o.max_attachment_bytes;
     if (typeof cap === "number" && Number.isFinite(cap) && cap > 0) {
       host.maxAttachmentBytes = cap;
+    }
+    // Absent stays absent: a daemon that does not advertise the sandboxed-codebase placement is one
+    // that would answer the request field by starting an ordinary, unconfined session, and reading
+    // a default here would hide that. Only an object saying what its jail confines is a capability.
+    const jail = o.sandboxed_codebase;
+    if (jail !== null && typeof jail === "object") {
+      const confines = (jail as { confines_filesystem?: unknown }).confines_filesystem;
+      host.sandboxedCodebase = { confinesFilesystem: confines === true };
     }
     return host;
   } catch {
@@ -112,6 +124,9 @@ export function daemonHostsFromParticipants(
     // The Start-Session form enforces this cap at pick time, and this list is its only source of
     // hosts — a cap dropped here is a cap the form can never enforce.
     if (adv?.maxAttachmentBytes) host.maxAttachmentBytes = adv.maxAttachmentBytes;
+    // The Start-Session form offers the sandboxed-codebase placement only on a host that advertised
+    // it, and this list is its only source of hosts — dropped here, the placement is unreachable.
+    if (adv?.sandboxedCodebase) host.sandboxedCodebase = adv.sandboxedCodebase;
     hosts.push(host);
   }
   return hosts;

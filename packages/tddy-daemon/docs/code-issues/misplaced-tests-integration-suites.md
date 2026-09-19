@@ -74,3 +74,16 @@ mounts the composition belongs with it.
 2026-09-15: built the module→crate map from both `lib.rs` files and classified all 139 test files by
 resolved owner. Separately verified that the apparent `tddy_daemon::` references *inside*
 `tddy-session-lifecycle` are log-target string literals, not a reverse dependency.
+
+## Concurrent changes
+
+- **2026-09-18 — `docs/dev/1-WIP/2026-09-18-sandboxed-codebase-mode-from-the-web.md`.** Planned
+  against today's shape with developer consent, having read this record's *If you are about to
+  change this code* guidance. It adds **three new suites** under `packages/tddy-daemon/tests/`:
+  `sandboxed_codebase_placement_acceptance.rs`, `sandboxed_codebase_lifecycle_acceptance.rs` and
+  `sandboxed_codebase_seatbelt_acceptance.rs` (macOS). The crate each actually exercises is
+  **`tddy-session-lifecycle`** (the placement, the start path, the tool env) with
+  `tddy-daemon-sandbox` consumed unchanged — so route all three there, not to `tddy-daemon`.
+  Its production code names the owning crates directly and takes no `tddy_daemon::` re-export, so
+  the facade deletion does not touch it. One `tddy-daemon/src/main.rs` edit (SIGTERM reaching the
+  workspace-jail registry) is genuine composition-root code and stays.
