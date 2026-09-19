@@ -136,6 +136,35 @@ pub struct DaemonAdvertisement {
     /// in which case the key is left off the wire so a reader cannot mistake it for a cap of zero.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub max_attachment_bytes: u64,
+    /// The id of the Ed25519 key this daemon signs session tokens with, so a peer holding one of
+    /// its tokens knows which advertised key to verify it against. Empty when the daemon does not
+    /// advertise one, in which case a peer cannot verify its tokens and must reject them rather
+    /// than guess.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub signing_key_id: String,
+    /// That key's public half, SPKI DER in base64url without padding.
+    ///
+    /// Carried as an opaque string rather than a key type on purpose: this crate advertises the
+    /// bytes and parses none of them, which is what keeps the identity boundary off its dependency
+    /// path — see its `dependency_boundary_unit`. Whoever verifies a token decodes this.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub signing_public_key: String,
+}
+
+/// This daemon's signing identity as it goes on the wire, ready to advertise.
+///
+/// Two opaque strings, deliberately: the crate that owns the keypair
+/// (`tddy_daemon_auth::DaemonSigningKey`) builds this and hands it in, so the key material and the
+/// crypto types stay off this crate's dependency path while the fleet still learns the key.
+///
+/// [`Default`] is a daemon that advertises no key — a desktop install, or one whose identity is
+/// not wired yet. It advertises nothing rather than something unverifiable.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AdvertisedSigningKey {
+    /// The key id, as `tddy_github::session_token_v2::KeyId` renders it.
+    pub key_id: String,
+    /// SPKI DER, base64url without padding.
+    pub public_key: String,
 }
 
 fn is_zero(value: &u64) -> bool {
@@ -191,6 +220,32 @@ struct DaemonAdvertisementWire {
     repos_base_path: String,
     #[serde(default)]
     max_attachment_bytes: u64,
+    #[serde(default)]
+    signing_key_id: String,
+    #[serde(default)]
+    signing_public_key: String,
+}
+
+/// The advertised public key of whichever peer signs with `signing_key_id`, if one does.
+///
+/// The fleet's half of key distribution: a daemon verifying a peer's session token reads the
+/// token's key id, then asks the common room who advertises it. Returns the base64url SPKI DER
+/// exactly as advertised — decoding and verifying belong to the identity boundary, not here.
+///
+/// An empty `signing_key_id` matches nothing, so a daemon that advertises no key cannot be
+/// selected by a token that names none.
+pub fn peer_signing_public_key<'a>(
+    peers: &'a [PeerDaemon],
+    signing_key_id: &str,
+) -> Option<&'a str> {
+    if signing_key_id.is_empty() {
+        return None;
+    }
+    peers
+        .iter()
+        .find(|peer| peer.advertisement.signing_key_id == signing_key_id)
+        .map(|peer| peer.advertisement.signing_public_key.as_str())
+        .filter(|key| !key.is_empty())
 }
 
 /// Parse and normalize a daemon advertisement JSON string from the discovery transport.
@@ -227,6 +282,8 @@ pub fn parse_peer_daemon_json(input: &str) -> Result<PeerDaemon, String> {
             label,
             repos_base_path,
             max_attachment_bytes: w.max_attachment_bytes,
+            signing_key_id: w.signing_key_id.trim().to_string(),
+            signing_public_key: w.signing_public_key.trim().to_string(),
         },
         host_id,
     })
@@ -722,13 +779,18 @@ pub fn spawn_common_room_discovery_loop(
     config: Arc<DaemonConfig>,
     registry: Arc<CommonRoomPeerRegistry>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    signing_key: AdvertisedSigningKey,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             let local_id = local_instance_id_for_config(&config);
-            let outcome =
-                common_room_discovery_cycle(config.clone(), registry.clone(), room_slot.clone())
-                    .await;
+            let outcome = common_room_discovery_cycle(
+                config.clone(),
+                registry.clone(),
+                room_slot.clone(),
+                signing_key.clone(),
+            )
+            .await;
             let retry_secs: u64 = match &outcome {
                 Ok(Some(DisconnectReason::DuplicateIdentity)) => 6,
                 _ => 2,
@@ -813,10 +875,8 @@ async fn connect_common_room_publish_metadata(
     room_name: &str,
     url: &str,
     token: &str,
-    local_id: &str,
+    advertisement: &DaemonAdvertisement,
     host_id: &str,
-    repos_base_path: &str,
-    max_attachment_bytes: u64,
 ) -> anyhow::Result<(
     Arc<Room>,
     tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
@@ -829,17 +889,11 @@ async fn connect_common_room_publish_metadata(
     log::info!(
         "common_room_discovery: LiveKit connected room={} identity={} participant_sid={:?} connection_state={:?}",
         room_name,
-        local_id,
+        advertisement.instance_id,
         lp.sid(),
         room.connection_state()
     );
-    let adv = DaemonAdvertisement {
-        instance_id: local_id.to_string(),
-        label: format!("{local_id} (this daemon)"),
-        repos_base_path: repos_base_path.to_string(),
-        max_attachment_bytes,
-    };
-    let meta_json = daemon_metadata_json(&adv, host_id)?;
+    let meta_json = daemon_metadata_json(advertisement, host_id)?;
     let meta_len = meta_json.len();
 
     let mut buffered = VecDeque::new();
@@ -1183,6 +1237,7 @@ async fn common_room_discovery_cycle(
     config: Arc<DaemonConfig>,
     registry: Arc<CommonRoomPeerRegistry>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    signing_key: AdvertisedSigningKey,
 ) -> anyhow::Result<Option<DisconnectReason>> {
     let (room_name, url, api_key, api_secret) = livekit_common_room_connect_strings(&config)?;
     let set_metadata_budget = config.common_room_set_metadata_attempt_budget();
@@ -1205,16 +1260,17 @@ async fn common_room_discovery_cycle(
     );
     let repos_base_path = config.repos_base_path_or_default().to_string();
     let host_id = local_base_instance_id_for_config(&config);
-    let (room, events, event_buffer, daemon_adv_metadata) = connect_common_room_publish_metadata(
-        &room_name,
-        &url,
-        &token,
-        &local_id,
-        &host_id,
-        &repos_base_path,
-        config.max_attachment_bytes,
-    )
-    .await?;
+    let advertisement = DaemonAdvertisement {
+        instance_id: local_id.clone(),
+        label: format!("{local_id} (this daemon)"),
+        repos_base_path,
+        max_attachment_bytes: config.max_attachment_bytes,
+        signing_key_id: signing_key.key_id,
+        signing_public_key: signing_key.public_key,
+    };
+    let (room, events, event_buffer, daemon_adv_metadata) =
+        connect_common_room_publish_metadata(&room_name, &url, &token, &advertisement, &host_id)
+            .await?;
     {
         let mut g = room_slot.write().await;
         *g = Some(room.clone());
@@ -1579,6 +1635,8 @@ mod tests {
                         label: format!("{id} (this daemon)"),
                         repos_base_path: format!("repos/{id}"),
                         max_attachment_bytes: 4096,
+                        signing_key_id: String::new(),
+                        signing_public_key: String::new(),
                     },
                     host_id: format!("{id}-host"),
                 };
@@ -1729,6 +1787,8 @@ mod tests {
             label: "peer-a (this daemon)".to_string(),
             repos_base_path: "repos".to_string(),
             max_attachment_bytes: 0,
+            signing_key_id: String::new(),
+            signing_public_key: String::new(),
         };
 
         // When it is serialized to the wire and parsed back
@@ -1741,6 +1801,73 @@ mod tests {
             "advertisement JSON must carry the repos_base_path key: {json}"
         );
         assert_eq!(got.repos_base_path, "repos");
+    }
+
+    #[test]
+    fn an_advertised_signing_key_survives_the_round_trip_to_the_common_room() {
+        // Given a daemon advertising the key it signs session tokens with
+        let advertisement = DaemonAdvertisement {
+            instance_id: "udoo".to_string(),
+            label: "udoo (this daemon)".to_string(),
+            repos_base_path: String::new(),
+            max_attachment_bytes: 0,
+            signing_key_id: "fzAyq1hLQ0hTpZ_p".to_string(),
+            signing_public_key: "MCowBQYDK2VwAyEAq1hLQ0hTpZ".to_string(),
+        };
+
+        // When it is published and read back
+        let json = daemon_metadata_json(&advertisement, "udoo").expect("the metadata serializes");
+        let got = parse_daemon_advertisement_json(&json).expect("the metadata parses");
+
+        // Then a peer holding one of its tokens can find the key the token names
+        assert_eq!(
+            (got.signing_key_id.clone(), got.signing_public_key.clone()),
+            (
+                "fzAyq1hLQ0hTpZ_p".to_string(),
+                "MCowBQYDK2VwAyEAq1hLQ0hTpZ".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn a_peers_signing_key_is_found_by_the_id_its_tokens_name() {
+        // Given a room holding two daemons, one of which advertises a signing key
+        let peers = vec![
+            a_peer_advertising("quiet", "", ""),
+            a_peer_advertising("udoo", "fzAyq1hLQ0hTpZ_p", "MCowBQYDK2VwAyEA"),
+        ];
+
+        // When a token naming that key id is looked up
+        let found = peer_signing_public_key(&peers, "fzAyq1hLQ0hTpZ_p");
+
+        // Then the advertising daemon's public key comes back
+        assert_eq!(found, Some("MCowBQYDK2VwAyEA"));
+    }
+
+    #[test]
+    fn a_daemon_advertising_no_signing_key_is_not_matched_by_a_token_that_names_none() {
+        // Given a room where nobody advertises a key
+        let peers = vec![a_peer_advertising("quiet", "", "")];
+
+        // When a token naming no key is looked up
+        let found = peer_signing_public_key(&peers, "");
+
+        // Then nothing matches — an empty id must never select an arbitrary peer
+        assert_eq!(found, None);
+    }
+
+    fn a_peer_advertising(instance_id: &str, key_id: &str, public_key: &str) -> PeerDaemon {
+        PeerDaemon {
+            advertisement: DaemonAdvertisement {
+                instance_id: instance_id.to_string(),
+                label: format!("{instance_id} (this daemon)"),
+                repos_base_path: String::new(),
+                max_attachment_bytes: 0,
+                signing_key_id: key_id.to_string(),
+                signing_public_key: public_key.to_string(),
+            },
+            host_id: instance_id.to_string(),
+        }
     }
 
     #[test]

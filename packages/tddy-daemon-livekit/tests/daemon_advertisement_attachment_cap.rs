@@ -22,6 +22,8 @@ fn an_advertisement_round_trips_its_attachment_cap() {
         label: "udoo (this daemon)".to_string(),
         repos_base_path: "repos".to_string(),
         max_attachment_bytes: SIXTY_FOUR_MIB,
+        signing_key_id: String::new(),
+        signing_public_key: String::new(),
     };
 
     // When — it is serialized and parsed back the way the discovery transport does
@@ -40,6 +42,8 @@ fn an_advertisement_serializes_the_cap_under_its_snake_case_wire_name() {
         label: "udoo (this daemon)".to_string(),
         repos_base_path: String::new(),
         max_attachment_bytes: SIXTY_FOUR_MIB,
+        signing_key_id: String::new(),
+        signing_public_key: String::new(),
     };
 
     // When
@@ -73,6 +77,8 @@ fn an_unadvertised_cap_is_left_out_of_the_wire_form() {
         label: "udoo (this daemon)".to_string(),
         repos_base_path: String::new(),
         max_attachment_bytes: 0,
+        signing_key_id: String::new(),
+        signing_public_key: String::new(),
     };
 
     // When

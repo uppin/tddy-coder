@@ -241,6 +241,9 @@ impl CommonRoomSupervisorTask {
 pub struct PeerDiscoveryHandles {
     pub registry: Arc<crate::livekit_peer_discovery::CommonRoomPeerRegistry>,
     pub room_slot: Arc<tokio::sync::RwLock<Option<Arc<livekit::Room>>>>,
+    /// What this daemon advertises as its signing identity, so peers can verify the session tokens
+    /// it mints. Built by whoever owns the keypair and handed in, never derived here.
+    pub signing_key: crate::livekit_peer_discovery::AdvertisedSigningKey,
 }
 
 /// The real thing: joins the common room as this daemon, serving its RPC roster and running peer
@@ -296,6 +299,7 @@ impl CommonRoomConnector for DaemonCommonRoomConnector {
                     config.clone(),
                     handles.registry.clone(),
                     handles.room_slot.clone(),
+                    handles.signing_key.clone(),
                 ),
             ),
             None => {
