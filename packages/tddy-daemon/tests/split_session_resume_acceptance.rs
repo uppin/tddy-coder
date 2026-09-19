@@ -33,14 +33,14 @@ use std::time::Duration;
 use serial_test::serial;
 use tddy_core::session_agent::SessionAgentRecord;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
-use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::DaemonSessionHost;
-use tddy_daemon::livekit_peer_discovery::{
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_daemon::test_util::{self, wait_until_peer_discovered};
+use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered};
 use tddy_github::{GitHubUser, SessionTokenSigner};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
@@ -188,7 +188,7 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
     let registry = Arc::new(CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
     spawn_common_room_discovery_task(config_arc.clone(), registry.clone(), room_slot.clone());
-    let eligible: Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource> = Arc::new(
+    let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
     );
 
@@ -673,10 +673,10 @@ enum CodebaseHostVisibility {
 /// The eligible list a daemon has when it can name the codebase host but not talk to it.
 struct ACommonRoomHoldingTheCodebaseHost;
 
-impl tddy_daemon::multi_host::EligibleDaemonSource for ACommonRoomHoldingTheCodebaseHost {
-    fn list_eligible_daemons(&self) -> Vec<tddy_daemon::multi_host::EligibleDaemonInfo> {
-        vec![tddy_daemon::multi_host::EligibleDaemonInfo {
-            instance_id: tddy_daemon::multi_host::DaemonInstanceId(
+impl tddy_host_service::multi_host::EligibleDaemonSource for ACommonRoomHoldingTheCodebaseHost {
+    fn list_eligible_daemons(&self) -> Vec<tddy_host_service::multi_host::EligibleDaemonInfo> {
+        vec![tddy_host_service::multi_host::EligibleDaemonInfo {
+            instance_id: tddy_host_service::multi_host::DaemonInstanceId(
                 CODEBASE_INSTANCE_ID.to_string(),
             ),
             label: "workstation-b".to_string(),

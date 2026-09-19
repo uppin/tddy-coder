@@ -11,8 +11,8 @@ use std::time::Duration;
 use livekit::prelude::RoomOptions;
 use serial_test::serial;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::DaemonSessionHost;
-use tddy_daemon::test_util::{test_service, TEST_TOKEN};
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request};
@@ -119,7 +119,7 @@ fn per_host_project_path_roundtrip() {
     host_repo_paths.insert("host-a".to_string(), "/home/alice/repos/app".to_string());
     host_repo_paths.insert("host-b".to_string(), "/home/bob/work/app".to_string());
 
-    let project = tddy_daemon::project_storage::ProjectData {
+    let project = tddy_projects::project_storage::ProjectData {
         project_id: "proj-same-id".to_string(),
         name: "app".to_string(),
         git_url: "https://github.com/org/repo.git".to_string(),
@@ -128,16 +128,16 @@ fn per_host_project_path_roundtrip() {
         remote_name: None,
         host_repo_paths,
     };
-    tddy_daemon::project_storage::write_projects(&projects_dir, &[project]).unwrap();
+    tddy_projects::project_storage::write_projects(&projects_dir, &[project]).unwrap();
 
     // When
-    let path_a = tddy_daemon::project_storage::main_repo_path_for_host(
+    let path_a = tddy_projects::project_storage::main_repo_path_for_host(
         &projects_dir,
         "proj-same-id",
         "host-a",
     )
     .unwrap();
-    let path_b = tddy_daemon::project_storage::main_repo_path_for_host(
+    let path_b = tddy_projects::project_storage::main_repo_path_for_host(
         &projects_dir,
         "proj-same-id",
         "host-b",
@@ -264,7 +264,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
 
     let os_user = std::env::var("USER").expect("USER required for spawn identity (passwd entry)");
 
-    let project = tddy_daemon::project_storage::ProjectData {
+    let project = tddy_projects::project_storage::ProjectData {
         project_id: REMOTE_ROUTING_PROJECT_ID.to_string(),
         name: "remote-routing".to_string(),
         git_url: "https://example.invalid/tddy-remote-routing.git".to_string(),
@@ -292,7 +292,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     let sessions_b = tempfile::tempdir().unwrap();
     // Register project where connection_service looks: {tddy_data_dir}/projects/
     let projects_dir_b = sessions_b.path().join("projects");
-    tddy_daemon::project_storage::write_projects(&projects_dir_b, &[project]).unwrap();
+    tddy_projects::project_storage::write_projects(&projects_dir_b, &[project]).unwrap();
     let base_b = sessions_b.path().to_path_buf();
     let resolver_b: SessionsBaseResolver = Arc::new(move |_| Some(base_b.clone()));
     let service_b = DaemonSessionHost::new(
@@ -303,7 +303,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         None,
         None,
         None,
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     );
 
     // Daemon B's discovery participant: bare instance id, publishes the advertisement A discovers.
@@ -347,7 +347,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         registry.clone(),
         room_slot.clone(),
     );
-    let eligible: Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource> = Arc::new(
+    let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
             config_arc,
             registry,
@@ -376,7 +376,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
             },
         ),
         None,
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     );
 
     tokio::time::timeout(Duration::from_secs(45), async {

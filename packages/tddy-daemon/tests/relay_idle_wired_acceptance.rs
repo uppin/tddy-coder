@@ -7,11 +7,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
-use tddy_daemon::test_util::TestDaemon;
+use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_rpc::Request;
 use tddy_service::proto::catalog::{CatalogService, ListToolsRequest};
 

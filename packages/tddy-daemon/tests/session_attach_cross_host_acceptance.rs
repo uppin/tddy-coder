@@ -25,12 +25,12 @@ use futures_util::{Stream, StreamExt};
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::DaemonSessionHost;
-use tddy_daemon::livekit_peer_discovery::{
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_daemon::test_util::{self, wait_until_peer_discovered, TEST_TOKEN};
+use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered, TEST_TOKEN};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::session::{
@@ -164,7 +164,7 @@ async fn a_daemon(
     let registry = Arc::new(CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
     spawn_common_room_discovery_task(config_arc.clone(), registry.clone(), room_slot.clone());
-    let eligible: Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource> = Arc::new(
+    let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
     );
 
@@ -179,7 +179,7 @@ async fn a_daemon(
             common_room_livekit_room: room_slot,
         }),
         None,
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
+        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
     .with_staging_base_dir(staging.path().to_path_buf());
 
@@ -337,7 +337,7 @@ async fn stage_on_local(env: &TwoDaemons, file_name: &str, data: &[u8]) -> PathB
         .await
         .expect("staging on the local daemon must succeed");
     let os_user = std::env::var("USER").expect("USER required");
-    tddy_daemon::session_attachment_staging::staging_root_for(&os_user, &env.local_staging_base)
+    tddy_session_files::session_attachment_staging::staging_root_for(&os_user, &env.local_staging_base)
         .join(STAGING_ID)
         .join(file_name)
 }
@@ -413,7 +413,7 @@ async fn a_forwarded_rpc_reaches_a_peer_serving_under_its_daemon_prefixed_identi
     // Then — the bytes are on the peer's staging root
     let os_user = std::env::var("USER").unwrap();
     let peer_staged =
-        tddy_daemon::session_attachment_staging::staging_root_for(&os_user, &env.peer_staging_base)
+        tddy_session_files::session_attachment_staging::staging_root_for(&os_user, &env.peer_staging_base)
             .join(STAGING_ID)
             .join("reached.md");
     assert!(
@@ -584,7 +584,7 @@ async fn a_cross_host_staged_ref_whose_upload_never_completed_is_refused_and_wri
 async fn stream_read_host_document_forwards_to_the_peer_that_owns_the_document() {
     // Given — a document on the peer, past the unary cap so only the stream can carry it
     let env = two_daemons().await;
-    let size = tddy_daemon::host_documents::MAX_HOST_DOCUMENT_BYTES + 512 * 1024;
+    let size = tddy_session_files::host_documents::MAX_HOST_DOCUMENT_BYTES + 512 * 1024;
     let document: Vec<u8> = (0..size).map(|i| (i % 241) as u8).collect();
     stage_on_peer(&env.service_a, "big-remote.bin", &document).await;
 
@@ -693,7 +693,7 @@ async fn stream_start_session_forwards_to_the_peer_that_runs_the_session() {
 async fn a_cross_host_staged_attachment_larger_than_the_unary_cap_is_materialized() {
     // Given — a document on the peer, past the unary ceiling but well under the configured cap
     let env = two_daemons().await;
-    let size = tddy_daemon::host_documents::MAX_HOST_DOCUMENT_BYTES + 512 * 1024;
+    let size = tddy_session_files::host_documents::MAX_HOST_DOCUMENT_BYTES + 512 * 1024;
     let document: Vec<u8> = (0..size).map(|i| (i % 239) as u8).collect();
     stage_on_peer(&env.service_a, "big-attach.bin", &document).await;
 
@@ -755,7 +755,7 @@ async fn stream_start_session_on_the_peer_reports_progress_while_staged_bytes_cr
 {
     // Given — a document staged on A, past the unary ceiling so the transfer spans many frames
     let env = two_daemons().await;
-    let size = tddy_daemon::host_documents::MAX_HOST_DOCUMENT_BYTES + 512 * 1024;
+    let size = tddy_session_files::host_documents::MAX_HOST_DOCUMENT_BYTES + 512 * 1024;
     let document: Vec<u8> = (0..size).map(|i| (i % 233) as u8).collect();
     let staged = stage_on_local(&env, "handbook.pdf", &document).await;
     assert!(

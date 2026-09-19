@@ -12,16 +12,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serial_test::serial;
-use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::DaemonSessionHost;
-use tddy_daemon::livekit_peer_discovery::{
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
-use tddy_daemon::multi_host::EligibleDaemonSource;
+use tddy_host_service::multi_host::EligibleDaemonSource;
 use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_daemon::test_util::TestDaemon;
+use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecToolService, ListExecToolsRequest};
@@ -216,7 +216,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         .generate_token(RELAY_ROOM, &rpc_identity(RELAY_PEER_ID))
         .expect("LiveKit token for remote peer B");
     let peer_run =
-        tddy_daemon::test_util::serve_daemon_rpc_participant(&ws_url, &token_b, &service_b).await;
+        tddy_session_lifecycle::test_util::serve_daemon_rpc_participant(&ws_url, &token_b, &service_b).await;
 
     // ── Service A: the relay. Has LiveKit discovery that will see B.
     let (_tmp_a, path_a) = write_daemon_yaml(&ws_url, None);
