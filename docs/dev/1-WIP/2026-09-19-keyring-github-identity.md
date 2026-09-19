@@ -1,7 +1,7 @@
 # Changeset: Git and GitHub operations resolve the project's account
 
 **Date**: 2026-09-19
-**Status**: 🚧 In Progress · ⛔ **Blocked on [#492](https://github.com/uppin/tddy-coder/pull/492)**
+**Status**: 🚧 In Progress · ✅ **#492 is this stack's base** — see Prerequisites
 **Type**: Architecture Change
 **Stack**: `#keyring` 9/9 · branch `feature/keyring/github-identity` · base `feature/keyring/link-github` (#515)
 
@@ -84,7 +84,9 @@ account is only meaningful when more than one account can exist.
 **The load-bearing edge is 5/9** [#512](https://github.com/uppin/tddy-coder/pull/512) — the
 assignments and `AccountResolution`. 3/9 and 4/9 are transitive through it.
 
-**⛔ Out-of-stack blocker: [#492](https://github.com/uppin/tddy-coder/pull/492)** — see Prerequisites.
+**#492 is an ancestor, not a blocker.** On 2026-09-19 the whole `#keyring` stack was re-based onto
+[#492](https://github.com/uppin/tddy-coder/pull/492) `feature/carve/git-plumbing`, so the moved
+`tddy-github` is present in this tree from node 1 onward — see Prerequisites.
 
 **Dependents**: none. This is the top of the stack.
 
@@ -113,7 +115,7 @@ Published in this PR's **second commit**:
 - `Ambiguous` fails rather than picking;
 - WIP snapshot commits are still authored by `tddy-daemon`.
 
-⚠ **Not mergeable in that state** — implementation follows in this same PR, **after #492 merges**.
+⚠ **Not mergeable in that state** — implementation follows in this same PR.
 
 ## Green wave
 
@@ -129,19 +131,26 @@ line and last in time, which is what the developer asked for.
 
 ## Prerequisites
 
-### ⛔ BLOCKING — the GitHub REST client is mid-move — [`squatting-github-rest-client`](../../../packages/tddy-workflow-recipes/docs/code-issues/squatting-github-rest-client.md)
+### ✅ RESOLVED BY THE BASE — the GitHub REST client is mid-move — [`squatting-github-rest-client`](../../../packages/tddy-workflow-recipes/docs/code-issues/squatting-github-rest-client.md)
 
 **Status in the record: `Open — claimed by #492, in flight`.** It is another stack's to fix
-(`#carve` 6/10), and this node neither claims it nor touches the files.
+(`#carve` 6/10), and this node neither claims it nor touches the files — **it must not delete the
+record**, which is #492's to delete when it wraps.
 
-The record's own guidance is the reason this node waits:
+This was a ⛔ BLOCKING entry when the stack was cut. It is no longer one: on 2026-09-19 the
+`#keyring` root was re-based from `master` onto `feature/carve/git-plumbing` (#492), so the move has
+already happened in this tree and this node writes against the post-move `tddy-github` directly. What
+remains is a **merge-order fact**, not a wait — recorded under `## Dependencies`.
+
+The record's own guidance is what made it blocking:
 
 > Coordinate if you are **adding a REST call** — it belongs in `tddy-github` after #492, and adding
 > it here means #492 moves it too.
 
 This node does something stronger than add a call: it changes how **all 2,124 lines** of that client
-get their token. Doing it first means editing a crate those files are leaving, and then having #492
-rewrite the result.
+get their token. Doing it *before* the move would mean editing a crate those files are leaving, and
+then having #492 rewrite the result. Basing the stack on #492 removes that collision entirely rather
+than scheduling around it.
 
 **The developer decided this before the stack was cut**, which is why it is recorded rather than
 escalated:
@@ -149,8 +158,13 @@ escalated:
 > plan the changes to git/github as late as possible with a dependency of this PR being merged
 > https://github.com/uppin/tddy-coder/pull/492
 
-⚠ **Nodes 1–8 are unaffected.** None of them touches `tddy-workflow-recipes`, so the block costs this
-node's schedule and nothing else. This PR stays a draft until #492 merges.
+⚠ **The cost moved from this node to the whole stack.** Under the original plan nodes 1–8 were
+independent of #492 and only this node waited. Now every `#keyring` node lands behind `#carve` 3/10
+[#498](https://github.com/uppin/tddy-coder/pull/498), 4/10
+[#491](https://github.com/uppin/tddy-coder/pull/491) and 5/10
+[#492](https://github.com/uppin/tddy-coder/pull/492). That trade was taken deliberately — it is the
+cheapest possible moment for the rebase, since every `#keyring` node is still docs-only — and it is
+recorded in node 1's changeset.
 
 ### ⚠ DURING — `runtime::build` complexity — [`complexity-runtime-build`](../../../packages/tddy-daemon/docs/code-issues/complexity-runtime-build.md)
 
@@ -176,8 +190,8 @@ two above. **"Not measured" is not "clean"**; this node claims nothing about the
 
 - [x] **PRD**: [PRD-2026-09-19-keyring-github-identity.md](../../ft/daemon/1-WIP/PRD-2026-09-19-keyring-github-identity.md)
 - [x] **Changeset**: this document
-- [ ] ⛔ **Blocked**: #492 must merge before implementation begins — the draft-PR contract is written
-      against the post-#492 module paths and is the only work that proceeds before it
+- [x] ✅ **Unblocked by the base**: #492 is an ancestor of this branch, so the post-move module paths
+      are present in the tree and implementation is not gated on a separate merge
 - [ ] **Draft PR contract**: surface + failing tests (wave 2, commit 2)
 - [ ] **Resolution**: one call, token and identity from one answer
 - [ ] **Outcomes**: a distinct failure per `AccountResolution` variant
@@ -236,7 +250,7 @@ resolution this node builds.
 
 ## Implementation Milestones
 
-⛔ **M1 begins only after #492 merges.**
+✅ **M1 is not gated on #492 merging** — #492 is this stack's base, so its move is already in the tree.
 
 - [ ] **M1** — REST entry points take a token; environment resolution deleted
 - [ ] **M2** — one resolution at the session edge; token + identity from it
@@ -300,7 +314,7 @@ clippy. LiveKit-backed tests reuse the testkit container. Whole-workspace green 
 - [x] Create/update PRD documentation
 - [x] Create changeset
 - [ ] Publish the draft-PR contract — wave 2
-- [ ] ⛔ Wait for [#492](https://github.com/uppin/tddy-coder/pull/492)
+- [x] ✅ #492 is the stack's base — no separate wait
 - [ ] M1–M6
 - [ ] `packages/tddy-accounts/docs/github-identity-resolution.md`
 - [ ] `/wrap-context-docs` — this node claims **no** `docs/dev/todo/` entry and **no** code-issue
