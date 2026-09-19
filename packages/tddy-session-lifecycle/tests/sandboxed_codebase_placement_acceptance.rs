@@ -34,18 +34,18 @@ use std::sync::{Arc, OnceLock};
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::{
-    classify_placement, CodebasePlacement, DaemonSessionHost, PlacementRequest,
-};
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
-use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
-use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_github::{GitHubUser, SessionTokenSigner};
+use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::connection_service::{
+    classify_placement, CodebasePlacement, DaemonSessionHost, PlacementRequest,
+};
+use tddy_session_lifecycle::test_util::TestDaemon;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

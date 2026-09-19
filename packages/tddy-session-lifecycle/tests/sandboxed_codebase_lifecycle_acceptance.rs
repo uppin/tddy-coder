@@ -22,10 +22,7 @@ use std::sync::{Arc, OnceLock};
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_daemon_sandbox::workspace_tool_sandbox::RUNNER_PID_FILE;
 use tddy_github::{GitHubUser, SessionTokenSigner};
 use tddy_rpc::Request;
@@ -34,6 +31,9 @@ use tddy_service::proto::session::{
     DeleteSessionRequest, ResumeSessionRequest, SessionService as SessionServiceTrait,
     StartSessionRequest,
 };
+use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::TestDaemon;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
