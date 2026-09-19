@@ -46,6 +46,17 @@ the parent reaches them by path (`before::before_red(…)`), which is why it dec
 
 `schema.rs`, `schema_manifest.rs`, `schema_pipeline.rs` (goal output schemas), `writer.rs`
 (artifact I/O), `permissions.rs` and `approval_policy.rs` (per-goal tool allowlists),
-`session_artifact_manifest.rs`, `recipe_resolve.rs`, `github_rest_common.rs`, and one module per
+`session_artifact_manifest.rs`, `recipe_resolve.rs`, and one module per
 recipe family: `tdd`, `tdd_small`, `bugfix`, `grill_me`, `review`, `free_prompting`, `merge_pr`,
-`github_pr`, `plan_pr_stack`, `pr_stack`, `orchestrate_pr_stack`, `feature_start_slash`.
+`plan_pr_stack`, `pr_stack`, `orchestrate_pr_stack`, `feature_start_slash`.
+
+## The GitHub REST client lives in `tddy-github`
+
+`github_rest_common.rs`, `github_pr.rs` and `orchestrate_pr_stack/github.rs` moved to
+[`tddy-github`](../tddy-github/) — `tddy_github::github_rest_common`, `tddy_github::github_pr` and
+`tddy_github::pr_api`. A REST client belongs in the crate named after the service, not in a
+workflow-recipes crate.
+
+The three old paths are kept here as one-line `pub use` facades, so
+`tddy_workflow_recipes::github_pr::…` and `crate::orchestrate_pr_stack::github::…` keep resolving and
+no caller was edited. Write new code against `tddy_github` directly.

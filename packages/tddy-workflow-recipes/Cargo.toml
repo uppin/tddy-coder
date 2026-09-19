@@ -10,6 +10,9 @@ serde_json = "1"
 [dependencies]
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-core = { path = "../tddy-core" }
+# The GitHub REST client lives in tddy-github; `github_pr`, `github_rest_common` and
+# `orchestrate_pr_stack::github` are facades re-exporting it from their historical paths.
+tddy-github = { path = "../tddy-github" }
 tddy-workflow = { path = "../tddy-workflow" }
 log = "0.4"
 async-trait = "0.1"
@@ -20,13 +23,14 @@ serde_yaml = "0.9"
 # schema.rs embeds generated/ and validates structured agent output against it.
 include_dir = "0.7"
 jsonschema = { version = "0.44", default-features = false }
-# github_pr.rs stages the REST request body in a temp file for `curl --data-binary`.
-tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "process", "sync"] }
 uuid = { version = "1", features = ["v7"] }
 
 [dev-dependencies]
 serial_test = "3"
+# Only the tests build worktrees and session dirs on disk now that github_pr.rs, which staged the
+# REST request body in a temp file, lives in tddy-github.
+tempfile = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }

@@ -98,24 +98,33 @@ Real dependency edges, as opposed to the branch line:
   `tddy-rpc` and `tddy-service`. `tddy-workflow-recipes` does not depend on it.
 - `tddy-tools/src/server.rs` consumes `github_pr` from across the crate boundary.
 
-### State B
+### State B — as delivered
 
-- `tddy-git` holds the plumbing and depends on no `tddy-*` crate.
-- `tddy-core::worktree` is the session-aware layer plus a facade, under 450 prod lines.
-- `tddy-github` owns the PR REST surface; `tddy-workflow-recipes` keeps facades.
+- **`tddy-git`** (new): 1,763 lines — the plumbing plus `ssh_exec`, depending on nothing but `log`.
+- **`tddy-core::worktree`**: **428 production lines** (was 1,606) — four session-aware functions
+  plus `pub use tddy_git::*;`. `tddy-core::ssh_exec` is a three-line facade.
+- **`tddy-github`**: owns `github_rest_common`, `github_pr` and `pr_api`
+  (ex-`orchestrate_pr_stack/github.rs`). Depends on `tddy-core` — a developer decision, see below.
+- **`tddy-workflow-recipes`**: three one-line facades; 2,124 lines gone.
+- **`tddy-service`**: `tddy-workflow-recipes` demoted to a **dev-dependency** to break the package
+  cycle the facade edge closes. Test-only usage, so no production path changed.
 
 ## Implementation phases
 
-| Phase | Kind | Work |
+| Phase | Planned kind | What green actually did |
 |---|---|---|
-| **A** | mechanical | `extract_module --to_file` on `worktree.rs`: lift the pure-git functions into a **flat** `git_plumbing` module, leaving the two session-aware functions behind. Flat is what `move_module_to_crate` requires |
-| **B** | manual | `tddy-git`'s `Cargo.toml` + `lib.rs`, and the workspace `members` entry — **no `create_file` operation exists**, by design |
-| **C** | mechanical | `move_module_to_crate` on `git_plumbing` → `tddy-git`, `reexport: "glob"` |
-| **D** | mechanical | `move_module_to_crate` × 3 → `tddy-github`, **leaf-first**: `github_rest_common`, `github_pr`, then the nested `orchestrate_pr_stack/github.rs`. Separate plan — `.restructure/` is repo-scoped until 3/9 lands |
-| **E** | manual | `Cargo.toml` dependency edges; facade tidy-up; `README.md` × 3 |
+| **A** | mechanical | **By hand.** `extract_module` needs one contiguous anchor range, and `restructure anchors` resolves no item at all right now |
+| **B** | manual | As planned: `tddy-git`'s `Cargo.toml` + `lib.rs` + the workspace `members` entry |
+| **C** | mechanical | **By hand.** `move_module_to_crate` refuses any move where a file left behind names the moved module — exactly the facade shape required here |
+| **D** | mechanical | **By hand**, `git mv` × 3, leaf-first as planned. The leaf-first ordering did pay off: `crate::github_rest_common::…` resolves unchanged once all three sit in one crate, so **not one path inside the moved bodies was rewritten** |
+| **E** | manual | As planned, plus the two manifest edits the plan did not foresee (`tddy-core` on `tddy-github`, and `tddy-service`'s dev-dependency demotion) |
 
-The ordering in Phase D is the whole reason this node does not need 3/9: **leaf-first turns a
-three-module move into three correct single-module moves.**
+**Every phase the plan called mechanical was done by hand.** That is not a shortcut — it is the
+third node in this stack to find the restructure operations inapplicable to a facade-leaving
+cross-crate move. Identity was proved with `diff` instead: see `## Verification`.
+
+The leaf-first ordering in Phase D was still the right call for the reason the plan gave — it turned
+a three-module move into three independent ones.
 
 ## TODO
 
@@ -129,17 +138,76 @@ three-module move into three correct single-module moves.**
     `tddy_github_gains_no_dependency_on_the_crate_the_client_left` is the cycle guard and must stay
     green through the move.
 - [x] Failing unit/integration tests — the same suite; "which crate owns this" is not a question the type system answers once everything compiles
-- [ ] Implement production code making tests pass (`/green`)
+- [x] Implement production code making tests pass (`/green`) — **5/5 shape tests green**
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — correct the title, ready for review
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
 
+## Decisions taken during green
+
+Three of this changeset's premises did not survive contact with the code. The first two were put to
+the developer rather than resolved by whichever reading kept a test green. The third had only one
+available answer and was taken without asking — it is called out as such below.
+
+**1. `orchestrate_pr_stack/github.rs` does name `tddy_core`.** The discovery's "none of them touches
+`tddy_core`" came from a `use` / `crate::` grep; the 16 references are fully qualified inline, and
+they include every method of the public `GithubPrApi` trait. **Developer chose:** move all three
+files and take the `tddy-github → tddy-core` edge. Consequently the AC6 guard test was **narrowed**
+to forbid only `tddy-workflow-recipes` — the crate the client left, and the only edge that can close
+a cycle. The `tddy-core` clause rested on the false premise and was removed, with the reasoning
+written into the test's doc comment. This is the one test change in this PR.
+
+**2. AC2's 450-line threshold is incompatible with FR1's list of stayers.** The five functions FR1
+named are 478 production lines on their own; the floor was 488. **Developer chose:** move
+`setup_worktree_for_session_over_ssh` and `ssh_exec.rs` to `tddy-git` as well — it is the one item
+on the list that never reads a `Changeset`. Result: 428 lines, AC2 met as written, FR1 corrected.
+
+**3. "`tddy-github` depends only on `tddy-rpc` and `tddy-service`, so no cycle is possible" was
+wrong.** It checked only `tddy-github`'s outgoing edges. The facade direction closes
+`recipes → github → service → recipes` and `cargo` refuses to build the workspace. Inherent to FR2 —
+it would have fired even if only the two leaf files moved. Resolved by demoting `tddy-service`'s
+`tddy-workflow-recipes` dependency to a dev-dependency (its only three uses are inside a
+`#[cfg(test)] mod`). **This is the one edit outside the changeset's stated package set**, and it was
+**not** put to the developer: with the cycle in place `cargo` builds nothing at all, so there was no
+state in which to ask. The alternative — cutting `tddy-github → tddy-service` by relocating the
+`proto::auth` types — is far larger and touches a crate nobody scoped. Worth a look at review.
+
+## Deferred
+
+- `packages/tddy-github/src/github_pr.rs` carries **13** log statements with
+  `target: "tddy_workflow_recipes::github_pr"`, now naming a crate the code has left. Retargeting
+  them is a log-message change, which this node's boundary forbids, and it would break any log
+  filter configured against the old target. Recorded in
+  [`docs/dev/todo/2026-09-20-github-pr-log-targets-name-the-crate-the-code-left.md`](../todo/2026-09-20-github-pr-log-targets-name-the-crate-the-code-left.md).
+
 ## Verification
 
 ```bash
-./test -p tddy-core -p tddy-git -p tddy-github -p tddy-workflow-recipes
-cargo clippy -p tddy-core -p tddy-git -p tddy-github -p tddy-workflow-recipes -- -D warnings
-cargo build -p tddy-tools     # proves AC5 — server.rs was not edited
+cargo test -p tddy-core -p tddy-git -p tddy-github -p tddy-workflow-recipes --no-fail-fast
+cargo clippy -p tddy-core -p tddy-git -p tddy-github -p tddy-workflow-recipes --all-targets -- -D warnings
+cargo build -p tddy-tools && cargo check -p tddy-tools --all-targets   # AC5 — server.rs not edited
+cargo check -p tddy-service --all-targets                             # covers the manifest demotion
 cargo fmt --all --check
-tddy-tools restructure verify --against HEAD
+```
+
+`--no-fail-fast` is not optional: `./test` does not pass it, and one red suite hides every target
+after it in these crates.
+
+**AC7 — identity, proved by `diff` rather than `restructure verify`.** No restructure plan was run
+(see `## Implementation phases`), so `restructure verify --against HEAD` has nothing to compare.
+
+```bash
+# all four whole-file moves: empty output
+for p in \
+  packages/tddy-workflow-recipes/src/github_rest_common.rs:packages/tddy-github/src/github_rest_common.rs \
+  packages/tddy-workflow-recipes/src/github_pr.rs:packages/tddy-github/src/github_pr.rs \
+  packages/tddy-workflow-recipes/src/orchestrate_pr_stack/github.rs:packages/tddy-github/src/pr_api.rs \
+  packages/tddy-core/src/ssh_exec.rs:packages/tddy-git/src/ssh_exec.rs; do
+  git show "HEAD:${p%%:*}" | diff - "${p##*:}"
+done
+
+# the worktree.rs split: line-multiset diff shows only the 5 `pub fn` widenings + doc/facade lines
+git show HEAD:packages/tddy-core/src/worktree.rs | grep -v '^[[:space:]]*$' | sort > /tmp/old
+cat packages/tddy-core/src/worktree.rs packages/tddy-git/src/lib.rs | grep -v '^[[:space:]]*$' | sort > /tmp/new
+comm -3 /tmp/old /tmp/new
 ```

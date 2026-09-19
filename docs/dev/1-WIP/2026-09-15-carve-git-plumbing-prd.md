@@ -34,9 +34,14 @@ So ~1,200 lines of general-purpose git plumbing are locked inside the workspace'
 | `src/github_pr.rs` | 494 | `crate::github_rest_common` only |
 | `src/orchestrate_pr_stack/github.rs` | 1,292 | `crate::github_rest_common::github_token_from_env` only |
 
-**2,124 lines of GitHub REST**, and not one of them touches `tddy_core`, the recipe machinery, or
-`pr_stack`. Meanwhile `tddy-github` exists — 1,340 lines of OAuth, session tokens and a token store —
+**2,124 lines of GitHub REST**, none of which touches the recipe machinery or `pr_stack`.
+Meanwhile `tddy-github` exists — 1,340 lines of OAuth, session tokens and a token store —
 with **no PR surface at all**, and `tddy-workflow-recipes` does not depend on it.
+
+> **Corrected during green.** The "Depends on" column above lists only `crate::`-qualified
+> references, and this section originally read "not one of them touches `tddy_core`". That is false:
+> `orchestrate_pr_stack/github.rs` names `tddy_core::WorkflowError` in 16 production signatures,
+> fully qualified inline, where a `use` / `crate::` grep does not see it. See FR2.
 
 `github_pr` is already consumed **outside** the crate, by `tddy-tools/src/server.rs`.
 
@@ -46,21 +51,57 @@ with **no PR surface at all**, and `tddy-workflow-recipes` does not depend on it
 
 The pure-git portion of `worktree.rs` moves to a new `tddy-git`. `tddy-core` keeps the session-aware
 layer — the two `setup_worktree_for_session*` functions, their `setup_worktree_for_session` wrapper,
-`resolve_persisted_worktree_integration_base_for_session`, and `setup_worktree_for_session_over_ssh` —
-which call into `tddy-git` for every git operation.
+and `resolve_persisted_worktree_integration_base_for_session` — which call into `tddy-git` for every
+git operation.
+
+> **Corrected during green.** This list originally also named `setup_worktree_for_session_over_ssh`,
+> and that is incompatible with AC2. The four functions above are **478 production lines on their
+> own**, so the floor for a `worktree.rs` that keeps all five is 488 — AC2 asks for under 450, and no
+> formatting slack closes a 47-line gap. `setup_worktree_for_session_over_ssh` is the one item on the
+> list that never reads a `Changeset`: it is `git clone` + `git worktree add` over SSH, parameterised
+> by a session-id **string**. It moves to `tddy-git` with `ssh_exec.rs` (96 lines, `std`-only), and
+> `tddy_core::ssh_exec` becomes a facade. Measured result: **428 production lines**. The "~1,200 lines
+> leave" estimate in the problem statement was simply wrong.
 
 `tddy-core::worktree` keeps a facade, so **no consumer is edited**.
 
 ### FR2 — the GitHub REST client moves to `tddy-github`
 
 All three files move, in **leaf-first order**: `github_rest_common`, then `github_pr`, then
-`orchestrate_pr_stack/github.rs`. `tddy-workflow-recipes` gains a `tddy-github` dependency and keeps
-facades at the old paths, so `tddy-tools/src/server.rs` is not edited.
+`orchestrate_pr_stack/github.rs` — which lands as `tddy_github::pr_api`, because
+`orchestrate_pr_stack` is a workflow-recipes concept with no meaning inside `tddy-github`.
+`tddy-workflow-recipes` gains a `tddy-github` dependency and keeps facades at the old paths, so
+`tddy-tools/src/server.rs` is not edited.
+
+> **Corrected during green — two premises in the problem statement were wrong.**
+>
+> 1. **`orchestrate_pr_stack/github.rs` does touch `tddy_core`.** It states `tddy_core::WorkflowError`
+>    in **16 production signatures**, including every method of the public `GithubPrApi` trait. The
+>    discovery missed this because the references are fully qualified inline, so a `use` / `crate::`
+>    grep does not see them. The client cannot move without that edge, and the developer chose to
+>    take it (see AC6).
+> 2. **The facade edge closes a package cycle.** `tddy-github` already depends on `tddy-service`
+>    (`auth_service.rs` uses `tddy_service::proto::auth`), and `tddy-service` depended on
+>    `tddy-workflow-recipes`. Adding `tddy-workflow-recipes → tddy-github` for the facades closes
+>    `recipes → github → service → recipes`, and `cargo` refuses to build the workspace at all. This
+>    is inherent to FR2 — it would have appeared even if only the two leaf files moved. Resolved by
+>    demoting `tddy-service`'s `tddy-workflow-recipes` dependency to a **dev-dependency**: its only
+>    three uses are `use tddy_workflow_recipes::TddRecipe;` inside `src/integration_tests.rs`, which
+>    `src/lib.rs` declares `#[cfg(test)] mod integration_tests;`. No production path changed, and
+>    Cargo permits cycles through dev-dependencies.
 
 ### FR3 — no behaviour changes
 
-Both are pure mechanical extractions. `restructure verify --against HEAD` must report every changed
-statement as a move, a re-point or a facade line.
+Both are pure relocations: every moved line is byte-identical to its origin, and the only edits to
+moved code are five `fn` → `pub fn` widenings in `tddy-git` for helpers the session layer still calls
+across the new crate boundary.
+
+> **Corrected during green.** "Mechanical" was meant as "performed by `tddy-tools restructure`". It
+> was not, and could not be: `restructure anchors` currently resolves no item in any file, and
+> `move_module_to_crate` refuses any move where a file left behind names the moved module — which is
+> precisely the facade shape both halves of this node require. Both moves were done by hand with
+> `git mv` plus an editor, and identity was proved with `diff` against `HEAD` rather than with
+> `restructure verify` (see AC7).
 
 ## Acceptance criteria
 
@@ -69,10 +110,10 @@ statement as a move, a re-point or a facade line.
 | AC1 | `tddy-git` exists, depends on no `tddy-*` crate, and holds no function naming `Changeset` |
 | AC2 | `tddy-core/src/worktree.rs` is under 450 production lines and holds only the session-aware layer |
 | AC3 | Every pre-existing `tddy_core::worktree::…` path resolves — no consumer edited |
-| AC4 | `tddy-github` exposes `github_pr`, `github_rest_common` and the PR-state API from `orchestrate_pr_stack/github.rs` |
+| AC4 | `tddy-github` exposes `github_pr`, `github_rest_common` and the PR-state API from `orchestrate_pr_stack/github.rs` (as `pr_api`) |
 | AC5 | Every pre-existing `tddy_workflow_recipes::github_pr::…` path resolves — `tddy-tools/src/server.rs` is not edited |
-| AC6 | `tddy-github` still depends only on `tddy-rpc` and `tddy-service` plus what the moved code needs; no dependency on `tddy-core` or `tddy-workflow-recipes` |
-| AC7 | `restructure verify --against HEAD` reports no moved logic |
+| AC6 | `tddy-github` gains no dependency on **`tddy-workflow-recipes`** — the crate the client left, which now holds facades pointing back here. **Amended during green:** the original also forbade `tddy-core`, on the false premise that the moved files name nothing from it. They name `WorkflowError` 16 times, so the developer ruled the edge in. It closes no cycle — `tddy-core` depends on neither `tddy-github` nor `tddy-service` nor `tddy-workflow-recipes` |
+| AC7 | No moved logic. **Amended during green:** `restructure verify` is not the instrument — it compares an `extract_module` plan's output, and no restructure plan was run (see FR3). Identity is proved directly: `git show HEAD:<old> \| diff - <new>` is empty for all four whole-file moves, and a line-multiset diff of `worktree.rs` against `worktree.rs + tddy-git/src/lib.rs` shows only the five `pub fn` widenings and the new doc/facade lines |
 | AC8 | `./test -p tddy-core -p tddy-github -p tddy-workflow-recipes` passes at baseline test counts |
 
 ## Out of scope
