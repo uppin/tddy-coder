@@ -54,6 +54,12 @@ choose that placement from the new-session form rather than a CLI flag.
 | `A` | `A` | Co-located. Explicit form of the above. |
 | `A` | `B` | **Split.** Agent on A, worktree on B. |
 
+A fourth placement is requested by its own field rather than by a host id:
+
+| Request | Result |
+|---|---|
+| `sandboxed_codebase = true` | **Sandboxed codebase.** Agent and worktree on this daemon, the worktree inside a `--workspace-tools` jail the agent reaches only through `mcp__tddy-tools__*`. |
+
 `codebase_daemon_instance_id` is only meaningful together with `managed_codebase = true`: an agent
 that still has native filesystem tools has nothing to proxy through. A split placement without
 `managed_codebase` is a request error, not a silently co-located session.
@@ -96,6 +102,45 @@ alias locally.
 Tools a specialized agent has taken over are still refused before dispatch; they are not routed over
 SSH. `ReadLints`, LSP tools, and `SemanticSearch` are unavailable over `RemoteShell` and return an
 explicit error.
+
+## Sandboxed codebase placement
+
+`StartSessionRequest.sandboxed_codebase = true` jails this daemon's own checkout and runs
+`claude-cli` beside it, unconfined, with every native filesystem and shell tool withdrawn. It is the
+split orchestration with the peer hop removed: a **local** `workspace` session holds the worktree
+with `sandbox: Some(true)`, the same `JailedWorkspaceSandboxProvisioner` jails it, and the agent's
+MCP addresses that workspace session — so `exec_tool_route`'s existing predicate
+(`session_type == "workspace" && sandbox == Some(true)`) lands every tool call in the jail.
+
+The agent's tool environment names this daemon over HTTP and carries **no LiveKit fields**, so the
+placement needs no common room, no peer discovery and no join token. A daemon with LiveKit
+unconfigured serves it.
+
+### What it confines, per platform
+
+| Host | Jail | Confines |
+|---|---|---|
+| macOS | Seatbelt | the checkout, the build, and filesystem access outside it |
+| Linux | cgroups | process and network — **not** filesystem writes outside the checkout, because the jail shares the host filesystem root |
+
+Each daemon advertises what its jail confines, as `sandboxed_codebase: { confines_filesystem }`, on
+both surfaces it describes itself over: the LiveKit common-room advertisement and `/api/config`.
+A daemon that advertises neither does not serve the placement, and the web disables the control
+naming that host rather than offering a session it would refuse.
+
+### What a sandboxed-codebase session cannot also ask for
+
+The placement is mutually exclusive with every other one, and each combination is refused naming
+both so the caller learns which field to drop:
+
+| Combined with | Refused because |
+|---|---|
+| `managed_codebase` | that placement jails the agent; this one jails the code |
+| `sandbox` | the same inversion, in the opposite direction |
+| `codebase_daemon_instance_id` | that is this inversion across two hosts, already served by a split |
+| `session_type` ≠ `claude-cli` | no other agent's tool surface can be withdrawn |
+| `recipe` | a recipe resolves `TDDY_REPO_DIR` where the agent is, not where the code is |
+| `dangerously_skip_permissions` | the confinement claim rests on the deny list that flag bypasses |
 
 ### What a split session cannot also ask for
 
