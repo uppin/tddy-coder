@@ -12049,6 +12049,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-credentials"
+version = "0.1.0"
+dependencies = [
+ "chacha20poly1305",
+ "hmac 0.12.1",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "tddy-core",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tddy-daemon"
 version = "0.1.0"
 dependencies = [
@@ -12138,6 +12154,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tddy-core",
+ "tddy-credentials",
  "tddy-daemon-kernel",
  "tddy-github",
  "tddy-livekit",

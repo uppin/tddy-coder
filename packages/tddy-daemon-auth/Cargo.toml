@@ -35,6 +35,10 @@ uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
 base64 = "0.22"
+# The credential store this crate's login path opens (`#keyring` 3/9). A dev-dependency while the
+# surface is published and the wiring is not: the acceptance tests seal a vault the login must then
+# refuse to open, which needs the crate here and nowhere else yet.
+tddy-credentials = { path = "../tddy-credentials" }
 # LiveKit's own JWT verifier. Already in the tree through `tddy-livekit`, which mints with the
 # matching `AccessToken` — so `token_service_acceptance.rs` checks the signature the way a LiveKit
 # server would rather than by re-reading the fields the daemon just wrote.

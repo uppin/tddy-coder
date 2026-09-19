@@ -212,6 +212,11 @@ claimed by 2/9). No other package this node touches is unanalyzed.
 - [ ] A failed credential write **fails the login**; so does a vault that cannot be opened
 - [ ] No API on the store returns a secret to an RPC response path
 - [ ] Key material is zeroized on drop and is not cached beyond the session's life
+- [ ] A vault sealed for one user does not open for another, even when both present the same input
+      keying material — the subject is bound into the derivation
+- [ ] **A stub login seals nothing**: `StubGitHubProvider` mints a fresh synthetic token on every
+      exchange, so a vault keyed on one would be locked at the next demo login. A stub login
+      succeeds and leaves no vault file behind
 - [ ] `GitHubTokenStore`, `FileGitHubTokenStore` and every reference to `github-tokens.json` are
       **gone** — no fallback read
 - [ ] PR-stack live status behaves identically: `Empty`, `Unavailable(reason)` and `Perform(token)`
