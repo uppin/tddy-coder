@@ -123,7 +123,11 @@ pub fn resolve_test_binary_move(
     moving: &TestBinaryMove,
 ) -> Result<WorkspaceEdit> {
     let text = workspace.read(&moving.source)?;
-    let repointed = repointed_references(workspace, &text, &moving.origin)?;
+    // Read once and handed to both passes: the manifest the test compiles against today says which
+    // of the names it writes are crates at all, and it is the only place a dependency line the
+    // walk cannot author may be copied from.
+    let origin_manifest = workspace.read(&format!("{}/Cargo.toml", moving.origin.dir))?;
+    let repointed = repointed_references(workspace, &text, &moving.origin, &origin_manifest)?;
 
     Ok(WorkspaceEdit {
         changes: vec![
@@ -138,7 +142,7 @@ pub fn resolve_test_binary_move(
                 path: moving.source.clone(),
                 edits: repointed.edits,
             },
-            destination_dev_dependencies(workspace, moving, &repointed.named)?,
+            destination_dev_dependencies(workspace, moving, &repointed.named, &origin_manifest)?,
         ],
     })
 }
@@ -176,12 +180,14 @@ struct References {
 /// `mod tests { … }`, survived a pass that read the header alone.
 ///
 /// The crates named — which is what the destination's `[dev-dependencies]` are built from — are
-/// collected from code only. See [`readable_spans`] for what that means and why prose is re-pointed
-/// but never counted.
+/// collected from code only, and from the whole of it: the same three sightings that have to be
+/// re-pointed are the ones that have to be depended on. See [`readable_spans`] for what "code"
+/// means here and why prose is re-pointed but never counted.
 fn repointed_references(
     workspace: &Workspace<'_>,
     text: &str,
     origin: &Destination,
+    origin_manifest: &str,
 ) -> Result<References> {
     let mut references = References {
         edits: Vec::new(),
@@ -189,6 +195,7 @@ fn repointed_references(
     };
 
     record_crates_declared_in_the_header(text, origin, &mut references.named);
+    record_crates_the_code_names(text, origin, origin_manifest, &mut references.named);
 
     for occurrence in origin_named_paths(text, &origin.extern_name) {
         let (qualifier, rest) = match occurrence.path.split_once("::") {
@@ -224,11 +231,12 @@ fn repointed_references(
 /// re-pointed. Every path that *does* name the origin and a module inside it is left to the
 /// whole-file pass, which reaches this same declaration and would otherwise edit it twice.
 ///
-/// A declaration is the only place another crate can be *recognised*. The origin's extern name is
-/// known, so `tddy_daemon::…` is a crate path wherever it is written; nothing else is —
-/// `PermissionMode::Plan` and `tokio::time::sleep` are the same shape, and only a type checker can
-/// say which of them names a crate. So a crate reached from a body with no declaration of its own
-/// is beyond a text pass either way, and this is where the crates to depend on are read from.
+/// A top-level declaration is the one place a crate is named *beyond doubt*: in Rust 2018 the first
+/// segment of a `use` path is a crate unless it is `crate`, `self`, `super`, a built-in, or an item
+/// of the file's own root. That certainty is why a name read here that no manifest declares is a
+/// refusal rather than a shrug — see [`destination_dev_dependencies`] — and why the wider pass in
+/// [`record_crates_the_code_names`], which reads shapes that only *may* be crate paths, answers the
+/// same question by dropping what it cannot corroborate instead.
 fn record_crates_declared_in_the_header(
     text: &str,
     origin: &Destination,
@@ -255,6 +263,243 @@ fn record_crates_declared_in_the_header(
             record(named, origin.extern_name.clone(), Some(origin.clone()));
         }
     }
+}
+
+/// The crates the moved test names **anywhere in its code**, which its header need never mention.
+///
+/// `packages/tddy-daemon/tests/remote_git_livekit_acceptance.rs` names `tddy_github` in a return
+/// type, `tddy_connectrpc` in a `let`, and `axum` in a statement — and declares none of the three.
+/// Read from the header alone, the destination gained no line for any of them and the moved suite
+/// stopped compiling on `E0433`. So the dependency question is asked of the same text the
+/// re-pointing pass reads, and [`readable_spans`] is the single answer to what text that is: a
+/// crate named only in a comment is prose and a crate named only in a string is data, and neither
+/// is a reason to depend on anything.
+///
+/// What makes this safe is that the head of a path is *not* self-evidently a crate. `mpsc::channel`
+/// after `use tokio::sync::mpsc;` names an imported module, and `PermissionMode::Plan` names a type;
+/// a dependency line for either would be a manifest edit nobody notices, where a missing line is a
+/// compile error the developer sees at once. So a name is taken as a crate only when every one of
+/// these holds, and is dropped whenever one does not:
+///
+/// - It is the **first** segment of a path — nothing pathlike sits immediately before it — and a
+///   segment inside a `use` group is not one, since only the declaration's own head names a crate.
+/// - It is not a name this file binds: a module it declares at any depth, or anything one of its
+///   `use` declarations brings into scope, aliases included.
+/// - It is not `crate`, `self`, `super`, `std`, `core` or `alloc`, and not the origin — whose
+///   every path the re-pointing pass resolves to the crate that really defines it.
+/// - **The origin's manifest declares it.** A test compiles in the crate it sits in today, so every
+///   crate it names is declared there; a head that is declared nowhere is therefore not a crate at
+///   all, whatever it looks like. That is also what keeps the refusal in
+///   [`destination_dev_dependencies`] out of reach of a guess: a name corroborated here always has
+///   a line to carry across.
+fn record_crates_the_code_names(
+    text: &str,
+    origin: &Destination,
+    origin_manifest: &str,
+    named: &mut BTreeMap<String, Option<Destination>>,
+) {
+    let bound = names_bound_in(text);
+
+    for head in crate_shaped_heads(text) {
+        if matches!(head, "crate" | "super" | "self" | "std" | "core" | "alloc")
+            || head == origin.extern_name
+            || bound.contains(head)
+        {
+            continue;
+        }
+        if !declared_by(origin_manifest, head) {
+            continue;
+        }
+        record(named, head.to_string(), None);
+    }
+}
+
+/// Whether a manifest declares a dependency on this crate, in either of the tables cargo compiles
+/// a test binary against.
+fn declared_by(manifest: &str, extern_name: &str) -> bool {
+    manifest_edits::declares_dependency(manifest, manifest_edits::Table::Dependencies, extern_name)
+        || manifest_edits::declares_dependency(
+            manifest,
+            manifest_edits::Table::DevDependencies,
+            extern_name,
+        )
+}
+
+/// Every first segment of a path written in the moved test's code, in the order written.
+///
+/// A segment counts when it is followed by `::` and opens the path it sits in: a name behind `::`
+/// is a module of whatever precedes it, one behind `.` is a field or a turbofished method, and one
+/// behind a path character is the tail of a longer identifier. Inside a `use` group only the
+/// declaration's own head opens a path — `use std::{time::Duration, path::Path};` names `time` and
+/// `path` as modules of `std`, and reading either as a crate is how `time` becomes a dependency.
+fn crate_shaped_heads(text: &str) -> Vec<&str> {
+    let declarations = use_trees(text);
+    let mut heads = Vec::new();
+
+    for (span, prose) in readable_spans(text) {
+        if prose != Prose::Code {
+            continue;
+        }
+        let mut at = span.start;
+        while at < span.end {
+            let rest = &text[at..span.end];
+            let length = segment_length(rest);
+            if length == 0 {
+                at += rest.chars().next().map_or(1, char::len_utf8);
+                continue;
+            }
+            let (segment, head_at) = (&rest[..length], at);
+            at += length;
+
+            if text[at..span.end].starts_with("::")
+                && segment.starts_with(|character: char| character.is_alphabetic())
+                && opens_a_path(text, head_at)
+                && !inside_a_declaration(&declarations, head_at)
+            {
+                heads.push(segment);
+            }
+        }
+    }
+    heads
+}
+
+/// Whether the segment at `at` opens the path it belongs to, read from what precedes it.
+fn opens_a_path(text: &str, at: usize) -> bool {
+    let before = &text[..at];
+
+    !before.ends_with(header::is_path_character)
+        && !before.ends_with(':')
+        && !before.ends_with('.')
+        && !before.ends_with('\'')
+}
+
+/// Whether the segment at `at` sits inside a `use` declaration without being its head.
+fn inside_a_declaration(declarations: &[(std::ops::Range<usize>, &str)], at: usize) -> bool {
+    declarations
+        .iter()
+        .any(|(span, _)| span.contains(&at) && span.start != at)
+}
+
+/// The names the moved file binds itself, none of which can be a crate it depends on.
+///
+/// Its own modules, declared at any depth — the crate-root rule the header pass draws is the wrong
+/// one here, because this pass reads paths from inside nested modules too — and everything its
+/// `use` declarations bring into scope, which is where the dangerous shadowing lives:
+/// `use tokio::sync::mpsc;` makes every later `mpsc::…` an imported module rather than a crate.
+fn names_bound_in(text: &str) -> BTreeSet<String> {
+    let mut bound: BTreeSet<String> = text.lines().filter_map(module_declared_by).collect();
+
+    for (_, tree) in use_trees(text) {
+        record_names_bound_by(tree, &mut bound);
+    }
+    bound
+}
+
+/// Every `use` declaration in a file, at any indentation, as the span of its tree and the tree.
+///
+/// Indentation is deliberately not read: [`header::use_declarations`] answers "which declarations
+/// are the file's own header", and this answers "what does this file bind", for which a `use`
+/// inside `mod tests { … }` counts exactly as much. The tree runs to the `;`, so a declaration
+/// broken across lines around a group is read whole.
+fn use_trees(text: &str) -> Vec<(std::ops::Range<usize>, &str)> {
+    let mut declarations = Vec::new();
+    let mut offset = 0usize;
+
+    for line in text.split_inclusive('\n') {
+        let start = offset;
+        offset += line.len();
+
+        let trimmed = line.trim_start();
+        let declaration = match trimmed.strip_prefix("pub") {
+            Some(visibility) => visibility.trim_start_matches(|c| c != ' ').trim_start(),
+            None => trimmed,
+        };
+        let Some(tree) = declaration.strip_prefix("use ") else {
+            continue;
+        };
+
+        let at = start + line.len() - tree.len();
+        let end = text[at..]
+            .find(';')
+            .map_or(text.len(), |semicolon| at + semicolon);
+        declarations.push((at..end, text[at..end].trim_end()));
+    }
+    declarations
+}
+
+/// Record every name a `use` tree binds, descending through its groups.
+///
+/// `use a::b::{c, d as e, f::{g}};` binds `c`, `e` and `g`; `use a::b::{self};` binds `b`. A glob
+/// binds names this pass cannot enumerate and so binds none of them — the one hole in the shadowing
+/// rule, and it takes a glob-imported module whose name is also one of the origin's dependencies to
+/// fall into it.
+fn record_names_bound_by(tree: &str, bound: &mut BTreeSet<String>) {
+    let tree = tree.trim();
+    let Some(opened) = tree.find('{') else {
+        bound.extend(name_bound_by(tree));
+        return;
+    };
+
+    let prefix = tree[..opened].trim();
+    for member in grouped_members(&tree[opened..]) {
+        let member = member.trim();
+        let reached = if member == "self" {
+            prefix.trim_end_matches("::").to_string()
+        } else {
+            format!("{prefix}{member}")
+        };
+        record_names_bound_by(&reached, bound);
+    }
+}
+
+/// The name one `use` path binds: its alias where it has one, its last segment otherwise.
+///
+/// A single-segment `use tokio;` binds the crate's own name rather than shadowing anything, so it
+/// binds nothing here — leaving the head scan free to read `tokio::…` as the crate it is.
+fn name_bound_by(path: &str) -> Option<String> {
+    if let Some((_, alias)) = path.rsplit_once(" as ") {
+        let alias = alias.trim();
+        return (alias != "_").then(|| alias.to_string());
+    }
+
+    let mut segments = path.split("::").map(str::trim);
+    segments.next()?;
+    let last = segments.last()?;
+
+    (!last.is_empty() && last.chars().all(header::is_path_character)).then(|| last.to_string())
+}
+
+/// The members of the group opening at the start of `braced`, split at its own commas.
+fn grouped_members(braced: &str) -> Vec<&str> {
+    let mut members = Vec::new();
+    let mut depth = 0usize;
+    let mut from = 0usize;
+
+    for (at, character) in braced.char_indices() {
+        match character {
+            '{' => {
+                depth += 1;
+                if depth == 1 {
+                    from = at + '{'.len_utf8();
+                }
+            }
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    members.push(&braced[from..at]);
+                    return members;
+                }
+            }
+            ',' if depth == 1 => {
+                members.push(&braced[from..at]);
+                from = at + ','.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    members.push(&braced[from..]);
+    members
 }
 
 /// Whether a stretch of a file is code the compiler resolves, or prose written beside it.
@@ -499,15 +744,19 @@ fn character_literal_end(text: &str, at: usize) -> Option<usize> {
 /// crate-root item, and a path in the file's header cannot name it — the same line the header
 /// scanner draws, drawn once more here so the two agree about what "top level" means.
 fn modules_declared_in(text: &str) -> BTreeSet<String> {
-    text.lines().filter_map(module_declared_by).collect()
+    text.lines()
+        .filter(|line| !line.starts_with(char::is_whitespace))
+        .filter_map(module_declared_by)
+        .collect()
 }
 
-/// The module a top-level `mod` line declares, whether it is a file module or an inline one.
+/// The module a `mod` line declares, whether it is a file module or an inline one.
+///
+/// Says nothing about where the line sits: the header pass wants crate-root items alone and filters
+/// for them, while [`names_bound_in`] wants every module the file declares at any depth. One
+/// reading of the line, two rules about which lines to read.
 fn module_declared_by(line: &str) -> Option<String> {
-    let trimmed = line.trim_end();
-    if trimmed.starts_with(char::is_whitespace) {
-        return None;
-    }
+    let trimmed = line.trim();
 
     let declaration = match trimmed.strip_prefix("pub") {
         // `pub`, `pub(crate)`, `pub(super)` — the visibility says nothing about whether the module
@@ -632,10 +881,10 @@ fn destination_dev_dependencies(
     workspace: &Workspace<'_>,
     moving: &TestBinaryMove,
     named: &BTreeMap<String, Option<Destination>>,
+    origin: &str,
 ) -> Result<FileEdit> {
     let path = format!("{}/Cargo.toml", moving.destination.dir);
     let text = workspace.read(&path)?;
-    let origin = workspace.read(&format!("{}/Cargo.toml", moving.origin.dir))?;
 
     let mut lines = Vec::new();
     for (extern_name, home) in named {
@@ -665,13 +914,13 @@ fn destination_dev_dependencies(
         }
 
         let declared = manifest_edits::dependency_line(
-            &origin,
+            origin,
             manifest_edits::Table::Dependencies,
             extern_name,
         )
         .or_else(|| {
             manifest_edits::dependency_line(
-                &origin,
+                origin,
                 manifest_edits::Table::DevDependencies,
                 extern_name,
             )

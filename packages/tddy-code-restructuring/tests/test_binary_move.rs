@@ -448,6 +448,145 @@ fn registers_the_host_it_was_given() {
     );
 }
 
+/// A crate the moved test names without ever importing it still has to be declared.
+///
+/// `packages/tddy-daemon/tests/remote_git_livekit_acceptance.rs` writes `tddy_github::GitHubUser`
+/// in a return type, `tddy_connectrpc::connect_router` in a `let` and `axum::serve` in a statement,
+/// and declares none of the three. Collected from the `use` header alone, the destination gained a
+/// line for none of them either, and the moved suite stopped compiling on `E0433` — the mirror of
+/// the re-pointing defect, in the same file.
+#[test]
+fn gives_the_destination_a_dependency_for_a_crate_named_only_in_a_signature() {
+    // Given a suite whose only mention of the kernel is a return type and the call under it
+    let directory = a_workspace_whose_moved_test_reads(
+        r#"fn a_configured_relay() -> daemon_kernel::relay::Relay {
+    daemon_kernel::relay::Relay::new()
+}
+
+#[test]
+fn builds_the_relay_it_was_configured_with() {
+    let _ = a_configured_relay();
+}
+"#,
+    );
+
+    // When the move is resolved
+    let edit = the_resolved_move_in(&directory);
+
+    // Then the destination declares the crate those positions name
+    assert_eq!(
+        added_to(&edit, &format!("{DESTINATION}/Cargo.toml")),
+        "\n[dev-dependencies]\ndaemon-kernel = { path = \"../daemon-kernel\" }\n"
+    );
+}
+
+/// A crate from a registry is collected by the same rule, and its line is copied rather than
+/// authored.
+///
+/// `axum` is one of the three the header pass missed, and it is not one of this workspace's own —
+/// so a pass that recognised crates by the shape of their names would have left it out, and one
+/// that authored its line would have invented a version. The manifest that already declares it is
+/// the only source for either.
+#[test]
+fn gives_the_destination_a_registry_crate_the_moved_test_names_in_a_body() {
+    // Given a suite that reaches an asynchronous helper without importing it
+    let directory = a_workspace_whose_moved_test_reads(
+        r#"#[test]
+fn waits_for_the_deadline_it_was_given() {
+    tokio::time::sleep(tokio::time::Duration::ZERO);
+}
+"#,
+    );
+
+    // When the move is resolved
+    let edit = the_resolved_move_in(&directory);
+
+    // Then the destination gains the line the daemon declares, version and all
+    assert_eq!(
+        added_to(&edit, &format!("{DESTINATION}/Cargo.toml")),
+        "\n[dev-dependencies]\ntokio = { version = \"1\" }\n"
+    );
+}
+
+/// A name a `use` brings into scope is an imported module, not a crate of the same name.
+///
+/// After `use daemon_kernel::config;` every later `config::…` reaches the kernel's module — and
+/// `config` is also a crate the daemon depends on, so a pass that read path heads without tracking
+/// what the file binds would declare a dependency on a crate the suite never names. A wrong
+/// dependency line is a manifest edit nobody notices, which is why the binding is tracked.
+#[test]
+fn leaves_a_module_a_use_declaration_binds_out_of_the_destination() {
+    // Given a suite reaching a module it imported, under a name the daemon also depends on
+    let directory = a_workspace_whose_moved_test_reads(
+        r#"use daemon_kernel::config;
+
+#[test]
+fn reads_the_relay_it_was_configured_with() {
+    let _ = config::Relay::default();
+}
+"#,
+    );
+
+    // When the move is resolved
+    let edit = the_resolved_move_in(&directory);
+
+    // Then only the crate the declaration opens with travels
+    assert_eq!(
+        added_to(&edit, &format!("{DESTINATION}/Cargo.toml")),
+        "\n[dev-dependencies]\ndaemon-kernel = { path = \"../daemon-kernel\" }\n"
+    );
+}
+
+/// A crate named in a comment is prose, and prose is no reason to depend on anything.
+///
+/// The sentence is still re-pointed — a comment naming a crate the file no longer uses is the debt
+/// this operation pays off — but what a suite *says* it once exercised and what it compiles against
+/// are different facts, and only the second is a dependency.
+#[test]
+fn leaves_a_crate_named_only_in_a_comment_out_of_the_destination() {
+    // Given a suite whose only mention of the kernel is a sentence about its history
+    let directory = a_workspace_whose_moved_test_reads(
+        r#"//! It was written against `daemon_kernel::relay` before the kernel grew one of its own.
+
+#[test]
+fn reports_the_mode_it_was_launched_with() {}
+"#,
+    );
+
+    // When the move is resolved
+    let edit = the_resolved_move_in(&directory);
+
+    // Then the destination's manifest is not touched at all
+    assert_eq!(added_to(&edit, &format!("{DESTINATION}/Cargo.toml")), "");
+}
+
+/// A crate named inside a string literal is data the suite asserts on, not a path it resolves.
+///
+/// The message is produced by whatever emits it. A suite checking that the kernel appears in an
+/// error is not compiled against the kernel, and declaring one because a fixture spells it would
+/// make every asserted string a dependency.
+#[test]
+fn leaves_a_crate_named_only_in_a_string_literal_out_of_the_destination() {
+    // Given a suite asserting on a message that spells a crate path
+    let directory = a_workspace_whose_moved_test_reads(
+        r#"#[test]
+fn names_the_module_the_relay_came_from() {
+    assert_eq!(reported_origin(), "daemon_kernel::relay");
+}
+
+fn reported_origin() -> String {
+    String::new()
+}
+"#,
+    );
+
+    // When the move is resolved
+    let edit = the_resolved_move_in(&directory);
+
+    // Then the destination's manifest is not touched at all
+    assert_eq!(added_to(&edit, &format!("{DESTINATION}/Cargo.toml")), "");
+}
+
 /// The grouped-declaration refusal is deliberate, and reaching further into the file does not end
 /// it: a group is still a group wherever it is declared.
 #[test]
@@ -514,6 +653,11 @@ fn reads_the_relay_it_was_configured_with() {
 /// is going; and a third that defines `host_registry`, which the destination has to gain a
 /// dependency on.
 ///
+/// The daemon also declares two crates no facade is involved in: `config`, whose name a module of
+/// the kernel shares, and `tokio`, which comes from a registry rather than from this workspace.
+/// Both are how a collected name is tested for being a crate at all — a name the daemon declares
+/// nowhere is not one, so a rule about what to leave alone can only be pinned by a name it does.
+///
 /// The moved test's own text is the scenario, so each test writes the file it is about.
 fn a_workspace_whose_moved_test_reads(text: &str) -> tempfile::TempDir {
     let directory = tempfile::tempdir().expect("a temporary directory");
@@ -524,7 +668,9 @@ fn a_workspace_whose_moved_test_reads(text: &str) -> tempfile::TempDir {
             "[package]\nname = \"daemon\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
              [dependencies]\nsession-lifecycle = { path = \"../session-lifecycle\" }\n\
              host-service = { path = \"../host-service\" }\n\
-             daemon-kernel = { path = \"../daemon-kernel\" }\n",
+             daemon-kernel = { path = \"../daemon-kernel\" }\n\
+             config = { version = \"0.14\" }\n\n\
+             [dev-dependencies]\ntokio = { version = \"1\" }\n",
         ),
         (
             "packages/daemon/src/lib.rs",
