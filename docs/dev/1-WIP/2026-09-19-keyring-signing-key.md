@@ -3,7 +3,14 @@
 **Date**: 2026-09-19
 **Status**: 🚧 In Progress
 **Type**: Architecture Change
-**Stack**: `#keyring` 1/9 — the root node · branch `feature/keyring/signing-key` · base `master`
+**Stack**: `#keyring` 1/9 — the root node · branch `feature/keyring/signing-key` · base
+`feature/carve/git-plumbing` (`#carve` 6/10, PR #492)
+
+> **What the base carries, and what it does not.** #492 is itself red: it delivers the *contract*
+> for the git/GitHub split — `packages/tddy-github/tests/git_plumbing_shape.rs`, four failing
+> tests — and has **moved no code**. There is no `tddy-git` crate in this tree and no
+> `tddy-github::github_pr`. Every node of this stack therefore inherits those four failures at its
+> baseline, and node 9 writes its surface against **today's** paths.
 
 ## Affected Packages
 
@@ -82,7 +89,16 @@ Concretely, and exclusively:
 | the `v2` token encoding and `verify` entry point | `tddy-github` | `session_token.rs` |
 | `DaemonSigningKey` (generate / load / public half) | `tddy-daemon-auth` | new |
 | `KeyDirectory` (the port) | `tddy-daemon-auth` | new — **auth owns it, see below** |
-| `LiveKitKeyDirectory` (the adapter) | `tddy-daemon-livekit` | new |
+| `AdvertisedSigningKey`, `peer_signing_public_key` | `tddy-daemon-livekit` | new — the key as **opaque strings** on the advertisement |
+| the `KeyDirectory` **adapter** over those strings | `tddy-daemon` | new — see below |
+
+> **Measured correction.** The adapter cannot live in `tddy-daemon-livekit`. That crate's own
+> `tests/dependency_boundary_unit.rs::does_not_reach_the_identity_boundary_it_mints_no_tokens_of_its_own`
+> asserts `tddy-daemon-auth` is absent from its transitive closure — *"a room token arrives through
+> the SessionTokenMinter port, so tddy-daemon-auth has no business on this path"* — and
+> `KeyDirectory` is an auth-owned trait. So the livekit crate carries the key as two opaque strings
+> on `DaemonAdvertisement` and offers `peer_signing_public_key`, while the crate that already
+> depends on both — `tddy-daemon` — implements the port. The boundary test stays green.
 
 **Explicitly not this node's, though adjacent:**
 
@@ -149,18 +165,24 @@ What this PR publishes in its **second commit** (wave 2), before any implementat
 
 **Surface**
 
-- `tddy-github` — `SessionTokenSigner::new(&DaemonSigningKey)`, `SessionTokenVerifier` taking a key
-  resolver, and the `v2` payload struct carrying `kid`. Signatures only; bodies `todo!()`.
+- `tddy-github` — `SessionTokenSigner::new(SigningKey, KeyId)` and `SessionTokenVerifier::verify(
+  &str, &VerifyingKey, SystemTime)`, with `key_id_of` as a separate unverified read, and the `v2`
+  claims struct carrying `kid`. Signatures only; bodies `todo!()`.
+
+  > **Measured correction.** The planned `SessionTokenSigner::new(&DaemonSigningKey)` is
+  > uncompilable: `DaemonSigningKey` lives in `tddy-daemon-auth`, which *depends on* `tddy-github`.
+  > The signer therefore takes raw `ed25519_dalek` types, and `DaemonSigningKey::signer()` is the
+  > one-line adapter on the auth side.
 - `tddy-daemon-auth` — `DaemonSigningKey::load_or_generate(&Path)`, its public-half accessor, and
   the `KeyDirectory` trait (`fn public_key_for(&self, kid: &str) -> Option<VerifyingKey>` in its
   async, error-carrying form).
-- `tddy-daemon-livekit` — `LiveKitKeyDirectory`, declared as implementing `KeyDirectory`.
+- `tddy-daemon-livekit` — `AdvertisedSigningKey` plus `peer_signing_public_key(&[PeerDaemon], &str)`,
+  and the two advertisement fields they read. The `KeyDirectory` *implementation* is `tddy-daemon`'s.
 
 **Failing tests**
 
 - acceptance: a `v2` token minted by daemon A verifies on daemon B once B has seen A's published key;
-- acceptance: a daemon with **no `livekit:` block** registers `auth.AuthService` and answers a
-  token-gated RPC;
+- acceptance: a daemon with **no `livekit:` block** completes a sign-in;
 - unit: a key id naming an unseen daemon is rejected with no fallback;
 - unit: a `v1` token is rejected;
 - unit: the keypair is generated once at `0600` and **reused** on restart;
@@ -314,8 +336,8 @@ already rewrites, and both shrink as the secret-gated branches go; neither needs
 - Tokens are `v2`: the same signed region plus a **key id**, signed with the daemon's private key.
   Verification resolves the key id through the `KeyDirectory` port. An unknown key id is rejected —
   no fallback, no migration window.
-- `build_auth_entries` needs no `livekit` block. A daemon with no `livekit:` at all registers the
-  full service set and answers token-gated RPCs.
+- `build_auth_entries` needs no `livekit` block. A daemon with no `livekit:` at all **signs**, so a
+  sign-in completes and the token it returns resolves to the user who signed in.
 - `livekit.api_secret` signs LiveKit room JWTs and nothing else.
 
 ### Delta (What's Changing)
@@ -335,8 +357,9 @@ already rewrites, and both shrink as the secret-gated branches go; neither needs
 - **Dependencies**: `ed25519-dalek` (approved); optionally `zeroize`.
 
 #### tddy-daemon-livekit
-- **Integration**: `LiveKitKeyDirectory` publishes this daemon's public key to the common room and
-  resolves peers' keys from published participant metadata.
+- **Integration**: `DaemonAdvertisement` carries `signing_key_id` / `signing_public_key`, so a
+  daemon's public key rides the common-room metadata it already publishes; `peer_signing_public_key`
+  resolves a peer's key from the registry by the id a token names.
 - **Dependencies**: none added — the port inverts the direction the boundary test forbids.
 
 #### tddy-daemon
@@ -354,7 +377,8 @@ already rewrites, and both shrink as the secret-gated branches go; neither needs
 
 - [ ] **M1** — `v2` format in `session_token.rs`, with the flaky helper corrected in the same commit
 - [ ] **M2** — keypair generate/load, `0600` write, `auth_storage` permissions warning
-- [ ] **M3** — `KeyDirectory` in `tddy-daemon-auth`; `LiveKitKeyDirectory` in `tddy-daemon-livekit`
+- [ ] **M3** — `KeyDirectory` in `tddy-daemon-auth`; the advertisement fields and
+      `peer_signing_public_key` in `tddy-daemon-livekit`; the adapter over them in `tddy-daemon`
 - [ ] **M4** — rewire `build_auth_entries`, `local_token.rs`, `runtime.rs`, `run.rs`
 - [ ] **M5** — migrate the two acceptance suites from `FLEET_SECRET` to per-daemon keys
 - [ ] **M6** — `desktop.yaml.production` and the three docs that state the barrier, plus the two
@@ -383,9 +407,15 @@ proof rather than being deleted.
   A's published public key. *Assertion*: the RPC succeeds, and B's key directory recorded a lookup
   for A's key id.
 - **Authentication with no LiveKit block** — Given a daemon whose config has no `livekit:` key at
-  all, When it starts, Then `auth.AuthService` is registered and a token-gated RPC with a valid token
-  succeeds. *Assertion*: service list contains `auth.AuthService`; the RPC returns a payload, not
-  `not_found`.
+  all, When a user signs in, Then the exchange returns a session token that resolves to that user.
+  *Assertion*: `ExchangeCode` returns a token, and a token-gated RPC carrying it names the same login.
+
+  > **Measured correction.** The plan said such a daemon "registers no session services at all".
+  > It is wrong: two tests written to pin it — one asserting `auth.AuthService` is unregistered, one
+  > asserting the identity function is absent — both **passed** against today's code. Registration
+  > never depended on `livekit`. The real barrier is one step later, at `ExchangeCode`:
+  > `FailedPrecondition: "session token signing is not configured"`, because the signing key *is*
+  > `livekit.api_secret`. The two tests were removed and replaced by the two that pin that break.
 - **LiveKit room JWTs still work** — Given `livekit.api_secret` configured, When a room token is
   minted, Then it is accepted by LiveKit. *Assertion*: the credential's LiveKit role is untouched.
 
@@ -408,8 +438,8 @@ and `cargo clippy -p <pkg> -- -D warnings` per package. **Whole-workspace green 
 
 ## Acceptance Criteria
 
-- [ ] A daemon with **no `livekit:` block at all** registers `auth.AuthService` and answers a
-      token-gated RPC
+- [ ] A daemon with **no `livekit:` block at all** completes a sign-in, and the token it issues
+      resolves to the user who signed in
 - [ ] A daemon generates its keypair on first boot, at mode `0600`, and **reuses** it on restart
 - [ ] A `v2` token minted by daemon A verifies on daemon B after B has seen A's published public key
 - [ ] A `v2` token whose key id names a daemon B has **not** seen is rejected — no fallback
