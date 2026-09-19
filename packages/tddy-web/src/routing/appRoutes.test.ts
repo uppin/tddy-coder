@@ -7,6 +7,8 @@ import {
   isRpcPlaygroundPath,
   VMS_ROUTE,
   isVmsPath,
+  ACCOUNTS_ROUTE,
+  isAccountsPath,
   HOSTS_ROUTE,
   isHostsPath,
   LIVEKIT_ROUTE,
@@ -354,6 +356,36 @@ describe("tasks routes", () => {
   it("isTasksPath does not match a path that merely starts with /tasks", () => {
     // When
     const result = isTasksPath("/tasks-archive");
+    // Then
+    expect(result).toBe(false);
+  });
+});
+
+describe("accounts route", () => {
+  it("ACCOUNTS_ROUTE is /accounts", () => {
+    // When
+    const result = ACCOUNTS_ROUTE;
+    // Then
+    expect(result).toBe("/accounts");
+  });
+
+  it("isAccountsPath matches the accounts screen path", () => {
+    // When
+    const result = isAccountsPath(ACCOUNTS_ROUTE);
+    // Then
+    expect(result).toBe(true);
+  });
+
+  it("isAccountsPath does not match a path that merely starts with /accounts", () => {
+    // When
+    const result = isAccountsPath("/accounts-archive");
+    // Then
+    expect(result).toBe(false);
+  });
+
+  it("isAccountsPath does not match an accounts sub-path", () => {
+    // When
+    const result = isAccountsPath("/accounts/github");
     // Then
     expect(result).toBe(false);
   });

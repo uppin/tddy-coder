@@ -1,0 +1,20 @@
+[package]
+name = "tddy-accounts"
+version = "0.1.0"
+edition = "2021"
+description = "accounts.AccountsService — what a person can see and curate in a daemon's credential store"
+
+[lib]
+name = "tddy_accounts"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-credentials = { path = "../tddy-credentials" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-service = { path = "../tddy-service" }
+async-trait = "0.1"
+prost = "0.13"
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -128,6 +128,44 @@ Published in this PR's **second commit**:
 
 ⚠ **Not mergeable in that state** — implementation follows in this same PR.
 
+### Addition to the drafted contract — the `AccountStore` port
+
+The contract above names only the service struct and its entry constructor. Writing the tests turned
+up a fact the plan did not have: **3/9's `SessionVault` cannot be constructed in a test.** Its `path`
+field is private and it exposes no constructor — the only way to obtain one is
+`CredentialStore::open_or_create`, which needs a real sealed file on disk and input keying material.
+A `ListAccounts` test that had to seal a vault first would be testing 3/9's crypto, not this node's
+grouping, and it would fail for 3/9's `todo!()` rather than for its own.
+
+So this node owns one more symbol than the plan listed — a **port trait** in
+`packages/tddy-accounts/src/store.rs`:
+
+```rust
+pub enum AccountsError { NoSuchSession, Locked, Unavailable(String) }
+
+pub trait AccountStore: Send + Sync {
+    fn list(&self, session_token: &str) -> Result<Vec<CredentialRecord>, AccountsError>;
+    fn set_label(&self, session_token: &str, provider: &ProviderId, account: &AccountId,
+                 label: &str) -> Result<CredentialRecord, AccountsError>;
+    fn remove(&self, session_token: &str, provider: &ProviderId, account: &AccountId)
+        -> Result<(), AccountsError>;
+}
+```
+
+Three things about it are deliberate:
+
+- **It is expressed over 3/9's real data types** — `CredentialRecord`, `ProviderId`, `AccountId` are
+  fully implemented and need no vault to build. Only the *opening* of a vault is stubbed upstream, so
+  a fake implementing this trait carries real records.
+- **It adds nothing to `SessionVault`.** The boundary rule is that no node implements a symbol
+  another owns; a new trait in *this* crate, with 3/9's types as parameters, does not touch 3/9's
+  surface. The green phase adds this crate's own implementation over `SessionVault` — again in this
+  crate, not in `tddy-credentials`.
+- **Its three error variants are exactly the three outcomes the PRD refuses to collapse**, plus the
+  refused token. `Locked` becomes `vault_locked: true`, `Unavailable` becomes an RPC error carrying
+  the reason, `NoSuchSession` becomes a refusal — and an `Ok(vec![])` becomes an empty list. Four
+  inputs, four distinguishable responses, which is what the acceptance tests assert.
+
 ## Green wave
 
 **Wave 3 of 5 — alone in its wave.**
@@ -255,6 +293,41 @@ single spec and story under change** — a full Cypress e2e run is ~50 minutes o
 belongs to CI. `tsc` is not a gate in this repo. Whole-workspace green comes from CI via
 `scripts/ci-status.sh`.
 
+### Measured red state (wave 2)
+
+Scoped to the packages this commit touches. `tddy-service` is the only *existing* Rust package it
+changes; `tddy-accounts` is new, so it has no baseline of its own.
+
+| Run | Command | Passed | Failed |
+|---|---|---|---|
+| Baseline, before this commit | `./test -p tddy-service --no-fail-fast` | 134 | 0 |
+| After this commit | `./test -p tddy-accounts -p tddy-service --no-fail-fast` | 135 | 9 |
+| Web routing | `bun test src/routing` | 98 | 0 |
+| Web acceptance | `cypress run --component --spec cypress/component/AccountsScreenAcceptance.cy.tsx` | 0 | 9 |
+
+`tddy-service` is **unchanged at 134 passed, 0 failed** — adding a proto and a module adds surface
+and moves nothing. The delta is this node's own: **9 Rust failures and 9 Cypress failures**, with two
+tests already green.
+
+- **9 of 10** in `tddy-accounts`' `accounts_service_acceptance.rs`, every one of them on
+  `AccountsServiceImpl`'s three `todo!()` bodies, named in the panic.
+- **1 of 10 passes**: `the_registry_entry_names_the_service_a_client_addresses`. The generated
+  `AccountsServiceServer` and `build_accounts_entry` are surface rather than implementation, so the
+  name a client addresses holds from this commit on.
+- **9 of 9** in `AccountsScreenAcceptance.cy.tsx`, each on a missing `data-testid` — the screen is
+  published as props and a comment, so no row, notice or control exists yet.
+- **4 of 4 pass** in `appRoutes.test.ts`. `ACCOUNTS_ROUTE` and `isAccountsPath` are real in this
+  commit, as the contract says: they are pure string rules whose tests cost a second.
+
+⚠ **Inherited, not this node's**: regenerating the committed TypeScript surfaced drift in
+`packages/tddy-rust-typescript-tests/gen/auth_pb.ts`. `#keyring` 2/9 added `StartDeviceLogin` and
+`PollDeviceLogin` to `auth.proto` and regenerated **only** `packages/tddy-web/src/gen/auth_pb.ts`;
+the manifest lists two gen directories over `../tddy-service/proto`, so the second one is 197 lines
+behind its proto and `scripts/generated-code.sh check` — a CI gate — fails on 2/9 and on every node
+above it. It is reverted out of this commit rather than absorbed: the file belongs to 2/9's diff, and
+fixing a parent's omission here would show in *this* PR as a change to a service it does not own. It
+is fixed by amending 2/9 during the stack's closing cascade.
+
 ## Acceptance Criteria
 
 - [ ] `ListAccounts` returns records grouped by provider with **no secret in any field**
@@ -270,7 +343,7 @@ belongs to CI. `tsc` is not a gate in this repo. Whole-workspace green comes fro
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Publish the draft-PR contract — wave 2
+- [x] Publish the draft-PR contract — wave 2
 - [ ] M1–M9
 - [ ] Package documentation for `tddy-accounts` and `tddy-web`
 - [ ] `/wrap-context-docs` — this node claims **no** backlog entry and **no** code-issue record
