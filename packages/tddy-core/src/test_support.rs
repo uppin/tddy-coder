@@ -11,8 +11,7 @@ use crate::backend::CodingBackend;
 use crate::workflow::graph::{Graph, GraphBuilder};
 use crate::workflow::hooks::RunnerHooks;
 use crate::workflow::ids::{GoalId, WorkflowState};
-use crate::workflow::recipe::{GoalHints, PermissionHint};
-use crate::workflow::recipe::{WorkflowEventSender, WorkflowRecipe};
+use crate::workflow::recipe::{GoalHints, PermissionHint, WorkflowEventSender, WorkflowRecipe};
 use tddy_graph::task::EndTask;
 
 /// A minimal linear recipe: `a -> b -> c -> end`. `goal_instructions` returns distinctive text.

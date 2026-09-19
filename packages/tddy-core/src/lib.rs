@@ -4,7 +4,6 @@ pub mod agent_activity;
 pub mod agent_skills;
 pub mod atomic_file;
 pub mod backend;
-pub mod backend_questions;
 pub mod base_sync;
 pub mod branch_worktree_intent;
 pub mod changeset;

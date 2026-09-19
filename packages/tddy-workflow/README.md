@@ -27,10 +27,11 @@ They live here because `tddy-core`'s modules need to name them **without naming 
 `stream` and `toolcall` both need a `ClarificationQuestion` and neither needs a backend; the
 workflow engine needs a `WorkflowEvent` and does not need the presenter. While those types lived in
 `backend/` and `presenter/`, each of those needs was a module cycle. Moving the data out removed
-three of `tddy-core`'s six ([`#carve` 5/11](../../docs/dev/changesets/)).
+three of `tddy-core`'s six (`#carve` 5/11).
 
 Every origin keeps a glob facade, so `tddy_core::backend::ClarificationQuestion` and friends still
-resolve and no consumer was edited.
+resolve and **no DTO consumer was edited**. (Retiring `backend`'s re-export of the *recipe trio* was a
+separate change, and that one did re-point 25 files.)
 
 **Artifact layout** (`artifact_paths`) — session artifact roots and manifest-driven layout paths,
 which is what decouples `tddy-core` from fixed PRD paths.

@@ -3,10 +3,9 @@
 **Location:** `packages/tddy-core/src/presenter/presenter_impl.rs` — `Presenter`
 **Category:** god-object
 **Detected:** 2026-09-15 by structural audit
-**Metrics:** **37 fields** · **46 methods** in one `impl` · 1,788 production lines · budget 500
+**Metrics:** **7 fields** (was 37) · **46 methods** in one `impl` · 1,691 production lines · budget 500
 **Restructure:** required — field regrouping (hand-written), then `extract_module --to_file` × 6
-**Status:** Open — claimed by #491 and #495, in flight
-**Claimed by:** #491 — `#carve` 5/10 `core-foundations` (the 37 **fields** → five sub-structs) · draft
+**Status:** Open — **partially fixed** (the fields are done; the 46 methods remain) — claimed by #495
 **Claimed by:** #495 — `#carve` 9/10 `presenter-split` (the 46 **methods** → six modules) · draft
 **Lands after:** #488, #489, #490, #498 (for #491); + #491, #492, #493, #494 (for #495)
 
@@ -15,6 +14,7 @@
 | Run | Fields | Methods | Production lines | Note |
 |---|---|---|---|---|
 | 2026-09-15 | 37 | 46 | 1,788 | first detection |
+| 2026-09-19 | **7** | 46 | **1,691** | #491 landed the field regrouping: five owned sub-structs in `presenter/state_groups.rs` (`WorkflowRun`, `PendingQuestions`, `ActivityRecorder`, `ViewChannels`, `BackendSelection`) plus `state` and `tddy_data_dir`. The 46 methods are untouched and still the god object. |
 
 ## What the tool found
 

@@ -31,8 +31,7 @@ use tddy_core::workflow::graph::Graph;
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::ids::GoalId;
 use tddy_core::workflow::ids::WorkflowState;
-use tddy_core::workflow::recipe::{GoalHints, PermissionHint};
-use tddy_core::workflow::recipe::{WorkflowEventSender, WorkflowRecipe};
+use tddy_core::workflow::recipe::{GoalHints, PermissionHint, WorkflowEventSender, WorkflowRecipe};
 
 /// Default TDD workflow (feature development with plan → acceptance tests → red/green → …).
 #[derive(Clone, Copy, Default, Debug)]

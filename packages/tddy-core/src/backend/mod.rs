@@ -10,7 +10,6 @@ pub mod model_catalog;
 mod stub;
 mod tool_executor;
 
-pub use crate::backend_questions::{ClarificationQuestion, QuestionOption};
 use crate::workflow::ids::GoalId;
 use crate::workflow::recipe::GoalHints;
 pub use acp::ClaudeAcpBackend;
@@ -27,6 +26,7 @@ pub use model_catalog::{
     render_models_json, resolve_agent_models, BackendCliPaths, CLAUDE_CLI_AGENT, CURSOR_CLI_AGENT,
 };
 pub use stub::StubBackend;
+pub use tddy_workflow::questions::{ClarificationQuestion, QuestionOption};
 pub use tool_executor::{InMemoryToolExecutor, ProcessToolExecutor, ToolExecutor};
 
 /// Enum dispatch for CLI backend selection (avoids trait object overhead).

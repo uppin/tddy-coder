@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 56 | 7 | 9 | 0 | first detection |
+| 2026-09-19 | 57 | 7 | 9 | 0 | #491 rewrote every field access in this body (`self.<field>` → `self.<group>.<field>`). Nesting and branch structure **unchanged**; lines +1 (rustfmt rewrap). The finding stands untouched. |
 
 ## What the tool found
 

@@ -1,4 +1,4 @@
-//! What `#carve` 4/9 delivers, asserted against the source tree.
+//! What `#carve` 5/11 delivers, asserted against the source tree.
 //!
 //! Three of this node's four claims are about *structure* — which module holds which type, how many
 //! fields a struct has, whether a cycle still exists — and none of them is observable from the type
@@ -22,6 +22,22 @@ fn read(relative: &str) -> String {
         .unwrap_or_else(|error| panic!("reading {}: {error}", path.display()))
 }
 
+/// Every `.rs` file under `directory`, at any depth.
+fn rust_files_under(directory: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let entries = std::fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("reading {}: {error}", directory.display()));
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(rust_files_under(&path));
+        } else if path.extension().is_some_and(|it| it == "rs") {
+            found.push(path);
+        }
+    }
+    found
+}
+
 /// Everything before the first `#[cfg(test)]`.
 fn production(text: &str) -> String {
     match text
@@ -33,14 +49,14 @@ fn production(text: &str) -> String {
     }
 }
 
-/// AC1 — the three cycles a DTO created are gone.
+/// AC1 — the two `backend` edges a shared DTO created are gone.
 ///
 /// Each was one to four symbols wide, and every one of them was a plain data type living inside a
 /// behaviour module: `stream/mod.rs:9` needed `ClarificationQuestion` and `QuestionOption`,
 /// `toolcall/client_wire.rs` needed `QuestionOption`, and `workflow/` needed `WorkflowEvent` twice.
 #[test]
 fn no_module_reaches_into_a_behaviour_module_for_a_shared_dto() {
-    // Given the three edges that formed cycles
+    // Given the two edges that reached into `backend` for a DTO
     let edges = [
         ("stream/mod.rs", "crate::backend::"),
         ("toolcall/client_wire.rs", "crate::backend::"),
@@ -64,16 +80,21 @@ fn no_module_reaches_into_a_behaviour_module_for_a_shared_dto() {
 #[test]
 fn the_workflow_engine_does_not_reach_into_the_presenter() {
     // Given every module of the workflow engine
-    let workflow = src("workflow");
-    let reaching: Vec<String> = std::fs::read_dir(&workflow)
-        .expect("the workflow directory")
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path().extension().is_some_and(|it| it == "rs"))
-        .filter(|entry| {
-            let text = std::fs::read_to_string(entry.path()).unwrap_or_default();
+    let modules = rust_files_under(&src("workflow"));
+    assert!(
+        !modules.is_empty(),
+        "no workflow modules were found — the test would pass vacuously"
+    );
+
+    // When each is read
+    let reaching: Vec<String> = modules
+        .iter()
+        .filter(|path| {
+            let text = std::fs::read_to_string(path)
+                .unwrap_or_else(|error| panic!("reading {}: {error}", path.display()));
             production(&text).contains("crate::presenter::")
         })
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .map(|path| path.display().to_string())
         .collect();
 
     // Then none of them names the presenter
@@ -92,14 +113,15 @@ fn the_backend_module_no_longer_re_exports_the_workflow_vocabulary() {
     // Given the backend's own module root
     let text = production(&read("backend/mod.rs"));
 
-    // Then it re-exports neither the id nor the recipe trio
+    // Then it re-exports nothing at all from the workflow, in any spelling
+    let republished: Vec<&str> = text
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| line.starts_with("pub use crate::workflow::"))
+        .collect();
     assert!(
-        !text.contains("pub use crate::workflow::ids::GoalId"),
-        "`backend` still re-exports `GoalId`"
-    );
-    assert!(
-        !text.contains("pub use crate::workflow::recipe::"),
-        "`backend` still re-exports the recipe trio"
+        republished.is_empty(),
+        "`backend` still re-exports the workflow's vocabulary: {republished:?}"
     );
 }
 
@@ -146,14 +168,16 @@ fn the_changeset_parent_is_a_facade() {
 /// AC4 — no module the split produces is over budget.
 #[test]
 fn no_changeset_module_exceeds_four_hundred_production_lines() {
-    // Given each produced module that exists
+    // Given all four modules — each must exist, or `read` panics rather than passing vacuously
     let over: Vec<String> = ["stack", "model", "io", "merge"]
         .into_iter()
-        .map(|module| (module, src(&format!("changeset/{module}.rs"))))
-        .filter(|(_, path)| path.exists())
-        .map(|(module, path)| {
-            let text = std::fs::read_to_string(&path).unwrap_or_default();
-            (module, production(&text).lines().count())
+        .map(|module| {
+            (
+                module,
+                production(&read(&format!("changeset/{module}.rs")))
+                    .lines()
+                    .count(),
+            )
         })
         .filter(|(_, lines)| *lines > 400)
         .map(|(module, lines)| format!("{module} at {lines}"))

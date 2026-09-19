@@ -14,7 +14,6 @@ pub struct WorkflowCompletePayload {
 
 /// Events the workflow thread sends to the Presenter.
 #[derive(Debug)]
-#[allow(dead_code)] // Progress used when workflow emits progress events
 pub enum WorkflowEvent {
     Progress(ProgressEvent),
     StateChange {

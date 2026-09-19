@@ -11,7 +11,7 @@ mod presenter_impl;
 #[cfg(test)]
 mod presenter_test_recipe;
 mod state;
-pub mod state_groups;
+mod state_groups;
 mod view;
 pub mod workflow_runner;
 mod worktree_display;

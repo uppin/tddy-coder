@@ -6,8 +6,8 @@
 //! that exist only for the deferred-start path. What the comments describe, the type system does not.
 //!
 //! These are that grouping made explicit. Grouping fields into owned types is a type-level change no
-//! assist expresses, so it is the one substantial hand-written part of `#carve` 4/9 — and it is what
-//! `#carve` 8/9 partitions the 46 methods along.
+//! assist expresses, so it is the one substantial hand-written part of `#carve` 5/11 — and it is what
+//! `#carve` 9/11 partitions the 46 methods along.
 //!
 //! `state` and `tddy_data_dir` belong to none of these groups and stay directly on `Presenter`.
 
@@ -71,16 +71,22 @@ pub struct PendingQuestions {
 
 /// What this session records about the agent's own tool calls, and where.
 ///
-/// Six fields carrying one responsibility the struct's comments already state at length: the session
+/// Four fields carry the provenance the struct's comments already state at length — the session
 /// directory holds the log, the worktree holds the files, and every record is stamped against the
-/// commit it ran upon.
+/// commit it ran upon. The remaining two ([`Self::output_buffer`] and
+/// [`Self::output_partial_row_active`]) are the activity log's own render state, kept here because
+/// they are written by the same path that records a tool call and read by nothing else.
 pub struct ActivityRecorder {
     /// The session directory receiving `agent-activity.jsonl`. When set, the presenter persists
     /// the agent's own tool calls here and broadcasts them as [`PresenterEvent::AgentActivity`].
     /// `None` when the daemon, not the coder, executes tools.
     pub dir: Option<PathBuf>,
-    /// The checkout the agent edits — **not** [`Self::dir`]. `None` when the caller wiring the
-    /// session did not know it, which is the documented "could not resolve" value.
+    /// The checkout the agent edits — **not** [`Self::dir`]. Every record written for this session
+    /// is stamped against it: the commit it ran upon and the paths it declared.
+    ///
+    /// `None` when the caller wiring the session did not know the checkout. A record then carries an
+    /// empty `head_commit` and no paths, which is the documented "could not resolve" value
+    /// (`docs/ft/daemon/session-worktree-sync.md` AC1); nothing else is read in its place.
     pub worktree: Option<PathBuf>,
     /// Provenance written on persisted rows: `"coder"` or `"cursor-cli"`.
     pub source: String,

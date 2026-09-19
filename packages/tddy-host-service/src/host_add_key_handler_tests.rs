@@ -7,8 +7,9 @@ use tokio_stream::StreamExt;
 
 use crate::host_keypair::FileHostKeypair;
 use crate::host_keypair::HostKeypair;
-use crate::host_prompts::{HostPromptRegistry, PromptKind};
-use crate::host_prompts::{InMemoryHostPromptRegistry, PendingPrompt};
+use crate::host_prompts::{
+    HostPromptRegistry, InMemoryHostPromptRegistry, PendingPrompt, PromptKind,
+};
 use crate::service::HostServiceImpl;
 use crate::ssh_agent_add::{AgentAddFailure, SshAgentKeyAdder};
 use crate::test_util::{test_service, TEST_TOKEN, TEST_USER};

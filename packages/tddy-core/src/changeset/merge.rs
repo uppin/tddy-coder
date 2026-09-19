@@ -8,7 +8,6 @@ use super::model::{
     Changeset, ChangesetWorkflow, ClarificationQa, ClarificationQuestionForQa, QuestionOptionForQa,
     SessionEntry, StateTransition,
 };
-use crate::backend_questions::ClarificationQuestion;
 use crate::error::WorkflowError;
 use crate::workflow::context::Context;
 use crate::workflow::ids::{GoalId, WorkflowState};
@@ -16,6 +15,7 @@ use crate::workflow::recipe::WorkflowRecipe;
 use log::{debug, info};
 use std::collections::BTreeMap;
 use std::path::Path;
+use tddy_workflow::questions::ClarificationQuestion;
 
 /// Merges persisted workflow/demo fields from `changeset.yaml` into session [`Context`]
 /// (`run_optional_step_x`, demo options) so graph predicates match stored intent after interview/plan.
@@ -114,9 +114,9 @@ fn merge_post_workflow_into_context(
 /// Which workflow goal to run when continuing from an on-disk session (CLI resume, presenter).
 ///
 /// For a normal persisted state, this is [`WorkflowRecipe::next_goal_for_state`]. When the session
-/// should be treated as **failed resume** ([`ChangesetState::current`] is `Failed`, or the last
+/// should be treated as **failed resume** ([`super::model::ChangesetState::current`] is `Failed`, or the last
 /// history entry is `Failed`), `next_goal_for_state(Failed)` is `None`; in that case we walk
-/// [`ChangesetState::history`] from newest to oldest, skipping `Failed`, and use the first
+/// [`super::model::ChangesetState::history`] from newest to oldest, skipping `Failed`, and use the first
 /// transition whose [`WorkflowRecipe::next_goal_for_state`] is `Some` and **not** equal to
 /// [`WorkflowRecipe::start_goal`].
 ///
@@ -126,7 +126,7 @@ fn merge_post_workflow_into_context(
 /// is skipped or `None`, falls back to [`WorkflowRecipe::start_goal`], with a TDD-specific fallback
 /// to **`plan`** when only trailing `Planning` → `plan` entries were skipped (failed during plan).
 ///
-/// When the **last** history entry is `Failed`, the same walk is used even if [`ChangesetState::current`]
+/// When the **last** history entry is `Failed`, the same walk is used even if [`super::model::ChangesetState::current`]
 /// was left stale (e.g. still `Planning` after a manual `changeset.yaml` edit that fixed `history`
 /// but not `current`). Otherwise `next_goal_for_state(current)` would incorrectly return `plan`.
 pub fn start_goal_for_session_continue(recipe: &dyn WorkflowRecipe, cs: &Changeset) -> GoalId {

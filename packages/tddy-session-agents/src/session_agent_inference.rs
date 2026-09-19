@@ -29,8 +29,9 @@ use std::sync::{Arc, Mutex};
 use tddy_core::agent_activity::AgentActivityRecord;
 use tddy_core::session_activity::SessionActivityStatus;
 use tddy_service::acp_replay;
-use tddy_service::proto::acp::{acp_agent_message, content_block, session_update};
-use tddy_service::proto::acp::{AcpAgentMessage, ToolCallStatus};
+use tddy_service::proto::acp::{
+    acp_agent_message, content_block, session_update, AcpAgentMessage, ToolCallStatus,
+};
 use tddy_service::proto::session_agents_svc::AgentCloneState;
 use tddy_service::proto::types::SessionAgentStatus;
 

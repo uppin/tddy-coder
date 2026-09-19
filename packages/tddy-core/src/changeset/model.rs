@@ -163,7 +163,7 @@ pub enum BranchWorktreeIntent {
 }
 
 impl BranchWorktreeIntent {
-    /// Stable string for [`Context`] keys and RPC (matches serde `snake_case`).
+    /// Stable string for [`crate::workflow::context::Context`] keys and RPC (matches serde `snake_case`).
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::NewBranchFromBase => "new_branch_from_base",
