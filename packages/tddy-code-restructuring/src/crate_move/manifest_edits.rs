@@ -90,6 +90,28 @@ pub(crate) fn dependency_line(manifest: &str, table: Table, extern_name: &str) -
         .map(str::to_string)
 }
 
+/// Whether a manifest declares a dependency on this crate in **either** of its tables.
+///
+/// The question a test binary asks, because cargo compiles one against `[dependencies]` and
+/// `[dev-dependencies]` alike: a crate declared in either is already reachable from the test, and
+/// declaring it a second time would be a second version to keep in step.
+pub(crate) fn declares_dependency_in_either_table(manifest: &str, extern_name: &str) -> bool {
+    dependency_line_from_either_table(manifest, extern_name).is_some()
+}
+
+/// The line declaring one dependency, verbatim, out of **either** of a manifest's tables.
+///
+/// `[dependencies]` is asked first and answers alone where it has the crate: a manifest declaring
+/// the same crate in both tables is declaring one dependency twice, and the ordinary table is the
+/// one a reader means by it.
+pub(crate) fn dependency_line_from_either_table(
+    manifest: &str,
+    extern_name: &str,
+) -> Option<String> {
+    dependency_line(manifest, Table::Dependencies, extern_name)
+        .or_else(|| dependency_line(manifest, Table::DevDependencies, extern_name))
+}
+
 /// The lines of one of a manifest's dependency tables.
 fn dependencies_of(manifest: &str, table: Table) -> Vec<&str> {
     manifest

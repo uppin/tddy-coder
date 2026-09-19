@@ -1,4 +1,4 @@
-use crate::crate_move::manifest_edits::{self, Table};
+use crate::crate_move::manifest_edits;
 use crate::RestructureError;
 
 use super::Result;
@@ -69,10 +69,7 @@ impl Destination {
             ))
         })?;
 
-        let declared = manifest_edits::dependency_line(&text, Table::Dependencies, extern_name)
-            .or_else(|| {
-                manifest_edits::dependency_line(&text, Table::DevDependencies, extern_name)
-            });
+        let declared = manifest_edits::dependency_line_from_either_table(&text, extern_name);
         let Some(relative) = declared.as_deref().and_then(manifest_edits::declared_path) else {
             return Ok(None);
         };

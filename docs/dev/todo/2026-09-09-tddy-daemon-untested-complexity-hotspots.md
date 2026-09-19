@@ -3,7 +3,7 @@
 **Category:** Missing coverage
 
 > **Scope note (2026-09-19, `#carve` 4/10).** These figures were captured while `tddy-daemon` held
-> **141** test binaries, **119** of which exercised other crates. Those 119 now live in the crates
+> **140** test binaries, **119** of which exercised other crates. Those 119 now live in the crates
 > they test, so a re-run of `analyze coverage` scoped to `tddy-daemon` will capture a small fraction
 > of the 2,159 tests counted here and the by-file percentages will not be comparable.
 >

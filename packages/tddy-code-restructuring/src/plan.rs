@@ -327,6 +327,8 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
     // facade having failed to help.
     // `move_module_to_crate` writes the same kind of facade one level up — `pub use <crate>::…;` in
     // the crate the module left — so it honours the field for the same reason and with the same
+    // failure mode if the field were ignored.
+    //
     // A test binary can have no facade at all, and the reason is worth its own refusal rather than
     // the generic one above: a facade exists to keep a *caller* resolving, and **nothing can
     // reference a test binary**. Cargo builds each `tests/*.rs` as its own crate root; no `use` path
@@ -348,7 +350,6 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
         ));
     }
 
-    // failure mode if the field were ignored.
     if op.reexport.is_some() && op.op != RefactorKind::ExtractModule && !op.op.moves_across_crates()
     {
         return Err(malformed(format!(

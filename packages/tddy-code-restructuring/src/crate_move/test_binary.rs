@@ -250,11 +250,7 @@ fn record_crates_declared_in_the_header(
             None => (path, ""),
         };
 
-        if matches!(
-            qualifier,
-            "crate" | "super" | "self" | "std" | "core" | "alloc"
-        ) || own_modules.contains(qualifier)
-        {
+        if is_a_built_in_root(qualifier) || own_modules.contains(qualifier) {
             continue;
         }
         if qualifier != origin.extern_name {
@@ -301,28 +297,23 @@ fn record_crates_the_code_names(
     let bound = names_bound_in(text);
 
     for head in crate_shaped_heads(text) {
-        if matches!(head, "crate" | "super" | "self" | "std" | "core" | "alloc")
-            || head == origin.extern_name
-            || bound.contains(head)
-        {
+        if is_a_built_in_root(head) || head == origin.extern_name || bound.contains(head) {
             continue;
         }
-        if !declared_by(origin_manifest, head) {
+        if !manifest_edits::declares_dependency_in_either_table(origin_manifest, head) {
             continue;
         }
         record(named, head.to_string(), None);
     }
 }
 
-/// Whether a manifest declares a dependency on this crate, in either of the tables cargo compiles
-/// a test binary against.
-fn declared_by(manifest: &str, extern_name: &str) -> bool {
-    manifest_edits::declares_dependency(manifest, manifest_edits::Table::Dependencies, extern_name)
-        || manifest_edits::declares_dependency(
-            manifest,
-            manifest_edits::Table::DevDependencies,
-            extern_name,
-        )
+/// Whether a path's first segment names something no manifest ever declares.
+///
+/// `crate`, `super` and `self` are the file's own crate under three names, and `std`, `core` and
+/// `alloc` are the crates every Rust file reaches without depending on them. None of the six is a
+/// crate the destination could gain a dependency on, and none of them is one to re-point.
+fn is_a_built_in_root(head: &str) -> bool {
+    matches!(head, "crate" | "super" | "self" | "std" | "core" | "alloc")
 }
 
 /// Every first segment of a path written in the moved test's code, in the order written.
@@ -395,6 +386,18 @@ fn names_bound_in(text: &str) -> BTreeSet<String> {
     bound
 }
 
+/// What a line declares, with any visibility modifier in front of it dropped.
+///
+/// `pub`, `pub(crate)`, `pub(super)` — the visibility says nothing about what is being declared or
+/// about whether it is this binary's own, so whatever follows it is what has to be read. A
+/// sub-slice of the line as given, so a caller can still read an offset back out of its length.
+fn behind_any_visibility(declaration: &str) -> &str {
+    match declaration.strip_prefix("pub") {
+        Some(visibility) => visibility.trim_start_matches(|c| c != ' ').trim_start(),
+        None => declaration,
+    }
+}
+
 /// Every `use` declaration in a file, at any indentation, as the span of its tree and the tree.
 ///
 /// Indentation is deliberately not read: [`header::use_declarations`] answers "which declarations
@@ -409,11 +412,7 @@ fn use_trees(text: &str) -> Vec<(std::ops::Range<usize>, &str)> {
         let start = offset;
         offset += line.len();
 
-        let trimmed = line.trim_start();
-        let declaration = match trimmed.strip_prefix("pub") {
-            Some(visibility) => visibility.trim_start_matches(|c| c != ' ').trim_start(),
-            None => trimmed,
-        };
+        let declaration = behind_any_visibility(line.trim_start());
         let Some(tree) = declaration.strip_prefix("use ") else {
             continue;
         };
@@ -650,10 +649,10 @@ fn block_comment_end(text: &str, at: usize) -> usize {
     while cursor < bytes.len() {
         if bytes[cursor..].starts_with(b"/*") {
             depth += 1;
-            cursor += 2;
+            cursor += "/*".len();
         } else if bytes[cursor..].starts_with(b"*/") {
             depth -= 1;
-            cursor += 2;
+            cursor += "*/".len();
             if depth == 0 {
                 return cursor;
             }
@@ -705,8 +704,10 @@ fn string_end(text: &str, from: usize) -> usize {
 
     while cursor < bytes.len() {
         match bytes[cursor] {
-            b'\\' => cursor += 2,
-            b'"' => return cursor + 1,
+            // The backslash and the one character it escapes, which a `"` does not close the
+            // string from.
+            b'\\' => cursor += '\\'.len_utf8() + 1,
+            b'"' => return cursor + '"'.len_utf8(),
             _ => cursor += 1,
         }
     }
@@ -756,14 +757,7 @@ fn modules_declared_in(text: &str) -> BTreeSet<String> {
 /// for them, while [`names_bound_in`] wants every module the file declares at any depth. One
 /// reading of the line, two rules about which lines to read.
 fn module_declared_by(line: &str) -> Option<String> {
-    let trimmed = line.trim();
-
-    let declaration = match trimmed.strip_prefix("pub") {
-        // `pub`, `pub(crate)`, `pub(super)` — the visibility says nothing about whether the module
-        // is this binary's own, so whatever follows the parentheses is what has to be read.
-        Some(visibility) => visibility.trim_start_matches(|c| c != ' ').trim_start(),
-        None => trimmed,
-    };
+    let declaration = behind_any_visibility(line.trim());
     let name = declaration
         .strip_prefix("mod ")?
         .trim_start()
@@ -792,7 +786,42 @@ struct Defining {
     home: Option<Destination>,
 }
 
-/// Walk the facades an origin-named path is reached through, to the crate that defines it.
+/// The crate that defines what an origin-named path reaches, once the facades are walked through.
+///
+/// Two shapes are answered without walking anything. A bare `use <crate>;` names no module to
+/// resolve, so the crate the test wrote is the one it means — there is no facade in a path with
+/// nothing behind the crate name. A group or a glob names several modules at once and is refused.
+///
+/// # Errors
+///
+/// Refuses a path whose first segment is the origin and whose second is a group or a glob. Which
+/// crate defines `{a, b}` has as many answers as the group has members, and they need not agree;
+/// splitting the declaration is the plan author's call, not this operation's.
+fn defining_home(
+    workspace: &Workspace<'_>,
+    origin: &Destination,
+    path: &str,
+    rest: &str,
+) -> Result<Defining> {
+    if rest.is_empty() {
+        return Ok(Defining {
+            extern_name: origin.extern_name.clone(),
+            home: Some(origin.clone()),
+        });
+    }
+    if rest.starts_with('{') || rest.starts_with('*') {
+        return Err(malformed(format!(
+            "`{path}` reaches several modules of `{}` at once, and they need not be defined by the \
+             same crate — write one `use` per path so each can be re-pointed at the crate that \
+             defines it",
+            origin.package
+        )));
+    }
+
+    crate_past_the_facades(workspace, origin, rest)
+}
+
+/// Walk the facades `<origin>::<rest>` is reached through, to the crate that defines it.
 ///
 /// [`module_home::defining_crate`] resolves **one** re-export, which is all a module move needs:
 /// the crate that hop names is one the origin's own manifest declares, so the dependency line can
@@ -809,32 +838,12 @@ struct Defining {
 ///
 /// # Errors
 ///
-/// Refuses a path whose first segment is the origin and whose second is a group or a glob. Which
-/// crate defines `{a, b}` has as many answers as the group has members, and they need not agree;
-/// splitting the declaration is the plan author's call, not this operation's.
-fn defining_home(
+/// Refuses when a hop's crate cannot be read — a manifest the walk reaches has to be a crate's.
+fn crate_past_the_facades(
     workspace: &Workspace<'_>,
     origin: &Destination,
-    path: &str,
     rest: &str,
 ) -> Result<Defining> {
-    // A bare `use <crate>;` names no module to resolve, so the crate the test wrote is the one it
-    // means — there is no facade in a path with nothing behind the crate name.
-    if rest.is_empty() {
-        return Ok(Defining {
-            extern_name: origin.extern_name.clone(),
-            home: Some(origin.clone()),
-        });
-    }
-    if rest.starts_with('{') || rest.starts_with('*') {
-        return Err(malformed(format!(
-            "`{path}` reaches several modules of `{}` at once, and they need not be defined by the \
-             same crate — write one `use` per path so each can be re-pointed at the crate that \
-             defines it",
-            origin.package
-        )));
-    }
-
     let mut visited = BTreeSet::from([origin.extern_name.clone()]);
     let mut current = origin.clone();
 
@@ -864,79 +873,30 @@ fn defining_home(
 /// The destination's `[dev-dependencies]`, gaining every crate the moved test names.
 ///
 /// `[dev-dependencies]`, not `[dependencies]`: the file lands in the destination's `tests/`, and a
-/// crate only a test needs is not one the library needs. A crate the destination already declares
-/// as an ordinary dependency is left alone, because cargo compiles a test binary against both
-/// tables — declaring it twice would be a second version to keep in step.
-///
-/// A crate the walk resolved to a directory has its line **authored**, from the destination back
-/// to it. That is the one fact this operation may write itself, for the same reason a module move
-/// writes the path back to the crate it left: it is a fact about this repository's own layout. A
-/// crate the walk could not place is copied from the manifest that already declares it, because a
-/// version invented here would be a fact about the world this operation has no way to know.
+/// crate only a test needs is not one the library needs.
 ///
 /// There is deliberately no dependency-cycle refusal, the one a module move makes. Cargo permits a
 /// dev-dependency cycle precisely because it does not enter the library's own build, so a test
 /// that goes on naming the crate it left is a normal outcome here rather than a defect.
+///
+/// # Errors
+///
+/// Refuses when a crate the moved test names has no line to carry across — see
+/// [`dev_dependency_line_for`].
 fn destination_dev_dependencies(
     workspace: &Workspace<'_>,
     moving: &TestBinaryMove,
     named: &BTreeMap<String, Option<Destination>>,
-    origin: &str,
+    origin_manifest: &str,
 ) -> Result<FileEdit> {
     let path = format!("{}/Cargo.toml", moving.destination.dir);
     let text = workspace.read(&path)?;
 
     let mut lines = Vec::new();
     for (extern_name, home) in named {
-        // The destination is what the test exercises, and a crate cannot depend on itself.
-        if *extern_name == moving.destination.extern_name {
-            continue;
-        }
-        if manifest_edits::declares_dependency(
-            &text,
-            manifest_edits::Table::Dependencies,
-            extern_name,
-        ) || manifest_edits::declares_dependency(
-            &text,
-            manifest_edits::Table::DevDependencies,
-            extern_name,
-        ) {
-            continue;
-        }
-
-        if let Some(home) = home {
-            lines.push(format!(
-                "{} = {{ path = \"{}\" }}",
-                home.package,
-                manifest_edits::relative_from(&moving.destination.dir, &home.dir)
-            ));
-            continue;
-        }
-
-        let declared = manifest_edits::dependency_line(
-            origin,
-            manifest_edits::Table::Dependencies,
-            extern_name,
-        )
-        .or_else(|| {
-            manifest_edits::dependency_line(
-                origin,
-                manifest_edits::Table::DevDependencies,
-                extern_name,
-            )
-        })
-        .ok_or_else(|| {
-            malformed(format!(
-                "the moved test names `{extern_name}`, which {}/Cargo.toml declares in neither \
-                 `[dependencies]` nor `[dev-dependencies]` — there is nothing to carry across",
-                moving.origin.dir
-            ))
-        })?;
-        lines.push(manifest_edits::re_anchored(
-            &declared,
-            &moving.origin.dir,
-            &moving.destination.dir,
-        ));
+        let line =
+            dev_dependency_line_for(moving, &text, origin_manifest, extern_name, home.as_ref())?;
+        lines.extend(line);
     }
 
     Ok(FileEdit::Change {
@@ -947,4 +907,60 @@ fn destination_dev_dependencies(
             &lines,
         ),
     })
+}
+
+/// The `[dev-dependencies]` line one named crate earns, or `None` when it earns none.
+///
+/// A crate the destination already declares — in either table, since cargo compiles a test binary
+/// against both — is left alone, because declaring it twice would be a second version to keep in
+/// step. So is the destination itself: it is what the test exercises, and a crate cannot depend on
+/// itself.
+///
+/// A crate the walk resolved to a directory has its line **authored**, from the destination back
+/// to it. That is the one fact this operation may write itself, for the same reason a module move
+/// writes the path back to the crate it left: it is a fact about this repository's own layout. A
+/// crate the walk could not place is copied from the manifest that already declares it, because a
+/// version invented here would be a fact about the world this operation has no way to know.
+///
+/// # Errors
+///
+/// Refuses a crate the origin's manifest declares in neither table. Every name that reaches here
+/// was corroborated against that manifest — see [`record_crates_declared_in_the_header`] for the
+/// one pass that may name a crate without it — so there being nothing to copy means the manifest
+/// the plan read is not the one the test compiles against.
+fn dev_dependency_line_for(
+    moving: &TestBinaryMove,
+    destination_manifest: &str,
+    origin_manifest: &str,
+    extern_name: &str,
+    home: Option<&Destination>,
+) -> Result<Option<String>> {
+    if extern_name == moving.destination.extern_name
+        || manifest_edits::declares_dependency_in_either_table(destination_manifest, extern_name)
+    {
+        return Ok(None);
+    }
+
+    if let Some(home) = home {
+        return Ok(Some(format!(
+            "{} = {{ path = \"{}\" }}",
+            home.package,
+            manifest_edits::relative_from(&moving.destination.dir, &home.dir)
+        )));
+    }
+
+    let declared = manifest_edits::dependency_line_from_either_table(origin_manifest, extern_name)
+        .ok_or_else(|| {
+            malformed(format!(
+                "the moved test names `{extern_name}`, which {}/Cargo.toml declares in neither \
+             `[dependencies]` nor `[dev-dependencies]` — there is nothing to carry across",
+                moving.origin.dir
+            ))
+        })?;
+
+    Ok(Some(manifest_edits::re_anchored(
+        &declared,
+        &moving.origin.dir,
+        &moving.destination.dir,
+    )))
 }

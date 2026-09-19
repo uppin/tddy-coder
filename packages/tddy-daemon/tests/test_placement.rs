@@ -2,12 +2,13 @@
 //!
 //! `tddy-daemon` is the daemon's **composition root**: `runtime.rs` wires ~20 services together and
 //! `main.rs` starts them. A test that mounts that composition belongs here. A test that reaches a
-//! module this crate merely **re-exports** does not — and 119 of 141 did, because
+//! module this crate merely **re-exports** does not — and 119 of 140 did, because
 //! `src/lib.rs` carried a facade over 82 `tddy-session-lifecycle` modules whose stated purpose was
 //! *"Legacy paths for integration suites"*.
 //!
 //! The counts moved while this node was planned and are stated here as measured, not as first
-//! written: the crate gained two suites, and four the plan had listed as strays are named in
+//! written. Master carried **140** suites; this file is the 141st and is added here, so 21 of the
+//! originals stay and **119 move**. Four the plan had listed as strays are named in
 //! [`BELONGS_HERE`] instead, because each is about `tddy-daemon` itself.
 //!
 //! These assertions are what keeps the tree honest once they have moved.
@@ -125,7 +126,7 @@ fn the_legacy_facade_is_gone() {
     }
 }
 
-/// AC7 — the crate that owns 97 of those suites finally has them.
+/// AC7 — the crate that owns 95 of those suites finally has them.
 ///
 /// `tddy-session-lifecycle` had **no `tests/` directory at all**, which is why it looked untested
 /// and could not be verified on its own.
