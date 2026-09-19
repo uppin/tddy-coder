@@ -153,6 +153,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/auth.proto"], &["proto"])?;
 
+    // Accounts service (`#keyring` 4/9) — async trait + RpcService server, and no tonic pass.
+    // `accounts.AccountsService` is asked by a browser over whatever wire the host connection was
+    // opened on; nothing addresses it over the daemon's local Unix socket, so it needs no tonic
+    // adapter. Same single-pass shape as `auth.proto` above, for the same reason.
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
+        }))
+        .compile_protos(&["proto/accounts.proto"], &["proto"])?;
+
     // Host and worktree services — `#unbundle` node 1 split families E/F (hosts, telemetry, prompts,
     // keys) and G/H (worktrees, their disk usage, their files) out of `the pre-unbundle monolithic RPC coordinate`.
     //
