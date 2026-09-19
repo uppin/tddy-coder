@@ -122,7 +122,7 @@ fn the_agent_makes(presenter: &mut Presenter, events: Vec<WorkflowEvent>) {
         tx.send(event).expect("queue the workflow event");
     }
     drop(tx);
-    presenter.workflow_event_rx = Some(rx);
+    presenter.workflow.event_rx = Some(rx);
     presenter.poll_workflow();
 }
 
