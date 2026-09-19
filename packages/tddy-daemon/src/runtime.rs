@@ -263,13 +263,17 @@ pub fn spawn_common_room_discovery_task(
     config: Arc<DaemonConfig>,
     registry: Arc<tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<livekit::Room>>>>,
+    signing_key: tddy_daemon_livekit::AdvertisedSigningKey,
 ) {
     tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
         &config,
         room_slot.clone(),
     );
     tddy_daemon_livekit::livekit_peer_discovery::spawn_common_room_discovery_loop(
-        config, registry, room_slot,
+        config,
+        registry,
+        room_slot,
+        signing_key,
     );
 }
 
@@ -726,6 +730,12 @@ pub async fn build(
                 peer_discovery = Some(PeerDiscoveryHandles {
                     registry: registry.clone(),
                     room_slot: room_slot.clone(),
+                    // TODO(signing-key): advertise this daemon's real identity —
+                    // `DaemonSigningKey::load_or_generate(&data_dir.join(SIGNING_KEY_FILE))`, whose
+                    // `key_id()` and `public_spki_der()` fill these two fields. Advertising nothing
+                    // until then is what an unconfigured daemon does anyway, so no peer can mistake
+                    // a placeholder for a key.
+                    signing_key: tddy_daemon_livekit::AdvertisedSigningKey::default(),
                 });
                 tasks.oauth_loopback_tunnel = Some(OauthLoopbackTunnel {
                     config: config_arc.clone(),

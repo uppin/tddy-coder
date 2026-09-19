@@ -33,6 +33,7 @@ pub mod github_pr_credentials;
 pub mod github_token_store;
 mod local_token;
 pub mod oauth_loopback_tunnel;
+pub mod signing_key;
 pub mod token_provider;
 
 /// The crate's own surface, at the crate root, so a caller writes `tddy_daemon_auth::…` for the
@@ -47,6 +48,14 @@ pub use auth::{
     LiveKitTokenServiceImpl,
 };
 pub use local_token::{build_local_token_entry, mint_local_token, LocalTokenError};
+
+/// The daemon's own signing identity and the port that resolves peers' keys.
+///
+/// At the root for the same reason the four above are: `runtime.rs` wires the keypair, the
+/// directory implementation and the verifier together, and reaches into no module to do it.
+pub use signing_key::{
+    DaemonSigningKey, DirectorySessionTokenVerifier, KeyDirectory, SIGNING_KEY_FILE,
+};
 
 /// Where the daemon keeps a user's GitHub token at rest.
 ///

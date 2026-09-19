@@ -208,8 +208,11 @@ record turns that from a preference into a constraint.
 
 ## Acceptance Criteria
 
-- [ ] A daemon with **no `livekit:` block at all** registers `auth.AuthService` and answers a
-      token-gated RPC ([session-auth.md](../session-auth.md))
+- [ ] A daemon with **no `livekit:` block at all** completes a sign-in, and the token it issues
+      resolves to the user who signed in ([session-auth.md](../session-auth.md)). Registration was
+      never the barrier — measured, `auth.AuthService` is registered without `livekit:` today;
+      the sign-in fails one step later at `ExchangeCode`, with
+      `FailedPrecondition: "session token signing is not configured"`
 - [ ] A daemon generates its keypair on first boot, at mode `0600`, and **reuses** it on restart
 - [ ] A `v2` token minted by daemon A verifies on daemon B after B has seen A's published public key
       ([livekit-peer-discovery.md](../livekit-peer-discovery.md))

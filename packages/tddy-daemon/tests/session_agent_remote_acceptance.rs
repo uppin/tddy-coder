@@ -274,6 +274,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             Arc::new(config),
             Arc::new(tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new()),
             Arc::new(tokio::sync::RwLock::new(None)),
+            Default::default(),
         );
 
         let token = livekit
@@ -360,6 +361,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         config_arc.clone(),
         registry.clone(),
         room_slot.clone(),
+        Default::default(),
     );
     let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
