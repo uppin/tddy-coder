@@ -149,20 +149,22 @@ async fn round_trips_an_echo_over_stdio_through_a_real_seatbelt_jail() {
     let shim_port = pick_free_loopback_port().expect("egress shim port");
     let profile_path = project.join("profile.sb");
 
-    let mut jail = SpawnedJail::new(spawn_sandbox_runner(SandboxRunnerSpawn {
-        project_root: project.clone(),
-        scratch_dir: scratch,
-        egress_dir: egress,
-        profile_path,
-        runner_argv,
-        env,
-        loopback_allow_ports: vec![shim_port],
-        ipc_socket: None,
-        mounts: vec![],
-        host_home: None,
-        cgroup: Default::default(),
-    })
-    .expect("spawn sandbox-runner"));
+    let mut jail = SpawnedJail::new(
+        spawn_sandbox_runner(SandboxRunnerSpawn {
+            project_root: project.clone(),
+            scratch_dir: scratch,
+            egress_dir: egress,
+            profile_path,
+            runner_argv,
+            env,
+            loopback_allow_ports: vec![shim_port],
+            ipc_socket: None,
+            mounts: vec![],
+            host_home: None,
+            cgroup: Default::default(),
+        })
+        .expect("spawn sandbox-runner"),
+    );
 
     // Wait for the ready marker (`--stdio` mode writes "stdio" instead of a port number) — same
     // polling pattern as `sandbox_runner_spawn_smoke.rs`, so a jail that fails to boot (e.g. an
@@ -199,7 +201,6 @@ async fn round_trips_an_echo_over_stdio_through_a_real_seatbelt_jail() {
     // a directly-spawned (unsandboxed) tddy-sandbox-runner process
     let response = EchoResponse::decode(response_bytes.as_slice()).expect("decode EchoResponse");
     assert_eq!(response.message, "hello-through-seatbelt");
-
 }
 
 /// A `HostToolHandler` that returns a fixed marker result — enough to prove a `ToolRequest`
@@ -298,20 +299,22 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
     let shim_port = pick_free_loopback_port().expect("egress shim port");
     let profile_path = project.join("profile.sb");
 
-    let mut jail = SpawnedJail::new(spawn_sandbox_runner(SandboxRunnerSpawn {
-        project_root: project.clone(),
-        scratch_dir: scratch,
-        egress_dir: egress.clone(),
-        profile_path,
-        runner_argv,
-        env,
-        loopback_allow_ports: vec![shim_port],
-        ipc_socket: None,
-        mounts: vec![],
-        host_home: None,
-        cgroup: Default::default(),
-    })
-    .expect("spawn sandbox-runner"));
+    let mut jail = SpawnedJail::new(
+        spawn_sandbox_runner(SandboxRunnerSpawn {
+            project_root: project.clone(),
+            scratch_dir: scratch,
+            egress_dir: egress.clone(),
+            profile_path,
+            runner_argv,
+            env,
+            loopback_allow_ports: vec![shim_port],
+            ipc_socket: None,
+            mounts: vec![],
+            host_home: None,
+            cgroup: Default::default(),
+        })
+        .expect("spawn sandbox-runner"),
+    );
 
     let deadline = Duration::from_secs(15);
     let start = std::time::Instant::now();
@@ -365,5 +368,4 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
         "expected the fake handler's marker in the tool result: {parsed}"
     );
     assert_eq!(parsed.get("tool").and_then(|v| v.as_str()), Some("Read"));
-
 }
