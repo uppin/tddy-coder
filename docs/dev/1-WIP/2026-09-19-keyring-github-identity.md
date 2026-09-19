@@ -84,9 +84,25 @@ account is only meaningful when more than one account can exist.
 **The load-bearing edge is 5/9** [#512](https://github.com/uppin/tddy-coder/pull/512) — the
 assignments and `AccountResolution`. 3/9 and 4/9 are transitive through it.
 
-**#492 is an ancestor, not a blocker.** On 2026-09-19 the whole `#keyring` stack was re-based onto
-[#492](https://github.com/uppin/tddy-coder/pull/492) `feature/carve/git-plumbing`, so the moved
-`tddy-github` is present in this tree from node 1 onward — see Prerequisites.
+**#492 is an ancestor. ⚠ It is not yet a *green* one.** On 2026-09-19 the whole `#keyring` stack
+was re-based onto [#492](https://github.com/uppin/tddy-coder/pull/492) `feature/carve/git-plumbing`,
+which removes the merge-order collision this node was planned around. What the plan then asserted —
+that "the moved `tddy-github` is present in this tree from node 1 onward" — **is false today**, and
+was false when it was written: #492 is itself in its wave-2 red state. Measured on this branch on
+2026-09-20:
+
+- `packages/tddy-git` does not exist;
+- `packages/tddy-github/src/` is `auth_service.rs`, `lib.rs`, `provider.rs`, `real.rs`,
+  `session_token.rs`, `session_token_v2.rs`, `stub.rs`, `token_store.rs` — no `github_pr`, no
+  `github_rest_common`, no PR surface of any kind;
+- `packages/tddy-github/tests/git_plumbing_shape.rs` is #492's **failing** acceptance suite, and its
+  four assertions are among this branch's inherited red;
+- all 2,124 lines of the REST client, and all ten callers of `github_token_from_env`, are still in
+  `tddy-workflow-recipes`.
+
+The consequence is scheduling, not design: the ancestry is right and the collision is gone, but the
+`tddy-github` half of the `## Draft PR contract` could not be published in wave 2 — see
+**As published** below. Nothing about *where* the token parameter belongs changed.
 
 **Dependents**: none. This is the top of the stack.
 
@@ -117,6 +133,94 @@ Published in this PR's **second commit**:
 
 ⚠ **Not mergeable in that state** — implementation follows in this same PR.
 
+### ⚠ Plan correction — the REST half could not be published
+
+The contract's first surface bullet promised `tddy-github`'s REST entry points taking a token
+parameter, *"written against the post-#492 module paths"*. Those paths do not exist on this branch.
+#492 is an ancestor in its **own wave-2 red state**, so the client has not moved: it is still 2,124
+lines in `tddy-workflow-recipes`, `packages/tddy-git` has not been created, and
+`packages/tddy-github/tests/git_plumbing_shape.rs` — #492's failing acceptance suite — is part of
+this branch's inherited red. The `## Dependencies` claim that the move *"has already happened in this
+tree"* has been corrected above.
+
+**What was done instead.** Publishing the parameter against the pre-move paths was rejected: it means
+editing the exact files #492 is moving, which is what `## Boundaries` puts out of scope (*"The REST
+client's move — #492's, entirely"*) and what basing the stack on #492 existed to avoid. So the REST
+half is **deferred to this node's green phase**, which runs after #492 is green and the paths are
+real. Two consequences, both recorded rather than hidden:
+
+- acceptance criterion *"a GitHub API call uses the assigned account's token"* is covered in wave 2
+  only as far as `ActingIdentity::token` — the assertion at the REST boundary arrives with M1;
+- no test in this commit constrains where the parameter lands. M1 is unchanged in scope; it simply
+  has no red test in front of it yet.
+
+**Nothing about the design changed.** The token still comes from one resolution, and the
+no-environment-fallback rule is pinned by
+`a_project_that_assigns_no_account_is_refused_although_the_environment_holds_a_token`, which sets
+`GITHUB_TOKEN` in the process and asserts the refusal anyway.
+
+### As published — measured red (wave 2, commit 2)
+
+Scoped to this node's own verification scope — `./test -p tddy-accounts -p tddy-github
+-p tddy-daemon-livekit -p tddy-daemon-auth --no-fail-fast`, run on 2026-09-20 before and after the
+surface commit. **Scoped, not whole-workspace**; CI is the authority on everything else.
+
+| | passed | failed |
+|---|---|---|
+| Baseline, before this commit | 279 | 76 |
+| After publishing the surface | 280 | 95 |
+
+**+19 failing, +1 passing, 0 previously-failing tests fixed or hidden.** The 76 inherited failures
+are nodes 2–8's unimplemented green phases plus #492's own four `git_plumbing_shape.rs` assertions;
+every one of them is still failing, by name, for the same reason.
+
+Where the 19 land, and what each fails on:
+
+| Suite | New red | Fails at |
+|---|---|---|
+| `tddy-accounts/tests/project_resolved_identity_acceptance.rs` | 5 | `identity.rs` — `acting_identity` |
+| `tddy-accounts/tests/acting_identity_unit.rs` | 8 | `identity.rs` — `acting_identity` (5) and `IdentityError: Display` (3) |
+| `tddy-daemon-livekit/tests/session_git_identity_acceptance.rs` | 3 | `session_git.rs` — `session_git_environment` |
+| `tddy-daemon-auth/tests/login_time_token_store_is_retired.rs` | 3 | their own assertions — the readers are still there |
+
+Sixteen of the nineteen panic on one of this node's three `todo!()`s and on nothing else; the other
+three are the structural assertions about `FileGitHubTokenStore`'s remaining readers, which fail
+because those readers exist.
+
+**One test is green from the moment it was written**, and is recorded rather than manufactured into
+red: `a_work_in_progress_snapshot_is_still_signed_by_the_daemon_itself`. It guards what this node
+promised **not** to change, so red would mean the promise was already broken. Proven non-vacuous by
+mutation — renaming `WIP_COMMIT_IDENTITY_NAME` to a person's login fails it, and restoring the
+constant passes it again.
+
+### Design decisions taken while publishing the surface
+
+1. **One entry point, `acting_identity`, returning one `ActingIdentity` carrying both halves.** The
+   alternative — a `token_for` beside an `identity_for` — is what the contract bullet *"token and
+   identity always come from one resolution"* rules out, and a shape no test can fully police. There
+   is nothing to police here: the crate publishes no way to obtain one without the other.
+2. **The git identity is derived from the record's provider metadata, never from its label.**
+   `META_SUBJECT_ID` and `META_SUBJECT` (`#keyring` 8/9) give `101+ada@users.noreply.github.com` and
+   `ada`; `CredentialRecord::label` is the one mutable field and is deliberately not identity-bearing
+   — `renaming_an_account_does_not_change_who_its_commits_are_authored_by` pins that.
+3. **A fifth refusal, `IdentityError::Unusable`, beyond the four `AccountResolution` outcomes.** A
+   record can resolve and still carry no provider identifiers. Refusing it — naming the absent
+   metadata key — is the alternative to inventing an address, and a commit authored under an invented
+   address is attributed to nobody and discovered only by reading history.
+4. **`session_git_environment` returns pairs rather than applying them to a `Command`.** The caller
+   that spawns the agent is the only thing that knows which process they belong on, and a list of
+   pairs is something a test can read without running `git`.
+5. **`tddy-daemon-livekit` gained a path dependency on `tddy-accounts`.** No external dependency, and
+   no cycle: `tddy-accounts` names `tddy-credentials`, `tddy-rpc` and `tddy-service`, none of which
+   reach back. The direction is the point — the crate deciding which account a project acts as knows
+   nothing about sessions or LiveKit.
+
+⚠ **`GITHUB_TOKEN` inside a session is a separate question, and this commit does not settle it.**
+`github_token_from_env` has ten production callers in `tddy-workflow-recipes`, and some of them run
+inside the *agent's* process, where the daemon may legitimately be the thing that set the variable.
+Deleting the daemon's fallback and deleting the agent's delivery mechanism are different changes; no
+test published here forces the second, and M1 must not quietly become it.
+
 ## Green wave
 
 **Wave 5 of 5** — alone.
@@ -131,16 +235,18 @@ line and last in time, which is what the developer asked for.
 
 ## Prerequisites
 
-### ✅ RESOLVED BY THE BASE — the GitHub REST client is mid-move — [`squatting-github-rest-client`](../../../packages/tddy-workflow-recipes/docs/code-issues/squatting-github-rest-client.md)
+### ⚠ UNBLOCKED BY THE BASE, NOT YET RESOLVED BY IT — the GitHub REST client is mid-move — [`squatting-github-rest-client`](../../../packages/tddy-workflow-recipes/docs/code-issues/squatting-github-rest-client.md)
 
 **Status in the record: `Open — claimed by #492, in flight`.** It is another stack's to fix
 (`#carve` 6/10), and this node neither claims it nor touches the files — **it must not delete the
 record**, which is #492's to delete when it wraps.
 
-This was a ⛔ BLOCKING entry when the stack was cut. It is no longer one: on 2026-09-19 the
-`#keyring` root was re-based from `master` onto `feature/carve/git-plumbing` (#492), so the move has
-already happened in this tree and this node writes against the post-move `tddy-github` directly. What
-remains is a **merge-order fact**, not a wait — recorded under `## Dependencies`.
+This was a ⛔ BLOCKING entry when the stack was cut. Re-basing the `#keyring` root from `master`
+onto `feature/carve/git-plumbing` (#492) on 2026-09-19 removed the *collision* — this node will never
+edit a crate the files are leaving. ⚠ **It did not move the files.** #492 is an ancestor in its own
+red state, so on 2026-09-20 this tree still has the client in `tddy-workflow-recipes` and
+`tddy-github` has no PR surface. The entry therefore stays **⚠ DURING**: it constrains this node's
+green phase, which must thread the token parameter through wherever #492 has put the file by then.
 
 The record's own guidance is what made it blocking:
 
@@ -190,9 +296,11 @@ two above. **"Not measured" is not "clean"**; this node claims nothing about the
 
 - [x] **PRD**: [PRD-2026-09-19-keyring-github-identity.md](../../ft/daemon/1-WIP/PRD-2026-09-19-keyring-github-identity.md)
 - [x] **Changeset**: this document
-- [x] ✅ **Unblocked by the base**: #492 is an ancestor of this branch, so the post-move module paths
-      are present in the tree and implementation is not gated on a separate merge
-- [ ] **Draft PR contract**: surface + failing tests (wave 2, commit 2)
+- [x] ⚠ **Unblocked by the base, not yet supplied by it**: #492 is an ancestor, so the merge-order
+      collision is gone — but it is still red, so the post-move module paths are **not** in this tree
+      and the REST half of the contract is deferred to this node's green phase
+- [x] **Draft PR contract**: surface + failing tests (wave 2, commit 2) — ⚠ **partly**: the REST
+      half is deferred, see **As published** under `## Draft PR contract`
 - [ ] **Resolution**: one call, token and identity from one answer
 - [ ] **Outcomes**: a distinct failure per `AccountResolution` variant
 - [ ] **Deletion**: the environment resolution path; `FileGitHubTokenStore`'s readers
@@ -313,8 +421,9 @@ clippy. LiveKit-backed tests reuse the testkit container. Whole-workspace green 
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Publish the draft-PR contract — wave 2
-- [x] ✅ #492 is the stack's base — no separate wait
+- [x] Publish the draft-PR contract — wave 2 (⚠ REST half deferred to green)
+- [x] ⚠ #492 is the stack's base — no separate wait, but it is still red: the moved module paths
+      arrive only when it greens
 - [ ] M1–M6
 - [ ] `packages/tddy-accounts/docs/github-identity-resolution.md`
 - [ ] `/wrap-context-docs` — this node claims **no** `docs/dev/todo/` entry and **no** code-issue

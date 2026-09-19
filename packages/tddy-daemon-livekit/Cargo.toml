@@ -21,6 +21,10 @@ log = "0.4"
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# `ActingIdentity` — the one resolution a session's commits and its pushes both come from. The
+# direction is the point: the crate that decides which account a project acts as knows nothing
+# about sessions or LiveKit, and this crate consumes it.
+tddy-accounts = { path = "../tddy-accounts" }
 tddy-core = { path = "../tddy-core" }
 # `DaemonConfig`, `SessionUserResolver`, the two daemon ids and the split-agent identity prefix —
 # everything this crate needs from the daemon it left, and nothing of the daemon itself.
@@ -51,6 +55,9 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "s
 
 [dev-dependencies]
 futures-util = "0.3"
+# `ActingIdentity` is built by hand in the session-identity suite, which asserts what `git` in a
+# session commits as without needing a vault on disk.
+tddy-credentials = { path = "../tddy-credentials" }
 prost = "0.13"
 # The inline tests build a `DaemonConfig` from the YAML an operator would write, rather than from
 # struct literals that could drift from the file format.

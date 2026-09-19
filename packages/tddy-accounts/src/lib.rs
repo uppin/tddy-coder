@@ -15,11 +15,13 @@
 //! [`AccountSummary::has_secret`]: tddy_service::proto::accounts::AccountSummary::has_secret
 //! [`linking`]: crate::linking
 
+mod identity;
 mod linking;
 mod resolver;
 mod service;
 mod store;
 
+pub use identity::{acting_identity, ActingIdentity, GitIdentity, IdentityError, PROVIDER_GITHUB};
 pub use linking::{
     record_for_link, removal_allowed, AccountLinker, LinkChallenge, LinkError, LinkProgress,
     LinkedAccountStore, LinkedIdentity, RemovalRefusal, META_SUBJECT, META_SUBJECT_ID,
