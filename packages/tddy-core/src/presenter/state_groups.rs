@@ -13,14 +13,15 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, oneshot};
 
 use crate::agent_activity::AgentActivityRecord;
 use crate::backend::{ClarificationQuestion, SharedBackend};
-use crate::toolcall::ToolCallRequest;
+use crate::toolcall::{ToolCallRequest, ToolCallResponse};
 use crate::workflow::recipe::WorkflowRecipe;
 
 use super::presenter_impl::DeferredBackendFactory;
@@ -32,6 +33,7 @@ use super::{PresenterEvent, UserIntent, WorkflowCompletePayload, WorkflowEvent};
 ///
 /// Twelve of the 37 fields, every one of them `workflow_*` or the receiver/sender pair that carries
 /// one. Nothing here is read while no workflow is running.
+#[derive(Default)]
 pub struct WorkflowRun {
     pub event_rx: Option<mpsc::Receiver<WorkflowEvent>>,
     pub answer_tx: Option<mpsc::Sender<String>>,
@@ -57,6 +59,7 @@ pub struct WorkflowRun {
 ///
 /// Four fields that are meaningful only together: an index into a list, the answers gathered against
 /// it, and whether the workflow thread is blocked waiting for the next prompt.
+#[derive(Default)]
 pub struct PendingQuestions {
     pub questions: Vec<ClarificationQuestion>,
     pub current_index: usize,
@@ -72,19 +75,36 @@ pub struct PendingQuestions {
 /// directory holds the log, the worktree holds the files, and every record is stamped against the
 /// commit it ran upon.
 pub struct ActivityRecorder {
-    /// The session directory receiving `agent-activity.jsonl`. `None` when the daemon, not the
-    /// coder, executes tools.
+    /// The session directory receiving `agent-activity.jsonl`. When set, the presenter persists
+    /// the agent's own tool calls here and broadcasts them as [`PresenterEvent::AgentActivity`].
+    /// `None` when the daemon, not the coder, executes tools.
     pub dir: Option<PathBuf>,
     /// The checkout the agent edits — **not** [`Self::dir`]. `None` when the caller wiring the
     /// session did not know it, which is the documented "could not resolve" value.
     pub worktree: Option<PathBuf>,
     /// Provenance written on persisted rows: `"coder"` or `"cursor-cli"`.
     pub source: String,
-    /// Running rows awaiting their terminal `ToolResult`, keyed by `call_id`.
+    /// Running rows awaiting their terminal `ToolResult`, keyed by `call_id`, so the terminal row
+    /// carries the same tool name and input the coalescing read side expects.
     pub pending: HashMap<String, AgentActivityRecord>,
     pub output_buffer: String,
     /// Whether the last `activity_log` row is the in-progress agent line.
     pub output_partial_row_active: bool,
+}
+
+impl Default for ActivityRecorder {
+    /// Records nothing until a session dir is wired, and attributes what it then records to the
+    /// coder — the process that executes tools unless a caller says otherwise.
+    fn default() -> Self {
+        Self {
+            dir: None,
+            worktree: None,
+            source: "coder".to_string(),
+            pending: HashMap::new(),
+            output_buffer: String::new(),
+            output_partial_row_active: false,
+        }
+    }
 }
 
 /// The surfaces outside the presenter that read its events or send it intents.
@@ -92,13 +112,18 @@ pub struct ActivityRecorder {
 /// Every field here is a seam to something else — a broadcast to gRPC subscribers, an intent channel
 /// from an external view, the tool-call relay, and the critical state a lagged subscriber recovers
 /// from.
+#[derive(Default)]
 pub struct ViewChannels {
+    /// When set, events are broadcast to gRPC subscribers.
     pub broadcast_tx: Option<broadcast::Sender<PresenterEvent>>,
+    /// When set, `connect_view` hands this to an external view to send intents back.
     pub intent_tx: Option<mpsc::Sender<UserIntent>>,
+    /// Relay requests from `tddy-tools`: `Submit`, `Ask`, `Approve`.
     pub tool_call_rx: Option<mpsc::Receiver<ToolCallRequest>>,
     /// When set, answers go to a tool-call response rather than to the workflow's `answer_tx`.
     pub pending_tool_call_response: Option<PendingToolCallResponse>,
-    /// Read by views after a `Lagged`, which is the whole reason it is shared rather than owned.
+    /// Updated on every `GoalStarted`/`StateChanged` and read by views after a `Lagged`, which is
+    /// the whole reason it is shared rather than owned.
     pub critical_state: Arc<std::sync::Mutex<CriticalPresenterState>>,
 }
 
@@ -107,12 +132,14 @@ pub struct ViewChannels {
 /// Eight fields that exist because backend selection can be answered interactively *after* the
 /// session has started, so the workflow has to be held until it is.
 pub struct BackendSelection {
+    /// When true, the next `AnswerSelect` resolves the interactive backend choice (session start).
     pub selection_pending: bool,
     /// When set, backend selection creates the backend and starts the held workflow.
     pub deferred_factory: Option<DeferredBackendFactory>,
     pub pending_start: Option<PendingWorkflowStart>,
     /// Overrides the per-backend default model after selection (CLI `--model`).
     pub deferred_cli_model: Option<String>,
+    /// The active workflow definition (TDD, bug-fix, …).
     pub recipe: Arc<dyn WorkflowRecipe>,
     /// After `/recipe` from the feature slash menu: the operator is picking TDD vs bugfix.
     pub recipe_slash_selection_pending: bool,
@@ -122,13 +149,29 @@ pub struct BackendSelection {
     pub start_slash_structured_run_active: bool,
 }
 
+impl BackendSelection {
+    /// The selection a session starts from: the recipe it was given, and nothing deferred.
+    pub fn new(recipe: Arc<dyn WorkflowRecipe>) -> Self {
+        Self {
+            selection_pending: false,
+            deferred_factory: None,
+            pending_start: None,
+            deferred_cli_model: None,
+            recipe,
+            recipe_slash_selection_pending: false,
+            recipe_resolver: None,
+            start_slash_structured_run_active: false,
+        }
+    }
+}
+
 /// Resolves a CLI recipe name to a [`WorkflowRecipe`], wired from `tddy-coder`.
 pub type RecipeResolverFn = dyn Fn(&str) -> Result<Arc<dyn WorkflowRecipe>, String> + Send + Sync;
 
 /// What an answer is currently owed to, when it is not owed to the workflow.
 pub enum PendingToolCallResponse {
     /// An `Ask` from `tddy-tools`, awaiting free text.
-    Ask(mpsc::Sender<String>),
+    Ask(oneshot::Sender<ToolCallResponse>),
     /// An `Approve` from `tddy-tools`, awaiting a yes or no.
-    Approve(mpsc::Sender<bool>),
+    Approve(oneshot::Sender<ToolCallResponse>),
 }
