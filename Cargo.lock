@@ -11716,6 +11716,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-accounts"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "pretty_assertions",
+ "prost 0.13.5",
+ "tddy-credentials",
+ "tddy-rpc",
+ "tddy-service",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-acp"
 version = "0.1.0"
 dependencies = [
