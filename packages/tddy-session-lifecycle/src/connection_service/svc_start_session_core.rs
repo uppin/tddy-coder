@@ -448,17 +448,17 @@ impl DaemonSessionHost {
             // A managed-codebase claude-cli session with a recipe is launched workflow-aware. An
             // unknown recipe is a request error (never silently ignored). Non-managed sessions and
             // managed sessions without a recipe keep the plain launch (managed_recipe = None).
-            let managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>> = if req
-                .managed_codebase
-                && !req.recipe.trim().is_empty()
-            {
-                Some(
-                    tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
+            let managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>> =
+                if req.managed_codebase && !req.recipe.trim().is_empty() {
+                    Some(
+                        tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(
+                            req.recipe.trim(),
+                        )
                         .map_err(Status::invalid_argument)?,
-                )
-            } else {
-                None
-            };
+                    )
+                } else {
+                    None
+                };
 
             if req.sandbox {
                 return self
@@ -539,17 +539,17 @@ impl DaemonSessionHost {
                 req.initial_prompt.trim(),
                 &materialized,
             );
-            let managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>> = if req
-                .managed_codebase
-                && !req.recipe.trim().is_empty()
-            {
-                Some(
-                    tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
+            let managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>> =
+                if req.managed_codebase && !req.recipe.trim().is_empty() {
+                    Some(
+                        tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(
+                            req.recipe.trim(),
+                        )
                         .map_err(Status::invalid_argument)?,
-                )
-            } else {
-                None
-            };
+                    )
+                } else {
+                    None
+                };
             if req.sandbox {
                 return self
                     .start_sandboxed_cursor_cli_session(

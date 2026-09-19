@@ -9,11 +9,12 @@
 //! **`codex login`** (stdout + `BROWSER`); see [`CodexBackend::spawn_oauth_login`] and the
 //! `tddy-coder` `BROWSER` hook for capturing that URL into the session dir.
 
-use super::{InvokeRequest, InvokeResponse, PermissionHint};
+use super::{InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
 use crate::stream::codex::{
     codex_jsonl_last_error_message, codex_stderr_brief_for_user, parse_codex_jsonl_output,
 };
+use crate::workflow::recipe::PermissionHint;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -492,7 +493,9 @@ impl super::CodingBackend for CodexBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::{GoalHints, GoalId, InvokeRequest, PermissionHint, SessionMode};
+    use crate::backend::{InvokeRequest, SessionMode};
+    use crate::workflow::ids::GoalId;
+    use crate::workflow::recipe::{GoalHints, PermissionHint};
 
     fn hints_tdd_plan_goal() -> GoalHints {
         GoalHints {

@@ -60,7 +60,7 @@ impl DaemonSessionHost {
         initial_prompt: &str,
         _managed_codebase: bool,
         specialized_agents: &[String],
-        managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
         // When true, index the worktree before launch (blocking; aborts on failure) and point the
         // in-jail `SemanticSearch` tool at the per-session index.
         semantic_index: bool,

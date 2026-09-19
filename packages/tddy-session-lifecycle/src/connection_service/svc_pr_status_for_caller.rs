@@ -352,8 +352,8 @@ impl DaemonSessionHost {
     /// default `Init`). Managed sessions persist a valid goal id on every committed transition.
     pub(crate) fn managed_resume_goal(
         session_dir: &Path,
-        recipe: &Arc<dyn tddy_core::backend::WorkflowRecipe>,
-    ) -> tddy_core::backend::GoalId {
+        recipe: &Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>,
+    ) -> tddy_core::workflow::ids::GoalId {
         let persisted = tddy_core::read_changeset(session_dir)
             .ok()
             .map(|cs| cs.state.current.into_inner())
@@ -362,7 +362,7 @@ impl DaemonSessionHost {
         if p.is_empty() || p == "Init" {
             recipe.start_goal()
         } else {
-            tddy_core::backend::GoalId::new(p)
+            tddy_core::workflow::ids::GoalId::new(p)
         }
     }
 
@@ -379,12 +379,12 @@ impl DaemonSessionHost {
     pub(crate) fn prepare_managed_workflow(
         &self,
         session_id: &str,
-        recipe: Arc<dyn tddy_core::backend::WorkflowRecipe>,
+        recipe: Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>,
         session_dir: &Path,
         worktree_path: &Path,
         prompt_dir: &Path,
         tddy_tools_path: &str,
-        resume_at: Option<tddy_core::backend::GoalId>,
+        resume_at: Option<tddy_core::workflow::ids::GoalId>,
         conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
     ) -> Result<ManagedLaunch, Status> {
         prepare_managed_workflow_inner(

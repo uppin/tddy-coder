@@ -1,8 +1,9 @@
 //! Claude Code CLI backend implementation.
 
-use super::{InvokeRequest, InvokeResponse, PermissionHint};
+use super::{InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
 use crate::stream;
+use crate::workflow::recipe::PermissionHint;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -767,7 +768,9 @@ impl ClaudeCodeBackend {
 #[cfg(test)]
 mod claude_config_tests {
     use super::{goal_to_claude_config, ClaudeInvokeConfig, PermissionMode};
-    use crate::backend::{GoalHints, GoalId, InvokeRequest, PermissionHint};
+    use crate::backend::InvokeRequest;
+    use crate::workflow::ids::GoalId;
+    use crate::workflow::recipe::{GoalHints, PermissionHint};
 
     fn minimal_invoke(hints: GoalHints) -> InvokeRequest {
         InvokeRequest {

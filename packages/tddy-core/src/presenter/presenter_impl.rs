@@ -13,25 +13,18 @@ use crate::presenter::activity_prompt_log;
 use crate::presenter::agent_activity;
 use crate::presenter::intent::UserIntent;
 use crate::presenter::presenter_events::{ModeChangedDetails, PresenterEvent, ViewConnection};
-use crate::presenter::state::{
-    ActivityEntry, ActivityKind, AppMode, CriticalPresenterState, PresenterState,
+use crate::presenter::state::{ActivityEntry, ActivityKind, AppMode, PresenterState};
+use crate::presenter::state_groups::{
+    ActivityRecorder, BackendSelection, PendingQuestions, PendingToolCallResponse,
+    RecipeResolverFn, ViewChannels, WorkflowRun,
 };
 use crate::presenter::workflow_runner;
 use crate::presenter::worktree_display::format_worktree_for_status_bar;
 use crate::presenter::{WorkflowCompletePayload, WorkflowEvent};
 
-/// Pending tool call response: Ask sends answers string, Approve sends allow/deny.
-enum PendingToolCallResponse {
-    Ask(tokio::sync::oneshot::Sender<ToolCallResponse>),
-    Approve(tokio::sync::oneshot::Sender<ToolCallResponse>),
-}
-
 /// Instruction prefix for dequeued inbox prompts.
 const QUEUED_INSTRUCTION_PREFIX: &str =
     "[QUEUED] The following prompt was queued while you were busy. Please address it:\n\n";
-
-/// Resolves CLI workflow recipe name (`tdd`, `bugfix`) after `/recipe` slash selection.
-type RecipeResolverFn = dyn Fn(&str) -> Result<Arc<dyn WorkflowRecipe>, String> + Send + Sync;
 
 /// Creates the coding backend after the user picks an agent (tddy-coder); returns `Err` for e.g. missing tddy-tools.
 pub type DeferredBackendFactory = Box<dyn FnOnce(&str) -> Result<SharedBackend, String> + Send>;
@@ -54,82 +47,18 @@ pub struct PendingWorkflowStart {
 /// Views observe state via connect_view() → ViewConnection (broadcast events).
 pub struct Presenter {
     state: PresenterState,
-    workflow_event_rx: Option<mpsc::Receiver<WorkflowEvent>>,
-    answer_tx: Option<mpsc::Sender<String>>,
-    workflow_backend: Option<SharedBackend>,
-    workflow_output_dir: Option<PathBuf>,
-    /// Directory containing `changeset.yaml` for the active workflow (session / plan dir).
-    /// When set, used for `read_changeset` in Continue with agent / resume; `workflow_output_dir`
-    /// alone may be `.` while the changeset lives under this path.
-    workflow_session_dir: Option<PathBuf>,
-    workflow_conversation_output: Option<PathBuf>,
-    workflow_debug_output: Option<PathBuf>,
-    workflow_debug: bool,
-    /// Stored when WorkflowComplete is received; used to print result on TUI exit.
-    workflow_result: Option<Result<WorkflowCompletePayload, String>>,
-    pending_questions: Vec<ClarificationQuestion>,
-    current_question_index: usize,
-    collected_answers: Vec<String>,
-    agent_output_buffer: String,
-    /// When true, the last `activity_log` row is the in-progress agent line (updated incrementally until `\n`).
-    agent_output_partial_row_active: bool,
-    /// Set when ClarificationNeeded is received with no questions; the workflow thread
-    /// is blocked on `answer_rx` waiting for the next prompt (e.g. free-prompting multi-turn).
-    awaiting_open_answer: bool,
-    workflow_handle: Option<thread::JoinHandle<()>>,
-    /// When set, events are broadcast for gRPC subscribers.
-    broadcast_tx: Option<tokio::sync::broadcast::Sender<PresenterEvent>>,
-    /// When set, connect_view() returns this for external views to send intents.
-    intent_tx: Option<mpsc::Sender<UserIntent>>,
-    /// Receiver for tddy-tools relay requests (Submit, Ask, Approve).
-    tool_call_rx: Option<mpsc::Receiver<ToolCallRequest>>,
-    /// When set, answers go to tool call response (Ask/Approve from tddy-tools) instead of answer_tx.
-    pending_tool_call_response: Option<PendingToolCallResponse>,
-    /// Stored socket path for workflow restart (dequeued prompts).
-    workflow_socket_path: Option<PathBuf>,
-    /// Pre-set worktree dir to skip git fetch/worktree creation in hooks.
-    workflow_worktree_dir: Option<PathBuf>,
-    /// When true, the next `AnswerSelect` resolves interactive backend choice (session start).
-    backend_selection_pending: bool,
-    /// When set with [`Self::configure_deferred_workflow_start`], backend selection creates the backend and starts the workflow.
-    deferred_backend_factory: Option<DeferredBackendFactory>,
-    pending_workflow_start: Option<PendingWorkflowStart>,
-    /// When set, overrides per-backend default model after selection (CLI `--model`).
-    deferred_cli_model: Option<String>,
-    /// Active workflow definition (TDD, bug-fix, …).
-    workflow_recipe: Arc<dyn WorkflowRecipe>,
-    /// After `/recipe` from the feature slash menu: user is picking TDD vs bugfix.
-    recipe_slash_selection_pending: bool,
-    /// Resolves CLI recipe name to a new [`WorkflowRecipe`] (wired from `tddy-coder`).
-    recipe_resolver: Option<Arc<RecipeResolverFn>>,
-    /// Set when the user started a non-`free-prompting` workflow via `/start-*`; cleared after
-    /// `WorkflowComplete` restores the session to free prompting (or on workflow error).
-    start_slash_structured_run_active: bool,
-    /// Shared critical state for broadcast lag recovery.
-    /// Updated on every GoalStarted/StateChanged; views read after Lagged.
-    critical_state: Arc<std::sync::Mutex<CriticalPresenterState>>,
+    /// The running workflow: its channels, its artifact directories, its result.
+    workflow: WorkflowRun,
+    /// The clarification questions awaiting an operator, and the answers collected so far.
+    questions: PendingQuestions,
+    /// What this session records about the agent's own tool calls, and where.
+    activity: ActivityRecorder,
+    /// The surfaces outside the presenter that read its events or send it intents.
+    views: ViewChannels,
+    /// Which backend and recipe this session runs, including the deferred-start path.
+    backend: BackendSelection,
     /// Tddy data directory root — passed to workflow runner to avoid global state.
     tddy_data_dir: PathBuf,
-    /// Session directory receiving this session's `agent-activity.jsonl`. When set (tool /
-    /// cursor-cli sessions, where the coder — not the daemon — executes tools), the presenter
-    /// persists the agent's own tool calls here and broadcasts them as
-    /// [`PresenterEvent::AgentActivity`].
-    agent_activity_dir: Option<PathBuf>,
-    /// The checkout the agent edits, which is **not** [`Self::agent_activity_dir`]: the session dir
-    /// holds the log, the worktree holds the files. Every record written for this session is stamped
-    /// against it — the commit it ran upon and the paths it declared, both of which a consumer needs
-    /// to place a change in the tree.
-    ///
-    /// `None` when the caller wiring the session did not know the checkout. A record then carries an
-    /// empty `head_commit` and no paths, which is the documented "could not resolve" value
-    /// (`docs/ft/daemon/session-worktree-sync.md` AC1); nothing else is read in its place.
-    agent_activity_worktree: Option<PathBuf>,
-    /// Provenance written on persisted agent-activity rows (`"coder"` | `"cursor-cli"`).
-    agent_activity_source: String,
-    /// Running agent-activity rows awaiting their terminal `ToolResult`, keyed by `call_id`, so the
-    /// terminal row carries the same tool name / input the coalescing read side expects.
-    agent_activity_pending:
-        std::collections::HashMap<String, crate::agent_activity::AgentActivityRecord>,
 }
 
 /// Milliseconds since the Unix epoch, for agent-activity timestamps.
@@ -175,42 +104,12 @@ impl Presenter {
         };
         Presenter {
             state,
-            workflow_event_rx: None,
-            answer_tx: None,
-            workflow_backend: None,
-            workflow_output_dir: None,
-            workflow_session_dir: None,
-            workflow_conversation_output: None,
-            workflow_debug_output: None,
-            workflow_debug: false,
-            workflow_result: None,
-            pending_questions: Vec::new(),
-            current_question_index: 0,
-            collected_answers: Vec::new(),
-            agent_output_buffer: String::new(),
-            agent_output_partial_row_active: false,
-            awaiting_open_answer: false,
-            workflow_handle: None,
-            broadcast_tx: None,
-            intent_tx: None,
-            tool_call_rx: None,
-            pending_tool_call_response: None,
-            workflow_socket_path: None,
-            workflow_worktree_dir: None,
-            backend_selection_pending: false,
-            deferred_backend_factory: None,
-            pending_workflow_start: None,
-            deferred_cli_model: None,
-            workflow_recipe,
-            recipe_slash_selection_pending: false,
-            recipe_resolver: None,
-            start_slash_structured_run_active: false,
-            critical_state: Arc::new(std::sync::Mutex::new(CriticalPresenterState::default())),
+            workflow: WorkflowRun::default(),
+            questions: PendingQuestions::default(),
+            activity: ActivityRecorder::default(),
+            views: ViewChannels::default(),
+            backend: BackendSelection::new(workflow_recipe),
             tddy_data_dir,
-            agent_activity_dir: None,
-            agent_activity_worktree: None,
-            agent_activity_source: "coder".to_string(),
-            agent_activity_pending: std::collections::HashMap::new(),
         }
     }
 
@@ -223,57 +122,57 @@ impl Presenter {
     /// checkout is somewhere else entirely; only the caller that started the session knows which
     /// one. It is an `Option` so a caller that does not know must say so, rather than the presenter
     /// quietly stamping records against whatever directory it happened to hold — see
-    /// [`Self::agent_activity_worktree`].
+    /// [`ActivityRecorder::worktree`].
     pub fn set_agent_activity_context(
         &mut self,
         dir: PathBuf,
         worktree: Option<PathBuf>,
         source: impl Into<String>,
     ) {
-        self.agent_activity_dir = Some(dir);
-        self.agent_activity_worktree = worktree;
-        self.agent_activity_source = source.into();
+        self.activity.dir = Some(dir);
+        self.activity.worktree = worktree;
+        self.activity.source = source.into();
     }
 
     /// Enable broadcast of PresenterEvents (for gRPC subscribers).
     pub fn with_broadcast(mut self, tx: tokio::sync::broadcast::Sender<PresenterEvent>) -> Self {
-        self.broadcast_tx = Some(tx);
+        self.views.broadcast_tx = Some(tx);
         self
     }
 
     /// Enable connect_view() by providing an intent sender for external views.
     pub fn with_intent_sender(mut self, tx: mpsc::Sender<UserIntent>) -> Self {
-        self.intent_tx = Some(tx);
+        self.views.intent_tx = Some(tx);
         self
     }
 
     /// Resolve workflow recipe CLI names when the user picks `/recipe` → TDD or Bugfix.
     pub fn with_recipe_resolver(mut self, resolver: Arc<RecipeResolverFn>) -> Self {
-        self.recipe_resolver = Some(resolver);
+        self.backend.recipe_resolver = Some(resolver);
         self
     }
 
     /// Pre-set worktree dir so the workflow skips git fetch / worktree creation.
     pub fn with_worktree_dir(mut self, dir: PathBuf) -> Self {
-        self.workflow_worktree_dir = Some(dir);
+        self.workflow.worktree_dir = Some(dir);
         self
     }
 
     /// Create a new view connection: state snapshot + event subscription + intent sender.
     /// Returns None if broadcast or intent_tx is not configured.
     pub fn connect_view(&self) -> Option<ViewConnection> {
-        let broadcast_tx = self.broadcast_tx.as_ref()?;
-        let intent_tx = self.intent_tx.clone()?;
+        let broadcast_tx = self.views.broadcast_tx.as_ref()?;
+        let intent_tx = self.views.intent_tx.clone()?;
         Some(ViewConnection {
             state_snapshot: self.state.clone(),
             event_rx: broadcast_tx.subscribe(),
             intent_tx,
-            critical_state: self.critical_state.clone(),
+            critical_state: self.views.critical_state.clone(),
         })
     }
 
     fn broadcast(&self, event: PresenterEvent) {
-        if let Some(ref tx) = self.broadcast_tx {
+        if let Some(ref tx) = self.views.broadcast_tx {
             let _ = tx.send(event);
         }
     }
@@ -286,7 +185,7 @@ impl Presenter {
     /// tree, which is the fabrication AC1 forbids in its least obvious form: a mirror would apply a
     /// change onto a base it was never cut from and report success.
     fn agent_activity_head_commit(&self) -> String {
-        match self.agent_activity_worktree.as_deref() {
+        match self.activity.worktree.as_deref() {
             Some(worktree) => crate::git_head::read_head_commit(worktree),
             None => String::new(),
         }
@@ -301,7 +200,7 @@ impl Presenter {
         tool_name: &str,
         input: &serde_json::Value,
     ) -> Vec<String> {
-        match self.agent_activity_worktree.as_deref() {
+        match self.activity.worktree.as_deref() {
             Some(worktree) => crate::agent_activity::declared_paths(tool_name, input, worktree),
             None => Vec::new(),
         }
@@ -317,7 +216,7 @@ impl Presenter {
             append_agent_activity, AgentActivityRecord, STATUS_COMPLETED, STATUS_ERROR,
             STATUS_RUNNING,
         };
-        let dir = match self.agent_activity_dir.clone() {
+        let dir = match self.activity.dir.clone() {
             Some(d) => d,
             None => return,
         };
@@ -349,12 +248,12 @@ impl Presenter {
                     error_message: String::new(),
                     started_unix_ms: now_unix_ms(),
                     completed_unix_ms: 0,
-                    source: self.agent_activity_source.clone(),
+                    source: self.activity.source.clone(),
                     // The poll tick covering this call is measured by the session room, which is a
                     // different process; 0 is its documented "no tick has covered it yet" (AC2).
                     activity_seq: 0,
                 };
-                self.agent_activity_pending.insert(call_id, rec.clone());
+                self.activity.pending.insert(call_id, rec.clone());
                 rec
             }
             crate::ProgressEvent::ToolResult {
@@ -367,7 +266,7 @@ impl Presenter {
                 // which is the state the call ran upon rather than the one it left behind. Falls
                 // back to a minimal row if no running row was seen (e.g. the presenter attached
                 // mid-call).
-                let pending = self.agent_activity_pending.remove(call_id);
+                let pending = self.activity.pending.remove(call_id);
                 // Only for that fallback, and read here because there is nothing to inherit: this
                 // row is the first this presenter saw of the call, so the moment it is recorded is
                 // now, and now is the HEAD it can honestly name. It declares no paths, having never
@@ -381,7 +280,7 @@ impl Presenter {
                     error_message: String::new(),
                     started_unix_ms: 0,
                     completed_unix_ms: 0,
-                    source: self.agent_activity_source.clone(),
+                    source: self.activity.source.clone(),
                     head_commit: self.agent_activity_head_commit(),
                     activity_seq: 0,
                     changed_paths: Vec::new(),
@@ -424,20 +323,21 @@ impl Presenter {
             mode: self.state.mode.clone(),
             plan_refinement_pending: self.state.plan_refinement_pending,
             skills_project_root: self.state.skills_project_root.clone(),
-            awaiting_open_answer: self.awaiting_open_answer,
+            awaiting_open_answer: self.questions.awaiting_open_answer,
         }));
     }
 
     fn prd_body_for_plan_review(&self, content_fallback: &str) -> String {
-        self.workflow_session_dir
+        self.workflow
+            .session_dir
             .as_ref()
-            .and_then(|d| self.workflow_recipe.read_primary_session_document_utf8(d))
+            .and_then(|d| self.backend.recipe.read_primary_session_document_utf8(d))
             .unwrap_or_else(|| content_fallback.to_string())
     }
 
     /// Send workflow answer `Approve`, switch to [`AppMode::Running`], and broadcast (shared by DocumentReview and MarkdownViewer).
     fn approve_plan_from_review_or_viewer(&mut self) {
-        if let Some(ref tx) = self.answer_tx {
+        if let Some(ref tx) = self.workflow.answer_tx {
             let _ = tx.send("Approve".to_string());
         }
         self.state.mode = AppMode::Running;
@@ -450,10 +350,10 @@ impl Presenter {
         question: ClarificationQuestion,
         initial_selected: usize,
     ) {
-        self.backend_selection_pending = true;
-        self.pending_questions = vec![question.clone()];
-        self.current_question_index = 0;
-        self.collected_answers.clear();
+        self.backend.selection_pending = true;
+        self.questions.questions = vec![question.clone()];
+        self.questions.current_index = 0;
+        self.questions.collected_answers.clear();
         self.state.mode = AppMode::Select {
             question,
             question_index: 0,
@@ -471,15 +371,15 @@ impl Presenter {
         cli_model_override: Option<String>,
     ) {
         self.state.skills_project_root = Some(pending.output_dir.clone());
-        self.deferred_backend_factory = Some(factory);
-        self.pending_workflow_start = Some(pending);
-        self.deferred_cli_model = cli_model_override;
+        self.backend.deferred_factory = Some(factory);
+        self.backend.pending_start = Some(pending);
+        self.backend.deferred_cli_model = cli_model_override;
     }
 
     /// True while waiting for user to pick a coding backend at session start.
     #[must_use]
     pub fn is_backend_selection_pending(&self) -> bool {
-        self.backend_selection_pending
+        self.backend.selection_pending
     }
 
     fn broadcast_error_recovery(&mut self, error_message: String) {
@@ -488,10 +388,10 @@ impl Presenter {
     }
 
     fn start_workflow_from_pending_if_any(&mut self, backend: SharedBackend) {
-        let Some(pending) = self.pending_workflow_start.take() else {
+        let Some(pending) = self.backend.pending_start.take() else {
             return;
         };
-        self.deferred_cli_model = None;
+        self.backend.deferred_cli_model = None;
         self.start_workflow(
             backend,
             pending.output_dir,
@@ -515,7 +415,7 @@ impl Presenter {
 
     /// Resolves interactive backend selection (`show_backend_selection`). No-op if the index is invalid.
     fn handle_backend_selection_answer(&mut self, idx: usize) {
-        let Some(q) = self.pending_questions.first() else {
+        let Some(q) = self.questions.questions.first() else {
             return;
         };
         if idx >= q.options.len() {
@@ -526,38 +426,38 @@ impl Presenter {
         let agent_str = agent.to_string();
         self.state.agent = agent_str.clone();
         self.state.model = model.to_string();
-        if let Some(ref m) = self.deferred_cli_model {
+        if let Some(ref m) = self.backend.deferred_cli_model {
             self.state.model = m.clone();
         }
-        self.backend_selection_pending = false;
-        self.pending_questions.clear();
-        self.current_question_index = 0;
-        self.collected_answers.clear();
+        self.backend.selection_pending = false;
+        self.questions.questions.clear();
+        self.questions.current_index = 0;
+        self.questions.collected_answers.clear();
         self.state.mode = AppMode::FeatureInput;
         self.broadcast_mode_changed();
         self.broadcast(PresenterEvent::BackendSelected {
             agent: agent_str.clone(),
             model: self.state.model.clone(),
         });
-        let Some(factory) = self.deferred_backend_factory.take() else {
+        let Some(factory) = self.backend.deferred_factory.take() else {
             return;
         };
         self.apply_deferred_backend_factory(factory, agent_str.as_str());
     }
 
     fn handle_recipe_slash_selection_answer(&mut self, idx: usize) {
-        let Some(q) = self.pending_questions.first() else {
-            self.recipe_slash_selection_pending = false;
+        let Some(q) = self.questions.questions.first() else {
+            self.backend.recipe_slash_selection_pending = false;
             return;
         };
         if idx >= q.options.len() {
             return;
         }
         let label = q.options[idx].label.clone();
-        self.recipe_slash_selection_pending = false;
-        self.pending_questions.clear();
-        self.current_question_index = 0;
-        self.collected_answers.clear();
+        self.backend.recipe_slash_selection_pending = false;
+        self.questions.questions.clear();
+        self.questions.current_index = 0;
+        self.questions.collected_answers.clear();
 
         let Some(cli_name) = crate::backend::recipe_cli_name_from_selection_label(&label) else {
             log::warn!("recipe slash: unknown option label {:?}", label);
@@ -565,11 +465,11 @@ impl Presenter {
             self.broadcast_mode_changed();
             return;
         };
-        if let Some(ref resolve) = self.recipe_resolver {
+        if let Some(ref resolve) = self.backend.recipe_resolver {
             match resolve(cli_name) {
                 Ok(new_recipe) => {
                     log::info!("recipe slash: active workflow recipe set to `{cli_name}`");
-                    self.workflow_recipe = new_recipe;
+                    self.backend.recipe = new_recipe;
                 }
                 Err(e) => {
                     log::warn!("recipe slash: could not resolve `{cli_name}`: {e}");
@@ -632,7 +532,7 @@ impl Presenter {
                 if self.try_handle_start_slash_line(&text) {
                     return;
                 }
-                if let Some(ref dir) = self.workflow_session_dir {
+                if let Some(ref dir) = self.workflow.session_dir {
                     let mut cs = crate::changeset::read_changeset(dir)
                         .unwrap_or_else(|_| crate::changeset::Changeset::default());
                     cs.initial_prompt = Some(text.clone());
@@ -651,7 +551,7 @@ impl Presenter {
                     self.restart_workflow(text);
                     return;
                 }
-                let text_for_restart = if let Some(ref tx) = self.answer_tx {
+                let text_for_restart = if let Some(ref tx) = self.workflow.answer_tx {
                     match tx.send(text) {
                         Ok(()) => None,
                         Err(std::sync::mpsc::SendError(t)) => Some(t),
@@ -692,7 +592,7 @@ impl Presenter {
                     AppMode::DocumentReview { .. } | AppMode::MarkdownViewer { .. }
                 ) {
                     self.state.plan_refinement_pending = false;
-                    if let Some(ref tx) = self.answer_tx {
+                    if let Some(ref tx) = self.workflow.answer_tx {
                         let _ = tx.send("reject".to_string());
                     }
                 }
@@ -739,19 +639,19 @@ impl Presenter {
                 }
             }
             UserIntent::AnswerSelect(idx) => {
-                if self.backend_selection_pending {
+                if self.backend.selection_pending {
                     self.handle_backend_selection_answer(idx);
                     return;
                 }
-                if self.recipe_slash_selection_pending {
+                if self.backend.recipe_slash_selection_pending {
                     self.handle_recipe_slash_selection_answer(idx);
                     return;
                 }
-                if let Some(q) = self.pending_questions.get(self.current_question_index) {
+                if let Some(q) = self.questions.questions.get(self.questions.current_index) {
                     if idx < q.options.len() {
                         let answer = q.options[idx].label.clone();
-                        self.collected_answers.push(answer);
-                        self.current_question_index += 1;
+                        self.questions.collected_answers.push(answer);
+                        self.questions.current_index += 1;
                         self.advance_to_next_question();
                         if self.clarification_answers_ready() {
                             self.send_clarification_answers();
@@ -760,15 +660,15 @@ impl Presenter {
                 }
             }
             UserIntent::AnswerOther(text) => {
-                self.collected_answers.push(text);
-                self.current_question_index += 1;
+                self.questions.collected_answers.push(text);
+                self.questions.current_index += 1;
                 self.advance_to_next_question();
                 if self.clarification_answers_ready() {
                     self.send_clarification_answers();
                 }
             }
             UserIntent::AnswerMultiSelect(indices, other) => {
-                if let Some(q) = self.pending_questions.get(self.current_question_index) {
+                if let Some(q) = self.questions.questions.get(self.questions.current_index) {
                     if q.multi_select
                         && !q.allow_other
                         && indices.is_empty()
@@ -786,8 +686,8 @@ impl Presenter {
                     if let Some(o) = other {
                         parts.push(o);
                     }
-                    self.collected_answers.push(parts.join(", "));
-                    self.current_question_index += 1;
+                    self.questions.collected_answers.push(parts.join(", "));
+                    self.questions.current_index += 1;
                     self.advance_to_next_question();
                     if self.clarification_answers_ready() {
                         self.send_clarification_answers();
@@ -798,7 +698,7 @@ impl Presenter {
                 if self.state.plan_refinement_pending {
                     log::info!("AnswerText: plan refinement feedback (len={})", text.len());
                     self.state.plan_refinement_pending = false;
-                    if let Some(ref tx) = self.answer_tx {
+                    if let Some(ref tx) = self.workflow.answer_tx {
                         let _ = tx.send(text);
                     }
                     self.state.mode = AppMode::Running;
@@ -810,14 +710,14 @@ impl Presenter {
                         "AnswerText: plan refinement (direct entry, len={})",
                         text.len()
                     );
-                    if let Some(ref tx) = self.answer_tx {
+                    if let Some(ref tx) = self.workflow.answer_tx {
                         let _ = tx.send(text);
                     }
                     self.state.mode = AppMode::Running;
                     self.broadcast_mode_changed();
                 } else {
-                    self.collected_answers.push(text);
-                    self.current_question_index += 1;
+                    self.questions.collected_answers.push(text);
+                    self.questions.current_index += 1;
                     self.advance_to_next_question();
                     if self.clarification_answers_ready() {
                         self.send_clarification_answers();
@@ -828,8 +728,8 @@ impl Presenter {
                 if text.is_empty() {
                     return;
                 }
-                if self.awaiting_open_answer {
-                    if let Some(ref tx) = self.answer_tx {
+                if self.questions.awaiting_open_answer {
+                    if let Some(ref tx) = self.workflow.answer_tx {
                         log::debug!(
                             "QueuePrompt → answer_tx (awaiting_open_answer, len={})",
                             text.len()
@@ -874,8 +774,8 @@ impl Presenter {
                     log::info!(
                         "ContinueWithAgent: read_changeset from {} (workflow_session_dir={:?}, workflow_output_dir={:?})",
                         cs_dir.display(),
-                        self.workflow_session_dir.as_ref().map(|p| p.display().to_string()),
-                        self.workflow_output_dir.as_ref().map(|p| p.display().to_string()),
+                        self.workflow.session_dir.as_ref().map(|p| p.display().to_string()),
+                        self.workflow.output_dir.as_ref().map(|p| p.display().to_string()),
                     );
                     match crate::changeset::read_changeset(cs_dir) {
                         Ok(cs) => {
@@ -965,8 +865,8 @@ impl Presenter {
                 } else {
                     log::warn!(
                         "ResumeFromError: no changeset dir or goal (session_dir={:?}, output_dir={:?}, goal={:?}), spawning fresh",
-                        self.workflow_session_dir,
-                        self.workflow_output_dir,
+                        self.workflow.session_dir,
+                        self.workflow.output_dir,
                         self.state.current_goal
                     );
                     None
@@ -974,23 +874,23 @@ impl Presenter {
                 self.state.mode = AppMode::Running;
                 self.broadcast_mode_changed();
                 if let (Some(backend), Some(output_dir)) = (
-                    self.workflow_backend.clone(),
-                    self.workflow_output_dir.clone(),
+                    self.workflow.backend.clone(),
+                    self.workflow.output_dir.clone(),
                 ) {
-                    if let Some(h) = self.workflow_handle.take() {
+                    if let Some(h) = self.workflow.handle.take() {
                         let _ = h.join();
                     }
                     self.spawn_workflow(
                         backend,
                         output_dir,
-                        self.workflow_session_dir.clone(),
+                        self.workflow.session_dir.clone(),
                         None,
-                        self.workflow_conversation_output.clone(),
-                        self.workflow_debug_output.clone(),
-                        self.workflow_debug,
+                        self.workflow.conversation_output.clone(),
+                        self.workflow.debug_output.clone(),
+                        self.workflow.debug,
                         session_id,
-                        self.workflow_socket_path.clone(),
-                        self.workflow_worktree_dir.clone(),
+                        self.workflow.socket_path.clone(),
+                        self.workflow.worktree_dir.clone(),
                     );
                 }
             }
@@ -998,19 +898,19 @@ impl Presenter {
     }
 
     fn clarification_answers_ready(&self) -> bool {
-        !self.pending_questions.is_empty()
-            && self.current_question_index >= self.pending_questions.len()
+        !self.questions.questions.is_empty()
+            && self.questions.current_index >= self.questions.questions.len()
             && matches!(self.state.mode, AppMode::Running)
     }
 
     fn send_clarification_answers(&mut self) {
         let answers = self.collect_answers();
         let is_approve = matches!(
-            self.pending_tool_call_response,
+            self.views.pending_tool_call_response,
             Some(PendingToolCallResponse::Approve(_))
         );
-        let is_tool_call = self.pending_tool_call_response.is_some();
-        if let Some(pending) = self.pending_tool_call_response.take() {
+        let is_tool_call = self.views.pending_tool_call_response.is_some();
+        if let Some(pending) = self.views.pending_tool_call_response.take() {
             match pending {
                 PendingToolCallResponse::Ask(tx) => {
                     let _ = tx.send(ToolCallResponse::AskAnswer {
@@ -1018,7 +918,7 @@ impl Presenter {
                     });
                     // `tddy-tools ask` does not go through WaitForInput; merge answers into workflow
                     // context via grill hooks reading this file in `after_task("grill")`.
-                    if let Some(ref dir) = self.workflow_session_dir {
+                    if let Some(ref dir) = self.workflow.session_dir {
                         let wf = dir.join(".workflow");
                         if let Err(e) = std::fs::create_dir_all(&wf) {
                             log::warn!("grill ask answers: create_dir_all {}: {}", wf.display(), e);
@@ -1038,6 +938,7 @@ impl Presenter {
                 }
                 PendingToolCallResponse::Approve(tx) => {
                     let allow = self
+                        .questions
                         .collected_answers
                         .first()
                         .map(|a| a.eq_ignore_ascii_case("Allow"))
@@ -1045,7 +946,7 @@ impl Presenter {
                     let _ = tx.send(ToolCallResponse::ApproveResult { allow });
                 }
             }
-        } else if let Some(ref answer_tx) = self.answer_tx {
+        } else if let Some(ref answer_tx) = self.workflow.answer_tx {
             let _ = answer_tx.send(answers.clone());
         }
         if is_tool_call {
@@ -1061,26 +962,26 @@ impl Presenter {
     }
 
     fn collect_answers(&self) -> String {
-        self.collected_answers.join("\n")
+        self.questions.collected_answers.join("\n")
     }
 
     fn advance_to_next_question(&mut self) {
-        if self.current_question_index >= self.pending_questions.len() {
+        if self.questions.current_index >= self.questions.questions.len() {
             self.state.mode = AppMode::Running;
             self.broadcast_mode_changed();
         } else {
-            let q = self.pending_questions[self.current_question_index].clone();
-            let total = self.pending_questions.len();
+            let q = self.questions.questions[self.questions.current_index].clone();
+            let total = self.questions.questions.len();
             if q.multi_select {
                 self.state.mode = AppMode::MultiSelect {
                     question: q,
-                    question_index: self.current_question_index,
+                    question_index: self.questions.current_index,
                     total_questions: total,
                 };
             } else {
                 self.state.mode = AppMode::Select {
                     question: q,
-                    question_index: self.current_question_index,
+                    question_index: self.questions.current_index,
                     total_questions: total,
                     initial_selected: 0,
                 };
@@ -1090,18 +991,18 @@ impl Presenter {
     }
 
     fn flush_agent_output_buffer(&mut self) {
-        if !self.agent_output_buffer.is_empty() {
-            let line = std::mem::take(&mut self.agent_output_buffer);
+        if !self.activity.output_buffer.is_empty() {
+            let line = std::mem::take(&mut self.activity.output_buffer);
             log::debug!(
                 "flush_agent_output_buffer: len={}, partial_row_active={}",
                 line.len(),
-                self.agent_output_partial_row_active
+                self.activity.output_partial_row_active
             );
             // Avoid a duplicate `activity_log` row when the partial row already shows this text.
-            if self.agent_output_partial_row_active {
+            if self.activity.output_partial_row_active {
                 if let Some(last) = self.state.activity_log.last() {
                     if last.kind == ActivityKind::AgentOutput && last.text == line {
-                        self.agent_output_partial_row_active = false;
+                        self.activity.output_partial_row_active = false;
                         self.broadcast(PresenterEvent::ActivityLogged(ActivityEntry {
                             text: line,
                             kind: ActivityKind::AgentOutput,
@@ -1109,7 +1010,7 @@ impl Presenter {
                         return;
                     }
                 }
-                self.agent_output_partial_row_active = false;
+                self.activity.output_partial_row_active = false;
             }
             self.log_activity(line, ActivityKind::AgentOutput);
         }
@@ -1124,17 +1025,17 @@ impl Presenter {
         log::debug!(
             "finalize_agent_line_in_activity_log: len={}, partial_row_active={}",
             line.len(),
-            self.agent_output_partial_row_active
+            self.activity.output_partial_row_active
         );
-        if self.agent_output_partial_row_active {
+        if self.activity.output_partial_row_active {
             if let Some(last) = self.state.activity_log.last_mut() {
                 if last.kind == ActivityKind::AgentOutput {
                     last.text = line;
-                    self.agent_output_partial_row_active = false;
+                    self.activity.output_partial_row_active = false;
                     return;
                 }
             }
-            self.agent_output_partial_row_active = false;
+            self.activity.output_partial_row_active = false;
         }
         self.state.activity_log.push(ActivityEntry {
             text: line,
@@ -1144,16 +1045,16 @@ impl Presenter {
 
     /// Syncs the visible tail of the current incomplete agent line into `activity_log` (incremental).
     fn sync_agent_partial_activity_log(&mut self) {
-        let tail = agent_activity::visible_tail_for_incremental_log(&self.agent_output_buffer);
+        let tail = agent_activity::visible_tail_for_incremental_log(&self.activity.output_buffer);
         if tail.is_empty() {
             return;
         }
         log::debug!(
             "sync_agent_partial_activity_log: tail_len={}, partial_row_active={}",
             tail.len(),
-            self.agent_output_partial_row_active
+            self.activity.output_partial_row_active
         );
-        if self.agent_output_partial_row_active {
+        if self.activity.output_partial_row_active {
             if let Some(last) = self.state.activity_log.last_mut() {
                 if last.kind == ActivityKind::AgentOutput {
                     last.text = tail;
@@ -1165,7 +1066,7 @@ impl Presenter {
             text: tail,
             kind: ActivityKind::AgentOutput,
         });
-        self.agent_output_partial_row_active = true;
+        self.activity.output_partial_row_active = true;
     }
 
     fn log_activity(&mut self, text: String, kind: ActivityKind) {
@@ -1176,7 +1077,7 @@ impl Presenter {
 
     /// Poll for tool call requests (tddy-tools relay). Call from main loop.
     pub fn poll_tool_calls(&mut self) {
-        let rx = match self.tool_call_rx.as_ref() {
+        let rx = match self.views.tool_call_rx.as_ref() {
             Some(r) => r,
             None => return,
         };
@@ -1226,10 +1127,10 @@ impl Presenter {
                         ActivityKind::ToolUse,
                     );
                     self.flush_agent_output_buffer();
-                    self.pending_questions = questions;
-                    self.current_question_index = 0;
-                    self.collected_answers.clear();
-                    self.pending_tool_call_response =
+                    self.questions.questions = questions;
+                    self.questions.current_index = 0;
+                    self.questions.collected_answers.clear();
+                    self.views.pending_tool_call_response =
                         Some(PendingToolCallResponse::Ask(response_tx));
                     self.advance_to_next_question();
                 }
@@ -1276,10 +1177,10 @@ impl Presenter {
                         multi_select: false,
                         allow_other: false,
                     };
-                    self.pending_questions = vec![question];
-                    self.current_question_index = 0;
-                    self.collected_answers.clear();
-                    self.pending_tool_call_response =
+                    self.questions.questions = vec![question];
+                    self.questions.current_index = 0;
+                    self.questions.collected_answers.clear();
+                    self.views.pending_tool_call_response =
                         Some(PendingToolCallResponse::Approve(response_tx));
                     self.advance_to_next_question();
                 }
@@ -1290,7 +1191,7 @@ impl Presenter {
     /// Poll for workflow events. Call from main loop.
     /// Drains all pending events per call to minimize latency between tasks.
     pub fn poll_workflow(&mut self) {
-        let rx = match self.workflow_event_rx.as_ref() {
+        let rx = match self.workflow.event_rx.as_ref() {
             Some(r) => r,
             None => return,
         };
@@ -1355,7 +1256,7 @@ impl Presenter {
                 }
                 WorkflowEvent::StateChange { from, to } => {
                     self.state.current_state = Some(to.clone());
-                    if let Ok(mut cs) = self.critical_state.lock() {
+                    if let Ok(mut cs) = self.views.critical_state.lock() {
                         cs.current_state = Some(to.clone());
                     }
                     let entry = ActivityEntry {
@@ -1370,9 +1271,9 @@ impl Presenter {
                     });
                 }
                 WorkflowEvent::GoalStarted(goal) => {
-                    self.awaiting_open_answer = false;
+                    self.questions.awaiting_open_answer = false;
                     self.state.current_goal = Some(goal.clone());
-                    if let Ok(mut cs) = self.critical_state.lock() {
+                    if let Ok(mut cs) = self.views.critical_state.lock() {
                         cs.current_goal = Some(goal.clone());
                     }
                     self.state.goal_start_time = std::time::Instant::now();
@@ -1384,10 +1285,10 @@ impl Presenter {
                 }
                 WorkflowEvent::ClarificationNeeded { questions } => {
                     self.flush_agent_output_buffer();
-                    self.awaiting_open_answer = questions.is_empty();
-                    self.pending_questions = questions;
-                    self.current_question_index = 0;
-                    self.collected_answers.clear();
+                    self.questions.awaiting_open_answer = questions.is_empty();
+                    self.questions.questions = questions;
+                    self.questions.current_index = 0;
+                    self.questions.collected_answers.clear();
                     self.advance_to_next_question();
                 }
                 WorkflowEvent::AwaitingFeatureInput => {
@@ -1428,9 +1329,9 @@ impl Presenter {
                     }
                 }
                 WorkflowEvent::WorkflowComplete(result) => {
-                    self.awaiting_open_answer = false;
+                    self.questions.awaiting_open_answer = false;
                     self.flush_agent_output_buffer();
-                    self.workflow_result = Some(result.clone());
+                    self.workflow.result = Some(result.clone());
                     self.broadcast(PresenterEvent::WorkflowComplete(result.clone()));
                     if result.is_ok() && !self.state.inbox.is_empty() {
                         let item = self.state.inbox.remove(0);
@@ -1442,13 +1343,13 @@ impl Presenter {
                         // Pass session_dir so we resume in the same session (avoids re-creating worktree).
                         let session_dir = result.as_ref().ok().and_then(|p| p.session_dir.clone());
                         if let (Some(backend), Some(output_dir)) = (
-                            self.workflow_backend.clone(),
-                            self.workflow_output_dir.clone(),
+                            self.workflow.backend.clone(),
+                            self.workflow.output_dir.clone(),
                         ) {
-                            if let Some(h) = self.workflow_handle.take() {
+                            if let Some(h) = self.workflow.handle.take() {
                                 let _ = h.join();
                             }
-                            self.workflow_result = None;
+                            self.workflow.result = None;
                             self.state.workflow_session_id = None;
                             log::debug!(
                                 "WorkflowComplete: inbox restart — cleared workflow_session_id until SessionStarted"
@@ -1458,12 +1359,12 @@ impl Presenter {
                                 output_dir,
                                 session_dir,
                                 Some(prefixed),
-                                self.workflow_conversation_output.clone(),
-                                self.workflow_debug_output.clone(),
-                                self.workflow_debug,
+                                self.workflow.conversation_output.clone(),
+                                self.workflow.debug_output.clone(),
+                                self.workflow.debug,
                                 None,
-                                self.workflow_socket_path.clone(),
-                                self.workflow_worktree_dir.clone(),
+                                self.workflow.socket_path.clone(),
+                                self.workflow.worktree_dir.clone(),
                             );
                         }
                     } else {
@@ -1472,7 +1373,7 @@ impl Presenter {
                                 self.finish_start_slash_structured_run_if_needed();
                             }
                             Err(_) => {
-                                self.start_slash_structured_run_active = false;
+                                self.backend.start_slash_structured_run_active = false;
                             }
                         }
                         match result {
@@ -1508,14 +1409,15 @@ impl Presenter {
                     );
                     for part in text.split_inclusive('\n') {
                         if part.ends_with('\n') {
-                            self.agent_output_buffer
+                            self.activity
+                                .output_buffer
                                 .push_str(part.trim_end_matches('\n'));
-                            let line = std::mem::take(&mut self.agent_output_buffer);
+                            let line = std::mem::take(&mut self.activity.output_buffer);
                             if !line.is_empty() {
                                 self.finalize_agent_line_in_activity_log(line);
                             }
                         } else {
-                            self.agent_output_buffer.push_str(part);
+                            self.activity.output_buffer.push_str(part);
                         }
                     }
                     self.sync_agent_partial_activity_log();
@@ -1540,15 +1442,15 @@ impl Presenter {
         socket_path: Option<PathBuf>,
         tool_call_rx: Option<mpsc::Receiver<ToolCallRequest>>,
     ) {
-        self.workflow_backend = Some(backend.clone());
-        self.workflow_output_dir = Some(output_dir.clone());
+        self.workflow.backend = Some(backend.clone());
+        self.workflow.output_dir = Some(output_dir.clone());
         self.state.skills_project_root = Some(output_dir.clone());
-        self.workflow_session_dir = session_dir.clone();
-        self.workflow_conversation_output = conversation_output_path.clone();
-        self.workflow_debug_output = debug_output_path.clone();
-        self.workflow_debug = debug;
-        self.tool_call_rx = tool_call_rx;
-        self.workflow_socket_path = socket_path.clone();
+        self.workflow.session_dir = session_dir.clone();
+        self.workflow.conversation_output = conversation_output_path.clone();
+        self.workflow.debug_output = debug_output_path.clone();
+        self.workflow.debug = debug;
+        self.views.tool_call_rx = tool_call_rx;
+        self.workflow.socket_path = socket_path.clone();
         self.state.workflow_session_id = session_id.clone();
         log::debug!(
             "start_workflow: initial workflow_session_id={}",
@@ -1568,39 +1470,39 @@ impl Presenter {
             debug,
             session_id,
             socket_path,
-            self.workflow_worktree_dir.clone(),
+            self.workflow.worktree_dir.clone(),
         );
     }
 
-    /// Starts another workflow run with `prompt`. Reuses [`Self::workflow_session_dir`] when set so
+    /// Starts another workflow run with `prompt`. Reuses [`WorkflowRun::session_dir`] when set so
     /// web/daemon/CLI-bound session folders keep receiving runs; only passes `None` when the first
     /// run also had no session dir (fresh allocation under `TDDY_SESSIONS_DIR`).
     fn restart_workflow(&mut self, prompt: String) {
         if let (Some(backend), Some(output_dir)) = (
-            self.workflow_backend.clone(),
-            self.workflow_output_dir.clone(),
+            self.workflow.backend.clone(),
+            self.workflow.output_dir.clone(),
         ) {
-            if let Some(h) = self.workflow_handle.take() {
+            if let Some(h) = self.workflow.handle.take() {
                 // Drop the answer sender so a workflow blocked on `answer_rx.recv()` (initial
                 // feature line or clarification) unblocks and exits; otherwise `join()` deadlocks
                 // (e.g. `/start-*` from FeatureInput before any text was sent to the channel).
-                self.answer_tx = None;
+                self.workflow.answer_tx = None;
                 let _ = h.join();
             }
-            self.workflow_result = None;
+            self.workflow.result = None;
             self.state.mode = AppMode::Running;
             self.broadcast_mode_changed();
             self.spawn_workflow(
                 backend,
                 output_dir,
-                self.workflow_session_dir.clone(),
+                self.workflow.session_dir.clone(),
                 Some(prompt),
-                self.workflow_conversation_output.clone(),
-                self.workflow_debug_output.clone(),
-                self.workflow_debug,
+                self.workflow.conversation_output.clone(),
+                self.workflow.debug_output.clone(),
+                self.workflow.debug,
                 None,
-                self.workflow_socket_path.clone(),
-                self.workflow_worktree_dir.clone(),
+                self.workflow.socket_path.clone(),
+                self.workflow.worktree_dir.clone(),
             );
         }
     }
@@ -1623,7 +1525,7 @@ impl Presenter {
         let (answer_tx, answer_rx) = mpsc::channel();
 
         let model_for_workflow = self.state.model.clone();
-        let recipe = self.workflow_recipe.clone();
+        let recipe = self.backend.recipe.clone();
         let tddy_data_dir = self.tddy_data_dir.clone();
         let handle = thread::spawn(move || {
             workflow_runner::run_workflow(
@@ -1645,32 +1547,33 @@ impl Presenter {
             );
         });
 
-        self.workflow_event_rx = Some(event_rx);
-        self.answer_tx = Some(answer_tx);
-        self.workflow_handle = Some(handle);
+        self.workflow.event_rx = Some(event_rx);
+        self.workflow.answer_tx = Some(answer_tx);
+        self.workflow.handle = Some(handle);
     }
 
-    /// Prefer session/plan dir for `changeset.yaml`; fall back to `workflow_output_dir`.
+    /// Prefer session/plan dir for `changeset.yaml`; fall back to [`WorkflowRun::output_dir`].
     fn changeset_read_dir(&self) -> Option<&PathBuf> {
-        self.workflow_session_dir
+        self.workflow
+            .session_dir
             .as_ref()
-            .or(self.workflow_output_dir.as_ref())
+            .or(self.workflow.output_dir.as_ref())
     }
 
     /// After a successful `/start-*` structured run, switch active recipe back to free prompting.
     fn finish_start_slash_structured_run_if_needed(&mut self) {
-        if !self.start_slash_structured_run_active {
+        if !self.backend.start_slash_structured_run_active {
             return;
         }
-        self.start_slash_structured_run_active = false;
-        let Some(ref resolve) = self.recipe_resolver else {
+        self.backend.start_slash_structured_run_active = false;
+        let Some(ref resolve) = self.backend.recipe_resolver else {
             log::debug!("finish_start_slash_structured_run: no recipe_resolver");
             return;
         };
         let fp_name = crate::feature_start_slash::DEFAULT_UNSPECIFIED_WORKFLOW_RECIPE_CLI_NAME;
         match resolve(fp_name) {
             Ok(r) => {
-                self.workflow_recipe = r;
+                self.backend.recipe = r;
                 if let Some(dir) = self.changeset_read_dir().cloned() {
                     let mut cs = crate::changeset::read_changeset(&dir).unwrap_or_default();
                     cs.recipe = Some(fp_name.to_string());
@@ -1707,7 +1610,7 @@ impl Presenter {
                 true
             }
             Ok(cli_name) => {
-                let Some(ref resolve) = self.recipe_resolver else {
+                let Some(ref resolve) = self.backend.recipe_resolver else {
                     log::debug!(
                         "try_handle_start_slash_line: no recipe_resolver; pass through as normal submit"
                     );
@@ -1723,8 +1626,8 @@ impl Presenter {
                     }
                     Ok(new_recipe) => {
                         let structured = new_recipe.name() != "free-prompting";
-                        self.start_slash_structured_run_active = structured;
-                        self.workflow_recipe = new_recipe;
+                        self.backend.start_slash_structured_run_active = structured;
+                        self.backend.recipe = new_recipe;
                         if let Some(dir) = self.changeset_read_dir().cloned() {
                             let mut cs = crate::changeset::read_changeset(&dir).unwrap_or_default();
                             cs.recipe = Some(cli_name.clone());
@@ -1750,12 +1653,12 @@ impl Presenter {
 
     /// True when workflow is complete (workflow_result is set).
     pub fn is_done(&self) -> bool {
-        self.workflow_result.is_some()
+        self.workflow.result.is_some()
     }
 
     /// Take the workflow result (if any) for printing on TUI exit.
     pub fn take_workflow_result(&mut self) -> Option<Result<WorkflowCompletePayload, String>> {
-        self.workflow_result.take()
+        self.workflow.result.take()
     }
 
     /// User accepted the `/recipe` built-in from the feature slash menu (PRD).
@@ -1768,16 +1671,16 @@ impl Presenter {
             return;
         }
         log::info!("apply_feature_slash_builtin_recipe: showing workflow recipe selection");
-        self.recipe_slash_selection_pending = true;
-        self.pending_questions = vec![crate::backend::workflow_recipe_selection_question()];
-        self.current_question_index = 0;
-        self.collected_answers.clear();
+        self.backend.recipe_slash_selection_pending = true;
+        self.questions.questions = vec![crate::backend::workflow_recipe_selection_question()];
+        self.questions.current_index = 0;
+        self.questions.collected_answers.clear();
         self.advance_to_next_question();
     }
 
     /// Whether the presenter is in recipe selection after `/recipe` from slash menu.
     pub fn recipe_slash_selection_active(&self) -> bool {
-        let active = self.recipe_slash_selection_pending
+        let active = self.backend.recipe_slash_selection_pending
             && matches!(self.state.mode, AppMode::Select { .. });
         log::debug!("recipe_slash_selection_active: {active}");
         active
@@ -1809,7 +1712,7 @@ mod tests {
     fn inject_workflow_event(presenter: &mut Presenter, event: WorkflowEvent) {
         let (tx, rx) = mpsc::channel();
         tx.send(event).unwrap();
-        presenter.workflow_event_rx = Some(rx);
+        presenter.workflow.event_rx = Some(rx);
     }
 
     fn inject_workflow_events(presenter: &mut Presenter, events: Vec<WorkflowEvent>) {
@@ -1818,7 +1721,7 @@ mod tests {
             tx.send(e).unwrap();
         }
         drop(tx);
-        presenter.workflow_event_rx = Some(rx);
+        presenter.workflow.event_rx = Some(rx);
     }
 
     #[test]
@@ -2039,7 +1942,7 @@ mod tests {
         let mut cs = crate::changeset::Changeset::default();
         cs.state.session_id = Some("agent-session-42".to_string());
         crate::changeset::write_changeset(tmp, &cs).unwrap();
-        p.workflow_output_dir = Some(tmp.to_path_buf());
+        p.workflow.output_dir = Some(tmp.to_path_buf());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "test error".to_string(),
         };
@@ -2071,7 +1974,7 @@ mod tests {
         let tmp = tmp.path();
         let cs = crate::changeset::Changeset::default(); // session_id is None
         crate::changeset::write_changeset(tmp, &cs).unwrap();
-        p.workflow_output_dir = Some(tmp.to_path_buf());
+        p.workflow.output_dir = Some(tmp.to_path_buf());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "test error".to_string(),
         };
@@ -2119,7 +2022,7 @@ mod tests {
             system_prompt_file: None,
         });
         crate::changeset::write_changeset(tmp, &cs).unwrap();
-        p.workflow_output_dir = Some(tmp.to_path_buf());
+        p.workflow.output_dir = Some(tmp.to_path_buf());
         p.state.current_goal = Some("evaluate".to_string());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "validate is not supported on the Cursor backend".to_string(),
@@ -2164,7 +2067,7 @@ mod tests {
             system_prompt_file: None,
         });
         crate::changeset::write_changeset(tmp, &cs).unwrap();
-        p.workflow_output_dir = Some(tmp.to_path_buf());
+        p.workflow.output_dir = Some(tmp.to_path_buf());
         p.state.current_goal = Some("validate".to_string());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "validate is not supported on the Cursor backend".to_string(),
@@ -2203,8 +2106,8 @@ mod tests {
         let mut cs = crate::changeset::Changeset::default();
         cs.state.session_id = Some(resume_id.to_string());
         crate::changeset::write_changeset(tmp_plan, &cs).unwrap();
-        p.workflow_output_dir = Some(tmp_wrong.to_path_buf());
-        p.workflow_session_dir = Some(tmp_plan.to_path_buf());
+        p.workflow.output_dir = Some(tmp_wrong.to_path_buf());
+        p.workflow.session_dir = Some(tmp_plan.to_path_buf());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "read refactoring-plan.md: No such file or directory (os error 2)"
                 .to_string(),
@@ -2451,7 +2354,7 @@ mod tests {
         std::fs::write(tmp.join("artifacts").join("SessionDoc.md"), on_disk).unwrap();
 
         let mut p = make_presenter();
-        p.workflow_session_dir = Some(tmp.to_path_buf());
+        p.workflow.session_dir = Some(tmp.to_path_buf());
         p.state.mode = AppMode::DocumentReview {
             content: "STALE_SNAPSHOT_NOT_ON_DISK".to_string(),
         };
@@ -2499,7 +2402,7 @@ mod tests {
         .unwrap();
 
         let mut p = make_presenter();
-        p.workflow_session_dir = Some(nested.clone());
+        p.workflow.session_dir = Some(nested.clone());
         p.state.mode = AppMode::DocumentReview {
             content: "STALE".to_string(),
         };

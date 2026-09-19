@@ -14,7 +14,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use crate::backend::QuestionOption;
+pub use tddy_workflow::questions::QuestionOption;
 
 /// Wire format for submit request (sent to socket).
 #[derive(Debug, Serialize, Deserialize)]

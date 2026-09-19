@@ -15,13 +15,15 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
-use tddy_core::backend::{CodingBackend, GoalId, WorkflowRecipe};
+use tddy_core::backend::CodingBackend;
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::toolcall::{
     ChildSpawnHandler, ConversationSpawnHandler, ToolCallRequest, ToolcallRpcService,
     TransitionHandler,
 };
 use tddy_core::workflow::controller::WorkflowController;
+use tddy_core::workflow::ids::GoalId;
+use tddy_core::workflow::recipe::WorkflowRecipe;
 use tddy_core::StubBackend;
 use tokio::net::UnixListener;
 use tokio::task::JoinHandle;
