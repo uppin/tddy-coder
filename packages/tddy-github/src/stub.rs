@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::provider::{GitHubOAuthProvider, GitHubUser};
+use crate::provider::{DeviceLoginPoll, DeviceLoginStart, GitHubOAuthProvider, GitHubUser};
 
 /// In-memory stub that mimics GitHub OAuth without HTTP calls.
 /// Pre-register code→user mappings via `register_code` before tests.
@@ -92,6 +92,18 @@ impl GitHubOAuthProvider for StubGitHubProvider {
             .ok_or_else(|| format!("unknown authorization code: {}", code))?;
         let access_token = format!("stub-access-token-{}", Uuid::new_v4());
         Ok((access_token, user))
+    }
+
+    async fn start_device_login(&self) -> Result<DeviceLoginStart, String> {
+        // TODO(desktop-login): hand back a fixed device code and user code, and record how many
+        // polls must arrive before the stub reports approval.
+        todo!("StubGitHubProvider::start_device_login")
+    }
+
+    async fn poll_device_login(&self, _device_code: &str) -> Result<DeviceLoginPoll, String> {
+        // TODO(desktop-login): count down the pending polls, then complete with the registered
+        // user — the same one `exchange_code` would return.
+        todo!("StubGitHubProvider::poll_device_login")
     }
 
     fn issues_usable_access_token(&self) -> bool {

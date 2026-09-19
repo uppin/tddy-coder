@@ -117,8 +117,13 @@ Two things are taken from it, both load-bearing:
 
 **Dependent**: `#keyring` 8/9 `link-github` — the deliberate second account this node refuses.
 
-**New external dependency**: none. Two HTTP calls to endpoints the crate already talks to, and
-`tokio::time` for the poll interval.
+**New external dependency**: none in the shipped build. Two HTTP calls to endpoints the crate
+already talks to, and `tokio::time` for the poll interval.
+
+> **One dev-dependency added**, recorded rather than slipped in: `axum = "0.8"` on `tddy-github`,
+> **`[dev-dependencies]` only**, to serve a GitHub on loopback. It is already this workspace's HTTP
+> server in five crates and already in `Cargo.lock`, so it resolves nothing new and ships nothing.
+> Without it the device flow's four non-error states are unreachable by any test.
 
 **Two answers owed before the green phase**, recorded rather than assumed (PRD § *Technical Impact*):
 whether the app registers as an **OAuth App** (recommended — its user token does not expire, so no
@@ -148,8 +153,13 @@ Published in this PR's **second commit**, before implementation:
   login is refused `permission_denied`;
 - unit: `slow_down` widens the interval; `expired_token` and `access_denied` are distinct states;
 - unit: no request in the device flow carries a client secret;
-- unit: `RealGitHubProvider` against a local base URL exercises all six of `exchange_code`'s error
-  returns.
+- unit: `RealGitHubProvider` against a local base URL exercises `exchange_code`'s error returns.
+
+  > **Measured correction.** `exchange_code` has **seven** error returns, not six: the forged
+  > state, two transport failures, two non-success statuses and two parse failures.
+  > `tests/real_provider_over_http.rs` covers six of them. The seventh — a transport failure on the
+  > *user* leg specifically, after the token leg succeeded — needs the stand-in to die between two
+  > requests, and is left to `/green` rather than claimed.
 
 ⚠ **Not mergeable in that state** — implementation follows in this same PR.
 

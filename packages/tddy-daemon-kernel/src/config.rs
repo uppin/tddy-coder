@@ -1065,7 +1065,7 @@ pub struct GitHubConfig {
     pub stub_codes: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct UserMapping {
     pub github_user: String,
