@@ -160,11 +160,18 @@ struct Header {
 /// name the binary — the `mod common;` it declares, not the library beside it — and mean exactly
 /// the same thing in the destination's `tests/`. That is the opposite of a module move, where
 /// `crate::` is the whole of the header pass.
+///
+/// A path whose first segment is a module the file itself declares is left alone for the same
+/// reason. `use common::PTY_STUB_OUTPUT;` under a `mod common;` reaches the binary's *own* module,
+/// backed by `tests/common/mod.rs`, and in Rust 2018 an unqualified first segment resolves to a
+/// crate-root item before it resolves to an extern crate. Reading it as one would send the walk
+/// looking for a crate nobody declares and then refuse a plan that is correct.
 fn repointed_header(workspace: &Workspace<'_>, text: &str, origin: &Destination) -> Result<Header> {
     let mut header = Header {
         edits: Vec::new(),
         named: BTreeMap::new(),
     };
+    let own_modules = modules_declared_in(text);
 
     for (at, path) in header::use_declarations(text) {
         let (qualifier, rest) = match path.split_once("::") {
@@ -175,7 +182,8 @@ fn repointed_header(workspace: &Workspace<'_>, text: &str, origin: &Destination)
         if matches!(
             qualifier,
             "crate" | "super" | "self" | "std" | "core" | "alloc"
-        ) {
+        ) || own_modules.contains(qualifier)
+        {
             continue;
         }
         if qualifier != origin.extern_name {
@@ -195,6 +203,42 @@ fn repointed_header(workspace: &Workspace<'_>, text: &str, origin: &Destination)
     }
 
     Ok(header)
+}
+
+/// The modules the moved file declares itself, which its own paths can name without a crate.
+///
+/// Cargo compiles every `tests/<name>.rs` as a crate root of its own, so a `mod` written there is a
+/// crate-root item of that binary — `mod common;` backed by `tests/common/mod.rs`, or an inline
+/// `mod fakes { … }`, both equally. Neither travels through any manifest, so neither is a crate the
+/// destination could gain a dependency on.
+///
+/// Only an unindented declaration counts: one inside a function body or a nested module is not a
+/// crate-root item, and a path in the file's header cannot name it — the same line the header
+/// scanner draws, drawn once more here so the two agree about what "top level" means.
+fn modules_declared_in(text: &str) -> BTreeSet<String> {
+    text.lines().filter_map(module_declared_by).collect()
+}
+
+/// The module a top-level `mod` line declares, whether it is a file module or an inline one.
+fn module_declared_by(line: &str) -> Option<String> {
+    let trimmed = line.trim_end();
+    if trimmed.starts_with(char::is_whitespace) {
+        return None;
+    }
+
+    let declaration = match trimmed.strip_prefix("pub") {
+        // `pub`, `pub(crate)`, `pub(super)` — the visibility says nothing about whether the module
+        // is this binary's own, so whatever follows the parentheses is what has to be read.
+        Some(visibility) => visibility.trim_start_matches(|c| c != ' ').trim_start(),
+        None => trimmed,
+    };
+    let name = declaration
+        .strip_prefix("mod ")?
+        .trim_start()
+        .split(|c: char| c == ';' || c == '{' || c.is_whitespace())
+        .next()?;
+
+    (!name.is_empty() && name.chars().all(header::is_path_character)).then(|| name.to_string())
 }
 
 /// Note a crate the moved test names, keeping the directory if either sighting of it found one.

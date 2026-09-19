@@ -13,7 +13,8 @@
 
 use tddy_code_restructuring::registry::Workspace;
 use tddy_code_restructuring::{
-    read_test_binary_move, Anchor, Overlay, Plan, Reexport, RefactorKind,
+    read_test_binary_move, resolve_test_binary_move, Anchor, FileEdit, Overlay, Plan, Reexport,
+    RefactorKind, WorkspaceEdit,
 };
 
 fn a_plan_line(op: &str, file: &str, extra: &str) -> String {
@@ -128,4 +129,126 @@ fn refuses_an_anchor_that_is_not_a_test_binary() {
         refusal.to_string().contains("tests/"),
         "the refusal does not name the shape it expected: {refusal}"
     );
+}
+
+/// A `mod` the moved test declares is that binary's own module, not a crate it depends on.
+///
+/// Six suites under `packages/tddy-daemon/tests/` open with `mod common;` and then reach their
+/// helpers as `common::…`. Cargo compiles each `tests/*.rs` as a crate root of its own, so that
+/// path names an item of the binary itself — `tests/common/mod.rs` — exactly as `crate::` does.
+/// Resolving it as an extern crate is a category error, and it refused a correct plan: `common` is
+/// declared in no manifest, so the carry-across had nothing to find.
+#[test]
+fn leaves_a_module_the_moved_test_declares_itself_out_of_the_destination() {
+    // Given a test binary that declares `mod common;` and reaches both it and a real crate
+    let directory = a_workspace_whose_moved_test_declares_a_module();
+    let overlay = Overlay::new();
+    let workspace = Workspace {
+        root: directory.path(),
+        overlay: &overlay,
+    };
+    let moving = read_test_binary_move(&workspace, &a_move_of(MOVED_TEST, DESTINATION))
+        .expect("the anchor is a test binary");
+
+    // When the move is resolved
+    let edit = resolve_test_binary_move(&workspace, &moving)
+        .expect("a test declaring a module of its own resolves");
+
+    // Then the destination gains only the crate the test genuinely names
+    assert_eq!(
+        added_to(&edit, &format!("{DESTINATION}/Cargo.toml")),
+        "\n[dev-dependencies]\ntokio = { version = \"1\" }\n",
+        "the module the moved test declares itself was read as an extern crate"
+    );
+}
+
+const MOVED_TEST: &str = "packages/daemon/tests/claude_cli_permission_mode_acceptance.rs";
+const DESTINATION: &str = "packages/session-lifecycle";
+
+/// Two crates and the test moving between them: the daemon whose library merely re-exports
+/// `claude_cli`, and the crate that defines it.
+///
+/// The moved test names three things, and the pass owes each a different answer: `common`, its own
+/// module, which is not a dependency at all; `daemon::claude_cli`, a facade to be re-pointed at the
+/// destination; and `tokio`, a dev-dependency that has to travel.
+fn a_workspace_whose_moved_test_declares_a_module() -> tempfile::TempDir {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+
+    for (relative, text) in [
+        (
+            "packages/daemon/Cargo.toml",
+            "[package]\nname = \"daemon\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\nsession-lifecycle = { path = \"../session-lifecycle\" }\n\n\
+             [dev-dependencies]\ntokio = { version = \"1\" }\n",
+        ),
+        (
+            "packages/daemon/src/lib.rs",
+            "//! The crate the suite is leaving, which only passes `claude_cli` on.\n\n\
+             pub use session_lifecycle::claude_cli;\n",
+        ),
+        (
+            "packages/daemon/tests/common/mod.rs",
+            "//! Helpers the suites share, compiled into each one that declares it.\n\n\
+             pub const PTY_STUB_OUTPUT: &str = \"ready\";\n\n\
+             pub fn a_capture_showing(output: &str) -> String {\n    output.to_string()\n}\n",
+        ),
+        (
+            MOVED_TEST,
+            "mod common;\n\n\
+             use common::{a_capture_showing, PTY_STUB_OUTPUT};\n\
+             use daemon::claude_cli::PermissionMode;\n\
+             use tokio::time::Duration;\n\n\
+             #[test]\nfn reports_the_mode_it_was_launched_with() {\n    \
+             assert_eq!(\n        \
+             PermissionMode::of(&a_capture_showing(PTY_STUB_OUTPUT), Duration::ZERO),\n        \
+             PermissionMode::Plan,\n    );\n}\n",
+        ),
+        (
+            "packages/session-lifecycle/Cargo.toml",
+            "[package]\nname = \"session-lifecycle\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        ),
+        (
+            "packages/session-lifecycle/src/lib.rs",
+            "//! The crate that defines what the suite exercises.\n\npub mod claude_cli;\n",
+        ),
+    ] {
+        let absolute = directory.path().join(relative);
+        std::fs::create_dir_all(absolute.parent().expect("a parent directory"))
+            .expect("the directory is created");
+        std::fs::write(absolute, text).expect("the file is written");
+    }
+    directory
+}
+
+fn a_move_of(source: &str, to: &str) -> tddy_code_restructuring::RefactorOp {
+    tddy_code_restructuring::RefactorOp {
+        op: RefactorKind::MoveTestBinaryToCrate,
+        anchor: Anchor::Symbol {
+            file: source.to_string(),
+            path: "whatever".to_string(),
+        },
+        name: None,
+        to: Some(to.to_string()),
+        variant: None,
+        with_private_deps: false,
+        reexport: None,
+        to_file: false,
+        also: Vec::new(),
+    }
+}
+
+/// The text one file gains from a resolved edit, which for a manifest is its new dependency lines.
+fn added_to(edit: &WorkspaceEdit, path: &str) -> String {
+    edit.changes
+        .iter()
+        .filter_map(|change| match change {
+            FileEdit::Change {
+                path: changed,
+                edits,
+            } if changed == path => Some(edits),
+            _ => None,
+        })
+        .flatten()
+        .map(|edit| edit.new_text.clone())
+        .collect()
 }
