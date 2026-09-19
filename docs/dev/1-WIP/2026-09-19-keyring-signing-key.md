@@ -117,7 +117,13 @@ dependents, six of which use none of it, and the SDK cannot enter `tddy-tools`'
 
 ## Dependencies
 
-**Parents**: none. This is the root node; its PR opens against `master`.
+**Parents**: none inside `#keyring`. This is the stack's root node, but its PR opens against
+[#492](https://github.com/uppin/tddy-coder/pull/492) `feature/carve/git-plumbing` — a node of the
+separate `#carve` stack — not against `master`. The whole `#keyring` line therefore lands after
+`#carve` 6/10 does. That base was taken deliberately: `#carve` moves the `tddy-github` and
+`tddy-core` code this stack edits, and taking the move now, while every `#keyring` node is still
+docs-only, is the cheapest this rebase will ever be. It also satisfies `#keyring` 9/9's block on
+#492 from the base rather than as a separate wait.
 
 **Direct dependents**:
 
@@ -131,8 +137,11 @@ dependents, six of which use none of it, and the SDK cannot enter `tddy-tools`'
 CLAUDE.md § ASK. `zeroize` for the secret key is recommended and optional. Nothing else is added;
 `#keyring` 6/9's wrap-to-recipient reuses the workspace's existing pinned `rsa`.
 
-**Nothing in this node waits on an unmerged PR.** The stack's only external block is `#keyring` 9/9
-on [#492](https://github.com/uppin/tddy-coder/pull/492), five nodes above this one.
+**Nothing in this node's own work waits on an unmerged PR**, but its *base* does: the line is
+`#carve` 4/10 [#498](https://github.com/uppin/tddy-coder/pull/498) → `#carve` 5/10
+[#491](https://github.com/uppin/tddy-coder/pull/491) → `#carve` 6/10
+[#492](https://github.com/uppin/tddy-coder/pull/492) → this node. All three must merge before any
+`#keyring` node can.
 
 ## Draft PR contract
 
