@@ -113,6 +113,60 @@ Published in this PR's **second commit**:
 
 ⚠ **Not mergeable in that state** — implementation follows in this same PR.
 
+### As published — measured red (wave 2, commit 2)
+
+`./test -p tddy-accounts -p tddy-service -p tddy-github -p tddy-daemon-auth --no-fail-fast`,
+**scoped to the four packages this node touches**. Whole-workspace green is CI's answer, not this
+one's.
+
+| | passed | failed |
+|---|---|---|
+| Before this commit (the inherited base) | 246 | 51 |
+| After | 250 | 76 |
+
+**+25 failing**, every one in this node's two new suites — 12 in `account_linking_unit.rs` and 13 in
+`account_linking_acceptance.rs`. Each fails on a `todo!()`: 22 on this node's three
+(`record_for_link`, `removal_allowed`, `begin_link_account`), and 3 on 4/9's unfinished
+`list_accounts` / `remove_account`, which those tests read the result of. That is expected — 4/9 is a
+real edge and is green before this node's own green phase starts.
+
+**The 51 inherited failures are untouched**: 2/9–5/9's unfinished green phases, plus the four
+`git_plumbing_shape.rs` assertions waiting on the `#carve` stack's move of `tddy-git` /
+`tddy-github`.
+
+**+4 passing, and they are green on purpose.** `packages/tddy-service/tests/linking_mints_no_session.rs`
+asserts a property of the **schema**, and the schema is what this commit changes — so the tripwire is
+satisfied the moment the surface lands, exactly as 7/9's two passphrase tripwires were. Recorded here
+rather than manufactured into red. Non-vacuity was checked by adding `string session_token = 4;` to
+`PollLinkAccountResponse` and confirming the assertion fails with that message.
+
+The `tddy-web` spec `cypress/component/AccountLinkingAcceptance.cy.tsx` is 13 further failing tests,
+run as the **single spec under change** — never the full Cypress suite.
+
+### Design decisions taken while publishing the surface
+
+**The session marker is `ListAccountsResponse.session_account`, a new `SessionAccount` message — not
+a field on `AccountSummary`.** This keeps the `## Boundaries` promise that 4/9's `AccountSummary` is
+reused with no new field, and it is the right shape besides: which account a session belongs to is a
+fact about the *caller*, and 6/9 propagates the same record to a daemon where it is an ordinary
+linked account. ⚠ It is still **one additive field on a message 4/9 owns**, and this node's green
+phase must populate it inside `list_accounts` — a body 4/9 owns. Flagged for the reviewer; nothing
+else in that message or its handler is touched here.
+
+**A new `LinkedAccountStore` port rather than a `put` on 4/9's `AccountStore`.** 4/9 shaped
+`AccountStore` as read-and-curate only (`list` / `set_label` / `remove`), which is what makes "no
+store API returns a secret to a response path" checkable. Writing a *new* credential is a different
+capability, so it gets its own port — `held` / `put` / `session_account` — following the
+`ScreenSharingTargetStore` precedent 7/9 set.
+
+**A daemon with no linking wired refuses, rather than pretending.** `AccountsServiceImpl::with_linking`
+is additive, and `require_linking` answers `FAILED_PRECONDITION` when it was never called. **Not a
+fallback**: nothing is substituted for the missing ports; the request does not happen, and says so.
+
+⚠ **One file 4/9 owns was edited.** `tests/accounts_service_acceptance.rs` gained a single
+`session_account: None,` in a `ListAccountsResponse` literal, which the new proto field made
+incomplete. A forced mechanical consequence, not a change to 4/9's behaviour.
+
 ## Green wave
 
 **Wave 4 of 5**, with 5/9, 6/9 and 7/9.
@@ -153,7 +207,7 @@ about it.
 
 - [x] **PRD**: [PRD-2026-09-19-keyring-link-github.md](../../ft/daemon/1-WIP/PRD-2026-09-19-keyring-link-github.md)
 - [x] **Changeset**: this document
-- [ ] **Draft PR contract**: surface + failing tests (wave 2, commit 2)
+- [x] **Draft PR contract**: surface + failing tests (wave 2, commit 2)
 - [ ] **Flow**: `BeginLinkAccount` / `PollLinkAccount` over 2/9's device flow, no session minted
 - [ ] **Dedup**: on GitHub user id; re-link updates in place
 - [ ] **Refusal**: the session's own account cannot be removed
@@ -233,7 +287,11 @@ having assigned one.
 ### Unit tests
 
 - Dedup on GitHub user id, including a changed login name for the same id.
-- A re-link updates the secret and keeps `account_id`, `label` and `created_at`.
+- A re-link updates the secret and keeps `account_id` and `label`, and moves `updated_at` to the
+  moment of the link. ⚠ **Plan correction**: this list originally said `created_at`, which
+  `CredentialRecord` does not have — the record carries `updated_at` and `version` only, and the
+  moment an account was *first* linked is not retained anywhere. Nothing needs it today; if a screen
+  ever does, it is a field on the record and a separate change.
 - The `RemoveAccount` refusal fires for the session account and not for others.
 - A locked vault maps to `LINK_VAULT_LOCKED`, not `LINK_DENIED`.
 
@@ -268,7 +326,7 @@ via `scripts/ci-status.sh`.
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Publish the draft-PR contract — wave 2
+- [x] Publish the draft-PR contract — wave 2
 - [ ] M1–M7
 - [ ] `packages/tddy-accounts/docs/account-linking.md`
 - [ ] `/wrap-context-docs` — this node claims **no** `docs/dev/todo/` entry and **no** code-issue

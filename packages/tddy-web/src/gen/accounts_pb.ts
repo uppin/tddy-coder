@@ -2,15 +2,15 @@
 // @generated from file accounts.proto (package accounts, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file accounts.proto.
  */
 export const file_accounts: GenFile = /*@__PURE__*/
-  fileDesc("Cg5hY2NvdW50cy5wcm90bxIIYWNjb3VudHMifgoOQWNjb3VudFN1bW1hcnkSEAoIcHJvdmlkZXIYASABKAkSEgoKYWNjb3VudF9pZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIPCgdzdWJqZWN0GAQgASgJEhIKCnVwZGF0ZWRfYXQYBSABKAMSEgoKaGFzX3NlY3JldBgGIAEoCCJQChBQcm92aWRlckFjY291bnRzEhAKCHByb3ZpZGVyGAEgASgJEioKCGFjY291bnRzGAIgAygLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkiLAoTTGlzdEFjY291bnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIlsKFExpc3RBY2NvdW50c1Jlc3BvbnNlEi0KCXByb3ZpZGVycxgBIAMoCzIaLmFjY291bnRzLlByb3ZpZGVyQWNjb3VudHMSFAoMdmF1bHRfbG9ja2VkGAIgASgIImQKFlNldEFjY291bnRMYWJlbFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIQCghwcm92aWRlchgCIAEoCRISCgphY2NvdW50X2lkGAMgASgJEg0KBWxhYmVsGAQgASgJIkQKF1NldEFjY291bnRMYWJlbFJlc3BvbnNlEikKB2FjY291bnQYASABKAsyGC5hY2NvdW50cy5BY2NvdW50U3VtbWFyeSJTChRSZW1vdmVBY2NvdW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhAKCHByb3ZpZGVyGAIgASgJEhIKCmFjY291bnRfaWQYAyABKAkiRgoVUmVtb3ZlQWNjb3VudFJlc3BvbnNlEi0KCXByb3ZpZGVycxgBIAMoCzIaLmFjY291bnRzLlByb3ZpZGVyQWNjb3VudHMyigIKD0FjY291bnRzU2VydmljZRJNCgxMaXN0QWNjb3VudHMSHS5hY2NvdW50cy5MaXN0QWNjb3VudHNSZXF1ZXN0Gh4uYWNjb3VudHMuTGlzdEFjY291bnRzUmVzcG9uc2USVgoPU2V0QWNjb3VudExhYmVsEiAuYWNjb3VudHMuU2V0QWNjb3VudExhYmVsUmVxdWVzdBohLmFjY291bnRzLlNldEFjY291bnRMYWJlbFJlc3BvbnNlElAKDVJlbW92ZUFjY291bnQSHi5hY2NvdW50cy5SZW1vdmVBY2NvdW50UmVxdWVzdBofLmFjY291bnRzLlJlbW92ZUFjY291bnRSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("Cg5hY2NvdW50cy5wcm90bxIIYWNjb3VudHMifgoOQWNjb3VudFN1bW1hcnkSEAoIcHJvdmlkZXIYASABKAkSEgoKYWNjb3VudF9pZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIPCgdzdWJqZWN0GAQgASgJEhIKCnVwZGF0ZWRfYXQYBSABKAMSEgoKaGFzX3NlY3JldBgGIAEoCCJQChBQcm92aWRlckFjY291bnRzEhAKCHByb3ZpZGVyGAEgASgJEioKCGFjY291bnRzGAIgAygLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkiLAoTTGlzdEFjY291bnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIqcBChRMaXN0QWNjb3VudHNSZXNwb25zZRItCglwcm92aWRlcnMYASADKAsyGi5hY2NvdW50cy5Qcm92aWRlckFjY291bnRzEhQKDHZhdWx0X2xvY2tlZBgCIAEoCBI2Cg9zZXNzaW9uX2FjY291bnQYAyABKAsyGC5hY2NvdW50cy5TZXNzaW9uQWNjb3VudEgAiAEBQhIKEF9zZXNzaW9uX2FjY291bnQiZAoWU2V0QWNjb3VudExhYmVsUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhAKCHByb3ZpZGVyGAIgASgJEhIKCmFjY291bnRfaWQYAyABKAkSDQoFbGFiZWwYBCABKAkiRAoXU2V0QWNjb3VudExhYmVsUmVzcG9uc2USKQoHYWNjb3VudBgBIAEoCzIYLmFjY291bnRzLkFjY291bnRTdW1tYXJ5IlMKFFJlbW92ZUFjY291bnRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEAoIcHJvdmlkZXIYAiABKAkSEgoKYWNjb3VudF9pZBgDIAEoCSJGChVSZW1vdmVBY2NvdW50UmVzcG9uc2USLQoJcHJvdmlkZXJzGAEgAygLMhouYWNjb3VudHMuUHJvdmlkZXJBY2NvdW50cyI2Cg5TZXNzaW9uQWNjb3VudBIQCghwcm92aWRlchgBIAEoCRISCgphY2NvdW50X2lkGAIgASgJIkIKF0JlZ2luTGlua0FjY291bnRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEAoIcHJvdmlkZXIYAiABKAkijgEKGEJlZ2luTGlua0FjY291bnRSZXNwb25zZRIPCgdsaW5rX2lkGAEgASgJEhEKCXVzZXJfY29kZRgCIAEoCRIYChB2ZXJpZmljYXRpb25fdXJpGAMgASgJEhoKEmV4cGlyZXNfaW5fc2Vjb25kcxgEIAEoAxIYChBpbnRlcnZhbF9zZWNvbmRzGAUgASgDIkAKFlBvbGxMaW5rQWNjb3VudFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIPCgdsaW5rX2lkGAIgASgJIoIBChdQb2xsTGlua0FjY291bnRSZXNwb25zZRIiCgVzdGF0ZRgBIAEoDjITLmFjY291bnRzLkxpbmtTdGF0ZRIpCgdhY2NvdW50GAIgASgLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkSGAoQaW50ZXJ2YWxfc2Vjb25kcxgDIAEoAyqEAQoJTGlua1N0YXRlEhoKFkxJTktfU1RBVEVfVU5TUEVDSUZJRUQQABIQCgxMSU5LX1BFTkRJTkcQARIPCgtMSU5LX0xJTktFRBACEg8KC0xJTktfREVOSUVEEAMSEAoMTElOS19FWFBJUkVEEAQSFQoRTElOS19WQVVMVF9MT0NLRUQQBTK9AwoPQWNjb3VudHNTZXJ2aWNlEk0KDExpc3RBY2NvdW50cxIdLmFjY291bnRzLkxpc3RBY2NvdW50c1JlcXVlc3QaHi5hY2NvdW50cy5MaXN0QWNjb3VudHNSZXNwb25zZRJWCg9TZXRBY2NvdW50TGFiZWwSIC5hY2NvdW50cy5TZXRBY2NvdW50TGFiZWxSZXF1ZXN0GiEuYWNjb3VudHMuU2V0QWNjb3VudExhYmVsUmVzcG9uc2USUAoNUmVtb3ZlQWNjb3VudBIeLmFjY291bnRzLlJlbW92ZUFjY291bnRSZXF1ZXN0Gh8uYWNjb3VudHMuUmVtb3ZlQWNjb3VudFJlc3BvbnNlElkKEEJlZ2luTGlua0FjY291bnQSIS5hY2NvdW50cy5CZWdpbkxpbmtBY2NvdW50UmVxdWVzdBoiLmFjY291bnRzLkJlZ2luTGlua0FjY291bnRSZXNwb25zZRJWCg9Qb2xsTGlua0FjY291bnQSIC5hY2NvdW50cy5Qb2xsTGlua0FjY291bnRSZXF1ZXN0GiEuYWNjb3VudHMuUG9sbExpbmtBY2NvdW50UmVzcG9uc2ViBnByb3RvMw");
 
 /**
  * One linked account, as a person sees it.
@@ -148,6 +148,16 @@ export type ListAccountsResponse = Message<"accounts.ListAccountsResponse"> & {
    * @generated from field: bool vault_locked = 2;
    */
   vaultLocked: boolean;
+
+  /**
+   * Which of the listed accounts the caller's session was established with — the one
+   * `RemoveAccount` refuses to forget. Unset when the session belongs to no linked account, which
+   * is ordinary: a daemon configured with a server-side credential has one, and every account it
+   * holds is removable.
+   *
+   * @generated from field: optional accounts.SessionAccount session_account = 3;
+   */
+  sessionAccount?: SessionAccount;
 };
 
 /**
@@ -257,6 +267,228 @@ export const RemoveAccountResponseSchema: GenMessage<RemoveAccountResponse> = /*
   messageDesc(file_accounts, 7);
 
 /**
+ * Which account the caller's session was established with.
+ *
+ * A separate message rather than a flag on `AccountSummary`, because it is a fact about the
+ * **caller**, not about the account: the same record is the session's on one daemon and an ordinary
+ * linked account on another after `#keyring` 6/9 propagates it. Putting the bit on the row would
+ * make the row's meaning depend on who read it.
+ *
+ * @generated from message accounts.SessionAccount
+ */
+export type SessionAccount = Message<"accounts.SessionAccount"> & {
+  /**
+   * @generated from field: string provider = 1;
+   */
+  provider: string;
+
+  /**
+   * @generated from field: string account_id = 2;
+   */
+  accountId: string;
+};
+
+/**
+ * Describes the message accounts.SessionAccount.
+ * Use `create(SessionAccountSchema)` to create a new message.
+ */
+export const SessionAccountSchema: GenMessage<SessionAccount> = /*@__PURE__*/
+  messageDesc(file_accounts, 8);
+
+/**
+ * @generated from message accounts.BeginLinkAccountRequest
+ */
+export type BeginLinkAccountRequest = Message<"accounts.BeginLinkAccountRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * Which service to link an account at — "github" today. Open for the same reason
+   * `AccountSummary.provider` is.
+   *
+   * @generated from field: string provider = 2;
+   */
+  provider: string;
+};
+
+/**
+ * Describes the message accounts.BeginLinkAccountRequest.
+ * Use `create(BeginLinkAccountRequestSchema)` to create a new message.
+ */
+export const BeginLinkAccountRequestSchema: GenMessage<BeginLinkAccountRequest> = /*@__PURE__*/
+  messageDesc(file_accounts, 9);
+
+/**
+ * What the operator is shown, and the handle the next poll uses.
+ *
+ * **There is no token of any kind here, and none in `PollLinkAccountResponse` either.** Linking a
+ * credential is not signing in, and the message shape is what enforces it: the flow that adds an
+ * account has no field to hand back a session with. See the `#keyring` 8/9 changeset — a link that
+ * silently re-identified the caller is the defect this node exists to prevent.
+ *
+ * @generated from message accounts.BeginLinkAccountResponse
+ */
+export type BeginLinkAccountResponse = Message<"accounts.BeginLinkAccountResponse"> & {
+  /**
+   * This daemon's handle on the attempt. Not the provider's device code, which is never shown and
+   * never leaves the daemon.
+   *
+   * @generated from field: string link_id = 1;
+   */
+  linkId: string;
+
+  /**
+   * The short code the operator types at the provider.
+   *
+   * @generated from field: string user_code = 2;
+   */
+  userCode: string;
+
+  /**
+   * Where they type it.
+   *
+   * @generated from field: string verification_uri = 3;
+   */
+  verificationUri: string;
+
+  /**
+   * @generated from field: int64 expires_in_seconds = 4;
+   */
+  expiresInSeconds: bigint;
+
+  /**
+   * The provider's *minimum* seconds between polls. Carried rather than hard-coded, because
+   * polling faster than this earns a slow-down.
+   *
+   * @generated from field: int64 interval_seconds = 5;
+   */
+  intervalSeconds: bigint;
+};
+
+/**
+ * Describes the message accounts.BeginLinkAccountResponse.
+ * Use `create(BeginLinkAccountResponseSchema)` to create a new message.
+ */
+export const BeginLinkAccountResponseSchema: GenMessage<BeginLinkAccountResponse> = /*@__PURE__*/
+  messageDesc(file_accounts, 10);
+
+/**
+ * @generated from message accounts.PollLinkAccountRequest
+ */
+export type PollLinkAccountRequest = Message<"accounts.PollLinkAccountRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string link_id = 2;
+   */
+  linkId: string;
+};
+
+/**
+ * Describes the message accounts.PollLinkAccountRequest.
+ * Use `create(PollLinkAccountRequestSchema)` to create a new message.
+ */
+export const PollLinkAccountRequestSchema: GenMessage<PollLinkAccountRequest> = /*@__PURE__*/
+  messageDesc(file_accounts, 11);
+
+/**
+ * @generated from message accounts.PollLinkAccountResponse
+ */
+export type PollLinkAccountResponse = Message<"accounts.PollLinkAccountResponse"> & {
+  /**
+   * @generated from field: accounts.LinkState state = 1;
+   */
+  state: LinkState;
+
+  /**
+   * The account, set only when `state` is `LINK_LINKED`. The same shape `ListAccounts` returns,
+   * and with the same absence of a secret field.
+   *
+   * @generated from field: accounts.AccountSummary account = 2;
+   */
+  account?: AccountSummary;
+
+  /**
+   * The interval to wait before the next poll. Set on `LINK_PENDING`, and widened when the
+   * provider said the last one was too soon.
+   *
+   * @generated from field: int64 interval_seconds = 3;
+   */
+  intervalSeconds: bigint;
+};
+
+/**
+ * Describes the message accounts.PollLinkAccountResponse.
+ * Use `create(PollLinkAccountResponseSchema)` to create a new message.
+ */
+export const PollLinkAccountResponseSchema: GenMessage<PollLinkAccountResponse> = /*@__PURE__*/
+  messageDesc(file_accounts, 12);
+
+/**
+ * Why a link attempt is where it is.
+ *
+ * Five states and no boolean, because four of them need different words in front of a person and
+ * two of them are ordinary progress. `LINK_VAULT_LOCKED` is held apart from `LINK_DENIED` on
+ * purpose: GitHub refusing the authorization and this daemon being unable to store the result are
+ * unrelated failures, and only one of them is about the operator's own decision.
+ *
+ * @generated from enum accounts.LinkState
+ */
+export enum LinkState {
+  /**
+   * @generated from enum value: LINK_STATE_UNSPECIFIED = 0;
+   */
+  LINK_STATE_UNSPECIFIED = 0,
+
+  /**
+   * The operator has not approved yet. Poll again after `interval_seconds`.
+   *
+   * @generated from enum value: LINK_PENDING = 1;
+   */
+  LINK_PENDING = 1,
+
+  /**
+   * Approved and retained. `account` carries the record as it now stands.
+   *
+   * @generated from enum value: LINK_LINKED = 2;
+   */
+  LINK_LINKED = 2,
+
+  /**
+   * The operator refused at the provider. The attempt is over; it must not be retried silently.
+   *
+   * @generated from enum value: LINK_DENIED = 3;
+   */
+  LINK_DENIED = 3,
+
+  /**
+   * The device code outlived its window. Begin a new attempt.
+   *
+   * @generated from enum value: LINK_EXPIRED = 4;
+   */
+  LINK_EXPIRED = 4,
+
+  /**
+   * Approval succeeded and there is nowhere to put the result: this session's key does not open
+   * the vault. Recoverable, and nothing to do with the operator's answer at the provider.
+   *
+   * @generated from enum value: LINK_VAULT_LOCKED = 5;
+   */
+  LINK_VAULT_LOCKED = 5,
+}
+
+/**
+ * Describes the enum accounts.LinkState.
+ */
+export const LinkStateSchema: GenEnum<LinkState> = /*@__PURE__*/
+  enumDesc(file_accounts, 0);
+
+/**
  * @generated from service accounts.AccountsService
  */
 export const AccountsService: GenService<{
@@ -281,7 +513,7 @@ export const AccountsService: GenService<{
     output: typeof SetAccountLabelResponseSchema;
   },
   /**
-   * Forget one account's credential.
+   * Forget one account's credential. Refuses the one the caller's session was established with.
    *
    * @generated from rpc accounts.AccountsService.RemoveAccount
    */
@@ -289,6 +521,26 @@ export const AccountsService: GenService<{
     methodKind: "unary";
     input: typeof RemoveAccountRequestSchema;
     output: typeof RemoveAccountResponseSchema;
+  },
+  /**
+   * Begin adding another account at a provider. Mints no session and returns no token.
+   *
+   * @generated from rpc accounts.AccountsService.BeginLinkAccount
+   */
+  beginLinkAccount: {
+    methodKind: "unary";
+    input: typeof BeginLinkAccountRequestSchema;
+    output: typeof BeginLinkAccountResponseSchema;
+  },
+  /**
+   * Ask where a link attempt stands. Mints no session and returns no token.
+   *
+   * @generated from rpc accounts.AccountsService.PollLinkAccount
+   */
+  pollLinkAccount: {
+    methodKind: "unary";
+    input: typeof PollLinkAccountRequestSchema;
+    output: typeof PollLinkAccountResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_accounts, 0);

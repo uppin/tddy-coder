@@ -2,13 +2,19 @@ syntax = "proto3";
 
 package accounts;
 
-// Accounts: what a person can see and curate in the daemon's credential store.
+// Accounts: what a person can see and curate in the daemon's credential store, and how another
+// account joins it.
 //
-// The first surface over the vault `#keyring` 3/9 introduced. Three methods, and deliberately no
-// fourth: this service **shows and curates** what exists, it never links an account. Each
-// provider's link flow is its own work — GitHub's is 8/9, screen-sharing's is 7/9 — because each
-// one is an authorization dance with its own failure modes, and folding them in here would make
-// this service the place every provider integration lands.
+// The first surface over the vault `#keyring` 3/9 introduced. The first three methods **show and
+// curate** what exists; the last two add a credential, and they are here rather than on
+// `auth.AuthService` for the reason this whole node exists: **linking is not signing in**.
+// Completing `auth.ExchangeCode` *is* becoming that person, so running it again to add a second
+// account signs the first one out. The two flows are separated by which service they live on, and
+// by these messages having no field to return a session in.
+//
+// One provider's dance is implemented behind `BeginLinkAccount`; each new provider is its own work,
+// because each is an authorization dance with its own failure modes. Screen-sharing (7/9) needs
+// none of this — its credential is a password a person types, not an authorization to obtain.
 //
 // Imports nothing. Its messages are reached by no other service.
 
@@ -17,8 +23,12 @@ service AccountsService {
   rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
   // Rename one account. The label is the only mutable field.
   rpc SetAccountLabel(SetAccountLabelRequest) returns (SetAccountLabelResponse);
-  // Forget one account's credential.
+  // Forget one account's credential. Refuses the one the caller's session was established with.
   rpc RemoveAccount(RemoveAccountRequest) returns (RemoveAccountResponse);
+  // Begin adding another account at a provider. Mints no session and returns no token.
+  rpc BeginLinkAccount(BeginLinkAccountRequest) returns (BeginLinkAccountResponse);
+  // Ask where a link attempt stands. Mints no session and returns no token.
+  rpc PollLinkAccount(PollLinkAccountRequest) returns (PollLinkAccountResponse);
 }
 
 // One linked account, as a person sees it.
@@ -74,6 +84,11 @@ message ListAccountsResponse {
   // The vault exists and this session's key does not open it. `providers` is empty and says
   // nothing about what the vault holds.
   bool vault_locked = 2;
+  // Which of the listed accounts the caller's session was established with — the one
+  // `RemoveAccount` refuses to forget. Unset when the session belongs to no linked account, which
+  // is ordinary: a daemon configured with a server-side credential has one, and every account it
+  // holds is removable.
+  optional SessionAccount session_account = 3;
 }
 
 message SetAccountLabelRequest {
@@ -99,4 +114,78 @@ message RemoveAccountResponse {
   // What remains, grouped exactly as `ListAccounts` returns it, so a screen does not have to
   // re-read to redraw.
   repeated ProviderAccounts providers = 1;
+}
+
+// Which account the caller's session was established with.
+//
+// A separate message rather than a flag on `AccountSummary`, because it is a fact about the
+// **caller**, not about the account: the same record is the session's on one daemon and an ordinary
+// linked account on another after `#keyring` 6/9 propagates it. Putting the bit on the row would
+// make the row's meaning depend on who read it.
+message SessionAccount {
+  string provider = 1;
+  string account_id = 2;
+}
+
+// Why a link attempt is where it is.
+//
+// Five states and no boolean, because four of them need different words in front of a person and
+// two of them are ordinary progress. `LINK_VAULT_LOCKED` is held apart from `LINK_DENIED` on
+// purpose: GitHub refusing the authorization and this daemon being unable to store the result are
+// unrelated failures, and only one of them is about the operator's own decision.
+enum LinkState {
+  LINK_STATE_UNSPECIFIED = 0;
+  // The operator has not approved yet. Poll again after `interval_seconds`.
+  LINK_PENDING = 1;
+  // Approved and retained. `account` carries the record as it now stands.
+  LINK_LINKED = 2;
+  // The operator refused at the provider. The attempt is over; it must not be retried silently.
+  LINK_DENIED = 3;
+  // The device code outlived its window. Begin a new attempt.
+  LINK_EXPIRED = 4;
+  // Approval succeeded and there is nowhere to put the result: this session's key does not open
+  // the vault. Recoverable, and nothing to do with the operator's answer at the provider.
+  LINK_VAULT_LOCKED = 5;
+}
+
+message BeginLinkAccountRequest {
+  string session_token = 1;
+  // Which service to link an account at — "github" today. Open for the same reason
+  // `AccountSummary.provider` is.
+  string provider = 2;
+}
+
+// What the operator is shown, and the handle the next poll uses.
+//
+// **There is no token of any kind here, and none in `PollLinkAccountResponse` either.** Linking a
+// credential is not signing in, and the message shape is what enforces it: the flow that adds an
+// account has no field to hand back a session with. See the `#keyring` 8/9 changeset — a link that
+// silently re-identified the caller is the defect this node exists to prevent.
+message BeginLinkAccountResponse {
+  // This daemon's handle on the attempt. Not the provider's device code, which is never shown and
+  // never leaves the daemon.
+  string link_id = 1;
+  // The short code the operator types at the provider.
+  string user_code = 2;
+  // Where they type it.
+  string verification_uri = 3;
+  int64 expires_in_seconds = 4;
+  // The provider's *minimum* seconds between polls. Carried rather than hard-coded, because
+  // polling faster than this earns a slow-down.
+  int64 interval_seconds = 5;
+}
+
+message PollLinkAccountRequest {
+  string session_token = 1;
+  string link_id = 2;
+}
+
+message PollLinkAccountResponse {
+  LinkState state = 1;
+  // The account, set only when `state` is `LINK_LINKED`. The same shape `ListAccounts` returns,
+  // and with the same absence of a secret field.
+  AccountSummary account = 2;
+  // The interval to wait before the next poll. Set on `LINK_PENDING`, and widened when the
+  // provider said the last one was too soon.
+  int64 interval_seconds = 3;
 }
