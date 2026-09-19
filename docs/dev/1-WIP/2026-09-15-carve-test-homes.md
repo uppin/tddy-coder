@@ -168,14 +168,22 @@ The last three cannot move at all: `CARGO_MANIFEST_DIR` would name whichever cra
 so each assertion would go on passing while silently being about something else — the same reason
 the discovery gave for leaving `proto_workflow_contracts.rs` in `tddy-workflow-recipes`.
 
-### Phase C also has to re-point the suites that stay
+### Phase C also has to re-point what the shims leave behind
 
 The four shims are `config`, `relay_idle`, `tddy_user_config` and `user_sessions_path`, each a
-two-line `pub use` over the crate that owns it. **16 of the 21 staying suites name one** — 15 name
-`tddy_daemon::config` alone, `local_token_uds.rs` also names `user_sessions_path`, and the three
-relay suites also name `relay_idle`. Deleting the shims without re-pointing those headers turns a
-mechanical relocation into a red `tddy-daemon`, which is not what `## Boundaries` means by leaving
-the 17 alone.
+two-line `pub use` over the crate that owns it. AC6 asserts only that none of the four still
+contains `pub use tddy_session_lifecycle::`, and **`config` forwards to `tddy-daemon-kernel`, not to
+`tddy-session-lifecycle`** — so it already satisfies the assertion and stays. Only `relay_idle`,
+`tddy_user_config` and `user_sessions_path` have to go.
+
+That makes the re-pointing much smaller than first recorded here. It is **4 staying suites**, not
+16: `relay_e2e_acceptance.rs`, `relay_runtime_acceptance.rs` and `relay_idle_wired_acceptance.rs`
+name `tddy_daemon::relay_idle`, and `local_token_uds.rs` names `tddy_daemon::user_sessions_path`.
+The 15 suites naming `tddy_daemon::config` need no change at all.
+
+**The daemon's own `src/` also names two of the three**, which the plan did not record: `crate::relay_idle`
+twice and `crate::user_sessions_path` six times. Deleting a shim without re-pointing its callers in
+`src/` breaks the crate itself, not just its tests.
 
 ### Two moved suites reach sibling source by string path
 
