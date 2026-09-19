@@ -18,11 +18,11 @@ use std::sync::{Arc, Mutex};
 
 use crate::changeset::{read_changeset, update_state, write_changeset_atomic};
 use crate::error::WorkflowError;
-use crate::presenter::WorkflowEvent;
 use crate::workflow::ids::GoalId;
 use crate::workflow::ids::WorkflowState;
 use crate::workflow::recipe::WorkflowRecipe;
 use tddy_graph::graph::Graph;
+use tddy_workflow::events::WorkflowEvent;
 
 /// Result of a [`WorkflowController::transition`] request.
 #[derive(Debug, Clone)]

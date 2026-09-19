@@ -2,7 +2,6 @@
 
 use crate::backend::{ClarificationQuestion, CodingBackend};
 use crate::changeset::Changeset;
-use crate::presenter::WorkflowEvent;
 use crate::workflow::context::Context;
 use crate::workflow::graph::Graph;
 use crate::workflow::hooks::RunnerHooks;
@@ -11,6 +10,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
+use tddy_workflow::events::WorkflowEvent;
 
 /// Channel type for TUI workflow events from hooks.
 pub type WorkflowEventSender = Sender<WorkflowEvent>;
