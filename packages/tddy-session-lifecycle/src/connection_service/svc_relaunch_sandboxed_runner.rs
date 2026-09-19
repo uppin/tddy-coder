@@ -30,7 +30,7 @@ impl DaemonSessionHost {
         // previous seed, and a relaunch that read the request would hand the main agent back a tool
         // the operator had withdrawn from it (PRD AC25).
         agents: &[tddy_core::SessionAgentRecord],
-        managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
         // When true, spawn the runner with `--resume` so the jailed `claude` continues the existing
         // on-disk transcript (`--resume <id>`) instead of assigning the id to a fresh session
         // (`--session-id <id>`). The persistent sandbox claude HOME keeps the transcript across

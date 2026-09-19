@@ -3,14 +3,14 @@
 //! Implements `tddy_graph::task::Task`. This type stays in `tddy-core` because it depends
 //! on backend types (`CodingBackend`, `InvokeRequest`, etc.) that are tddy-core concerns.
 
-use crate::backend::{
-    CodingBackend, GoalHints, GoalId, InvokeRequest, SessionMode, WorkflowRecipe,
-};
+use crate::backend::{CodingBackend, InvokeRequest, SessionMode};
 use crate::toolcall::take_submit_result_for_goal;
 use crate::workflow::action_cache::{
     action_cache_disabled, fingerprint_action_inputs, lookup_cached_completed_submit,
     persist_successful_submit_to_action_cache, stable_action_cache_key, ActionFingerprintParts,
 };
+use crate::workflow::ids::GoalId;
+use crate::workflow::recipe::{GoalHints, WorkflowRecipe};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::PathBuf;

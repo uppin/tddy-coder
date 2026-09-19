@@ -5,9 +5,10 @@
 
 use std::sync::Arc;
 
-use tddy_core::backend::{CodingBackend, GoalId};
+use tddy_core::backend::CodingBackend;
 use tddy_core::workflow::graph::Graph;
 use tddy_core::workflow::graph::GraphBuilder;
+use tddy_core::workflow::ids::GoalId;
 use tddy_core::workflow::recipe::WorkflowRecipe;
 use tddy_core::workflow::task::{BackendInvokeTask, EndTask};
 

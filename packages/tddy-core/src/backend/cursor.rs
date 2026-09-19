@@ -522,7 +522,9 @@ mod tests {
     use super::build_cursor_cli_args;
     use super::parse_cursor_model_list;
     use super::CursorBackend;
-    use crate::backend::{GoalHints, GoalId, InvokeRequest, PermissionHint, SessionMode};
+    use crate::backend::{InvokeRequest, SessionMode};
+    use crate::workflow::ids::GoalId;
+    use crate::workflow::recipe::{GoalHints, PermissionHint};
 
     const LIST_MODELS_STDOUT: &str = "Available models\n\
         \n\

@@ -2,10 +2,12 @@
 //!
 //! Holds graph, runner, storage, backend. Provides run_goal() and run_full_workflow().
 
-use crate::backend::{CodingBackend, GoalId, WorkflowRecipe};
+use crate::backend::CodingBackend;
 use crate::workflow::context::Context;
 use crate::workflow::graph::{ExecutionResult, ExecutionStatus, Graph};
 use crate::workflow::hooks::RunnerHooks;
+use crate::workflow::ids::GoalId;
+use crate::workflow::recipe::WorkflowRecipe;
 use crate::workflow::runner::FlowRunner;
 use crate::workflow::session::{Session, SessionStorage};
 use crate::SharedBackend;

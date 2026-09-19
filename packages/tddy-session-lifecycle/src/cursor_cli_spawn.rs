@@ -141,7 +141,7 @@ pub async fn spawn_cursor_cli_session_inner(
     // rather than here because qualifying an id needs this daemon's def sources *and* its registry
     // assistants, and this free function is handed neither.
     agents: &mut [tddy_core::SessionAgentRecord],
-    managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+    managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
     // When true, index the worktree before launch (blocking; aborts on failure) and point the
     // `SemanticSearch` tool at the per-session index via `TDDY_SEMANTIC_INDEX_DB`.
     semantic_index: bool,
