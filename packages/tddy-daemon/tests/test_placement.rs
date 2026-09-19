@@ -2,9 +2,13 @@
 //!
 //! `tddy-daemon` is the daemon's **composition root**: `runtime.rs` wires ~20 services together and
 //! `main.rs` starts them. A test that mounts that composition belongs here. A test that reaches a
-//! module this crate merely **re-exports** does not — and 122 of 139 did, because
+//! module this crate merely **re-exports** does not — and 119 of 141 did, because
 //! `src/lib.rs` carried a facade over 82 `tddy-session-lifecycle` modules whose stated purpose was
 //! *"Legacy paths for integration suites"*.
+//!
+//! The counts moved while this node was planned and are stated here as measured, not as first
+//! written: the crate gained two suites, and four the plan had listed as strays are named in
+//! [`BELONGS_HERE`] instead, because each is about `tddy-daemon` itself.
 //!
 //! These assertions are what keeps the tree honest once they have moved.
 
@@ -30,10 +34,16 @@ fn test_binaries_of(crate_name: &str) -> BTreeSet<String> {
     }
 }
 
-/// The seventeen suites that genuinely exercise this crate's own production modules — `runtime`,
-/// `server`, `startup`, `daemon_settings`, `daemon_config_service`, `local_socket_server`,
-/// `relay_idle` — plus this file.
-const BELONGS_HERE: [&str; 17] = [
+/// The suites that genuinely exercise this crate's own production modules — `runtime`, `server`,
+/// `startup`, `daemon_settings`, `daemon_config_service`, `local_socket_server`, `relay_idle`,
+/// `index_daemon` — plus this file.
+///
+/// Membership is not a matter of taste. A suite belongs here when it names a module this crate
+/// **defines**, or when it asserts about this package's own `src/` or `Cargo.toml` — the second
+/// kind cannot move at all, because `CARGO_MANIFEST_DIR` would then name whichever crate it landed
+/// in and the assertion would silently be about something else. `tddy-workflow-recipes`'
+/// `proto_workflow_contracts.rs` is the same shape and stays put for the same reason.
+const BELONGS_HERE: [&str; 21] = [
     "session_agent_remote_acceptance.rs",
     "remote_managed_worktree_cross_host_acceptance.rs",
     "split_session_resume_acceptance.rs",
@@ -51,6 +61,13 @@ const BELONGS_HERE: [&str; 17] = [
     "embedded_runtime.rs",
     "relay_idle_wired_acceptance.rs",
     "relay_idle_shutdown_acceptance.rs",
+    // Names `tddy_daemon::index_daemon`, which this crate defines.
+    "index_daemon_lifecycle_acceptance.rs",
+    // Read this package's own `src/`, so they are about `tddy-daemon` wherever they sit.
+    "local_socket_reachability_acceptance.rs",
+    "unbundle_endpoint.rs",
+    // Reads this package's own `Cargo.toml`.
+    "unbundle_tools_dependency_dropped.rs",
 ];
 
 /// AC5 — only the suites that exercise this crate remain.
