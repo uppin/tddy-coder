@@ -311,6 +311,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         Arc::new(config_b),
         Arc::new(tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new()),
         Arc::new(tokio::sync::RwLock::new(None)),
+        Default::default(),
     );
 
     // Daemon B's RPC participant: `daemon-{instance_id}`, the identity A's forward addresses.
@@ -346,6 +347,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         config_arc.clone(),
         registry.clone(),
         room_slot.clone(),
+        Default::default(),
     );
     let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
