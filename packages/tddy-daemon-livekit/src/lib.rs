@@ -34,6 +34,7 @@
 
 pub mod common_room_supervisor;
 pub mod livekit_peer_discovery;
+pub mod livekit_peer_transport;
 pub mod livekit_rooms_stream;
 pub mod livekit_service;
 pub mod session_room;
@@ -42,6 +43,7 @@ pub use common_room_supervisor::{CommonRoomSupervisor, SupervisedCommonRoom};
 pub use livekit_peer_discovery::{
     daemon_rpc_identity, peer_signing_public_key, AdvertisedSigningKey, CommonRoomPeerRegistry,
 };
+pub use livekit_peer_transport::LiveKitPeerTransport;
 pub use livekit_rooms_stream::{RoomRoster, RosterError};
 pub use livekit_service::{build_livekit_entry, build_livekit_service, LiveKitServiceImpl};
 pub use session_room::{

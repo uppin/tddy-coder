@@ -194,6 +194,29 @@ pub struct LocalConfig {
     pub socket_path: Option<PathBuf>,
 }
 
+/// Which peers this daemon will propagate credentials to.
+///
+/// The section is optional, and its absence means **this daemon syncs credentials with nobody** —
+/// not "with everyone in the room". Room membership carries no attestation that a participant runs
+/// `tddy-daemon` (`docs/ft/daemon/livekit-peer-discovery.md` § *Trust model*), and handing a
+/// person's GitHub credential to anything holding the room's LiveKit credentials is the property
+/// `#keyring` exists to remove. A desktop install with no fleet is the common case for leaving it
+/// unset, and it must work.
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeyringConfig {
+    /// The shared secret that authorises a peer to hold this deployment's credentials.
+    ///
+    /// **One of two required checks, never sufficient alone.** It answers *may that daemon hold my
+    /// credentials* — a per-deployment authorisation decision with no cryptographic answer. The
+    /// other check is `#keyring` 1/9's Ed25519 signature, which answers *did that daemon send
+    /// this*; a peer passing only one of the two receives nothing and is journaled as refused.
+    ///
+    /// The secret itself never travels: a peer advertises an HMAC of a fresh challenge under it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_secret: Option<String>,
+}
+
 /// Git behavior for daemon-side operations that contact a remote (fetching integration bases).
 #[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
@@ -399,6 +422,10 @@ pub struct DaemonConfig {
     /// Git behavior for daemon-side remote operations (see `GitConfig`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<GitConfig>,
+    /// Credential propagation between daemons (see [`KeyringConfig`]). Absent = this daemon
+    /// propagates credentials to no peer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keyring: Option<KeyringConfig>,
     /// Linux rootless cgroups sandbox delegation (see `SandboxCgroupConfig`). None = runtime defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox_cgroup: Option<SandboxCgroupConfig>,
@@ -483,6 +510,7 @@ impl Default for DaemonConfig {
             tddy_data_dir: None,
             screen_sharing: None,
             git: None,
+            keyring: None,
             sandbox_cgroup: None,
             local: LocalConfig::default(),
             supervisor: None,
