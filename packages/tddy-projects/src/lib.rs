@@ -1,7 +1,6 @@
 //! The repositories a daemon knows, their hosts, and their branches.
 //!
-//! Extracted from `tddy-daemon` by `#unbundle` node 9, serving `project.ProjectService` — family D,
-//! 5 methods.
+//! Extracted from `tddy-daemon` by `#unbundle` node 9, serving `project.ProjectService` — family D.
 
 pub mod project_provision;
 pub mod project_storage;
@@ -68,6 +67,17 @@ mod tests {
                 >,
             ) -> Result<
                 tddy_rpc::Response<tddy_service::proto::project::SetProjectDefaultBranchResponse>,
+                tddy_rpc::Status,
+            > {
+                Err(tddy_rpc::Status::unimplemented("test stub"))
+            }
+            async fn set_project_accounts(
+                &self,
+                _request: tddy_rpc::Request<
+                    tddy_service::proto::project::SetProjectAccountsRequest,
+                >,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::project::SetProjectAccountsResponse>,
                 tddy_rpc::Status,
             > {
                 Err(tddy_rpc::Status::unimplemented("test stub"))

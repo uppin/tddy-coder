@@ -2084,6 +2084,7 @@ mod tests {
             daemon_instance_id: String::new(),
             main_branch_ref: String::new(),
             default_remote: String::new(),
+            accounts: Vec::new(),
         }
     }
 

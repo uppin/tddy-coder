@@ -160,10 +160,7 @@ async fn a_code_exchange_refuses_a_state_it_never_issued() {
 
     // Then it is refused before a single byte goes to GitHub
     assert_eq!(
-        (
-            exchanged.map(|_| ()),
-            github.received.lock().unwrap().len()
-        ),
+        (exchanged.map(|_| ()), github.received.lock().unwrap().len()),
         (Err("invalid or expired state parameter".to_string()), 0)
     );
 }
