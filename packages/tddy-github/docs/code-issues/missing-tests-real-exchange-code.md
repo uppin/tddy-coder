@@ -6,7 +6,9 @@
 **Metrics:** **71 production lines** · **2 outbound HTTP calls** · **6 error returns, 0 exercised** · 2 hardcoded absolute hosts · 0 tests enter the function
 **Coverage:** **not measured** — `tddy-tools analyze coverage` was not run for this crate; the count above is a call-graph check, so "0 tests enter it" is a reference fact, not a coverage tier
 **Restructure:** not required — ordinary work (a base-URL seam, then tests)
-**Status:** Open — **unclaimed**
+**Status:** Open — claimed by #509, in flight
+**Claimed by:** #509 — `#keyring` 2/9 `desktop-login` · draft · `feature/keyring/desktop-login`
+**Lands after:** #508
 **Verified:** ✅ hand-verified 2026-09-19 — see *Verified by hand*
 
 ## Measurement history
@@ -74,6 +76,14 @@ treated as usable. Keep the seam to the *host*, not to the provider's honesty ab
 
 Do this **before or inside** `#keyring` 2/9 rather than after. Adding the device flow first means
 writing the seam twice.
+
+## If you are about to change this code
+
+#509 (`#keyring` 2/9) adds the device flow beside `exchange_code` and closes this record with it: the
+base-URL seam is what makes both testable, so the tests arrive with the seam rather than after it.
+
+Coordinate if you are **changing `RealGitHubProvider`'s constructor or its host resolution** — that
+is precisely the seam #509 introduces. Adding an unrelated method is safe.
 
 ## Verified by hand
 
