@@ -1,6 +1,22 @@
 # 2026-09-09 — First CRAP results for `tddy-daemon`: the untested-complexity hotspots
 
 **Category:** Missing coverage
+
+> **Scope note (2026-09-19, `#carve` 4/10).** These figures were captured while `tddy-daemon` held
+> **141** test binaries, **119** of which exercised other crates. Those 119 now live in the crates
+> they test, so a re-run of `analyze coverage` scoped to `tddy-daemon` will capture a small fraction
+> of the 2,159 tests counted here and the by-file percentages will not be comparable.
+>
+> **Nothing here is fixed and nothing is claimed.** The hotspots are unchanged: `telegram_bot.rs`,
+> `connection_service.rs`, `session_agent_clone.rs` and `telegram_session_control.rs` are
+> `tddy-session-lifecycle`'s, and `livekit_peer_discovery.rs` is `tddy-daemon-livekit`'s — all were
+> already there, since `#carve` 4/10 moves no `src/` file. What changed is which crate's test run
+> covers them, and the next measurement should be taken per owning crate rather than against
+> `tddy-daemon`.
+>
+> The caveat below about `session_agent_remote_acceptance.rs` and
+> `remote_managed_worktree_cross_host_acceptance.rs` still applies as written: both stay in
+> `tddy-daemon`, because both exercise its composition root.
 **Source:** `analyze-coverage-export-and-harness-selection` (#466), `analyze coverage` + `report`
 
 The first CRAP report the repo has been able to produce. 2,159 tests captured, 9,064 instrumented

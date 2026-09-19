@@ -141,6 +141,28 @@ fn the_session_lifecycle_crate_has_its_own_suites() {
     );
 }
 
+/// Every `.rs` file under `src/`, concatenated — **including the ones in subdirectories**.
+///
+/// A flat `read_dir` reads `src/*.rs` only, which is not where all of this crate's production code
+/// lives: `src/index_daemon/registry.rs` names `tddy_sandbox_runner` and `tddy_daemon_sandbox`, so
+/// a flat scan reports two genuine runtime dependencies as unused and this assertion would have
+/// them deleted out of a crate that calls them.
+fn every_source_file_under(dir: &Path) -> String {
+    let mut source = String::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return source;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            source.push_str(&every_source_file_under(&path));
+        } else {
+            source.push_str(&std::fs::read_to_string(&path).unwrap_or_default());
+        }
+    }
+    source
+}
+
 /// AC8 — no crate declares as a runtime dependency something only its tests name.
 ///
 /// Sixteen `tddy-*` entries sat in `[dependencies]` while no file in `src/` named them, so every
@@ -160,11 +182,7 @@ fn no_runtime_dependency_is_named_only_by_tests() {
         .map(|n| format!("tddy_{}", n.replace('-', "_")))
         .collect();
 
-    let mut source = String::new();
-    for entry in std::fs::read_dir(package("tddy-daemon").join("src")).expect("src/") {
-        let entry = entry.expect("a source entry");
-        source.push_str(&std::fs::read_to_string(entry.path()).unwrap_or_default());
-    }
+    let source = every_source_file_under(&package("tddy-daemon").join("src"));
 
     // When each runtime dependency is checked against what the source names
     let unused: Vec<&String> = runtime.iter().filter(|c| !source.contains(*c)).collect();

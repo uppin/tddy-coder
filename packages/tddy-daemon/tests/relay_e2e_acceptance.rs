@@ -19,7 +19,7 @@ use tddy_daemon::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::multi_host::EligibleDaemonSource;
-use tddy_daemon::relay_idle::IdleTimeoutTracker;
+use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon::test_util::TestDaemon;
 use tddy_livekit_testkit::LiveKitTestkit;

@@ -12,7 +12,9 @@ path = "src/lib.rs"
 # Off by default so ordinary dev builds/tests stay candle-free. With it, `production_embedder`
 # yields the local bundled model and a `semantic_index = true` request can actually index; without
 # it, such a request aborts the start with a clear error (the intended honest behavior).
-local-model = ["tddy-semantic-index/local-model"]
+# Forwarded through `tddy-session-lifecycle`, which declares the same feature, rather than held as a
+# direct dependency edge: no file in this crate's `src/` names `tddy-semantic-index`.
+local-model = ["tddy-session-lifecycle/local-model"]
 
 [[bin]]
 name = "tddy-daemon"
@@ -50,41 +52,29 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-model-registry = { path = "../tddy-model-registry" }
 tddy-bsp = { path = "../tddy-bsp" }
 tddy-discovery = { path = "../tddy-discovery" }
-tddy-demo-runner = { path = "../tddy-demo-runner" }
 tddy-github = { path = "../tddy-github" }
-tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
-tddy-workflow = { path = "../tddy-workflow" }
-tddy-livekit = { path = "../tddy-livekit" }
 tddy-lsp = { path = "../tddy-lsp" }
 tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 tddy-rpc = { path = "../tddy-rpc" }
-tddy-stdio = { path = "../tddy-stdio" }
 tddy-service = { path = "../tddy-service" }
 # The mirror algorithm an agent clone runs in-process (docs/ft/daemon/session-worktree-sync.md).
 # The same crate the standalone `tddy-session-sync` client is built from, used as a library: a
 # second implementation of "restore from the WIP ref, apply a delta, notice a divergence" would be
 # two mirrors that disagree, and the disagreement is silent.
-tddy-session-sync = { path = "../tddy-session-sync" }
 tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }
-tddy-pty = { path = "../tddy-pty" }
 tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
-tddy-semantic-index = { path = "../tddy-semantic-index" }
 tokio-stream = "0.1"
 tddy-vm = { path = "../tddy-vm" }
 tddy-connectrpc = { path = "../tddy-connectrpc" }
-tddy-sandbox = { path = "../tddy-sandbox" }
 # The extracted sandbox subsystem: `sandbox_session`, `workspace_tool_sandbox`, `sandbox_action`,
 # `sandbox_plan_builder` and `sandbox_runtime`. `tddy-sandbox-qemu` and `tddy-sandbox-darwin` left
 # with them; the per-OS backends are reached only through this crate now.
-tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 # The extracted spawn subsystem: `spawner`, `spawn_worker`, `supervisor_spawn` and
 # `supervisor_client`. `tddy-supervisor` left with them — the daemon reaches the supervisor only
 # through this crate now.
 tddy-spawn = { path = "../tddy-spawn" }
-tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
-tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
@@ -112,7 +102,6 @@ tddy-screen-sharing = { path = "../tddy-screen-sharing" }
 # `telegram_tracked_session` and `telegram_github_link`. `hmac`, `sha2` and `subtle` are the
 # OAuth-state signer's and left with it; `base64` stays, because `auth.rs` uses it too. `teloxide`
 # also stays — the four modules that keep it here are on the blocked side of the cycle.
-tddy-telegram = { path = "../tddy-telegram" }
 # The moved auth subsystem: `runtime.rs` calls `build_auth_entries`, and the daemon re-exports the
 # three of its seven modules that something here still names.
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
@@ -120,16 +109,16 @@ tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 # The moved session-file-I/O subsystem: the ten modules `connection_service` and eight of its
 # submodules read and write session files through. The edge runs this way round because none of the
 # ten names `connection_service` — the coupling was always daemon → session files.
-tddy-session-files = { path = "../tddy-session-files" }
 # The session-notification bus, its subscriber trait and the stream subscriber `tddy-web` reads —
 # `#unbundle` node 7. The daemon keeps the label resolution built on `session_list_enrichment`
 # and its Telegram subscriber, and re-exports the rest through the same two module paths.
-tddy-session-activity = { path = "../tddy-session-activity" }
 # The session-agent roster, the agent-status mapping, its inference from ACP frames, and the clone
 # store and mirror — `#unbundle` node 7. The daemon keeps `clone_worktree_path`, which resolves a
 # checkout through `workspace_session`, and re-exports the rest through the same four module paths.
-tddy-session-agents = { path = "../tddy-session-agents" }
 tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
+# Reached from `src/index_daemon/registry.rs`, not from a top-level source file.
+tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
+tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-projects = { path = "../tddy-projects" }
 
 [target.'cfg(unix)'.dependencies]
@@ -167,3 +156,8 @@ scopeguard = "1"
 # `tddy-daemon-sandbox` owns them, and `tddy-sandbox-darwin` and `tddy-sandbox-qemu` left outright.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 tddy-sandbox-cgroups = { path = "../tddy-sandbox-cgroups" }
+
+# Dev-only since the suites that named them moved to the crates they exercise: both are reached by
+# tddy-daemon's own remaining tests and by no file in src/.
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-sandbox = { path = "../tddy-sandbox" }
