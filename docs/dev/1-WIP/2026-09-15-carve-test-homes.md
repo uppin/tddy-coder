@@ -207,8 +207,8 @@ recorded here rather than discovered when they fail.
     **3 passing**, because the vocabulary refusals are real logic rather than stubs.
   - **Correction:** these documents first said *16* unused runtime dependencies. The test measured
     **17** — the original list had seventeen entries and was miscounted. Corrected throughout.
-- [ ] Implement production code making tests pass (`/green`)
-- [ ] Annotate the CRAP backlog entry
+- [x] Implement production code making tests pass (`/green`) — Phases A–D; `test_placement.rs` 4/4
+- [x] Annotate the CRAP backlog entry — scope note, nothing claimed
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — correct the title, ready for review
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
