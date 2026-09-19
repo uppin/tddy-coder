@@ -34,6 +34,8 @@ tokio-util = { version = "0.7", features = ["compat"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 tddy-workflow = { path = "../tddy-workflow" }
 tddy-graph = { path = "../tddy-graph" }
+# The `git` plumbing `worktree` is built on. Depends on no workspace crate, so this adds no cycle.
+tddy-git = { path = "../tddy-git" }
 tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }
 # Toolcall relay transport (see docs/dev/1-WIP/finish-stdio-ipc-migration.md, Item C):

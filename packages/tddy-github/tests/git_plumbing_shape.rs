@@ -129,18 +129,22 @@ fn tddy_github_owns_the_pull_request_surface() {
 
 /// AC6 — the move adds no dependency that could close a cycle.
 ///
-/// `tddy-github` depends only on `tddy-rpc` and `tddy-service`, and neither the origin crate nor
-/// `tddy-core` may join them: the three moved files name nothing from either.
+/// The origin crate is the one that can close a cycle: it keeps facades at the old paths, so it
+/// depends on `tddy-github`. An edge back the other way would make the pair mutually dependent.
+///
+/// `tddy-core` is deliberately **not** on this list. `orchestrate_pr_stack/github.rs` states
+/// `tddy_core::WorkflowError` in sixteen production signatures, including every method of the
+/// public `GithubPrApi` trait, so the client cannot move without that edge. It closes no cycle:
+/// `tddy-core` does not depend on `tddy-github`, directly or transitively.
 #[test]
 fn tddy_github_gains_no_dependency_on_the_crate_the_client_left() {
     // Given its manifest
     let text = manifest("tddy-github");
 
-    // Then it does not depend on the origin, nor on the god-crate
-    for forbidden in ["tddy-workflow-recipes", "tddy-core"] {
-        assert!(
-            !text.contains(forbidden),
-            "`tddy-github` gained a dependency on `{forbidden}`, which the moved files do not need"
-        );
-    }
+    // Then it does not depend on the crate the client left
+    assert!(
+        !text.contains("tddy-workflow-recipes"),
+        "`tddy-github` gained a dependency on `tddy-workflow-recipes`, which holds the facades \
+         pointing here — the two crates would depend on each other"
+    );
 }

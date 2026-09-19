@@ -1,4 +1,7 @@
 pub mod auth_service;
+pub mod github_pr;
+pub mod github_rest_common;
+pub mod pr_api;
 pub mod provider;
 pub mod real;
 pub mod session_token;

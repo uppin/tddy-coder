@@ -1,0 +1,12 @@
+[package]
+name = "tddy-git"
+version = "0.1.0"
+edition = "2021"
+description = "Pure git plumbing: worktrees, branches, refs and remotes"
+
+[lib]
+name = "tddy_git"
+path = "src/lib.rs"
+
+[dependencies]
+log = "0.4"
