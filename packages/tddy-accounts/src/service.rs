@@ -7,11 +7,13 @@ use tddy_credential_sync::AccountSyncSummary;
 use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::accounts::{
-    AccountSummary, AccountsService, ListAccountsRequest, ListAccountsResponse, ProviderAccounts,
-    RemoveAccountRequest, RemoveAccountResponse, SetAccountLabelRequest, SetAccountLabelResponse,
-    SyncStatus,
+    AccountSummary, AccountsService, BeginLinkAccountRequest, BeginLinkAccountResponse,
+    ListAccountsRequest, ListAccountsResponse, PollLinkAccountRequest, PollLinkAccountResponse,
+    ProviderAccounts, RemoveAccountRequest, RemoveAccountResponse, SetAccountLabelRequest,
+    SetAccountLabelResponse, SyncStatus,
 };
 
+use crate::linking::{AccountLinker, LinkedAccountStore};
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
 
@@ -19,13 +21,25 @@ use crate::sync_status::SyncStatusSource;
 /// Cloudflare account id. Shown beside the label; never a credential.
 const SUBJECT_METADATA_KEY: &str = "subject";
 
-/// Serves `accounts.AccountsService` by reading and curating one [`AccountStore`].
+/// The two ports adding an account needs, wired together.
+///
+/// Held as one optional field rather than two, because they are only ever useful as a pair: the
+/// provider's dance produces a credential, and the store is where it goes. A daemon that wires
+/// neither serves the three read-and-curate methods and refuses the two link ones.
+struct Linking {
+    linker: Arc<dyn AccountLinker>,
+    store: Arc<dyn LinkedAccountStore>,
+}
+
+/// Serves `accounts.AccountsService` by reading and curating one [`AccountStore`], and — when the
+/// linking half is wired — by adding accounts to it.
 pub struct AccountsServiceImpl<S> {
     store: Arc<S>,
     /// `#keyring` 6/9's aggregate sync standing per account. `None` when no sync engine is wired
     /// on this daemon — the common case — in which case every account reports
     /// `SYNC_STATUS_UNSPECIFIED`, exactly as it did before this port existed.
     sync_status: Option<Arc<dyn SyncStatusSource>>,
+    linking: Option<Linking>,
 }
 
 impl<S> AccountsServiceImpl<S> {
@@ -34,6 +48,7 @@ impl<S> AccountsServiceImpl<S> {
         Self {
             store,
             sync_status: None,
+            linking: None,
         }
     }
 
@@ -44,6 +59,34 @@ impl<S> AccountsServiceImpl<S> {
     pub fn with_sync_status(mut self, source: Arc<dyn SyncStatusSource>) -> Self {
         self.sync_status = Some(source);
         self
+    }
+
+    /// Wire the half that adds an account: a provider's authorization dance, and somewhere to put
+    /// what it yields.
+    ///
+    /// Additive rather than a second parameter on [`new`](Self::new), so a daemon that only shows
+    /// and curates is unchanged. **Neither port can mint a session**: [`AccountLinker`] has no
+    /// method that produces one, and [`LinkedAccountStore`] writes records. That is the boundary
+    /// `#keyring` 8/9 is built around, expressed as what the types make unreachable.
+    #[must_use]
+    pub fn with_linking(
+        mut self,
+        linker: Arc<dyn AccountLinker>,
+        store: Arc<dyn LinkedAccountStore>,
+    ) -> Self {
+        self.linking = Some(Linking { linker, store });
+        self
+    }
+
+    /// The linking half, or the refusal a daemon that never wired one owes the caller.
+    ///
+    /// A refusal rather than a pretend-empty answer: a person who asked to add an account and was
+    /// told nothing happened would try again. **Not a fallback** — nothing is substituted for the
+    /// missing ports; the request simply does not happen, and says so.
+    fn require_linking(&self) -> Result<&Linking, Status> {
+        self.linking.as_ref().ok_or_else(|| {
+            Status::failed_precondition("this daemon cannot link accounts: no store is wired")
+        })
     }
 }
 
@@ -191,6 +234,24 @@ fn status_for(refusal: AccountsError) -> Status {
             "no {provider} account {account} is linked, so there is nothing to rename"
         )),
         AccountsError::Unavailable(reason) => Status::internal(reason),
+    }
+
+    async fn begin_link_account(
+        &self,
+        _request: Request<BeginLinkAccountRequest>,
+    ) -> Result<Response<BeginLinkAccountResponse>, Status> {
+        let linking = self.require_linking()?;
+        let _ = (&linking.linker, &linking.store);
+        todo!("TODO(keyring 8/9): begin the provider's dance; carry the operator's code through")
+    }
+
+    async fn poll_link_account(
+        &self,
+        _request: Request<PollLinkAccountRequest>,
+    ) -> Result<Response<PollLinkAccountResponse>, Status> {
+        let linking = self.require_linking()?;
+        let _ = (&linking.linker, &linking.store);
+        todo!("TODO(keyring 8/9): one poll; on approval store the record and return the summary")
     }
 }
 

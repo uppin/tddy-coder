@@ -2,10 +2,13 @@
  * Accounts screen — every credential a daemon holds, grouped by provider.
  *
  * Presentational: it renders what it is given, matching the `HostsScreen` / `HostsAppPage` split.
- * `AccountsAppPage` owns the `ListAccounts` call and the four outcomes it can come back with.
+ * `AccountsAppPage` owns the `ListAccounts` call and the four outcomes it can come back with, and
+ * the `BeginLinkAccount` / `PollLinkAccount` pair behind the add-account control.
  *
  * **No row ever carries a secret.** `accounts.proto` has no field to put one in; `hasSecret` is the
- * single bit that tells a linked account from a stale row.
+ * single bit that tells a linked account from a stale row. The same holds through the link flow:
+ * what a person sees of it is a short code and where to type it, and the credential it produces
+ * never comes back up the wire.
  */
 
 import { useState } from "react";
@@ -39,6 +42,18 @@ export interface ProviderGroup {
 }
 
 /**
+ * The account this session was established with.
+ *
+ * Carried beside the groups rather than as a flag on a row, mirroring `ListAccountsResponse`: it is
+ * a fact about *the caller*, and the same record is an ordinary linked account to a daemon that
+ * received it through `#keyring` 6/9's propagation.
+ */
+export interface SessionAccountRef {
+  provider: string;
+  accountId: string;
+}
+
+/**
  * What the daemon came back with. The four are held apart deliberately: an open-and-empty vault, no
  * vault yet, a vault that exists but is not unlocked on this daemon, and a read that failed are
  * different facts with different remedies — choose a passphrase, enter the passphrase, fix the
@@ -46,17 +61,37 @@ export interface ProviderGroup {
  * already have.
  */
 export type AccountsOutcome =
-  | { kind: "listed"; providers: ProviderGroup[] }
+  | { kind: "listed"; providers: ProviderGroup[]; sessionAccount?: SessionAccountRef }
   | { kind: "uninitialized" }
   | { kind: "locked" }
   | { kind: "error"; reason: string };
 
+/**
+ * Where an attempt to add another account stands.
+ *
+ * `denied` and `locked` are separate states for the same reason `LinkState` keeps them apart: the
+ * operator refusing at the provider and this daemon having nowhere to put the result are unrelated
+ * failures, and only one of them is about a decision somebody made.
+ */
+export type LinkAttempt =
+  | { kind: "awaiting"; provider: string; userCode: string; verificationUri: string }
+  | { kind: "denied" }
+  | { kind: "expired" }
+  | { kind: "locked" };
+
 export interface AccountsScreenProps {
   outcome: AccountsOutcome;
+  /** Set while an add-account attempt is in flight or has just ended. */
+  linkAttempt?: LinkAttempt;
   onRename: (provider: string, accountId: string, label: string) => void;
   onRemove: (provider: string, accountId: string) => void;
+  /** Begin adding another account at this provider. Never signs anybody in. */
+  onAddAccount: (provider: string) => void;
 }
 
+// TODO(#keyring 8/9): render the add-account control per provider (`onAddAccount`), the attempt's
+// code and verification link and its four end states (`linkAttempt`), and the marker on the account
+// this session was established with — whose remove control is refused rather than offered.
 export function AccountsScreen({ outcome, onRename, onRemove }: AccountsScreenProps) {
   return <div data-testid="accounts-screen">{renderOutcome(outcome, onRename, onRemove)}</div>;
 }

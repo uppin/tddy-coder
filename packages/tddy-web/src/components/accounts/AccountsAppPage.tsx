@@ -1,9 +1,14 @@
 /**
- * Data container for the Accounts screen: one `ListAccounts` call against the selected daemon.
+ * Data container for the Accounts screen: one `ListAccounts` call against the selected daemon, plus
+ * the `BeginLinkAccount` / `PollLinkAccount` pair behind the add-account control.
  *
  * One RPC, deliberately — a vault's contents change only when somebody links, renames or removes an
  * account, and each of those is an action this screen already knows it took. A rename answers with
  * the account as it now stands and a removal with what remains, so neither re-reads.
+ *
+ * **Nothing here signs anybody in.** The link pair is on `AccountsService` rather than
+ * `AuthService`, and neither response has a token field, so completing a link cannot replace the
+ * session this page is already reading the vault with.
  */
 
 import { useEffect, useState } from "react";
@@ -89,6 +94,9 @@ function withRenamed(providers: ProviderGroup[], provider: string, renamed: Acco
   );
 }
 
+// TODO(#keyring 8/9): carry `session_account` through onto the outcome, call `BeginLinkAccount`
+// from `onAddAccount`, poll `PollLinkAccount` at the interval the daemon named, and re-read the
+// listing once a link reports `LINK_LINKED`.
 export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { sessionToken } = useAuthContext();
   const client = useDaemonClient(AccountsService);
@@ -156,7 +164,15 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
           {actionError}
         </p>
       ) : null}
-      {outcome ? <AccountsScreen outcome={outcome} onRename={rename} onRemove={remove} /> : null}
+      {outcome ? (
+        <AccountsScreen
+          outcome={outcome}
+          onRename={rename}
+          onRemove={remove}
+          // TODO(#keyring 8/9): begin a link and drive its poll.
+          onAddAccount={() => {}}
+        />
+      ) : null}
     </AppShell>
   );
 }
