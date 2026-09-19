@@ -46,4 +46,26 @@ export const accountsScreenPage = {
     accountsScreenPage.removeButton(provider, accountId).click();
     accountsScreenPage.removeConfirm(provider, accountId).click();
   },
+
+  /**
+   * The marker on the account this session was established with — the one `RemoveAccount` refuses
+   * to forget. Absent from every other row, and absent from all of them when the session belongs
+   * to no linked account.
+   */
+  sessionMarker: (provider: string, accountId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${provider}-${accountId}-session`),
+
+  /** Begin adding another account at a provider. */
+  addAccountButton: (provider: string) => byTestId(`accounts-add-${provider}`),
+
+  /** The short code the operator types at the provider. Never the provider's own device code. */
+  linkUserCode: () => byTestId("accounts-link-user-code"),
+  /** Where they type it. */
+  linkVerificationUri: () => byTestId("accounts-link-verification-uri"),
+  /** The operator refused at the provider. Distinct from every failure below. */
+  linkDeniedNotice: () => byTestId("accounts-link-denied"),
+  /** The code outlived its window; a new attempt is the recovery. */
+  linkExpiredNotice: () => byTestId("accounts-link-expired"),
+  /** Approval succeeded and there was nowhere to put it. Nothing to do with the operator. */
+  linkLockedNotice: () => byTestId("accounts-link-locked"),
 };

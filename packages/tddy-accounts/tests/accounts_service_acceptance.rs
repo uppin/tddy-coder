@@ -385,6 +385,7 @@ async fn removing_an_account_leaves_every_other_one_in_place() {
             grouping_of(&ListAccountsResponse {
                 providers: response.providers,
                 vault_locked: false,
+                session_account: None,
             })
         }),
         Ok(vec![
