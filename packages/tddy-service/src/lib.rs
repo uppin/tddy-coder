@@ -101,6 +101,13 @@ pub mod proto {
     pub mod auth {
         include!(concat!(env!("OUT_DIR"), "/auth.rs"));
     }
+    /// `AccountsService`: what a person can see and curate in the credential store. Served from
+    /// `tddy-accounts` over the vault `tddy-credentials` seals. Carries no secret in any message —
+    /// see `accounts.proto`.
+    #[allow(unused_imports, unused_variables)]
+    pub mod accounts {
+        include!(concat!(env!("OUT_DIR"), "/accounts.rs"));
+    }
     #[allow(unused_imports, unused_variables)]
     /// `HostService`: the durable host registry, tooling probes, telemetry, prompts and ssh keys.
     ///
