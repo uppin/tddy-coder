@@ -6,9 +6,9 @@
 //! persists the new state into the session's `changeset.yaml`; an illegal transition is rejected and
 //! leaves the persisted state unchanged.
 
-use tddy_core::backend::GoalId;
 use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
 use tddy_core::workflow::controller::TransitionOutcome;
+use tddy_core::workflow::ids::GoalId;
 use tddy_session_lifecycle::session_toolcall::set_up_managed_workflow;
 use tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name;
 

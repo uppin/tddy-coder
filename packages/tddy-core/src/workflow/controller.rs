@@ -16,12 +16,13 @@ use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-use crate::backend::{GoalId, WorkflowRecipe};
 use crate::changeset::{read_changeset, update_state, write_changeset_atomic};
 use crate::error::WorkflowError;
-use crate::presenter::WorkflowEvent;
+use crate::workflow::ids::GoalId;
 use crate::workflow::ids::WorkflowState;
+use crate::workflow::recipe::WorkflowRecipe;
 use tddy_graph::graph::Graph;
+use tddy_workflow::events::WorkflowEvent;
 
 /// Result of a [`WorkflowController::transition`] request.
 #[derive(Debug, Clone)]
@@ -238,7 +239,7 @@ mod tests {
         fn create_hooks(&self, _tx: Option<WorkflowEventSender>) -> Arc<dyn RunnerHooks> {
             unimplemented!("not used by controller tests")
         }
-        fn goal_hints(&self, _goal_id: &GoalId) -> Option<crate::backend::GoalHints> {
+        fn goal_hints(&self, _goal_id: &GoalId) -> Option<crate::workflow::recipe::GoalHints> {
             None
         }
         fn goal_ids(&self) -> Vec<GoalId> {

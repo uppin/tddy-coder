@@ -9,8 +9,8 @@ use std::sync::Arc;
 const TUI_SESSION_FALLBACK_DIR: &str = "tddy-flowrunner-tui-session";
 use std::sync::mpsc;
 
-use crate::backend::WorkflowRecipe;
 use crate::workflow::graph::{ElicitationEvent, ExecutionResult, ExecutionStatus};
+use crate::workflow::recipe::WorkflowRecipe;
 use crate::{
     get_session_for_tag, read_changeset, write_changeset_atomic, ClarificationQuestion,
     GithubPrStatus, SharedBackend, WorkflowEngine,
@@ -721,7 +721,7 @@ pub fn run_workflow(
             .as_ref()
             .map(|c| c.state.current.as_str().to_string())
             .filter(|s| recipe.goal_ids().iter().any(|g| g.as_str() == s))
-            .map(crate::backend::GoalId::new)
+            .map(crate::workflow::ids::GoalId::new)
             .unwrap_or_else(|| recipe.start_goal());
         let working_dir = worktree_dir.clone().or_else(|| Some(output_dir.clone()));
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");

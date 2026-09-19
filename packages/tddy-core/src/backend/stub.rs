@@ -5,11 +5,12 @@
 //! Deterministic outputs for each goal enable workflow tests to assert on exact state transitions.
 
 use super::{
-    ClarificationQuestion, CodingBackend, GoalId, InvokeRequest, InvokeResponse, QuestionOption,
+    ClarificationQuestion, CodingBackend, InvokeRequest, InvokeResponse, QuestionOption,
     ToolExecutor,
 };
 use crate::error::BackendError;
 use crate::stream::ProgressEvent;
+use crate::workflow::ids::GoalId;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
