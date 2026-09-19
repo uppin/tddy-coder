@@ -1,6 +1,6 @@
 # complexity: facade_lines
 
-**Location:** `packages/tddy-code-restructuring/src/backends/rust.rs:3963` — `facade_lines`
+**Location:** `packages/tddy-code-restructuring/src/backends/rust.rs:3978` — `facade_lines`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **47 lines** · **nesting depth 5** · 3 parameters · 5 branch/match lines · 1 early exits

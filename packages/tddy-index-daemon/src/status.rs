@@ -37,6 +37,7 @@ pub fn status_of(error: &RestructureError) -> Status {
         | RestructureError::SnapshotMismatch { .. }
         | RestructureError::AnchorInvalidated { .. }
         | RestructureError::JournalExists
+        | RestructureError::RepoScopedJournal { .. }
         | RestructureError::CheckpointDivergence { .. }
         | RestructureError::IndeterminateJournal { .. }
         | RestructureError::NotAGitWorktree { .. } => Status::failed_precondition(refusal),

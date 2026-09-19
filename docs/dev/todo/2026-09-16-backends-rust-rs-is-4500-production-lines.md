@@ -66,6 +66,7 @@ perennial debt: the reason it was impractical has been removed.
 
 ## Not to be confused with
 
-[2026-09-10-move-module-to-crate-cannot-move-an-entangled-cluster.md](./2026-09-10-move-module-to-crate-cannot-move-an-entangled-cluster.md)
-— that is about moving between *crates*, and this is a within-crate module split. The helper tail is
+Moving a mutually entangled cluster **between crates** — which was its own backlog entry until
+[#490](https://github.com/uppin/tddy-coder/pull/490) closed it with `move_cluster_to_crate`. This
+entry is a *within-crate* module split, a different operation (`extract_module`). The helper tail is
 not entangled, which is the whole reason it is the place to start.
