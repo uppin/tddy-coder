@@ -143,19 +143,38 @@ pub struct AccountId(String);
 pub struct CredentialRecord { provider, account, label, secret, metadata, updated_at }
 
 pub struct CredentialStore;      // the sealed file
+pub const VAULT_FILE: &str = "credentials.vault";
 impl CredentialStore {
+    pub fn path_in(auth_storage_dir: impl AsRef<Path>) -> PathBuf;
     pub fn open_or_create(path: &Path, ikm: &[u8], subject: &str) -> Result<SessionVault, VaultError>;
 }
 pub struct SessionVault;         // zeroizes on drop
 impl SessionVault {
+    pub fn path(&self) -> &Path;
     pub fn put(&self, record: CredentialRecord) -> Result<(), VaultError>;
     pub fn get(&self, provider: &ProviderId, account: &AccountId) -> Result<Option<CredentialRecord>, VaultError>;
     pub fn list(&self, provider: Option<&ProviderId>) -> Result<Vec<CredentialRecord>, VaultError>;
     pub fn remove(&self, provider: &ProviderId, account: &AccountId) -> Result<(), VaultError>;
     pub fn rewrap(&self, ikm: &[u8]) -> Result<(), VaultError>;
 }
-pub enum VaultError { Locked, FormatMismatch { .. }, Io(..), Crypto }
+pub struct SecretBytes([u8; 32]);   // key material, zeroed on drop
+pub enum VaultError { Locked, FormatMismatch { expected, found }, Io(String), Crypto }
 ```
+
+> **Three additions to what this section originally listed**, each forced by writing the tests
+> against it:
+>
+> - **`VAULT_FILE` / `CredentialStore::path_in`.** The vault is the replacement for
+>   `github-tokens.json`, and the daemon that writes it, the acceptance tests that seal one, and
+>   anyone inspecting a deployment's `auth_storage` all have to agree on one name. Leaving it
+>   private would make every caller hard-code the string.
+> - **`SecretBytes`.** "`SessionVault` zeroizes on drop" needs a type that *does* the zeroizing, and
+>   an assertion needs to be able to name it. Hand-rolled — a volatile write plus a fence — rather
+>   than taken from `zeroize`, which is tidier and needs CLAUDE.md § ASK approval first.
+> - **`VaultError::Io(String)`, not `Io(std::io::Error)`.** `io::Error` is not `PartialEq`, so the
+>   enum could not be compared and every test would have to match loosely instead of asserting an
+>   exact value. A `String` also matches the trait being replaced, whose errors were already
+>   strings carrying server-side detail for the log rather than for the client.
 
 **Failing tests**
 
@@ -166,9 +185,31 @@ pub enum VaultError { Locked, FormatMismatch { .. }, Io(..), Crypto }
 - a different input keying material yields `Locked` — and **nothing is re-initialised**;
 - `rewrap` succeeds and the vault opens under the new key and not the old;
 - key material is zeroized on drop;
-- acceptance: a failed credential write fails the login; so does a `Locked` vault;
-- acceptance: PR-stack live status resolves `Empty` / `Unavailable(reason)` / `Perform(token)`
-  exactly as before through the new read path.
+- acceptance: a `Locked` vault fails the login, and is **not** replaced by an empty one;
+- acceptance: a **stub login seals nothing** — see the measured correction below.
+
+> **Measured correction — the third planned acceptance test is already written.** "PR-stack live
+> status resolves `Empty` / `Unavailable(reason)` / `Perform(token)` exactly as before" is pinned
+> today by `packages/tddy-daemon-auth/tests/pr_lookup_credentials_acceptance.rs` — five tests over
+> `pr_lookup_for_caller(stub_mode, Option<&str>)`, a signature this migration does not touch. Only
+> *where* `stored` comes from changes (`svc_pr_status_for_caller.rs:93`). A second copy of those
+> assertions would add no coverage; that suite is the regression net, and it must still be green
+> when `/green` finishes.
+>
+> **Measured correction — a stub login must seal nothing, and this node decides that here.**
+> `packages/tddy-github/src/stub.rs:91` mints `stub-access-token-{uuid}` fresh on every exchange. A
+> vault keyed on the login credential would therefore be `Locked` on a demo daemon's *second*
+> login — the exact silent breakage this node exists to make impossible. The rule that already
+> covers it is the stub's own: `issues_usable_access_token()` is `false`, a stub retains no token
+> today, and so a stub login must open no vault and leave no file. Recorded as an acceptance test
+> rather than left to be discovered during `/green`, because the alternative — opening a vault
+> unconditionally at login — reads entirely reasonable until the second demo login fails.
+>
+> **Also owed to `#keyring` 2/9's device flow**: a device login's access token is a *different*
+> credential from a callback login's. Both are stable for an OAuth App, so either derives a working
+> key, but a user who signs in one way and then the other rotates their own vault key. `rewrap` on
+> every successful login is what absorbs that, and it is the reason it runs unconditionally rather
+> than only when the credential is seen to have changed.
 
 ⚠ **Not mergeable in that state** — implementation follows in this same PR.
 
@@ -212,6 +253,15 @@ fails the login**. Both are carried into this node's acceptance criteria and int
 ⚠ **Also stale after `#keyring` 1/9**: the same comment calls the session token "HMAC". 1/9 owns
 that correction; this node deletes the file, so whichever lands first, the sentence does not
 survive.
+
+### ⚠ DURING — `action_sandbox_acceptance` does not finish locally — [`2026-09-19-action-sandbox-acceptance-pty-test-does-not-finish.md`](../todo/2026-09-19-action-sandbox-acceptance-pty-test-does-not-finish.md)
+
+Found by this node's own wave-2 baseline: `sandboxed_bash_pty_action_streams_output` in
+`tddy-session-lifecycle` ran **over 14 minutes** without a result and had to be killed before the
+scoped gate could continue. Because `./test` is single-threaded, it blocks every suite behind it, so
+anyone scoping a gate to this package gets no result rather than a failure. Recorded, **not
+claimed** — this node touches `svc_pr_status_for_caller.rs`, not the sandbox or the action runner,
+and an unrelated hang investigation does not belong in a credential-store diff.
 
 ### Unanalyzed packages
 
@@ -330,6 +380,40 @@ the login, PR status behaves identically — are properties of the wired daemon,
 `./test -p tddy-credentials -p tddy-github -p tddy-daemon-auth -p tddy-daemon -p tddy-session-lifecycle`
 and scoped clippy per package. Whole-workspace green comes from CI via `scripts/ci-status.sh`.
 
+### Measured red state (wave 2)
+
+Scoped to the two packages this commit touches, on this branch, with `--no-fail-fast` because
+`./test` is `--test-threads=1` and stops at the first failing binary otherwise.
+
+| Run | Command | Passed | Failed |
+|---|---|---|---|
+| Baseline, before this commit | `./test -p tddy-github -p tddy-daemon-auth -p tddy-session-lifecycle --no-fail-fast` | `tddy-daemon-auth` 75 | 14 |
+| After this commit | `./test -p tddy-credentials -p tddy-daemon-auth --no-fail-fast` | 76 | 29 |
+
+The delta is **exactly this node's 15 new failures**, and one new test already passes:
+
+- **12 of 13** in `tddy-credentials` — 11 reach `CredentialStore::open_or_create`'s `todo!()`;
+  `key_material_is_zeroed_when_the_thing_holding_it_is_dropped` fails on its own assertion
+  (`[0x5a; 32]` still in the slot), because `Drop for SecretBytes` is deliberately **not** written
+  yet — a missing `Drop` fails the assertion cleanly, where a half-written one would panic in drop.
+- **1 of 13 passes**: `key_material_does_not_print_itself`. `Debug for SecretBytes` is part of the
+  published surface rather than of the implementation, so the redaction holds from this commit on.
+- **3 of 3** in `tddy-daemon-auth`'s `login_opens_the_credential_store_acceptance.rs`. Two fail in
+  their *Given* on the same `todo!()`. The third,
+  `a_stub_login_leaves_no_credential_store_behind`, fails on
+  `Err("session token signing is not configured")` — **an inherited reason**: `#keyring` 1/9's
+  `DaemonSigningKey::load_or_generate` is itself still `todo!()`. Its own assertion cannot be
+  exercised until 1/9 is green, which is a scheduling fact, not a defect in the test.
+
+The **14 inherited failures** are unchanged in count and identity: six `signing_key::tests::*` and
+eight acceptance tests across 1/9 and 2/9, every one of them on `DaemonSigningKey::load_or_generate`
+or `AuthServiceImpl::start_device_login`. Nothing this commit adds made an inherited failure worse.
+
+`tddy-session-lifecycle` is in the baseline and not in the after-run: this commit does not touch it
+yet (the `svc_pr_status_for_caller.rs` migration is green-phase work), and its
+`action_sandbox_acceptance` hang — recorded under **Prerequisites** — makes it expensive to re-run
+for no signal.
+
 ## Acceptance Criteria
 
 - [ ] A credential is readable in-session and **unreadable from the file alone**
@@ -349,7 +433,7 @@ and scoped clippy per package. Whole-workspace green comes from CI via `scripts/
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Publish the draft-PR contract — wave 2
+- [x] Publish the draft-PR contract — wave 2
 - [ ] M1–M7
 - [ ] Ask before taking `hkdf` / `zeroize`
 - [ ] Package documentation for the five affected packages
