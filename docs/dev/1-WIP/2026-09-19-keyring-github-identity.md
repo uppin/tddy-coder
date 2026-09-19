@@ -100,9 +100,23 @@ was false when it was written: #492 is itself in its wave-2 red state. Measured 
 - all 2,124 lines of the REST client, and all ten callers of `github_token_from_env`, are still in
   `tddy-workflow-recipes`.
 
-The consequence is scheduling, not design: the ancestry is right and the collision is gone, but the
-`tddy-github` half of the `## Draft PR contract` could not be published in wave 2 — see
-**As published** below. Nothing about *where* the token parameter belongs changed.
+**Measured again on 2026-09-20, after the stack-wide rebase: the move has landed.** `#carve` pushed
+`#carve 6/11` — *"tddy-git is born, and GitHub REST moves to the crate named after the service"* —
+onto `feature/carve/git-plumbing`, and the cascade brought every layer of this stack onto it. At this
+branch's tip `packages/tddy-git/src/` holds `lib.rs` and `ssh_exec.rs`, and the same 2,124 lines now
+sit in `packages/tddy-github/src/` as `github_pr.rs` (494), `github_rest_common.rs` (338) and
+`pr_api.rs` (1,292). `github_token_from_env` is **defined** at `github_rest_common.rs:19`, with 14
+call sites across five files.
+
+So the post-#492 module paths this node's contract was written against are **real on this branch
+now**. What that does not change: #492 is still red, and still moving — it was `5/9` when this node
+was planned and is `6/11` today. The REST half of the contract was published as deferred before the
+base moved, and the deferral stands with a better reason than the one it was written with: green does
+that work against paths that exist, rather than wave 2 doing it against paths that were about to be
+rewritten.
+
+The consequence is scheduling, not design. Nothing about *where* the token parameter belongs
+changed.
 
 **Dependents**: none. This is the top of the stack.
 
@@ -136,18 +150,21 @@ Published in this PR's **second commit**:
 ### ⚠ Plan correction — the REST half could not be published
 
 The contract's first surface bullet promised `tddy-github`'s REST entry points taking a token
-parameter, *"written against the post-#492 module paths"*. Those paths do not exist on this branch.
-#492 is an ancestor in its **own wave-2 red state**, so the client has not moved: it is still 2,124
-lines in `tddy-workflow-recipes`, `packages/tddy-git` has not been created, and
-`packages/tddy-github/tests/git_plumbing_shape.rs` — #492's failing acceptance suite — is part of
-this branch's inherited red. The `## Dependencies` claim that the move *"has already happened in this
-tree"* has been corrected above.
+parameter, *"written against the post-#492 module paths"*. **When the surface was published those
+paths did not exist**: #492 was an ancestor in its own wave-2 red state, the client was still 2,124
+lines in `tddy-workflow-recipes`, and `packages/tddy-git` had not been created. The
+`## Dependencies` claim that the move *"has already happened in this tree"* was corrected above.
+
+**Hours later the base moved and the move landed** — see the 2026-09-20 measurement under
+`## Dependencies`. The paths are real on this branch now. That vindicates the deferral rather than
+reversing it: had the parameter been published against the pre-move files, every one of them would
+have been rewritten underneath it by `#carve 6/11`.
 
 **What was done instead.** Publishing the parameter against the pre-move paths was rejected: it means
 editing the exact files #492 is moving, which is what `## Boundaries` puts out of scope (*"The REST
 client's move — #492's, entirely"*) and what basing the stack on #492 existed to avoid. So the REST
-half is **deferred to this node's green phase**, which runs after #492 is green and the paths are
-real. Two consequences, both recorded rather than hidden:
+half is **deferred to this node's green phase**, which now runs against real paths. Two
+consequences, both recorded rather than hidden:
 
 - acceptance criterion *"a GitHub API call uses the assigned account's token"* is covered in wave 2
   only as far as `ActingIdentity::token` — the assertion at the REST boundary arrives with M1;
@@ -216,8 +233,9 @@ constant passes it again.
    nothing about sessions or LiveKit.
 
 ⚠ **`GITHUB_TOKEN` inside a session is a separate question, and this commit does not settle it.**
-`github_token_from_env` has ten production callers in `tddy-workflow-recipes`, and some of them run
-inside the *agent's* process, where the daemon may legitimately be the thing that set the variable.
+`github_token_from_env` is defined in `tddy-github/src/github_rest_common.rs` and called from 14
+sites across five files, and some of them run inside the *agent's* process, where the daemon may
+legitimately be the thing that set the variable.
 Deleting the daemon's fallback and deleting the agent's delivery mechanism are different changes; no
 test published here forces the second, and M1 must not quietly become it.
 
