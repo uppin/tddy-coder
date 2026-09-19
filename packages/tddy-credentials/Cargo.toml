@@ -1,0 +1,31 @@
+[package]
+name = "tddy-credentials"
+version = "0.1.0"
+edition = "2021"
+description = "Where a secret lives and what it takes to read one — a provider-extensible credential store, sealed at rest and openable only while a user session exists"
+
+[lib]
+name = "tddy_credentials"
+path = "src/lib.rs"
+
+[dependencies]
+# AEAD over each record, with the record's identity as associated data. Already this workspace's
+# authenticated cipher (tddy-screen-sharing), so the pattern is one a reviewer here has read before.
+chacha20poly1305 = "0.10"
+# HKDF-Extract/Expand over the login credential, hand-rolled in a dozen lines rather than taken as a
+# dependency — `hkdf` would be tidier and needs CLAUDE.md § ASK approval first.
+hmac = "0.12"
+sha2 = "0.10"
+# Constant-time comparison of the verifier, so a wrong key cannot be found a byte at a time.
+subtle = "2.6"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# `write_atomic_with_mode`: the one implementation of "replace a secret without ever truncating the
+# file that is already there" (docs/dev/todo/2026-08-16-…-truncate-in-place.md). This crate must not
+# grow a second one.
+tddy-core = { path = "../tddy-core" }
+
+[dev-dependencies]
+tempfile = "3"
