@@ -47,7 +47,7 @@ inside the jail — no unconfined fallback on unsupported hosts (`failed_precond
 example build-action artifact dirs). `tddy-coder` plan approval uses piped stdin on confined process
 actions.
 
-Acceptance: `packages/tddy-daemon/tests/action_sandbox_acceptance.rs` (tddy-coder, build-action RO
+Acceptance: `packages/tddy-session-lifecycle/tests/action_sandbox_acceptance.rs` (tddy-coder, build-action RO
 mount, escape denial, PTY, unsupported platform).
 
 ## Summary

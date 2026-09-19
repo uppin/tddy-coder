@@ -43,7 +43,7 @@ After sign-in, **ConnectionScreen** loads **ListEligibleDaemons** with tools and
 
 ## Operator and CI notes
 
-- **`TDDY_PROJECTS_DIR`:** test-only override for **`projects_path_for_user`**; see **`packages/tddy-daemon/src/user_sessions_path.rs`**. Avoid setting it globally across unrelated suites; tests such as **`multi_host_acceptance`** save/restore the prior value and use **`#[serial]`** where they share LiveKit.
+- **`TDDY_PROJECTS_DIR`:** test-only override for **`projects_path_for_user`**; see **`packages/tddy-session-lifecycle/src/user_sessions_path.rs`**. Avoid setting it globally across unrelated suites; tests such as **`multi_host_acceptance`** save/restore the prior value and use **`#[serial]`** where they share LiveKit.
 - **LiveKit:** use the Docker testkit or set **`LIVEKIT_TESTKIT_WS_URL`** where documented; acceptance tests that share a room use **`#[serial]`** or equivalent isolation. Rust module overview: **`packages/tddy-daemon-livekit/src/livekit_peer_discovery.rs`** (top-level **`//!`** section), and the crate page **[`livekit-service.md`](../../../packages/tddy-daemon-livekit/docs/livekit-service.md)**.
 
 ## Related documentation

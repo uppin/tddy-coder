@@ -39,13 +39,19 @@ Two properties make that possible, and both are load-bearing:
 
 `extract_method`, `extract_variable`, `rename_symbol`, `extract_module` (`reexport`, `to_file`),
 `extract_module_to_file`, `extract_trait`, `inline_method`, `move_module_to_crate` (`to`,
-`reexport`), `move_cluster_to_crate` (`also`, `to`, `reexport`).
+`reexport`), `move_cluster_to_crate` (`also`, `to`, `reexport`), `move_test_binary_to_crate` (`to`).
 
 `move_cluster_to_crate` moves a **set** of modules as one unit — `anchor` is the first member and
 `also` names the rest — in a single edit, so the tree is never half-moved. That is what makes a
 mutually-referencing group movable at all: moved one at a time, each module's reference to a sibling
 still in the origin would make the destination depend on the crate it left, and no ordering of
 one-module operations can resolve a cycle.
+
+`move_test_binary_to_crate` moves `<crate>/tests/<name>.rs` to the crate it exercises. A test binary
+is a different shape from a module — cargo auto-discovers it, so there is no `mod` line to remove;
+nothing can reference it, so `reexport` is refused; and the destination gains
+`[dev-dependencies]`, not `[dependencies]`. See
+[docs/test-binary-moves.md](docs/test-binary-moves.md).
 
 Run state is keyed by the **plan**, at `<root>/.restructure/<plan stem>-<digest>/`, so one plan
 follows another under the same root without hand-archiving and `--resume` resumes the plan it was

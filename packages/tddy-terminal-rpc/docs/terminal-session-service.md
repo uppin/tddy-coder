@@ -159,5 +159,5 @@ named.
 | `terminal_session_service_acceptance.rs` | all nine methods answer at the registered coordinate |
 | `terminal_session_bidi_acceptance.rs` | `StreamSessionTerminalIO` carries a session end to end |
 | `terminal_history_parity_acceptance.rs` | `GetTerminalHistory` frames and offsets |
-| `packages/tddy-daemon/tests/sandbox_terminal_parity_acceptance.rs` | a real sandbox session's served frames against literal expectations, across both replay modes, the prologue, forward fill and drifted-offset clamping |
+| `packages/tddy-session-lifecycle/tests/sandbox_terminal_parity_acceptance.rs` | a real sandbox session's served frames against literal expectations, across both replay modes, the prologue, forward fill and drifted-offset clamping |
 | `packages/tddy-coder/tests/two_server_parity_acceptance.rs` | the daemon and the coder answer one session identically |
