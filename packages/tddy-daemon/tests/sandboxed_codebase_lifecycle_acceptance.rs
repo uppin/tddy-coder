@@ -238,6 +238,14 @@ fn a_read_of(session_id: &str) -> ExecuteToolRequest {
 // Delete
 // ---------------------------------------------------------------------------
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
+              provisioned without them, and GitHub's ubuntu runners set \
+              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
+              FailedPrecondition rather than starting an unconfined session, which is correct — see \
+              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
+)]
 #[tokio::test]
 async fn deleting_a_sandboxed_codebase_session_tears_its_jail_down() {
     // Given a started jailed-codebase session with a live runner
@@ -268,6 +276,14 @@ async fn deleting_a_sandboxed_codebase_session_tears_its_jail_down() {
     );
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
+              provisioned without them, and GitHub's ubuntu runners set \
+              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
+              FailedPrecondition rather than starting an unconfined session, which is correct — see \
+              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
+)]
 #[tokio::test]
 async fn deleting_a_sandboxed_codebase_session_removes_its_paired_checkout_session() {
     // Given a started jailed-codebase session
@@ -293,6 +309,14 @@ async fn deleting_a_sandboxed_codebase_session_removes_its_paired_checkout_sessi
     );
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
+              provisioned without them, and GitHub's ubuntu runners set \
+              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
+              FailedPrecondition rather than starting an unconfined session, which is correct — see \
+              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
+)]
 #[tokio::test]
 async fn deleting_a_sandboxed_codebase_session_whose_checkout_is_already_gone_succeeds() {
     // Given a jailed-codebase session whose paired checkout was deleted on its own — an operator
@@ -338,6 +362,14 @@ async fn deleting_a_sandboxed_codebase_session_whose_checkout_is_already_gone_su
 // Resume
 // ---------------------------------------------------------------------------
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
+              provisioned without them, and GitHub's ubuntu runners set \
+              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
+              FailedPrecondition rather than starting an unconfined session, which is correct — see \
+              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
+)]
 #[tokio::test]
 async fn resuming_a_sandboxed_codebase_session_re_provisions_its_jail() {
     // Given a jailed-codebase session whose daemon restarted, losing every jail registration
@@ -402,6 +434,14 @@ async fn resuming_a_sandboxed_codebase_session_re_provisions_its_jail() {
 // Shutdown — docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md
 // ---------------------------------------------------------------------------
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
+              provisioned without them, and GitHub's ubuntu runners set \
+              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
+              FailedPrecondition rather than starting an unconfined session, which is correct — see \
+              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
+)]
 #[tokio::test]
 async fn a_daemon_shutdown_leaves_no_sandbox_runner_behind() {
     // Given a started jailed-codebase session with a live runner
