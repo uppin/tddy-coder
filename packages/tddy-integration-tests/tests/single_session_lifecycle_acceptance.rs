@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_core::backend::InvokeResponse;
-use tddy_core::workflow::ids::GoalId;
 use tddy_core::output::{create_session_dir_under, create_session_dir_with_id};
 use tddy_core::workflow::graph::ExecutionStatus;
+use tddy_core::workflow::ids::GoalId;
 use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
 /// Plan output as JSON (tddy-tools submit format).
