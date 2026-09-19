@@ -71,4 +71,3 @@ pub fn resolve_test_binary_move(
     // TODO(test-homes): implement
     todo!("resolve_test_binary_move: rename, re-point the header, extend [dev-dependencies]")
 }
-

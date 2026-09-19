@@ -116,6 +116,7 @@ fn refuses_an_anchor_that_is_not_a_test_binary() {
         with_private_deps: false,
         reexport: None,
         to_file: false,
+        also: Vec::new(),
     };
 
     // When the move is read
