@@ -26,11 +26,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::SessionArtifactManifest;
-use tddy_core::backend::{CodingBackend, GoalHints, GoalId, PermissionHint};
+use tddy_core::backend::CodingBackend;
 use tddy_core::workflow::graph::Graph;
 use tddy_core::workflow::hooks::RunnerHooks;
+use tddy_core::workflow::ids::GoalId;
 use tddy_core::workflow::ids::WorkflowState;
-use tddy_core::workflow::recipe::{WorkflowEventSender, WorkflowRecipe};
+use tddy_core::workflow::recipe::{GoalHints, PermissionHint, WorkflowEventSender, WorkflowRecipe};
 
 /// Default TDD workflow (feature development with plan → acceptance tests → red/green → …).
 #[derive(Clone, Copy, Default, Debug)]
@@ -338,7 +339,7 @@ mod planning_intent_tests {
     use tddy_core::GoalId;
     use tddy_core::WorkflowRecipe;
 
-    /// Backends must use [`tddy_core::backend::GoalHints::agent_cli_plan_mode`] (not goal id) for vendor plan-mode CLI flags.
+    /// Backends must use [`tddy_core::workflow::recipe::GoalHints::agent_cli_plan_mode`] (not goal id) for vendor plan-mode CLI flags.
     #[test]
     fn agent_cli_plan_mode_is_true_only_for_plan_goal() {
         // Given

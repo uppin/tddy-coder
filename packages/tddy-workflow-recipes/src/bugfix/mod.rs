@@ -10,12 +10,13 @@ use std::sync::Arc;
 
 pub use hooks::BugfixWorkflowHooks;
 
-use tddy_core::backend::{ClarificationQuestion, CodingBackend, GoalHints, GoalId, PermissionHint};
+use tddy_core::backend::{ClarificationQuestion, CodingBackend};
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::{Graph, GraphBuilder};
 use tddy_core::workflow::hooks::RunnerHooks;
+use tddy_core::workflow::ids::GoalId;
 use tddy_core::workflow::ids::WorkflowState;
-use tddy_core::workflow::recipe::{WorkflowEventSender, WorkflowRecipe};
+use tddy_core::workflow::recipe::{GoalHints, PermissionHint, WorkflowEventSender, WorkflowRecipe};
 use tddy_core::workflow::task::{BackendInvokeTask, EndTask};
 
 use crate::permissions;

@@ -4,10 +4,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tddy_core::backend::{CodingBackend, GoalId, InvokeRequest, WorkflowRecipe};
+use tddy_core::backend::{CodingBackend, InvokeRequest};
 use tddy_core::error::{BackendError, ParseError, WorkflowError};
 use tddy_core::toolcall::take_submit_result_for_goal;
 use tddy_core::workflow::context::Context;
+use tddy_core::workflow::ids::GoalId;
+use tddy_core::workflow::recipe::WorkflowRecipe;
 use tddy_core::workflow::task::{NextAction, Task, TaskResult};
 
 use super::session_dir_resolve::resolve_existing_session_dir_for_plan;

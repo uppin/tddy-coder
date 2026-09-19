@@ -50,7 +50,7 @@ impl DaemonSessionHost {
         session_token: &str,
         // When `Some`, the session is launched workflow-aware: the recipe's orchestration prompt is
         // injected and its `transition` tool advances a per-session `WorkflowController`.
-        managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
         // When true, index the worktree before launch and expose the `SemanticSearch` tool.
         semantic_index: bool,
         // When true (new_branch_from_base only), push the new branch to origin at session start.
@@ -135,7 +135,7 @@ impl DaemonSessionHost {
     /// is rejected there rather than silently spawning.
     pub(crate) fn conversation_spawn_handler_for(
         &self,
-        recipe: &Arc<dyn tddy_core::backend::WorkflowRecipe>,
+        recipe: &Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>,
         os_user: &str,
         session_id: &str,
         project_id: &str,

@@ -5,11 +5,11 @@
 //! AskQuestion tool uses askUserQuestionToolCall or askQuestionToolCall with args.questions.
 
 use super::{parse_ask_user_question, ProgressEvent, StreamResult};
-use crate::backend::ClarificationQuestion;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::io::BufRead;
 use std::path::Path;
+use tddy_workflow::questions::ClarificationQuestion;
 
 #[derive(Debug, Deserialize)]
 struct CursorEvent {

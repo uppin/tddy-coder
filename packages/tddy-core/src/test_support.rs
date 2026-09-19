@@ -7,11 +7,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::backend::{CodingBackend, GoalHints, PermissionHint};
+use crate::backend::CodingBackend;
 use crate::workflow::graph::{Graph, GraphBuilder};
 use crate::workflow::hooks::RunnerHooks;
 use crate::workflow::ids::{GoalId, WorkflowState};
-use crate::workflow::recipe::{WorkflowEventSender, WorkflowRecipe};
+use crate::workflow::recipe::{GoalHints, PermissionHint, WorkflowEventSender, WorkflowRecipe};
 use tddy_graph::task::EndTask;
 
 /// A minimal linear recipe: `a -> b -> c -> end`. `goal_instructions` returns distinctive text.

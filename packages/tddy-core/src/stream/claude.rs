@@ -4,10 +4,10 @@
 //! tool_use with AskUserQuestion, task_started, task_progress.
 
 use super::{parse_ask_user_question, ProgressEvent, StreamResult};
-use crate::backend::ClarificationQuestion;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::io::BufRead;
+use tddy_workflow::questions::ClarificationQuestion;
 
 #[derive(Debug, Deserialize)]
 struct PermissionDenial {

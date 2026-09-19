@@ -10,6 +10,8 @@ pub mod model_catalog;
 mod stub;
 mod tool_executor;
 
+use crate::workflow::ids::GoalId;
+use crate::workflow::recipe::GoalHints;
 pub use acp::ClaudeAcpBackend;
 pub use claude::{
     build_claude_args, read_claude_subagent_usages, read_claude_transcript_usage,
@@ -24,6 +26,7 @@ pub use model_catalog::{
     render_models_json, resolve_agent_models, BackendCliPaths, CLAUDE_CLI_AGENT, CURSOR_CLI_AGENT,
 };
 pub use stub::StubBackend;
+pub use tddy_workflow::questions::{ClarificationQuestion, QuestionOption};
 pub use tool_executor::{InMemoryToolExecutor, ProcessToolExecutor, ToolExecutor};
 
 /// Enum dispatch for CLI backend selection (avoids trait object overhead).
@@ -226,9 +229,6 @@ pub fn kill_child_process() -> bool {
     );
     false
 }
-
-pub use crate::workflow::ids::GoalId;
-pub use crate::workflow::recipe::{GoalHints, PermissionHint, WorkflowRecipe};
 
 /// Gather the full per-conversation token-usage snapshot for a session by merging every source,
 /// in a stable order: when `include_main_agent`, the main Claude agent's own transcript usage
@@ -481,10 +481,6 @@ impl Default for InvokeRequest {
     }
 }
 
-fn default_allow_other() -> bool {
-    true
-}
-
 /// Build a PATH that prepends the directory of the current executable.
 /// This ensures `tddy-tools` (built alongside `tddy-coder`) is discoverable
 /// by agents that call it as a bare command.
@@ -503,28 +499,6 @@ pub(crate) fn path_with_exe_dir() -> std::ffi::OsString {
         }
     }
     std::env::join_paths(dirs).unwrap_or_default()
-}
-
-/// Structured clarification question from AskUserQuestion tool.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ClarificationQuestion {
-    pub header: String,
-    pub question: String,
-    pub options: Vec<QuestionOption>,
-    #[serde(default, alias = "multiSelect")]
-    pub multi_select: bool,
-    /// When false, omit "Other (type your own)" — e.g. for binary permission (Yes/No).
-    #[serde(default = "default_allow_other")]
-    pub allow_other: bool,
-}
-
-/// Option for a clarification question.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct QuestionOption {
-    pub label: String,
-    /// Secondary line in the TUI; omit in JSON when unused (`tddy-tools ask`).
-    #[serde(default)]
-    pub description: String,
 }
 
 /// Build a clarification question for interactive coding backend selection at session start.

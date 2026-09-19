@@ -57,11 +57,10 @@ pub use backend::{
     default_model_for_agent, get_child_pid, kill_child_process, preselected_index_for_agent,
     recipe_cli_name_from_selection_label, set_child_pid, workflow_recipe_selection_question,
     AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend, ClaudeCodeBackend,
-    ClaudeInvokeConfig, CodexAcpBackend, CodexBackend, CodingBackend, CursorBackend, GoalHints,
-    GoalId, InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionHint,
-    PermissionMode, ProcessToolExecutor, QuestionOption, RemoteToolEnv, SessionMode, SharedBackend,
-    StubBackend, ToolExecutor, WorkflowRecipe, CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
-    CODEX_THREAD_ID_FILENAME,
+    ClaudeInvokeConfig, CodexAcpBackend, CodexBackend, CodingBackend, CursorBackend,
+    InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionMode,
+    ProcessToolExecutor, QuestionOption, RemoteToolEnv, SessionMode, SharedBackend, StubBackend,
+    ToolExecutor, CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_ID_FILENAME,
 };
 pub use changeset::{
     append_session_and_update_state, get_session_for_tag, merge_persisted_workflow_into_context,
@@ -138,7 +137,8 @@ pub use workflow::{
     engine::WorkflowEngine,
     find_git_root,
     graph::{ElicitationEvent, ExecutionResult, ExecutionStatus},
-    ids::WorkflowState,
+    ids::{GoalId, WorkflowState},
+    recipe::{GoalHints, PermissionHint, WorkflowRecipe},
     session::{workflow_engine_storage_dir, WORKFLOW_ENGINE_STORAGE_SUBDIR},
     GoalOptions,
 };

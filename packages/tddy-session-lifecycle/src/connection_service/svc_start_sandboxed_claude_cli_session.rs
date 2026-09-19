@@ -84,7 +84,7 @@ impl DaemonSessionHost {
         specialized_agents: &[String],
         // When `Some`, launch workflow-aware: inject the recipe's orchestration prompt and route the
         // agent's host-side `tddy-tools transition` to a per-session `WorkflowController`.
-        managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
         // When true, index the worktree before launch (blocking; aborts on failure) and expose the
         // in-jail `SemanticSearch` tool backed by that per-session index.
         semantic_index: bool,

@@ -1,12 +1,12 @@
-# cycle: five module cycles, each caused by a shared DTO
+# cycle: two module cycles remain, no longer caused by a shared DTO
 
 **Location:** `packages/tddy-core/src/` — `backend`, `stream`, `toolcall`, `workflow`, `changeset`, `presenter`
 **Category:** cycle
 **Detected:** 2026-09-15 by structural audit
-**Metrics:** 6-module SCC · 5 cycles · each edge **1–4 symbols wide** · ~172 lines of DTO involved · 35 dependent crates
-**Restructure:** required — move 3 leaf DTO groups to the existing `tddy-workflow` crate
-**Status:** Open — claimed by #491, in flight
-**Claimed by:** #491 — `#carve` 5/10 `core-foundations` · draft · `feature/carve/core-foundations`
+**Metrics:** **3-module SCC** (was 6) · **2 cycles** (was 5) · 35 dependent crates
+**Restructure:** the DTO half is done; what remains is a design change, not a move
+**Status:** Open — **partially fixed by #491** (3 of 5 cycles gone, SCC 6 → 3). The remainder is not DTO movement.
+**Claimed by:** nobody — see `docs/dev/todo/2026-09-19-backend-cannot-be-extracted-while-workflow-recipe-is-not-a-leaf.md`
 **Lands after:** #488, #489, #490, #498
 
 ## Measurement history
@@ -14,6 +14,7 @@
 | Run | SCC size | Cycles | Widest edge | Note |
 |---|---|---|---|---|
 | 2026-09-15 | 6 modules | 5 | 4 symbols | first detection |
+| 2026-09-19 | **3 modules** | **2** | recipe trio | #491 moved `GoalId`/`WorkflowState`, `ClarificationQuestion`/`QuestionOption`, `ProgressEvent` and `WorkflowEvent` into `tddy-workflow` and retired `backend/mod.rs`'s re-export facade. `backend ↔ stream`, `backend ↔ toolcall` and `presenter ↔ workflow` are gone. |
 
 ## What the tool found
 
@@ -39,6 +40,16 @@ The cycles are why `tddy-core` cannot be decomposed, and its size is why that ma
 depend on it**. Any attempt to extract `backend/`, `presenter/` or `workflow/` pulls the whole SCC.
 The cycles are *also* almost free to break, which makes this the highest-leverage issue in the crate:
 about 172 lines of pure-data movement removes three of five outright.
+
+## What remains, measured 2026-09-19
+
+| Cycle | Why it survives |
+|---|---|
+| `backend ↔ workflow` | `backend/` needs `GoalHints` and `PermissionHint` from `workflow::recipe`, and `workflow/` needs `backend` throughout. `workflow/recipe.rs` is not a leaf, and `WorkflowRecipe` is a **trait** whose methods name `CodingBackend` — so no DTO move reaches it. |
+| `workflow ↔ changeset` | `workflow/{controller,recipe}.rs` need `changeset::Changeset`; `changeset/{model,merge,stack}.rs` need `workflow::{ids,context,recipe}`. Never claimed by #491. |
+
+Neither is a shared DTO in a behaviour module any more, so **this record's original finding is
+closed**. What is left is a genuine mutual dependency that a move cannot express.
 
 ## What would close it
 
