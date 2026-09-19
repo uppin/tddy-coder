@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file screen_sharing.proto.
  */
 export const file_screen_sharing: GenFile = /*@__PURE__*/
-  fileDesc("ChRzY3JlZW5fc2hhcmluZy5wcm90bxIOc2NyZWVuX3NoYXJpbmciigEKE1NjcmVlblNoYXJpbmdUYXJnZXQSCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSDAoEaG9zdBgDIAEoCRIMCgRwb3J0GAQgASgNEioKCHByb3RvY29sGAUgASgOMhguc2NyZWVuX3NoYXJpbmcuUHJvdG9jb2wSEAoIdXNlcm5hbWUYBiABKAkiPwoSTGlzdFRhcmdldHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJLChNMaXN0VGFyZ2V0c1Jlc3BvbnNlEjQKB3RhcmdldHMYASADKAsyIy5zY3JlZW5fc2hhcmluZy5TY3JlZW5TaGFyaW5nVGFyZ2V0IrgBChBBZGRUYXJnZXRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIMCgRob3N0GAQgASgJEgwKBHBvcnQYBSABKA0SEAoIcGFzc3dvcmQYBiABKAkSKgoIcHJvdG9jb2wYByABKA4yGC5zY3JlZW5fc2hhcmluZy5Qcm90b2NvbBIQCgh1c2VybmFtZRgIIAEoCSJIChFBZGRUYXJnZXRSZXNwb25zZRIzCgZ0YXJnZXQYASABKAsyIy5zY3JlZW5fc2hhcmluZy5TY3JlZW5TaGFyaW5nVGFyZ2V0IlMKE1JlbW92ZVRhcmdldFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXRhcmdldF9pZBgDIAEoCSIiChRSZW1vdmVUYXJnZXRSZXNwb25zZRIKCgJvaxgBIAEoCCJTChJVbmxvY2tWYXVsdFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhIKCnBhc3NwaHJhc2UYAyABKAkiIQoTVW5sb2NrVmF1bHRSZXNwb25zZRIKCgJvaxgBIAEoCCJSChJTdGFydFN0cmVhbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXRhcmdldF9pZBgDIAEoCSKMAQoTU3RhcnRTdHJlYW1SZXNwb25zZRIUCgxsaXZla2l0X3Jvb20YASABKAkSEwoLbGl2ZWtpdF91cmwYAiABKAkSFwoPYnJpZGdlX2lkZW50aXR5GAMgASgJEhIKCnRyYWNrX25hbWUYBCABKAkSDQoFd2lkdGgYBSABKA0SDgoGaGVpZ2h0GAYgASgNIlEKEVN0b3BTdHJlYW1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIRCgl0YXJnZXRfaWQYAyABKAkiIAoSU3RvcFN0cmVhbVJlc3BvbnNlEgoKAm9rGAEgASgIIksKFkxpc3RIb3N0VGFyZ2V0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkiTwoXTGlzdEhvc3RUYXJnZXRzUmVzcG9uc2USNAoHdGFyZ2V0cxgBIAMoCzIjLnNjcmVlbl9zaGFyaW5nLlNjcmVlblNoYXJpbmdUYXJnZXQisgEKFEFkZEhvc3RUYXJnZXRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEg0KBWxhYmVsGAMgASgJEgwKBGhvc3QYBCABKAkSDAoEcG9ydBgFIAEoDRIqCghwcm90b2NvbBgGIAEoDjIYLnNjcmVlbl9zaGFyaW5nLlByb3RvY29sEhAKCHVzZXJuYW1lGAcgASgJIioKFUFkZEhvc3RUYXJnZXRSZXNwb25zZRIRCgl0YXJnZXRfaWQYASABKAkiXgoWU3RhcnRIb3N0U3RyZWFtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIRCgl0YXJnZXRfaWQYAyABKAkiXQoVU3RvcEhvc3RTdHJlYW1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEhEKCXRhcmdldF9pZBgDIAEoCSIkChZTdG9wSG9zdFN0cmVhbVJlc3BvbnNlEgoKAm9rGAEgASgIKkgKCFByb3RvY29sEhgKFFBST1RPQ09MX1VOU1BFQ0lGSUVEEAASEAoMUFJPVE9DT0xfVk5DEAESEAoMUFJPVE9DT0xfUkRQEAIyowcKFFNjcmVlblNoYXJpbmdTZXJ2aWNlElYKC0xpc3RUYXJnZXRzEiIuc2NyZWVuX3NoYXJpbmcuTGlzdFRhcmdldHNSZXF1ZXN0GiMuc2NyZWVuX3NoYXJpbmcuTGlzdFRhcmdldHNSZXNwb25zZRJQCglBZGRUYXJnZXQSIC5zY3JlZW5fc2hhcmluZy5BZGRUYXJnZXRSZXF1ZXN0GiEuc2NyZWVuX3NoYXJpbmcuQWRkVGFyZ2V0UmVzcG9uc2USWQoMUmVtb3ZlVGFyZ2V0EiMuc2NyZWVuX3NoYXJpbmcuUmVtb3ZlVGFyZ2V0UmVxdWVzdBokLnNjcmVlbl9zaGFyaW5nLlJlbW92ZVRhcmdldFJlc3BvbnNlElYKC1VubG9ja1ZhdWx0EiIuc2NyZWVuX3NoYXJpbmcuVW5sb2NrVmF1bHRSZXF1ZXN0GiMuc2NyZWVuX3NoYXJpbmcuVW5sb2NrVmF1bHRSZXNwb25zZRJWCgtTdGFydFN0cmVhbRIiLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVxdWVzdBojLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVzcG9uc2USUwoKU3RvcFN0cmVhbRIhLnNjcmVlbl9zaGFyaW5nLlN0b3BTdHJlYW1SZXF1ZXN0GiIuc2NyZWVuX3NoYXJpbmcuU3RvcFN0cmVhbVJlc3BvbnNlEmIKD0xpc3RIb3N0VGFyZ2V0cxImLnNjcmVlbl9zaGFyaW5nLkxpc3RIb3N0VGFyZ2V0c1JlcXVlc3QaJy5zY3JlZW5fc2hhcmluZy5MaXN0SG9zdFRhcmdldHNSZXNwb25zZRJcCg1BZGRIb3N0VGFyZ2V0EiQuc2NyZWVuX3NoYXJpbmcuQWRkSG9zdFRhcmdldFJlcXVlc3QaJS5zY3JlZW5fc2hhcmluZy5BZGRIb3N0VGFyZ2V0UmVzcG9uc2USXgoPU3RhcnRIb3N0U3RyZWFtEiYuc2NyZWVuX3NoYXJpbmcuU3RhcnRIb3N0U3RyZWFtUmVxdWVzdBojLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVzcG9uc2USXwoOU3RvcEhvc3RTdHJlYW0SJS5zY3JlZW5fc2hhcmluZy5TdG9wSG9zdFN0cmVhbVJlcXVlc3QaJi5zY3JlZW5fc2hhcmluZy5TdG9wSG9zdFN0cmVhbVJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("ChRzY3JlZW5fc2hhcmluZy5wcm90bxIOc2NyZWVuX3NoYXJpbmciigEKE1NjcmVlblNoYXJpbmdUYXJnZXQSCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSDAoEaG9zdBgDIAEoCRIMCgRwb3J0GAQgASgNEioKCHByb3RvY29sGAUgASgOMhguc2NyZWVuX3NoYXJpbmcuUHJvdG9jb2wSEAoIdXNlcm5hbWUYBiABKAkiPwoSTGlzdFRhcmdldHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJhChNMaXN0VGFyZ2V0c1Jlc3BvbnNlEjQKB3RhcmdldHMYASADKAsyIy5zY3JlZW5fc2hhcmluZy5TY3JlZW5TaGFyaW5nVGFyZ2V0EhQKDHZhdWx0X2xvY2tlZBgCIAEoCCK4AQoQQWRkVGFyZ2V0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDQoFbGFiZWwYAyABKAkSDAoEaG9zdBgEIAEoCRIMCgRwb3J0GAUgASgNEhAKCHBhc3N3b3JkGAYgASgJEioKCHByb3RvY29sGAcgASgOMhguc2NyZWVuX3NoYXJpbmcuUHJvdG9jb2wSEAoIdXNlcm5hbWUYCCABKAkiSAoRQWRkVGFyZ2V0UmVzcG9uc2USMwoGdGFyZ2V0GAEgASgLMiMuc2NyZWVuX3NoYXJpbmcuU2NyZWVuU2hhcmluZ1RhcmdldCJTChNSZW1vdmVUYXJnZXRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIRCgl0YXJnZXRfaWQYAyABKAkiIgoUUmVtb3ZlVGFyZ2V0UmVzcG9uc2USCgoCb2sYASABKAgiUgoSU3RhcnRTdHJlYW1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIRCgl0YXJnZXRfaWQYAyABKAkijAEKE1N0YXJ0U3RyZWFtUmVzcG9uc2USFAoMbGl2ZWtpdF9yb29tGAEgASgJEhMKC2xpdmVraXRfdXJsGAIgASgJEhcKD2JyaWRnZV9pZGVudGl0eRgDIAEoCRISCgp0cmFja19uYW1lGAQgASgJEg0KBXdpZHRoGAUgASgNEg4KBmhlaWdodBgGIAEoDSJRChFTdG9wU3RyZWFtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEQoJdGFyZ2V0X2lkGAMgASgJIiAKElN0b3BTdHJlYW1SZXNwb25zZRIKCgJvaxgBIAEoCCJLChZMaXN0SG9zdFRhcmdldHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJIk8KF0xpc3RIb3N0VGFyZ2V0c1Jlc3BvbnNlEjQKB3RhcmdldHMYASADKAsyIy5zY3JlZW5fc2hhcmluZy5TY3JlZW5TaGFyaW5nVGFyZ2V0IrIBChRBZGRIb3N0VGFyZ2V0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIMCgRob3N0GAQgASgJEgwKBHBvcnQYBSABKA0SKgoIcHJvdG9jb2wYBiABKA4yGC5zY3JlZW5fc2hhcmluZy5Qcm90b2NvbBIQCgh1c2VybmFtZRgHIAEoCSIqChVBZGRIb3N0VGFyZ2V0UmVzcG9uc2USEQoJdGFyZ2V0X2lkGAEgASgJIl4KFlN0YXJ0SG9zdFN0cmVhbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSEQoJdGFyZ2V0X2lkGAMgASgJIl0KFVN0b3BIb3N0U3RyZWFtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIRCgl0YXJnZXRfaWQYAyABKAkiJAoWU3RvcEhvc3RTdHJlYW1SZXNwb25zZRIKCgJvaxgBIAEoCCpICghQcm90b2NvbBIYChRQUk9UT0NPTF9VTlNQRUNJRklFRBAAEhAKDFBST1RPQ09MX1ZOQxABEhAKDFBST1RPQ09MX1JEUBACMssGChRTY3JlZW5TaGFyaW5nU2VydmljZRJWCgtMaXN0VGFyZ2V0cxIiLnNjcmVlbl9zaGFyaW5nLkxpc3RUYXJnZXRzUmVxdWVzdBojLnNjcmVlbl9zaGFyaW5nLkxpc3RUYXJnZXRzUmVzcG9uc2USUAoJQWRkVGFyZ2V0EiAuc2NyZWVuX3NoYXJpbmcuQWRkVGFyZ2V0UmVxdWVzdBohLnNjcmVlbl9zaGFyaW5nLkFkZFRhcmdldFJlc3BvbnNlElkKDFJlbW92ZVRhcmdldBIjLnNjcmVlbl9zaGFyaW5nLlJlbW92ZVRhcmdldFJlcXVlc3QaJC5zY3JlZW5fc2hhcmluZy5SZW1vdmVUYXJnZXRSZXNwb25zZRJWCgtTdGFydFN0cmVhbRIiLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVxdWVzdBojLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVzcG9uc2USUwoKU3RvcFN0cmVhbRIhLnNjcmVlbl9zaGFyaW5nLlN0b3BTdHJlYW1SZXF1ZXN0GiIuc2NyZWVuX3NoYXJpbmcuU3RvcFN0cmVhbVJlc3BvbnNlEmIKD0xpc3RIb3N0VGFyZ2V0cxImLnNjcmVlbl9zaGFyaW5nLkxpc3RIb3N0VGFyZ2V0c1JlcXVlc3QaJy5zY3JlZW5fc2hhcmluZy5MaXN0SG9zdFRhcmdldHNSZXNwb25zZRJcCg1BZGRIb3N0VGFyZ2V0EiQuc2NyZWVuX3NoYXJpbmcuQWRkSG9zdFRhcmdldFJlcXVlc3QaJS5zY3JlZW5fc2hhcmluZy5BZGRIb3N0VGFyZ2V0UmVzcG9uc2USXgoPU3RhcnRIb3N0U3RyZWFtEiYuc2NyZWVuX3NoYXJpbmcuU3RhcnRIb3N0U3RyZWFtUmVxdWVzdBojLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVzcG9uc2USXwoOU3RvcEhvc3RTdHJlYW0SJS5zY3JlZW5fc2hhcmluZy5TdG9wSG9zdFN0cmVhbVJlcXVlc3QaJi5zY3JlZW5fc2hhcmluZy5TdG9wSG9zdFN0cmVhbVJlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message screen_sharing.ScreenSharingTarget
@@ -90,6 +90,18 @@ export type ListTargetsResponse = Message<"screen_sharing.ListTargetsResponse"> 
    * @generated from field: repeated screen_sharing.ScreenSharingTarget targets = 1;
    */
   targets: ScreenSharingTarget[];
+
+  /**
+   * The store exists and this session's key does not open it — the login credential changed.
+   *
+   * A field rather than an error, and for the same reason `accounts.proto` makes it one: an
+   * open-and-empty store (`targets` empty, `vault_locked` false) and a locked one are different
+   * situations with different remedies, and rendering the second as "no targets" tells the person
+   * to add targets they already have.
+   *
+   * @generated from field: bool vault_locked = 2;
+   */
+  vaultLocked: boolean;
 };
 
 /**
@@ -129,8 +141,8 @@ export type AddTargetRequest = Message<"screen_sharing.AddTargetRequest"> & {
   port: number;
 
   /**
-   * Plaintext password; daemon encrypts it with the vault key.
-   * Requires vault to be unlocked (call UnlockVault first).
+   * Plaintext password. The daemon seals it as this target's `screen-sharing` record, under the
+   * key the caller's own session already holds — there is nothing for the caller to unlock first.
    * Leave empty for password-less targets.
    *
    * @generated from field: string password = 6;
@@ -219,53 +231,6 @@ export const RemoveTargetResponseSchema: GenMessage<RemoveTargetResponse> = /*@_
   messageDesc(file_screen_sharing, 6);
 
 /**
- * Called by the browser when the user enters the passphrase.
- * The derived key is cached in daemon memory for the session lifetime.
- *
- * @generated from message screen_sharing.UnlockVaultRequest
- */
-export type UnlockVaultRequest = Message<"screen_sharing.UnlockVaultRequest"> & {
-  /**
-   * @generated from field: string session_token = 1;
-   */
-  sessionToken: string;
-
-  /**
-   * @generated from field: string session_id = 2;
-   */
-  sessionId: string;
-
-  /**
-   * @generated from field: string passphrase = 3;
-   */
-  passphrase: string;
-};
-
-/**
- * Describes the message screen_sharing.UnlockVaultRequest.
- * Use `create(UnlockVaultRequestSchema)` to create a new message.
- */
-export const UnlockVaultRequestSchema: GenMessage<UnlockVaultRequest> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 7);
-
-/**
- * @generated from message screen_sharing.UnlockVaultResponse
- */
-export type UnlockVaultResponse = Message<"screen_sharing.UnlockVaultResponse"> & {
-  /**
-   * @generated from field: bool ok = 1;
-   */
-  ok: boolean;
-};
-
-/**
- * Describes the message screen_sharing.UnlockVaultResponse.
- * Use `create(UnlockVaultResponseSchema)` to create a new message.
- */
-export const UnlockVaultResponseSchema: GenMessage<UnlockVaultResponse> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 8);
-
-/**
  * @generated from message screen_sharing.StartStreamRequest
  */
 export type StartStreamRequest = Message<"screen_sharing.StartStreamRequest"> & {
@@ -290,7 +255,7 @@ export type StartStreamRequest = Message<"screen_sharing.StartStreamRequest"> & 
  * Use `create(StartStreamRequestSchema)` to create a new message.
  */
 export const StartStreamRequestSchema: GenMessage<StartStreamRequest> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 9);
+  messageDesc(file_screen_sharing, 7);
 
 /**
  * Response carries the LiveKit coordinates so the browser knows which participant
@@ -339,7 +304,7 @@ export type StartStreamResponse = Message<"screen_sharing.StartStreamResponse"> 
  * Use `create(StartStreamResponseSchema)` to create a new message.
  */
 export const StartStreamResponseSchema: GenMessage<StartStreamResponse> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 10);
+  messageDesc(file_screen_sharing, 8);
 
 /**
  * @generated from message screen_sharing.StopStreamRequest
@@ -366,7 +331,7 @@ export type StopStreamRequest = Message<"screen_sharing.StopStreamRequest"> & {
  * Use `create(StopStreamRequestSchema)` to create a new message.
  */
 export const StopStreamRequestSchema: GenMessage<StopStreamRequest> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 11);
+  messageDesc(file_screen_sharing, 9);
 
 /**
  * @generated from message screen_sharing.StopStreamResponse
@@ -383,7 +348,7 @@ export type StopStreamResponse = Message<"screen_sharing.StopStreamResponse"> & 
  * Use `create(StopStreamResponseSchema)` to create a new message.
  */
 export const StopStreamResponseSchema: GenMessage<StopStreamResponse> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 12);
+  messageDesc(file_screen_sharing, 10);
 
 /**
  * @generated from message screen_sharing.ListHostTargetsRequest
@@ -405,7 +370,7 @@ export type ListHostTargetsRequest = Message<"screen_sharing.ListHostTargetsRequ
  * Use `create(ListHostTargetsRequestSchema)` to create a new message.
  */
 export const ListHostTargetsRequestSchema: GenMessage<ListHostTargetsRequest> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 13);
+  messageDesc(file_screen_sharing, 11);
 
 /**
  * @generated from message screen_sharing.ListHostTargetsResponse
@@ -422,7 +387,7 @@ export type ListHostTargetsResponse = Message<"screen_sharing.ListHostTargetsRes
  * Use `create(ListHostTargetsResponseSchema)` to create a new message.
  */
 export const ListHostTargetsResponseSchema: GenMessage<ListHostTargetsResponse> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 14);
+  messageDesc(file_screen_sharing, 12);
 
 /**
  * @generated from message screen_sharing.AddHostTargetRequest
@@ -469,7 +434,7 @@ export type AddHostTargetRequest = Message<"screen_sharing.AddHostTargetRequest"
  * Use `create(AddHostTargetRequestSchema)` to create a new message.
  */
 export const AddHostTargetRequestSchema: GenMessage<AddHostTargetRequest> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 15);
+  messageDesc(file_screen_sharing, 13);
 
 /**
  * @generated from message screen_sharing.AddHostTargetResponse
@@ -486,7 +451,7 @@ export type AddHostTargetResponse = Message<"screen_sharing.AddHostTargetRespons
  * Use `create(AddHostTargetResponseSchema)` to create a new message.
  */
 export const AddHostTargetResponseSchema: GenMessage<AddHostTargetResponse> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 16);
+  messageDesc(file_screen_sharing, 14);
 
 /**
  * Starts a bridge for a HOST-scoped target. Returns the same StartStreamResponse the session-scoped
@@ -522,7 +487,7 @@ export type StartHostStreamRequest = Message<"screen_sharing.StartHostStreamRequ
  * Use `create(StartHostStreamRequestSchema)` to create a new message.
  */
 export const StartHostStreamRequestSchema: GenMessage<StartHostStreamRequest> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 17);
+  messageDesc(file_screen_sharing, 15);
 
 /**
  * @generated from message screen_sharing.StopHostStreamRequest
@@ -549,7 +514,7 @@ export type StopHostStreamRequest = Message<"screen_sharing.StopHostStreamReques
  * Use `create(StopHostStreamRequestSchema)` to create a new message.
  */
 export const StopHostStreamRequestSchema: GenMessage<StopHostStreamRequest> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 18);
+  messageDesc(file_screen_sharing, 16);
 
 /**
  * @generated from message screen_sharing.StopHostStreamResponse
@@ -566,7 +531,7 @@ export type StopHostStreamResponse = Message<"screen_sharing.StopHostStreamRespo
  * Use `create(StopHostStreamResponseSchema)` to create a new message.
  */
 export const StopHostStreamResponseSchema: GenMessage<StopHostStreamResponse> = /*@__PURE__*/
-  messageDesc(file_screen_sharing, 19);
+  messageDesc(file_screen_sharing, 17);
 
 /**
  * @generated from enum screen_sharing.Protocol
@@ -595,8 +560,11 @@ export const ProtocolSchema: GenEnum<Protocol> = /*@__PURE__*/
   enumDesc(file_screen_sharing, 0);
 
 /**
- * Control-plane service: add/list/remove screen-sharing targets per session,
- * unlock the credential vault, and start/stop the bridge for a target.
+ * Control-plane service: add/list/remove a user's screen-sharing targets, and start/stop the
+ * bridge for one of them. A target's password is a `screen-sharing` record in the credential store
+ * (`#keyring` 3/9), which the caller's own session opens — so NO RPC HERE CARRIES A PASSPHRASE, and
+ * none may be added. A second secret, typed by a person and sent over a wire, existed only because
+ * the daemon had no other way to know the person was present; after `#keyring` 2/9 and 3/9 it does.
  * Implemented by tddy-daemon and consumed by the browser via HTTP Connect.
  * Supports VNC and RDP protocols via the Protocol enum on each target.
  *
@@ -626,14 +594,6 @@ export const ScreenSharingService: GenService<{
     methodKind: "unary";
     input: typeof RemoveTargetRequestSchema;
     output: typeof RemoveTargetResponseSchema;
-  },
-  /**
-   * @generated from rpc screen_sharing.ScreenSharingService.UnlockVault
-   */
-  unlockVault: {
-    methodKind: "unary";
-    input: typeof UnlockVaultRequestSchema;
-    output: typeof UnlockVaultResponseSchema;
   },
   /**
    * @generated from rpc screen_sharing.ScreenSharingService.StartStream

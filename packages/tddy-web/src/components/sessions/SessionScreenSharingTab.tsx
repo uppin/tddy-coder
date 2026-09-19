@@ -3,14 +3,15 @@
  *
  * Shows a list of screen-sharing targets configured for the session and an Add form.
  * The form includes a protocol selector (VNC / RDP) that auto-fills the default port.
- * When a password is provided on the Add form, prompts for a vault passphrase
- * before calling AddTarget.
+ *
+ * A target's password goes straight to `AddTarget`. There is no passphrase to ask for: the
+ * daemon seals the password under the key the signed-in session already holds, so the second
+ * secret this form used to collect has nothing left to open.
  */
 
 import React, { useEffect, useReducer, useState } from "react";
 import type { Room } from "livekit-client";
 import { Protocol } from "../../gen/screen_sharing_pb";
-import { ScreenSharingPassphraseDialog } from "./ScreenSharingPassphraseDialog";
 import { ScreenSharingOverlay } from "./ScreenSharingOverlay";
 import { applyScreenSharingTabAction, initialScreenSharingTabState } from "./screenSharingTabState";
 
@@ -25,7 +26,6 @@ export interface SessionScreenSharingTabProps {
   onListTargets: () => Promise<ScreenSharingTargetInfo[]>;
   onAddTarget: (req: AddScreenSharingTargetReq) => Promise<ScreenSharingTargetInfo>;
   onRemoveTarget: (targetId: string) => Promise<void>;
-  onUnlockVault: (passphrase: string) => Promise<void>;
   onStartStream: (targetId: string) => Promise<StartStreamResult>;
   onStopStream: (targetId: string) => Promise<void>;
 }
@@ -83,7 +83,6 @@ export function SessionScreenSharingTab({
   onListTargets,
   onAddTarget,
   onRemoveTarget,
-  onUnlockVault,
   onStartStream,
   onStopStream,
 }: SessionScreenSharingTabProps): React.ReactElement {
@@ -96,12 +95,6 @@ export function SessionScreenSharingTab({
   const [port, setPort] = useState("5900");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-
-  // Pending add request — held while passphrase dialog is open
-  const [pendingAdd, setPendingAdd] = useState<AddScreenSharingTargetReq | null>(null);
-  const [passphraseOpen, setPassphraseOpen] = useState(false);
-  // Tracks whether UnlockVault has succeeded in this session — skips re-prompting.
-  const [vaultUnlocked, setVaultUnlocked] = useState(false);
 
   // Active stream result — stored when StartStream succeeds
   const [activeStreamResult, setActiveStreamResult] = useState<StartStreamResult | null>(null);
@@ -141,12 +134,7 @@ export function SessionScreenSharingTab({
       protocol,
     };
 
-    if (password && !vaultUnlocked) {
-      setPendingAdd(req);
-      setPassphraseOpen(true);
-    } else {
-      submitAdd(req);
-    }
+    submitAdd(req);
   };
 
   const submitAdd = (req: AddScreenSharingTargetReq) => {
@@ -170,27 +158,6 @@ export function SessionScreenSharingTab({
       .catch((e: unknown) => {
         setErrorMsg(e instanceof Error ? e.message : "Failed to add target");
       });
-  };
-
-  const handlePassphraseConfirm = (passphrase: string) => {
-    setPassphraseOpen(false);
-    if (!pendingAdd) return;
-    const req = pendingAdd;
-    setPendingAdd(null);
-
-    onUnlockVault(passphrase)
-      .then(() => {
-        setVaultUnlocked(true);
-        submitAdd(req);
-      })
-      .catch((e: unknown) => {
-        setErrorMsg(e instanceof Error ? e.message : "Failed to unlock vault — wrong passphrase?");
-      });
-  };
-
-  const handlePassphraseCancel = () => {
-    setPassphraseOpen(false);
-    setPendingAdd(null);
   };
 
   const handleStart = (targetId: string) => {
@@ -332,13 +299,6 @@ export function SessionScreenSharingTab({
             {errorMsg}
           </p>
         )}
-
-        <ScreenSharingPassphraseDialog
-          open={passphraseOpen}
-          vaultExists={false}
-          onConfirm={handlePassphraseConfirm}
-          onCancel={handlePassphraseCancel}
-        />
       </div>
 
       {state.activeOverlayTargetId && activeStreamResult && (

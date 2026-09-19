@@ -22,6 +22,9 @@ argon2 = "0.5"
 chacha20poly1305 = "0.10"
 rand = "0.8"
 uuid = { version = "1", features = ["v4", "v7"] }
+# The credential store a target's password is a record in (`#keyring` 3/9). A workspace path
+# dependency, not a new external one: this crate gains a consumer relationship, nothing to vendor.
+tddy-credentials = { path = "../tddy-credentials" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-core = { path = "../tddy-core" }
 tddy-service = { path = "../tddy-service" }
@@ -44,6 +47,10 @@ rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = "3"
 tddy-testing-commons = { path = "../tddy-testing-commons" }
+# The propagation engine (`#keyring` 6/9), so this node can *prove* a screen-sharing record needs
+# no provider-specific code to sync rather than assert it. A dev-dependency, not a dependency: the
+# claim is about the record's shape, and nothing in this crate calls the engine.
+tddy-credential-sync = { path = "../tddy-credential-sync" }
 # The inline suite encrypts a desktop password to the host's public key exactly as the browser's
 # `SubtleCrypto` does — RSA-OAEP(SHA-256). Pinned to match `tddy-host-service`, which owns the
 # keypair being encrypted to.

@@ -129,6 +129,54 @@ Published in this PR's **second commit**:
 
 ⚠ **Not mergeable in that state** — implementation follows in this same PR.
 
+### Measured red state — wave 2, commit 2
+
+`./test -p tddy-screen-sharing -p tddy-service -p tddy-daemon --no-fail-fast`, scoped to the three
+packages this node touches. Whole-workspace green is CI's answer, via `scripts/ci-status.sh`.
+
+| | passed | failed |
+|---|---|---|
+| Baseline, before this commit | 342 | 2 |
+| After this commit | 340 | 21 |
+
+**Twenty new failures, every one at a `todo!()` this node or 3/9 or 6/9 owns.** The one inherited
+failure that reappears is `restores_a_clone_that_diverged_and_says_so`
+(`tddy-daemon/tests/session_agent_remote_acceptance.rs`) — nothing to do with `#keyring`. Its
+baseline partner `gives_each_owning_daemon_its_own_clone` passed this time; both are flaky rather
+than deterministic.
+
+| Failing | Count | Blocked on |
+|---|---|---|
+| `screen_sharing_records_unit.rs` — the record shape | 9 | `record_for` / `target_from` (this node, M1–M2) |
+| `screen_sharing_records_unit.rs` — the AEAD tamper | 1 | `CredentialStore::open_or_create` / `put` / `list` (3/9) |
+| `screen_sharing_service_acceptance.rs` — targets over the store | 5 | `record_for` (this node); `start_stream` still reads the retired vault (M3–M4) |
+| `screen_sharing_record_propagation.rs` | 3 | `SyncEngine::reconcile` (6/9), `record_for` (this node) |
+| `screen_sharing_service.rs` inline suite — session desktops | 2 | `start_stream` on the store (M3–M4) |
+
+### ⚠ Five criteria are **green already**, and that is the correct outcome here
+
+A deletion node's surface is not a stub, so part of its contract lands finished in commit 2. Stated
+rather than manufactured into red:
+
+| Green in wave 2 | Why it is real work, not a passing stub |
+|---|---|
+| `no_rpc_in_the_screen_sharing_schema_carries_a_passphrase` | `UnlockVault` and its two messages are **deleted** from the schema. Proven non-vacuous: adding `string passphrase = 9;` to `AddTargetRequest` fails the test with its own message |
+| `the_screen_sharing_schema_declares_no_unlock_rpc` | same deletion |
+| `a_store_sealed_under_another_login_is_reported_as_locked` | `ListTargetsResponse.vault_locked` exists and the service sets it; only the *rendering* (M5) is outstanding |
+| `a_desktop_cannot_be_added_with_no_credential_store_wired` | a password with nowhere to go is refused — there is no second place for a secret |
+| `a_token_naming_no_session_reaches_no_targets` | preserved behaviour, pinned so the store rewrite cannot quietly drop it |
+
+`tddy-credentials` is **unchanged by this node** — `git status` lists no file under
+`packages/tddy-credentials/`, which is the boundary claim in [Boundaries](#boundaries) measured
+rather than asserted.
+
+### Generated-code gate
+
+`scripts/generated-code.sh check packages/tddy-web packages/tddy-rust-typescript-tests`:
+`packages/tddy-web/src/gen` is **up to date**, and the only drift is
+`packages/tddy-rust-typescript-tests/gen/auth_pb.ts` (+174/−6) — **`#keyring` 2/9's**, from
+`auth.proto`, not this node's to regenerate. It is a red CI gate on nodes 2–7 until 2/9 fixes it.
+
 ## Green wave
 
 **Wave 4 of 5**, with 5/9, 6/9 and 8/9.
@@ -170,7 +218,7 @@ nothing about the rest.
 
 - [x] **PRD**: [PRD-2026-09-19-keyring-screen-share.md](../../ft/screen-capture/1-WIP/PRD-2026-09-19-keyring-screen-share.md)
 - [x] **Changeset**: this document
-- [ ] **Draft PR contract**: the proto deletion + surface + failing tests (wave 2, commit 2)
+- [x] **Draft PR contract**: the proto deletion + surface + failing tests (wave 2, commit 2)
 - [ ] **Records**: targets as `screen-sharing` records, metadata inside the AEAD
 - [ ] **Deletions**: `screen_sharing_vault.rs`, `DerivedKey`, `ScreenSharingKeyCache`, `UnlockVault`,
       the web prompt, the `runtime.rs` wiring
@@ -285,7 +333,7 @@ Whole-workspace green comes from CI via `scripts/ci-status.sh`.
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Publish the draft-PR contract — wave 2
+- [x] Publish the draft-PR contract — wave 2
 - [ ] M1–M7
 - [ ] `packages/tddy-screen-sharing/docs/screen-sharing-service.md`
 - [ ] `/wrap-context-docs` — this node claims **no** `docs/dev/todo/` entry and **no** code-issue

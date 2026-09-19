@@ -13126,6 +13126,8 @@ dependencies = [
  "serde_yaml",
  "sha2 0.10.9",
  "tddy-core",
+ "tddy-credential-sync",
+ "tddy-credentials",
  "tddy-daemon-kernel",
  "tddy-host-service",
  "tddy-livekit",
