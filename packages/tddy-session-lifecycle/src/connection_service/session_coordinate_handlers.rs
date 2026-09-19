@@ -294,6 +294,7 @@ impl DaemonSessionHost {
                 self.resume_claude_cli_session(
                     os_user,
                     &req.session_id,
+                    &sessions_base,
                     session_dir,
                     metadata,
                     &req.session_token,

@@ -390,7 +390,7 @@ impl DaemonSessionHost {
                 &sessions_base,
                 codebase_instance_id,
                 &codebase_session_id,
-                &livekit,
+                Some(&livekit),
                 req,
                 progress,
             )

@@ -8,7 +8,40 @@ use std::time::Duration;
 use tddy_daemon_sandbox::sandbox_session::{
     pick_free_loopback_port, spawn_sandbox_runner, SandboxRunnerSpawn,
 };
-use tddy_sandbox::format_sandbox_diagnostics;
+use tddy_sandbox::{format_sandbox_diagnostics, SandboxHandle};
+
+/// A spawned jail that is torn down on every exit from the test, a failed assertion included.
+///
+/// [`SandboxHandle`] is a plain struct over [`std::process::Child`], which neither kills nor reaps
+/// on drop, so dropping a handle is not teardown. Teardown placed on the last line of a test is
+/// not teardown either: the `ready_marker` assertions above it panic exactly when the jail failed
+/// to boot, which is the case that orphans a `tddy-sandbox-runner` onto the host for as long as
+/// the machine is up. `wait()` follows the `kill()` so the reaped pid does not linger as a zombie
+/// on the happy path either.
+struct SpawnedJail {
+    handle: SandboxHandle,
+}
+
+impl SpawnedJail {
+    fn new(handle: SandboxHandle) -> Self {
+        Self { handle }
+    }
+
+    fn pid(&self) -> u32 {
+        self.handle.pid()
+    }
+
+    fn handle_mut(&mut self) -> &mut SandboxHandle {
+        &mut self.handle
+    }
+}
+
+impl Drop for SpawnedJail {
+    fn drop(&mut self) {
+        self.handle.child_mut().kill().ok();
+        self.handle.child_mut().wait().ok();
+    }
+}
 
 fn sandbox_runner_binary() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_tddy-sandbox-runner")
@@ -101,20 +134,22 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
     let profile_path = project.join("profile.sb");
 
     // When
-    let mut handle = spawn_sandbox_runner(SandboxRunnerSpawn {
-        project_root: project.clone(),
-        scratch_dir: scratch,
-        egress_dir: egress.clone(),
-        profile_path,
-        runner_argv,
-        env,
-        loopback_allow_ports,
-        ipc_socket: None,
-        mounts: vec![],
-        host_home: None,
-        cgroup: Default::default(),
-    })
-    .expect("spawn sandbox-runner");
+    let mut jail = SpawnedJail::new(
+        spawn_sandbox_runner(SandboxRunnerSpawn {
+            project_root: project.clone(),
+            scratch_dir: scratch,
+            egress_dir: egress.clone(),
+            profile_path,
+            runner_argv,
+            env,
+            loopback_allow_ports,
+            ipc_socket: None,
+            mounts: vec![],
+            host_home: None,
+            cgroup: Default::default(),
+        })
+        .expect("spawn sandbox-runner"),
+    );
 
     let deadline = Duration::from_secs(15);
     let start = std::time::Instant::now();
@@ -126,15 +161,13 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
     }
 
     // Then
-    let exit_status = handle.child_mut().try_wait().ok().flatten();
+    let exit_status = jail.handle_mut().child_mut().try_wait().ok().flatten();
     assert!(
         ready_marker.exists(),
         "ready marker must appear (child={exit_status:?})\n{}\npid={}",
         format_sandbox_diagnostics(&egress, Some(&project)),
-        handle.pid()
+        jail.pid()
     );
-
-    let _ = handle.into_child().kill();
 }
 
 /// **generic_pty_runner_writes_ready_marker_inside_seatbelt**: confined sandbox-runner in generic
@@ -199,20 +232,22 @@ async fn generic_pty_runner_writes_ready_marker_inside_seatbelt() {
     );
 
     // When
-    let handle = spawn_sandbox_runner(SandboxRunnerSpawn {
-        project_root: project.clone(),
-        scratch_dir: scratch,
-        egress_dir: egress.clone(),
-        profile_path: project.join("profile.sb"),
-        runner_argv,
-        env,
-        loopback_allow_ports: vec![grpc_port, shim_port],
-        ipc_socket: None,
-        mounts: vec![],
-        host_home: None,
-        cgroup: Default::default(),
-    })
-    .expect("spawn generic pty sandbox-runner");
+    let _jail = SpawnedJail::new(
+        spawn_sandbox_runner(SandboxRunnerSpawn {
+            project_root: project.clone(),
+            scratch_dir: scratch,
+            egress_dir: egress.clone(),
+            profile_path: project.join("profile.sb"),
+            runner_argv,
+            env,
+            loopback_allow_ports: vec![grpc_port, shim_port],
+            ipc_socket: None,
+            mounts: vec![],
+            host_home: None,
+            cgroup: Default::default(),
+        })
+        .expect("spawn generic pty sandbox-runner"),
+    );
 
     let deadline = Duration::from_secs(15);
     let start = std::time::Instant::now();
@@ -229,8 +264,6 @@ async fn generic_pty_runner_writes_ready_marker_inside_seatbelt() {
         "generic pty ready marker must appear\n{}",
         format_sandbox_diagnostics(&egress, Some(&project))
     );
-
-    let _ = handle.into_child().kill();
 }
 
 /// **generic_pty_host_relay_streams_command_output**: generic PTY mode forwards bytes to the host relay.
@@ -297,20 +330,22 @@ async fn generic_pty_host_relay_streams_command_output() {
         egress.to_string_lossy().to_string(),
     );
 
-    let handle = spawn_sandbox_runner(SandboxRunnerSpawn {
-        project_root: project.clone(),
-        scratch_dir: scratch,
-        egress_dir: egress.clone(),
-        profile_path: project.join("profile.sb"),
-        runner_argv,
-        env,
-        loopback_allow_ports: vec![grpc_port, shim_port],
-        ipc_socket: None,
-        mounts: vec![],
-        host_home: None,
-        cgroup: Default::default(),
-    })
-    .expect("spawn generic pty sandbox-runner");
+    let _jail = SpawnedJail::new(
+        spawn_sandbox_runner(SandboxRunnerSpawn {
+            project_root: project.clone(),
+            scratch_dir: scratch,
+            egress_dir: egress.clone(),
+            profile_path: project.join("profile.sb"),
+            runner_argv,
+            env,
+            loopback_allow_ports: vec![grpc_port, shim_port],
+            ipc_socket: None,
+            mounts: vec![],
+            host_home: None,
+            cgroup: Default::default(),
+        })
+        .expect("spawn generic pty sandbox-runner"),
+    );
 
     let deadline = Duration::from_secs(15);
     let start = std::time::Instant::now();
@@ -348,8 +383,12 @@ async fn generic_pty_host_relay_streams_command_output() {
     .await
     .expect("terminal output timeout");
 
-    let _ = relay.await;
-    let _ = handle.into_child().kill();
+    // The relay task lives as long as the jail's `SessionChannel` is open, and the runner outlives
+    // the PTY command it ran, so awaiting the handle here waits for a jail that is never going to
+    // close its channel. What the test claims — that the relay forwarded the PTY bytes — is
+    // already settled by `captured` above; the relay is simply stopped so the task does not
+    // outlive the test that started it.
+    relay.abort();
 
     // Then
     assert!(

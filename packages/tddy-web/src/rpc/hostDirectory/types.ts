@@ -35,6 +35,10 @@ export interface HostDescriptor {
 
   /** The largest single session attachment this host will serve (`max_attachment_bytes`). */
   readonly maxAttachmentBytes?: number;
+
+  /** What this host's workspace jail confines (`sandboxed_codebase`). Absent = the host does not
+   *  serve the sandboxed-codebase placement at all. */
+  readonly sandboxedCodebase?: { readonly confinesFilesystem: boolean };
 }
 
 /**

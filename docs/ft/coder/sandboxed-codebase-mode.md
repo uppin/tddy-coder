@@ -285,8 +285,12 @@ the other macOS paths.
 9. **Confinement (real Seatbelt).** Through the host's MCP socket: a `Write` lands in the checkout;
    a `Shell` runs with the checkout as its working directory; and a `Read` of a host file outside
    the checkout is refused — the jail, not the tool engine's path checks, is what refuses it.
-10. **Platform.** `--codebase-mode sandboxed` on Linux is refused with a message naming macOS as the
-    supported host for this mode; the Linux daemon-assisted path is otherwise unchanged.
+10. **Platform.** `tddy-sandbox-app` serves this mode on macOS only: `--codebase-mode sandboxed`
+    on its Linux daemon-assisted path is refused with a message naming macOS, because the app
+    provisions its own `--workspace-tools` jail and cannot do so under cgroup v2 delegation
+    containment. The **daemon** serves the same placement on both platforms — see
+    [remote-managed-worktree.md](../daemon/remote-managed-worktree.md) § Sandboxed codebase
+    placement — so the refusal is about which process provisions the jail, not about the mode.
 11. **Session artifacts.** Session id, session dir layout, `sessions/latest` symlink and the
     end-of-session token summary are unchanged from the other macOS paths, with one addition:
     `<session_dir>/host/`, the one directory in the tree no grant in the jail's profile covers. The
@@ -314,9 +318,10 @@ the other macOS paths.
 
 ## What is deliberately not in scope
 
-- **Linux.** `run_linux` delegates to a running `tddy-daemon`; carrying a third codebase mode over
-  `StartSessionRequest` is a daemon-side change and the Linux jail is documented as not verified
-  end-to-end. The mode is refused there rather than half-wired.
+- **Linux, for `tddy-sandbox-app`.** `run_linux` delegates to a running `tddy-daemon`, and the app
+  cannot provision the `--workspace-tools` jail this mode needs on that path. The mode is refused
+  there rather than half-wired. The daemon-served placement has no such limit and is reachable from
+  the web on both platforms.
 - **Cursor.** `--agent-kind cursor` keeps today's placement. Cursor's own tool surface is not
   withdrawable the way Claude's `--disallowedTools` makes Claude's, so an inverted placement could
   not make the confinement claim.

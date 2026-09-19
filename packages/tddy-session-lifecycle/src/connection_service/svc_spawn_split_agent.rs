@@ -39,7 +39,20 @@ use std::path::Path;
 use super::DaemonSessionHost;
 
 impl DaemonSessionHost {
-    /// Spawn the agent half of a split session and record the pairing.
+    /// Spawn the agent half of a session whose checkout it does not hold, and record the pairing.
+    ///
+    /// Serves both placements that separate the agent from its worktree, because they differ in
+    /// exactly one thing — how the agent reaches the checkout:
+    ///
+    /// - `Some(room)` is a **split** session. The checkout is on `codebase_instance_id`, reached
+    ///   over the LiveKit room this daemon hosts and measures the remote worktree through.
+    /// - `None` is a **sandboxed codebase** session. The checkout is a jailed `workspace` session
+    ///   on *this* daemon, reached over this daemon's own HTTP URL — so there is no room to open,
+    ///   nothing remote to measure, and no join token to mint.
+    ///
+    /// The argv is deliberately identical either way: both agents run outside the checkout with
+    /// every native filesystem and shell tool withdrawn, and the jailed-codebase placement's whole
+    /// confinement claim rests on that list (`split_session::withdrawal_contract_tests`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_split_agent(
         &self,
@@ -48,7 +61,7 @@ impl DaemonSessionHost {
         sessions_base: &Path,
         codebase_instance_id: &str,
         codebase_session_id: &str,
-        livekit: &crate::split_session::SplitLiveKitRoom,
+        livekit: Option<&crate::split_session::SplitLiveKitRoom>,
         req: &StartSessionRequest,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
@@ -74,55 +87,71 @@ impl DaemonSessionHost {
         );
 
         let tddy_tools_path = self.resolve_tddy_tools_path();
-        let remote = crate::split_session::split_remote_tool_env(
-            livekit,
-            session_id,
-            codebase_instance_id,
-            codebase_session_id,
-            &req.session_token,
-        )?;
-        // This daemon runs the agent, so it is this session's facilitating daemon and hosts its room —
-        // even though the checkout is on `codebase_instance_id`. Opened before the agent is spawned
-        // (PRD FR2), and measured by asking the codebase daemon rather than by reading a filesystem
-        // this host does not have (FR5). The agent's token was minted for exactly this room.
-        //
-        // The poller signs its own credential per poll under the verified caller's identity rather
-        // than re-presenting `req.session_token`, which the codebase daemon stops accepting five
-        // minutes in — see `RoomPollTokenMinter`.
-        let token_minter = Arc::new(crate::split_session::RoomPollTokenMinter::new(
-            &livekit.api_secret,
-            &req.session_token,
-        )?);
-        let remote_source = Arc::new(tddy_daemon_livekit::session_room::RemoteCheckout::new(
-            Arc::new(self.clone()),
-            codebase_session_id.to_string(),
-            codebase_instance_id.to_string(),
-            token_minter,
-            session_dir.clone(),
-        ));
-        let local_instance_id = local_instance_id_for_config(&self.config);
-        match self
-            .session_rooms
-            .open_measured_by(
-                &tddy_daemon_livekit::session_room::DaemonRoomHosting {
-                    config: &self.config,
-                    instance_id: &local_instance_id,
-                    rooms: &self.session_rooms,
-                }
-                .for_remote_worktree(session_id, &session_dir),
-                Arc::new(self.clone()).session_room_roster(),
-                remote_source,
-            )
-            .await?
-        {
-            Some(room) => log::info!(
-                "split session {session_id} facilitated in {} as {}, measuring session {codebase_session_id} on daemon {codebase_instance_id}",
-                room.room,
-                room.server_identity
+        let remote = match livekit {
+            Some(livekit) => crate::split_session::split_remote_tool_env(
+                livekit,
+                session_id,
+                codebase_instance_id,
+                codebase_session_id,
+                &req.session_token,
+            )?,
+            // The checkout is a jailed `workspace` session on this daemon, so this daemon's own
+            // URL is the route to it and no LiveKit field is set at all — see
+            // [`crate::split_session::colocated_jail_tool_env`], which inverts the split builder's
+            // reasoning field by field.
+            None => crate::split_session::colocated_jail_tool_env(
+                &hooks_and_urls::local_daemon_hook_url(&self.config),
+                codebase_session_id,
+                &self.agent_session_token_for(&req.session_token)?,
             ),
-            None => log::debug!(
-                "split session {session_id} runs without a session room (LiveKit not configured)"
-            ),
+        };
+        if let Some(livekit) = livekit {
+            // This daemon runs the agent, so it is this session's facilitating daemon and hosts its room —
+            // even though the checkout is on `codebase_instance_id`. Opened before the agent is spawned
+            // (PRD FR2), and measured by asking the codebase daemon rather than by reading a filesystem
+            // this host does not have (FR5). The agent's token was minted for exactly this room.
+            //
+            // A jailed-codebase session opens none: the worktree it would measure is on this
+            // filesystem, held by a `workspace` session that reports on itself.
+            //
+            // The poller signs its own credential per poll under the verified caller's identity rather
+            // than re-presenting `req.session_token`, which the codebase daemon stops accepting five
+            // minutes in — see `RoomPollTokenMinter`.
+            let token_minter = Arc::new(crate::split_session::RoomPollTokenMinter::new(
+                &livekit.api_secret,
+                &req.session_token,
+            )?);
+            let remote_source = Arc::new(tddy_daemon_livekit::session_room::RemoteCheckout::new(
+                Arc::new(self.clone()),
+                codebase_session_id.to_string(),
+                codebase_instance_id.to_string(),
+                token_minter,
+                session_dir.clone(),
+            ));
+            let local_instance_id = local_instance_id_for_config(&self.config);
+            match self
+                .session_rooms
+                .open_measured_by(
+                    &tddy_daemon_livekit::session_room::DaemonRoomHosting {
+                        config: &self.config,
+                        instance_id: &local_instance_id,
+                        rooms: &self.session_rooms,
+                    }
+                    .for_remote_worktree(session_id, &session_dir),
+                    Arc::new(self.clone()).session_room_roster(),
+                    remote_source,
+                )
+                .await?
+            {
+                Some(room) => log::info!(
+                    "split session {session_id} facilitated in {} as {}, measuring session {codebase_session_id} on daemon {codebase_instance_id}",
+                    room.room,
+                    room.server_identity
+                ),
+                None => log::debug!(
+                    "split session {session_id} runs without a session room (LiveKit not configured)"
+                ),
+            }
         }
 
         // A split session's roster lives on the codebase daemon, in the workspace session the
@@ -240,9 +269,13 @@ impl DaemonSessionHost {
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
 
+        let placement = match livekit {
+            Some(_) => "split",
+            None => "jailed-codebase",
+        };
         log::info!(
             target: "tddy_daemon::connection_service",
-            "started split claude-cli session {session_id} pid={} codebase_daemon={codebase_instance_id} codebase_session={codebase_session_id}",
+            "started {placement} claude-cli session {session_id} pid={} codebase_daemon={codebase_instance_id} codebase_session={codebase_session_id}",
             handle.pid
         );
 
@@ -253,6 +286,43 @@ impl DaemonSessionHost {
             livekit_server_identity: String::new(),
             branch_conflict: None,
         }))
+    }
+
+    /// The credential an agent presents on every tool call it makes back to a daemon.
+    ///
+    /// Minted for the agent under the caller's **verified** identity, for the reason
+    /// [`crate::split_session::split_remote_tool_env`] gives: the caller's own access token is
+    /// proof of who asked and expires minutes into a session that runs for hours, so forwarding it
+    /// would tie the agent's whole toolchain to it.
+    ///
+    /// A deployment with no `livekit.api_secret` signs no session tokens at all — that is the one
+    /// secret `tddy-daemon-auth` builds its signer from — and it is **refused here** rather than
+    /// falling back to forwarding the caller's credential. Forwarding it would hand the agent a
+    /// string this daemon cannot verify, to present on every tool call for the hours the session
+    /// runs.
+    ///
+    /// Unreachable in production today, and deliberately a refusal rather than an
+    /// `unreachable!`: with `github:` configured and no secret, `tddy-daemon-auth` installs a
+    /// `user_resolver` that rejects *every* token (`auth.rs` — `None => Arc::new(|_| None)`), so
+    /// a gated RPC never reaches this function; with no `github:` at all the session host is
+    /// never built (`tddy-daemon/src/runtime.rs`). The refusal is what keeps a third deployment
+    /// shape from quietly reintroducing the fallback.
+    pub(crate) fn agent_session_token_for(&self, caller_token: &str) -> Result<String, Status> {
+        match self
+            .config
+            .livekit
+            .as_ref()
+            .and_then(|livekit| livekit.api_secret.as_deref())
+            .map(str::trim)
+            .filter(|secret| !secret.is_empty())
+        {
+            Some(secret) => crate::split_session::mint_agent_session_token(secret, caller_token),
+            None => Err(Status::failed_precondition(
+                "this daemon signs no session tokens, so the agent's tool calls back to it could \
+                 not be authenticated: configure livekit.api_secret — the one secret a session \
+                 token is minted and verified with — and retry",
+            )),
+        }
     }
 
     /// How long to wait for the codebase daemon's answer to a split session's forwarded start.
@@ -348,6 +418,40 @@ impl DaemonSessionHost {
         else {
             return Ok(());
         };
+
+        // A **jailed-codebase** session records this daemon as its own codebase host, so the
+        // checkout it names is a `workspace` session right here. Deleted through the same handler
+        // an operator's `DeleteSession` reaches, which is what stops its jail and removes its
+        // worktree — going out to the common room for a session on this filesystem would fail on
+        // a daemon that never joined one, and this placement is defined by not needing one.
+        //
+        // No recursion beyond this hop: the workspace half records `agent_*`, not `codebase_*`,
+        // so `split_pairing` answers `None` for it.
+        if codebase_daemon == local_instance_id_for_config(&self.config) {
+            let deleted = Box::pin(self.delete_session_at_session_coordinate(
+                tddy_rpc::Request::new(DeleteSessionRequest {
+                    session_token: session_token.to_string(),
+                    session_id: codebase_session.to_string(),
+                }),
+            ))
+            .await;
+            match deleted {
+                Ok(_) => log::info!(
+                    "DeleteSession: deleted the jailed checkout session {codebase_session} this session was paired with"
+                ),
+                // The same idempotency the cross-host arm below applies, for the same reason: the
+                // checkout already being gone is the state this call exists to reach, not a
+                // failure to reach it. An operator may have deleted that session directly, or an
+                // earlier attempt may have removed it and then failed on this half. Propagating
+                // here would make the agent session permanently undeletable — every retry would
+                // re-ask for a session that is provably not there.
+                Err(e) if peer_has_no_such_session(&e) => log::info!(
+                    "DeleteSession: this daemon no longer has the paired checkout session {codebase_session} ({e}); it was already torn down, so this session's deletion continues"
+                ),
+                Err(e) => return Err(e),
+            }
+            return Ok(());
+        }
 
         let slot = self.common_room_slot("DeleteSession")?;
         // `common_room_slot` only proves this daemon is *configured* for a common room, not that it

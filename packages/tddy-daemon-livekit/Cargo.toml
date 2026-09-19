@@ -21,6 +21,11 @@ tddy-core = { path = "../tddy-core" }
 # `DaemonConfig`, `SessionUserResolver`, the two daemon ids and the split-agent identity prefix —
 # everything this crate needs from the daemon it left, and nothing of the daemon itself.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+# `workspace_sandbox_platform_support` — the one answer to "can this host hold a workspace jail",
+# which the common-room advertisement publishes as the `sandboxed_codebase` capability. Read from
+# the module the start path consults rather than restated from an OS string, so a daemon cannot
+# advertise a placement it would then refuse.
+tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 # `host_registry` and `multi_host`: peer discovery files a sighting and answers with an eligible
 # daemon. The edge is one-directional — nothing in `tddy-host-service` names a LiveKit module.
 tddy-host-service = { path = "../tddy-host-service" }

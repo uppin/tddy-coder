@@ -62,6 +62,21 @@ message GetClientConfigResponse {
   // off, so the page constructs no `Room` and mints no token — the same quiet outcome an
   // unconfigured deployment already has, reached deliberately rather than by omission.
   optional bool livekit_enabled = 8;
+  // What this daemon's `--workspace-tools` jail confines, so a page hosted by it can offer the
+  // sandboxed-codebase placement with no common room to advertise it in. Absent is a host that
+  // does not serve the placement at all — a daemon that predates this field, or an OS with no
+  // sandbox backend — and the page disables the control with the reason rather than offering it.
+  optional SandboxedCodebaseSupport sandboxed_codebase = 9;
+}
+
+// What a daemon's workspace jail confines, as that daemon describes itself. Mirrors the
+// `sandboxed_codebase` key of the common-room advertisement, so one capability has one shape
+// whichever source the web read the host from.
+message SandboxedCodebaseSupport {
+  // Whether the jail confines filesystem writes outside the checkout: true on macOS Seatbelt,
+  // false on the Linux cgroups jail, which shares the host filesystem root and so confines process
+  // and network only. The web turns this into the caveat it shows beside the control.
+  bool confines_filesystem = 1;
 }
 
 message ClientAllowedAgent {

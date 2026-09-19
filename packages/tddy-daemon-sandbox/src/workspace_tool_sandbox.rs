@@ -446,7 +446,16 @@ impl WorkspaceSandbox for JailedWorkspaceSandbox {
     }
 
     fn stop(&self) {
-        if let Some(mut handle) = self.handle.lock().unwrap().take() {
+        // A poisoned lock is a thread that panicked while holding the handle, not a reason to
+        // leave the jail running: `stop` is reached from `Drop` and from the shutdown sweep, and
+        // panicking here would orphan a `tddy-sandbox-runner` onto the host — the very thing this
+        // method exists to prevent. The handle behind the poison is still the child to reap.
+        let taken = self
+            .handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(mut handle) = taken {
             let _ = handle.child_mut().kill();
             let _ = handle.child_mut().wait();
         } else {
@@ -518,5 +527,64 @@ impl WorkspaceSandboxRegistry {
 
     pub async fn remove(&self, session_id: &str) -> Option<Arc<dyn WorkspaceSandbox>> {
         self.inner.lock().await.remove(session_id)
+    }
+
+    /// Stop every jail this registry holds and forget them, answering with the session ids that
+    /// were stopped.
+    ///
+    /// The shutdown counterpart of [`Self::remove`]: a jail is a child process of this daemon, so
+    /// a daemon that exits without reaching here leaves a `tddy-sandbox-runner` orphaned onto the
+    /// host (`docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md`).
+    /// The map is drained under the lock and the jails stopped after it is released, so a
+    /// concurrent `insert` racing the shutdown adds to an empty map rather than blocking on one.
+    ///
+    /// Draining first is also what makes a per-jail failure unrecoverable by anyone else: the
+    /// jails are out of the registry before the first one is stopped, so nothing can reach the
+    /// ones after it. The sweep therefore carries on past a failure and answers with the ids it
+    /// actually stopped, rather than reporting the whole drained set as though it had.
+    ///
+    /// Each stop runs on the blocking pool because it is one: [`WorkspaceSandbox::stop`] kills
+    /// its runner and `wait`s for it, and the fallback path sleeps between SIGTERM and SIGKILL.
+    /// Run inline, a shutdown sweep would block a tokio worker for as long as every jail takes.
+    pub async fn stop_all(&self) -> Vec<String> {
+        let draining: Vec<(String, Arc<dyn WorkspaceSandbox>)> =
+            self.inner.lock().await.drain().collect();
+        let mut stopped = Vec::with_capacity(draining.len());
+        for (session_id, jail) in draining {
+            match tokio::task::spawn_blocking(move || jail.stop()).await {
+                Ok(()) => stopped.push(session_id),
+                Err(e) => log::error!(
+                    target: "tddy_daemon_sandbox::workspace_tool_sandbox",
+                    "session {session_id}: its jail could not be stopped ({e}); its runner may be \
+                     orphaned onto this host, and the remaining jails are stopped regardless"
+                ),
+            }
+        }
+        log::info!(
+            target: "tddy_daemon_sandbox::workspace_tool_sandbox",
+            "stopped {} workspace jail(s): {}",
+            stopped.len(),
+            stopped.join(", ")
+        );
+        stopped
+    }
+}
+
+/// Stop every jail still held when the registry itself goes away.
+///
+/// [`Self::stop_all`] is the *announced* shutdown, reached from the daemon's SIGTERM path. This is
+/// the one nobody announces: a daemon dropped without that sweep — every test harness that builds
+/// one and lets it fall out of scope — would otherwise leave each jail's `tddy-sandbox-runner`
+/// orphaned onto the host, reparented to `launchd` in its own process group, where killing the
+/// test binary never reaps it.
+///
+/// `Mutex::get_mut` needs no lock (`&mut self` already proves exclusivity) and no `await`, which
+/// is what makes this expressible in `Drop` at all; [`WorkspaceSandbox::stop`] is sync for the
+/// same reason.
+impl Drop for WorkspaceSandboxRegistry {
+    fn drop(&mut self) {
+        for (_, jail) in self.inner.get_mut().drain() {
+            jail.stop();
+        }
     }
 }

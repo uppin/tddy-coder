@@ -2,28 +2,52 @@
 
 **Location:** `packages/tddy-daemon/src/runtime.rs`
 **Category:** oversized-file
-**Detected:** 2026-09-19 by the `/pr-wrap` file-length gate on #498
-**Metrics:** **1,423 production lines** (1,420 before #498) · budget 500
-**Restructure:** required
-**Status:** Open — pre-existing; #498 added 3 lines and deferred with explicit developer consent
+**Detected:** 2026-09-19 by the `/pr-wrap` file-length gate, independently on #498 and #518
+**Metrics:** **1482 production lines** · budget 500 · **~3× over** · residue function `build` is **819 lines**
+**Thresholds breached:** length 1482 > 500; `build` 819 > 60
+**Restructure:** required — three `extract_module --to_file` seams **plus** function splitting
+**Status:** Open — pre-existing; both #498 and #518 grew it and deferred with explicit developer consent
 
 ## Measurement history
 
 | Run | Production lines | Note |
 |---|---|---|
-| 2026-09-19 | 1,423 | first detection; 1,420 before #498 |
+| 2026-09-19 | 1,420 | baseline, before either PR |
+| 2026-09-19 | 1,423 | after #498 — three lines |
+| 2026-09-19 | 1,479 | after #518 — 59 lines |
+| 2026-09-19 | 1482 | both merged |
 
 ## What the gate found
 
-Already 2.8× the budget before #498 touched it. #498's contribution is **three lines**: eight
-`crate::relay_idle` / `crate::user_sessions_path` paths re-pointed at `tddy_session_lifecycle` when
-the re-export shims were deleted, which reflowed three lines under `rustfmt`.
+Already 2.8× the budget before either PR touched it.
 
-The file is the daemon's composition root — `runtime::build` wires roughly twenty services — so its
-size is a real design question, not an accident of this change. See the companion record
-`complexity-runtime-build.md`.
+**#498's contribution is three lines**: eight `crate::relay_idle` / `crate::user_sessions_path`
+paths re-pointed at `tddy_session_lifecycle` when the re-export shims were deleted, which reflowed
+three lines under `rustfmt`.
 
-## What would close it
+**#518's is 59**: `DaemonChildren`, the `session_host` field, and the shutdown wiring that makes
+SIGTERM reach the workspace-jail registry.
 
-A decomposition of `runtime::build` along service-group seams. Out of scope for #498, which moved no
-production module by design: its `## Boundaries` say no `src/` file moves between crates in that node.
+## What would close it — designed seams
+
+| Seam | Items | Out |
+|---|---|---|
+| A | `DaemonChildren` … `impl RuntimeTasks` | ~265 |
+| B | `apply_env_overrides`, `env_var`, `data_dir_from`, `tddy_data_dir_for` | ~83 |
+| C | `TelegramWiring`, `build_telegram` | ~114 |
+
+All three → parent ~1017. **The module seams alone cannot close this**: the residue is `build`,
+**819 lines**, one function.
+
+## The residue, and why it is the easy case
+
+`build` is a **free function**, not an impl member. So `extract_method --variant module` puts the
+extracted helper at module level where `anchors` *can* address it, and `extract_module_to_file`
+then moves it out — no impl in the way, unlike `svc_start_session_core.rs`.
+
+Cut along the wiring groups inside `build`; each subsystem's construction is a contiguous run.
+Three or four cuts of ~200 lines each take the file under 500 **and** the function under the
+60-line ceiling.
+
+⚠ Line numbers must be re-derived with `restructure anchors` — the seams above were located
+against the 1,479-line tree, before this merge.

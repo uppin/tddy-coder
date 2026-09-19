@@ -36,6 +36,17 @@ export interface ClientConfig {
   daemonInstanceId?: string;
   allowedAgents?: ClientAllowedAgent[];
   debug?: string;
+  /**
+   * What the serving daemon's `--workspace-tools` jail confines, so the Start-Session form can
+   * offer the sandboxed-codebase placement on a deployment with no common room to advertise it in.
+   *
+   * Absent is a host that does not serve the placement — a daemon that predates the key, an OS
+   * with no sandbox backend, or a bundle served by something that is not a daemon at all — and the
+   * control is disabled with the reason rather than offered. Absence is never read as a default:
+   * a daemon that would answer the request field by starting an ordinary, unconfined session is
+   * exactly what the disabled state exists to prevent.
+   */
+  sandboxedCodebase?: { confinesFilesystem: boolean };
 }
 
 /** The JSON `GET /api/config` serves — snake_case, as `tddy_coder::web_server::ClientConfig`. */
@@ -48,6 +59,23 @@ interface ClientConfigJson {
   daemon_instance_id?: string;
   allowed_agents?: ClientAllowedAgent[];
   debug?: string;
+  sandboxed_codebase?: { confines_filesystem?: boolean };
+}
+
+/**
+ * The jail capability a payload described, or `undefined` when it described none.
+ *
+ * Only an object saying what the jail confines is a capability: an absent key is a host that does
+ * not serve the placement, and reading a default here would turn "unadvertised" into a promise.
+ * Both sources are narrowed through this one reader, so the browser and the desktop cannot
+ * disagree about the same host.
+ */
+function sandboxedCodebaseOf(
+  advertised: boolean,
+  confinesFilesystem: boolean | undefined,
+): { confinesFilesystem: boolean } | undefined {
+  if (!advertised) return undefined;
+  return { confinesFilesystem: confinesFilesystem === true };
 }
 
 function fromJson(json: ClientConfigJson): ClientConfig {
@@ -60,6 +88,10 @@ function fromJson(json: ClientConfigJson): ClientConfig {
     daemonInstanceId: json.daemon_instance_id,
     allowedAgents: json.allowed_agents,
     debug: json.debug,
+    sandboxedCodebase: sandboxedCodebaseOf(
+      json.sandboxed_codebase !== undefined && json.sandboxed_codebase !== null,
+      json.sandboxed_codebase?.confines_filesystem,
+    ),
   };
 }
 
@@ -96,5 +128,9 @@ export async function loadClientConfig(
     daemonInstanceId: response.daemonInstanceId,
     allowedAgents: response.allowedAgents.map(({ id, label }) => ({ id, label })),
     debug: response.debug,
+    sandboxedCodebase: sandboxedCodebaseOf(
+      response.sandboxedCodebase !== undefined,
+      response.sandboxedCodebase?.confinesFilesystem,
+    ),
   };
 }

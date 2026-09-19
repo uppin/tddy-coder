@@ -277,6 +277,26 @@ export const TEST_IDS = {
   createSessionDangerouslySkipPermissionsToggle:
     "create-session-dangerously-skip-permissions-toggle",
   createSessionSandboxToggle: "create-session-sandbox-toggle",
+  /** "Sandboxed codebase" checkbox — jails this session's own checkout and runs the agent beside
+   * it, unconfined, with its native filesystem and shell tools withdrawn. The inverted placement of
+   * docs/ft/coder/sandboxed-codebase-mode.md, served by the daemon. Mutually exclusive with the
+   * Sandbox and Managed codebase toggles: all three name a placement, and a session has one. */
+  createSessionSandboxedCodebaseToggle: "create-session-sandboxed-codebase-toggle",
+  /** Why the sandboxed-codebase placement is unavailable on the selected host. Rendered beside a
+   * disabled toggle, never in place of one — the capability stays discoverable from a host that
+   * cannot serve it. */
+  createSessionSandboxedCodebaseUnavailable: "create-session-sandboxed-codebase-unavailable",
+  /** What the selected host's jail does *not* confine. Rendered beside an enabled toggle on a host
+   * whose jail shares the filesystem root, so "sandboxed" never promises more than it delivers.
+   * See docs/dev/todo/2026-06-28-tddy-sandbox-cgroups.md. */
+  createSessionSandboxedCodebaseCaveat: "create-session-sandboxed-codebase-caveat",
+  /** Probe: the instance id the host directory's serving source contributes. */
+  servingHostId: "serving-host-id",
+  /** Probe: what the serving daemon said its own `--workspace-tools` jail confines
+   * (`/api/config`'s `sandboxed_codebase`), or `unadvertised` when it described none. */
+  servingHostJail: "serving-host-jail",
+  /** Probe: the Start-Session form's verdict on that host — `available`, or the stated reason. */
+  servingHostPlacementVerdict: "serving-host-placement-verdict",
   /** Collapsible "Managed codebase" section header — claude-cli sessions only. See
    * docs/ft/coder/specialized-subagents.md. */
   createSessionManagedCodebaseToggle: "create-session-managed-codebase-toggle",

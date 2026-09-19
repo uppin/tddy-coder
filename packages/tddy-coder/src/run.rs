@@ -1211,6 +1211,9 @@ fn build_client_config(args: &Args) -> crate::web_server::ClientConfig {
         daemon_instance_id: None,
         // …and has no common-room switch to report the state of.
         livekit_enabled: None,
+        // The standalone web server provisions no `--workspace-tools` jail, so it advertises no
+        // sandboxed-codebase placement: the key is left off the wire entirely.
+        sandboxed_codebase: None,
     }
 }
 

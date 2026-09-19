@@ -113,6 +113,15 @@ export interface SelectedDaemonProviderProps {
   /** The instance id of the daemon that served this web bundle (`/api/config`'s `daemon_instance_id`). */
   servingInstanceId?: string;
   /**
+   * What the serving daemon's workspace jail confines (`/api/config`'s `sandboxed_codebase`).
+   *
+   * The serving source contributes it so the Start-Session form can offer the sandboxed-codebase
+   * placement on a daemon with no common room to advertise it in — which is the deployment that
+   * placement exists for. Absent is a host that does not serve it, and the control is disabled
+   * with the reason rather than offered.
+   */
+  servingSandboxedCodebase?: { confinesFilesystem: boolean };
+  /**
    * Test-injection seam (mirrors `RpcTransportProviderProps.liveKitFactory`): when provided, used
    * directly instead of joining the common room via `useCommonRoom`. No production caller sets this.
    */
@@ -155,6 +164,7 @@ function useDirectorySources({
   livekitUrl,
   commonRoom,
   servingInstanceId,
+  servingSandboxedCodebase,
   room: roomOverride,
   daemons: daemonsOverride,
   roomFactory,
@@ -184,7 +194,7 @@ function useDirectorySources({
     hosts: daemonsOverride,
     roomFactory,
   });
-  const servingSource = useServingHostDirectorySource(servingInstanceId);
+  const servingSource = useServingHostDirectorySource(servingInstanceId, servingSandboxedCodebase);
   const sources = useMemo(
     () => [liveKitSource, servingSource],
     [liveKitSource, servingSource],
@@ -273,6 +283,7 @@ export function SelectedDaemonProvider({
   livekitUrl,
   commonRoom,
   servingInstanceId,
+  servingSandboxedCodebase,
   room: roomOverride,
   daemons: daemonsOverride,
   roomFactory,
@@ -283,6 +294,7 @@ export function SelectedDaemonProvider({
     livekitUrl,
     commonRoom,
     servingInstanceId,
+    servingSandboxedCodebase,
     room: roomOverride,
     daemons: daemonsOverride,
     roomFactory,

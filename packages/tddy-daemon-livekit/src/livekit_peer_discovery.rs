@@ -136,6 +136,47 @@ pub struct DaemonAdvertisement {
     /// in which case the key is left off the wire so a reader cannot mistake it for a cap of zero.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub max_attachment_bytes: u64,
+    /// What this host's `--workspace-tools` jail confines, surfaced so the web Start-Session form
+    /// can offer the **sandboxed codebase** placement — and say what it does not guarantee.
+    ///
+    /// `None` is a host that does not serve the placement at all: either an older daemon that
+    /// predates the key, or one whose OS has no sandbox backend
+    /// (`workspace_sandbox_platform_support`). The key is left off the wire entirely in that case,
+    /// so a reader cannot mistake "absent" for "present and confines nothing" — the control is
+    /// then disabled with the reason rather than offered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandboxed_codebase: Option<SandboxedCodebaseSupport>,
+}
+
+/// What a host's workspace jail actually confines, as that host advertises it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, Deserialize)]
+pub struct SandboxedCodebaseSupport {
+    /// Whether the jail confines filesystem writes outside the checkout.
+    ///
+    /// **True on macOS**, where Seatbelt denies paths outside the two trees the jail holds.
+    /// **False on Linux**, where the cgroups jail shares the host filesystem root — the minimal
+    /// read-only root with `pivot_root` is unbuilt
+    /// (`docs/dev/todo/2026-06-28-tddy-sandbox-cgroups.md`) — so it confines process and network
+    /// but not writes. The web turns this boolean into the caveat it shows beside the control:
+    /// getting it backwards would promise confinement the kernel does not give.
+    pub confines_filesystem: bool,
+}
+
+/// The placement this host can serve, or `None` when its OS has no sandbox backend to hold a jail.
+///
+/// Read from [`tddy_daemon_sandbox::workspace_tool_sandbox::workspace_sandbox_platform_support`]
+/// rather than restated from an OS string: that function is what the start path actually consults,
+/// so a host advertising a placement it would then refuse is not expressible.
+///
+/// `pub` because the common-room advertisement is not the only place a daemon describes itself:
+/// the serving daemon's own `/api/config` (and its `GetClientConfig` RPC mirror) carries the same
+/// capability, for the deployment that has no common room at all. Both read this one function, so
+/// the two descriptions of the same host cannot drift.
+pub fn sandboxed_codebase_support() -> Option<SandboxedCodebaseSupport> {
+    tddy_daemon_sandbox::workspace_tool_sandbox::workspace_sandbox_platform_support().ok()?;
+    Some(SandboxedCodebaseSupport {
+        confines_filesystem: cfg!(target_os = "macos"),
+    })
 }
 
 fn is_zero(value: &u64) -> bool {
@@ -191,6 +232,8 @@ struct DaemonAdvertisementWire {
     repos_base_path: String,
     #[serde(default)]
     max_attachment_bytes: u64,
+    #[serde(default)]
+    sandboxed_codebase: Option<SandboxedCodebaseSupport>,
 }
 
 /// Parse and normalize a daemon advertisement JSON string from the discovery transport.
@@ -227,6 +270,7 @@ pub fn parse_peer_daemon_json(input: &str) -> Result<PeerDaemon, String> {
             label,
             repos_base_path,
             max_attachment_bytes: w.max_attachment_bytes,
+            sandboxed_codebase: w.sandboxed_codebase,
         },
         host_id,
     })
@@ -838,6 +882,7 @@ async fn connect_common_room_publish_metadata(
         label: format!("{local_id} (this daemon)"),
         repos_base_path: repos_base_path.to_string(),
         max_attachment_bytes,
+        sandboxed_codebase: sandboxed_codebase_support(),
     };
     let meta_json = daemon_metadata_json(&adv, host_id)?;
     let meta_len = meta_json.len();
@@ -1579,6 +1624,7 @@ mod tests {
                         label: format!("{id} (this daemon)"),
                         repos_base_path: format!("repos/{id}"),
                         max_attachment_bytes: 4096,
+                        sandboxed_codebase: None,
                     },
                     host_id: format!("{id}-host"),
                 };
@@ -1729,6 +1775,7 @@ mod tests {
             label: "peer-a (this daemon)".to_string(),
             repos_base_path: "repos".to_string(),
             max_attachment_bytes: 0,
+            sandboxed_codebase: None,
         };
 
         // When it is serialized to the wire and parsed back
