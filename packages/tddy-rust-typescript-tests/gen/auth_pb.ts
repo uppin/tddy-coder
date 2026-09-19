@@ -2,15 +2,15 @@
 // @generated from file auth.proto (package auth, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file auth.proto.
  */
 export const file_auth: GenFile = /*@__PURE__*/
-  fileDesc("CgphdXRoLnByb3RvEgRhdXRoIhMKEUdldEF1dGhVcmxSZXF1ZXN0IjoKEkdldEF1dGhVcmxSZXNwb25zZRIVCg1hdXRob3JpemVfdXJsGAEgASgJEg0KBXN0YXRlGAIgASgJIjIKE0V4Y2hhbmdlQ29kZVJlcXVlc3QSDAoEY29kZRgBIAEoCRINCgVzdGF0ZRgCIAEoCSJkChRFeGNoYW5nZUNvZGVSZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXISFQoNcmVmcmVzaF90b2tlbhgDIAEoCSItChRHZXRBdXRoU3RhdHVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIk4KFUdldEF1dGhTdGF0dXNSZXNwb25zZRIVCg1hdXRoZW50aWNhdGVkGAEgASgIEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXIiLgoVUmVmcmVzaFNlc3Npb25SZXF1ZXN0EhUKDXJlZnJlc2hfdG9rZW4YASABKAkiZgoWUmVmcmVzaFNlc3Npb25SZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXISFQoNcmVmcmVzaF90b2tlbhgDIAEoCSImCg1Mb2dvdXRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiEAoOTG9nb3V0UmVzcG9uc2UiMAoXTWludExpdmVLaXRUb2tlblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJZChhNaW50TGl2ZUtpdFRva2VuUmVzcG9uc2USDQoFdG9rZW4YASABKAkSCwoDdXJsGAIgASgJEgwKBHJvb20YAyABKAkSEwoLdHRsX3NlY29uZHMYBCABKAQiSQoKR2l0SHViVXNlchINCgVsb2dpbhgBIAEoCRISCgphdmF0YXJfdXJsGAIgASgJEgwKBG5hbWUYAyABKAkSCgoCaWQYBCABKAQy4QIKC0F1dGhTZXJ2aWNlEj8KCkdldEF1dGhVcmwSFy5hdXRoLkdldEF1dGhVcmxSZXF1ZXN0GhguYXV0aC5HZXRBdXRoVXJsUmVzcG9uc2USRQoMRXhjaGFuZ2VDb2RlEhkuYXV0aC5FeGNoYW5nZUNvZGVSZXF1ZXN0GhouYXV0aC5FeGNoYW5nZUNvZGVSZXNwb25zZRJICg1HZXRBdXRoU3RhdHVzEhouYXV0aC5HZXRBdXRoU3RhdHVzUmVxdWVzdBobLmF1dGguR2V0QXV0aFN0YXR1c1Jlc3BvbnNlEksKDlJlZnJlc2hTZXNzaW9uEhsuYXV0aC5SZWZyZXNoU2Vzc2lvblJlcXVlc3QaHC5hdXRoLlJlZnJlc2hTZXNzaW9uUmVzcG9uc2USMwoGTG9nb3V0EhMuYXV0aC5Mb2dvdXRSZXF1ZXN0GhQuYXV0aC5Mb2dvdXRSZXNwb25zZTJoChNMaXZlS2l0VG9rZW5TZXJ2aWNlElEKEE1pbnRMaXZlS2l0VG9rZW4SHS5hdXRoLk1pbnRMaXZlS2l0VG9rZW5SZXF1ZXN0Gh4uYXV0aC5NaW50TGl2ZUtpdFRva2VuUmVzcG9uc2ViBnByb3RvMw");
+  fileDesc("CgphdXRoLnByb3RvEgRhdXRoIhMKEUdldEF1dGhVcmxSZXF1ZXN0IjoKEkdldEF1dGhVcmxSZXNwb25zZRIVCg1hdXRob3JpemVfdXJsGAEgASgJEg0KBXN0YXRlGAIgASgJIjIKE0V4Y2hhbmdlQ29kZVJlcXVlc3QSDAoEY29kZRgBIAEoCRINCgVzdGF0ZRgCIAEoCSJkChRFeGNoYW5nZUNvZGVSZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXISFQoNcmVmcmVzaF90b2tlbhgDIAEoCSItChRHZXRBdXRoU3RhdHVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIk4KFUdldEF1dGhTdGF0dXNSZXNwb25zZRIVCg1hdXRoZW50aWNhdGVkGAEgASgIEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXIiLgoVUmVmcmVzaFNlc3Npb25SZXF1ZXN0EhUKDXJlZnJlc2hfdG9rZW4YASABKAkiZgoWUmVmcmVzaFNlc3Npb25SZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXISFQoNcmVmcmVzaF90b2tlbhgDIAEoCSImCg1Mb2dvdXRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiEAoOTG9nb3V0UmVzcG9uc2UiGQoXU3RhcnREZXZpY2VMb2dpblJlcXVlc3QikgEKGFN0YXJ0RGV2aWNlTG9naW5SZXNwb25zZRITCgtkZXZpY2VfY29kZRgBIAEoCRIRCgl1c2VyX2NvZGUYAiABKAkSGAoQdmVyaWZpY2F0aW9uX3VyaRgDIAEoCRIaChJleHBpcmVzX2luX3NlY29uZHMYBCABKAQSGAoQaW50ZXJ2YWxfc2Vjb25kcxgFIAEoBCItChZQb2xsRGV2aWNlTG9naW5SZXF1ZXN0EhMKC2RldmljZV9jb2RlGAEgASgJIqgBChdQb2xsRGV2aWNlTG9naW5SZXNwb25zZRIlCgVzdGF0ZRgBIAEoDjIWLmF1dGguRGV2aWNlTG9naW5TdGF0ZRIYChBpbnRlcnZhbF9zZWNvbmRzGAIgASgEEhUKDXNlc3Npb25fdG9rZW4YAyABKAkSHgoEdXNlchgEIAEoCzIQLmF1dGguR2l0SHViVXNlchIVCg1yZWZyZXNoX3Rva2VuGAUgASgJIjAKF01pbnRMaXZlS2l0VG9rZW5SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiWQoYTWludExpdmVLaXRUb2tlblJlc3BvbnNlEg0KBXRva2VuGAEgASgJEgsKA3VybBgCIAEoCRIMCgRyb29tGAMgASgJEhMKC3R0bF9zZWNvbmRzGAQgASgEIkkKCkdpdEh1YlVzZXISDQoFbG9naW4YASABKAkSEgoKYXZhdGFyX3VybBgCIAEoCRIMCgRuYW1lGAMgASgJEgoKAmlkGAQgASgEKtgBChBEZXZpY2VMb2dpblN0YXRlEiIKHkRFVklDRV9MT0dJTl9TVEFURV9VTlNQRUNJRklFRBAAEh4KGkRFVklDRV9MT0dJTl9TVEFURV9QRU5ESU5HEAESIAocREVWSUNFX0xPR0lOX1NUQVRFX1NMT1dfRE9XThACEh0KGURFVklDRV9MT0dJTl9TVEFURV9ERU5JRUQQAxIeChpERVZJQ0VfTE9HSU5fU1RBVEVfRVhQSVJFRBAEEh8KG0RFVklDRV9MT0dJTl9TVEFURV9DT01QTEVURRAFMoQECgtBdXRoU2VydmljZRI/CgpHZXRBdXRoVXJsEhcuYXV0aC5HZXRBdXRoVXJsUmVxdWVzdBoYLmF1dGguR2V0QXV0aFVybFJlc3BvbnNlEkUKDEV4Y2hhbmdlQ29kZRIZLmF1dGguRXhjaGFuZ2VDb2RlUmVxdWVzdBoaLmF1dGguRXhjaGFuZ2VDb2RlUmVzcG9uc2USSAoNR2V0QXV0aFN0YXR1cxIaLmF1dGguR2V0QXV0aFN0YXR1c1JlcXVlc3QaGy5hdXRoLkdldEF1dGhTdGF0dXNSZXNwb25zZRJLCg5SZWZyZXNoU2Vzc2lvbhIbLmF1dGguUmVmcmVzaFNlc3Npb25SZXF1ZXN0GhwuYXV0aC5SZWZyZXNoU2Vzc2lvblJlc3BvbnNlEjMKBkxvZ291dBITLmF1dGguTG9nb3V0UmVxdWVzdBoULmF1dGguTG9nb3V0UmVzcG9uc2USUQoQU3RhcnREZXZpY2VMb2dpbhIdLmF1dGguU3RhcnREZXZpY2VMb2dpblJlcXVlc3QaHi5hdXRoLlN0YXJ0RGV2aWNlTG9naW5SZXNwb25zZRJOCg9Qb2xsRGV2aWNlTG9naW4SHC5hdXRoLlBvbGxEZXZpY2VMb2dpblJlcXVlc3QaHS5hdXRoLlBvbGxEZXZpY2VMb2dpblJlc3BvbnNlMmgKE0xpdmVLaXRUb2tlblNlcnZpY2USUQoQTWludExpdmVLaXRUb2tlbhIdLmF1dGguTWludExpdmVLaXRUb2tlblJlcXVlc3QaHi5hdXRoLk1pbnRMaXZlS2l0VG9rZW5SZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message auth.GetAuthUrlRequest
@@ -220,6 +220,120 @@ export const LogoutResponseSchema: GenMessage<LogoutResponse> = /*@__PURE__*/
   messageDesc(file_auth, 9);
 
 /**
+ * @generated from message auth.StartDeviceLoginRequest
+ */
+export type StartDeviceLoginRequest = Message<"auth.StartDeviceLoginRequest"> & {
+};
+
+/**
+ * Describes the message auth.StartDeviceLoginRequest.
+ * Use `create(StartDeviceLoginRequestSchema)` to create a new message.
+ */
+export const StartDeviceLoginRequestSchema: GenMessage<StartDeviceLoginRequest> = /*@__PURE__*/
+  messageDesc(file_auth, 10);
+
+/**
+ * @generated from message auth.StartDeviceLoginResponse
+ */
+export type StartDeviceLoginResponse = Message<"auth.StartDeviceLoginResponse"> & {
+  /**
+   * The daemon's half of the exchange. The client sends it back on every poll and never shows it.
+   *
+   * @generated from field: string device_code = 1;
+   */
+  deviceCode: string;
+
+  /**
+   * The operator's half — the short code they type at `verification_uri`.
+   *
+   * @generated from field: string user_code = 2;
+   */
+  userCode: string;
+
+  /**
+   * @generated from field: string verification_uri = 3;
+   */
+  verificationUri: string;
+
+  /**
+   * How long the codes stay valid, and the minimum seconds between polls.
+   *
+   * @generated from field: uint64 expires_in_seconds = 4;
+   */
+  expiresInSeconds: bigint;
+
+  /**
+   * @generated from field: uint64 interval_seconds = 5;
+   */
+  intervalSeconds: bigint;
+};
+
+/**
+ * Describes the message auth.StartDeviceLoginResponse.
+ * Use `create(StartDeviceLoginResponseSchema)` to create a new message.
+ */
+export const StartDeviceLoginResponseSchema: GenMessage<StartDeviceLoginResponse> = /*@__PURE__*/
+  messageDesc(file_auth, 11);
+
+/**
+ * @generated from message auth.PollDeviceLoginRequest
+ */
+export type PollDeviceLoginRequest = Message<"auth.PollDeviceLoginRequest"> & {
+  /**
+   * @generated from field: string device_code = 1;
+   */
+  deviceCode: string;
+};
+
+/**
+ * Describes the message auth.PollDeviceLoginRequest.
+ * Use `create(PollDeviceLoginRequestSchema)` to create a new message.
+ */
+export const PollDeviceLoginRequestSchema: GenMessage<PollDeviceLoginRequest> = /*@__PURE__*/
+  messageDesc(file_auth, 12);
+
+/**
+ * @generated from message auth.PollDeviceLoginResponse
+ */
+export type PollDeviceLoginResponse = Message<"auth.PollDeviceLoginResponse"> & {
+  /**
+   * @generated from field: auth.DeviceLoginState state = 1;
+   */
+  state: DeviceLoginState;
+
+  /**
+   * Set only on SLOW_DOWN — the interval the client must adopt.
+   *
+   * @generated from field: uint64 interval_seconds = 2;
+   */
+  intervalSeconds: bigint;
+
+  /**
+   * All three set only on COMPLETE, and identical in meaning to `ExchangeCodeResponse`.
+   *
+   * @generated from field: string session_token = 3;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: auth.GitHubUser user = 4;
+   */
+  user?: GitHubUser;
+
+  /**
+   * @generated from field: string refresh_token = 5;
+   */
+  refreshToken: string;
+};
+
+/**
+ * Describes the message auth.PollDeviceLoginResponse.
+ * Use `create(PollDeviceLoginResponseSchema)` to create a new message.
+ */
+export const PollDeviceLoginResponseSchema: GenMessage<PollDeviceLoginResponse> = /*@__PURE__*/
+  messageDesc(file_auth, 13);
+
+/**
  * @generated from message auth.MintLiveKitTokenRequest
  */
 export type MintLiveKitTokenRequest = Message<"auth.MintLiveKitTokenRequest"> & {
@@ -237,7 +351,7 @@ export type MintLiveKitTokenRequest = Message<"auth.MintLiveKitTokenRequest"> & 
  * Use `create(MintLiveKitTokenRequestSchema)` to create a new message.
  */
 export const MintLiveKitTokenRequestSchema: GenMessage<MintLiveKitTokenRequest> = /*@__PURE__*/
-  messageDesc(file_auth, 10);
+  messageDesc(file_auth, 14);
 
 /**
  * @generated from message auth.MintLiveKitTokenResponse
@@ -275,7 +389,7 @@ export type MintLiveKitTokenResponse = Message<"auth.MintLiveKitTokenResponse"> 
  * Use `create(MintLiveKitTokenResponseSchema)` to create a new message.
  */
 export const MintLiveKitTokenResponseSchema: GenMessage<MintLiveKitTokenResponse> = /*@__PURE__*/
-  messageDesc(file_auth, 11);
+  messageDesc(file_auth, 15);
 
 /**
  * @generated from message auth.GitHubUser
@@ -307,7 +421,61 @@ export type GitHubUser = Message<"auth.GitHubUser"> & {
  * Use `create(GitHubUserSchema)` to create a new message.
  */
 export const GitHubUserSchema: GenMessage<GitHubUser> = /*@__PURE__*/
-  messageDesc(file_auth, 12);
+  messageDesc(file_auth, 16);
+
+/**
+ * Where one poll left the attempt. The client's next move differs for every state, so they are
+ * distinct values rather than an empty response plus an error string.
+ *
+ * @generated from enum auth.DeviceLoginState
+ */
+export enum DeviceLoginState {
+  /**
+   * @generated from enum value: DEVICE_LOGIN_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Not approved yet. Poll again after the interval.
+   *
+   * @generated from enum value: DEVICE_LOGIN_STATE_PENDING = 1;
+   */
+  PENDING = 1,
+
+  /**
+   * Polled too fast. Adopt `interval_seconds` from the response, then poll again.
+   *
+   * @generated from enum value: DEVICE_LOGIN_STATE_SLOW_DOWN = 2;
+   */
+  SLOW_DOWN = 2,
+
+  /**
+   * The operator refused. The attempt is over.
+   *
+   * @generated from enum value: DEVICE_LOGIN_STATE_DENIED = 3;
+   */
+  DENIED = 3,
+
+  /**
+   * The codes outlived their window. Start a new login.
+   *
+   * @generated from enum value: DEVICE_LOGIN_STATE_EXPIRED = 4;
+   */
+  EXPIRED = 4,
+
+  /**
+   * Approved. The token fields carry the session, in the same shape `ExchangeCode` returns.
+   *
+   * @generated from enum value: DEVICE_LOGIN_STATE_COMPLETE = 5;
+   */
+  COMPLETE = 5,
+}
+
+/**
+ * Describes the enum auth.DeviceLoginState.
+ */
+export const DeviceLoginStateSchema: GenEnum<DeviceLoginState> = /*@__PURE__*/
+  enumDesc(file_auth, 0);
 
 /**
  * @generated from service auth.AuthService
@@ -356,6 +524,29 @@ export const AuthService: GenService<{
     methodKind: "unary";
     input: typeof LogoutRequestSchema;
     output: typeof LogoutResponseSchema;
+  },
+  /**
+   * Begin the OAuth device flow — the sign-in a desktop deployment uses, which needs a public
+   * client id and no client secret. The response is shown to the operator; approval happens in
+   * their browser against GitHub.
+   *
+   * @generated from rpc auth.AuthService.StartDeviceLogin
+   */
+  startDeviceLogin: {
+    methodKind: "unary";
+    input: typeof StartDeviceLoginRequestSchema;
+    output: typeof StartDeviceLoginResponseSchema;
+  },
+  /**
+   * Ask whether the device code has been approved. The client polls this no faster than the
+   * interval it was given, widening it whenever the answer says to.
+   *
+   * @generated from rpc auth.AuthService.PollDeviceLogin
+   */
+  pollDeviceLogin: {
+    methodKind: "unary";
+    input: typeof PollDeviceLoginRequestSchema;
+    output: typeof PollDeviceLoginResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_auth, 0);
