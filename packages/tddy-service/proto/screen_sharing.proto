@@ -1,15 +1,17 @@
 syntax = "proto3";
 package screen_sharing;
 
-// Control-plane service: add/list/remove screen-sharing targets per session,
-// unlock the credential vault, and start/stop the bridge for a target.
+// Control-plane service: add/list/remove a user's screen-sharing targets, and start/stop the
+// bridge for one of them. A target's password is a `screen-sharing` record in the credential store
+// (`#keyring` 3/9), which the caller's own session opens — so NO RPC HERE CARRIES A PASSPHRASE, and
+// none may be added. A second secret, typed by a person and sent over a wire, existed only because
+// the daemon had no other way to know the person was present; after `#keyring` 2/9 and 3/9 it does.
 // Implemented by tddy-daemon and consumed by the browser via HTTP Connect.
 // Supports VNC and RDP protocols via the Protocol enum on each target.
 service ScreenSharingService {
   rpc ListTargets  (ListTargetsRequest)  returns (ListTargetsResponse);
   rpc AddTarget    (AddTargetRequest)    returns (AddTargetResponse);
   rpc RemoveTarget (RemoveTargetRequest) returns (RemoveTargetResponse);
-  rpc UnlockVault  (UnlockVaultRequest)  returns (UnlockVaultResponse);
   rpc StartStream  (StartStreamRequest)  returns (StartStreamResponse);
   rpc StopStream   (StopStreamRequest)   returns (StopStreamResponse);
 
@@ -56,6 +58,13 @@ message ListTargetsRequest {
 
 message ListTargetsResponse {
   repeated ScreenSharingTarget targets = 1;
+  // The store exists and this session's key does not open it — the login credential changed.
+  //
+  // A field rather than an error, and for the same reason `accounts.proto` makes it one: an
+  // open-and-empty store (`targets` empty, `vault_locked` false) and a locked one are different
+  // situations with different remedies, and rendering the second as "no targets" tells the person
+  // to add targets they already have.
+  bool vault_locked = 2;
 }
 
 // --- AddTarget ---
@@ -66,8 +75,8 @@ message AddTargetRequest {
   string   label         = 3;
   string   host          = 4;
   uint32   port          = 5;
-  // Plaintext password; daemon encrypts it with the vault key.
-  // Requires vault to be unlocked (call UnlockVault first).
+  // Plaintext password. The daemon seals it as this target's `screen-sharing` record, under the
+  // key the caller's own session already holds — there is nothing for the caller to unlock first.
   // Leave empty for password-less targets.
   string   password      = 6;
   Protocol protocol      = 7;
@@ -88,20 +97,6 @@ message RemoveTargetRequest {
 }
 
 message RemoveTargetResponse {
-  bool ok = 1;
-}
-
-// --- UnlockVault ---
-
-// Called by the browser when the user enters the passphrase.
-// The derived key is cached in daemon memory for the session lifetime.
-message UnlockVaultRequest {
-  string session_token = 1;
-  string session_id    = 2;
-  string passphrase    = 3;
-}
-
-message UnlockVaultResponse {
   bool ok = 1;
 }
 

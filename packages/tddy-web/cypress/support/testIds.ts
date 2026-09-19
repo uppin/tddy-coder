@@ -629,10 +629,10 @@ export const TEST_IDS = {
   sessionsScreenSharingAddPassword: "sessions-screen-sharing-add-password",
   sessionsScreenSharingAddProtocol: "sessions-screen-sharing-add-protocol",
   sessionsScreenSharingAddSubmit: "sessions-screen-sharing-add-submit",
-  sessionsScreenSharingPassphraseDialog: "sessions-screen-sharing-passphrase-dialog",
-  sessionsScreenSharingPassphraseInput: "sessions-screen-sharing-passphrase-input",
-  sessionsScreenSharingPassphraseConfirm: "sessions-screen-sharing-passphrase-confirm",
-  sessionsScreenSharingPassphraseCancel: "sessions-screen-sharing-passphrase-cancel",
+  /** Shown when the credential store exists and this session's key does not open it. */
+  sessionsScreenSharingVaultLocked: "sessions-screen-sharing-vault-locked",
+  /** Shown when the credential store exists and this session's key does not open it. */
+  sessionsScreenSharingVaultLocked: "sessions-screen-sharing-vault-locked",
 
   // Screen Sharing overlay
   screenSharingOverlay: "screen-sharing-overlay",

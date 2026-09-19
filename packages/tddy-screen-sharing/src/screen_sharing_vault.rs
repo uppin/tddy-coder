@@ -367,12 +367,6 @@ impl ScreenSharingVault {
         ))
     }
 
-    /// Read non-secret target metadata from a vault file without needing the key.
-    pub(crate) fn list_targets_from_file(path: &Path) -> anyhow::Result<Vec<ScreenSharingTarget>> {
-        let data = read_vault_file(path)?;
-        Ok(data.targets.iter().map(encrypted_to_target).collect())
-    }
-
     /// Check whether the passphrase is correct for an existing vault without fully
     /// loading it. Returns `false` if the file does not exist.
     pub fn is_passphrase_valid(path: &Path, passphrase: &str) -> anyhow::Result<bool> {
