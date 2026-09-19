@@ -1,0 +1,21 @@
+[package]
+name = "tddy-credential-sync"
+version = "0.1.0"
+edition = "2021"
+description = "Which peers may hold a credential, what crosses the wire, and how both sides know where they stand"
+
+[lib]
+name = "tddy_credential_sync"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# The records and the vault format this engine reconciles. The **only** tddy dependency, and
+# deliberately so: an engine that could reach `tddy-daemon-livekit` would be written against LiveKit
+# and would repeat the misplaced dependency `heavy-dependency-livekit-peer-forwarding` records.
+tddy-credentials = { path = "../tddy-credentials" }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

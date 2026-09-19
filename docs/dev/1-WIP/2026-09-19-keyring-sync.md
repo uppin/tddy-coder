@@ -124,7 +124,7 @@ Published in this PR's **second commit**:
 ```rust
 pub trait PeerTransport {          // the port; LiveKit implements it
     fn advertise(&self, ad: SignedAdvertisement) -> Result<(), TransportError>;
-    fn peers(&self) -> Vec<PeerAdvertisement>;
+    fn peers(&self) -> Vec<SignedAdvertisement>;   // signature travels with what it signs
     fn send(&self, to: &PeerId, payload: WrappedRecords) -> Result<Ack, TransportError>;
 }
 
@@ -191,7 +191,7 @@ what has not been analyzed.
 
 - [x] **PRD**: [PRD-2026-09-19-keyring-sync.md](../../ft/daemon/1-WIP/PRD-2026-09-19-keyring-sync.md)
 - [x] **Changeset**: this document
-- [ ] **Draft PR contract**: port + engine surface + format change + failing tests (wave 2, commit 2)
+- [x] **Draft PR contract**: port + engine surface + format change + failing tests (wave 2, commit 2)
 - [ ] **Format**: record version and tombstones in `tddy-credentials`
 - [ ] **Journal**: storage, statuses, read-back
 - [ ] **Authorisation**: group secret + Ed25519 signature, both required
@@ -299,6 +299,75 @@ and scoped clippy. LiveKit-backed acceptance tests reuse a running testkit conta
 (`./run-livekit-testkit-server`, `LIVEKIT_TESTKIT_WS_URL`). For `tddy-web`, the single spec under
 change. Whole-workspace green comes from CI via `scripts/ci-status.sh`.
 
+### Measured red state (wave 2)
+
+Scoped to the packages this commit changes, per CLAUDE.md § Verification. Whole-workspace green is
+CI's answer, via `scripts/ci-status.sh`.
+
+| Run | Command | Passed | Failed |
+|---|---|---|---|
+| Baseline, before this commit | `./test -p tddy-credentials -p tddy-daemon-livekit -p tddy-daemon-kernel -p tddy-accounts --no-fail-fast` | 258 | 31 |
+| After this commit | `./test -p tddy-credential-sync -p tddy-credentials -p tddy-daemon-livekit -p tddy-daemon-kernel -p tddy-accounts --no-fail-fast` | 258 | 67 |
+
+The baseline's **31 failures are inherited** — 3 from 2/9's enrolment, ~12 from 3/9's vault bodies, 9
+from 4/9's `AccountsServiceImpl`, 7 from 5/9's `resolve_account` — and they are still exactly 31
+afterwards. This node's delta is **+0 passed and +36 failed**: the 36 tests it adds, every one of
+them red.
+
+| New target | Tests | Passed | Failed |
+|---|---|---|---|
+| `tests/peer_admission_unit.rs` | 10 | 0 | 10 |
+| `tests/reconciliation_unit.rs` | 8 | 0 | 8 |
+| `tests/credential_propagation_acceptance.rs` | 8 | 0 | 8 |
+| `tests/sync_journal_unit.rs` | 5 | 0 | 5 |
+| `tests/wrapped_payload_unit.rs` | 5 | 0 | 5 |
+
+**No vacuous passes**, because nothing passes. That is unusual for a wave-2 commit and it is the
+right outcome here: unlike 5/9, whose `accounts` serde field shipped real and so passed its
+round-trip tests immediately, every behaviour this node pins sits behind a body that does not exist
+yet. The one thing that *did* ship real — `VaultEntry`, `Tombstone` and `CredentialRecord::version`
+in `tddy-credentials` — has no test of its own here; it is exercised through the engine's fixtures,
+and its own serde round-trip belongs with the vault I/O that writes it.
+
+⚠ **22 of the 36 stop in the Given, not at the assertion**, at
+`GroupSecret::proof_for` (`transport.rs:77`) — every test whose fixture builds a peer advertisement,
+which is the whole admission, payload and propagation set. This is named rather than fixed: a peer's
+advertisement genuinely *is* `proof_for`'s output, so handing the fixture opaque bytes instead would
+pin a proof format green would then be obliged to match. The consequence is honest and worth stating
+— until `proof_for` and `verifies` land, those 22 tests prove one thing between them, not 22. The 14
+that do reach their subject are split 8 on `SyncEngine::reconcile` (`engine.rs:168`) and 5 on
+`SyncJournal::note`/`status` (`journal.rs:87`, `:97`), which are the two surfaces reachable without
+an advertisement.
+
+The one fixture deliberately kept off a `todo!()` is the transport key:
+`VaultTransportKey::from_secret` is **real**, so tests take a fixed `[3u8; 32]` rather than dying
+inside `generate()`. Key *generation* is not what any of these tests are about, and green needs that
+constructor anyway for `load_or_generate`.
+
+### Verification scope for this commit
+
+- **Behavioural**, measured above: `tddy-credential-sync` (new), `tddy-credentials`,
+  `tddy-daemon-livekit`, `tddy-daemon-kernel`, `tddy-accounts`.
+- **Mechanical**, compile-checked only. Two surface changes reach beyond the measured set — a new
+  required `version` field on `CredentialRecord`, and a new optional `keyring` field on
+  `DaemonConfig` — so the gate is **`cargo check --all-targets -p …`**, never `cargo build -p …`:
+  `build` compiles neither `#[cfg(test)]` modules nor `tests/*.rs` targets, and on 5/9 it reported
+  success while seven struct literals in test code did not compile. Checked clean across
+  `tddy-host-service`, `tddy-model-registry`, `tddy-daemon`, `tddy-session-lifecycle`, `tddy-spawn`,
+  `tddy-telegram`, `tddy-worktree-service`, `tddy-daemon-auth` — every `DaemonConfig` consumer. They
+  need no edit: `keyring` is `Option` with `#[serde(default)]` and the `Default` impl absorbs it.
+  `CredentialRecord`'s consumers are the three test files listed below, which do.
+- Three existing test files gained `version: FIRST_VERSION` in five builders —
+  `credential_store_acceptance.rs` (3), and `tddy-accounts`' `accounts_service_acceptance.rs` and
+  `account_resolution_acceptance.rs` (1 each). Their failure counts are unchanged, which is the point
+  of checking: the format change added no failures of its own.
+- `./dev cargo clippy --all-targets -p tddy-credential-sync -p tddy-credentials
+  -p tddy-daemon-livekit -p tddy-daemon-kernel -- -D warnings` — **clean**.
+- **Not run, and not claimed**: the LiveKit-backed acceptance tests. `LiveKitPeerTransport` is three
+  `todo!()` bodies, so there is nothing for a testkit container to exercise yet; those tests arrive
+  with the adapter in green. No `tddy-web` spec is touched — the Accounts-screen sync status is
+  milestone M9 and not part of this commit's owned surface.
+
 ## Acceptance Criteria
 
 - [ ] A peer failing **either** check receives nothing, and the journal records the refusal
@@ -316,7 +385,7 @@ change. Whole-workspace green comes from CI via `scripts/ci-status.sh`.
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Publish the draft-PR contract — wave 2
+- [x] Publish the draft-PR contract — wave 2
 - [ ] Ask for `x25519-dalek` (CLAUDE.md § ASK) before M5
 - [ ] M1–M10
 - [ ] Package documentation for the six packages

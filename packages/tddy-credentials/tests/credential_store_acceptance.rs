@@ -12,6 +12,7 @@
 
 use tddy_credentials::{
     AccountId, CredentialRecord, CredentialStore, ProviderId, SecretString, VaultError,
+    FIRST_VERSION,
 };
 
 const THE_OPERATOR: &str = "operator";
@@ -338,6 +339,7 @@ fn a_github_credential() -> CredentialRecord {
         secret: SecretString::new(THE_SECRET),
         metadata: [("scopes".to_string(), THE_METADATA_VALUE.to_string())].into(),
         updated_at: 1_758_240_000,
+        version: FIRST_VERSION,
     }
 }
 
@@ -349,6 +351,7 @@ fn a_second_github_credential() -> CredentialRecord {
         secret: SecretString::new("gho_the_other_one"),
         metadata: Default::default(),
         updated_at: 1_758_240_001,
+        version: FIRST_VERSION,
     }
 }
 
@@ -360,6 +363,7 @@ fn a_cloudflare_credential() -> CredentialRecord {
         secret: SecretString::new("cf_an_api_token"),
         metadata: Default::default(),
         updated_at: 1_758_240_002,
+        version: FIRST_VERSION,
     }
 }
 

@@ -68,7 +68,7 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use crate::kdf::{hkdf_expand, keyed_name, to_hex};
-use crate::record::{AccountId, CredentialRecord, ProviderId};
+use crate::record::{AccountId, CredentialRecord, ProviderId, VaultEntry};
 use crate::secret::{SecretBytes, SecretString};
 use crypto::{
     check_verifier, open, passphrase_kek, random_bytes, random_key, record_aad, seal,
@@ -313,16 +313,23 @@ impl SessionVault {
     }
 
     /// Forget the record for this provider and account. Removing one that is not held is `Ok`.
-    pub fn remove(&self, provider: &ProviderId, account: &AccountId) -> Result<(), VaultError> {
-        let _serialised = serialised();
-        let mut file = self.load()?;
-        let id = self.record_id(provider, account);
-        let before = file.records.len();
-        file.records.retain(|sealed| sealed.id != id);
-        if file.records.len() == before {
-            return Ok(());
-        }
-        write_vault_file(&self.path, &file)
+    ///
+    /// The slot is not emptied — it is replaced by a [`VaultEntry::Tombstone`] carrying the version
+    /// that was removed. An emptied slot is indistinguishable from one this daemon never held, so a
+    /// peer that still has the record would send it straight back and the person's removal would
+    /// undo itself at the next sync (`#keyring` 6/9).
+    pub fn remove(&self, _provider: &ProviderId, _account: &AccountId) -> Result<(), VaultError> {
+        todo!("TODO(keyring 6/9): implement — write the tombstone, replace the file atomically")
+    }
+
+    /// Every slot, deletions included, in the store's own `(provider, account)` order.
+    ///
+    /// Distinct from [`list`](Self::list), and the distinction is the whole reason this exists:
+    /// `list` answers *"what credentials do I have"* and a caller acting on the person's behalf
+    /// must never see a deletion there. Reconciliation asks the other question — *"what has this
+    /// vault decided about each slot"* — and a deletion is one of the answers.
+    pub fn entries(&self) -> Result<Vec<VaultEntry>, VaultError> {
+        todo!("TODO(keyring 6/9): implement — open every slot, tombstones included")
     }
 
     /// Re-read the file and prove this session's data key still opens it.
@@ -405,6 +412,7 @@ struct RecordToSeal<'a> {
     secret: &'a str,
     metadata: &'a BTreeMap<String, String>,
     updated_at: u64,
+    version: u64,
 }
 
 impl<'a> From<&'a CredentialRecord> for RecordToSeal<'a> {
@@ -416,6 +424,7 @@ impl<'a> From<&'a CredentialRecord> for RecordToSeal<'a> {
             secret: record.secret.expose(),
             metadata: &record.metadata,
             updated_at: record.updated_at,
+            version: record.version,
         }
     }
 }
@@ -429,6 +438,7 @@ struct OpenedRecord {
     secret: String,
     metadata: BTreeMap<String, String>,
     updated_at: u64,
+    version: u64,
 }
 
 impl From<OpenedRecord> for CredentialRecord {
@@ -440,6 +450,7 @@ impl From<OpenedRecord> for CredentialRecord {
             secret: SecretString::new(opened.secret),
             metadata: opened.metadata,
             updated_at: opened.updated_at,
+            version: opened.version,
         }
     }
 }
@@ -478,6 +489,7 @@ fn create_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::record::FIRST_VERSION;
 
     const THE_OPERATOR: &str = "operator";
     const THE_PASSPHRASE: &str = "correct horse battery staple";
@@ -494,6 +506,7 @@ mod tests {
             secret: SecretString::new(format!("gho_{account}")),
             metadata: Default::default(),
             updated_at: 1,
+            version: FIRST_VERSION,
         }
     }
 
