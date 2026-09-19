@@ -111,12 +111,51 @@ Real dependency edges:
 |---|---|---|
 | **A** | manual | `move_test_binary_to_crate` — the operation, its refusals, and the `[dev-dependencies]` pass. Hand-written: it is new tooling, and there is no assist behind a cross-crate move |
 | **B** | mechanical | The 123 moves as restructure plans, batched by destination crate. Thirteen plans, one per destination, each verifiable on its own |
-| **C** | manual | Delete the `lib.rs` facade and the four shims; drop the 17 dependencies; add the dev-dependencies each destination now needs (`tddy-testing-commons`, `tddy-session-tool-client`, `tddy-livekit-testkit` and the rest currently sitting in `tddy-daemon`'s `[dev-dependencies]`) |
+| **C** | manual | Delete the `lib.rs` facade and the four shims; **re-point the 16 staying suites that name one** (see below); drop the 16 dependencies; add the dev-dependencies each destination now needs (`tddy-testing-commons`, `tddy-session-tool-client`, `tddy-livekit-testkit` and the rest currently sitting in `tddy-daemon`'s `[dev-dependencies]`) |
 | **D** | manual | Annotate the CRAP backlog entry with the suites' new homes; `README.md` for `tddy-daemon` and `tddy-session-lifecycle` |
 
 Phase B is the node's bulk and is entirely intents. Phase A exists to make Phase B expressible at
 all, which is why they are one node and not two — an operation with no use and a use with no
 operation are the layer split the boundary contract forbids.
+
+## Measurements, as measured
+
+The plan's figures were taken against 139 test binaries on 2026-09-15. Master has moved since —
+`#carve` 1/10, 2/10 and 3/10 merged, and the index-daemon work added suites. Restated from the
+tests themselves on 2026-09-19:
+
+| Quantity | Planned | Measured | Why it moved |
+|---|---|---|---|
+| Test binaries in `tddy-daemon` | 139 | **141** | two suites added on master |
+| Suites that stay | 17 (+ this file) | **21 (+ this file)** | four cannot move — see below |
+| Suites that move | 122 | **119** | 141 − 22 |
+| Runtime dependencies named by no `src/` file | 17 | **16** | one is now named in `src/`; the earlier correction to 17 has itself been overtaken |
+
+### Four suites the plan counted as strays are about `tddy-daemon` itself
+
+- `index_daemon_lifecycle_acceptance.rs` names `tddy_daemon::index_daemon`, which this crate defines.
+- `local_socket_reachability_acceptance.rs` and `unbundle_endpoint.rs` read this package's own `src/`.
+- `unbundle_tools_dependency_dropped.rs` reads this package's own `Cargo.toml`.
+
+The last three cannot move at all: `CARGO_MANIFEST_DIR` would name whichever crate they landed in,
+so each assertion would go on passing while silently being about something else — the same reason
+the discovery gave for leaving `proto_workflow_contracts.rs` in `tddy-workflow-recipes`.
+
+### Phase C also has to re-point the suites that stay
+
+The four shims are `config`, `relay_idle`, `tddy_user_config` and `user_sessions_path`, each a
+two-line `pub use` over the crate that owns it. **16 of the 21 staying suites name one** — 15 name
+`tddy_daemon::config` alone, `local_token_uds.rs` also names `user_sessions_path`, and the three
+relay suites also name `relay_idle`. Deleting the shims without re-pointing those headers turns a
+mechanical relocation into a red `tddy-daemon`, which is not what `## Boundaries` means by leaving
+the 17 alone.
+
+### Two moved suites reach sibling source by string path
+
+`session_chaining_phase2_acceptance.rs` and `telegram_chain_workflow_dispatch_acceptance.rs` read
+`concat!(env!("CARGO_MANIFEST_DIR"), "/../tddy-session-lifecycle/src/telegram_bot.rs")`. The header
+pass rewrites `use` declarations, not string literals, so both need a hand edit once moved —
+recorded here rather than discovered when they fail.
 
 ## TODO
 
