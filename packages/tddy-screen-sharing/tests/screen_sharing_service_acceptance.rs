@@ -1,59 +1,151 @@
-//! Acceptance tests: Screen Sharing control-plane service.
+//! Acceptance tests: the screen-sharing control plane over the credential store.
 //!
 //! PRD: docs/ft/web/screen-sharing-sessions.md (AC-SS-2 through AC-SS-9).
 //!
-//! These tests verify that `ScreenSharingServiceImpl` correctly:
-//!   1. Rejects unauthenticated requests.
-//!   2. Requires vault unlock before operations that need the key.
-//!   3. Accepts the correct passphrase via `UnlockVault` and caches the key.
-//!   4. Adds, lists, and removes targets, preserving the `protocol` field.
-//!   5. Returns generalized `screenshare:`-prefixed coordinates from `StartStream`.
+//! **There is no unlock here, and that is the point.** The service used to make the operator type a
+//! second secret before it would touch a target, because the daemon had no other way to know a
+//! person was present. The session-gated credential store (`#keyring` 3/9) is that other way, so the
+//! passphrase, the RPC that carried it and the vault it opened are gone — and every test below
+//! reaches its targets with nothing but the session token the caller already holds.
 //!
-//! All tests reference `tddy_service::proto::screen_sharing` and
-//! `tddy_screen_sharing::screen_sharing_service` which do not yet exist — they will
-//! fail to compile until the green phase implements the renamed modules.
+//! # What is faked, and what is not
+//!
+//! [`AnInMemoryTargetStore`] fakes **storage only**: it keeps records in a `Vec` instead of a sealed
+//! file. Everything a target's record *is* — which provider it belongs to, which account, what
+//! travels in the metadata — goes through the real [`record_for`] and [`target_from`], because that
+//! mapping is the whole of this node's claim and a fake that reimplemented it would test nothing.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::Mutex;
 
+use tddy_credentials::CredentialRecord;
 use tddy_rpc::{Code, Request};
+use tddy_screen_sharing::screen_sharing_records::{
+    account_for, record_for, screen_sharing_provider, target_from, ScreenSharingTargetStore,
+    TargetError,
+};
 use tddy_screen_sharing::screen_sharing_service::{
     ScreenSharingKeyCache, ScreenSharingServiceImpl,
 };
 use tddy_service::proto::screen_sharing::{
-    AddTargetRequest, ListTargetsRequest, Protocol, ScreenSharingService, StartStreamRequest,
-    UnlockVaultRequest,
+    AddTargetRequest, ListTargetsRequest, Protocol, RemoveTargetRequest, ScreenSharingService,
+    ScreenSharingTarget, StartStreamRequest,
 };
 
 const VALID_TOKEN: &str = "valid-token";
 const SESSION_ID: &str = "ss-test-session-aabbccdd";
-const PASSPHRASE: &str = "hunter2-passphrase";
+const A_DESKTOP_PASSWORD: &str = "the-desktop-password";
+const WRITTEN_AT: u64 = 1_758_240_000;
 
 type SessionsBaseFn = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolverFn = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 // ---------------------------------------------------------------------------
+// The store the service talks to
+// ---------------------------------------------------------------------------
+
+/// A credential store that holds its records in memory.
+///
+/// `locked` stands in for the one thing a real store can be that an empty one is not: present, and
+/// sealed under a login key this session does not have.
+#[derive(Default)]
+struct AnInMemoryTargetStore {
+    records: StdMutex<Vec<CredentialRecord>>,
+    locked: bool,
+}
+
+impl AnInMemoryTargetStore {
+    fn open() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    fn sealed_under_another_login() -> Arc<Self> {
+        Arc::new(Self {
+            records: StdMutex::new(Vec::new()),
+            locked: true,
+        })
+    }
+
+    fn the_records_it_holds(&self) -> Vec<CredentialRecord> {
+        self.records.lock().unwrap().clone()
+    }
+
+    fn admits(&self, session_token: &str) -> Result<(), TargetError> {
+        match (session_token, self.locked) {
+            (VALID_TOKEN, false) => Ok(()),
+            (VALID_TOKEN, true) => Err(TargetError::Locked),
+            _ => Err(TargetError::NoSuchSession),
+        }
+    }
+}
+
+impl ScreenSharingTargetStore for AnInMemoryTargetStore {
+    fn list(&self, session_token: &str) -> Result<Vec<ScreenSharingTarget>, TargetError> {
+        self.admits(session_token)?;
+        self.the_records_it_holds()
+            .iter()
+            .map(target_from)
+            .collect()
+    }
+
+    fn add(
+        &self,
+        session_token: &str,
+        target: &ScreenSharingTarget,
+        password: &str,
+    ) -> Result<ScreenSharingTarget, TargetError> {
+        self.admits(session_token)?;
+
+        let mut stored = target.clone();
+        stored.id = format!("target-{}", self.records.lock().unwrap().len());
+
+        let record = record_for(&stored, password, WRITTEN_AT);
+        self.records.lock().unwrap().push(record);
+
+        Ok(stored)
+    }
+
+    fn remove(&self, session_token: &str, target_id: &str) -> Result<(), TargetError> {
+        self.admits(session_token)?;
+        self.records
+            .lock()
+            .unwrap()
+            .retain(|record| record.account != account_for(target_id));
+        Ok(())
+    }
+
+    fn password_for(&self, session_token: &str, target_id: &str) -> Result<String, TargetError> {
+        self.admits(session_token)?;
+        self.the_records_it_holds()
+            .into_iter()
+            .find(|record| record.account == account_for(target_id))
+            .map(|record| record.secret)
+            .ok_or_else(|| TargetError::Malformed(format!("no target {target_id}")))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn make_service(
+fn a_service_over(
+    store: &Arc<AnInMemoryTargetStore>,
     sessions_dir: &std::path::Path,
-) -> (ScreenSharingServiceImpl, ScreenSharingKeyCache) {
+) -> ScreenSharingServiceImpl {
+    a_service_with_no_store(sessions_dir).with_target_store(Arc::clone(store) as Arc<_>)
+}
+
+fn a_service_with_no_store(sessions_dir: &std::path::Path) -> ScreenSharingServiceImpl {
     let sessions_path = sessions_dir.to_path_buf();
     let sessions_base: SessionsBaseFn = Arc::new(move |_user| Some(sessions_path.clone()));
-    let user_resolver: UserResolverFn = Arc::new(|token| {
-        if token == VALID_TOKEN {
-            Some("testuser".to_string())
-        } else {
-            None
-        }
-    });
+    let user_resolver: UserResolverFn =
+        Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
     let key_cache: ScreenSharingKeyCache = Arc::new(Mutex::new(HashMap::new()));
-    let svc = ScreenSharingServiceImpl::new(user_resolver, sessions_base, Arc::clone(&key_cache));
-    (svc, key_cache)
+
+    ScreenSharingServiceImpl::new(user_resolver, sessions_base, key_cache)
 }
 
 fn session_dir(base: &std::path::Path) -> PathBuf {
@@ -62,255 +154,225 @@ fn session_dir(base: &std::path::Path) -> PathBuf {
     dir
 }
 
-// ---------------------------------------------------------------------------
-// SS-Svc-1: unauthenticated token is rejected
-// ---------------------------------------------------------------------------
-
-/// **invalid_token_is_rejected**: all ScreenSharingService RPCs must return
-/// `UNAUTHENTICATED` when presented with an invalid session token.
-#[tokio::test]
-async fn invalid_token_is_rejected() {
-    // Given
-    let tmp = tempfile::tempdir().unwrap();
-    let (svc, _cache) = make_service(tmp.path());
-
-    // When — list targets with a bad token
-    let err = svc
-        .list_targets(Request::new(ListTargetsRequest {
-            session_token: "bad-token".to_string(),
-            session_id: SESSION_ID.to_string(),
-        }))
-        .await
-        .expect_err("must fail with invalid token");
-
-    // Then
-    assert_eq!(
-        err.code,
-        Code::Unauthenticated,
-        "invalid token must yield Unauthenticated; got {:?}",
-        err.code
-    );
-}
-
-// ---------------------------------------------------------------------------
-// SS-Svc-2: add_target requires vault to be unlocked
-// ---------------------------------------------------------------------------
-
-/// **add_target_before_unlock_is_rejected**: `AddTarget` before unlocking the vault
-/// must return `FAILED_PRECONDITION` (vault locked).
-#[tokio::test]
-async fn add_target_before_unlock_is_rejected() {
-    // Given
-    let tmp = tempfile::tempdir().unwrap();
-    let _session = session_dir(tmp.path());
-    let (svc, _cache) = make_service(tmp.path());
-
-    // When — add a target without first unlocking
-    let err = svc
-        .add_target(Request::new(AddTargetRequest {
-            session_token: VALID_TOKEN.to_string(),
-            session_id: SESSION_ID.to_string(),
-            label: "Test VM".to_string(),
-            host: "192.168.1.1".to_string(),
-            port: 5900,
-            password: "secret".to_string(),
-            protocol: Protocol::Vnc as i32,
-            username: String::new(),
-        }))
-        .await
-        .expect_err("add without unlock must fail");
-
-    // Then
-    assert_eq!(
-        err.code,
-        Code::FailedPrecondition,
-        "locked vault must yield FailedPrecondition; got {:?}",
-        err.code
-    );
-}
-
-// ---------------------------------------------------------------------------
-// SS-Svc-3: unlock → add VNC target → list returns protocol=VNC
-// ---------------------------------------------------------------------------
-
-/// **unlock_then_add_vnc_target_then_list_returns_vnc_protocol**: unlocking the vault,
-/// adding a VNC target, then listing must return the target with `protocol == VNC`.
-#[tokio::test]
-async fn unlock_then_add_vnc_target_then_list_returns_vnc_protocol() {
-    // Given
-    let tmp = tempfile::tempdir().unwrap();
-    let _session = session_dir(tmp.path());
-    let (svc, _cache) = make_service(tmp.path());
-
-    // When — unlock
-    svc.unlock_vault(Request::new(UnlockVaultRequest {
-        session_token: VALID_TOKEN.to_string(),
-        session_id: SESSION_ID.to_string(),
-        passphrase: PASSPHRASE.to_string(),
-    }))
-    .await
-    .expect("unlock must succeed");
-
-    // When — add a VNC target
-    svc.add_target(Request::new(AddTargetRequest {
+fn a_vnc_desktop() -> AddTargetRequest {
+    AddTargetRequest {
         session_token: VALID_TOKEN.to_string(),
         session_id: SESSION_ID.to_string(),
         label: "VNC Dev Box".to_string(),
         host: "10.0.0.5".to_string(),
         port: 5900,
-        password: String::new(),
+        password: A_DESKTOP_PASSWORD.to_string(),
         protocol: Protocol::Vnc as i32,
         username: String::new(),
-    }))
-    .await
-    .expect("add VNC target must succeed");
-
-    // When — list
-    let list_resp = svc
-        .list_targets(Request::new(ListTargetsRequest {
-            session_token: VALID_TOKEN.to_string(),
-            session_id: SESSION_ID.to_string(),
-        }))
-        .await
-        .expect("list must succeed")
-        .into_inner();
-
-    // Then
-    assert_eq!(
-        list_resp.targets.len(),
-        1,
-        "list must contain exactly one target"
-    );
-    assert_eq!(
-        list_resp.targets[0].protocol,
-        Protocol::Vnc as i32,
-        "VNC target must have protocol=VNC; got {}",
-        list_resp.targets[0].protocol
-    );
-    assert_eq!(list_resp.targets[0].label, "VNC Dev Box");
+    }
 }
 
-// ---------------------------------------------------------------------------
-// SS-Svc-4: unlock → add RDP target → list returns protocol=RDP
-// ---------------------------------------------------------------------------
-
-/// **unlock_then_add_rdp_target_then_list_returns_rdp_protocol**: unlocking the vault,
-/// adding an RDP target, then listing must return the target with `protocol == RDP`.
-#[tokio::test]
-async fn unlock_then_add_rdp_target_then_list_returns_rdp_protocol() {
-    // Given
-    let tmp = tempfile::tempdir().unwrap();
-    let _session = session_dir(tmp.path());
-    let (svc, _cache) = make_service(tmp.path());
-
-    // When — unlock
-    svc.unlock_vault(Request::new(UnlockVaultRequest {
-        session_token: VALID_TOKEN.to_string(),
-        session_id: SESSION_ID.to_string(),
-        passphrase: PASSPHRASE.to_string(),
-    }))
-    .await
-    .expect("unlock must succeed");
-
-    // When — add an RDP target
-    svc.add_target(Request::new(AddTargetRequest {
+fn an_rdp_desktop() -> AddTargetRequest {
+    AddTargetRequest {
         session_token: VALID_TOKEN.to_string(),
         session_id: SESSION_ID.to_string(),
         label: "Windows Dev Box".to_string(),
         host: "10.0.0.10".to_string(),
         port: 3389,
-        password: String::new(),
+        password: A_DESKTOP_PASSWORD.to_string(),
         protocol: Protocol::Rdp as i32,
         username: "tester".to_string(),
-    }))
-    .await
-    .expect("add RDP target must succeed");
+    }
+}
 
-    // When — list
-    let list_resp = svc
-        .list_targets(Request::new(ListTargetsRequest {
-            session_token: VALID_TOKEN.to_string(),
-            session_id: SESSION_ID.to_string(),
-        }))
-        .await
-        .expect("list must succeed")
-        .into_inner();
-
-    // Then
-    assert_eq!(
-        list_resp.targets.len(),
-        1,
-        "list must contain exactly one target"
-    );
-    assert_eq!(
-        list_resp.targets[0].protocol,
-        Protocol::Rdp as i32,
-        "RDP target must have protocol=RDP; got {}",
-        list_resp.targets[0].protocol
-    );
-    assert_eq!(list_resp.targets[0].label, "Windows Dev Box");
+fn a_listing_for(token: &str) -> ListTargetsRequest {
+    ListTargetsRequest {
+        session_token: token.to_string(),
+        session_id: SESSION_ID.to_string(),
+    }
 }
 
 // ---------------------------------------------------------------------------
-// SS-Svc-5: wrong passphrase is rejected by unlock
+// AC-SS-2: a token that names no session reaches no targets
 // ---------------------------------------------------------------------------
 
-/// **wrong_passphrase_is_rejected_by_unlock**: `UnlockVault` with an incorrect
-/// passphrase (after a vault already exists) must return `UNAUTHENTICATED`.
 #[tokio::test]
-async fn wrong_passphrase_is_rejected_by_unlock() {
-    // Given — create the vault with the correct passphrase first
+async fn a_token_naming_no_session_reaches_no_targets() {
+    // Given a store holding a desktop
+    let tmp = tempfile::tempdir().unwrap();
+    let store = AnInMemoryTargetStore::open();
+    let svc = a_service_over(&store, tmp.path());
+
+    // When a stranger lists
+    let refusal = svc
+        .list_targets(Request::new(a_listing_for("bad-token")))
+        .await
+        .expect_err("a token naming no session must be refused");
+
+    // Then
+    assert_eq!(refusal.code, Code::Unauthenticated);
+}
+
+// ---------------------------------------------------------------------------
+// AC-SS-3: a target's password is a credential record
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_desktops_password_is_retained_as_a_screen_sharing_credential() {
+    // Given a session with a credential store
     let tmp = tempfile::tempdir().unwrap();
     let _session = session_dir(tmp.path());
-    let (svc, _cache) = make_service(tmp.path());
+    let store = AnInMemoryTargetStore::open();
+    let svc = a_service_over(&store, tmp.path());
 
-    svc.unlock_vault(Request::new(UnlockVaultRequest {
-        session_token: VALID_TOKEN.to_string(),
-        session_id: SESSION_ID.to_string(),
-        passphrase: PASSPHRASE.to_string(),
-    }))
-    .await
-    .expect("initial unlock must succeed");
-
-    // Re-create the service to reset the key cache (simulate a new session start)
-    let (svc2, _cache2) = make_service(tmp.path());
-
-    // When — try unlocking with wrong passphrase
-    let err = svc2
-        .unlock_vault(Request::new(UnlockVaultRequest {
-            session_token: VALID_TOKEN.to_string(),
-            session_id: SESSION_ID.to_string(),
-            passphrase: "wrong-passphrase".to_string(),
-        }))
+    // When a desktop is added, with no unlock and no second secret
+    svc.add_target(Request::new(a_vnc_desktop()))
         .await
-        .expect_err("wrong passphrase must fail");
+        .expect("adding a desktop must succeed");
 
-    // Then
-    assert_eq!(
-        err.code,
-        Code::Unauthenticated,
-        "wrong passphrase must yield Unauthenticated; got {:?}",
-        err.code
-    );
+    // Then the password is a record of the `screen-sharing` provider — the same store a GitHub
+    // token lives in, reached through the same session key
+    let records = store.the_records_it_holds();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].provider, screen_sharing_provider());
+    assert_eq!(records[0].secret, A_DESKTOP_PASSWORD);
 }
 
 // ---------------------------------------------------------------------------
-// SS-Svc-6: start_stream returns screenshare-prefixed track name and identity
+// AC-SS-4: a desktop survives the session that added it
 // ---------------------------------------------------------------------------
 
-/// **start_stream_returns_screenshare_prefixed_track_and_identity**: `StartStream`
-/// for an added target must return `track_name` starting with `"screenshare:"` and
-/// `bridge_identity` starting with `"screenshare-"`.
 #[tokio::test]
-async fn start_stream_returns_screenshare_prefixed_track_and_identity() {
+async fn a_desktop_added_in_one_session_is_listed_by_the_next() {
+    // Given a desktop added through one service instance
+    let tmp = tempfile::tempdir().unwrap();
+    let _session = session_dir(tmp.path());
+    let store = AnInMemoryTargetStore::open();
+    a_service_over(&store, tmp.path())
+        .add_target(Request::new(an_rdp_desktop()))
+        .await
+        .expect("adding a desktop must succeed");
+
+    // When a later session lists — no unlock in between, because the store is opened by the login
+    let listing = a_service_over(&store, tmp.path())
+        .list_targets(Request::new(a_listing_for(VALID_TOKEN)))
+        .await
+        .expect("listing must succeed")
+        .into_inner();
+
+    // Then the desktop comes back whole, protocol included
+    assert_eq!(listing.targets.len(), 1);
+    assert_eq!(listing.targets[0].label, "Windows Dev Box");
+    assert_eq!(listing.targets[0].host, "10.0.0.10");
+    assert_eq!(listing.targets[0].port, 3389);
+    assert_eq!(listing.targets[0].protocol, Protocol::Rdp as i32);
+    assert_eq!(listing.targets[0].username, "tester");
+}
+
+#[tokio::test]
+async fn a_vnc_desktop_is_listed_as_vnc() {
+    // Given a VNC desktop
+    let tmp = tempfile::tempdir().unwrap();
+    let _session = session_dir(tmp.path());
+    let store = AnInMemoryTargetStore::open();
+    let svc = a_service_over(&store, tmp.path());
+    svc.add_target(Request::new(a_vnc_desktop()))
+        .await
+        .expect("adding a desktop must succeed");
+
+    // When it is listed
+    let listing = svc
+        .list_targets(Request::new(a_listing_for(VALID_TOKEN)))
+        .await
+        .expect("listing must succeed")
+        .into_inner();
+
+    // Then the protocol survives the round trip through the record
+    assert_eq!(listing.targets.len(), 1);
+    assert_eq!(listing.targets[0].protocol, Protocol::Vnc as i32);
+}
+
+#[tokio::test]
+async fn a_removed_desktop_is_no_longer_a_credential() {
+    // Given a stored desktop
+    let tmp = tempfile::tempdir().unwrap();
+    let _session = session_dir(tmp.path());
+    let store = AnInMemoryTargetStore::open();
+    let svc = a_service_over(&store, tmp.path());
+    let added = svc
+        .add_target(Request::new(a_vnc_desktop()))
+        .await
+        .expect("adding a desktop must succeed")
+        .into_inner()
+        .target
+        .expect("an added desktop comes back");
+
+    // When it is removed
+    svc.remove_target(Request::new(RemoveTargetRequest {
+        session_token: VALID_TOKEN.to_string(),
+        session_id: SESSION_ID.to_string(),
+        target_id: added.id,
+    }))
+    .await
+    .expect("removing a desktop must succeed");
+
+    // Then its password is gone with it
+    assert_eq!(store.the_records_it_holds(), vec![]);
+}
+
+// ---------------------------------------------------------------------------
+// AC-SS-5: a sealed store is reported as sealed, never as "no desktops"
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_store_sealed_under_another_login_is_reported_as_locked() {
+    // Given a store this session's key does not open
+    let tmp = tempfile::tempdir().unwrap();
+    let store = AnInMemoryTargetStore::sealed_under_another_login();
+    let svc = a_service_over(&store, tmp.path());
+
+    // When the desktops are listed
+    let listing = svc
+        .list_targets(Request::new(a_listing_for(VALID_TOKEN)))
+        .await
+        .expect("a sealed store is a state to render, not a refusal")
+        .into_inner();
+
+    // Then the screen is told the store is locked rather than empty — the second reading would tell
+    // the operator to re-add desktops they already have
+    assert!(listing.vault_locked);
+    assert_eq!(listing.targets, vec![]);
+}
+
+// ---------------------------------------------------------------------------
+// AC-SS-6: with no store wired there is nowhere to put a password
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_desktop_cannot_be_added_with_no_credential_store_wired() {
+    // Given a service with no store
+    let tmp = tempfile::tempdir().unwrap();
+    let _session = session_dir(tmp.path());
+    let svc = a_service_with_no_store(tmp.path());
+
+    // When a desktop is added
+    let refusal = svc
+        .add_target(Request::new(a_vnc_desktop()))
+        .await
+        .expect_err("a password with nowhere to go must not be accepted");
+
+    // Then it is refused rather than kept somewhere else — there is no second place for a secret
+    assert_eq!(refusal.code, Code::FailedPrecondition);
+}
+
+// ---------------------------------------------------------------------------
+// AC-SS-9: opening a desktop is unchanged, and needs no unlock
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn opening_a_desktop_returns_the_coordinates_a_viewer_needs() {
     use tddy_core::session_metadata::{
         write_initial_tool_session_metadata, InitialToolSessionMetadataOpts,
     };
 
+    // Given a session holding a desktop
     let tmp = tempfile::tempdir().unwrap();
     let session_dir_path = session_dir(tmp.path());
-
-    // Write a minimal .session.yaml so the service can find the livekit_room.
     write_initial_tool_session_metadata(
         &session_dir_path,
         InitialToolSessionMetadataOpts {
@@ -321,58 +383,29 @@ async fn start_stream_returns_screenshare_prefixed_track_and_identity() {
     )
     .expect("session metadata must write");
 
-    let (svc, _cache) = make_service(tmp.path());
-
-    // Unlock the vault first
-    svc.unlock_vault(Request::new(UnlockVaultRequest {
-        session_token: VALID_TOKEN.to_string(),
-        session_id: SESSION_ID.to_string(),
-        passphrase: PASSPHRASE.to_string(),
-    }))
-    .await
-    .expect("unlock must succeed");
-
-    // Add a target (password-less VNC for simplicity)
-    let target = svc
-        .add_target(Request::new(AddTargetRequest {
-            session_token: VALID_TOKEN.to_string(),
-            session_id: SESSION_ID.to_string(),
-            label: "Test VM".to_string(),
-            host: "127.0.0.1".to_string(),
-            port: 5900,
-            password: String::new(),
-            protocol: Protocol::Vnc as i32,
-            username: String::new(),
-        }))
+    let store = AnInMemoryTargetStore::open();
+    let svc = a_service_over(&store, tmp.path());
+    let added = svc
+        .add_target(Request::new(a_vnc_desktop()))
         .await
-        .expect("add must succeed")
-        .into_inner();
-    let target_id = target.target.expect("must have target").id;
+        .expect("adding a desktop must succeed")
+        .into_inner()
+        .target
+        .expect("an added desktop comes back");
 
-    // When — start stream
-    let resp = svc
+    // When it is opened — with no unlock, because the store needs none
+    let opened = svc
         .start_stream(Request::new(StartStreamRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
-            target_id: target_id.clone(),
+            target_id: added.id,
         }))
         .await
-        .expect("start_stream must succeed")
+        .expect("opening a desktop must succeed")
         .into_inner();
 
-    // Then — generalized screenshare: prefix (not vnc: or rdp:)
-    assert!(
-        resp.track_name.starts_with("screenshare:"),
-        "track_name must start with 'screenshare:'; got '{}'",
-        resp.track_name
-    );
-    assert!(
-        resp.bridge_identity.starts_with("screenshare-"),
-        "bridge_identity must start with 'screenshare-'; got '{}'",
-        resp.bridge_identity
-    );
-    assert!(
-        !resp.livekit_room.is_empty(),
-        "livekit_room must be non-empty"
-    );
+    // Then the viewer gets the same coordinates it always did
+    assert_eq!(opened.livekit_room, "room-ss-test");
+    assert!(opened.track_name.starts_with("screenshare:"));
+    assert!(opened.bridge_identity.starts_with("screenshare-"));
 }

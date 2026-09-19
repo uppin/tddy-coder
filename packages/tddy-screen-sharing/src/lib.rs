@@ -24,11 +24,16 @@
 //! their tests. The deletion rides with this node rather than getting its own because this is the
 //! only node whose reviewer is already reading the live screen-sharing service beside it.
 
+pub mod screen_sharing_records;
 pub mod screen_sharing_service;
 pub mod screen_sharing_vault;
 
 use std::sync::Arc;
 
+pub use screen_sharing_records::{
+    account_for, record_for, screen_sharing_provider, target_from, ScreenSharingTargetStore,
+    TargetError, META_HOST, META_PORT, META_PROTOCOL, META_USERNAME, SCREEN_SHARING_PROVIDER,
+};
 pub use screen_sharing_service::{ScreenSharingKeyCache, ScreenSharingServiceImpl, SessionsBase};
 pub use screen_sharing_vault::{
     vault_path, DerivedKey, ScreenSharingTarget, ScreenSharingVault, VAULT_FILENAME,

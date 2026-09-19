@@ -566,11 +566,6 @@ export function SessionInspectorDrawer({
                   .removeTarget({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, targetId })
                   .then(() => undefined)
               }
-              onUnlockVault={(passphrase) =>
-                screenSharingClient
-                  .unlockVault({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, passphrase })
-                  .then(() => undefined)
-              }
               onStartStream={(targetId) =>
                 screenSharingClient
                   .startStream({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, targetId })
