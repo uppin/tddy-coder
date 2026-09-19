@@ -65,6 +65,33 @@ and no facade it could ever leave behind.
 
 This PR goes on to implement all of it. **It must not merge in that state.**
 
+### Boundary departure: this node fixes `module_home`, with consent
+
+The `1/10` row above says this PR does **not** touch `module_home` / `unrunnable_moves`. It now
+touches `module_home`, and the developer authorised that on 2026-09-19 after the alternative was
+put to them.
+
+`defining_crate` could not resolve either facade in this workspace, so the header pass did nothing
+at all. Executing the real plans moved 31 suites that each kept `use tddy_daemon::…` and each gave
+its new crate a `tddy-daemon` `[dev-dependency]` — a leaf crate depending back on the daemon, and a
+test that compiles while naming the wrong crate. That is the precise failure the operation exists to
+prevent, so the node cannot deliver its `## Responsibility` without the fix. All 31 moves were
+reverted.
+
+Two defects, both in `module_home.rs`:
+
+1. `re_export_target` matches within a single line, and both facades are multi-line braced groups.
+   `pub use tddy_session_lifecycle::{` carries no member to match, so the walk stopped on hop zero.
+2. `defining_module_in_crate` reads only `<crate>/src/lib.rs`, so a `pub mod config;` whose
+   `src/config.rs` is itself `pub use tddy_daemon_kernel::config::*;` reads as locally defined. The
+   same shape holds for the other three shims this node deletes.
+
+Node `1/10` has merged, so there is no parent branch left to carry the fix. The alternative —
+re-implementing facade resolution inside this PR's `defining_home` — is what the `## Dependencies`
+row exists to forbid, and would leave module moves broken for the nodes above. Reviewers of `5/10`
+through `10/10` should know this function changed under them; every existing `module_home` test is
+kept green for that reason.
+
 ## Green wave
 
 **Wave:** 3 of 5
