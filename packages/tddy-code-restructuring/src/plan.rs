@@ -123,6 +123,19 @@ impl RefactorKind {
     /// The two cross-crate moves differ only in how many modules travel, so every decision taken
     /// about one — the destination it must name, the facade it may leave, the preconditions read
     /// before a server is spawned — is taken about both.
+    ///
+    /// [`RefactorKind::MoveTestBinaryToCrate`] crosses a crate boundary too and is still **not**
+    /// one of these, because this predicate does not mean "crosses a boundary" — it means "moves a
+    /// *module*", and every caller reads it that way. Each of the three refusals it gates is
+    /// already made for a test binary, earlier and in words about a test binary; and the fourth
+    /// caller, [`unrunnable_moves`](crate::unrunnable_moves), reads each anchor as
+    /// `<crate>/src/<module>.rs` to find the `mod` line it is about. A test binary has no `mod`
+    /// line anywhere and does not live under `src/`, so admitting it here would report every
+    /// well-formed test-binary move as an operation that cannot run.
+    ///
+    /// TODO(carve-test-homes): give `check` a static preflight for a test-binary move of its own —
+    /// the anchor's shape and both crates' manifests are all readable before a server is spawned,
+    /// so `apply`'s refusals are reachable statically the way a module move's are.
     #[must_use]
     pub fn moves_across_crates(self) -> bool {
         matches!(

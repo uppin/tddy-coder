@@ -84,6 +84,12 @@ impl Rehearsal {
     /// member's alone would name a fraction of the blast radius as the whole of it. The rehearsal
     /// still resolves the operation, so a cluster's refusals are reported exactly as a single
     /// move's are; what `check --deep` withholds is the survey line, not a verdict.
+    ///
+    /// `move_test_binary_to_crate` is not surveyed for a different reason: its blast radius is
+    /// empty by construction. Cargo builds each `tests/*.rs` as its own crate root, so no `use`
+    /// path anywhere in the workspace can name one, and a survey of it would report zero items
+    /// reached and zero callers — a line that says only that the operation is the one it is. Its
+    /// refusals reach the report the same way a cluster's do, through the resolution.
     fn survey(
         &self,
         root: &Path,
