@@ -9,6 +9,10 @@ name = "tddy_daemon_livekit"
 path = "src/lib.rs"
 
 [dependencies]
+# `PeerTransport`, implemented here. The direction is the point: the engine that decides who may
+# hold a credential knows nothing about LiveKit, and this crate implements its port — the same shape
+# `KeyDirectory` takes for `#keyring` 1/9.
+tddy-credential-sync = { path = "../tddy-credential-sync" }
 anyhow = "1"
 async-trait = "0.1"
 futures-util = "0.3"

@@ -38,7 +38,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::record::{AccountId, CredentialRecord, ProviderId};
+use crate::record::{AccountId, CredentialRecord, ProviderId, VaultEntry};
 
 /// Why a vault operation did not happen.
 ///
@@ -157,8 +157,23 @@ impl SessionVault {
     }
 
     /// Forget the record for this provider and account. Removing one that is not held is `Ok`.
+    ///
+    /// The slot is not emptied — it is replaced by a [`VaultEntry::Tombstone`] carrying the version
+    /// that was removed. An emptied slot is indistinguishable from one this daemon never held, so a
+    /// peer that still has the record would send it straight back and the person's removal would
+    /// undo itself at the next sync (`#keyring` 6/9).
     pub fn remove(&self, _provider: &ProviderId, _account: &AccountId) -> Result<(), VaultError> {
-        todo!("TODO(keyring 3/9): implement — drop the record, replace the file atomically")
+        todo!("TODO(keyring 3/9): implement — write the tombstone, replace the file atomically")
+    }
+
+    /// Every slot, deletions included, in the store's own `(provider, account)` order.
+    ///
+    /// Distinct from [`list`](Self::list), and the distinction is the whole reason this exists:
+    /// `list` answers *"what credentials do I have"* and a caller acting on the person's behalf
+    /// must never see a deletion there. Reconciliation asks the other question — *"what has this
+    /// vault decided about each slot"* — and a deletion is one of the answers.
+    pub fn entries(&self) -> Result<Vec<VaultEntry>, VaultError> {
+        todo!("TODO(keyring 6/9): implement — open every slot, tombstones included")
     }
 
     /// Re-wrap the data key under a key derived from `ikm`, with a fresh salt.

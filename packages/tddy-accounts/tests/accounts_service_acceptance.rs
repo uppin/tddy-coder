@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use pretty_assertions::assert_eq;
 use prost::Message;
 use tddy_accounts::{build_accounts_entry, AccountStore, AccountsError, AccountsServiceImpl};
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, FIRST_VERSION};
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::accounts::{
     AccountsService, ListAccountsRequest, ListAccountsResponse, RemoveAccountRequest,
@@ -35,6 +35,7 @@ fn a_credential(provider: &str, account: &str, label: &str) -> CredentialRecord 
         secret: format!("shhh-{provider}-{account}"),
         metadata,
         updated_at: 1_726_700_000,
+        version: FIRST_VERSION,
     }
 }
 

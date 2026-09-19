@@ -12062,6 +12062,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-credential-sync"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tddy-credentials",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tddy-credentials"
 version = "0.1.0"
 dependencies = [
@@ -12218,6 +12229,7 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tddy-core",
+ "tddy-credential-sync",
  "tddy-daemon-kernel",
  "tddy-daemon-sandbox",
  "tddy-host-service",
