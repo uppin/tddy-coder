@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use base64::Engine;
 
-use tddy_github::provider::{GitHubOAuthProvider, GitHubUser};
+use tddy_github::provider::{DeviceLoginPoll, DeviceLoginStart, GitHubOAuthProvider, GitHubUser};
 use tddy_github::token_store::GitHubTokenStore;
 use tddy_github::{
     AuthServiceImpl, KeyId, RealGitHubProvider, SessionClaims, SessionTokenAuthority,
@@ -102,6 +102,14 @@ impl GitHubOAuthProvider for ProviderWithARealCredential {
                 name: "Operator".to_string(),
             },
         ))
+    }
+
+    async fn start_device_login(&self) -> Result<DeviceLoginStart, String> {
+        unimplemented!("this fake authenticates by code exchange, never by device code")
+    }
+
+    async fn poll_device_login(&self, _device_code: &str) -> Result<DeviceLoginPoll, String> {
+        unimplemented!("this fake authenticates by code exchange, never by device code")
     }
 
     fn issues_usable_access_token(&self) -> bool {

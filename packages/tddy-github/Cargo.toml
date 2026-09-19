@@ -26,8 +26,13 @@ tokio = { version = "1", features = ["sync"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+# A local stand-in for GitHub. The device flow and `exchange_code` are pure HTTP conversations, and
+# nothing about their error handling is reachable while the hostnames are literals inside the
+# request builders. Dev-only, and already this workspace's HTTP server in five other crates.
+axum = "0.8"
 prost = "0.13"
 serial_test = "3"
-tokio = { version = "1", features = ["rt", "macros"] }
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }

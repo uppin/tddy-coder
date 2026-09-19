@@ -11,6 +11,13 @@ service AuthService {
   // to keep the session alive without re-login; an expired or non-refresh token is rejected.
   rpc RefreshSession(RefreshSessionRequest) returns (RefreshSessionResponse);
   rpc Logout(LogoutRequest) returns (LogoutResponse);
+  // Begin the OAuth device flow — the sign-in a desktop deployment uses, which needs a public
+  // client id and no client secret. The response is shown to the operator; approval happens in
+  // their browser against GitHub.
+  rpc StartDeviceLogin(StartDeviceLoginRequest) returns (StartDeviceLoginResponse);
+  // Ask whether the device code has been approved. The client polls this no faster than the
+  // interval it was given, widening it whenever the answer says to.
+  rpc PollDeviceLogin(PollDeviceLoginRequest) returns (PollDeviceLoginResponse);
 }
 
 message GetAuthUrlRequest {}
@@ -55,6 +62,48 @@ message LogoutRequest {
   string session_token = 1;
 }
 message LogoutResponse {}
+
+message StartDeviceLoginRequest {}
+message StartDeviceLoginResponse {
+  // The daemon's half of the exchange. The client sends it back on every poll and never shows it.
+  string device_code = 1;
+  // The operator's half — the short code they type at `verification_uri`.
+  string user_code = 2;
+  string verification_uri = 3;
+  // How long the codes stay valid, and the minimum seconds between polls.
+  uint64 expires_in_seconds = 4;
+  uint64 interval_seconds = 5;
+}
+
+message PollDeviceLoginRequest {
+  string device_code = 1;
+}
+
+// Where one poll left the attempt. The client's next move differs for every state, so they are
+// distinct values rather than an empty response plus an error string.
+enum DeviceLoginState {
+  DEVICE_LOGIN_STATE_UNSPECIFIED = 0;
+  // Not approved yet. Poll again after the interval.
+  DEVICE_LOGIN_STATE_PENDING = 1;
+  // Polled too fast. Adopt `interval_seconds` from the response, then poll again.
+  DEVICE_LOGIN_STATE_SLOW_DOWN = 2;
+  // The operator refused. The attempt is over.
+  DEVICE_LOGIN_STATE_DENIED = 3;
+  // The codes outlived their window. Start a new login.
+  DEVICE_LOGIN_STATE_EXPIRED = 4;
+  // Approved. The token fields carry the session, in the same shape `ExchangeCode` returns.
+  DEVICE_LOGIN_STATE_COMPLETE = 5;
+}
+
+message PollDeviceLoginResponse {
+  DeviceLoginState state = 1;
+  // Set only on SLOW_DOWN — the interval the client must adopt.
+  uint64 interval_seconds = 2;
+  // All three set only on COMPLETE, and identical in meaning to `ExchangeCodeResponse`.
+  string session_token = 3;
+  GitHubUser user = 4;
+  string refresh_token = 5;
+}
 
 // Mint a LiveKit room JWT for an already-authenticated caller.
 //
