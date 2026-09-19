@@ -6,8 +6,10 @@
 
 use crate::tdd::plan_task::PlanTask;
 use std::sync::Arc;
-use tddy_core::backend::{CodingBackend, GoalId, WorkflowRecipe};
+use tddy_core::backend::CodingBackend;
 use tddy_core::workflow::graph::{Graph, GraphBuilder};
+use tddy_core::workflow::ids::GoalId;
+use tddy_core::workflow::recipe::WorkflowRecipe;
 use tddy_core::workflow::task::{BackendInvokeTask, EndTask};
 
 /// Bumped to **2** when interview→plan handoff relay and `before_plan` merge are fully implemented.

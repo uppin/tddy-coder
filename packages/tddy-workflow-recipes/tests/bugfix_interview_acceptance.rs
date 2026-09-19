@@ -5,10 +5,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tddy_core::backend::{GoalHints, PermissionHint, StubBackend};
+use tddy_core::backend::StubBackend;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::recipe::WorkflowRecipe;
+use tddy_core::workflow::recipe::{GoalHints, PermissionHint};
 use tddy_core::GoalId;
 use tddy_workflow_recipes::bugfix::interview as bugfix_interview;
 use tddy_workflow_recipes::bugfix::{BugfixRecipe, BugfixWorkflowHooks};

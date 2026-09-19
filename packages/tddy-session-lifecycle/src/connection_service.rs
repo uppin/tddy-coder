@@ -269,7 +269,7 @@ async fn spawn_claude_cli_session_inner(
     permission_mode: &str,
     dangerously_skip_permissions: bool,
     stack_parent: stack_parent::SpawnStackParent<'_>,
-    managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+    managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
     child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
     // When true, index the worktree into the session dir before launch (blocking; aborts the start
@@ -700,12 +700,12 @@ pub(crate) struct ManagedLaunch {
 fn prepare_managed_workflow_inner(
     tddy_data_dir: &Path,
     session_id: &str,
-    recipe: Arc<dyn tddy_core::backend::WorkflowRecipe>,
+    recipe: Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>,
     session_dir: &Path,
     worktree_path: &Path,
     prompt_dir: &Path,
     tddy_tools_path: &str,
-    resume_at: Option<tddy_core::backend::GoalId>,
+    resume_at: Option<tddy_core::workflow::ids::GoalId>,
     child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
 ) -> Result<ManagedLaunch, Status> {

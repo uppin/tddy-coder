@@ -10,13 +10,13 @@
 //! through the presenter's tool-call loop *concurrently* with this blocking invoke, so nothing
 //! extra is needed here for them.
 
+use crate::workflow::ids::GoalId;
+use crate::workflow::recipe::WorkflowRecipe;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::Arc;
 
-use crate::backend::{
-    CodingBackend, GoalId, InvokeRequest, SessionMode, SharedBackend, WorkflowRecipe,
-};
+use crate::backend::{CodingBackend, InvokeRequest, SessionMode, SharedBackend};
 use crate::presenter::{WorkflowCompletePayload, WorkflowEvent};
 use crate::workflow::controller::WorkflowController;
 
