@@ -139,11 +139,72 @@ move. Everything else is an intent.
     still re-exports the workflow vocabulary, `changeset.rs` is not split, and `Presenter` still
     holds 37 fields rather than seven.
 - [x] Failing unit/integration tests — the same suite; three of this node's four claims are about *structure*, which the type system cannot observe once the code compiles (a cycle between two modules of one crate compiles perfectly well — that is why `tddy-core` has six)
-- [ ] Implement production code making tests pass (`/green`)
-- [ ] File the `backend/`-extraction todo
+- [x] Implement production code making tests pass (`/green`) — **7/7 shape tests green**
+- [x] File the `backend/`-extraction todo
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — correct the title, ready for review
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
+
+## What green actually did
+
+Three things the plan did not anticipate. Each is recorded here rather than absorbed silently.
+
+### 1. AC3 and `## Boundaries` could not both hold — the facade was retired
+
+`## Responsibility` says "retire `backend/mod.rs:230-231`'s re-export facade" and AC3 asserts it.
+`## Boundaries` says "does not edit any consumer crate". **25 files outside `tddy-core`** (14 in
+`tddy-workflow-recipes`, 10 in `tddy-session-lifecycle`, 1 integration test) import the recipe trio
+through `tddy_core::backend::`, so retiring the facade necessarily edits them.
+
+Put to the developer, who chose **retire it and re-point the 25 files**. Retiring the facade *is*
+the removal of a path consumers use; a renamed facade would satisfy the assertion's string while
+leaving the misdirection AC3 exists to remove. The edits are one-line import changes; `backend`
+still *uses* `GoalId`/`GoalHints` privately.
+
+The boundary as written was reachable only for the **moves**, where glob facades genuinely cost no
+consumer a diff — not for the facade retirement.
+
+### 2. `ProgressEvent` had to move too
+
+The plan lists five DTO groups. `WorkflowEvent` carries a `ProgressEvent`, which lived in
+`stream/mod.rs`, and a destination crate cannot reach back into the crate it left — so
+`ProgressEvent` moved with it, as a sixth. `tddy-workflow` gains `serde` for the same reason.
+
+### 3. Phases A and C were mechanical in the plan and manual in fact
+
+Both restructuring operations this node was sequenced around refused. Written up as standing
+records under `packages/tddy-code-restructuring/docs/code-issues/`:
+
+| Phase | Planned | What happened |
+|---|---|---|
+| **A** | `extract_module --to_file` × 4 | [`restructure anchors` resolves no item at all](../../../packages/tddy-code-restructuring/docs/code-issues/broken-restructure-anchors-empty-outline.md) — warm path returns an empty outline in 3–89 ms, cold path exits with `lsp server exited`. Split by hand. |
+| **C** | `move_module_to_crate` × 3 | [refuses whenever any file left behind names the module](../../../packages/tddy-code-restructuring/docs/code-issues/refusal-move-module-to-crate-any-caller-left-behind.md) — 19 findings over 4 moves. That is every caller of a shared DTO, which is the operation's whole purpose. `git mv` + hand-written glob facade. |
+
+A prerequisite the plan missed either way: `extract_module`'s anchor is a **single range over
+contiguous items**, and not one seam here was contiguous — `Stack` sat at 41–274 *and* 841–937, the
+question DTOs at 508–528 with their `default_allow_other` helper stranded at 484. Making the items
+contiguous is itself a hand move no operation expresses, so Phase A was never four operations.
+
+This is the third stack to plan around `move_module_to_crate` and the second to fall back to
+`git mv` (`#unbundle` node 2 moved 0 of ~24).
+
+### 4. Two published draft-contract types were fabricated
+
+`state_groups.rs` shipped `tokio::sync::mpsc` where the presenter uses `std::sync::mpsc`, and
+`PendingToolCallResponse::Ask(mpsc::Sender<String>)` / `Approve(mpsc::Sender<bool>)` where the real
+shape is `Ask(oneshot::Sender<ToolCallResponse>)` / `Approve(oneshot::Sender<ToolCallResponse>)`.
+As published the contract could not have compiled against the presenter. **Field and type names are
+unchanged**; the two types were corrected to reality.
+
+**`#carve` 9/11 (PR #495) should re-check against the corrected `state_groups.rs`** — the variant
+payloads in particular are not a mechanical substitution.
+
+### Phase E: measured, not done
+
+`presenter_impl.rs` is **1,691 production lines** after Phase D. Splitting its 46 methods is
+`#carve` 9/11's responsibility and this node's `## Boundaries` forbid it, so Phase E is a no-op
+here rather than an omission. `changeset/` is well inside budget: model 313, stack 345, merge 274,
+io 69, parent 17.
 
 ## Verification
 
