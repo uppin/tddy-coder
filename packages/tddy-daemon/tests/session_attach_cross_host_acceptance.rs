@@ -25,12 +25,10 @@ use futures_util::{Stream, StreamExt};
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
-use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered, TEST_TOKEN};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::session::{
@@ -43,6 +41,8 @@ use tddy_service::proto::session_files::{
     UploadStagedAttachmentChunkRequest,
 };
 use tddy_service::proto::types::HostDocumentScope;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered, TEST_TOKEN};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -337,9 +337,12 @@ async fn stage_on_local(env: &TwoDaemons, file_name: &str, data: &[u8]) -> PathB
         .await
         .expect("staging on the local daemon must succeed");
     let os_user = std::env::var("USER").expect("USER required");
-    tddy_session_files::session_attachment_staging::staging_root_for(&os_user, &env.local_staging_base)
-        .join(STAGING_ID)
-        .join(file_name)
+    tddy_session_files::session_attachment_staging::staging_root_for(
+        &os_user,
+        &env.local_staging_base,
+    )
+    .join(STAGING_ID)
+    .join(file_name)
 }
 
 fn peer_staged_document_request(relative_path: &str) -> ReadHostDocumentRequest {
@@ -412,10 +415,12 @@ async fn a_forwarded_rpc_reaches_a_peer_serving_under_its_daemon_prefixed_identi
 
     // Then — the bytes are on the peer's staging root
     let os_user = std::env::var("USER").unwrap();
-    let peer_staged =
-        tddy_session_files::session_attachment_staging::staging_root_for(&os_user, &env.peer_staging_base)
-            .join(STAGING_ID)
-            .join("reached.md");
+    let peer_staged = tddy_session_files::session_attachment_staging::staging_root_for(
+        &os_user,
+        &env.peer_staging_base,
+    )
+    .join(STAGING_ID)
+    .join("reached.md");
     assert!(
         peer_staged.exists(),
         "the forwarded upload must land on the peer at {peer_staged:?}"

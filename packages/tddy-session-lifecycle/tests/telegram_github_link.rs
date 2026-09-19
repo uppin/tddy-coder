@@ -3,13 +3,15 @@
 //! Integration tests for Telegram ↔ GitHub binding and OS-user resolution.
 
 use tddy_daemon_kernel::config::{DaemonConfig, UserMapping};
+use tddy_github::{GitHubUser, StubGitHubProvider};
+use tddy_session_lifecycle::telegram_notifier::InMemoryTelegramSender;
+use tddy_session_lifecycle::telegram_session_control::{
+    StartWorkflowCommand, TelegramSessionControlHarness,
+};
 use tddy_telegram::telegram_github_link::{
     complete_telegram_link_via_stub_exchange, resolved_os_user_for_telegram_workflow,
     TelegramGithubMappingStore, TelegramOAuthStateSigner,
 };
-use tddy_session_lifecycle::telegram_notifier::InMemoryTelegramSender;
-use tddy_session_lifecycle::telegram_session_control::{StartWorkflowCommand, TelegramSessionControlHarness};
-use tddy_github::{GitHubUser, StubGitHubProvider};
 
 const AUTHORIZED_CHAT: i64 = 424_242;
 

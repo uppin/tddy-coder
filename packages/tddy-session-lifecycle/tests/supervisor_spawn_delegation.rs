@@ -17,15 +17,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_host_service::multi_host::{EligibleDaemonSource, LocalOnlyEligibleDaemonSource};
-use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
+use tddy_host_service::multi_host::{EligibleDaemonSource, LocalOnlyEligibleDaemonSource};
 use tddy_rpc::Request;
 use tddy_service::proto::project::{
     AddProjectToHostRequest, ProjectService as ProjectServiceTrait,
 };
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_spawn::spawner::{self, LiveKitCreds, SpawnOptions};
 use tddy_spawn::supervisor_client::{spawn_worker_for, SpawnBackendChoice};
 use tddy_spawn::supervisor_spawn;

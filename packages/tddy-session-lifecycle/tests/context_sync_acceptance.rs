@@ -19,10 +19,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use pretty_assertions::assert_eq;
-use tddy_session_files::context_sync::{ContextSource, ContextSyncer};
-use tddy_session_lifecycle::split_session::build_split_context_dir;
 use tddy_rpc::Status;
 use tddy_sandbox::{ContextEntry, ContextManifest};
+use tddy_session_files::context_sync::{ContextSource, ContextSyncer};
+use tddy_session_lifecycle::split_session::build_split_context_dir;
 
 // ---------------------------------------------------------------------------
 // Fixtures

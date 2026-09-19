@@ -11,14 +11,14 @@
 //! authorization that runs before any lookup, the absence of a room at all, and the framing.
 
 use pretty_assertions::assert_eq;
-use tddy_session_lifecycle::connection_service::activity_delta_frames;
-use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_daemon_livekit::session_room::ActivityDelta;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::activity::{
     ActivityService as _, AgentActivityDeltaChunk, AgentActivityDeltaRequest, DeltaScope,
 };
+use tddy_session_lifecycle::connection_service::activity_delta_frames;
+use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 
 const A_SESSION: &str = "1780828020298-delta";
 const A_CALL: &str = "0199c7a4-6c2c-7c9a-9d1e-3f0a1b2c3d4e";

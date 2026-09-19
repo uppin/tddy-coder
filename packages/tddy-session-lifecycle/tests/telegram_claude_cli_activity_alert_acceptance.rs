@@ -11,14 +11,14 @@ use std::sync::Arc;
 
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_rpc::Request;
+use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::telegram_notifier::{InMemoryTelegramSender, TelegramSessionWatcher};
 use tddy_session_lifecycle::telegram_session_subscriber::TelegramDaemonHooks;
 use tddy_telegram::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
-use tddy_rpc::Request;
-use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

@@ -27,14 +27,14 @@ use std::sync::Arc;
 
 use tddy_core::changeset::Changeset;
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
 use tddy_service::proto::pr_stack::{
     BranchBaseSync, BranchResolution, PrStackService, QueryBranchRequest,
 };
+use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
 const ORCHESTRATOR: &str = "orchestrator-1";
@@ -138,7 +138,10 @@ fn a_config(stub_github: bool) -> (tddy_daemon_kernel::config::DaemonConfig, tem
         format!("users:\n  - github_user: \"u\"\n    os_user: \"u\"\n{github}"),
     )
     .unwrap();
-    (tddy_daemon_kernel::config::DaemonConfig::load(&path).unwrap(), dir)
+    (
+        tddy_daemon_kernel::config::DaemonConfig::load(&path).unwrap(),
+        dir,
+    )
 }
 
 /// A service rooted at `sessions_base`, holding **no** GitHub token store — the deployment state

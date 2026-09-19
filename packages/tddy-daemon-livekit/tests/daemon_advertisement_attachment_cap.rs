@@ -8,7 +8,9 @@
 //! RPC — the web already parses that metadata into a `DaemonHost`. Mirrors how `repos_base_path` is
 //! advertised, including staying optional so an older daemon's advertisement still parses.
 
-use tddy_daemon_livekit::livekit_peer_discovery::{parse_daemon_advertisement_json, DaemonAdvertisement};
+use tddy_daemon_livekit::livekit_peer_discovery::{
+    parse_daemon_advertisement_json, DaemonAdvertisement,
+};
 
 const SIXTY_FOUR_MIB: u64 = 64 * 1024 * 1024;
 

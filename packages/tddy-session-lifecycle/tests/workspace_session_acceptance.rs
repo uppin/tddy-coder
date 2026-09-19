@@ -9,13 +9,13 @@ use std::sync::Arc;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::read_session_metadata;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_service::proto::session::{
     ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::TestDaemon;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

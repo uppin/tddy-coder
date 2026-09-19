@@ -30,12 +30,7 @@ use std::time::{Duration, Instant};
 
 use hyper_util::rt::TokioIo;
 use tddy_daemon::config::DaemonConfig;
-use tddy_session_lifecycle::host_tonic_adapter::HostServiceTonicAdapter;
 use tddy_daemon::local_socket_server::{serve_connection_uds, LocalSocketServices};
-use tddy_session_lifecycle::local_token_tonic_adapter::{LocalTokenUdsTonicAdapter, UidToUsername};
-use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
-use tddy_session_lifecycle::user_sessions_path::username_for_uid;
-use tddy_session_lifecycle::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_daemon_livekit::{build_livekit_service, RoomRoster, RosterError};
 use tddy_github::{SessionTokenSigner, TokenKind};
@@ -60,6 +55,11 @@ use tddy_service::proto::worktree::{
 };
 use tddy_service::tonic_host::host_service_client::HostServiceClient;
 use tddy_service::tonic_worktree::worktree_service_client::WorktreeServiceClient;
+use tddy_session_lifecycle::host_tonic_adapter::HostServiceTonicAdapter;
+use tddy_session_lifecycle::local_token_tonic_adapter::{LocalTokenUdsTonicAdapter, UidToUsername};
+use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
+use tddy_session_lifecycle::user_sessions_path::username_for_uid;
+use tddy_session_lifecycle::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
 use tddy_terminal_rpc::proto::terminal_session::{
     ClaimTerminalControlRequest, SessionTerminalInput, TerminalSessionServiceTonicAdapter,
 };

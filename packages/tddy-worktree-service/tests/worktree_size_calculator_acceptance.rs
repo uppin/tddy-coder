@@ -17,7 +17,9 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-use tddy_worktree_service::worktrees::{WorktreeSizeCalculator, WorktreeSizeStatus, WorktreeSizeUpdate};
+use tddy_worktree_service::worktrees::{
+    WorktreeSizeCalculator, WorktreeSizeStatus, WorktreeSizeUpdate,
+};
 
 const PROJECT: &str = "proj-disk-usage";
 

@@ -20,8 +20,8 @@ use std::sync::{Arc, Mutex};
 use tddy_core::changeset::{BranchWorktreeIntent, Changeset};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon_kernel::config::{ClaudeCliConfig, DaemonConfig};
+use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::telegram_notifier::InMemoryTelegramSender;
 use tddy_session_lifecycle::telegram_session_control::{
     collect_outbound_messages, parse_telegram_branch_conflict_callback, CapturedTelegramMessage,

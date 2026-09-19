@@ -33,18 +33,18 @@ use std::time::Duration;
 use serial_test::serial;
 use tddy_core::session_agent::SessionAgentRecord;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
-use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered};
 use tddy_github::{GitHubUser, SessionTokenSigner};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{ResumeSessionRequest, SessionService as SessionServiceTrait};
+use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered};
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_argv};
 use tddy_testing_commons::wait::eventually_blocking;
 

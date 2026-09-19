@@ -33,15 +33,15 @@ use std::sync::Arc;
 
 use tddy_core::changeset::{Changeset, Stack, StackNode};
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::pr_stack::{
     BranchResolution, PrStackService, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
     ReorderPlannedPrRequest, ReorderPlannedPrResponse,
 };
+use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::TestDaemon;
 
 const ORCHESTRATOR: &str = "orchestrator-1";
 /// A child PR session of the same stack: a `tdd` recipe, not an orchestrator. The session a stale or

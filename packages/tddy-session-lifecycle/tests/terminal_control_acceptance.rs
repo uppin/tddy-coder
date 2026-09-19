@@ -11,10 +11,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tddy_session_lifecycle::claude_cli_session::{ClaimOutcome, ClaudeCliSessionManager};
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_rpc::{Code, Request};
+use tddy_session_lifecycle::claude_cli_session::{ClaimOutcome, ClaudeCliSessionManager};
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     ClaimTerminalControlRequest, SessionTerminalInput, StreamReplayMode,
     TerminalSessionService as TerminalSessionServiceTrait, WatchTerminalControlRequest,

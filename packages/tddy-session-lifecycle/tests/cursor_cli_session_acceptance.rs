@@ -4,19 +4,19 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
-use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_rpc::{Code, Request, Response, Status};
+use tddy_service::proto::session::{
+    ListSessionsRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+    StartSessionResponse,
+};
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::connection_service::{
     SeedCodebase, SeededAgentClones, SeededCloneGuard, SpawnStackParent, StackBaseLookup,
     StackNodeLink, StackParentHost,
 };
 use tddy_session_lifecycle::cursor_cli_spawn::spawn_cursor_cli_session_inner;
-use tddy_rpc::{Code, Request, Response, Status};
-use tddy_service::proto::session::{
-    ListSessionsRequest, SessionService as SessionServiceTrait, StartSessionRequest,
-    StartSessionResponse,
-};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

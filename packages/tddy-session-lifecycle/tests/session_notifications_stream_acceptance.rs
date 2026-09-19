@@ -19,15 +19,15 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::{DaemonConfig, UserMapping};
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::session_notification_subscribers::SessionNotificationStreamSubscriber;
-use tddy_session_lifecycle::session_notifications::SessionNotificationBus;
 use tddy_rpc::Request;
 use tddy_service::proto::activity::{
     ActivityService, ReportSessionStatusRequest, SessionNotificationEvent,
     SessionNotificationKind as ProtoSessionNotificationKind,
     SessionNotificationSource as ProtoSessionNotificationSource, StreamSessionNotificationsRequest,
 };
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::session_notification_subscribers::SessionNotificationStreamSubscriber;
+use tddy_session_lifecycle::session_notifications::SessionNotificationBus;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

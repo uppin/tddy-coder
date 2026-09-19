@@ -34,8 +34,6 @@ use std::time::Duration;
 use prost::Message as _;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_daemon_sandbox::sandbox_session::{
     build_sandbox_runner_env, dial_and_bridge, pick_free_loopback_port, spawn_sandbox_runner,
     SandboxRunnerSpawn,
@@ -48,6 +46,8 @@ use tddy_service::proto::session_agents_svc::{
     PromptAgentConversationRequest, SessionAgentRoster, SessionAgentService as _,
     StreamSessionAgentsRequest,
 };
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tokio::sync::{broadcast, mpsc};
 
 /// The coordinate an in-jail agent addresses family B at. Spelled out, not imported — see the

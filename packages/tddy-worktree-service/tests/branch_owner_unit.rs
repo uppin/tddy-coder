@@ -10,9 +10,9 @@ use std::path::Path;
 
 use tddy_core::changeset::Changeset;
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_worktree_service::branch_owner::find_session_owning_branch;
 use tddy_session_lifecycle::session_reader::DaemonSessionListing;
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
+use tddy_worktree_service::branch_owner::find_session_owning_branch;
 
 const BRANCH: &str = "feat/auth";
 const FIRST_SESSION: &str = "019d6392-3cff-0001-aaaa-000000000001";

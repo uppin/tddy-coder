@@ -15,9 +15,9 @@ use std::sync::Arc;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{ResumeSessionRequest, SessionService as SessionServiceTrait};
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_testing_commons::builders::a_session_metadata;
 use tddy_testing_commons::fs::write_session_yaml;
 

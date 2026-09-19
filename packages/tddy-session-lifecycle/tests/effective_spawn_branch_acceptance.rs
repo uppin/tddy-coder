@@ -18,7 +18,9 @@
 //! PRD: docs/ft/coder/pr-stack-live-status.md (C1, D2, D3, D34).
 
 use tddy_core::changeset::{write_changeset, Changeset};
-use tddy_session_lifecycle::connection_service::{effective_spawn_branch, spawned_branch_of_session};
+use tddy_session_lifecycle::connection_service::{
+    effective_spawn_branch, spawned_branch_of_session,
+};
 
 #[test]
 fn a_new_branch_spawn_is_keyed_on_the_branch_it_creates() {

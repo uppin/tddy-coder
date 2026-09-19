@@ -27,13 +27,13 @@ use tddy_testing_commons::stub_scripts::{
 };
 use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 
-use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{
     ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

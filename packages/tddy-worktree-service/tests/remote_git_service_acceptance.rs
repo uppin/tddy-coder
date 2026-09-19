@@ -16,12 +16,12 @@ use pretty_assertions::assert_eq;
 use rstest::rstest;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_projects::project_storage::{write_projects, ProjectData};
+use tddy_rpc::Code;
+use tddy_service::proto::remote_git::{GitClientFrame, GitOpen};
 use tddy_worktree_service::remote_git_service::{
     open_from_first_frame, resolve_git_verb, resolve_project_repo, AuthorizedGitRequest, GitVerb,
     ProjectsDirResolver, RemoteGitServiceImpl, UserResolver,
 };
-use tddy_rpc::Code;
-use tddy_service::proto::remote_git::{GitClientFrame, GitOpen};
 
 const VALID_TOKEN: &str = "valid-token";
 const GITHUB_USER: &str = "testuser";

@@ -15,8 +15,8 @@ use std::sync::{Arc, Mutex};
 use tddy_core::changeset::read_changeset;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon_kernel::config::{ClaudeCliConfig, DaemonConfig};
+use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::telegram_notifier::InMemoryTelegramSender;
 
 mod common;

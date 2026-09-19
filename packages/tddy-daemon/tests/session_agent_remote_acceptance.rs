@@ -23,9 +23,6 @@ use tddy_connectrpc::connect_router;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_worktree_service::remote_git_service::{ProjectsDirResolver, RemoteGitServiceImpl};
-use tddy_session_lifecycle::test_util::{TestDaemon, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, MultiRpcService, Request, RpcBridge, RpcService, ServiceEntry};
@@ -42,6 +39,9 @@ use tddy_service::proto::session_agents_svc::{
 use tddy_service::{
     LiveKitTokenServiceServer, RemoteGitServiceServer, SessionAdmissionServiceServer,
 };
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::{TestDaemon, TEST_TOKEN};
+use tddy_worktree_service::remote_git_service::{ProjectsDirResolver, RemoteGitServiceImpl};
 
 const ROOM: &str = "agent-roster-common-room";
 const DAEMON_B: &str = "agent-roster-daemon-b";
@@ -286,9 +286,12 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         // whole reason that helper exists.
         let service_arc = Arc::new(service);
         service_arc.install_sandbox_rpc_bridge();
-        let run =
-            tddy_session_lifecycle::test_util::serve_daemon_rpc_participant(&ws_url, &token, &service_arc)
-                .await;
+        let run = tddy_session_lifecycle::test_util::serve_daemon_rpc_participant(
+            &ws_url,
+            &token,
+            &service_arc,
+        )
+        .await;
 
         running_peers.push(PeerDaemon {
             instance_id: instance_id.to_string(),
@@ -422,7 +425,8 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     ]);
     let instance_id_a =
         tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config(&config_a);
-    let rpc_identity_a = tddy_daemon_livekit::livekit_peer_discovery::daemon_rpc_identity(&instance_id_a);
+    let rpc_identity_a =
+        tddy_daemon_livekit::livekit_peer_discovery::daemon_rpc_identity(&instance_id_a);
     let rpc_token_a = livekit
         .generate_token(ROOM, &rpc_identity_a)
         .expect("A RPC participant token");

@@ -41,3 +41,6 @@ serial_test = "3"
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
+axum = "0.8"
+tddy-connectrpc = { path = "../tddy-connectrpc" }
+tddy-github = { path = "../tddy-github" }

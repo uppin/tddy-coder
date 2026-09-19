@@ -2,16 +2,16 @@
 //!
 //! Grounded in PRD Testing Plan — outbound keyboards + recommended metadata wiring.
 
-use tddy_session_lifecycle::telegram_notifier::{
-    InMemoryTelegramSender, InlineKeyboardRows, TelegramSessionWatcher,
-};
-use tddy_session_lifecycle::telegram_session_control::parse_elicitation_multi_select_shortcut;
 use tddy_service::gen::app_mode_proto::Variant;
 use tddy_service::gen::server_message::Event;
 use tddy_service::gen::{
     AppModeMultiSelect, AppModeProto, ClarificationQuestionProto, ModeChanged, QuestionOptionProto,
     ServerMessage,
 };
+use tddy_session_lifecycle::telegram_notifier::{
+    InMemoryTelegramSender, InlineKeyboardRows, TelegramSessionWatcher,
+};
+use tddy_session_lifecycle::telegram_session_control::parse_elicitation_multi_select_shortcut;
 
 const AUTHORIZED_CHAT: i64 = 424_242;
 
@@ -134,7 +134,9 @@ fn telegram_choose_none_submits_empty_multi_via_presenter() {
     let sid = "01900000-0000-7000-8000-0000000000aa";
 
     // When / Then
-    let cb = tddy_session_lifecycle::telegram_multi_select_shortcuts::compose_choose_none_callback(sid, 0);
+    let cb = tddy_session_lifecycle::telegram_multi_select_shortcuts::compose_choose_none_callback(
+        sid, 0,
+    );
     assert!(
         parse_elicitation_multi_select_shortcut(&cb).is_some(),
         "`eli:mn:` payloads must parse so GREEN can invoke answer_clarification_multi_select_localhost with empty indices; cb={cb:?}"

@@ -12,10 +12,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use tddy_session_lifecycle::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID};
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_rpc::{Code, Request};
+use tddy_session_lifecycle::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID};
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 mod common;
 use common::{a_capture_showing, PTY_STUB_OUTPUT};

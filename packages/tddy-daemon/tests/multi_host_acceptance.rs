@@ -11,8 +11,6 @@ use std::time::Duration;
 use livekit::prelude::RoomOptions;
 use serial_test::serial;
 use tddy_daemon::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request};
@@ -20,6 +18,8 @@ use tddy_service::proto::session::{
     DeleteSessionRequest, ListSessionsRequest, SessionService as SessionServiceTrait,
     StartSessionRequest,
 };
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 use tddy_testing_commons::a_session_metadata;
 
 const REMOTE_ACCEPTANCE_ROOM: &str = "acceptance-common-room";

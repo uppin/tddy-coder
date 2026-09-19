@@ -13,11 +13,11 @@ use std::sync::Arc;
 use tddy_core::changeset::{GithubPrStatus, Stack, StackNode};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::{write_changeset, Changeset};
-use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

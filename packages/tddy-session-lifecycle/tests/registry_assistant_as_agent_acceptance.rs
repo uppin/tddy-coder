@@ -11,14 +11,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_model_registry::{ModelRegistryStore, NewAssistant, NewProvider};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest, SubagentInfo};
 use tddy_service::proto::models::ProviderKind;
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::TestDaemon;
 
 // ---------------------------------------------------------------------------
 // Fixtures

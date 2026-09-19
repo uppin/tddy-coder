@@ -1,9 +1,9 @@
 //! Integration-style tests: `ListSessions` returns enriched workflow fields from on-disk fixtures.
 
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
 use tddy_service::proto::session::{ListSessionsRequest, SessionService as SessionServiceTrait};
+use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
 #[tokio::test]

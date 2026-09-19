@@ -15,14 +15,14 @@ use std::sync::Arc;
 
 use tddy_core::changeset::{read_changeset, Changeset};
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
 use tddy_service::proto::session::{
     SessionService as SessionServiceTrait, StartSessionRequest, StartSessionResponse,
 };
+use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
 const VALID_TOKEN: &str = "valid-token";

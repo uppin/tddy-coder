@@ -21,19 +21,19 @@ use std::sync::Arc;
 use pretty_assertions::assert_eq;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::{SessionAgentRecord, SessionMetadata};
-use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
-use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
+use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::session_agents_svc::{
     AttachSessionAgentRequest, CancelAgentConversationRequest, DetachSessionAgentRequest,
     ListSessionAgentsRequest, OpenAgentConversationRequest, PromptAgentConversationRequest,
     SessionAgentService as _, StreamSessionAgentsRequest,
 };
+use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
 /// This daemon: where the agent's loop runs.
 const AGENT_HOST: &str = "agent-host";

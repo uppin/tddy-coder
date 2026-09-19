@@ -18,15 +18,15 @@ use std::sync::Arc;
 
 use prost::Message as _;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_session_lifecycle::connection_service::PeerRoutedSessionFiles;
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
-use tddy_session_lifecycle::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_rpc::{Code, RpcMessage, RpcResult, RpcService, Status};
 use tddy_service::proto::session_files::{
     DeleteStagedAttachmentRequest, ListSessionWorkflowFilesRequest,
     ListSessionWorkflowFilesResponse, ListStagedAttachmentsRequest, ListStagedAttachmentsResponse,
     UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
 };
+use tddy_session_lifecycle::connection_service::PeerRoutedSessionFiles;
+use tddy_session_lifecycle::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
 /// The generated server the daemon's entry wraps around its routing surface — the thing that

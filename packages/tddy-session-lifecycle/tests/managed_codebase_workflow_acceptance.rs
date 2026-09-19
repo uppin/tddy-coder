@@ -13,10 +13,10 @@ use std::sync::Arc;
 
 use tddy_core::changeset::read_changeset;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_rpc::{Code, Request};
+use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 mod common;
 use common::{a_capture_showing, PTY_STUB_OUTPUT};

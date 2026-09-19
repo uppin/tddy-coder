@@ -20,7 +20,6 @@ use futures_util::StreamExt;
 use pretty_assertions::assert_eq;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
-use tddy_session_lifecycle::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 use tddy_service::proto::session_agents_svc::{
@@ -28,6 +27,7 @@ use tddy_service::proto::session_agents_svc::{
     ReportAgentCloneStateRequest, SessionAgentRoster, SessionAgentService as _,
     StreamSessionAgentsRequest,
 };
+use tddy_session_lifecycle::test_util::{test_service, TestDaemon, TEST_TOKEN};
 
 /// `AgentCloneState::READY`, as the proto numbers it.
 const CLONE_STATE_READY: i32 = 3;

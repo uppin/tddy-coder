@@ -13,13 +13,13 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use pretty_assertions::assert_eq;
+use tddy_rpc::Code;
+use tddy_service::proto::remote_git::GitServerFrame;
 use tddy_session_lifecycle::pty_runtime::ResolvedPtyUser;
 use tddy_worktree_service::remote_git_service::{
     git_argv, git_argv_as_user, git_child_command, GitChildRelay, GitStreamSlots, GitVerb,
     GIT_FRAME_CHANNEL_CAPACITY, MAX_GIT_FRAME_BYTES,
 };
-use tddy_rpc::Code;
-use tddy_service::proto::remote_git::GitServerFrame;
 use tokio::sync::mpsc::Receiver;
 
 /// Everything a completed relay emitted, reassembled in arrival order.

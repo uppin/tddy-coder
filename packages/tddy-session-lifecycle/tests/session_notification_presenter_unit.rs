@@ -11,13 +11,13 @@
 //! Telegram through `telegram_notifier`'s keyboard-bearing surface. These events exist to move a
 //! dot, not to send a message.
 
-use tddy_session_lifecycle::session_notifications::{
-    notification_for_presenter_event, SessionNotificationKind, SessionNotificationSource,
-};
 use tddy_service::gen::server_message::Event;
 use tddy_service::gen::{
     app_mode_proto, AppModeProto, AppModeRunning, AppModeSelect, BackendSelected, GoalStarted,
     ModeChanged, ServerMessage, StateChanged,
+};
+use tddy_session_lifecycle::session_notifications::{
+    notification_for_presenter_event, SessionNotificationKind, SessionNotificationSource,
 };
 
 const SESSION_ID: &str = "01900000-0000-7000-8000-AABB00000001";

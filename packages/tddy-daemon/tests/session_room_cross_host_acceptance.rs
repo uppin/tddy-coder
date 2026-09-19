@@ -23,13 +23,11 @@ use prost::Message;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
-use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon_livekit::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
-use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered};
 use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
@@ -37,6 +35,8 @@ use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered};
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_env};
 use tddy_testing_commons::wait::eventually_awaiting;
 

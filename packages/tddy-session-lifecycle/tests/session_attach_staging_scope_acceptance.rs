@@ -27,8 +27,6 @@ use std::time::Duration;
 use futures_util::{Stream, StreamExt};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_files::host_documents::MAX_HOST_DOCUMENT_BYTES;
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::session::{
@@ -41,6 +39,8 @@ use tddy_service::proto::session_files::{
     UploadStagedAttachmentChunkRequest,
 };
 use tddy_service::proto::types::HostDocumentScope;
+use tddy_session_files::host_documents::MAX_HOST_DOCUMENT_BYTES;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -298,10 +298,12 @@ async fn staged_files_land_under_the_temp_staging_root_and_never_under_the_data_
     stage_complete_file(&fixture.service, STAGING_ID_A, "spec.md", b"# spec").await;
 
     // Then — it is under the staging base, byte-for-byte
-    let staged =
-        tddy_session_files::session_attachment_staging::staging_root_for(&os_user, &fixture.staging_base)
-            .join(STAGING_ID_A)
-            .join("spec.md");
+    let staged = tddy_session_files::session_attachment_staging::staging_root_for(
+        &os_user,
+        &fixture.staging_base,
+    )
+    .join(STAGING_ID_A)
+    .join("spec.md");
     assert!(staged.exists(), "staged file must be at {staged:?}");
     assert_eq!(std::fs::read(&staged).unwrap(), b"# spec");
 

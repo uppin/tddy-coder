@@ -14,10 +14,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use tddy_session_lifecycle::claude_cli_session::{ClaudeCliSessionManager, PtyHandle};
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
+use tddy_session_lifecycle::claude_cli_session::{ClaudeCliSessionManager, PtyHandle};
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_terminal_rpc::proto::terminal_session::{
     StreamReplayMode, StreamTerminalOutputRequest,
     TerminalSessionService as TerminalSessionServiceTrait,

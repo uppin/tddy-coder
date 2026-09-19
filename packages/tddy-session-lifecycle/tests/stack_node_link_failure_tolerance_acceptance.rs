@@ -14,10 +14,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use tddy_rpc::Status;
 use tddy_session_lifecycle::connection_service::{
     SpawnStackParent, StackBaseLookup, StackNodeLink, StackParentHost,
 };
-use tddy_rpc::Status;
 
 const ORCHESTRATOR: &str = "orchestrator-1";
 const NODE: &str = "attach-store";

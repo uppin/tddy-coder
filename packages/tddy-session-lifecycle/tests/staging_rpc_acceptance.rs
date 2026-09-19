@@ -24,8 +24,6 @@ use std::sync::Arc;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_files::host_documents::MAX_HOST_DOCUMENT_BYTES;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::session::{
     session_attachment::Source as AttachmentSource, HostDocumentRef, SessionAttachment,
@@ -35,6 +33,8 @@ use tddy_service::proto::session_files::{
     SessionFilesService as SessionFilesServiceTrait, UploadStagedAttachmentChunkRequest,
 };
 use tddy_service::proto::types::HostDocumentScope;
+use tddy_session_files::host_documents::MAX_HOST_DOCUMENT_BYTES;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

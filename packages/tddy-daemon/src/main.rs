@@ -137,7 +137,9 @@ fn main() -> anyhow::Result<()> {
                 })
                 .collect();
         let daemon_instance_id =
-            tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config(&daemon.config);
+            tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config(
+                &daemon.config,
+            );
 
         // Start what the runtime assembled but left to its host: the local socket, the common-room
         // participant, peer discovery, the Telegram dispatcher and the background loops.

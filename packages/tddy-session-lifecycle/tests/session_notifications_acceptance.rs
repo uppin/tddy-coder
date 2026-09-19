@@ -14,6 +14,8 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_rpc::Request;
+use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::session_notification_subscribers::TelegramNotificationSubscriber;
 use tddy_session_lifecycle::session_notifications::{
@@ -25,8 +27,6 @@ use tddy_session_lifecycle::telegram_session_subscriber::TelegramDaemonHooks;
 use tddy_telegram::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
-use tddy_rpc::Request;
-use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -120,7 +120,8 @@ fn telegram_hooks(sender: Arc<InMemoryTelegramSender>) -> Arc<TelegramDaemonHook
 
     Arc::new(TelegramDaemonHooks {
         config: a_daemon_config(),
-        sender: sender as Arc<dyn tddy_session_lifecycle::telegram_notifier::TelegramSender + Send + Sync>,
+        sender: sender
+            as Arc<dyn tddy_session_lifecycle::telegram_notifier::TelegramSender + Send + Sync>,
         watcher: Arc::new(tokio::sync::Mutex::new(watcher)),
     })
 }

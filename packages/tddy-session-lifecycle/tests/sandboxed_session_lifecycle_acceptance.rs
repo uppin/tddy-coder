@@ -7,14 +7,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_core::session_metadata::read_session_metadata;
-use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{
     DeleteSessionRequest, ResumeSessionRequest, SessionService as SessionServiceTrait,
     StartSessionRequest,
 };
+use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_testing_commons::process_is_alive;
 
 const VALID_TOKEN: &str = "valid-token";

@@ -18,12 +18,10 @@ use prost::Message as _;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
-use tddy_daemon::runtime::spawn_common_room_discovery_task;
-use tddy_session_lifecycle::test_util::{wait_until_peer_discovered, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Request, RpcMessage, RpcResult, RpcService as _};
@@ -33,6 +31,8 @@ use tddy_service::proto::session::{
 };
 use tddy_service::proto::session_files::UploadStagedAttachmentChunkRequest;
 use tddy_service::proto::types::HostDocumentScope;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::{wait_until_peer_discovered, TEST_TOKEN};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -310,10 +310,12 @@ async fn staging_rpcs_addressed_to_a_peer_daemon_forward_and_operate_on_the_peer
 
     // Then — the file landed on the peer's staging root, not A's
     let os_user = std::env::var("USER").unwrap();
-    let peer_staged =
-        tddy_session_files::session_attachment_staging::staging_root_for(&os_user, &peer_staging_base)
-            .join(STAGING_ID)
-            .join("remote.md");
+    let peer_staged = tddy_session_files::session_attachment_staging::staging_root_for(
+        &os_user,
+        &peer_staging_base,
+    )
+    .join(STAGING_ID)
+    .join("remote.md");
     assert!(
         peer_staged.exists(),
         "staged file must land on the peer at {peer_staged:?}"

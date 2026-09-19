@@ -29,9 +29,7 @@ use prost::Message;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_daemon_livekit::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
-use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
@@ -46,6 +44,8 @@ use tddy_service::proto::session_files::{ReadHostDocumentRequest, ReadHostDocume
 use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
 use tddy_service::proto::types::HostDocumentScope;
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 use tddy_testing_commons::wait::eventually_awaiting;
 
@@ -352,7 +352,8 @@ impl FacilitatingDaemon {
         let staging = tempfile::tempdir().unwrap();
         // Held by the test as well as by the service: the manager owns the sessions' PTYs, and
         // "this session has no terminal to bridge" is a fact only it can be asked for.
-        let agents = Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new());
+        let agents =
+            Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new());
         let service = DaemonSessionHost::new(
             config.clone(),
             resolver,
@@ -419,8 +420,10 @@ impl FacilitatingDaemon {
         contents: &[u8],
     ) -> StartSessionResponse {
         let os_user = std::env::var("USER").expect("USER required");
-        let staging_root =
-            tddy_session_files::session_attachment_staging::staging_root_for(&os_user, &self.staging_base);
+        let staging_root = tddy_session_files::session_attachment_staging::staging_root_for(
+            &os_user,
+            &self.staging_base,
+        );
         tddy_session_files::session_attachment_staging::write_staged_chunk(
             &staging_root,
             STAGING_ID,

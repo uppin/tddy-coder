@@ -16,9 +16,9 @@ use pretty_assertions::assert_eq;
 use tddy_core::agent_activity::{read_agent_activity, AgentActivityRecord};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
-use tddy_session_lifecycle::test_util::{test_service, TEST_USER};
 use tddy_rpc::Request;
 use tddy_service::proto::activity::{ActivityService as _, ReportAgentActivityRequest};
+use tddy_session_lifecycle::test_util::{test_service, TEST_USER};
 
 /// The per-session secret the hook authenticates with. Any value works; it only has to match what
 /// the session's metadata holds.

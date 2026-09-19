@@ -35,17 +35,19 @@ use serial_test::serial;
 use tddy_core::agent_activity::{append_agent_activity, AgentActivityRecord, STATUS_COMPLETED};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_projects::project_storage::{write_projects, ProjectData};
-use tddy_worktree_service::remote_git_service::{ProjectsDirResolver, RemoteGitServiceImpl, UserResolver};
 use tddy_livekit::{LiveKitParticipant, RoomOptions};
 use tddy_livekit_testkit::LiveKitTestkit;
+use tddy_projects::project_storage::{write_projects, ProjectData};
 use tddy_service::proto::session::{
     ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_sync::{Credentials, DaemonToken, LiveKitCredentials};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 use tddy_testing_commons::wait::eventually;
+use tddy_worktree_service::remote_git_service::{
+    ProjectsDirResolver, RemoteGitServiceImpl, UserResolver,
+};
 
 /// The daemon under test: it runs the session, hosts its room, serves the deltas and serves the
 /// project as a git remote. One instance id for all four, because a participant addresses one

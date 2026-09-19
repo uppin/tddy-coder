@@ -15,11 +15,11 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
 use tddy_service::proto::session::{
     DeleteSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
+use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a37";
 

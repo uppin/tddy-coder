@@ -12,16 +12,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_host_service::multi_host::{EligibleDaemonSource, LocalOnlyEligibleDaemonSource};
-use tddy_session_lifecycle::test_util::TEST_TOKEN;
-use tddy_projects::project_storage;
-use tddy_session_lifecycle::user_sessions_path;
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
+use tddy_host_service::multi_host::{EligibleDaemonSource, LocalOnlyEligibleDaemonSource};
+use tddy_projects::project_storage;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::project::{
     ListProjectsRequest, ProjectService as ProjectServiceTrait, SetProjectDefaultBranchRequest,
 };
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::TEST_TOKEN;
+use tddy_session_lifecycle::user_sessions_path;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

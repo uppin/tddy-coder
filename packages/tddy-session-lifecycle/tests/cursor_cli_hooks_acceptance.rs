@@ -6,12 +6,12 @@ use std::sync::Arc;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
-use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
+use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 

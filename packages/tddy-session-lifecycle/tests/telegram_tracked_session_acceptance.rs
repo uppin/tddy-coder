@@ -8,24 +8,24 @@ use std::sync::{Arc, Mutex, Once};
 
 use log::{LevelFilter, Log, Metadata, Record};
 use tddy_core::SessionMetadata;
-use tddy_telegram::active_elicitation::{
-    ActiveElicitationCoordinator, SharedActiveElicitationCoordinator,
-};
 use tddy_daemon_kernel::config::{DaemonConfig, TelegramConfig};
+use tddy_service::gen::app_mode_proto::Variant;
+use tddy_service::gen::server_message::Event;
+use tddy_service::gen::{
+    AppModeProto, AppModeSelect, ClarificationQuestionProto, ModeChanged, QuestionOptionProto,
+    ServerMessage,
+};
 use tddy_session_lifecycle::telegram_notifier::{
     ElicitationSelectOptionsCache, InMemoryTelegramSender, TelegramSessionWatcher,
 };
 use tddy_session_lifecycle::telegram_session_control::{
     StartWorkflowCommand, TelegramSessionControlHarness, CB_ENTER,
 };
+use tddy_telegram::active_elicitation::{
+    ActiveElicitationCoordinator, SharedActiveElicitationCoordinator,
+};
 use tddy_telegram::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
-};
-use tddy_service::gen::app_mode_proto::Variant;
-use tddy_service::gen::server_message::Event;
-use tddy_service::gen::{
-    AppModeProto, AppModeSelect, ClarificationQuestionProto, ModeChanged, QuestionOptionProto,
-    ServerMessage,
 };
 
 const AUTHORIZED_CHAT: i64 = 424_242;

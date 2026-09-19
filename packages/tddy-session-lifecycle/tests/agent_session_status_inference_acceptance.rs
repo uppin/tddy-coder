@@ -9,7 +9,6 @@ use tddy_core::agent_activity::{
     append_agent_activity, AgentActivityRecord, STATUS_COMPLETED, STATUS_RUNNING,
 };
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
 use tddy_service::acp_replay::{append_acp_frame, tool_use_frame};
 use tddy_service::proto::acp::ToolCallStatus;
@@ -17,6 +16,7 @@ use tddy_service::proto::session::{
     ListSessionsRequest, SessionEntry as ProtoSessionEntry, SessionService as SessionServiceTrait,
 };
 use tddy_service::proto::types::SessionAgentStatus;
+use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
 /// A stamp far enough in the past that it can never be confused with "now".

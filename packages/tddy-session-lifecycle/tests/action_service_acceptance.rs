@@ -14,9 +14,9 @@ use tddy_service::proto::actions::{
 use tddy_service::proto::tasks::{ListTasksRequest, ListTasksResponse, TaskServiceServer};
 use tddy_task::TaskRegistry;
 
+use tddy_daemon_kernel::SessionUserResolver;
 use tddy_session_lifecycle::action_service::ActionServiceImpl;
 use tddy_session_lifecycle::task_service::TaskServiceImpl;
-use tddy_daemon_kernel::SessionUserResolver;
 
 const GOOD_TOKEN: &str = "valid-token";
 

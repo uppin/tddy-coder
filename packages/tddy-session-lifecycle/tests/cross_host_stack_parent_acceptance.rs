@@ -33,16 +33,16 @@ use std::sync::Arc;
 use pretty_assertions::assert_eq;
 use tddy_core::changeset::{write_changeset, Changeset, Stack, StackNode};
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
-use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
+use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::pr_stack::{PrStackService, ResolveStackBaseRequest};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::TestDaemon;
 
 /// The daemon under test: the one a child session is started on, and the one that holds the
 /// project. In the reported failure it is also the host with no orchestrator of its own.

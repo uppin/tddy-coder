@@ -4,14 +4,14 @@
 
 use std::sync::Arc;
 
-use tddy_session_lifecycle::telegram_notifier::{InMemoryTelegramSender, TelegramSessionWatcher};
-use tddy_session_lifecycle::telegram_session_control::TelegramSessionControlHarness;
 use tddy_service::gen::app_mode_proto::Variant;
 use tddy_service::gen::server_message::Event;
 use tddy_service::gen::{
     AppModeMultiSelect, AppModeProto, AppModeRunning, AppModeSelect, ClarificationQuestionProto,
     ModeChanged, QuestionOptionProto, ServerMessage,
 };
+use tddy_session_lifecycle::telegram_notifier::{InMemoryTelegramSender, TelegramSessionWatcher};
+use tddy_session_lifecycle::telegram_session_control::TelegramSessionControlHarness;
 
 const AUTHORIZED_CHAT: i64 = 424_242;
 

@@ -17,11 +17,11 @@
 
 use std::path::Path;
 
+use tddy_rpc::Status;
 use tddy_session_lifecycle::connection_service::{
     claude_cli_participant_metadata, SpawnStackParent, StackBaseLookup, StackNodeLink,
     StackParentHost, StartingClaudeCliSession,
 };
-use tddy_rpc::Status;
 
 const SESSION: &str = "019f9fdb-cf83-70d2-aef5-0000000000b2";
 const ORCHESTRATOR: &str = "019f9dd5-716d-7071-96ac-464ff7b98c2a";

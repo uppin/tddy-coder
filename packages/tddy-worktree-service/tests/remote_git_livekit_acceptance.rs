@@ -26,11 +26,13 @@ use std::time::Duration;
 use pretty_assertions::assert_eq;
 use serial_test::serial;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_projects::project_storage::{write_projects, ProjectData};
-use tddy_worktree_service::remote_git_service::{ProjectsDirResolver, RemoteGitServiceImpl, UserResolver};
 use tddy_livekit::{LiveKitParticipant, RoomOptions};
 use tddy_livekit_testkit::LiveKitTestkit;
+use tddy_projects::project_storage::{write_projects, ProjectData};
 use tddy_service::RemoteGitServiceServer;
+use tddy_worktree_service::remote_git_service::{
+    ProjectsDirResolver, RemoteGitServiceImpl, UserResolver,
+};
 
 const GITHUB_USER: &str = "testuser";
 const PROJECT_NAME: &str = "my-app";
@@ -250,8 +252,8 @@ async fn a_served_project(suffix: &str) -> AServedProject {
 
     // The daemon's own auth wiring — the OAuth service, the room-token mint, and the resolver both
     // they and `RemoteGitService` verify tokens with. One resolver, as in production.
-    let auth =
-        tddy_daemon_auth::auth::build_auth_entries(&config, "127.0.0.1", 0).expect("auth must build");
+    let auth = tddy_daemon_auth::auth::build_auth_entries(&config, "127.0.0.1", 0)
+        .expect("auth must build");
     let user_resolver: UserResolver = auth
         .user_resolver
         .clone()

@@ -586,7 +586,9 @@ pub async fn build(
     // Relay mode: an idle tracker the RPC surface touches, plus the channel its monitor fires.
     let (idle_tracker, relay_idle_monitor, relay_shutdown) = match options.relay_idle_timeout {
         Some(timeout) => {
-            let tracker = Arc::new(tddy_session_lifecycle::relay_idle::IdleTimeoutTracker::new(timeout));
+            let tracker = Arc::new(tddy_session_lifecycle::relay_idle::IdleTimeoutTracker::new(
+                timeout,
+            ));
             let (tx, rx) = tokio::sync::oneshot::channel::<()>();
             (Some(Arc::clone(&tracker)), Some((tracker, tx)), Some(rx))
         }
@@ -1357,22 +1359,23 @@ fn build_telegram(
         },
     );
 
-    let sessions_base = match tddy_session_lifecycle::user_sessions_path::tddy_data_root_matching_child(
-        &user,
-        Some(tddy_data_dir),
-    ) {
-        Some(base) => base,
-        None => {
-            log::warn!(
-                target: "tddy_daemon",
-                "telegram inbound session control disabled: could not resolve sessions base for USER={user}"
-            );
-            return TelegramWiring {
-                hooks: Some(hooks),
-                inbound: None,
-            };
-        }
-    };
+    let sessions_base =
+        match tddy_session_lifecycle::user_sessions_path::tddy_data_root_matching_child(
+            &user,
+            Some(tddy_data_dir),
+        ) {
+            Some(base) => base,
+            None => {
+                log::warn!(
+                    target: "tddy_daemon",
+                    "telegram inbound session control disabled: could not resolve sessions base for USER={user}"
+                );
+                return TelegramWiring {
+                    hooks: Some(hooks),
+                    inbound: None,
+                };
+            }
+        };
 
     #[cfg(unix)]
     let spawn_for_tg = options
