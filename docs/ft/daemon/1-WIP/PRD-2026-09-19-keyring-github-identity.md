@@ -1,7 +1,7 @@
 # PRD: Git and GitHub operations resolve the project's account
 
 **Date**: 2026-09-19
-**Status**: 🚧 In Progress · ⛔ **Blocked on [#492](https://github.com/uppin/tddy-coder/pull/492)**
+**Status**: 🚧 In Progress · ✅ **#492 is this stack's base**
 **Stack**: `#keyring` 9/9 · branch `feature/keyring/github-identity` · base `feature/keyring/link-github` (#515)
 
 ## Affected Features
@@ -21,7 +21,7 @@ This is the node the whole stack was built for. `#keyring` 3/9 put credentials s
 made them visible, 5/9 let a project name one, 8/9 allowed more than one to exist — and none of that
 changes a single commit's author until this node.
 
-## ⛔ Blocked on #492
+## #492 is this stack's base
 
 The developer's instruction is explicit:
 
@@ -36,13 +36,24 @@ out of `tddy-workflow-recipes` and into `tddy-github`. Its code-issue record,
 > Coordinate if you are **adding a REST call** — it belongs in `tddy-github` after #492, and adding
 > it here means #492 moves it too.
 
-This node changes **how every one of those calls gets its token**. Doing it before #492 lands means
-editing 2,124 lines that are mid-move, in a crate they are leaving, and then watching the move
-rewrite the result. The record is 🚧 **Claimed by #492**, which is another stack's to fix; this node
-neither claims nor touches it.
+This node changes **how every one of those calls gets its token**. Doing it before the move lands
+would mean editing 2,124 lines that are mid-move, in a crate they are leaving, and then watching the
+move rewrite the result. The record is 🚧 **Claimed by #492**, which is another stack's to fix; this
+node neither claims nor touches it, and **must not delete the record** — #492 deletes it when it
+wraps.
 
-**Consequence for the stack**: nodes 1–8 are independent of #492 and land on their own schedule. This
-one waits.
+**How that instruction is honoured.** On 2026-09-19 the `#keyring` root (#508) was re-based from
+`master` onto `feature/carve/git-plumbing` — #492's own branch. The dependency the developer asked
+for is therefore expressed as the stack's **base** rather than as a wait: the moved `tddy-github` is
+present in the tree from node 1 onward, this node writes against the post-move module paths
+directly, and #492 is by construction merged before any `#keyring` node can be.
+
+**Consequence for the stack**: the cost moved from this node to all nine. Under the original plan
+nodes 1–8 were independent of #492; now every node lands behind `#carve` 4/10
+[#498](https://github.com/uppin/tddy-coder/pull/498), 5/10
+[#491](https://github.com/uppin/tddy-coder/pull/491) and 6/10
+[#492](https://github.com/uppin/tddy-coder/pull/492). The trade was taken deliberately, while every
+`#keyring` node was still docs-only and the rebase was therefore free.
 
 ## Background
 
@@ -169,7 +180,7 @@ report: there is no account with which to open a PR.
 
 ## References
 
-- [#492](https://github.com/uppin/tddy-coder/pull/492) — the blocking move
+- [#492](https://github.com/uppin/tddy-coder/pull/492) — the move, and this stack's base
 - `packages/tddy-workflow-recipes/docs/code-issues/squatting-github-rest-client.md` — 🚧 claimed by #492
 - `packages/tddy-daemon-livekit/src/session_room.rs:337` — why WIP commits keep a machine identity
 - `packages/tddy-workflow-recipes/src/github_rest_common.rs:17` — the environment resolution removed
