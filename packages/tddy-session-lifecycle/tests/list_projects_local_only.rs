@@ -44,6 +44,7 @@ impl EligibleDaemonSource for PeerProjectsSource {
             daemon_instance_id: "server-2".to_string(),
             main_branch_ref: String::new(),
             default_remote: String::new(),
+            accounts: Vec::new(),
         }]
     }
 }

@@ -5,6 +5,18 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+/// Which account a project uses at one provider.
+///
+/// An account id is minted by the daemon holding the credential and is unique only **within its
+/// provider**, so an assignment names both. It is a reference, never a credential: nothing here is
+/// secret, and a row that names an account this host has never seen is a legible state rather than
+/// a corrupt one — see `tddy_accounts::AccountResolution`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AccountAssignment {
+    pub provider: String,
+    pub account_id: String,
+}
+
 /// One project row stored in `projects.yaml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProjectData {
@@ -25,6 +37,12 @@ pub struct ProjectData {
     /// Per-host (or per-daemon-instance) checkout paths for the same logical `project_id`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub host_repo_paths: HashMap<String, String>,
+    /// Which account this project uses at each provider, at most one per provider. **Absent means
+    /// unassigned, and unassigned resolves to nothing** — no caller's own login, no sole account in
+    /// the vault. A row written by an older daemon reads as empty, exactly as the three optional
+    /// fields above do.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accounts: Vec<AccountAssignment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -243,6 +261,21 @@ pub fn set_project_default_branch(
     write_projects(projects_dir, &projects)
 }
 
+/// Replaces `project_id`'s whole account assignment set.
+///
+/// Replace, never merge: two people editing a project's accounts concurrently cannot interleave
+/// into a set neither of them chose. An empty `accounts` clears every assignment, which is how a
+/// project is returned to unassigned. Refuses two entries naming the same provider, and errors when
+/// `project_id` is unknown.
+pub fn set_project_accounts(
+    projects_dir: &Path,
+    project_id: &str,
+    accounts: &[AccountAssignment],
+) -> anyhow::Result<()> {
+    let _ = (projects_dir, project_id, accounts);
+    todo!("(#keyring 5/9): refuse a repeated provider, then replace the row's whole account set")
+}
+
 /// Resolved `main_repo_path` for `project_id` on `host_key` (simulated host or daemon instance id).
 ///
 /// Multi-host: returns [`ProjectData::host_repo_paths`]\[host_key] when non-empty, else
@@ -294,6 +327,7 @@ mod per_host_path_unit_tests {
             main_branch_ref: None,
             remote_name: None,
             host_repo_paths,
+            accounts: Vec::new(),
         };
         write_projects(&projects_dir, &[project]).unwrap();
         let px = main_repo_path_for_host(&projects_dir, "p1", "unit-host-x")
@@ -524,6 +558,7 @@ mod project_integration_base_acceptance_tests {
             main_branch_ref: Some("upstream/main;rm -rf /".to_string()),
             remote_name: None,
             host_repo_paths: HashMap::new(),
+            accounts: Vec::new(),
         };
         let r = add_project(&projects_dir, project);
         assert!(
@@ -552,6 +587,7 @@ mod project_integration_base_acceptance_tests {
             main_branch_ref: Some("upstream/release/2025".to_string()),
             remote_name: None,
             host_repo_paths: HashMap::new(),
+            accounts: Vec::new(),
         };
         add_project(&projects_dir, project).expect(
             "a safe <remote>/<path> must be accepted at the boundary regardless of the remote name",
@@ -588,6 +624,7 @@ mod set_project_default_branch_unit_tests {
                 main_branch_ref: main_branch_ref.map(str::to_string),
                 remote_name: None,
                 host_repo_paths: HashMap::new(),
+                accounts: Vec::new(),
             },
         )
         .expect("seed project");

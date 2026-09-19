@@ -170,6 +170,7 @@ async fn list_worktrees_refresh_returns_git_worktree_rows() {
         main_branch_ref: None,
         remote_name: None,
         host_repo_paths: std::collections::HashMap::new(),
+        accounts: Vec::new(),
     };
 
     project_storage::add_project(&projects_dir, project).unwrap();
@@ -274,6 +275,7 @@ async fn clean_worktree_primary_is_failed_precondition() {
             main_branch_ref: None,
             remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
+            accounts: Vec::new(),
         },
     )
     .unwrap();
@@ -344,6 +346,7 @@ async fn clean_worktree_clears_secondary_and_invalidates_cache() {
             main_branch_ref: None,
             remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
+            accounts: Vec::new(),
         },
     )
     .unwrap();
@@ -453,6 +456,7 @@ async fn restore_session_worktree_recreates_worktree_from_changeset() {
             main_branch_ref: None,
             remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
+            accounts: Vec::new(),
         },
     )
     .unwrap();

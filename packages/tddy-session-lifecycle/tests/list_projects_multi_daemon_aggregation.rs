@@ -94,6 +94,7 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
                 daemon_instance_id: "workstation-1".to_string(),
                 main_branch_ref: String::new(),
                 default_remote: String::new(),
+                accounts: Vec::new(),
             },
             ProtoProjectEntry {
                 project_id: marker.to_string(),
@@ -103,6 +104,7 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
                 daemon_instance_id: "server-2".to_string(),
                 main_branch_ref: String::new(),
                 default_remote: String::new(),
+                accounts: Vec::new(),
             },
         ]
     }

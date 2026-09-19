@@ -6,8 +6,8 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ProjectService, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse,
+    ListProjectsResponse, ProjectService, SetProjectAccountsRequest, SetProjectAccountsResponse,
+    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
 };
 
 use super::DaemonSessionHost;
@@ -52,6 +52,14 @@ impl ProjectHandler for DaemonSessionHost {
         self.set_project_default_branch_at_project_coordinate(request)
             .await
     }
+
+    async fn set_project_accounts(
+        &self,
+        request: Request<tddy_service::proto::project::SetProjectAccountsRequest>,
+    ) -> Result<Response<tddy_service::proto::project::SetProjectAccountsResponse>, Status> {
+        self.set_project_accounts_at_project_coordinate(request)
+            .await
+    }
 }
 
 #[async_trait]
@@ -89,6 +97,13 @@ impl ProjectService for DaemonSessionHost {
         request: Request<SetProjectDefaultBranchRequest>,
     ) -> Result<Response<SetProjectDefaultBranchResponse>, Status> {
         ProjectHandler::set_project_default_branch(self, request).await
+    }
+
+    async fn set_project_accounts(
+        &self,
+        request: Request<SetProjectAccountsRequest>,
+    ) -> Result<Response<SetProjectAccountsResponse>, Status> {
+        ProjectHandler::set_project_accounts(self, request).await
     }
 }
 

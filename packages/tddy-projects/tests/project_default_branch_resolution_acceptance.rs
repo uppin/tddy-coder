@@ -91,6 +91,7 @@ fn legacy_project_resolves_its_default_live_from_the_repository_not_a_hardcoded_
             main_branch_ref: None,
             remote_name: None,
             host_repo_paths: HashMap::new(),
+            accounts: Vec::new(),
         },
     )
     .expect("register legacy project");
@@ -125,6 +126,7 @@ fn a_stored_default_branch_wins_over_the_legacy_probe() {
             main_branch_ref: Some("origin/release/2025".to_string()),
             remote_name: None,
             host_repo_paths: HashMap::new(),
+            accounts: Vec::new(),
         },
     )
     .expect("register project with stored default");
@@ -153,6 +155,7 @@ fn any_remote_branch_including_a_slashed_name_is_a_valid_stored_default() {
             main_branch_ref: Some("origin/release/2025".to_string()),
             remote_name: None,
             host_repo_paths: HashMap::new(),
+            accounts: Vec::new(),
         },
     );
 
@@ -176,6 +179,7 @@ fn a_default_branch_with_shell_metacharacters_is_still_rejected() {
             main_branch_ref: Some("origin/main;rm -rf /".to_string()),
             remote_name: None,
             host_repo_paths: HashMap::new(),
+            accounts: Vec::new(),
         },
     );
 
