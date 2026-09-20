@@ -49,6 +49,11 @@ pub struct SubagentConversation {
     /// Token usage across the turns that have **ended**. A turn in flight has spent nothing this
     /// session can attribute to it yet.
     usage: crate::openai::TokenUsage,
+    /// What this conversation's history cost to send on its last completed turn — occupancy, not
+    /// spend (see [`SubagentSession::context_tokens`]). Copied out of the session with
+    /// [`Self::usage`] and for the same reason: a turn in flight holds the session's lock, and
+    /// reading back through it would either block behind that turn or report a half-run one.
+    context_tokens: u64,
     /// The turn loop, behind the lock that serializes turns on *this* conversation and nothing
     /// else. A conversation's history is one sequence, so two turns must not run against it at
     /// once; `tokio::sync::Mutex` is fair, so waiting for it is the queue (criterion 30).
@@ -71,6 +76,7 @@ impl SubagentConversation {
             turns: 0,
             model: session.model().to_string(),
             usage: session.cumulative_usage(),
+            context_tokens: session.context_tokens(),
             session: std::sync::Arc::new(tokio::sync::Mutex::new(session)),
             remote,
         }
@@ -288,6 +294,41 @@ fn conversation_record(
     }
 }
 
+/// Every conversation as `subagent_list` reports it: the shared accounting record, plus the
+/// occupancy figure that record deliberately does not carry.
+///
+/// `contextTokens` is what the conversation's history costs to send now, and it answers a question
+/// cumulative spend cannot: every turn re-sends the whole history, so `inputTokens` is a sum of
+/// growing prefixes that over-counts the window. A main agent watching occupancy can wind a
+/// conversation down on its own terms instead of discovering the ceiling by hitting it.
+///
+/// A **retired** conversation carries no `contextTokens` at all: it has no history left to send, so
+/// there is no occupancy to report, and a `0` there would be indistinguishable from an open
+/// conversation that has not yet run a turn.
+pub fn conversation_listing(conversations: &SubagentConversations) -> Vec<serde_json::Value> {
+    let mut rows: Vec<serde_json::Value> = conversations
+        .open
+        .iter()
+        .map(|(id, conv)| {
+            let mut row = serde_json::json!(conversation_record(id, conv));
+            if let Some(object) = row.as_object_mut() {
+                object.insert(
+                    "contextTokens".to_string(),
+                    serde_json::json!(conv.context_tokens),
+                );
+            }
+            row
+        })
+        .collect();
+    rows.extend(
+        conversations
+            .retired
+            .iter()
+            .map(|record| serde_json::json!(record)),
+    );
+    rows
+}
+
 /// Every conversation this process has run, open ones first. The retired ones are included because
 /// their tokens were spent by this session: an accounting file that lists only what is still open
 /// reports a detached agent's consumption as zero.
@@ -346,12 +387,14 @@ pub async fn run_turn(turn: DeferredTurn) {
     // Read while the turn lock is still held, and kept held until the table is updated: releasing
     // it first would let the next queued turn end and record its own totals underneath this one.
     let usage = session.cumulative_usage();
+    let context_tokens = session.context_tokens();
 
     let mut sessions = subagent_sessions().lock().await;
     if let Some(conv) = sessions.open.get_mut(&turn.conversation_id) {
         // A turn that failed still counts what it spent reaching that failure, but is not a turn
         // the conversation took: nothing was added to its history.
         conv.usage = usage;
+        conv.context_tokens = context_tokens;
         if ended.took_a_turn {
             conv.turns += 1;
         }

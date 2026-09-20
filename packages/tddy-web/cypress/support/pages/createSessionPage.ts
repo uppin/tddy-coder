@@ -153,9 +153,10 @@ export const createSessionPage = {
     byTestId(ids.createSessionAgentOption(agentId)).click();
   },
 
-  /** No specialized agent can be attached in the current form state. */
+  /** No specialized agent can be attached in the current form state — a session type that has no
+   *  roster at all, rather than a placement, which never withholds the picker. */
   expectNoSpecializedAgentPicker() {
-    byTestId(TEST_IDS.createSessionManagedCodebaseSection).should("not.exist");
+    byTestId(TEST_IDS.createSessionAgentPickerSection).should("not.exist");
   },
 
   /** Close the "Managed codebase" section. */

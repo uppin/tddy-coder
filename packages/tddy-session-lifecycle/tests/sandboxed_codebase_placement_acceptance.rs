@@ -57,6 +57,8 @@ const LOCAL_INSTANCE_ID: &str = "workstation";
 /// exercise a refusal instead of the placement.
 const LK_API_SECRET: &str = "secret";
 const A_PEER_ID: &str = "laptop-b";
+/// A specialized agent this deployment offers, as the create-session form would name it.
+const A_SPECIALIZED_AGENT: &str = "fastcontext";
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a36";
 
 // ---------------------------------------------------------------------------
@@ -181,7 +183,25 @@ fn user_resolver_valid() -> UserResolver {
     })
 }
 
+/// Define one specialized agent on this daemon, under `<tddyhome>/agents`.
+///
+/// Part of the fixture deployment rather than of a single test: a start naming an agent no host
+/// defines is refused by name (`seeded_roster_records`), so without a def the managed cases below
+/// would exercise that refusal instead of the placement.
+fn an_agent_def_on_this_host(tddy_data_dir: &Path, name: &str) {
+    let agents = tddy_data_dir.join("agents");
+    std::fs::create_dir_all(&agents).expect("create agents dir");
+    std::fs::write(
+        agents.join(format!("{name}.yaml")),
+        format!(
+            "name: {name}\nmodel: qwen2.5-coder:7b\nbase_url: http://127.0.0.1:11434/v1\nreplaces:\n  - Grep\n"
+        ),
+    )
+    .expect("write agent def");
+}
+
 fn a_daemon(sessions_base: PathBuf, discovery: Option<LiveKitDiscoveryHandles>) -> TestDaemon {
+    an_agent_def_on_this_host(&sessions_base, A_SPECIALIZED_AGENT);
     let repo = sessions_base.join("fixture-repo");
     a_git_repo_with_origin_at(&repo);
     register_project(&sessions_base, &repo);
@@ -238,6 +258,17 @@ fn a_sandboxed_codebase_request() -> StartSessionRequest {
         model: "claude-opus-5".to_string(),
         sandboxed_codebase: true,
         ..Default::default()
+    }
+}
+
+/// A jailed-codebase session that also runs the managed workflow, with one specialized agent.
+/// `recipe` stays empty on purpose: a recipe resolves `TDDY_REPO_DIR` where the *agent* is rather
+/// than where the code is, so it remains refused on this placement. The roster does not need one.
+fn a_managed_sandboxed_codebase_request() -> StartSessionRequest {
+    StartSessionRequest {
+        managed_codebase: true,
+        specialized_agents: vec![A_SPECIALIZED_AGENT.to_string()],
+        ..a_sandboxed_codebase_request()
     }
 }
 
@@ -352,22 +383,22 @@ fn a_known_peer_is_still_a_split_placement() {
 }
 
 #[test]
-fn a_sandboxed_codebase_request_with_managed_codebase_is_refused_naming_both_placements() {
-    // Given a request asking to jail the code and to jail the agent's view of it
+fn a_jailed_codebase_session_may_also_be_managed() {
+    // Given a request to jail the codebase AND to run the managed workflow over it.
+    // `managed_codebase` is not a placement: it carries a recipe, a specialized-agent roster and a
+    // per-session toolcall listener, and confines nothing. The flag it was once refused beside is
+    // `sandbox`, which jails the agent — that one is still an opposite placement, and still
+    // refused below.
     let request = PlacementRequest {
         managed_codebase: true,
         ..a_jailed_codebase_placement_request()
     };
 
     // When
-    let error = classify_placement(&request)
-        .expect_err("two placements at once must be refused, not resolved to either");
+    let placement = classify_placement(&request);
 
-    // Then the message names both, so the caller learns which flag to drop
-    assert!(
-        error.contains("sandboxed_codebase") && error.contains("managed_codebase"),
-        "the refusal must name both placements; got '{error}'"
-    );
+    // Then the codebase is still jailed — orchestration did not change where anything runs
+    assert_eq!(placement, Ok(CodebasePlacement::SandboxedCodebase));
 }
 
 #[test]
@@ -450,25 +481,25 @@ fn a_sandboxed_codebase_request_for_a_tool_session_is_refused_naming_the_session
 }
 
 #[test]
-fn a_sandboxed_codebase_request_with_the_permission_bypass_is_refused_naming_both() {
-    // Given a request asking to jail the codebase and to let the agent skip its permission prompts
+fn a_jailed_codebase_session_may_skip_its_permission_prompts() {
+    // Given a request to jail the codebase and to let the agent skip its permission prompts.
+    //
+    // This placement confines in two layers: the kernel jail around the checkout, and the
+    // withdrawn-tool deny list that forces every codebase access through `mcp__tddy-tools__*`.
+    // The flag bypasses the second and cannot touch the first, so the trade is real but bounded —
+    // the operator gives up "only through the routed tool surface", not "only inside the jail".
+    // Stated in the PRD rather than enforced by a refusal.
     let request = PlacementRequest {
         dangerously_skip_permissions: true,
         ..a_jailed_codebase_placement_request()
     };
 
     // When
-    let error = classify_placement(&request).expect_err(
-        "the placement confines by withdrawing the agent's tools, and this repo does not pin \
-         whether that withdrawal survives the bypass flag",
-    );
+    let placement = classify_placement(&request);
 
-    // Then the message names both, so the caller learns which flag to drop
-    assert!(
-        error.contains("sandboxed_codebase")
-            && error.contains("mutually exclusive with dangerously_skip_permissions"),
-        "the refusal must name both the placement and the flag; got '{error}'"
-    );
+    // Then the placement is unchanged — the jail is what the placement is, and the flag is not
+    // an argument about where the code lives
+    assert_eq!(placement, Ok(CodebasePlacement::SandboxedCodebase));
 }
 
 #[test]
@@ -811,7 +842,7 @@ async fn start_session_refuses_a_jailed_codebase_alongside_the_agent_sandbox() {
 }
 
 #[tokio::test]
-async fn start_session_refuses_a_jailed_codebase_alongside_the_permission_bypass() {
+async fn a_jailed_codebase_session_that_skips_permissions_is_still_jailed() {
     // Given a request asking to jail the codebase and to bypass the agent's permission prompts
     let sessions_tmp = tempfile::tempdir().unwrap();
     let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
@@ -821,27 +852,20 @@ async fn start_session_refuses_a_jailed_codebase_alongside_the_permission_bypass
     };
 
     // When
-    let status = service
+    let started = service
         .start_session(Request::new(request))
         .await
-        .expect_err("the deny list is the confinement, so the flag that may bypass it is refused");
+        .expect("the bypass is the operator's to take; it is not a reason to refuse the placement")
+        .into_inner();
 
-    // Then it is refused at the request, not honoured and left to the agent to resolve — a session
-    // that came up with the withdrawal bypassed would be unconfined with nothing said
-    assert_eq!(
-        status.code(),
-        tddy_rpc::Code::InvalidArgument,
-        "expected InvalidArgument; got {:?}: {}",
-        status.code(),
-        status.message()
-    );
-    assert!(
-        status
-            .message()
-            .contains("mutually exclusive with dangerously_skip_permissions"),
-        "the refusal must name the flag that cannot be honoured; got '{}'",
-        status.message()
-    );
+    // Then the kernel jail is still provisioned, which is the half of the confinement the flag
+    // cannot reach. What it does surrender — that every codebase access goes through the routed
+    // tool surface — is stated in the PRD rather than enforced by a refusal here.
+    let checkout = checkout_session_of(sessions_tmp.path(), &started.session_id);
+    let workspace = metadata_of(sessions_tmp.path(), &checkout);
+    assert_eq!(workspace.sandbox, Some(true));
+
+    service.shut_down_children().await;
 }
 
 #[tokio::test]
@@ -873,4 +897,75 @@ async fn start_session_refuses_a_jailed_codebase_on_a_cursor_cli_session() {
         "the refusal must name the offending session type; got '{}'",
         status.message()
     );
+}
+
+// ---------------------------------------------------------------------------
+// The managed workflow over a jailed codebase
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn managing_a_jailed_codebase_session_leaves_its_checkout_in_the_jail() {
+    // Given a daemon with no LiveKit
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
+
+    // When a session asks for its codebase to be jailed AND for the managed workflow over it
+    let started = service
+        .start_session(Request::new(a_managed_sandboxed_codebase_request()))
+        .await
+        .expect("orchestration and confinement are orthogonal, so both must be served")
+        .into_inner();
+
+    // Then the checkout is still jailed — managing a session moved nothing
+    let checkout = checkout_session_of(sessions_tmp.path(), &started.session_id);
+    let workspace = metadata_of(sessions_tmp.path(), &checkout);
+    assert_eq!(workspace.session_type.as_deref(), Some("workspace"));
+    assert_eq!(workspace.sandbox, Some(true));
+
+    // And the agent half holds no roster of its own. One half keeps it — the codebase half, which
+    // is where a roster agent's own loop reads its withdrawals from — and a second copy here would
+    // be stale from the first attach or detach onward. The roster itself is asserted on the half
+    // that owns it, in the test below.
+    let agent = metadata_of(sessions_tmp.path(), &started.session_id);
+    assert_eq!(agent.session_type.as_deref(), Some("claude-cli"));
+    assert!(
+        agent.agents.is_empty(),
+        "the agent half must not carry a second copy of the roster; got {:?}",
+        agent.agents
+    );
+
+    service.shut_down_children().await;
+}
+
+#[tokio::test]
+async fn a_specialized_agent_on_a_jailed_codebase_session_is_held_by_the_codebase_half() {
+    // Given a managed, jailed-codebase session
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
+    let started = service
+        .start_session(Request::new(a_managed_sandboxed_codebase_request()))
+        .await
+        .expect("a managed jailed-codebase session must start")
+        .into_inner();
+
+    // When the roster is read off the half that holds it. A split session's roster lives on the
+    // codebase half — `rosterHalfOf` maps a session to `codebase_session_id` — and this placement
+    // is that split with the peer hop removed, so the same rule decides which half answers.
+    let checkout = checkout_session_of(sessions_tmp.path(), &started.session_id);
+    let workspace = metadata_of(sessions_tmp.path(), &checkout);
+
+    // Then the agent the session was started with is on that half, addressable by the id the main
+    // agent uses. Until now no subagent could be reached on this placement at all: a roster needs
+    // a full RPC client to the daemon, and the HTTP relay this placement was given was never one.
+    let ids: Vec<&str> = workspace
+        .agents
+        .iter()
+        .map(|a| a.agent_id.as_str())
+        .collect();
+    assert!(
+        ids.iter().any(|id| id.starts_with(A_SPECIALIZED_AGENT)),
+        "the codebase half must hold the roster the session was started with; got {ids:?}"
+    );
+
+    service.shut_down_children().await;
 }

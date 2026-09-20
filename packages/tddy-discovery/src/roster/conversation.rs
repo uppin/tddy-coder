@@ -275,6 +275,25 @@ impl SubagentSession for RemoteAgentSession {
     fn cumulative_usage(&self) -> TokenUsage {
         TokenUsage::default()
     }
+
+    /// Always zero: the history is the owning daemon's, and no conversation RPC reports what it
+    /// costs to send. Zero here means "this side cannot see it", not "the window is empty" — the
+    /// daemon running the loop is where that conversation's occupancy is visible.
+    ///
+    /// TODO: carry occupancy on `PromptAgentConversation`'s response so a remote conversation is
+    /// as readable as a local one.
+    fn context_tokens(&self) -> u64 {
+        0
+    }
+
+    /// Always empty: the transcript lives on the daemon running the loop, and no conversation RPC
+    /// returns it. Empty rather than a placeholder line — a caller reading a tail wants the
+    /// exchanges as they happened, and inventing one would be worse than reporting none.
+    ///
+    /// TODO: add a conversation-tail RPC so a remote conversation can be read the same way.
+    fn tail(&self, _max_messages: usize) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// The wire spelling of a stop reason, as the daemon writes it (`agent_stop_reason`).
@@ -287,6 +306,9 @@ fn parse_stop_reason(reason: &str) -> Result<StopReason, String> {
         "EndTurn" => Ok(StopReason::EndTurn),
         "MaxTurnRequests" => Ok(StopReason::MaxTurnRequests),
         "Cancelled" => Ok(StopReason::Cancelled),
+        // The wire spelling `tddy-session-agents` writes for a turn the daemon ended because the
+        // model's context window was full.
+        "ContextExhausted" => Ok(StopReason::ContextExhausted),
         other => Err(format!(
             "PromptAgentConversation ended with stop reason '{other}', which this build does not \
              recognise — the two hosts disagree about how a turn ends"

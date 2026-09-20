@@ -1031,9 +1031,13 @@ pub struct PlacementRequest {
     pub recipe: String,
     /// Whether the request asks the agent to skip its permission prompts.
     ///
-    /// Part of *where the codebase goes* because on the two placements that confine through a
-    /// withdrawn tool surface it is the confinement itself that is at stake — see the refusal in
-    /// [`classify_placement`].
+    /// Part of *where the codebase goes* because on the placements that confine through a
+    /// withdrawn tool surface it is one of the two confinement layers that is at stake. It no
+    /// longer refuses anything: the jail around the checkout is untouched by the flag, and what
+    /// the operator gives up is the guarantee that the agent reaches the code *only* through
+    /// `mcp__tddy-tools__*`. [`classify_placement`] records the combination rather than serving
+    /// it silently — see
+    /// `docs/ft/daemon/amendments/PRD-2026-09-20-sandboxed-codebase-managed-workflow.md`.
     pub dangerously_skip_permissions: bool,
 }
 
@@ -1068,12 +1072,6 @@ pub fn classify_placement(request: &PlacementRequest) -> Result<CodebasePlacemen
             "sandboxed_codebase is mutually exclusive with codebase_daemon_instance_id {requested:?}: both jail the codebase and leave the agent unconfined, and codebase_daemon_instance_id is the cross-host form of that same placement — drop one"
         ));
     }
-    if request.managed_codebase {
-        return Err(
-            "sandboxed_codebase is mutually exclusive with managed_codebase: sandboxed_codebase jails the codebase and leaves the agent on the host, managed_codebase jails the agent and leaves the codebase on it — a session has one placement, not two"
-                .to_string(),
-        );
-    }
     if request.sandbox {
         return Err(
             "sandboxed_codebase is mutually exclusive with sandbox: sandboxed_codebase jails the codebase, sandbox jails the agent — opposite placements, and a session has one"
@@ -1092,21 +1090,18 @@ pub fn classify_placement(request: &PlacementRequest) -> Result<CodebasePlacemen
             "sandboxed_codebase cannot carry recipe {recipe:?}: a workflow recipe resolves TDDY_REPO_DIR where the agent runs, and on this placement the code is not there"
         ));
     }
-    // Refused for the reason a split refuses it, and the reason is this placement's whole claim:
-    // the agent runs unjailed on this host, and what keeps it off the filesystem is the deny list
-    // its argv withdraws. Whether that list survives `--dangerously-skip-permissions` is not
-    // something this repo pins, so the combination is refused rather than assumed safe — a session
-    // that came up with the flag honoured and the list bypassed would be unconfined with nothing
-    // said. See docs/ft/daemon/amendments/PRD-2026-09-18-sandboxed-codebase-from-the-web.md
-    // § What's staying the same.
-    if request.dangerously_skip_permissions {
-        return Err(
-            "sandboxed_codebase is mutually exclusive with dangerously_skip_permissions: the placement confines nothing but by withdrawing the agent's native filesystem and shell tools, and whether that deny list survives --dangerously-skip-permissions is not pinned by this repo — drop one"
-                .to_string(),
-        );
-    }
-
-    log::info!("classify_placement: codebase jailed on this daemon, agent beside it");
+    log::info!(
+        "classify_placement: codebase jailed on this daemon, agent beside it{}",
+        match request.dangerously_skip_permissions {
+            // Confined by the kernel and unconfined by policy: the jail still holds the checkout,
+            // but the withdrawn-tool deny list that forces every access through
+            // `mcp__tddy-tools__*` may not survive the bypass. The operator asked for it, so it is
+            // served — and written down, because nothing else would say it happened.
+            true =>
+                ", with permission prompts skipped: the jail holds, the withdrawn-tool deny list may not",
+            false => "",
+        }
+    );
     Ok(CodebasePlacement::SandboxedCodebase)
 }
 

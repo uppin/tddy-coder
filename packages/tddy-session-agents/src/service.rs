@@ -154,6 +154,7 @@ pub fn agent_stop_reason(reason: tddy_discovery::subagent::StopReason) -> &'stat
         tddy_discovery::subagent::StopReason::EndTurn => "EndTurn",
         tddy_discovery::subagent::StopReason::MaxTurnRequests => "MaxTurnRequests",
         tddy_discovery::subagent::StopReason::Cancelled => "Cancelled",
+        tddy_discovery::subagent::StopReason::ContextExhausted => "ContextExhausted",
     }
 }
 

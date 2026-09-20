@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import type { DaemonHost } from "../../lib/participantRole";
 import { CreateSessionSshConfigSelect } from "./CreateSessionSshConfigSelect";
 import { inputClass, labelClass } from "./createSessionFormStyles";
@@ -18,15 +17,18 @@ export interface CreateSessionManagedCodebaseFieldsProps {
   sessionToken: string;
   sshConfigHost: string;
   setSshConfigHost: (sshConfigHost: string) => void;
-  agentPickerSection: ReactNode;
-  semanticIndex: boolean;
-  setSemanticIndex: (semanticIndex: boolean) => void;
 }
 
 /**
- * What the claude-cli **Managed codebase** toggle opens: the recipe picker, the codebase host, the
- * SSH host, the specialized-agent picker and the semantic index. Presentational — every value stays
- * in `CreateSessionPane`, which decides what each placement withdraws.
+ * What the claude-cli **Managed codebase** toggle opens: the recipe picker, the codebase host and
+ * the SSH host. Presentational — every value stays in `CreateSessionPane`, which decides what each
+ * placement withdraws.
+ *
+ * The specialized-agent picker and the Semantic index are **not** here. Neither is a property of
+ * the orchestration this toggle turns on: an agent is placeable on any host and reads the codebase
+ * through the session's own placement, and the index is built wherever the worktree is. Owning
+ * them here meant choosing any other placement took the controls off the page — see
+ * `docs/ft/daemon/amendments/PRD-2026-09-20-sandboxed-codebase-managed-workflow.md`.
  */
 export function CreateSessionManagedCodebaseFields({
   isSplitCodebase,
@@ -41,9 +43,6 @@ export function CreateSessionManagedCodebaseFields({
   sessionToken,
   sshConfigHost,
   setSshConfigHost,
-  agentPickerSection,
-  semanticIndex,
-  setSemanticIndex,
 }: CreateSessionManagedCodebaseFieldsProps) {
   return (
     <div className="mt-2 space-y-3 pl-4">
@@ -106,25 +105,6 @@ export function CreateSessionManagedCodebaseFields({
           onChange={setSshConfigHost}
         />
       )}
-      {/* No split guard: an agent is placeable on any host, and the placement only
-          decides how it reads the codebase — an agent on the codebase host reads that
-          worktree directly, one anywhere else reads a clone the session's worktree sync
-          keeps current. So the picker offers the same roster either way. */}
-      {agentPickerSection}
-      {/* No split guard: the index is built wherever the worktree is, which on a split
-          session is the codebase host. */}
-      <div>
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <input
-            data-testid="create-session-semantic-index-toggle"
-            type="checkbox"
-            className="h-4 w-4 rounded border-input"
-            checked={semanticIndex}
-            onChange={(e) => setSemanticIndex(e.target.checked)}
-          />
-          Semantic index
-        </label>
-      </div>
     </div>
   );
 }

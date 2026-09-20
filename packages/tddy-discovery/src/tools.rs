@@ -24,7 +24,12 @@ pub enum ToolExecutor {
     /// Execute against the local filesystem.
     Local,
     /// Execute via the relay → `ExecuteTool` RPC against a remote worktree.
-    Remote(RemoteToolEnv),
+    ///
+    /// Boxed: `RemoteToolEnv` carries eight optional strings and is far larger than the dataless
+    /// `Local`, so inlining it made every `ToolExecutor` — local ones included — pay for the remote
+    /// case. It crossed clippy's `large_enum_variant` threshold when the embedded daemon's socket
+    /// path joined the struct.
+    Remote(Box<RemoteToolEnv>),
 }
 
 /// Response body from `ExecuteTool` RPC.
@@ -39,7 +44,7 @@ impl ToolExecutor {
     /// Construct an executor from an `InvokeRequest`: Remote when `remote` is Some, Local otherwise.
     pub fn from_invoke_request(req: &InvokeRequest) -> Self {
         match req.remote.clone() {
-            Some(env) => ToolExecutor::Remote(env),
+            Some(env) => ToolExecutor::Remote(Box::new(env)),
             None => ToolExecutor::Local,
         }
     }
@@ -344,7 +349,7 @@ mod tests {
             .await;
 
         let env = make_remote_tool_env(&server.uri());
-        let executor = ToolExecutor::Remote(env);
+        let executor = ToolExecutor::Remote(Box::new(env));
 
         // When
         let output = executor
@@ -401,7 +406,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let executor = ToolExecutor::Remote(make_remote_tool_env(&server.uri()));
+        let executor = ToolExecutor::Remote(Box::new(make_remote_tool_env(&server.uri())));
 
         // When
         let output = executor
@@ -433,7 +438,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let executor = ToolExecutor::Remote(make_remote_tool_env(&server.uri()));
+        let executor = ToolExecutor::Remote(Box::new(make_remote_tool_env(&server.uri())));
 
         // When
         let output = executor
@@ -470,7 +475,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let executor = ToolExecutor::Remote(make_remote_tool_env(&server.uri()));
+        let executor = ToolExecutor::Remote(Box::new(make_remote_tool_env(&server.uri())));
 
         // When
         let result = executor.read("../../etc/passwd", None, None).await;

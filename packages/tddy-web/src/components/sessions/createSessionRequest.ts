@@ -173,10 +173,10 @@ export function buildStartSessionRequest(
     // The third placement. Choosing it cleared the two above and the codebase host in the form,
     // so they go out cleared here without being restated — the request says what the screen says.
     sandboxedCodebase,
-    // Both ride along on any placement, split or not — an agent reads the codebase through its
-    // own placement, and the index is built wherever the worktree is. Only `managedCodebase`
-    // gates them: without a managed codebase there is nothing to index and no worktree to give
-    // an agent, and the picker and toggle are hidden, so neither value may leak into the request.
+    // Both ride along on any placement, split or jailed or neither, and on whether the codebase is
+    // managed or not — an agent reads the codebase through its own placement, and the index is
+    // built wherever the worktree is. Nothing gates them here: the picker and the toggle are shown
+    // on every claude-cli placement, so what the form holds is what the screen showed.
     specializedAgents: selectedAgentIds,
     semanticIndex,
     // A remote worktree is reachable only through the mcp__tddy-tools__* proxy that managed

@@ -19,7 +19,7 @@ use tddy_discovery::subagent::{resolve_replaced_tools_for_defs, SubagentRegistry
 // `tddy-discovery` with the roster at `#unbundle` node 5 — it is logic over that crate's own
 // session types — while the tool bodies, their schemas and the router stayed here.
 use tddy_discovery::subagent_runtime::{
-    conversation_records, report_local_conversation_state, run_turn, subagent_error_json,
+    conversation_listing, report_local_conversation_state, run_turn, subagent_error_json,
     subagent_sessions, wait_for_turn, write_accounting_file, DeferredTurn, SubagentConversation,
 };
 use tddy_workflow_recipes::github_pr::{
@@ -1949,10 +1949,10 @@ async fn subagent_cancel_tool(args: serde_json::Value) -> String {
 }
 
 /// `subagent_list`: enumerate every conversation this session ran — open and ended — with its
-/// per-conversation token accounting.
+/// per-conversation token accounting and, for the open ones, how full its context is.
 async fn subagent_list_tool(_args: serde_json::Value) -> String {
     let sessions = subagent_sessions().lock().await;
-    serde_json::json!({ "conversations": conversation_records(&sessions) }).to_string()
+    serde_json::json!({ "conversations": conversation_listing(&sessions) }).to_string()
 }
 
 /// A roster status as the word the tool reports, and the `data-` value a UI would key on.
@@ -2380,9 +2380,16 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
 
     let list_tool = rmcp::model::Tool::new(
         "subagent_list",
-        "List all open subagent conversations with per-conversation token accounting. \
-         Returns {conversations:[{agent, id, model, inputTokens, outputTokens, totalTokens, \
-         turns}]}.",
+        "List all open subagent conversations with per-conversation token accounting and how \
+         full each one's context is. Returns {conversations:[{agent, id, model, inputTokens, \
+         outputTokens, totalTokens, turns, contextTokens}]}. `contextTokens` is what that \
+         conversation's history costs to send NOW — the last turn's prompt tokens — so it is the \
+         figure to watch against the model's window; `inputTokens` is cumulative spend across \
+         every turn, which re-sends the history each time and so over-counts the window several \
+         times over. A conversation that has ended carries no `contextTokens`: it has no history \
+         left to send. Wind a conversation down before `contextTokens` reaches the model's \
+         window — a turn refused for a full context ends it, returning a handoff brief to open a \
+         new conversation with.",
         schema_object(serde_json::json!({
             "type": "object",
             "properties": {}

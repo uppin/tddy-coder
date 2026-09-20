@@ -27,8 +27,11 @@ import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aJoinedCommonRoom } from "../support/rpc/withSelectedDaemon";
 import { createSessionPage } from "../support/pages/createSessionPage";
+import { anAvailableAgent } from "../support/rpc/sessionAgentRosterBackend";
 
 const THIS_HOST = "workstation";
+/** A specialized agent this deployment offers, by the qualified id the form submits. */
+const FASTCONTEXT = "fastcontext@workstation";
 const PROJECT = "proj-1";
 
 /**
@@ -60,6 +63,13 @@ const A_HOST_THAT_DOES_NOT_ADVERTISE_THE_PLACEMENT: DaemonHost = {
   instanceId: THIS_HOST,
   label: "workstation (this daemon)",
 };
+
+/** The same backend, with one specialized agent on offer. */
+function aCreateSessionBackendOfferingAnAgent(): InMemoryRpcBackend {
+  return aCreateSessionBackend().onUnary(CatalogService.method.listSubagents, () => ({
+    subagents: [anAvailableAgent("fastcontext", THIS_HOST)],
+  }));
+}
 
 function aCreateSessionBackend(): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
@@ -323,5 +333,41 @@ describe("Create session sandboxed codebase", () => {
     // Then there is nothing to caveat
     createSessionPage.sandboxedCodebaseToggle().should("be.enabled");
     createSessionPage.sandboxedCodebaseCaveat().should("not.exist");
+  });
+
+  it("offers the specialized-agent picker when the codebase is jailed", () => {
+    // Given a host that serves the placement and offers an agent
+    rpcBackend = aCreateSessionBackendOfferingAnAgent();
+    mountCreatePane(rpcBackend, A_HOST_WITH_A_FULLY_CONFINING_JAIL);
+    createSessionPage.switchToClaudeCliSession();
+    createSessionPage.selectProject(PROJECT);
+
+    // When the operator jails the codebase
+    createSessionPage.enableSandboxedCodebase();
+
+    // Then the agent is still on offer. Delegation is orthogonal to confinement, and this is the
+    // placement where it is safest — the checkout an agent could damage is the jailed one.
+    createSessionPage.specializedAgentOption(FASTCONTEXT).should("be.visible");
+  });
+
+  it("sends the chosen specialized agents for a jailed-codebase session", () => {
+    // Given an agent chosen on a jailed-codebase session
+    rpcBackend = aCreateSessionBackendOfferingAnAgent();
+    mountCreatePane(rpcBackend, A_HOST_WITH_A_FULLY_CONFINING_JAIL);
+    createSessionPage.switchToClaudeCliSession();
+    createSessionPage.selectProject(PROJECT);
+    createSessionPage.enableSandboxedCodebase();
+    createSessionPage.selectSpecializedAgent(FASTCONTEXT);
+
+    // When the session is created
+    createSessionPage.submit();
+
+    // Then the selection rides along beside the placement rather than being dropped with the
+    // control it used to live under
+    cy.wrap(rpcBackend).should(() => {
+      const request = theStartSessionRequest(rpcBackend);
+      expect(request.sandboxedCodebase).to.equal(true);
+      expect(request.specializedAgents).to.deep.equal([FASTCONTEXT]);
+    });
   });
 });
