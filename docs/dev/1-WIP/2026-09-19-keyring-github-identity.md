@@ -232,12 +232,33 @@ constant passes it again.
    reach back. The direction is the point — the crate deciding which account a project acts as knows
    nothing about sessions or LiveKit.
 
-⚠ **`GITHUB_TOKEN` inside a session is a separate question, and this commit does not settle it.**
-`github_token_from_env` is defined in `tddy-github/src/github_rest_common.rs` and called from 14
-sites across five files, and some of them run inside the *agent's* process, where the daemon may
-legitimately be the thing that set the variable.
-Deleting the daemon's fallback and deleting the agent's delivery mechanism are different changes; no
-test published here forces the second, and M1 must not quietly become it.
+### `GITHUB_TOKEN` inside a session — settled: it goes too
+
+The surface was published with this left open, because `github_token_from_env` is defined in
+`tddy-github/src/github_rest_common.rs` and called from 14 sites across five files, and some of them
+run inside the *agent's* process, where the daemon setting the variable is plausibly a delivery
+mechanism rather than a fallback. **The developer settled it on 2026-09-20: delete it entirely.**
+
+So the environment read is not narrowed to the daemon and left standing in the agent — it stops
+existing, and a token reaches a REST call only by being passed to it. What that costs, and what M1
+therefore owes:
+
+- `tddy-github` — the definition at `github_rest_common.rs:19` and its ten uses across
+  `github_rest_common.rs`, `github_pr.rs` and `pr_api.rs`. These are the entry points M1 was already
+  threading a token through; the deletion is the same edit finished rather than a second one.
+- `tddy-workflow-recipes` — the re-export in `lib.rs` and the caller in `merge_pr/github.rs`. This is
+  the part the earlier hedge was about: `merge_pr` runs where the agent runs, so it gains a token
+  parameter of its own and its caller must resolve one. **Green must not restore the environment
+  read under another name** — a `token: Option<String>` that falls back when `None` is the same
+  fallback with a longer path, and CLAUDE.md forbids it without consent that has not been given.
+- `tddy-workflow-recipes/tests/github_pr_acceptance.rs` — asserts the variable is absent before
+  exercising the unauthenticated path. It is rewritten against whatever replaces the parameter, not
+  deleted wholesale, because the behaviour it pins (no credential ⇒ refuse) is still the behaviour.
+
+Pinned by `no_crate_still_resolves_a_github_token_from_the_process_environment` in
+`packages/tddy-daemon-auth/tests/login_time_token_store_is_retired.rs` — a structural test, because
+"nothing reaches for this any more" is not a question the type system answers while the function
+still exists.
 
 ## Green wave
 
@@ -405,7 +426,9 @@ one account and pushed by another — which reads, to everyone downstream, as th
 - Each `AccountResolution` variant maps to its own failure, with its own message.
 - The session environment is constructed from a single record — asserted by construction, not by
   comparing two lookups.
-- No code path reads `GITHUB_TOKEN` or `GH_TOKEN` from the process environment.
+- No code path reads `GITHUB_TOKEN` or `GH_TOKEN` from the process environment — asserted
+  structurally over `tddy-github` and `tddy-workflow-recipes`, since a deleted function is
+  what makes the claim true rather than an unexercised branch.
 
 ### Acceptance tests
 
@@ -432,6 +455,8 @@ clippy. LiveKit-backed tests reuse the testkit container. Whole-workspace green 
 - [ ] `UnknownOnThisHost` fails with its own reason
 - [ ] `Ambiguous` fails rather than picking
 - [ ] `GITHUB_TOKEN` in the daemon's environment is never used for a session
+- [ ] `github_token_from_env` is deleted — no crate, daemon-side or agent-side, reads a
+      GitHub token from the process environment
 - [ ] WIP snapshot commits are still authored by `tddy-daemon`
 - [ ] `FileGitHubTokenStore` has no readers left
 
