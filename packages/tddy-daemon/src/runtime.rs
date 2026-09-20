@@ -228,6 +228,10 @@ pub struct RuntimeTasks {
     common_room: Option<CommonRoomSupervisorTask>,
     oauth_loopback_tunnel: Option<OauthLoopbackTunnel>,
     local_socket: Option<LocalSocketTransport>,
+    /// The agent-facing tool socket an **embedded** daemon serves, so a co-located agent spawned
+    /// beside a jailed checkout can reach `ExecuteTool` and the roster at all. `None` on the
+    /// binary host, which already serves both HTTP and the tonic local socket.
+    agent_tool_socket: Option<(PathBuf, Vec<tddy_rpc::ServiceEntry>)>,
     lsp_idle_reaper: Option<tddy_lsp::LspRegistry>,
     index_daemon: Option<crate::index_daemon::IndexDaemonRegistry>,
     relay_idle_monitor: Option<(
@@ -380,6 +384,26 @@ impl RuntimeTasks {
                 loop {
                     ticker.tick().await;
                     index_daemon.reap_idle().await;
+                }
+            }));
+        }
+
+        if let Some((socket_path, entries)) = self.agent_tool_socket {
+            handles.push(tokio::spawn(async move {
+                // Runs for the life of the process: an embedded daemon is stopped by its
+                // application exiting, and the socket file is removed on the way out.
+                let shutdown = std::future::pending::<()>();
+                if let Err(e) = crate::agent_tool_socket::serve_agent_tool_socket(
+                    &socket_path,
+                    entries,
+                    shutdown,
+                )
+                .await
+                {
+                    log::error!(
+                        target: "tddy_daemon::agent_tool_socket",
+                        "agent tool socket exited with error: {e:#}"
+                    );
                 }
             }));
         }
@@ -665,6 +689,7 @@ pub async fn build(
         common_room: None,
         oauth_loopback_tunnel: None,
         local_socket: None,
+        agent_tool_socket: None,
         lsp_idle_reaper: None,
         index_daemon: None,
         relay_idle_monitor,
@@ -1350,6 +1375,18 @@ pub async fn build(
         cloned_entries(&rpc_entries),
         peer_discovery,
     ))));
+
+    // An embedded daemon serves no HTTP listener and no tonic local socket, so this socket is the
+    // only channel a *co-located agent* has to it — a separate OS process spawned beside a jailed
+    // checkout, which can use neither the application's in-process bridge nor a port that only
+    // answers the OAuth callback. Built from the finished roster, so a tool call over it reaches
+    // the very handlers the UI does. See `crate::agent_tool_socket`.
+    if options.host == RuntimeHost::Embedded {
+        tasks.agent_tool_socket = Some((
+            crate::agent_tool_socket::agent_tool_socket_path(&tddy_data_dir),
+            cloned_entries(&rpc_entries),
+        ));
+    }
 
     Ok(DaemonRuntime {
         entries: rpc_entries,

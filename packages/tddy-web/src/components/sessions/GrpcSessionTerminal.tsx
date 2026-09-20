@@ -182,7 +182,7 @@ export function GrpcSessionTerminal({
     const mode = hasSyncedRef.current ? StreamReplayMode.FROM_OFFSET : StreamReplayMode.TAIL;
     const fromOffset = hasSyncedRef.current ? currentOffsetRef.current : 0n;
     dResize(
-      "streamTerminalOutput open sessionId=%s mode=%s fromOffset=%s container=%gx%gpx initialCols=%d initialRows=%d",
+      "streamTerminalOutput open sessionId=%s mode=%s fromOffset=%s container=%dx%dpx initialCols=%d initialRows=%d",
       sessionId,
       hasSyncedRef.current ? "FROM_OFFSET" : "TAIL",
       fromOffset.toString(),

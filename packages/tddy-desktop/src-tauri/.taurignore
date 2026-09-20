@@ -1,0 +1,29 @@
+# Paths `tauri dev`'s file watcher must NOT rebuild the application for.
+#
+# The watcher follows every workspace crate this binary depends on — which is most of them — and
+# a rebuild here is not cheap: it relinks the app, restarts the process, and so tears down the
+# tddy-daemon it hosts, every open session, every RPC connection and the log files they write.
+#
+# Generated trees inside those crates therefore have to be excluded by hand. `tddy-tool-engine`'s
+# acceptance tests write a whole fake checkout under `tests/fixtures/buildbox-root/` (gitignored),
+# so a plain `cargo test -p tddy-tool-engine` in this worktree restarted a running desktop app
+# mid-session — the rebuild announced itself as
+# `File .../tests/fixtures/.../hello.txt changed. Rebuilding application...`.
+#
+# Keep this list to things no source change can hide behind: test fixtures, scratch dirs and
+# build output. Excluding a real source path would leave the app silently running stale code.
+
+# Test fixtures, including the generated checkouts acceptance tests build inside them.
+**/tests/fixtures/
+
+# Session state, logs and scratch space a running dev stack writes continuously.
+tmp/
+**/tmp/
+**/.tddy/
+
+# Build output and dependencies.
+target/
+**/target/
+**/node_modules/
+**/dist/
+**/storybook-static/

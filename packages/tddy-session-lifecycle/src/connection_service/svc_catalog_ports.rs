@@ -111,7 +111,7 @@ impl tddy_discovery::catalog_service::CatalogHandler for DaemonSessionHost {
             }
         }
 
-        let tools_path = self.resolve_tddy_tools_path();
+        let tools_path = self.resolve_tddy_tools_path()?;
         // Cursor's model probe must hand tddy-tools the resolved absolute `agent` path (as the PTY
         // spawn does), so the impersonated child execs a fully-qualified binary instead of doing a
         // PATH lookup that lacks the install dir. Only forward an absolute path — a bare-name

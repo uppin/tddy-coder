@@ -16,6 +16,7 @@ use tddy_core::backend::RemoteToolEnv;
 fn a_split_session_env() -> RemoteToolEnv {
     RemoteToolEnv {
         daemon_url: String::new(),
+        daemon_socket: None,
         session_id: "019d105b-ac0f-78d3-9a89-409731145a40".to_string(),
         session_token: "caller-session-token".to_string(),
         daemon_instance_id: Some("workstation-b".to_string()),
@@ -30,6 +31,7 @@ fn a_split_session_env() -> RemoteToolEnv {
 fn a_co_located_env() -> RemoteToolEnv {
     RemoteToolEnv {
         daemon_url: "http://127.0.0.1:9321".to_string(),
+        daemon_socket: None,
         session_id: "019d105b-ac0f-78d3-9a89-409731145a41".to_string(),
         session_token: "caller-session-token".to_string(),
         daemon_instance_id: None,

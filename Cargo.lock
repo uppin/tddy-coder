@@ -12097,6 +12097,7 @@ dependencies = [
  "tddy-session-files",
  "tddy-session-lifecycle",
  "tddy-spawn",
+ "tddy-stdio",
  "tddy-task",
  "tddy-terminal-rpc",
  "tddy-testing-commons",

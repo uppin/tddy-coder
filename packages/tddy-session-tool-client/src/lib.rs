@@ -33,6 +33,24 @@ pub use tddy_sandbox::session_id_from_env;
 pub enum SessionToolTransport {
     /// In-jail MCP → unix socket → sandbox-runner → SessionChannel → host daemon.
     SandboxIpc { socket_path: PathBuf },
+    /// Direct connection to *this host's* daemon over its agent-facing unix socket, using the same
+    /// `tddy-rpc` framing the sandbox socket uses.
+    ///
+    /// The transport a co-located agent needs when the daemon runs **embedded** in an application
+    /// (Tddy Desktop): such a host serves no HTTP listener at all
+    /// (`tddy_daemon::runtime::RuntimeHost::Embedded`), so [`SessionToolTransport::DaemonHttp`]
+    /// pointed at `listen.web_port` reached the OAuth callback port and every tool call came back
+    /// `relay parse error` from an empty 404 body.
+    ///
+    /// Unlike [`SessionToolTransport::SandboxIpc`] this carries a full envelope: the agent runs
+    /// *beside* the jail rather than inside one, so the connection implies no session and the
+    /// daemon has to be told which one is calling.
+    DaemonUds {
+        socket_path: PathBuf,
+        session_id: String,
+        session_token: String,
+        daemon_instance_id: String,
+    },
     /// Direct HTTP Connect POST to `ExecToolService/ExecuteTool`.
     DaemonHttp {
         session_id: String,
@@ -241,6 +259,20 @@ pub fn detect_session_tool_transport() -> Option<SessionToolTransport> {
     {
         return Some(SessionToolTransport::IncompleteLiveKit { missing });
     }
+    // An embedded daemon serves no HTTP, so it exports a socket instead of a URL. Checked before
+    // the HTTP arm because a host may export both while migrating, and the socket is the one that
+    // works: it reaches the daemon in this very process tree rather than a port nothing listens on.
+    if let (Some(session_id), Some(socket_path)) = (
+        non_empty_env("TDDY_REMOTE_SESSION_ID"),
+        non_empty_env("TDDY_REMOTE_DAEMON_SOCKET"),
+    ) {
+        return Some(SessionToolTransport::DaemonUds {
+            socket_path: PathBuf::from(socket_path),
+            session_id,
+            session_token: std::env::var("TDDY_REMOTE_SESSION_TOKEN").unwrap_or_default(),
+            daemon_instance_id: std::env::var("TDDY_REMOTE_DAEMON_INSTANCE_ID").unwrap_or_default(),
+        });
+    }
     // Blank counts as unset here too: `RemoteToolEnv::env_pairs` always exports
     // `TDDY_REMOTE_DAEMON_URL`, and a split session exports it empty. Taken as a URL it produced
     // "relay connection error: relative URL without a base" on every tool call — an error naming
@@ -319,6 +351,20 @@ pub async fn dispatch_session_tool(tool_name: &str, args: serde_json::Value) -> 
     match transport {
         SessionToolTransport::SandboxIpc { socket_path } => {
             dispatch_via_sandbox_ipc(&socket_path, tool_name, &args).await
+        }
+        SessionToolTransport::DaemonUds {
+            socket_path,
+            session_id,
+            session_token,
+            daemon_instance_id,
+        } => {
+            dispatch_via_daemon_uds(
+                &socket_path,
+                &SessionToolEnvelope { session_id, session_token, daemon_instance_id },
+                tool_name,
+                &args,
+            )
+            .await
         }
         SessionToolTransport::DaemonHttp {
             session_id,
@@ -685,6 +731,27 @@ pub async fn dispatch_via_sandbox_ipc(
     };
     // The socket itself identifies the session to the sandbox-runner, so the envelope stays empty.
     dispatch_via_rpc_transport(&client, &SessionToolEnvelope::default(), tool_name, args).await
+}
+
+/// Forward a tool call to this host's embedded daemon over its agent-facing unix socket.
+///
+/// Same framing and the same connection-per-call rule as [`dispatch_via_sandbox_ipc`] — the socket
+/// is a duplex byte stream either way — and differs only in carrying a real
+/// [`SessionToolEnvelope`], because nothing about this connection tells the daemon which session
+/// is calling.
+pub async fn dispatch_via_daemon_uds(
+    socket_path: &std::path::Path,
+    envelope: &SessionToolEnvelope,
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> String {
+    let client = match connect_sandbox_ipc(socket_path).await {
+        Ok(client) => client,
+        Err(e) => {
+            return serde_json::json!({"error": e, "is_error": true}).to_string();
+        }
+    };
+    dispatch_via_rpc_transport(&client, envelope, tool_name, args).await
 }
 
 /// Open one sandbox-IPC connection and return the RPC transport over it.

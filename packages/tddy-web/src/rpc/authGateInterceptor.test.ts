@@ -13,6 +13,7 @@ import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import { SessionService, ListSessionsRequestSchema } from "../gen/session_pb";
 import { AuthService, GetAuthUrlRequestSchema } from "../gen/auth_pb";
+import { ActivityService, StreamAcpReplayRequestSchema } from "../gen/activity_pb";
 
 import { createAuthGateInterceptor } from "./authGateInterceptor";
 
@@ -28,6 +29,24 @@ function aListSessionsRequest(sessionToken: string) {
     message: create(ListSessionsRequestSchema, { sessionToken }),
     header: new Headers(),
     url: "/rpc/session.SessionService/ListSessions",
+    init: {},
+    signal: new AbortController().signal,
+  };
+}
+
+
+/** A server-streaming request, as ConnectRPC hands one to an interceptor: `stream: true` and a
+ *  `message` that is an AsyncIterable of the outgoing request messages. */
+function aStreamAcpReplayRequest(sessionToken: string) {
+  return {
+    stream: true as const,
+    service: ActivityService,
+    method: ActivityService.method.streamAcpReplay,
+    message: (async function* () {
+      yield create(StreamAcpReplayRequestSchema, { sessionToken, sessionId: "s-1" });
+    })(),
+    header: new Headers(),
+    url: "/rpc/activity.ActivityService/StreamAcpReplay",
     init: {},
     signal: new AbortController().signal,
   };
@@ -117,5 +136,24 @@ describe("createAuthGateInterceptor", () => {
     // Then — it is forwarded unchanged, gaining no sessionToken field
     expect(forwarded).toBe(true);
     expect("sessionToken" in req.message).toBe(false);
+  });
+
+  it("rewrites the sessionToken on a streaming request too, so a stream is not sent with a stale token", async () => {
+    // Given — a server-streaming call (StreamAcpReplay) carrying a token that has since lapsed
+    const interceptor = createAuthGateInterceptor(async () => "fresh-access-token");
+    const req = aStreamAcpReplayRequest("stale-token");
+    const sent: { sessionToken: string }[] = [];
+    const next = async (r: { message: AsyncIterable<{ sessionToken: string }> }) => {
+      // The transport is what drains the outgoing iterable; do the same so the gate's rewrite runs.
+      for await (const m of r.message) sent.push(m);
+      return aResponseFor(req as never);
+    };
+
+    // When — the stream is opened through the gate
+    await interceptor(next as never)(req as never);
+
+    // Then — the message that actually went out carries the fresh token, not the stale one
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.sessionToken).toBe("fresh-access-token");
   });
 });

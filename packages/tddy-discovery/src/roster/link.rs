@@ -66,6 +66,26 @@ pub(crate) async fn connect_facilitating_daemon(
              cannot be reached at all"
                 .to_string(),
         ),
+        // A full `tddy-rpc` client, so unlike the HTTP relay this one *can* carry the roster and
+        // conversation RPCs — the same framing the sandbox socket uses, differing only in that the
+        // envelope has to be carried: an agent running beside the jail is not identified by the
+        // connection the way an in-jail one is.
+        SessionToolTransport::DaemonUds {
+            socket_path,
+            session_id,
+            session_token,
+            daemon_instance_id,
+        } => {
+            let client = tddy_session_tool_client::connect_sandbox_ipc(socket_path).await?;
+            Ok((
+                client,
+                SessionToolEnvelope {
+                    session_id: session_id.clone(),
+                    session_token: session_token.clone(),
+                    daemon_instance_id: daemon_instance_id.clone(),
+                },
+            ))
+        }
         // Refused rather than served over a second transport: the HTTP relay reaches the daemon's
         // `ExecuteTool` only, and an `IncompleteLiveKit` environment is a split session whose
         // variables are broken, where a stray relay would answer from the wrong host.

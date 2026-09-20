@@ -222,6 +222,7 @@ mod tests {
     fn make_remote_tool_env(daemon_url: &str) -> RemoteToolEnv {
         RemoteToolEnv {
             daemon_url: daemon_url.to_string(),
+            daemon_socket: None,
             session_id: "sess-test-123".to_string(),
             session_token: "tok-abc".to_string(),
             daemon_instance_id: Some("relay-local".to_string()),

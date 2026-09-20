@@ -105,14 +105,22 @@ impl RpcService for MultiRpcService {
             .find_service(service)
             .map(|s| s.is_bidi_stream(service, method))
             .unwrap_or(false);
-        log::info!(
-            "[rpc] MultiRpcService.is_bidi_stream {}/{} -> found={} bidi={} (registered: {:?})",
-            service,
-            method,
-            found,
-            bidi,
-            self.service_names()
-        );
+        // DEBUG, not INFO: this fires several times per RPC and prints the whole service registry
+        // each time, which on a busy daemon is ~70% of the INFO stream and buries the lines that
+        // say what a session actually did. The registry only matters when a lookup FAILS, so that
+        // case keeps its full detail at WARN and the ordinary hit is debug-only.
+        if found {
+            log::debug!(
+                "[rpc] MultiRpcService.is_bidi_stream {service}/{method} -> found=true bidi={bidi}"
+            );
+        } else {
+            log::warn!(
+                "[rpc] MultiRpcService.is_bidi_stream {}/{} -> NOT FOUND (registered: {:?})",
+                service,
+                method,
+                self.service_names()
+            );
+        }
         bidi
     }
 

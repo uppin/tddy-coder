@@ -467,6 +467,7 @@ pub fn split_remote_tool_env(
         // but from the wrong host's filesystem. Left empty so the LiveKit transport is the only one
         // configured rather than a wrong one waiting behind it.
         daemon_url: String::new(),
+        daemon_socket: None,
         session_id: codebase_session_id.to_string(),
         session_token: agent_session_token,
         daemon_instance_id: Some(codebase_instance_id.to_string()),
@@ -499,9 +500,14 @@ pub fn colocated_jail_tool_env(
     this_daemon_url: &str,
     checkout_session_id: &str,
     agent_session_token: &str,
+    daemon_socket: Option<String>,
 ) -> RemoteToolEnv {
     RemoteToolEnv {
         daemon_url: this_daemon_url.to_string(),
+        // Set when this daemon serves no HTTP listener (an embedded host). The agent prefers it
+        // over `daemon_url`, which on such a host is only where a GitHub sign-in returns — every
+        // tool call POSTed there came back `relay parse error` from an empty 404 body.
+        daemon_socket,
         session_id: checkout_session_id.to_string(),
         session_token: agent_session_token.to_string(),
         // No peer to forward to: `daemon_instance_id` is the hop a split takes to reach another
@@ -1357,7 +1363,7 @@ mod colocated_jail_tool_env_tests {
     fn a_jailed_codebase_agent_reaches_its_checkout_over_this_daemons_own_url() {
         // Given a jailed checkout held by this daemon
         // When
-        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN);
+        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN, None);
 
         // Then this daemon's own URL is the route. `split_remote_tool_env` blanks it for the
         // opposite reason — there the URL answers, but from the wrong host's filesystem.
@@ -1368,7 +1374,7 @@ mod colocated_jail_tool_env_tests {
     fn a_jailed_codebase_agent_is_pointed_at_the_workspace_session_not_its_own() {
         // Given an agent session and the workspace session holding its checkout
         // When
-        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN);
+        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN, None);
 
         // Then the agent's MCP addresses the checkout. Its own id resolves to a session with no
         // worktree, and — decisively — one that `exec_tool_route` would answer `HostWorktree` for,
@@ -1381,7 +1387,7 @@ mod colocated_jail_tool_env_tests {
     fn a_jailed_codebase_agent_is_given_no_livekit_transport() {
         // Given both halves on this host
         // When
-        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN);
+        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN, None);
 
         // Then nothing LiveKit is configured — the placement must start on a daemon that has never
         // joined a common room, and a half-set transport is how it would silently stop doing so.
@@ -1395,7 +1401,7 @@ mod colocated_jail_tool_env_tests {
     fn a_jailed_codebase_agent_names_no_peer_daemon() {
         // Given both halves on this host
         // When
-        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN);
+        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN, None);
 
         // Then there is no forwarding hint: `daemon_instance_id` is the hop a split takes to reach
         // another host, and this placement has no hop to make.
@@ -1406,7 +1412,7 @@ mod colocated_jail_tool_env_tests {
     fn a_jailed_codebase_agent_carries_its_own_minted_token() {
         // Given a token minted for the agent, not the caller's own credential
         // When
-        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN);
+        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN, None);
 
         // Then it is what the agent presents — the caller's token is proof of who asked and is
         // never forwarded, exactly as on the split path.
@@ -1416,7 +1422,7 @@ mod colocated_jail_tool_env_tests {
     #[test]
     fn a_jailed_codebase_agents_env_exports_no_livekit_variables() {
         // Given the env as the spawner will export it
-        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN);
+        let env = colocated_jail_tool_env(THIS_DAEMON_URL, CHECKOUT_SESSION, AGENT_TOKEN, None);
 
         // When
         let exported: Vec<String> = env.env_pairs().into_iter().map(|(key, _)| key).collect();

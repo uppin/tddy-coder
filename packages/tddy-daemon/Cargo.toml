@@ -56,6 +56,8 @@ tddy-github = { path = "../tddy-github" }
 tddy-lsp = { path = "../tddy-lsp" }
 tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 tddy-rpc = { path = "../tddy-rpc" }
+# The agent-facing tool socket wraps a UnixStream as a tddy-rpc endpoint (`StdioEndpoint::from_duplex`).
+tddy-stdio = { path = "../tddy-stdio" }
 tddy-service = { path = "../tddy-service" }
 tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }

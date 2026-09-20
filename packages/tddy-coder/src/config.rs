@@ -130,6 +130,7 @@ impl RemoteConfig {
         use anyhow::Context;
         Ok(tddy_core::backend::RemoteToolEnv {
             daemon_url: self.daemon_url.clone().context("daemon_url is required")?,
+            daemon_socket: None,
             session_id: self.session_id.clone().context("session_id is required")?,
             session_token: self
                 .session_token

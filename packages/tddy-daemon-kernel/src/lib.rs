@@ -64,6 +64,9 @@ pub mod daemon_identity;
 pub mod peer_forwarding;
 pub mod privilege_drop;
 pub mod spawn_as_user;
+pub mod agent_tool_socket;
+pub use agent_tool_socket::agent_tool_socket_path;
+pub mod toolchain;
 pub mod user_paths;
 
 /// Resolve a session token to the OS user that owns it.
