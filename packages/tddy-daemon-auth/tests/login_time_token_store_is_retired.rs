@@ -72,3 +72,20 @@ fn nothing_in_the_tree_still_declares_a_login_keyed_github_token_store() {
         "`GitHubTokenStore` is still declared — a login-keyed store cannot express two accounts"
     );
 }
+
+#[test]
+fn no_crate_still_resolves_a_github_token_from_the_process_environment() {
+    // Given every crate that reaches GitHub over REST
+    let source = format!(
+        "{}{}",
+        production_source_of("tddy-github"),
+        production_source_of("tddy-workflow-recipes")
+    );
+
+    // Then none of them reads the credential out of the environment it happens to run in
+    assert!(
+        !source.contains("github_token_from_env"),
+        "a GitHub token is still read from the process environment — which account that is depends \
+         on who exported the variable, not on what the project was assigned"
+    );
+}
