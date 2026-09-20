@@ -86,7 +86,7 @@ impl DaemonSessionHost {
             &materialized,
         );
 
-        let tddy_tools_path = self.resolve_tddy_tools_path();
+        let tddy_tools_path = self.resolve_tddy_tools_path()?;
         let remote = match livekit {
             Some(livekit) => crate::split_session::split_remote_tool_env(
                 livekit,
@@ -103,8 +103,26 @@ impl DaemonSessionHost {
                 &hooks_and_urls::local_daemon_hook_url(&self.config),
                 codebase_session_id,
                 &self.agent_session_token_for(&req.session_token)?,
+                self.agent_tool_socket_for_embedded_host(),
             ),
         };
+        // What this agent was actually wired to, on one line, on the path *every* placement takes.
+        // None of it used to be logged: a session started and the only record of which binaries it
+        // got — or which route its tools would take back — was the process table, after the fact.
+        // Both bit us. The tools path was written relative and resolved against the agent's own
+        // context dir, so its MCP server never launched; and the relay was an HTTP URL on a host
+        // that serves no HTTP, so every tool call returned `relay parse error`.
+        log::info!(
+            "agent tool wiring: session={} codebase_session={} tddy_tools={} relay={}",
+            session_id,
+            codebase_session_id,
+            tddy_tools_path.display(),
+            match (&remote.daemon_socket, remote.daemon_url.is_empty()) {
+                (Some(sock), _) => format!("uds {sock}"),
+                (None, false) => format!("http {}", remote.daemon_url),
+                (None, true) => "livekit".to_string(),
+            },
+        );
         if let Some(livekit) = livekit {
             // This daemon runs the agent, so it is this session's facilitating daemon and hosts its room —
             // even though the checkout is on `codebase_instance_id`. Opened before the agent is spawned

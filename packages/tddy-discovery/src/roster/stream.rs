@@ -260,9 +260,13 @@ pub fn decide_roster_subscription(
         // `tddy_sandbox_runner::ToolExecService` and `run_host_relay_with_rpc`. The subscription
         // proceeds exactly as it does over LiveKit: a fresh connection per stream, the first frame
         // replaces the seed, reconnect-on-drop with backoff.
-        SessionToolTransport::SandboxIpc { .. } | SessionToolTransport::LiveKit { .. } => {
-            Some(transport)
-        }
+        // `DaemonUds` joins these two rather than the HTTP arm below: it is a full `tddy-rpc`
+        // client to the daemon, so `StreamSessionAgents` and the conversation RPCs ride it exactly
+        // as they ride the sandbox socket. An embedded daemon's co-located agent therefore gets a
+        // live roster, where the HTTP relay it used to be given could only ever refuse one.
+        SessionToolTransport::SandboxIpc { .. }
+        | SessionToolTransport::DaemonUds { .. }
+        | SessionToolTransport::LiveKit { .. } => Some(transport),
         // TODO(session-agent-roster): give the HTTP transport a `StreamSessionAgents` client (or a
         // `ListSessionAgents` poll) so a daemon-HTTP session can address agents at all.
         SessionToolTransport::DaemonHttp { .. } => {

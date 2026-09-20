@@ -284,8 +284,12 @@ export function CreateSessionPane({
    *
    * Only the jailed codebase is exclusive with *both* of the others, so this owns exactly that
    * axis: the two older toggles keep their own state, and choosing either of them clears the jail.
-   * Choosing the jail clears them, together with everything only the managed section could offer —
-   * a selection the operator can no longer see is one the form must no longer hold.
+   * Choosing the jail clears them, together with the codebase host only the managed section could
+   * offer — a selection the operator can no longer see is one the form must no longer hold.
+   *
+   * The specialized agents and the Semantic index are deliberately **not** cleared: they are
+   * offered on every placement now, so they are still on screen after this runs, and a placement
+   * has never been what decides whether an agent may be attached.
    */
   /**
    * Whether this placement withdraws `--dangerously-skip-permissions`.
@@ -308,8 +312,6 @@ export function CreateSessionPane({
     if (next === "sandboxedCodebase") {
       setSandbox(false);
       setManagedCodebase(false);
-      setSemanticIndex(false);
-      setSelectedAgentIds([]);
       setCodebaseDaemonInstanceId("");
     }
   };
@@ -546,6 +548,34 @@ export function CreateSessionPane({
     />
   );
 
+  /**
+   * The specialized-agent picker and the Semantic index, offered on **every** claude-cli placement.
+   *
+   * Neither is a property of a placement. An agent is placeable on any host and reads the codebase
+   * through the session's own placement; the index is built wherever the worktree is. They used to
+   * live inside the Managed-codebase block, so choosing the jailed codebase — the placement where
+   * delegating is safest, because the checkout an agent could damage is the confined one — took
+   * both controls off the page. See
+   * docs/ft/daemon/amendments/PRD-2026-09-20-sandboxed-codebase-managed-workflow.md.
+   */
+  const placementIndependentFields = (
+    <>
+      {agentPickerSection}
+      <div>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          <input
+            data-testid="create-session-semantic-index-toggle"
+            type="checkbox"
+            className="h-4 w-4 rounded border-input"
+            checked={semanticIndex}
+            onChange={(e) => setSemanticIndex(e.target.checked)}
+          />
+          Semantic index
+        </label>
+      </div>
+    </>
+  );
+
   return (
     <div
       data-testid="create-session-pane"
@@ -641,8 +671,9 @@ export function CreateSessionPane({
             />
           </div>
 
-          {/* Managed codebase — an explicit toggle that, when on, makes the session workflow-aware
-              (recipe picker) and lets the user attach specialized subagents.
+          {/* Managed codebase — an explicit toggle that, when on, makes the session workflow-aware:
+              a recipe, a seeded changeset and a toolcall listener. It is the orchestration axis and
+              confines nothing, so it composes with any placement — including the jailed codebase.
               See docs/ft/coder/managed-codebase-workflow.md. */}
           <div>
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -653,10 +684,11 @@ export function CreateSessionPane({
                 checked={managedCodebase}
                 onChange={(e) => {
                   setManagedCodebase(e.target.checked);
-                  // Closing the section clears what only it could offer, rather than leaving the
-                  // values to be stripped at submit: a selection the operator can no longer see is
-                  // one the form must no longer hold, and a request that disagrees with the screen
-                  // is how a picked agent went missing without an error.
+                  // Switching the orchestration off resets what a managed session was going to be
+                  // given, rather than leaving the values to be stripped at submit: a request that
+                  // disagrees with the screen is how a picked agent went missing without an error.
+                  // Both controls stay visible either way — they are placement-independent — so
+                  // this is a reset the operator can see, not a hidden value dropped at the wire.
                   if (!e.target.checked) {
                     setSemanticIndex(false);
                     setSelectedAgentIds([]);
@@ -680,12 +712,11 @@ export function CreateSessionPane({
                 sessionToken={sessionToken}
                 sshConfigHost={sshConfigHost}
                 setSshConfigHost={setSshConfigHost}
-                agentPickerSection={agentPickerSection}
-                semanticIndex={semanticIndex}
-                setSemanticIndex={setSemanticIndex}
               />
             )}
           </div>
+
+          {placementIndependentFields}
         </>
       )}
 

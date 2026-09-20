@@ -359,6 +359,11 @@ impl SessionMode {
 #[derive(Debug, Clone)]
 pub struct RemoteToolEnv {
     pub daemon_url: String,
+    /// Unix socket to reach the daemon on instead of `daemon_url`, for a host that serves no HTTP
+    /// listener at all — an application embedding the daemon in its own process (Tddy Desktop).
+    /// A co-located agent is a separate process, so it can use neither the application's in-process
+    /// bridge nor `listen.web_port`, which on such a host answers only the OAuth callback.
+    pub daemon_socket: Option<String>,
     pub session_id: String,
     pub session_token: String,
     pub daemon_instance_id: Option<String>,
@@ -388,6 +393,9 @@ impl RemoteToolEnv {
                 self.session_token.clone(),
             ),
         ];
+        if let Some(v) = &self.daemon_socket {
+            pairs.push(("TDDY_REMOTE_DAEMON_SOCKET".to_string(), v.clone()));
+        }
         if let Some(v) = &self.daemon_instance_id {
             pairs.push(("TDDY_REMOTE_DAEMON_INSTANCE_ID".to_string(), v.clone()));
         }

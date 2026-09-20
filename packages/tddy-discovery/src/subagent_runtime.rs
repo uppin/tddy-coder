@@ -49,6 +49,11 @@ pub struct SubagentConversation {
     /// Token usage across the turns that have **ended**. A turn in flight has spent nothing this
     /// session can attribute to it yet.
     usage: crate::openai::TokenUsage,
+    /// What this conversation's history cost to send on its last completed turn — occupancy, not
+    /// spend (see [`SubagentSession::context_tokens`]). Copied out of the session with
+    /// [`Self::usage`] and for the same reason: a turn in flight holds the session's lock, and
+    /// reading back through it would either block behind that turn or report a half-run one.
+    context_tokens: u64,
     /// The turn loop, behind the lock that serializes turns on *this* conversation and nothing
     /// else. A conversation's history is one sequence, so two turns must not run against it at
     /// once; `tokio::sync::Mutex` is fair, so waiting for it is the queue (criterion 30).
@@ -71,6 +76,7 @@ impl SubagentConversation {
             turns: 0,
             model: session.model().to_string(),
             usage: session.cumulative_usage(),
+            context_tokens: session.context_tokens(),
             session: std::sync::Arc::new(tokio::sync::Mutex::new(session)),
             remote,
         }
@@ -146,8 +152,22 @@ pub enum TurnState {
 /// table.
 struct PendingTurn {
     conversation_id: String,
+    /// Where this turn came in the order prompts were **accepted** on this process — the sequence
+    /// [`PendingTurns::start`] was called in. The table is a `HashMap`, which has no order of its
+    /// own, so without this there is nothing to say which of two outstanding turns was asked for
+    /// first.
+    arrived: u64,
     publish: tokio::sync::watch::Sender<TurnState>,
     abort: tokio::task::AbortHandle,
+}
+
+impl PendingTurn {
+    /// Whether this turn is still outstanding. Read off the published state rather than off the
+    /// turn's presence in the table: an entry deliberately survives its result being collected, so
+    /// "is in the table" and "has not ended" are different questions.
+    fn is_running(&self) -> bool {
+        matches!(*self.publish.borrow(), TurnState::Running)
+    }
 }
 
 /// Every turn this process deferred, keyed by the `responseId` its caller was given.
@@ -158,6 +178,8 @@ struct PendingTurn {
 #[derive(Default)]
 pub struct PendingTurns {
     turns: HashMap<String, PendingTurn>,
+    /// How many turns this table has ever registered, and so the arrival number the next one takes.
+    accepted: u64,
 }
 
 impl PendingTurns {
@@ -169,14 +191,62 @@ impl PendingTurns {
         abort: tokio::task::AbortHandle,
     ) {
         let (publish, _) = tokio::sync::watch::channel(TurnState::Running);
+        let arrived = self.accepted;
+        self.accepted += 1;
         self.turns.insert(
             response_id.to_string(),
             PendingTurn {
                 conversation_id: conversation_id.to_string(),
+                arrived,
                 publish,
                 abort,
             },
         );
+    }
+
+    /// How many turns on the same conversation were accepted before `response_id` and have not
+    /// ended — `0` meaning nothing is ahead of it, so it is the one holding the conversation's turn
+    /// lock. `None` is an id this table never registered, which is not the front of the line: a
+    /// caller told `0` for an id nothing is stored under would read it as a turn about to run.
+    ///
+    /// **Arrival order, not completion order.** This counts the prompts *accepted* ahead of this
+    /// one. Turns are serialized by the conversation's session mutex, which is fair, so the two
+    /// normally agree — but the spawned tasks race to make their first `lock()` call, and the
+    /// scheduler settles that race. The number is an accurate statement about how many prompts
+    /// were taken before this one, and nothing stronger.
+    pub fn queue_position(&self, response_id: &str) -> Option<usize> {
+        let turn = self.turns.get(response_id)?;
+        Some(
+            self.turns
+                .values()
+                .filter(|other| {
+                    other.conversation_id == turn.conversation_id
+                        && other.arrived < turn.arrived
+                        && other.is_running()
+                })
+                .count(),
+        )
+    }
+
+    /// How many turns are outstanding on `conversation_id`, the one running included. `0` for a
+    /// conversation with nothing in flight.
+    ///
+    /// Per conversation, because a conversation is what a turn queues on: turns on two
+    /// conversations hold different session mutexes and wait for nothing of each other's.
+    pub fn queue_size(&self, conversation_id: &str) -> usize {
+        self.turns
+            .values()
+            .filter(|turn| turn.conversation_id == conversation_id && turn.is_running())
+            .count()
+    }
+
+    /// The conversation a deferred turn belongs to. For a caller holding only a `responseId` —
+    /// `subagent_await` is given the turn's id and nothing else, and the queue it has to report on
+    /// is that turn's conversation's.
+    pub fn conversation_of(&self, response_id: &str) -> Option<&str> {
+        self.turns
+            .get(response_id)
+            .map(|turn| turn.conversation_id.as_str())
     }
 
     /// A receiver for `response_id`, for a caller that wants to wait on it. `None` means no turn
@@ -288,6 +358,50 @@ fn conversation_record(
     }
 }
 
+/// Every conversation as `subagent_list` reports it: the shared accounting record, plus the
+/// occupancy figure that record deliberately does not carry.
+///
+/// `contextTokens` is what the conversation's history costs to send now, and it answers a question
+/// cumulative spend cannot: every turn re-sends the whole history, so `inputTokens` is a sum of
+/// growing prefixes that over-counts the window. A main agent watching occupancy can wind a
+/// conversation down on its own terms instead of discovering the ceiling by hitting it.
+///
+/// `queued` is how many turns are outstanding on the conversation, the one running included. A
+/// conversation runs one turn at a time, so a caller that has fired several prompts at one of them
+/// can see here how much of its own work is still lined up behind the turn in flight.
+///
+/// A **retired** conversation carries no `contextTokens` at all: it has no history left to send, so
+/// there is no occupancy to report, and a `0` there would be indistinguishable from an open
+/// conversation that has not yet run a turn. It carries no `queued` either, and for the same
+/// reason: its turns were answered when it ended, so there is no queue left to stand in.
+pub fn conversation_listing(conversations: &SubagentConversations) -> Vec<serde_json::Value> {
+    let mut rows: Vec<serde_json::Value> = conversations
+        .open
+        .iter()
+        .map(|(id, conv)| {
+            let mut row = serde_json::json!(conversation_record(id, conv));
+            if let Some(object) = row.as_object_mut() {
+                object.insert(
+                    "contextTokens".to_string(),
+                    serde_json::json!(conv.context_tokens),
+                );
+                object.insert(
+                    "queued".to_string(),
+                    serde_json::json!(conversations.pending.queue_size(id)),
+                );
+            }
+            row
+        })
+        .collect();
+    rows.extend(
+        conversations
+            .retired
+            .iter()
+            .map(|record| serde_json::json!(record)),
+    );
+    rows
+}
+
 /// Every conversation this process has run, open ones first. The retired ones are included because
 /// their tokens were spent by this session: an accounting file that lists only what is still open
 /// reports a detached agent's consumption as zero.
@@ -346,12 +460,14 @@ pub async fn run_turn(turn: DeferredTurn) {
     // Read while the turn lock is still held, and kept held until the table is updated: releasing
     // it first would let the next queued turn end and record its own totals underneath this one.
     let usage = session.cumulative_usage();
+    let context_tokens = session.context_tokens();
 
     let mut sessions = subagent_sessions().lock().await;
     if let Some(conv) = sessions.open.get_mut(&turn.conversation_id) {
         // A turn that failed still counts what it spent reaching that failure, but is not a turn
         // the conversation took: nothing was added to its history.
         conv.usage = usage;
+        conv.context_tokens = context_tokens;
         if ended.took_a_turn {
             conv.turns += 1;
         }
@@ -465,6 +581,84 @@ mod tests {
     /// What a `watch` receiver is holding right now, as a test reads it.
     fn state_of(receiver: &tokio::sync::watch::Receiver<TurnState>) -> TurnState {
         receiver.borrow().clone()
+    }
+
+    /// A conversation runs one turn at a time: `SubagentConversation::session` is a mutex the
+    /// whole turn is held under. A caller that prompts a busy conversation is queueing, and these
+    /// are the numbers that let it know that rather than read `pending: true` as "running now".
+    #[tokio::test]
+    async fn the_first_turn_on_an_idle_conversation_is_at_the_front() {
+        // Given nothing else running on this conversation
+        let mut pending = PendingTurns::default();
+
+        // When a turn is registered
+        pending.start("response-1", "conv-1", a_turn_still_running());
+
+        // Then it is the one running, not one waiting
+        assert_eq!(pending.queue_position("response-1"), Some(0));
+        assert_eq!(pending.queue_size("conv-1"), 1);
+    }
+
+    #[tokio::test]
+    async fn each_further_turn_queues_behind_the_ones_accepted_before_it() {
+        // Given a conversation already working
+        let mut pending = PendingTurns::default();
+        pending.start("response-1", "conv-1", a_turn_still_running());
+
+        // When two more prompts are accepted on it
+        pending.start("response-2", "conv-1", a_turn_still_running());
+        pending.start("response-3", "conv-1", a_turn_still_running());
+
+        // Then each is told how many were accepted ahead of it. This is the number whose absence
+        // had a caller fire ten prompts at one conversation and then call the queue a bug.
+        assert_eq!(pending.queue_position("response-2"), Some(1));
+        assert_eq!(pending.queue_position("response-3"), Some(2));
+        assert_eq!(pending.queue_size("conv-1"), 3);
+    }
+
+    #[tokio::test]
+    async fn a_queue_is_per_conversation_and_not_a_process_wide_line() {
+        // Given turns on two different conversations
+        let mut pending = PendingTurns::default();
+        pending.start("response-1", "conv-1", a_turn_still_running());
+        pending.start("response-2", "conv-2", a_turn_still_running());
+
+        // Then neither waits on the other — they hold different session mutexes, so a shared count
+        // would report a delay that does not exist
+        assert_eq!(pending.queue_position("response-2"), Some(0));
+        assert_eq!(pending.queue_size("conv-1"), 1);
+        assert_eq!(pending.queue_size("conv-2"), 1);
+    }
+
+    #[tokio::test]
+    async fn the_queue_drains_as_earlier_turns_finish() {
+        // Given a turn waiting behind two others
+        let mut pending = PendingTurns::default();
+        pending.start("response-1", "conv-1", a_turn_still_running());
+        pending.start("response-2", "conv-1", a_turn_still_running());
+        pending.start("response-3", "conv-1", a_turn_still_running());
+
+        // When the one in front finishes
+        pending.resolve(
+            "response-1",
+            prompt_outcome_json(an_end_turn_outcome("done")),
+        );
+
+        // Then the ones behind it move up. A caller polling `subagent_await` is asking "how much
+        // longer", so the number it gets has to be the current one, not the one it queued at.
+        assert_eq!(pending.queue_position("response-3"), Some(1));
+        assert_eq!(pending.queue_size("conv-1"), 2);
+    }
+
+    #[tokio::test]
+    async fn a_turn_nobody_registered_has_no_position() {
+        // Given an empty registry
+        let pending = PendingTurns::default();
+
+        // Then an unknown id is reported as unknown rather than as "at the front", which would
+        // read as a turn that is about to run
+        assert_eq!(pending.queue_position("never-started"), None);
+        assert_eq!(pending.queue_size("conv-1"), 0);
     }
 
     /// Registering a turn is what makes its id answerable at all — before it resolves, the honest

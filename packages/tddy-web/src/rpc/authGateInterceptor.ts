@@ -32,13 +32,35 @@ export function carriesSessionToken(message: unknown): message is { sessionToken
 export function createAuthGateInterceptor(
   ensureFreshAccessToken: () => Promise<string | null>,
 ): Interceptor {
-  return (next) => async (req) => {
-    if (!req.stream && carriesSessionToken(req.message)) {
-      const token = await ensureFreshAccessToken();
-      if (token !== null) {
-        req.message.sessionToken = token;
-      }
+  /** Rewrite one outgoing message in place, when it carries a token the gate owns. */
+  async function refreshTokenOn(message: unknown): Promise<void> {
+    if (!carriesSessionToken(message)) return;
+    const token = await ensureFreshAccessToken();
+    if (token !== null) {
+      message.sessionToken = token;
     }
-    return next(req);
+  }
+
+  return (next) => async (req) => {
+    if (!req.stream) {
+      await refreshTokenOn(req.message);
+      return next(req);
+    }
+
+    // A streaming call carries an AsyncIterable of request messages rather than one message, so
+    // the token is rewritten per message as the transport pulls it. Skipping streams entirely —
+    // as this gate once did — sent them with whatever token the caller happened to hold, which for
+    // a long-lived page is the lapsed one React state last saw: the unary calls beside them kept
+    // working (the gate refreshed those) while every stream was refused `unauthenticated`.
+    const outgoing = req.message;
+    return next({
+      ...req,
+      message: (async function* () {
+        for await (const message of outgoing) {
+          await refreshTokenOn(message);
+          yield message;
+        }
+      })(),
+    });
   };
 }

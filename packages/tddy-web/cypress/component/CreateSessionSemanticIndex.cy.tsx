@@ -74,13 +74,14 @@ describe("CreateSession managed-codebase semantic index", () => {
     cy.viewport(1280, 800);
   });
 
-  it("hides the Semantic index option until Managed codebase is enabled", () => {
+  it("offers the Semantic index option without waiting for Managed codebase", () => {
     // Given — a claude-cli session with Managed codebase still disabled
     mountCreatePane(aCreateSessionBackend());
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
 
-    // Then — the Semantic index checkbox is not shown
-    byTestId(TEST_IDS.createSessionSemanticIndexToggle).should("not.exist");
+    // Then — the Semantic index checkbox is shown. The index is built wherever the worktree is,
+    // on every placement, so the orchestration toggle is not what decides whether it is offered.
+    byTestId(TEST_IDS.createSessionSemanticIndexToggle).should("be.visible");
 
     // When — enabling Managed codebase
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();

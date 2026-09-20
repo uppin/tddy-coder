@@ -20,6 +20,7 @@ pub fn extract_remote_env_from_ctx(ctx: &HashMap<String, String>) -> Option<Remo
     let session_token = ctx.get("remote_session_token")?.clone();
     Some(RemoteToolEnv {
         daemon_url,
+        daemon_socket: ctx.get("remote_daemon_socket").cloned(),
         session_id,
         session_token,
         daemon_instance_id: ctx.get("remote_daemon_instance_id").cloned(),

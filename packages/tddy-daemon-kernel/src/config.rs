@@ -334,6 +334,17 @@ pub struct DaemonConfig {
     pub users: Vec<UserMapping>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_tools: Vec<AllowedTool>,
+    /// Directory holding this deployment's tddy binaries (`tddy-tools`, `tddy-sandbox-runner`,
+    /// `tddy-index-daemon`, …). Absent — the ordinary case — means "beside the running daemon",
+    /// which is how `./install` ships them and where a dev `target/debug` tree has them.
+    ///
+    /// Stated as its own key because the answer used to be *derived* from `allowed_tools[0].path`,
+    /// a UI menu entry naming which `tddy-coder` build to offer an operator. That made the
+    /// toolchain's location a side effect of a dropdown, and — since those paths are relative in
+    /// every dev config — produced commands that resolved against each consumer's own cwd. See
+    /// [`crate::toolchain`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toolchain_dir: Option<String>,
     /// Allowed coding backends / agents (`tddy-coder --agent` values), with optional UI labels.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_agents: Vec<AllowedAgent>,
@@ -458,6 +469,7 @@ impl Default for DaemonConfig {
         Self {
             listen: ListenConfig::default(),
             web_bundle_path: None,
+            toolchain_dir: None,
             livekit: None,
             github: None,
             auth_storage: None,
@@ -1168,6 +1180,14 @@ impl DaemonConfig {
             .first()
             .map(|t| t.path.clone())
             .unwrap_or_else(|| "tddy-coder".to_string())
+    }
+
+    /// This deployment's tddy toolchain — where its binaries are, resolved absolutely.
+    ///
+    /// Never derived from `allowed_tools`: that list is the operator's menu of `tddy-coder`
+    /// builds, not a statement about where the toolchain lives.
+    pub fn toolchain(&self) -> crate::toolchain::TddyToolchain {
+        crate::toolchain::TddyToolchain::resolve(self.toolchain_dir.as_deref())
     }
 
     /// Allowed agent ids (`StartSession.agent` / `tddy-coder --agent`) and display labels.

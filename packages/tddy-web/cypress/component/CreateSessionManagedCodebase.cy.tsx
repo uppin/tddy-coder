@@ -103,9 +103,10 @@ describe("CreateSession managed-codebase specialized-subagent picker", () => {
     // When
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
 
-    // Then — the checkbox is present and unchecked, so the subagent list is not yet shown
+    // Then — the checkbox is present and unchecked. The subagent list is shown regardless: an
+    // agent is attachable on any placement, so the orchestration toggle does not gate it.
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).should("be.visible").and("not.be.checked");
-    byTestId(TEST_IDS.createSessionManagedCodebaseSection).should("not.exist");
+    byTestId(TEST_IDS.createSessionAgentPickerSection).should("be.visible");
   });
 
   it("enabling Managed codebase lists every subagent returned by ListSubagents", () => {
@@ -117,7 +118,7 @@ describe("CreateSession managed-codebase specialized-subagent picker", () => {
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
 
     // Then
-    byTestId(TEST_IDS.createSessionManagedCodebaseSection).should("be.visible");
+    byTestId(TEST_IDS.createSessionAgentPickerSection).should("be.visible");
     byTestId(createSessionAgentOption(FASTCONTEXT)).should("be.visible");
     byTestId(createSessionAgentOption(MY_EXPLORER)).should("be.visible");
   });

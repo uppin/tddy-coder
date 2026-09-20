@@ -95,21 +95,22 @@ describe("CreateSession managed-codebase workflow", () => {
       .and("have.attr", "type", "checkbox");
   });
 
-  it("enabling Managed codebase reveals the recipe picker and the subagent list", () => {
+  it("enabling Managed codebase reveals the recipe picker", () => {
     // Given
     mountCreatePane(aCreateSessionBackend());
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
 
-    // Then — neither the recipe picker nor the subagent list is shown while disabled
+    // Then — the recipe picker is not shown while disabled. The subagent list is: a recipe is
+    // orchestration and belongs to this toggle, whereas attaching an agent does not.
     byTestId(TEST_IDS.createSessionRecipeSelect).should("not.exist");
-    byTestId(TEST_IDS.createSessionManagedCodebaseSection).should("not.exist");
+    byTestId(TEST_IDS.createSessionAgentPickerSection).should("be.visible");
 
     // When — enabling Managed codebase
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
 
     // Then — both the recipe picker and the subagent list appear
     byTestId(TEST_IDS.createSessionRecipeSelect).should("be.visible");
-    byTestId(TEST_IDS.createSessionManagedCodebaseSection).should("be.visible");
+    byTestId(TEST_IDS.createSessionAgentPickerSection).should("be.visible");
     byTestId(createSessionAgentOption(FASTCONTEXT)).should("be.visible");
   });
 

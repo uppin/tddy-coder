@@ -19,8 +19,9 @@ use tddy_discovery::subagent::{resolve_replaced_tools_for_defs, SubagentRegistry
 // `tddy-discovery` with the roster at `#unbundle` node 5 — it is logic over that crate's own
 // session types — while the tool bodies, their schemas and the router stayed here.
 use tddy_discovery::subagent_runtime::{
-    conversation_records, report_local_conversation_state, run_turn, subagent_error_json,
-    subagent_sessions, wait_for_turn, write_accounting_file, DeferredTurn, SubagentConversation,
+    conversation_listing, report_local_conversation_state, run_turn, subagent_error_json,
+    subagent_sessions, wait_for_turn, write_accounting_file, DeferredTurn, PendingTurns,
+    SubagentConversation,
 };
 use tddy_workflow_recipes::github_pr::{
     create_pull_request_via_rest_api, update_pull_request_via_rest_api, CreatePullRequestParams,
@@ -1677,10 +1678,29 @@ fn subagent_tool_names() -> Vec<String> {
 /// (docs/ft/coder/managed-codebase-subagents.md § Long turns).
 const SUBAGENT_PROMPT_GRACE: std::time::Duration = std::time::Duration::from_secs(25);
 
-/// `{responseId, pending: true}` — the second shape a conversation tool can return, told apart from
-/// an outcome by a key an outcome never carries.
-fn pending_turn_json(response_id: &str) -> String {
-    serde_json::json!({ "responseId": response_id, "pending": true }).to_string()
+/// `{responseId, pending: true, queuePosition, queueSize}` — the second shape a conversation tool
+/// can return, told apart from an outcome by a key an outcome never carries.
+///
+/// The queue numbers are read **here**, as the receipt is written, so a `subagent_await` that hands
+/// one back reports where the turn stands now rather than where it stood when it was accepted —
+/// which is the number a caller polling for progress is asking for.
+///
+/// `queuePosition` is how many turns accepted before this one on the same conversation are still
+/// outstanding (`0` = this is the one running); `queueSize` counts every outstanding turn on that
+/// conversation, this one included. Both are `null` for a turn `pending` does not hold: that is "no
+/// queue to report", which a `0` would misstate as the front of the line.
+fn pending_turn_json(pending: &PendingTurns, response_id: &str) -> String {
+    let position = pending.queue_position(response_id);
+    let size = pending
+        .conversation_of(response_id)
+        .map(|conversation_id| pending.queue_size(conversation_id));
+    serde_json::json!({
+        "responseId": response_id,
+        "pending": true,
+        "queuePosition": position,
+        "queueSize": size,
+    })
+    .to_string()
 }
 
 /// Read a caller-named blocking budget (`graceMs`, `timeoutMs`) in milliseconds.
@@ -1875,7 +1895,13 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
                 .forget(&response_id);
             result
         }
-        None => pending_turn_json(&response_id),
+        // The queue is read under a fresh hold on the table, after the grace period rather than
+        // before it: the caller is told what it is waiting behind now, not what it was waiting
+        // behind when the prompt was accepted.
+        None => {
+            let sessions = subagent_sessions().lock().await;
+            pending_turn_json(&sessions.pending, &response_id)
+        }
     }
 }
 
@@ -1898,7 +1924,12 @@ async fn subagent_await_tool(args: serde_json::Value) -> String {
     };
     match wait_for_turn(&mut watched, timeout).await {
         Some(result) => result,
-        None => pending_turn_json(response_id),
+        // Read after the wait, so a caller polling a queued turn sees its position fall as the
+        // turns accepted ahead of it end — the question an await repeated on one id is asking.
+        None => {
+            let sessions = subagent_sessions().lock().await;
+            pending_turn_json(&sessions.pending, response_id)
+        }
     }
 }
 
@@ -1949,10 +1980,10 @@ async fn subagent_cancel_tool(args: serde_json::Value) -> String {
 }
 
 /// `subagent_list`: enumerate every conversation this session ran — open and ended — with its
-/// per-conversation token accounting.
+/// per-conversation token accounting and, for the open ones, how full its context is.
 async fn subagent_list_tool(_args: serde_json::Value) -> String {
     let sessions = subagent_sessions().lock().await;
-    serde_json::json!({ "conversations": conversation_records(&sessions) }).to_string()
+    serde_json::json!({ "conversations": conversation_listing(&sessions) }).to_string()
 }
 
 /// A roster status as the word the tool reports, and the `data-` value a UI would key on.
@@ -2339,11 +2370,19 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
     let prompt_tool = rmcp::model::Tool::new(
         "subagent_prompt",
         "Send a prompt turn to an open subagent session (ACP session/prompt-shaped). \
+         A conversation runs ONE turn at a time: a prompt sent while a turn is in flight is \
+         accepted, but it WAITS ITS TURN rather than running alongside it. To get work running in \
+         parallel, open a second conversation — more prompts to one conversation is a queue. \
          Blocks for at most `graceMs` (default 25000). A turn that yields in time returns \
          {stopReason, content, usage}. A turn still running when that elapses is NOT cancelled: \
-         the call returns {responseId, pending: true}, the turn keeps running, and \
-         `subagent_await` collects its outcome — in the same {stopReason, content, usage} shape — \
-         under that responseId. A responseId is a receipt, not an error.",
+         the call returns {responseId, pending: true, queuePosition, queueSize}, the turn keeps \
+         running, and `subagent_await` collects its outcome — in the same {stopReason, content, \
+         usage} shape — under that responseId. A responseId is a receipt, not an error. \
+         `queuePosition` is how many turns on this conversation were accepted before this one and \
+         have not ended yet — 0 means nothing is ahead of it, so it is the turn running now; \
+         `queueSize` counts every turn still outstanding on this conversation, this one included. \
+         They report what this turn is waiting behind, not a guarantee of the order turns finish \
+         in.",
         subagent_prompt_schema(),
     );
     router.add_route(subagent_route(prompt_tool, |args| {
@@ -2354,9 +2393,13 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
         "subagent_await",
         "Collect the outcome of a subagent turn that subagent_prompt handed back a responseId \
          for. Blocks for at most `timeoutMs` (default 25000). Returns the turn's {stopReason, \
-         content, usage} once it has ended, or {responseId, pending: true} if it is still \
-         running — in which case call again with the same responseId. Collecting an outcome does \
-         not consume it: the same responseId can be awaited again.",
+         content, usage} once it has ended, or {responseId, pending: true, queuePosition, \
+         queueSize} if it is still running — in which case call again with the same responseId. \
+         A conversation runs one turn at a time, so a turn with a `queuePosition` above 0 has not \
+         started: that many turns accepted before it on the same conversation are still \
+         outstanding, and the number falls as they end. `queueSize` is every turn still \
+         outstanding on that conversation, this one included. Collecting an outcome does not \
+         consume it: the same responseId can be awaited again.",
         subagent_await_schema(),
     );
     router.add_route(subagent_route(await_tool, |args| {
@@ -2380,9 +2423,19 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
 
     let list_tool = rmcp::model::Tool::new(
         "subagent_list",
-        "List all open subagent conversations with per-conversation token accounting. \
-         Returns {conversations:[{agent, id, model, inputTokens, outputTokens, totalTokens, \
-         turns}]}.",
+        "List all open subagent conversations with per-conversation token accounting, how \
+         full each one's context is, and how much work is lined up on it. Returns \
+         {conversations:[{agent, id, model, inputTokens, outputTokens, totalTokens, turns, \
+         contextTokens, queued}]}. `queued` is how many turns are still outstanding on that \
+         conversation, the one running included — a conversation runs one turn at a time, so \
+         anything above 1 is waiting. `contextTokens` is what that \
+         conversation's history costs to send NOW — the last turn's prompt tokens — so it is the \
+         figure to watch against the model's window; `inputTokens` is cumulative spend across \
+         every turn, which re-sends the history each time and so over-counts the window several \
+         times over. A conversation that has ended carries no `contextTokens`: it has no history \
+         left to send. Wind a conversation down before `contextTokens` reaches the model's \
+         window — a turn refused for a full context ends it, returning a handoff brief to open a \
+         new conversation with.",
         schema_object(serde_json::json!({
             "type": "object",
             "properties": {}
@@ -3202,8 +3255,9 @@ mod tests {
             an_end_turn_outcome("src/auth.rs:1-50"),
         ))
         .expect("an outcome must serialize to JSON");
-        let deferral: serde_json::Value = serde_json::from_str(&pending_turn_json("response-1"))
-            .expect("a deferral must serialize to JSON");
+        let deferral: serde_json::Value =
+            serde_json::from_str(&pending_turn_json(&PendingTurns::default(), "response-1"))
+                .expect("a deferral must serialize to JSON");
 
         // Then the outcome carries no trace of the deferred shape
         assert!(

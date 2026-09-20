@@ -46,6 +46,13 @@ pub enum StopReason {
     EndTurn,
     MaxTurnRequests,
     Cancelled,
+    /// The model refused the turn because its context window is full.
+    ///
+    /// A stop reason rather than an error, for the same reason [`Self::MaxTurnRequests`] is one:
+    /// the caller should get the work that was gathered instead of a failure string. It is not a
+    /// condition this conversation can recover from — its history is still oversized, so every
+    /// further prompt re-sends it — so the outcome carries a handoff brief for a fresh one.
+    ContextExhausted,
 }
 
 /// Result of one [`SubagentSession::prompt`] call — the loop's yield point.
@@ -91,6 +98,26 @@ pub trait SubagentSession: Send {
 
     /// Running token total across every `prompt()` call made on this session.
     fn cumulative_usage(&self) -> TokenUsage;
+
+    /// What this conversation's history currently costs to send — the most recent turn's prompt
+    /// tokens.
+    ///
+    /// Occupancy, not spend. [`Self::cumulative_usage`]'s input figure is the sum of every turn's
+    /// prompt, and every turn re-sends the whole history, so it is a sum of growing prefixes that
+    /// over-counts the window several times over: a caller watching it cannot tell a nearly-full
+    /// conversation from one that has merely run many cheap turns.
+    fn context_tokens(&self) -> u64;
+
+    /// The last `max_messages` messages of the history, oldest first, each truncated to a bound.
+    ///
+    /// Verbatim where the handoff brief is lossy: sometimes the useful thing is exactly where the
+    /// agent was standing when it stopped. Answers for a conversation that has already exhausted
+    /// its context — such a conversation is unpromptable, but it is not unreadable, and it stays in
+    /// the open table until it is cancelled.
+    ///
+    /// Bounded per message so that reading the tail of one full context cannot fill the reader's
+    /// own.
+    fn tail(&self, max_messages: usize) -> Vec<String>;
 }
 
 /// Boxed async dispatch fn injected by the caller (`tddy-tools`) for managed codebase access.
@@ -660,6 +687,95 @@ fn tool_name(tool: crate::agent_def::SubagentTool) -> &'static str {
     }
 }
 
+/// The phrasings providers use to refuse a turn because the context window is full.
+///
+/// Matching prose is fragile by nature, so the list is short and every entry is a **real** string a
+/// provider emits: the first two are OpenAI's (`code: "context_length_exceeded"`, and the message
+/// body that carries it), the third is Ollama's. A phrasing that is not here keeps today's
+/// behaviour exactly — an error — so the cost of missing one is that a caller sees the provider's
+/// own words, while the cost of over-reaching would be telling a caller to rebuild a conversation
+/// that had nothing wrong with it.
+const CONTEXT_REFUSAL_PHRASES: &[&str] = &[
+    "context_length_exceeded",
+    "maximum context length",
+    "input length exceeds context length",
+];
+
+/// Whether a provider error is a context-length refusal rather than any other failure.
+///
+/// The error text is the whole surface there is: `OpenAiClient::complete` returns a
+/// `Box<dyn Error>` wrapping `"OpenAI API error {status}: {body}"`, with the provider's JSON in the
+/// body and no typed code of its own.
+fn is_context_length_refusal(error: &SubagentError) -> bool {
+    let text = error.0.to_lowercase();
+    CONTEXT_REFUSAL_PHRASES
+        .iter()
+        .any(|phrase| text.contains(phrase))
+}
+
+/// How many messages the verbatim tail of an exhausted conversation carries.
+///
+/// The brief above it is lossy on purpose; this is the other half — the last exchanges exactly as
+/// they happened, so the caller can see where the agent was standing when it stopped without a
+/// second round trip to ask.
+const EXHAUSTION_TAIL_MESSAGES: usize = 6;
+
+/// How much of one message a [`SubagentSession::tail`] entry carries before it is cut.
+///
+/// A tail is read to recover from a context that filled; reading a few unbounded tool results to do
+/// it would fill the reader's own.
+const TAIL_MESSAGE_CHAR_CAP: usize = 2_000;
+
+/// Truncate `text` to [`TAIL_MESSAGE_CHAR_CAP`] characters, saying how much was left out.
+///
+/// Counted in `char`s, not bytes: a byte slice through a multi-byte character panics.
+fn truncate_for_tail(text: &str) -> String {
+    let total = text.chars().count();
+    if total <= TAIL_MESSAGE_CHAR_CAP {
+        return text.to_string();
+    }
+    let kept: String = text.chars().take(TAIL_MESSAGE_CHAR_CAP).collect();
+    let dropped = total - TAIL_MESSAGE_CHAR_CAP;
+    format!("{kept}… [{dropped} more characters]")
+}
+
+/// Render one history message for a tail read: who said it, what they said (bounded), and any tool
+/// calls it issued, by name and arguments.
+///
+/// The tool calls are appended after the bound rather than folded into it — they are a line each
+/// and they are the part that says what the agent was doing, so a long message must not push them
+/// out.
+fn render_tail_message(message: &ChatMessage) -> String {
+    let mut rendered = match (message.role.as_str(), message.name.as_deref()) {
+        ("tool", Some(name)) => format!("tool ({name}): "),
+        (role, _) => format!("{role}: "),
+    };
+    rendered.push_str(&truncate_for_tail(message.content.as_deref().unwrap_or("")));
+    for call in message.tool_calls.iter().flatten() {
+        rendered.push_str(&format!(
+            "\n  → {} {}",
+            call.function.name, call.function.arguments
+        ));
+    }
+    rendered
+}
+
+/// One `## `-headed section of a handoff brief, or `when_empty` in place of an empty list — a
+/// heading with nothing under it reads as lost content rather than as absent content.
+fn brief_section(title: &str, entries: &[String], when_empty: &str) -> String {
+    let mut section = format!("\n## {title}\n");
+    if entries.is_empty() {
+        section.push_str(when_empty);
+        section.push('\n');
+    } else {
+        for entry in entries {
+            section.push_str(entry);
+            section.push('\n');
+        }
+    }
+    section
+}
+
 /// A subagent session built from a [`crate::agent_def::SpecializedAgentDef`] — the only kind
 /// there is, since every agent comes from a def an operator wrote. An optional system prompt seeds
 /// the conversation, only the def's bound tools are advertised to (and dispatchable by) the model,
@@ -675,6 +791,9 @@ pub struct SpecializedSubagentSession {
     messages: Vec<ChatMessage>,
     tools: Vec<crate::agent_def::SubagentTool>,
     cumulative: TokenUsage,
+    /// Prompt tokens the most recent model turn reported — what the history costs to send now.
+    /// See [`SubagentSession::context_tokens`].
+    context_tokens: u64,
 }
 
 impl SpecializedSubagentSession {
@@ -699,6 +818,18 @@ impl SpecializedSubagentSession {
             messages,
             tools,
             cumulative: TokenUsage::default(),
+            context_tokens: 0,
+        }
+    }
+
+    /// Record what the turn just sent cost, as this conversation's current occupancy.
+    ///
+    /// A turn whose provider reported no usage at all leaves the figure alone rather than zeroing
+    /// it: silence about occupancy is not evidence of an empty window, and a conversation that
+    /// reported 1200 tokens and then reported nothing has not shrunk.
+    fn note_context_occupancy(&mut self, turn_usage: TokenUsage) {
+        if turn_usage.input_tokens > 0 {
+            self.context_tokens = turn_usage.input_tokens;
         }
     }
 
@@ -740,6 +871,7 @@ impl SpecializedSubagentSession {
             "SpecializedSubagentSession",
         )
         .await?;
+        self.note_context_occupancy(turn_usage);
         let message = match step {
             TurnStep::FinalAnswer(outcome) => return Ok((Some(outcome), turn_usage)),
             TurnStep::Continue(message) => message,
@@ -780,6 +912,134 @@ impl SpecializedSubagentSession {
         }
     }
 
+    /// The handoff brief for a conversation whose context window filled: what a fresh conversation
+    /// needs to carry this work on without redoing it.
+    ///
+    /// Built mechanically from the history, because it must be: the context that would summarise
+    /// this conversation is the context that is full, so there is no model call to make. One rule
+    /// decides what survives —
+    ///
+    /// > Drop the payloads. Keep the conclusions and the index of what was already examined.
+    ///
+    /// so the goal, every assistant text block, and every tool call by name and arguments are kept,
+    /// while tool **results** — the file contents and search output that are the bulk, and that
+    /// filled the window — are dropped. The already-examined index is the half that actually saves
+    /// the work: told only that it ran out of context, a replacement re-reads the same files and
+    /// refills the same window.
+    ///
+    /// The system prompt is not carried: a new conversation with this same agent is seeded from the
+    /// same def, so repeating it here would spend the new window on something already in it.
+    ///
+    /// Honest limit: an agent that narrated little and mostly called tools leaves thin conclusions.
+    /// The index still prevents the repeated reads, which is the expensive half, but the new
+    /// conversation may have to re-derive reasoning a faithful compaction cannot invent.
+    fn handoff_brief(&self) -> String {
+        let mut goals: Vec<String> = Vec::new();
+        let mut findings: Vec<String> = Vec::new();
+        let mut examined: Vec<String> = Vec::new();
+        for message in &self.messages {
+            let text = message.content.as_deref().unwrap_or("").trim();
+            match message.role.as_str() {
+                "user" => {
+                    if !text.is_empty() {
+                        goals.push(text.to_string());
+                    }
+                }
+                "assistant" => {
+                    if !text.is_empty() {
+                        findings.push(format!("- {text}"));
+                    }
+                    for call in message.tool_calls.iter().flatten() {
+                        examined.push(format!(
+                            "- {} {}",
+                            call.function.name, call.function.arguments
+                        ));
+                    }
+                }
+                // "tool" — the results. This is what is dropped, and it is the reason the brief
+                // fits: a finding derived from a file is worth carrying where the file is not.
+                // "system" — the def seeds the replacement conversation with it already.
+                _ => {}
+            }
+        }
+
+        let where_it_got_to = match self.messages.last() {
+            Some(message) if message.role == "tool" => format!(
+                "The window filled on the turn after {}, so that result is not in this brief.",
+                message.name.as_deref().unwrap_or("its last tool call")
+            ),
+            Some(message) if message.role == "assistant" => {
+                "The window filled on the turn after the last finding above.".to_string()
+            }
+            _ => "The window filled before the agent acted on the request above.".to_string(),
+        };
+
+        let mut brief = String::from(
+            "This specialized agent ran out of context. Its history is already larger than the \
+             model's window, so this conversation cannot be continued — every further prompt \
+             re-sends the same oversized history and fails the same way. Below is what it had done, \
+             compacted: the tool results it read are dropped, because they are what filled the \
+             window.\n",
+        );
+        brief.push_str(&brief_section("Goal", &goals, "(no prompt was recorded)"));
+        brief.push_str(&brief_section(
+            "Findings so far",
+            &findings,
+            "(the agent recorded no findings in prose)",
+        ));
+        brief.push_str(&brief_section(
+            "Already examined — do not repeat",
+            &examined,
+            "(no tool calls were made)",
+        ));
+        brief.push_str(&brief_section(
+            "Where it got to",
+            &[where_it_got_to],
+            "(unknown)",
+        ));
+        brief.push_str(&brief_section(
+            "What to do next",
+            &["Open a NEW conversation with this same specialized agent and pass this brief as its \
+               first prompt, then continue from the open question. Do not repeat anything on the \
+               already-examined list: those lookups have been made, and re-running them refills the \
+               same window this one ran out of."
+                .to_string()],
+            "(unknown)",
+        ));
+        brief
+    }
+
+    /// The soft landing for a context refusal: the work gathered so far plus the brief that lets a
+    /// fresh conversation carry it on, under [`StopReason::ContextExhausted`].
+    ///
+    /// The same shape [`Self::run_synthesis_turn`] gives a spent turn budget, for the same reason —
+    /// the caller should receive what was gathered rather than a failure string.
+    fn context_exhausted_outcome(&self, call_usage: TokenUsage) -> PromptOutcome {
+        log::warn!(
+            target: "tddy_discovery::subagent",
+            "SpecializedSubagentSession: model={} refused the turn for a full context after {} messages; \
+             landing with a handoff brief",
+            self.model,
+            self.messages.len(),
+        );
+        // Both halves in one response: the compacted brief, and the verbatim tail under it. A
+        // caller that has just been told its conversation is unusable should not need another call
+        // to find out where it stopped.
+        let mut tail = self.tail(EXHAUSTION_TAIL_MESSAGES);
+        tail.insert(
+            0,
+            "## The last exchanges, verbatim (long messages cut)".to_string(),
+        );
+        PromptOutcome {
+            stop_reason: StopReason::ContextExhausted,
+            content: vec![
+                ContentBlock::text(self.handoff_brief()),
+                ContentBlock::text(tail.join("\n")),
+            ],
+            usage: call_usage,
+        }
+    }
+
     /// The turn budget is spent with no `<final_answer>`. Rather than discard everything gathered
     /// so far and answer with nothing, spend one final turn asking the model to summarize what it
     /// already read. In incident 019f2d14 the model burned every turn tool-calling (each turn
@@ -810,6 +1070,7 @@ impl SpecializedSubagentSession {
             "SpecializedSubagentSession synthesis",
         )
         .await?;
+        self.note_context_occupancy(turn_usage);
         let content = match step {
             TurnStep::FinalAnswer(outcome) => outcome.content,
             TurnStep::Continue(message) => {
@@ -841,7 +1102,18 @@ impl SubagentSession for SpecializedSubagentSession {
 
         let mut call_usage = TokenUsage::default();
         for _turn in 0..self.max_turns {
-            let (maybe_outcome, turn_usage) = self.run_one_turn().await?;
+            let (maybe_outcome, turn_usage) = match self.run_one_turn().await {
+                Ok(turn) => turn,
+                // A full context is a stop condition, not a failure: the caller gets what was
+                // gathered, with a brief for a fresh conversation. The turns already spent are
+                // charged first, exactly as the budget-exhausted path below charges them — they
+                // were spent whatever this turn did.
+                Err(e) if is_context_length_refusal(&e) => {
+                    self.cumulative = self.cumulative + call_usage;
+                    return Ok(self.context_exhausted_outcome(call_usage));
+                }
+                Err(e) => return Err(e),
+            };
             call_usage = call_usage + turn_usage;
             if let Some(mut outcome) = maybe_outcome {
                 outcome.usage = call_usage;
@@ -858,7 +1130,15 @@ impl SubagentSession for SpecializedSubagentSession {
         // times out or is refused — the conversation's running total would then under-report every
         // turn the prompt paid for.
         self.cumulative = self.cumulative + call_usage;
-        let synthesis = self.run_synthesis_turn().await?;
+        let synthesis = match self.run_synthesis_turn().await {
+            Ok(synthesis) => synthesis,
+            // The synthesis turn re-sends the same history plus an instruction, so it can be
+            // refused for the same reason a loop turn can. `call_usage` is already charged above.
+            Err(e) if is_context_length_refusal(&e) => {
+                return Ok(self.context_exhausted_outcome(call_usage))
+            }
+            Err(e) => return Err(e),
+        };
         self.cumulative = self.cumulative + synthesis.usage;
         let call_usage = call_usage + synthesis.usage;
         Ok(PromptOutcome {
@@ -874,6 +1154,18 @@ impl SubagentSession for SpecializedSubagentSession {
 
     fn cumulative_usage(&self) -> TokenUsage {
         self.cumulative
+    }
+
+    fn context_tokens(&self) -> u64 {
+        self.context_tokens
+    }
+
+    fn tail(&self, max_messages: usize) -> Vec<String> {
+        let start = self.messages.len().saturating_sub(max_messages);
+        self.messages[start..]
+            .iter()
+            .map(render_tail_message)
+            .collect()
     }
 }
 

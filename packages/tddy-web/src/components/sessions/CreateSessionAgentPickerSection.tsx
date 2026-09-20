@@ -19,7 +19,7 @@ export function CreateSessionAgentPickerSection({
   toggleAgent,
 }: CreateSessionAgentPickerSectionProps) {
   return (
-    <div data-testid="create-session-managed-codebase-section" className="space-y-1">
+    <div data-testid="create-session-agent-picker-section" className="space-y-1">
       {availableAgents.failures.map((failure) => (
         <p
           key={failure.daemonInstanceId}

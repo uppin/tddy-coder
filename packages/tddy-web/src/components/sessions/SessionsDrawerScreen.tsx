@@ -42,6 +42,7 @@ import { Button } from "../ui/button";
 import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
+import { withoutJailedCodebaseHalves } from "./jailedCodebaseHalf";
 import { HostStatsFooter } from "./HostStatsFooter";
 import { useSessionAttachment } from "./useSessionAttachment";
 import { nextInspectorState } from "./inspectorState";
@@ -407,13 +408,18 @@ export function SessionsDrawerScreen({
   // orchestrator as active whenever a session it owns is active. This only affects drawer grouping;
   // the main pane keeps the raw list so branch→session resolution reads each child's true activity.
   const drawerSessions = useMemo(() => {
+    // A sandboxed-codebase placement is served by two sessions on one daemon; only the agent half
+    // is a session the operator started. Dropped here rather than in `sortedSessions` for the same
+    // reason the orchestrator rule lives here: the main pane keeps the raw list, so branch→session
+    // resolution and `codebase_session_id` lookups still see both halves.
+    const listed = withoutJailedCodebaseHalves(sortedSessions);
     const activeOrchestratorIds = new Set(
-      sortedSessions
+      listed
         .filter((s) => s.isActive && s.orchestratorSessionId.length > 0)
         .map((s) => s.orchestratorSessionId),
     );
-    if (activeOrchestratorIds.size === 0) return sortedSessions;
-    return sortedSessions.map((s) =>
+    if (activeOrchestratorIds.size === 0) return listed;
+    return listed.map((s) =>
       !s.isActive && activeOrchestratorIds.has(s.sessionId) ? { ...s, isActive: true } : s,
     );
   }, [sortedSessions]);

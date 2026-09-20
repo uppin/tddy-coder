@@ -12,6 +12,7 @@ fn remote_tool_env_struct_has_required_fields() {
     // Given
     let env = RemoteToolEnv {
         daemon_url: "http://127.0.0.1:9000".to_string(),
+        daemon_socket: None,
         session_id: "sess-abc123".to_string(),
         session_token: "tok-xyz".to_string(),
         daemon_instance_id: Some("relay-local".to_string()),
@@ -34,6 +35,7 @@ fn invoke_request_has_remote_field() {
     // Given
     let env = RemoteToolEnv {
         daemon_url: "http://127.0.0.1:9000".to_string(),
+        daemon_socket: None,
         session_id: "sess-abc123".to_string(),
         session_token: "tok-xyz".to_string(),
         daemon_instance_id: None,
@@ -86,6 +88,7 @@ fn remote_tool_env_env_pairs_covers_all_required_vars() {
     // Given
     let env = RemoteToolEnv {
         daemon_url: "http://relay.local:9000".to_string(),
+        daemon_socket: None,
         session_id: "sess-789".to_string(),
         session_token: "tok-abc".to_string(),
         daemon_instance_id: Some("relay-local".to_string()),

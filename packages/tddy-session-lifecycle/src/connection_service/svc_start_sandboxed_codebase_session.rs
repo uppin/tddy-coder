@@ -228,17 +228,33 @@ impl DaemonSessionHost {
             &super::hooks_and_urls::local_daemon_hook_url(&self.config),
             checkout_session_id,
             &self.agent_session_token_for(session_token)?,
+            self.agent_tool_socket_for_embedded_host(),
+        );
+        let tddy_tools = self.resolve_tddy_tools_path()?;
+        let context_dir = crate::split_session::build_split_context_dir(
+            session_dir,
+            &withdrawals,
+            tddy_core::backend::context_globs_for_agent(agent),
+            &context,
+        )?;
+        // What this placement is actually made of, on one line. Everything here was previously
+        // unlogged: a session started, and the only record of *which* binaries it was wired to —
+        // or that the agent's cwd is not the checkout — was the process table, after the fact.
+        // The tools path is the one that bit: written relative, it resolved against the agent's
+        // context dir and the MCP server never started.
+        log::info!(
+            "sandboxed-codebase wiring: agent_session={session_id} checkout_session={checkout_session_id} \
+             toolchain={} tddy_tools={} agent_cwd={} withdrawn_tools={}",
+            self.config.toolchain().describe(),
+            tddy_tools.display(),
+            context_dir.display(),
+            withdrawals.len(),
         );
         let wiring = crate::split_session::SplitAgentWiring {
-            context_dir: crate::split_session::build_split_context_dir(
-                session_dir,
-                &withdrawals,
-                tddy_core::backend::context_globs_for_agent(agent),
-                &context,
-            )?,
+            context_dir,
             extra_args: crate::split_session::split_claude_extra_args(
                 session_dir,
-                &self.resolve_tddy_tools_path().to_string_lossy(),
+                &tddy_tools.to_string_lossy(),
                 &withdrawals,
             )?,
             env: remote.env_pairs(),

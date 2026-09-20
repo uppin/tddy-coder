@@ -59,11 +59,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 // single ~100-field struct that four moving modules and every handler in both new services take by
 // reference and read disjointly, so the symbol *is* the file. See the changeset's
 // `## Decisions & Trade-offs`.
+pub mod agent_tool_socket;
 pub mod config;
 pub mod daemon_identity;
 pub mod peer_forwarding;
 pub mod privilege_drop;
 pub mod spawn_as_user;
+pub use agent_tool_socket::agent_tool_socket_path;
+pub mod toolchain;
 pub mod user_paths;
 
 /// Resolve a session token to the OS user that owns it.
