@@ -841,6 +841,14 @@ async fn start_session_refuses_a_jailed_codebase_alongside_the_agent_sandbox() {
     );
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
+              provisioned without them, and GitHub's ubuntu runners set \
+              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
+              FailedPrecondition rather than starting an unconfined session, which is correct — see \
+              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
+)]
 #[tokio::test]
 async fn a_jailed_codebase_session_that_skips_permissions_is_still_jailed() {
     // Given a request asking to jail the codebase and to bypass the agent's permission prompts
@@ -903,6 +911,14 @@ async fn start_session_refuses_a_jailed_codebase_on_a_cursor_cli_session() {
 // The managed workflow over a jailed codebase
 // ---------------------------------------------------------------------------
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
+              provisioned without them, and GitHub's ubuntu runners set \
+              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
+              FailedPrecondition rather than starting an unconfined session, which is correct — see \
+              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
+)]
 #[tokio::test]
 async fn managing_a_jailed_codebase_session_leaves_its_checkout_in_the_jail() {
     // Given a daemon with no LiveKit
@@ -937,6 +953,14 @@ async fn managing_a_jailed_codebase_session_leaves_its_checkout_in_the_jail() {
     service.shut_down_children().await;
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
+              provisioned without them, and GitHub's ubuntu runners set \
+              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
+              FailedPrecondition rather than starting an unconfined session, which is correct — see \
+              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
+)]
 #[tokio::test]
 async fn a_specialized_agent_on_a_jailed_codebase_session_is_held_by_the_codebase_half() {
     // Given a managed, jailed-codebase session

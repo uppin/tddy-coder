@@ -108,7 +108,7 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 17] = [
+    const ENDPOINT: [&str; 18] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -132,6 +132,13 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         "index_daemon/error.rs",
         "index_daemon/registry.rs",
         "index_daemon/spawn.rs",
+        // The unix socket an embedded daemon serves to co-located agents — the only channel a
+        // process spawned beside a jailed checkout has to this daemon, since `RuntimeHost::Embedded`
+        // runs no HTTP listener. Wiring by this test's criterion: it implements no RPC method (it
+        // serves the roster `runtime.rs` hands it), holds no session state, touches no
+        // `SessionHost`, and its only caller is `runtime.rs`, which binds it at startup and
+        // removes the socket on the way out.
+        "agent_tool_socket.rs",
     ];
 
     let mut files = Vec::new();
