@@ -47,9 +47,8 @@ pub async fn serve_agent_tool_socket(
     if let Some(parent) = socket_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    let listener = tokio::net::UnixListener::bind(socket_path).map_err(|e| {
-        anyhow::anyhow!("bind agent tool socket {}: {e}", socket_path.display())
-    })?;
+    let listener = tokio::net::UnixListener::bind(socket_path)
+        .map_err(|e| anyhow::anyhow!("bind agent tool socket {}: {e}", socket_path.display()))?;
     log::info!(
         target: "tddy_daemon::agent_tool_socket",
         "serving co-located agents on {}",

@@ -100,10 +100,16 @@ impl TddyToolchain {
         };
 
         if let Some(dir) = named(env_dir) {
-            return Self { dir: Some(absolute(dir)), source: ToolchainSource::Env };
+            return Self {
+                dir: Some(absolute(dir)),
+                source: ToolchainSource::Env,
+            };
         }
         if let Some(dir) = named(configured_dir) {
-            return Self { dir: Some(absolute(dir)), source: ToolchainSource::Config };
+            return Self {
+                dir: Some(absolute(dir)),
+                source: ToolchainSource::Config,
+            };
         }
         if let Some(dir) = exe_dir {
             return Self {
@@ -111,7 +117,10 @@ impl TddyToolchain {
                 source: ToolchainSource::SiblingOfExe,
             };
         }
-        Self { dir: None, source: ToolchainSource::SearchPath }
+        Self {
+            dir: None,
+            source: ToolchainSource::SearchPath,
+        }
     }
 
     /// Resolve from this process: `TDDY_TOOLCHAIN_DIR`, then `configured_dir`, then the directory
@@ -147,7 +156,10 @@ impl TddyToolchain {
     /// no tools rather than as an error naming the file.
     pub fn binary(&self, name: &str) -> Result<PathBuf, ToolchainBinaryMissing> {
         let Some(dir) = self.dir.as_deref() else {
-            return Err(ToolchainBinaryMissing { name: name.to_string(), looked_in: None });
+            return Err(ToolchainBinaryMissing {
+                name: name.to_string(),
+                looked_in: None,
+            });
         };
         let candidate = dir.join(name);
         if candidate.is_file() {
@@ -214,8 +226,12 @@ mod tests {
     fn the_running_executables_directory_is_the_install_contract() {
         // Given — neither env nor config names a directory, which is every ordinary deployment:
         // `./install` ships the binaries beside the daemon, and a dev tree has them in target/debug
-        let toolchain =
-            TddyToolchain::resolve_from(None, None, Some(Path::new("/opt/tddy/bin")), Path::new("/cwd"));
+        let toolchain = TddyToolchain::resolve_from(
+            None,
+            None,
+            Some(Path::new("/opt/tddy/bin")),
+            Path::new("/cwd"),
+        );
 
         assert_eq!(toolchain.dir(), Some(Path::new("/opt/tddy/bin")));
         assert_eq!(toolchain.source(), ToolchainSource::SiblingOfExe);
@@ -233,7 +249,10 @@ mod tests {
         );
 
         // Then — resolved against the workspace root, once, here
-        assert_eq!(toolchain.dir(), Some(Path::new("/workspace/root/target/debug")));
+        assert_eq!(
+            toolchain.dir(),
+            Some(Path::new("/workspace/root/target/debug"))
+        );
     }
 
     #[test]
@@ -258,7 +277,10 @@ mod tests {
         let resolved = toolchain.binary("tddy-tools").expect("binary resolves");
 
         assert_eq!(resolved, tmp.path().join("tddy-tools"));
-        assert!(resolved.is_absolute(), "a spawned command must not depend on the caller's cwd");
+        assert!(
+            resolved.is_absolute(),
+            "a spawned command must not depend on the caller's cwd"
+        );
     }
 
     #[test]
@@ -278,7 +300,8 @@ mod tests {
         assert_eq!(err.name, "tddy-tools");
         assert_eq!(err.looked_in.as_deref(), Some(tmp.path()));
         assert!(
-            err.to_string().contains("tddy-tools") && err.to_string().contains(&tmp.path().display().to_string()),
+            err.to_string().contains("tddy-tools")
+                && err.to_string().contains(&tmp.path().display().to_string()),
             "the refusal must name the binary and where it looked: {err}"
         );
     }

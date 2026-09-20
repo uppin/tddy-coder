@@ -24,7 +24,6 @@ use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 
 use crate::config::DaemonConfig;
 
-
 use std::path::PathBuf;
 
 use tddy_rpc::Status;
@@ -55,8 +54,7 @@ impl DaemonSessionHost {
     /// flag cannot disagree with reality.
     pub(crate) fn agent_tool_socket_for_embedded_host(&self) -> Option<String> {
         let path = tddy_daemon_kernel::agent_tool_socket_path(&self.tddy_data_dir);
-        path.exists()
-            .then(|| path.to_string_lossy().into_owned())
+        path.exists().then(|| path.to_string_lossy().into_owned())
     }
 
     pub(crate) fn resolve_tddy_tools_path(&self) -> Result<PathBuf, Status> {

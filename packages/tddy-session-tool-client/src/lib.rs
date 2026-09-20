@@ -360,7 +360,11 @@ pub async fn dispatch_session_tool(tool_name: &str, args: serde_json::Value) -> 
         } => {
             dispatch_via_daemon_uds(
                 &socket_path,
-                &SessionToolEnvelope { session_id, session_token, daemon_instance_id },
+                &SessionToolEnvelope {
+                    session_id,
+                    session_token,
+                    daemon_instance_id,
+                },
                 tool_name,
                 &args,
             )
