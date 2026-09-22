@@ -18,6 +18,16 @@
   - `src/runtime.rs:882` — construction and injection. **The file is not split**
 - **tddy-session-lifecycle**: [session-service.md](../../../packages/tddy-session-lifecycle/docs/session-service.md)
   - `src/connection_service/svc_pr_status_for_caller.rs:93` — the one external read, migrated
+- **tddy-service** (added at green): `proto/auth.proto` — additive `vault_unlock_key` fields on
+  `ExchangeCodeResponse`, `PollDeviceLoginResponse`, `RefreshSessionRequest`,
+  `RefreshSessionResponse` and `LogoutRequest`. No new RPC
+- **tddy-web** (added at green): `src/rpc/sessionTokenStore.ts`, `src/hooks/useAuth.ts` — the unlock
+  key is stored beside the refresh token, presented on refresh, replaced with the rotated one, sent
+  on logout, cleared with the tokens; a page load holding one refreshes at once
+- Incidental, one line each: `tddy-remote-git-repo` and `tddy-session-sync` (a tool's
+  `RefreshSessionRequest` presents no unlock key), `tddy-host-service` (a doc link to the deleted
+  store), `tddy-daemon-kernel` (the `auth_storage` doc comment), `tddy-rust-typescript-tests`
+  (regenerated `auth_pb.ts`), `daemon.yaml.production`, `desktop.yaml.production`, `install`
 
 ## Related Feature Documentation
 
@@ -213,6 +223,38 @@ pub enum VaultError { Locked, FormatMismatch { expected, found }, Io(String), Cr
 
 ⚠ **Not mergeable in that state** — implementation follows in this same PR.
 
+> **Changed at green, by the developer's decisions** (recorded here because they change the
+> published surface):
+>
+> - **One vault per user, not per daemon.** `CredentialStore::path_in(auth_storage, subject)` →
+>   `credentials-<hex subject>.vault`; `VAULT_FILE` is gone. A vault opens for one subject only (a
+>   test pins that), so the single `credentials.vault` the contract named would have locked every
+>   user after the first out of theirs — a regression from `github-tokens.json`, which held many
+>   logins. The daemon-auth login acceptance tests now seal the vault at `path_in(&storage,
+>   THE_LOGIN)`; their intent — *that user's* locked vault refuses the login and is not replaced —
+>   is unchanged.
+> - **Multiple wrap slots.** The data key is wrapped by the login slot (`header` +
+>   `wrapped_data_key`, rewrapped on every login) **and** by up to `MAX_UNLOCK_SLOTS` (16) unlock
+>   slots, one per browser session lineage, beside the header in `unlock_slots`. Beside rather than
+>   inside: the header is the login slot's associated data, and a slot added at a refresh — with no
+>   login credential present — must not invalidate the wrap only a login can rewrite. The tests
+>   also pin `header.salt` as the login slot's salt.
+> - **The browser holds the unlock key.** The developer rejected "log in again after a restart".
+>   Added surface: `UnlockKey` (`to_wire` / `from_wire`, `<hex subject>.<slot id>.<hex key>`),
+>   `CredentialStore::{open_existing, open_with_unlock_key}`,
+>   `SessionVault::{add_unlock_slot, rotate_unlock_slot, remove_unlock_slot, unlock_slot_ids}`,
+>   `SessionVaults::{new, unlock, reopen, forget, get, path_for}`. The key carries its subject so a
+>   logout can remove its slot even with a lapsed access token.
+> - **`open_existing`** exists for the stub rule: a stub login never creates a vault, but one that
+>   is already there and does not open still refuses it (`Locked`) — the daemon-auth acceptance
+>   test uses a stub provider for exactly that.
+> - **A refresh whose unlock key does not open its slot still succeeds**, returning an empty key,
+>   and is logged at `warn` (`tddy_github::auth_service`). Failing it would sign the operator out
+>   of everything for a credential-store problem; PR status then reads *unavailable* until the next
+>   login re-issues a key.
+> - **`LogoutRequest.vault_unlock_key`** is a fifth field beyond the four the brief listed:
+>   without it a logout cannot name the lineage whose slot it removes.
+
 ## Green wave
 
 **Wave 2 of 5**, with `#keyring` 2/9. Its only unmet need is wave 1.
@@ -319,7 +361,19 @@ revoked authorisation and re-approved, so GitHub issued a different token. The d
 **distinctly** and the user re-links their accounts into a fresh vault. It does **not** re-initialise
 silently and there is **no second key**. Mitigation: every successful login calls `rewrap`, so a
 rotation observed while a session can still be established costs nothing; only a rotation with no
-live session and no old credential costs the vault.
+live session and no old credential costs the vault. `SessionVaults::unlock` rewraps the handle
+already open for a user signed in elsewhere, which is what makes that mitigation real for a rotated
+credential rather than only for a fresh salt.
+
+**A restart is not a lock.** The daemon still holds no key of its own; the browser does. Each login
+adds an unlock slot and returns its key `U` (`vault_unlock_key`); the daemon keeps only the wrap.
+A refresh presents `U`, and the daemon opens the vault through the slot, registers it, rotates the
+slot and returns `U'`. A logout removes the slot. Between a restart and the first refresh, PR status
+is *unavailable* with a reason naming the next session refresh — not a re-login — and the web client
+refreshes on load when it holds a key. Accepted trade-off: `U` crosses the plain-http LAN origin
+beside the refresh token, but it is a wrap key, not a stored credential, and opens nothing without
+the vault file on the daemon's disk. The slot count is bounded at 16; the least recently used is
+evicted.
 
 #### tddy-github
 - **API**: `token_store.rs` deleted. `auth_service.rs` writes a `CredentialRecord`.
@@ -337,13 +391,28 @@ live session and no old credential costs the vault.
 
 ## Implementation Milestones
 
-- [ ] **M1** — `tddy-credentials`: record model, versioned header, seal/open, `write_atomic_with_mode`
-- [ ] **M2** — key derivation, wrapped data key, verifier, `rewrap`, zeroization
-- [ ] **M3** — wire construction in `auth.rs` and `runtime.rs`; derive on login, re-wrap on login
-- [ ] **M4** — migrate `svc_pr_status_for_caller.rs:93`
-- [ ] **M5** — delete `token_store.rs`, `github_token_store.rs`, every `github-tokens.json` reference
-- [ ] **M6** — extend the half-login rule to `Locked`
-- [ ] **M7** — `tddy-credentials` documentation, carrying the two retention rules forward
+- [x] **M1** — `tddy-credentials`: record model, versioned header, seal/open, `write_atomic_with_mode`
+- [x] **M2** — key derivation, wrapped data key, verifier, `rewrap`, zeroization — plus unlock slots
+- [x] **M3** — wire construction in `auth.rs` and `runtime.rs`; derive on login, re-wrap on login;
+      unlock key on login, reopen + rotate on refresh, remove on logout
+- [x] **M4** — migrate `svc_pr_status_for_caller.rs:93` (through `retained_github_token`)
+- [x] **M5** — delete `token_store.rs`, `github_token_store.rs`, every code/config `github-tokens.json`
+      reference
+- [x] **M6** — extend the half-login rule to `Locked`
+- [x] **M7** — `tddy-credentials` documentation, carrying the two retention rules forward
+- [x] **M8** (added) — the unlock key over the wire: `auth.proto` fields, `tddy-web` storage/refresh/logout
+
+**Implementation status (green).** All milestones done; see the PR description for the scoped
+counts. Still owed at wrap, because `packages/*/docs/` moves only through this changeset:
+`tddy-daemon-auth/docs/auth-service.md` (lines 15, 96, 114 name `github_token_store`),
+`tddy-host-service/docs/host-registry.md:41`, `tddy-model-registry/docs/model-registry.md:41`,
+`tddy-session-store/docs/architecture.md:68`, `tddy-github/docs/code-issues/missing-tests-real-exchange-code.md:53`,
+and `docs/ft/daemon/session-auth.md` § GitHub access-token retention /
+`docs/ft/coder/pr-stack-live-status.md:224,446` — all still describe the deleted plaintext store.
+`#keyring` 2/9's `poll_device_login` must set `vault_unlock_key` exactly as `exchange_code` does
+(its `TODO(desktop-login)` says so). ⚠ TODOs left: the cipher/HMAC key-schedule copies are not
+wiped without `zeroize` (`vault.rs`); `SessionVaults` entries are not evicted when a session ends
+(`sessions.rs`).
 
 ## Testing Plan
 
