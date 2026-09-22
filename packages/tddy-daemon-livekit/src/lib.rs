@@ -33,7 +33,7 @@
 //! dependency path. **This crate never derives its own.** For the same reason the key this daemon
 //! advertises to its peers crosses into this crate only as the two opaque strings of
 //! [`AdvertisedSigningKey`]: the crate publishes them and reads peers' back
-//! ([`peer_signing_public_key`]), and parses none of them.
+//! ([`peer_signing_public_keys`]), and parses none of them.
 
 pub mod common_room_supervisor;
 pub mod livekit_peer_discovery;
@@ -43,7 +43,7 @@ pub mod session_room;
 
 pub use common_room_supervisor::{CommonRoomSupervisor, SupervisedCommonRoom};
 pub use livekit_peer_discovery::{
-    daemon_rpc_identity, peer_signing_public_key, AdvertisedSigningKey, CommonRoomPeerRegistry,
+    daemon_rpc_identity, peer_signing_public_keys, AdvertisedSigningKey, CommonRoomPeerRegistry,
 };
 pub use livekit_rooms_stream::{RoomRoster, RosterError};
 pub use livekit_service::{build_livekit_entry, build_livekit_service, LiveKitServiceImpl};

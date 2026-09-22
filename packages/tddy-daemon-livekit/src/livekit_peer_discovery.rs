@@ -271,26 +271,33 @@ struct DaemonAdvertisementWire {
     signing_public_key: String,
 }
 
-/// The advertised public key of whichever peer signs with `signing_key_id`, if one does.
+/// Every public key advertised under `signing_key_id`, as the advertising peers published them.
 ///
 /// The fleet's half of key distribution: a daemon verifying a peer's session token reads the
 /// token's key id, then asks the common room who advertises it. Returns the base64url SPKI DER
 /// exactly as advertised — decoding and verifying belong to the identity boundary, not here.
 ///
+/// **Every** candidate, not the first: two peers can advertise one id, and only one of them can be
+/// telling the truth, because an id is a digest of its key. Picking one here would let a peer that
+/// re-advertises a genuine id with other bytes shadow the real key, nondeterministically, and make
+/// that daemon's tokens fail fleet-wide. The identity boundary checks each against the id and keeps
+/// the one that hashes to it.
+///
 /// An empty `signing_key_id` matches nothing, so a daemon that advertises no key cannot be
 /// selected by a token that names none.
-pub fn peer_signing_public_key<'a>(
-    peers: &'a [PeerDaemon],
+pub fn peer_signing_public_keys<'a>(
+    peers: impl IntoIterator<Item = &'a PeerDaemon>,
     signing_key_id: &str,
-) -> Option<&'a str> {
+) -> Vec<&'a str> {
     if signing_key_id.is_empty() {
-        return None;
+        return Vec::new();
     }
     peers
-        .iter()
-        .find(|peer| peer.advertisement.signing_key_id == signing_key_id)
+        .into_iter()
+        .filter(|peer| peer.advertisement.signing_key_id == signing_key_id)
         .map(|peer| peer.advertisement.signing_public_key.as_str())
         .filter(|key| !key.is_empty())
+        .collect()
 }
 
 /// Parse and normalize a daemon advertisement JSON string from the discovery transport.
@@ -537,20 +544,17 @@ impl CommonRoomPeerRegistry {
             .collect()
     }
 
-    /// The signing public key the peer advertising `signing_key_id` published, exactly as it
-    /// advertised it (base64url SPKI DER), if any peer in the room does.
+    /// Every signing public key advertised under `signing_key_id` by a peer in the room, exactly as
+    /// advertised (base64url SPKI DER) — see [`peer_signing_public_keys`] for why all of them.
     ///
     /// What a daemon's key directory reads to verify a peer's session token. The bytes are handed
     /// back undecoded: parsing and trusting them is the identity boundary's job, not discovery's.
-    pub fn signing_public_key_for(&self, signing_key_id: &str) -> Option<String> {
-        let peers: Vec<PeerDaemon> = self
-            .remotes
-            .read()
-            .expect("registry lock")
-            .values()
-            .cloned()
-            .collect();
-        peer_signing_public_key(&peers, signing_key_id).map(str::to_string)
+    pub fn signing_public_keys_for(&self, signing_key_id: &str) -> Vec<String> {
+        let remotes = self.remotes.read().expect("registry lock");
+        peer_signing_public_keys(remotes.values(), signing_key_id)
+            .into_iter()
+            .map(str::to_string)
+            .collect()
     }
 
     /// Drop all remote rows (e.g. when discovery disconnects).
@@ -1897,10 +1901,27 @@ mod tests {
         ];
 
         // When a token naming that key id is looked up
-        let found = peer_signing_public_key(&peers, "fzAyq1hLQ0hTpZ_p");
+        let found = peer_signing_public_keys(&peers, "fzAyq1hLQ0hTpZ_p");
 
         // Then the advertising daemon's public key comes back
-        assert_eq!(found, Some("MCowBQYDK2VwAyEA"));
+        assert_eq!(found, vec!["MCowBQYDK2VwAyEA"]);
+    }
+
+    #[test]
+    fn every_peer_advertising_one_key_id_is_a_candidate_for_it() {
+        // Given a genuine daemon and a second participant re-advertising its key id with other bytes
+        let peers = vec![
+            a_peer_advertising("udoo", "fzAyq1hLQ0hTpZ_p", "MCowBQYDK2VwAyEA"),
+            a_peer_advertising("shadow", "fzAyq1hLQ0hTpZ_p", "c29tZXRoaW5nLWVsc2U"),
+        ];
+
+        // When a token naming that key id is looked up
+        let mut found = peer_signing_public_keys(&peers, "fzAyq1hLQ0hTpZ_p");
+        found.sort_unstable();
+
+        // Then both come back, so the identity boundary — which can check each against the id —
+        // decides, rather than whichever row a map happened to yield first
+        assert_eq!(found, vec!["MCowBQYDK2VwAyEA", "c29tZXRoaW5nLWVsc2U"]);
     }
 
     #[test]
@@ -1909,10 +1930,10 @@ mod tests {
         let peers = vec![a_peer_advertising("quiet", "", "")];
 
         // When a token naming no key is looked up
-        let found = peer_signing_public_key(&peers, "");
+        let found = peer_signing_public_keys(&peers, "");
 
         // Then nothing matches — an empty id must never select an arbitrary peer
-        assert_eq!(found, None);
+        assert_eq!(found, Vec::<&str>::new());
     }
 
     #[test]
@@ -1926,12 +1947,15 @@ mod tests {
 
         // When a token naming that key id is looked up, and one naming a key nobody advertised
         let found = (
-            registry.signing_public_key_for("fzAyq1hLQ0hTpZ_p"),
-            registry.signing_public_key_for("somebody-else"),
+            registry.signing_public_keys_for("fzAyq1hLQ0hTpZ_p"),
+            registry.signing_public_keys_for("somebody-else"),
         );
 
         // Then the advertised key comes back as advertised, and the stranger finds nothing
-        assert_eq!(found, (Some("MCowBQYDK2VwAyEA".to_string()), None));
+        assert_eq!(
+            found,
+            (vec!["MCowBQYDK2VwAyEA".to_string()], Vec::<String>::new())
+        );
     }
 
     fn a_peer_advertising(instance_id: &str, key_id: &str, public_key: &str) -> PeerDaemon {

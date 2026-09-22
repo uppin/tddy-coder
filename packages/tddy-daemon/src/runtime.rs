@@ -611,54 +611,56 @@ pub async fn build(
             tddy_session_lifecycle::host_registry::host_registry_dir(&tddy_data_dir),
         ),
     );
-    // The common room's roster, when this daemon joins one. Built before auth because it is also
-    // where peers' session-token keys are read from: a token a peer minted is verified against the
-    // key that peer advertises here.
-    let peer_registry = CommonRoomTarget::from_livekit(config.livekit.as_ref()).map(|_| {
-        Arc::new(
+    // The common room this daemon joins, if any, and its roster. Built before auth because the
+    // roster is also where peers' session-token keys are read from: a token a peer minted is
+    // verified against the key that peer advertises here. Resolved once, so the key directory and
+    // peer discovery below cannot disagree about whether there is a room.
+    let common_room_peers = CommonRoomTarget::from_livekit(config.livekit.as_ref()).map(|target| {
+        let registry = Arc::new(
             tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new()
                 .with_host_registry(Arc::clone(&host_registry)),
-        )
+        );
+        (target, registry)
     });
     // This daemon's signing identity, loaded — or generated on first boot — only when it has
     // someone to authenticate: with no `github:` block nothing here signs or verifies a token.
-    let signing = match &auth_config.github {
-        Some(_) => {
-            let key = tddy_daemon_auth::load_signing_key(&auth_config)?;
-            let directory: Arc<dyn tddy_daemon_auth::KeyDirectory> = match &peer_registry {
-                Some(registry) => Arc::new(
-                    crate::common_room_key_directory::CommonRoomKeyDirectory::new(
-                        Arc::clone(registry),
-                        &key,
-                    ),
+    let signing_key = match &auth_config.github {
+        Some(_) => Some(tddy_daemon_auth::load_signing_key(&auth_config)?),
+        None => None,
+    };
+    let auth_result = match &signing_key {
+        Some(key) => {
+            let directory: Arc<dyn tddy_daemon_auth::KeyDirectory> = match &common_room_peers {
+                Some((_, registry)) => Arc::new(
+                    crate::common_room_key_directory::CommonRoomKeyDirectory::new(Arc::clone(
+                        registry,
+                    )),
                 ),
                 None => Arc::new(tddy_daemon_auth::StandaloneKeyDirectory),
             };
             log::info!(
-                target: "tddy_daemon::auth",
+                target: tddy_daemon_auth::AUTH_LOG_TARGET,
                 "signing session tokens as key {}",
                 key.key_id()
             );
-            Some((
-                tddy_daemon_auth::SessionTokens::new(&key, directory),
-                crate::common_room_key_directory::advertised_signing_key(&key),
-            ))
+            tddy_session_lifecycle::auth::build_auth_entries_with(
+                &auth_config,
+                web_host.as_str(),
+                web_port,
+                &tddy_daemon_auth::SessionTokens::new(key, directory),
+            )?
         }
-        None => None,
-    };
-    let auth_result = match &signing {
-        Some((tokens, _)) => tddy_session_lifecycle::auth::build_auth_entries_with(
-            &auth_config,
-            web_host.as_str(),
-            web_port,
-            tokens,
-        )?,
         None => tddy_session_lifecycle::auth::build_auth_entries(
             &auth_config,
             web_host.as_str(),
             web_port,
         )?,
     };
+    // What the common room is told about this daemon's key, so a peer holding one of its tokens
+    // can find the key that verifies it.
+    let advertised_signing_key = signing_key
+        .as_ref()
+        .map(crate::common_room_key_directory::advertised_signing_key);
     let mut rpc_entries = auth_result.entries;
 
     // The room-JWT mint the web UI joins rooms through. Gated on the same session token as every
@@ -748,9 +750,11 @@ pub async fn build(
         telegram_inbound: telegram.inbound,
     };
 
-    if let (Some(user_resolver), Some((session_tokens, advertised_signing_key))) =
-        (auth_result.user_resolver, signing)
-    {
+    if let (Some(user_resolver), Some(session_tokens), Some(advertised_signing_key)) = (
+        auth_result.user_resolver,
+        auth_result.session_tokens,
+        advertised_signing_key,
+    ) {
         let config_arc = Arc::new(config.clone());
         // The local row is the daemon's own, and nothing else records it: the peer registry
         // deliberately holds only *remote* participants, and a daemon with LiveKit switched off
@@ -766,11 +770,8 @@ pub async fn build(
         // roster is built from; the task that fills them is the host's to start.
         let livekit_discovery: Option<
             tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles,
-        > = match (
-            CommonRoomTarget::from_livekit(config.livekit.as_ref()),
-            peer_registry,
-        ) {
-            (Some(target), Some(registry)) => {
+        > = match common_room_peers {
+            Some((target, registry)) => {
                 let room_slot = Arc::new(tokio::sync::RwLock::new(None));
                 log::info!(
                     "LiveKit common-room peer discovery configured (room {:?})",
@@ -799,7 +800,7 @@ pub async fn build(
                         common_room_livekit_room: room_slot,
                     })
             }
-            _ => None,
+            None => None,
         };
         // Clone before moving into DaemonSessionHost — VmService and ScreenSharingService need the same resolver.
         let vm_user_resolver = user_resolver.clone();

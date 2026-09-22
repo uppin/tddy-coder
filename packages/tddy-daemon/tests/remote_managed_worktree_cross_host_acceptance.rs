@@ -30,7 +30,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon::common_room_key_directory::CommonRoomKeyDirectory;
+use tddy_daemon::common_room_key_directory::{advertised_signing_key, CommonRoomKeyDirectory};
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon_auth::{DaemonSigningKey, SessionTokens};
@@ -257,8 +257,8 @@ async fn a_daemon(
     // This daemon's identity, advertised on the common room, and a key directory over the peers
     // it discovers there — what lets each daemon verify the other's credentials.
     let key = the_signing_key_of(instance_id);
-    let directory = Arc::new(CommonRoomKeyDirectory::new(Arc::clone(&registry), &key));
-    let advertised = directory.advertised();
+    let directory = Arc::new(CommonRoomKeyDirectory::new(Arc::clone(&registry)));
+    let advertised = advertised_signing_key(&key);
     let tokens = SessionTokens::new(&key, directory);
     let user_resolver = a_resolver_verifying_with(&tokens);
     spawn_common_room_discovery_task(

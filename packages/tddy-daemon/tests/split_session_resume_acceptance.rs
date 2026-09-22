@@ -33,7 +33,7 @@ use std::time::Duration;
 use serial_test::serial;
 use tddy_core::session_agent::SessionAgentRecord;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
-use tddy_daemon::common_room_key_directory::CommonRoomKeyDirectory;
+use tddy_daemon::common_room_key_directory::{advertised_signing_key, CommonRoomKeyDirectory};
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon_auth::{DaemonSigningKey, SessionTokens, StandaloneKeyDirectory};
@@ -216,8 +216,8 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
     let config_arc = Arc::new(config.clone());
     let registry = Arc::new(CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-    let directory = Arc::new(CommonRoomKeyDirectory::new(Arc::clone(&registry), &key));
-    let advertised = directory.advertised();
+    let directory = Arc::new(CommonRoomKeyDirectory::new(Arc::clone(&registry)));
+    let advertised = advertised_signing_key(&key);
     let tokens = SessionTokens::new(&key, directory);
     spawn_common_room_discovery_task(
         config_arc.clone(),

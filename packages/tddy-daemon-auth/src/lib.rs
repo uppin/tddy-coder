@@ -69,6 +69,11 @@ pub use signing_key::{
 /// it.
 pub use tddy_github::token_store::GitHubTokenStore;
 
+/// The log target every record about the daemon's identity boundary goes out under — signing,
+/// verification, the key file and `auth_storage` — so an operator filters for one string, and the
+/// crates that wire the boundary (`tddy-daemon`'s runtime) log under the same one.
+pub const AUTH_LOG_TARGET: &str = "tddy_daemon::auth";
+
 #[cfg(test)]
 mod tests {
     use super::*;

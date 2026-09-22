@@ -52,20 +52,18 @@ struct AFleet {
     announced: Mutex<HashMap<KeyId, Ed25519VerifyingKey>>,
 }
 
-#[async_trait]
-impl KeyDirectory for AFleet {
-    async fn publish(
-        &self,
-        key_id: &KeyId,
-        public_key: &Ed25519VerifyingKey,
-    ) -> anyhow::Result<()> {
+impl AFleet {
+    /// A daemon joining the fleet with `key` — what its common-room advertisement does for real.
+    fn announce(&self, key: &DaemonSigningKey) {
         self.announced
             .lock()
             .unwrap()
-            .insert(key_id.clone(), *public_key);
-        Ok(())
+            .insert(key.key_id(), key.verifying_key());
     }
+}
 
+#[async_trait]
+impl KeyDirectory for AFleet {
     async fn public_key_for(&self, key_id: &KeyId) -> anyhow::Result<Option<Ed25519VerifyingKey>> {
         Ok(self.announced.lock().unwrap().get(key_id).copied())
     }
@@ -104,10 +102,7 @@ async fn a_peer_daemon_accepts_a_token_minted_by_a_daemon_whose_key_it_has_learn
     let (minting_daemon, _minting_home) = a_daemon_key();
     let (peer_key, _peer_home) = a_daemon_key();
     for daemon in [&minting_daemon, &peer_key] {
-        fleet
-            .publish(&daemon.key_id(), &daemon.verifying_key())
-            .await
-            .unwrap();
+        fleet.announce(daemon);
     }
     let (config, dir) = a_daemon_config();
     let service = a_peer_daemon(

@@ -120,7 +120,7 @@ pub fn build_auth_entries_with(
             // Said once, here, at startup — and not repaired: see
             // `auth_storage_looser_than_owner_only`.
             if let Some(warning) = auth_storage_looser_than_owner_only(dir) {
-                log::warn!(target: "tddy_daemon::auth", "{warning}");
+                log::warn!(target: crate::AUTH_LOG_TARGET, "{warning}");
             }
             Some(Arc::new(store) as Arc<dyn GitHubTokenStore>)
         }
@@ -196,7 +196,7 @@ pub fn session_token_authenticator(
         }
         None => {
             log::warn!(
-                target: "tddy_daemon::auth",
+                target: crate::AUTH_LOG_TARGET,
                 "serving {service_name} with no way to verify a session token — every call will be \
                  refused. Configure `github:` to make it usable."
             );
@@ -434,7 +434,7 @@ impl LiveKitTokenServiceTrait for LiveKitTokenServiceImpl {
         .map_err(|e| Status::internal(format!("could not mint a livekit token: {e}")))?;
 
         log::info!(
-            target: "tddy_daemon::auth",
+            target: crate::AUTH_LOG_TARGET,
             "minted a {}s livekit token for {login} (os user {os_user}) in room {room}",
             MINTED_ROOM_TOKEN_TTL.as_secs()
         );

@@ -46,6 +46,8 @@ const PEER_INSTANCE_ID: &str = "key-trust-peer";
 const IMPOSTOR_DAEMON_ID: &str = "key-trust-impostor";
 /// The identity `token.TokenService` does hand it.
 const IMPOSTOR_CLIENT_IDENTITY: &str = "web-key-trust-impostor";
+/// A daemon-shaped participant re-advertising another daemon's key id.
+const SHADOW_INSTANCE_ID: &str = "key-trust-shadow";
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[tokio::test]
@@ -106,9 +108,63 @@ async fn a_non_daemon_participant_advertising_a_signing_key_does_not_get_its_tok
     );
 }
 
+#[tokio::test]
+#[serial]
+async fn a_participant_re_advertising_a_genuine_key_id_with_other_bytes_does_not_shadow_it() {
+    // Given a verifying daemon, a genuine peer, and a second daemon-shaped participant advertising
+    // the peer's key id with a key of its own — the one kind of participant discovery does read,
+    // so only a holder of the LiveKit API secret could put it there
+    let fleet = Fleet::start().await;
+    let verifier = fleet.a_daemon(VERIFIER_INSTANCE_ID);
+    let peer = fleet.a_daemon(PEER_INSTANCE_ID);
+    let shadow = Keypair::generate();
+    let shadowing = shadow.advertisement_claiming(SHADOW_INSTANCE_ID, &peer.key);
+    let shadow_jwt = fleet
+        .livekit
+        .generate_token(&fleet.room, SHADOW_INSTANCE_ID)
+        .expect("a room token for the shadow");
+    let _shadow_room = join_advertising(&fleet.ws_url, &shadow_jwt, &shadowing).await;
+
+    // When the verifier has both on its roster and is handed the genuine peer's token
+    verifier.discovers(&peer.instance_id).await;
+    verifier.discovers(SHADOW_INSTANCE_ID).await;
+    let genuine = peer.key.signer().mint_access(&the_operator());
+
+    // Then it verifies — the key that hashes to the id wins, whichever row the roster yields first
+    assert_eq!(
+        verifier.verifies(&genuine).map(|claims| claims.login),
+        Ok(the_operator().login)
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_peers_key_once_learned_still_verifies_while_the_roster_is_empty() {
+    // Given a verifying daemon that has learned a peer's key by verifying one of its tokens
+    let fleet = Fleet::start().await;
+    let verifier = fleet.a_daemon(VERIFIER_INSTANCE_ID);
+    let peer = fleet.a_daemon(PEER_INSTANCE_ID);
+    verifier.discovers(&peer.instance_id).await;
+    let genuine = peer.key.signer().mint_access(&the_operator());
+    let first = verifier.verifies(&genuine).map(|claims| claims.login);
+
+    // When its connection to the room ends and discovery clears the roster, as it does before
+    // every reconnect — no await in between, so no discovery tick can refill it
+    verifier.registry.clear();
+    let roster = verifier.registry.snapshot_remotes();
+    let while_reconnecting = verifier.verifies(&genuine).map(|claims| claims.login);
+
+    // Then the token still verifies: a key id names exactly one key, so a remembered key can never
+    // turn into a wrong one, and a reconnect must not log every peer's users out
+    assert_eq!(
+        (first, roster.len(), while_reconnecting),
+        (Ok(the_operator().login), 0, Ok(the_operator().login))
+    );
+}
+
 /// One LiveKit server, one common room named afresh for this run.
 struct Fleet {
-    _livekit: LiveKitTestkit,
+    livekit: LiveKitTestkit,
     ws_url: String,
     room: String,
     homes: tempfile::TempDir,
@@ -121,7 +177,7 @@ impl Fleet {
             .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
         Self {
             ws_url: livekit.get_ws_url(),
-            _livekit: livekit,
+            livekit,
             room: format!("key-trust-lobby-{}", uuid::Uuid::new_v4()),
             homes: tempfile::tempdir().expect("a temporary directory"),
         }
@@ -135,7 +191,7 @@ impl Fleet {
             .expect("a daemon generates its keypair");
         let registry = Arc::new(CommonRoomPeerRegistry::new());
         let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-        let directory = Arc::new(CommonRoomKeyDirectory::new(Arc::clone(&registry), &key));
+        let directory = Arc::new(CommonRoomKeyDirectory::new(Arc::clone(&registry)));
         let tokens = SessionTokens::new(&key, directory);
         spawn_common_room_discovery_loop(
             Arc::clone(&config),
@@ -257,20 +313,38 @@ impl Keypair {
     /// The common-room metadata a daemon named `instance_id` holding this key would publish.
     fn advertisement_as(&self, instance_id: &str) -> String {
         let advertised = advertised_signing_key(&self.key);
-        daemon_metadata_json(
-            &DaemonAdvertisement {
-                instance_id: instance_id.to_string(),
-                label: "Build server".to_string(),
-                repos_base_path: String::new(),
-                max_attachment_bytes: 0,
-                sandboxed_codebase: None,
-                signing_key_id: advertised.key_id,
-                signing_public_key: advertised.public_key,
-            },
-            instance_id,
-        )
-        .expect("an advertisement serializes")
+        advertisement_json(instance_id, advertised.key_id, advertised.public_key)
     }
+
+    /// Metadata advertising this key's bytes under `victim`'s key id.
+    fn advertisement_claiming(&self, instance_id: &str, victim: &DaemonSigningKey) -> String {
+        advertisement_json(
+            instance_id,
+            victim.key_id().to_string(),
+            advertised_signing_key(&self.key).public_key,
+        )
+    }
+}
+
+/// The common-room metadata a daemon named `instance_id` would publish, advertising the given key.
+fn advertisement_json(
+    instance_id: &str,
+    signing_key_id: String,
+    signing_public_key: String,
+) -> String {
+    daemon_metadata_json(
+        &DaemonAdvertisement {
+            instance_id: instance_id.to_string(),
+            label: "Build server".to_string(),
+            repos_base_path: String::new(),
+            max_attachment_bytes: 0,
+            sandboxed_codebase: None,
+            signing_key_id,
+            signing_public_key,
+        },
+        instance_id,
+    )
+    .expect("an advertisement serializes")
 }
 
 async fn mint_room_token(

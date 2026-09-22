@@ -123,7 +123,7 @@ impl DaemonSigningKey {
         self.key_id.clone()
     }
 
-    /// The public half, for publishing to a [`KeyDirectory`].
+    /// The public half — what peers verify this daemon's tokens with.
     pub fn verifying_key(&self) -> VerifyingKey {
         self.signing_key.verifying_key()
     }
@@ -192,7 +192,7 @@ impl DaemonSigningKey {
             Ok(()) => {
                 let key = Self::from_signing_key(signing_key);
                 log::info!(
-                    target: "tddy_daemon::auth",
+                    target: crate::AUTH_LOG_TARGET,
                     "generated this daemon's session-token signing key {} at {}",
                     key.key_id,
                     path.display()
@@ -293,25 +293,24 @@ pub fn auth_storage_looser_than_owner_only(_dir: &Path) -> Option<String> {
     None
 }
 
-/// Where a daemon learns other daemons' public keys, and announces its own.
+/// Where a daemon learns other daemons' public keys.
 ///
 /// A port rather than a concrete type because the answer is deployment-shaped: a LiveKit fleet
 /// resolves it off the common room, and a desktop install has no peers at all and answers `None`
-/// to every id but its own.
+/// to every id — its own key is held by the verifier directly.
+///
+/// Resolving is all a directory does. How a daemon's own key reaches its peers is the transport's
+/// business, not this port's: on a LiveKit fleet the key rides in the common-room advertisement the
+/// discovery loop publishes on every connection (`tddy_daemon_livekit::AdvertisedSigningKey`), and
+/// that loop lives in a crate this one may not depend on.
 ///
 /// **An implementation answers from what it already holds.** Every token-gated RPC on the daemon
 /// authenticates through the synchronous `SessionUserResolver`, which polls
-/// [`KeyDirectory::public_key_for`] once ([`DirectorySessionTokenVerifier::verify_now`]); a lookup
-/// that is still pending on that poll is refused as an unknown key rather than waited for. A
-/// directory that needs I/O to answer must keep a local view it refreshes in the background.
+/// [`KeyDirectory::public_key_for`] exactly once
+/// ([`DirectorySessionTokenVerifier::verify_now`]); a lookup still pending on that poll is refused
+/// as an unknown key. See that method for what this asks of an I/O-backed directory.
 #[async_trait]
 pub trait KeyDirectory: Send + Sync {
-    /// Announce this daemon's key so peers can verify tokens it mints.
-    ///
-    /// Called on every (re)connection, not once: a peer that joined after the first announcement
-    /// would otherwise never learn the key.
-    async fn publish(&self, key_id: &KeyId, public_key: &VerifyingKey) -> anyhow::Result<()>;
-
     /// The public key for `key_id`, or `None` when no peer has announced it.
     ///
     /// `None` is a real answer — an unknown daemon, or one that has not announced yet — and is
@@ -319,18 +318,14 @@ pub trait KeyDirectory: Send + Sync {
     async fn public_key_for(&self, key_id: &KeyId) -> anyhow::Result<Option<VerifyingKey>>;
 }
 
-/// The directory of a daemon that belongs to no fleet: it has nobody to announce to, and knows no
-/// key but its own — which [`DirectorySessionTokenVerifier`] holds directly.
+/// The directory of a daemon that belongs to no fleet: it knows no key but its own — which
+/// [`DirectorySessionTokenVerifier`] holds directly.
 ///
 /// Tddy Desktop's shape, and every daemon's without a common room.
 pub struct StandaloneKeyDirectory;
 
 #[async_trait]
 impl KeyDirectory for StandaloneKeyDirectory {
-    async fn publish(&self, _key_id: &KeyId, _public_key: &VerifyingKey) -> anyhow::Result<()> {
-        Ok(())
-    }
-
     async fn public_key_for(&self, _key_id: &KeyId) -> anyhow::Result<Option<VerifyingKey>> {
         Ok(None)
     }
@@ -369,7 +364,7 @@ impl DirectorySessionTokenVerifier {
                 Ok(None) => return Err(SessionTokenError::UnknownKeyId(key_id)),
                 Err(e) => {
                     log::warn!(
-                        target: "tddy_daemon::auth",
+                        target: crate::AUTH_LOG_TARGET,
                         "could not look up the public key for session-token key id {key_id}: {e}"
                     );
                     return Err(SessionTokenError::UnknownKeyId(key_id));
@@ -381,10 +376,21 @@ impl DirectorySessionTokenVerifier {
 
     /// [`Self::verify`], for the synchronous gates every daemon RPC authenticates through.
     ///
-    /// Polls the verification once. With a directory that answers from what it holds — the
-    /// contract [`KeyDirectory`] states — that one poll is the whole verification. A lookup still
-    /// pending is refused as [`SessionTokenError::UnknownKeyId`], never waited for: blocking an RPC
-    /// worker on a directory's I/O would stall every other caller behind it.
+    /// **Polls the verification exactly once**, with a no-op waker, and never again. A verification
+    /// that is `Ready` on that poll is the answer; one that is `Pending` is refused as
+    /// [`SessionTokenError::UnknownKeyId`] and dropped — it is not waited for, re-polled or
+    /// retried, because blocking an RPC worker on a directory's I/O would stall every caller
+    /// behind it, and this gate (`SessionUserResolver`) is a synchronous closure with 60-odd call
+    /// sites.
+    ///
+    /// Safe with the directories that exist: the local key is compared without a lookup,
+    /// [`StandaloneKeyDirectory`] answers immediately, and the common-room directory reads an
+    /// in-memory snapshot behind a `std` lock — none of them ever awaits, so the single poll is the
+    /// whole verification. A **future I/O-backed directory** (a network fetch, a file read, an async
+    /// lock) must not await inside `public_key_for` on this path: it must keep a local view that a
+    /// background task refreshes and answer from it, as the common-room directory does. One that
+    /// awaited would not fail loudly — it would refuse every peer token as an unknown key, with a
+    /// warning in the log naming the key id.
     pub fn verify_now(&self, token: &str) -> Result<SessionClaims, SessionTokenError> {
         let mut verification = pin!(self.verify(token));
         match verification
@@ -395,7 +401,7 @@ impl DirectorySessionTokenVerifier {
             Poll::Pending => {
                 let key_id = SessionTokenVerifier::key_id_of(token)?;
                 log::warn!(
-                    target: "tddy_daemon::auth",
+                    target: crate::AUTH_LOG_TARGET,
                     "the key directory could not answer for key id {key_id} without waiting; \
                      refusing the token"
                 );
@@ -633,10 +639,6 @@ mod tests {
 
     #[async_trait]
     impl KeyDirectory for AlwaysWaiting {
-        async fn publish(&self, _: &KeyId, _: &VerifyingKey) -> anyhow::Result<()> {
-            std::future::pending().await
-        }
-
         async fn public_key_for(&self, _: &KeyId) -> anyhow::Result<Option<VerifyingKey>> {
             std::future::pending().await
         }

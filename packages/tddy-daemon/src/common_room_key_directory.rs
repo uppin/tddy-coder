@@ -6,7 +6,8 @@
 //! its own `dependency_boundary_unit` asserts it — so the LiveKit crate carries a key only as the
 //! two opaque strings of [`AdvertisedSigningKey`] and this adapter is what turns them into keys.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -16,9 +17,10 @@ use ed25519_dalek::VerifyingKey;
 use tddy_daemon_auth::{DaemonSigningKey, KeyDirectory};
 use tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry;
 use tddy_daemon_livekit::AdvertisedSigningKey;
-use tddy_github::session_token_v2::{spki_der, KeyId};
+use tddy_github::session_token_v2::KeyId;
 
-/// This daemon's signing key in the form its common-room advertisement carries it.
+/// This daemon's signing key in the form its common-room advertisement carries it — handed to the
+/// discovery loop, which publishes it on every (re)connection to the common room.
 pub fn advertised_signing_key(key: &DaemonSigningKey) -> AdvertisedSigningKey {
     AdvertisedSigningKey {
         key_id: key.key_id().to_string(),
@@ -26,58 +28,78 @@ pub fn advertised_signing_key(key: &DaemonSigningKey) -> AdvertisedSigningKey {
     }
 }
 
-/// Resolves peers' keys from the common-room roster and announces this daemon's through its
-/// advertisement.
+/// Resolves peers' keys from the common-room roster.
 ///
-/// Every lookup reads the registry's current snapshot — held in memory and refreshed by the
-/// discovery loop — so it answers without waiting, which is what [`KeyDirectory`] asks of an
-/// implementation.
+/// Every lookup is answered from memory — the registry's current snapshot, refreshed by the
+/// discovery loop, or a key already learned — so it never waits, which is what [`KeyDirectory`]
+/// asks of an implementation.
+///
+/// A key, once learned, is **kept** across `CommonRoomPeerRegistry::clear`, which the discovery
+/// loop runs every time its connection to the room ends. That is safe because a key id is a digest
+/// of its key: an id names exactly one key, forever, so a remembered answer can never become a
+/// wrong one. Without it, every peer's token — a 24 h split-agent credential included — would be
+/// refused for as long as this daemon is reconnecting. The cache holds one entry per peer identity
+/// ever verified, which grows only when a daemon generates a new key.
 pub struct CommonRoomKeyDirectory {
     registry: Arc<CommonRoomPeerRegistry>,
-    advertised: AdvertisedSigningKey,
+    learned: Mutex<HashMap<KeyId, VerifyingKey>>,
 }
 
 impl CommonRoomKeyDirectory {
-    /// A directory over `registry` for the daemon that holds `local`.
-    pub fn new(registry: Arc<CommonRoomPeerRegistry>, local: &DaemonSigningKey) -> Self {
+    /// A directory over `registry`, which discovery fills from the common room.
+    pub fn new(registry: Arc<CommonRoomPeerRegistry>) -> Self {
         Self {
             registry,
-            advertised: advertised_signing_key(local),
+            learned: Mutex::new(HashMap::new()),
         }
     }
 
-    /// What this daemon's advertisement carries — handed to the discovery loop, which publishes
-    /// it on every (re)connection to the common room.
-    pub fn advertised(&self) -> AdvertisedSigningKey {
-        self.advertised.clone()
+    fn remembered(&self, key_id: &KeyId) -> Option<VerifyingKey> {
+        self.learned
+            .lock()
+            .expect("the learned-key cache is never poisoned")
+            .get(key_id)
+            .copied()
+    }
+
+    fn remember(&self, key_id: &KeyId, key: VerifyingKey) {
+        self.learned
+            .lock()
+            .expect("the learned-key cache is never poisoned")
+            .insert(key_id.clone(), key);
     }
 }
 
 #[async_trait]
 impl KeyDirectory for CommonRoomKeyDirectory {
-    /// The room learns a daemon's key from the advertisement the discovery loop publishes on each
-    /// connection, and that advertisement is fixed when the loop is started. So there is nothing to
-    /// send here; what can be checked is that the key being announced is the one the room is told.
-    /// A different one would mean this daemon signs with a key no peer can find.
-    async fn publish(&self, key_id: &KeyId, public_key: &VerifyingKey) -> anyhow::Result<()> {
-        let announcing = AdvertisedSigningKey {
-            key_id: key_id.to_string(),
-            public_key: URL_SAFE_NO_PAD.encode(spki_der(public_key)),
-        };
-        if announcing != self.advertised {
-            anyhow::bail!(
-                "the common room announces signing key {} for this daemon, not {key_id}",
-                self.advertised.key_id
-            );
-        }
-        Ok(())
-    }
-
+    /// The key advertised under `key_id` that really is that key.
+    ///
+    /// Every candidate the room holds is checked, because two participants can advertise one id
+    /// and only the one whose bytes hash to it is telling the truth; an impostor re-advertising a
+    /// genuine id is ignored rather than allowed to shadow the real key. `Err` only when candidates
+    /// exist and none of them is the key — the error says why each was refused.
     async fn public_key_for(&self, key_id: &KeyId) -> anyhow::Result<Option<VerifyingKey>> {
-        self.registry
-            .signing_public_key_for(key_id.as_str())
-            .map(|advertised| decode_advertised_key(key_id, &advertised))
-            .transpose()
+        if let Some(key) = self.remembered(key_id) {
+            return Ok(Some(key));
+        }
+        let candidates = self.registry.signing_public_keys_for(key_id.as_str());
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        let mut refusals = Vec::with_capacity(candidates.len());
+        for advertised in &candidates {
+            match decode_advertised_key(key_id, advertised) {
+                Ok(key) => {
+                    self.remember(key_id, key);
+                    return Ok(Some(key));
+                }
+                Err(refusal) => refusals.push(refusal.to_string()),
+            }
+        }
+        anyhow::bail!(
+            "no peer advertising signing key {key_id} sent that key: {}",
+            refusals.join("; ")
+        )
     }
 }
 
@@ -96,10 +118,10 @@ fn decode_advertised_key(key_id: &KeyId, advertised: &str) -> anyhow::Result<Ver
             "the peer advertising signing key {key_id} sent a key that is not Ed25519 SPKI: {e}"
         )
     })?;
-    if KeyId::of(&key) != *key_id {
+    let actual = KeyId::of(&key);
+    if actual != *key_id {
         anyhow::bail!(
-            "the peer advertising signing key {key_id} sent the key {}, which is not that key",
-            KeyId::of(&key)
+            "the peer advertising signing key {key_id} sent the key {actual}, which is not that key"
         );
     }
     Ok(key)
@@ -131,33 +153,31 @@ mod tests {
         let advertised = advertised_signing_key(&impostor);
 
         // When a peer decodes it for the id it claims
-        let refusal = decode_advertised_key(&victim.key_id(), &advertised.public_key);
+        let refusal = decode_advertised_key(&victim.key_id(), &advertised.public_key)
+            .expect_err("a key that does not hash to its id must be refused");
 
-        // Then it is refused — the id is a digest of the key, so the claim is checkable
+        // Then it is refused for exactly that reason — the id is a digest of the key, so the claim
+        // is checkable — and not for a decoding failure
         assert!(
-            refusal.is_err(),
-            "a key that does not hash to the id it is advertised under must be refused"
+            refusal.to_string().contains("which is not that key"),
+            "expected a key/id mismatch, got: {refusal}"
         );
     }
 
     #[tokio::test]
-    async fn announces_only_the_key_its_advertisement_carries() {
-        // Given a directory advertising one daemon's key
-        let (daemon, _home) = a_daemon();
-        let (stranger, _other_home) = a_daemon();
-        let directory =
-            CommonRoomKeyDirectory::new(Arc::new(CommonRoomPeerRegistry::new()), &daemon);
+    async fn a_key_id_nobody_advertises_is_an_unknown_key() {
+        // Given a directory over an empty roster
+        let (stranger, _home) = a_daemon();
+        let directory = CommonRoomKeyDirectory::new(Arc::new(CommonRoomPeerRegistry::new()));
 
-        // When it is asked to announce that key, and then a different one
-        let own = directory
-            .publish(&daemon.key_id(), &daemon.verifying_key())
-            .await;
-        let other = directory
-            .publish(&stranger.key_id(), &stranger.verifying_key())
-            .await;
+        // When a key id nobody advertised is looked up
+        let found = directory
+            .public_key_for(&stranger.key_id())
+            .await
+            .expect("an empty roster is an answer, not a failure");
 
-        // Then only the advertised key is announceable
-        assert_eq!((own.is_ok(), other.is_ok()), (true, false));
+        // Then there is none — `None`, the verifier's cue to refuse as an unknown key
+        assert_eq!(found, None);
     }
 
     fn a_daemon() -> (DaemonSigningKey, tempfile::TempDir) {
