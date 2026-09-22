@@ -1,0 +1,27 @@
+[package]
+name = "tddy-session-catalog"
+version = "0.1.0"
+edition = "2021"
+description = "Per-session SQLite catalog of action manifests and build targets"
+
+[lib]
+name = "tddy_session_catalog"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1"
+dashmap = "6"
+once_cell = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The workspace's per-session catalog store. Runtime query API only (no `query!` macro) — no
+# build-time DATABASE_URL. `tls-rustls` matches the daemon TLS stack; `sqlite` bundles SQLite
+# (json1 + generated columns). Owned here so crates that never open a catalog do not compile it.
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "sqlite"] }
+thiserror = "2"
+tddy-session-store = { path = "../tddy-session-store" }
+tddy-task = { path = "../tddy-task" }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

@@ -1530,7 +1530,7 @@ fn run_acp_agent(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
 /// and auto-discovered `BUILD.yaml` build targets, on a detached background thread with its own
 /// runtime. Fire-and-forget: failures are logged, not propagated.
 ///
-/// Deliberately runs the [`tddy_core::session_catalog::PopulateCatalogTask`] on a local registry
+/// Deliberately runs the [`tddy_session_catalog::PopulateCatalogTask`] on a local registry
 /// **without** registering the catalog in the process-global map — this coder flow only *writes*
 /// the catalog for later reads; it does not serve `list-actions` from it yet, so it leaves no
 /// live pool behind once the scan commits.
@@ -1552,26 +1552,26 @@ fn spawn_session_catalog_populate(
             }
         };
         rt.block_on(async move {
-            let db_path = tddy_core::session_catalog::read::catalog_db_path(&session_dir);
-            let pool = match tddy_core::session_catalog::store::open_pool(&db_path).await {
+            let db_path = tddy_session_catalog::read::catalog_db_path(&session_dir);
+            let pool = match tddy_session_catalog::store::open_pool(&db_path).await {
                 Ok(pool) => pool,
                 Err(e) => {
                     log::warn!(target: "tddy_coder::run", "session catalog populate: open failed: {e}");
                     return;
                 }
             };
-            let task = tddy_core::session_catalog::PopulateCatalogTask {
+            let task = tddy_session_catalog::PopulateCatalogTask {
                 pool,
                 session_dir,
                 repo_root,
                 tddy_data_dir,
-                build_provider: tddy_core::session_catalog::build_catalog_provider(),
+                build_provider: tddy_session_catalog::build_catalog_provider(),
             };
             let registry = tddy_task::TaskRegistry::new();
             let handle = registry
                 .spawn(
                     task,
-                    tddy_core::session_catalog::populate::POPULATE_TASK_KIND,
+                    tddy_session_catalog::populate::POPULATE_TASK_KIND,
                     session_id,
                     vec![],
                 )

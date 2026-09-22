@@ -14,6 +14,8 @@ members = [
     "packages/tddy-graph",
     "packages/tddy-discovery",
     "packages/tddy-core",
+    "packages/tddy-session-store",
+    "packages/tddy-session-catalog",
     "packages/tddy-rpc",
     "packages/tddy-stdio",
     "packages/tddy-tauri-rpc",

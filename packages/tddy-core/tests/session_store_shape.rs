@@ -56,10 +56,18 @@ fn the_god_crate_keeps_the_dependency_that_does_not_leave() {
     );
 }
 
-/// AC3 — `tddy-session-store` depends on `tddy-workflow` and nothing else of ours.
+/// The only workspace crates `tddy-session-store` may depend on. None of them depends on
+/// `tddy-core`, so none can close a cycle back into the crate the storage layer left.
+const STORAGE_CRATE_WORKSPACE_DEPENDENCIES: [&str; 3] =
+    ["tddy-workflow", "tddy-actions", "tddy-task"];
+
+/// AC3 — `tddy-session-store` depends on the vocabulary and the action runtime, and nothing else of
+/// ours.
 ///
-/// `tddy-workflow` is where `#carve` 4/9 puts `ClarificationQuestion`, which is the group's only
-/// edge out. Any other workspace dependency means the seam was cut in the wrong place.
+/// `tddy-workflow` is where `#carve` 4/9 puts `ClarificationQuestion`, which `error.rs` names.
+/// `session_actions/runtime.rs` runs every manifest on the action runtime (`tddy-actions`) and
+/// tracks it in the task registry (`tddy-task`). Any other workspace dependency means the seam was
+/// cut in the wrong place.
 #[test]
 fn the_storage_crate_depends_only_on_the_vocabulary() {
     // Given the new crate's manifest
@@ -74,14 +82,20 @@ fn the_storage_crate_depends_only_on_the_vocabulary() {
         .lines()
         .map(str::trim)
         .filter(|line| line.starts_with("tddy-"))
-        .filter(|line| !line.starts_with("tddy-workflow"))
+        .filter(|line| !STORAGE_CRATE_WORKSPACE_DEPENDENCIES.contains(&dependency_name(line)))
         .collect();
 
-    // Then only the vocabulary crate is among them
+    // Then only the allowlisted crates are among them
     assert!(
         unexpected.is_empty(),
-        "`tddy-session-store` depends on more than the vocabulary: {unexpected:?}"
+        "`tddy-session-store` depends on workspace crates outside \
+         {STORAGE_CRATE_WORKSPACE_DEPENDENCIES:?}: {unexpected:?}"
     );
+}
+
+/// The crate name a manifest dependency line declares: `tddy-task = { … }` → `tddy-task`.
+fn dependency_name(line: &str) -> &str {
+    line.split('=').next().unwrap_or(line).trim()
 }
 
 /// AC4 — the catalog crate takes `sqlx` with it, and depends back on nothing.

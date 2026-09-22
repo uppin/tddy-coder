@@ -11773,6 +11773,7 @@ dependencies = [
  "tddy-core",
  "tddy-rpc",
  "tddy-service",
+ "tddy-session-catalog",
  "tddy-task",
  "tempfile",
  "tokio",
@@ -11963,6 +11964,7 @@ dependencies = [
  "tddy-pty",
  "tddy-rpc",
  "tddy-service",
+ "tddy-session-catalog",
  "tddy-stdio",
  "tddy-task",
  "tddy-terminal-rpc",
@@ -12026,12 +12028,12 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
- "sqlx",
  "tddy-actions",
  "tddy-git",
  "tddy-graph",
  "tddy-rpc",
  "tddy-sandbox",
+ "tddy-session-store",
  "tddy-stdio",
  "tddy-task",
  "tddy-testing-commons",
@@ -13027,6 +13029,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-session-catalog"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dashmap 6.2.1",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tddy-session-store",
+ "tddy-task",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-session-files"
 version = "0.1.0"
 dependencies = [
@@ -13133,6 +13152,29 @@ dependencies = [
  "tonic 0.12.3",
  "tower 0.5.3",
  "url",
+ "uuid",
+]
+
+[[package]]
+name = "tddy-session-store"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dashmap 6.2.1",
+ "glob",
+ "jsonschema 0.44.1",
+ "log",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
+ "tddy-actions",
+ "tddy-task",
+ "tddy-workflow",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
  "uuid",
 ]
 

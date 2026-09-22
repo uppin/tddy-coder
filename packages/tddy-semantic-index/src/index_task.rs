@@ -1,6 +1,6 @@
 //! The indexing task: walk → chunk → embed → store, modeled as a [`TaskBody`] so the daemon can
 //! spawn it on a `TaskRegistry` and block on its terminal status before launching the agent
-//! (mirrors `tddy_core::session_catalog::PopulateCatalogTask`).
+//! (mirrors `tddy_session_catalog::PopulateCatalogTask`).
 
 use std::path::PathBuf;
 

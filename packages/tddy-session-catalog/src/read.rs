@@ -13,7 +13,7 @@ use super::error::CatalogError;
 use super::populate::{self, PopulateCatalogTask};
 use super::provider::BuildCatalogProvider;
 use super::store;
-use crate::session_actions::{ActionListResult, DiscoveryQuery};
+use tddy_session_store::session_actions::{ActionListResult, DiscoveryQuery};
 
 /// The catalog database filename within a session directory.
 pub const CATALOG_DB_FILENAME: &str = "catalog.db";

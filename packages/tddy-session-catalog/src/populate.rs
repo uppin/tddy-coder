@@ -11,7 +11,7 @@ use tddy_task::{TaskBody, TaskContext, TaskStatus};
 use super::entry::{project_package, BuildTargetCatalogEntry, CatalogEntry, CatalogEntryKind};
 use super::provider::BuildCatalogProvider;
 use super::store;
-use crate::session_actions::{list_action_summaries, DiscoveryQuery};
+use tddy_session_store::session_actions::{list_action_summaries, DiscoveryQuery};
 
 /// The `kind` label recorded on the populate task in the registry.
 pub const POPULATE_TASK_KIND: &str = "session_catalog_populate";

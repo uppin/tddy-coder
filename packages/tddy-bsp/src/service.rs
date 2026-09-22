@@ -1,7 +1,7 @@
 //! The `bsp.BspService` RPC implementation.
 //!
 //! Read methods project the per-session catalog's `build_targets` table (see
-//! [`tddy_core::session_catalog`]); build ops delegate to [`tddy_build::service::build_json`] and are
+//! [`tddy_session_catalog`]); build ops delegate to [`tddy_build::service::build_json`] and are
 //! capability-gated. Served over the workspace's protobuf/Connect + LiveKit transports.
 
 use std::path::PathBuf;
@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_build::capabilities::BuildMode;
-use tddy_core::session_catalog::{BuildTargetSummary, SessionCatalog};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::bsp::{
     ActionOutcome, BspService as BspServiceTrait, BuildTarget, BuildTargetActionRequest,
@@ -19,6 +18,7 @@ use tddy_service::proto::bsp::{
     SourceItem, SourcesItem, WorkspaceBuildTargetsRequest, WorkspaceBuildTargetsResponse,
     WorkspaceReloadRequest, WorkspaceReloadResponse,
 };
+use tddy_session_catalog::{BuildTargetSummary, SessionCatalog};
 use tddy_task::TaskRegistry;
 use tokio::sync::Mutex;
 
@@ -84,7 +84,7 @@ impl BspServiceImpl {
             &self.tddy_data_dir,
             &self.task_registry,
             &self.session_id(),
-            tddy_core::session_catalog::build_catalog_provider(),
+            tddy_session_catalog::build_catalog_provider(),
         )
         .await
         .map_err(|e| Status::internal(e.to_string()))
@@ -329,7 +329,7 @@ impl BspServiceTrait for BspServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tddy_core::session_catalog::CatalogCapabilities;
+    use tddy_session_catalog::CatalogCapabilities;
 
     fn a_summary() -> BuildTargetSummary {
         BuildTargetSummary {

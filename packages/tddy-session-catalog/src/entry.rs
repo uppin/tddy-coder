@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CatalogEntryKind {
-    /// A declarative YAML action manifest ([`crate::session_actions`]).
+    /// A declarative YAML action manifest ([`tddy_session_store::session_actions`]).
     ActionManifest,
     /// A `BUILD.yaml` build target, auto-discovered via [`super::provider::BuildCatalogProvider`].
     BuildTarget,
@@ -23,7 +23,7 @@ impl CatalogEntryKind {
 }
 
 /// One row of the catalog. Serialized as the `json` column; the read path reconstructs an
-/// [`crate::session_actions::ActionSummary`] from it (of which this is a superset).
+/// [`tddy_session_store::session_actions::ActionSummary`] from it (of which this is a superset).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogEntry {
     pub kind: CatalogEntryKind,

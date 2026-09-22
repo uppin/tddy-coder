@@ -1,7 +1,7 @@
 //! The per-daemon registry's SQLite store: providers, their cached model catalogs, and the
 //! assistants composed from those models.
 //!
-//! Follows the `session_catalog` precedent (`tddy-core/src/session_catalog/store.rs`): `sqlx` with
+//! Follows the `session_catalog` precedent (`tddy-session-catalog/src/store.rs`): `sqlx` with
 //! the runtime query API only (no `query!` macro, so no compile-time database), WAL journal,
 //! `Normal` synchronous, a 5 s busy timeout, and the file created on demand.
 //!

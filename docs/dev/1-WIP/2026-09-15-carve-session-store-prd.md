@@ -24,30 +24,65 @@ compile a bundled C SQLite because of 854 lines in one directory.
 
 ```
 atomic_file  →  (nothing)
-error        →  backend::ClarificationQuestion        ← the only edge out of the group
+error        →  backend::ClarificationQuestion        ← moves to tddy-workflow at #carve 4/9
 output       →  atomic_file, error
-session_actions  →  atomic_file, output
+session_actions  →  atomic_file, output,
+                    tddy-actions, tddy-task           ← runtime.rs, since #244 (missed at discovery)
+session_actions/session_dir.rs  →  changeset          ← read_changeset, since #474 (missed at discovery)
 session_catalog  →  session_actions
 ```
 
-That single outward edge is `error.rs:3` — `use crate::backend::ClarificationQuestion;` — for one
-variant of `WorkflowError`. **`#carve` 4/9 moves `ClarificationQuestion` to `tddy-workflow`**, and
-the moment it does, the whole group becomes a closed DAG with no dependency on the rest of
-`tddy-core`.
+`error.rs:3` (`use crate::backend::ClarificationQuestion;`, for one variant of `WorkflowError`) is
+one of three edges out of the group, not the only one. **`#carve` 4/9 moves `ClarificationQuestion`
+to `tddy-workflow`**, which clears it. The other two were missed at discovery and found at `/green`:
+
+- **`session_actions/runtime.rs` → `tddy-actions`, `tddy-task`.** Every manifest runs as a task on
+  the action runtime. Neither crate depends on `tddy-core`, so this edge is harmless: the storage
+  crate takes both dependencies.
+- **`session_actions/session_dir.rs` → `changeset`.** `load_repo_root` calls `read_changeset` and
+  matches `WorkflowError::ChangesetMissing`. `changeset/` names `workflow`, so this edge reaches the
+  remaining SCC. `session_dir.rs` therefore **stays in `tddy-core`**, behind the `session_actions`
+  facade.
 
 ## What this PR delivers
 
 ### FR1 — `tddy-session-store`
 
-`atomic_file`, `error`, `output` and `session_actions` move to a new `tddy-session-store`, which
-depends on `tddy-workflow` and no other `tddy-*` crate. `tddy-core` re-exports every old path, so
-**no consumer is edited** — and 14 `tddy-core` files naming `crate::error`, 11 naming
-`crate::atomic_file`, 9 naming `crate::session_actions` and 4 naming `crate::output` keep resolving.
+`atomic_file`, `error`, `output` and `session_actions` move to a new `tddy-session-store`. Its only
+`tddy-*` dependencies are `tddy-workflow`, `tddy-actions` and `tddy-task`, none of which depends on
+`tddy-core`. `tddy-core` re-exports every old path, so **no consumer of these four is edited**, and
+the 14 `tddy-core` files naming `crate::error`, 11 naming `crate::atomic_file`, 9 naming
+`crate::session_actions` and 4 naming `crate::output` keep resolving.
+
+**`session_actions/session_dir.rs` does not move.** It reads `changeset.yaml` through
+`read_changeset`, which stays with the workflow layer. `tddy_core::session_actions` is therefore a
+facade that also defines something: `pub use tddy_session_store::session_actions::*;` plus
+`mod session_dir;` and its three re-exports (`list_actions_in_session_dir`,
+`invoke_action_in_session_dir`, `ListActionsResponse`).
+
+`session_actions::runtime` goes from `pub(crate)` to `pub`, and so do `block_on` and
+`write_channel_logs` in it. `tddy-core`'s `session_action_jobs/runner.rs` stays and uses both, and
+it now reaches them across a crate boundary.
 
 ### FR2 — `tddy-session-catalog`
 
-`session_catalog/` moves to its own crate, depending on `tddy-session-store`. **`sqlx` and bundled
-SQLite leave `tddy-core`'s dependency tree**, and with it the 34 crates that never wanted it.
+`session_catalog/` moves to its own crate, depending on `tddy-session-store` and `tddy-task`.
+**`sqlx` and bundled SQLite leave `tddy-core`'s dependency tree**, and with it every dependent that
+never opens a catalog.
+
+**There is no facade at `tddy_core::session_catalog`** (developer decision at `/green`, deviating
+from the original FR2/AC5). A facade would make `tddy-core` depend on the catalog, so on `sqlx`,
+and every dependent would keep compiling SQLite, which defeats the node. The catalog's real
+consumers are edited instead to name `tddy_session_catalog` and depend on it directly:
+
+- `tddy-coder/src/run.rs` (`spawn_session_catalog_populate`) and
+  `tddy-coder/tests/session_catalog_populate.rs`
+- `tddy-bsp/src/{provider.rs, service.rs}`, plus doc links in `tddy-bsp/src/lib.rs`
+- a doc comment in `tddy-semantic-index/src/index_task.rs`, and the precedent path in two
+  `tddy-model-registry` comments
+
+The two `tddy-core` test binaries that exercised the catalog, `session_catalog_acceptance.rs` and
+`session_catalog_red.rs`, move to `tddy-session-catalog/tests/`, with their imports repointed.
 
 ### FR3 — no behaviour changes
 
@@ -59,12 +94,28 @@ as a move, a re-point or a facade line.
 | # | Criterion |
 |---|---|
 | AC1 | `tddy-core/Cargo.toml` names neither `sqlx` nor any SQLite feature |
-| AC2 | `cargo tree -p tddy-coder \| grep sqlx` is empty — the removal reaches a real consumer, not just the manifest |
-| AC3 | `tddy-session-store` depends on `tddy-workflow` and no other `tddy-*` crate |
+| AC2 | `cargo tree -p tddy-workflow-recipes -i sqlx` and `cargo tree -p tddy-tui -i sqlx` find no `sqlx`. The removal reaches real `tddy-core` consumers that never open a catalog, not just the manifest. *(Re-targeted from `tddy-coder`, which opens the catalog pool itself and so must compile `sqlx`.)* |
+| AC3 | `tddy-session-store`'s only `tddy-*` dependencies are `tddy-workflow`, `tddy-actions` and `tddy-task`. *(Widened from `tddy-workflow` alone: `session_actions/runtime.rs` needs the other two, and neither depends on `tddy-core`.)* |
 | AC4 | `tddy-session-catalog` depends on `tddy-session-store`, and nothing depends back on `tddy-core` |
-| AC5 | Every pre-existing `tddy_core::{atomic_file,error,output,session_actions,session_catalog}::…` path resolves — no consumer edited |
+| AC5 | Every pre-existing `tddy_core::{atomic_file,error,output,session_actions}::…` path resolves, and no consumer of those four is edited. *(`session_catalog` excluded: it has no facade, and its consumers are edited, as listed under FR2.)* |
 | AC6 | `restructure verify --against HEAD` reports no moved logic |
 | AC7 | `./test -p tddy-core -p tddy-session-store -p tddy-session-catalog` passes at baseline test counts |
+
+## Which crates still compile `sqlx`, and why
+
+Measured at `/green` with `cargo tree --workspace -i sqlx -e normal`. Of `tddy-core`'s 52 transitive
+dependents, **44 no longer compile `sqlx`**. The 8 that still do all reach it through a crate that
+genuinely opens a database:
+
+| Crate | Path to `sqlx` |
+|---|---|
+| `tddy-bsp` | direct: `tddy-session-catalog` (the `BUILD.yaml` provider, `bsp.BspService`) |
+| `tddy-coder` | direct: `tddy-session-catalog` (worktree-open populate), and via `tddy-bsp` |
+| `tddy-tools` | via `tddy-bsp` |
+| `tddy-model-registry` | direct: its own `sqlx` store, and via `tddy-coder` |
+| `tddy-session-lifecycle` | via `tddy-coder`/`tddy-bsp`, and via `tddy-model-registry` |
+| `tddy-daemon` | via `tddy-coder`/`tddy-bsp`, and via `tddy-model-registry` |
+| `tddy-demo`, `tddy-desktop` | via `tddy-coder` / `tddy-daemon` |
 
 ## Out of scope
 

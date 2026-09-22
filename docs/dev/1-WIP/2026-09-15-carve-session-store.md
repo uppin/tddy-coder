@@ -14,17 +14,26 @@ PRD: [`2026-09-15-carve-session-store-prd.md`](./2026-09-15-carve-session-store-
 
 ## Affected Packages
 
-- **`tddy-session-store`** (new): `atomic_file`, `error`, `output`, `session_actions`.
-- **`tddy-session-catalog`** (new): the SQLite session catalog, and `sqlx` with it.
+- **`tddy-session-store`** (new): [README.md](../../../packages/tddy-session-store/README.md) —
+  `atomic_file`, `error`, `output`, `session_actions` (all but `session_dir.rs`).
+- **`tddy-session-catalog`** (new): [README.md](../../../packages/tddy-session-catalog/README.md) —
+  the SQLite session catalog, and `sqlx` with it.
 - **`tddy-core`**: [README.md](../../../packages/tddy-core/README.md) — loses the storage layer and
-  the `sqlx` dependency; keeps facades at every old path.
+  the `sqlx` dependency; keeps facades at the four storage paths; keeps
+  `session_actions/session_dir.rs`; has **no** `session_catalog` facade.
+- **Catalog consumers**, repointed to `tddy_session_catalog`: `tddy-coder` (`src/run.rs`,
+  `tests/session_catalog_populate.rs`, `Cargo.toml`), `tddy-bsp` (`src/{lib,provider,service}.rs`,
+  `Cargo.toml`). Comment-only: `tddy-semantic-index/src/index_task.rs`,
+  `tddy-model-registry/{src/store.rs, tests/model_registry_store_unit.rs}`.
 
 ## Responsibility
 
 - Create `tddy-session-store` and move the four storage modules into it, leaf-first.
 - Create `tddy-session-catalog` and move `session_catalog/` into it.
 - Remove `sqlx` from `tddy-core`'s manifest, and prove the removal reaches a real consumer.
-- Leave a facade at every moved path so no consumer is edited.
+- Leave a facade at every moved storage path so no consumer of those is edited.
+- Leave **no** facade for the catalog; repoint its consumers instead (developer decision at
+  `/green` — a facade would make `tddy-core` depend on `sqlx` again).
 
 ## Boundaries
 
@@ -32,7 +41,8 @@ PRD: [`2026-09-15-carve-session-store-prd.md`](./2026-09-15-carve-session-store-
 - Does **not** remove `jsonschema` from `tddy-core`: `session_action_pipeline.rs` stays and still
   names it. Only `session_actions/validate.rs` leaves.
 - Does **not** change the catalog's schema, queries or migration behaviour.
-- Does **not** edit any consumer crate.
+- Does **not** edit any consumer crate **except the catalog's** (`tddy-coder`, `tddy-bsp`, plus
+  comment-only touches listed under Affected Packages).
 - Does **not** rely on `#carve` 3/9's cluster support — see `## Dependencies`.
 
 ## Dependencies
@@ -57,8 +67,14 @@ Published first:
 pinning the manifest shape both new crates must have. The skeletons themselves are Phase A
 implementation, not surface.
 
-AC2's `cargo tree -p tddy-coder | grep sqlx` stays a `/green` verification rather than a test: it
-shells out to cargo against the whole workspace, which is a CI-shaped check, not a unit one.
+AC2's `cargo tree` stays a `/green` verification rather than a test: it shells out to cargo against
+the whole workspace, which is a CI-shaped check, not a unit one. It is re-targeted from `tddy-coder`
+(which opens the catalog pool, so must compile `sqlx`) to `tddy-workflow-recipes` and `tddy-tui`.
+
+AC3's test (`the_storage_crate_depends_only_on_the_vocabulary`) was widened at `/green`, with
+developer authorisation, to a named allowlist of `tddy-workflow`, `tddy-actions` and `tddy-task`.
+It now matches exact dependency names. The old `starts_with("tddy-workflow")` would also have let
+`tddy-workflow-recipes` through, and that crate depends on `tddy-core`.
 
 This PR goes on to implement all of it. **It must not merge in that state.**
 
@@ -90,25 +106,46 @@ Real dependency edges, as refined by this node's discovery:
   `session_catalog/`. **All 35 dependents compile it.**
 - The storage group's production dependency shape:
   `atomic_file → ∅`; `error → backend::ClarificationQuestion`; `output → atomic_file, error`;
-  `session_actions → atomic_file, output`; `session_catalog → session_actions`.
+  `session_actions → atomic_file, output, tddy-actions, tddy-task`;
+  `session_actions/session_dir.rs → changeset`; `session_catalog → session_actions`.
+- **Two of those edges were missed at discovery** and found at `/green`:
+  - `session_actions/runtime.rs → tddy-actions, tddy-task` (since #244). Harmless: neither depends
+    on `tddy-core`. The storage crate takes both, and AC3 is widened to allow them.
+  - `session_actions/session_dir.rs → changeset` (`read_changeset`, since #474 / `#unbundle` 5/10).
+    This one reaches the workflow SCC, so `session_dir.rs` stays in `tddy-core`.
+- `session_action_jobs/runner.rs` (stays) uses `session_actions::runtime`'s `pub(crate)` items
+  `block_on` and `write_channel_logs`.
 - Reach inside `tddy-core`: 14 files name `crate::error`, 11 `crate::atomic_file`,
   9 `crate::session_actions`, 4 `crate::output`.
 
 ### State B
 
-- `tddy-session-store` holds the four storage modules, depending only on `tddy-workflow`.
-- `tddy-session-catalog` holds the catalog and `sqlx`.
-- `tddy-core` names neither `sqlx` nor SQLite, and `cargo tree -p tddy-coder` proves it.
+- `tddy-session-store` holds the four storage modules, minus `session_dir.rs`. Its only `tddy-*`
+  dependencies are `tddy-workflow`, `tddy-actions` and `tddy-task`. `runtime` and its `block_on`
+  and `write_channel_logs` are `pub`, since `runner.rs` now reaches them across a crate boundary.
+- `tddy_core::session_actions` is `pub use tddy_session_store::session_actions::*;` plus
+  `mod session_dir;` and its three re-exports.
+- `tddy-session-catalog` holds the catalog and `sqlx`. `tddy_core::session_catalog` no longer
+  exists, and its consumers name `tddy_session_catalog`.
+- `tddy-core` names neither `sqlx` nor SQLite. `cargo tree -p tddy-workflow-recipes -i sqlx` and
+  `-p tddy-tui -i sqlx` prove it. `tddy-coder` cannot: it opens the catalog pool itself. 44 of
+  `tddy-core`'s 52 transitive dependents no longer compile `sqlx`. The 8 that do are listed in the
+  PRD, with the reason for each.
 
 ## Implementation phases
 
 | Phase | Kind | Work |
 |---|---|---|
 | **A** | manual | Both crate skeletons — `Cargo.toml`, `lib.rs`, workspace `members`. **No `create_file` operation exists**, by design |
-| **B** | mechanical | `move_module_to_crate` → `tddy-session-store`, **leaf-first**: `atomic_file`, `error`, `output`, then the nested `session_actions/`. `reexport: "glob"` on each |
-| **C** | mechanical | `move_module_to_crate` on the nested `session_catalog/` → `tddy-session-catalog`. Separate plan while `.restructure/` is repo-scoped |
-| **D** | manual | Manifest surgery: drop `sqlx` from `tddy-core`, add the two new dependency edges, keep `jsonschema` (still needed by `session_action_pipeline.rs`) |
-| **E** | manual | `README.md` × 3 |
+| **B** | manual (`git mv`) | → `tddy-session-store`: `atomic_file`, `error`, `output`, then `session_actions/` without `session_dir.rs`. Glob facades at each old path |
+| **C** | manual (`git mv`) | `session_catalog/` → `tddy-session-catalog` as the crate root (`mod.rs` → `lib.rs`), plus its two `tddy-core` test binaries. No facade |
+| **D** | manual | Manifest surgery: drop `sqlx` from `tddy-core`, add the new dependency edges (`tddy-core → store`; `tddy-coder`, `tddy-bsp → catalog`), keep `jsonschema` (still needed by `session_action_pipeline.rs`) |
+| **E** | manual | Repoint the catalog's consumers to `tddy_session_catalog` |
+| **F** | manual | `README.md` × 3 |
+
+Phases B and C were done by hand, as on earlier `#carve` nodes: `move_module_to_crate` is
+effectively unusable for facade-shaped moves. Identity was proven with `diff` against `HEAD`, and
+every moved body is byte-identical except for the necessary lines, which are listed in the PR.
 
 Phase A is manual-first here rather than mechanical-first, because both destinations are **new
 crates** and `move_module_to_crate` needs somewhere to move to.
@@ -124,7 +161,18 @@ crates** and `move_module_to_crate` needs somewhere to move to.
     exists); **1 passing**: `the_god_crate_keeps_the_dependency_that_does_not_leave` guards
     `jsonschema` **staying**, since `session_action_pipeline.rs` remains and still names it.
 - [x] Failing unit/integration tests — the same suite; every claim here is about manifests and crate boundaries
-- [ ] Implement production code making tests pass (`/green`)
+- [x] Implement production code making tests pass (`/green`)
+  - **Premises corrected at `/green`:**
+    1. **The storage group was not a closed DAG.** Discovery missed
+       `session_actions/runtime.rs → tddy-actions, tddy-task` (#244) and
+       `session_actions/session_dir.rs → changeset` (#474). The first is harmless and AC3 is
+       widened for it. The second reaches the workflow SCC, so `session_dir.rs` stays in
+       `tddy-core` behind the `session_actions` facade.
+    2. **A `session_catalog` facade would defeat the node.** It would make `tddy-core` depend on the
+       catalog, and so on `sqlx`. Developer decision: no facade. The catalog's consumers are edited,
+       and AC5 excludes `session_catalog`.
+    3. **AC2 could not target `tddy-coder`.** It opens the catalog pool itself, so it must compile
+       `sqlx`. Re-targeted to `tddy-workflow-recipes` and `tddy-tui`, both `sqlx`-free.
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — correct the title, ready for review
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
@@ -132,11 +180,12 @@ crates** and `move_module_to_crate` needs somewhere to move to.
 ## Verification
 
 ```bash
-./test -p tddy-core -p tddy-session-store -p tddy-session-catalog
-cargo clippy -p tddy-core -p tddy-session-store -p tddy-session-catalog -- -D warnings
-cargo tree -p tddy-coder | grep sqlx     # must be EMPTY — this is AC2
+./test -p tddy-core -p tddy-session-store -p tddy-session-catalog -p tddy-bsp --no-fail-fast
+cargo clippy -p tddy-core -p tddy-session-store -p tddy-session-catalog -p tddy-bsp -p tddy-coder --all-targets -- -D warnings
+cargo tree -p tddy-workflow-recipes -i sqlx   # must find no sqlx — this is AC2
+cargo tree -p tddy-tui -i sqlx                # likewise
 cargo fmt --all --check
-tddy-tools restructure verify --against HEAD
+tddy-tools restructure verify --against HEAD   # AC6
 ```
 
 `cargo tree` is the acceptance criterion that matters: a manifest with no `sqlx` line still pulls it

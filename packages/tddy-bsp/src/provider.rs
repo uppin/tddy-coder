@@ -1,4 +1,4 @@
-//! The enriched [`tddy_core::session_catalog::BuildCatalogProvider`] over `tddy-build` discovery.
+//! The enriched [`tddy_session_catalog::BuildCatalogProvider`] over `tddy-build` discovery.
 //!
 //! `tddy-core` owns the port and has no `tddy-build` dependency; the concrete provider lives here and
 //! projects each `BUILD.yaml` target into a rich catalog entry. Registered on worktree-open by the
@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use tddy_build::capabilities::BuildMode;
 use tddy_build::lower::lower_target;
-use tddy_core::session_catalog::{
+use tddy_session_catalog::{
     register_build_catalog_provider, BuildCatalogProvider, BuildTargetCatalogEntry,
     CatalogCapabilities,
 };

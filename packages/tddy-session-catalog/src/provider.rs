@@ -3,7 +3,7 @@
 //! `tddy-core` deliberately has **no** dependency on `tddy-build`. It defines the
 //! [`BuildCatalogProvider`] trait and a process-global registry; the binary that owns a session
 //! (`tddy-coder`) registers a concrete provider on top of `tddy-build`'s `discover_build_manifests`.
-//! Mirrors [`crate::toolcall::build`].
+//! Mirrors `tddy_core::toolcall::build`.
 
 use std::path::Path;
 use std::sync::{Arc, OnceLock};

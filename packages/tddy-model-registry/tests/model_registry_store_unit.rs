@@ -1,7 +1,7 @@
 //! The per-daemon model registry: its SQLite store, the capability-label derivation, and the
 //! projection of an assistant onto a `SpecializedAgentDef`.
 //!
-//! The store follows the `session_catalog` precedent (`tddy-core/src/session_catalog/store.rs`):
+//! The store follows the `session_catalog` precedent (`tddy-session-catalog/src/store.rs`):
 //! `sqlx` runtime query API, WAL journal, created on demand. These tests run against a real DB file
 //! in a tempdir — a fake would prove nothing about the schema.
 //!

@@ -27,6 +27,7 @@ uuid = { version = "1", features = ["v4", "v7"] }
 ctrlc = { version = "3", features = ["termination"] }
 crossterm = "0.29"
 tddy-core = { path = "../tddy-core" }
+tddy-session-catalog = { path = "../tddy-session-catalog" }
 tddy-acp = { path = "../tddy-acp" }
 tddy-bsp = { path = "../tddy-bsp" }
 tddy-build = { path = "../tddy-build" }

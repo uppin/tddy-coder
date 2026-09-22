@@ -37,6 +37,16 @@ the paths to name. The remaining `backend <-> workflow` edge is real and is why 
 its own crate — see
 [the todo](../../docs/dev/todo/2026-09-19-backend-cannot-be-extracted-while-workflow-recipe-is-not-a-leaf.md).
 
+The **session storage layer lives in [`tddy-session-store`](../tddy-session-store/README.md)**:
+`atomic_file`, `error`, `output` and `session_actions`. Each old path is a glob facade, so
+`tddy_core::error::WorkflowError` and the rest still resolve. `session_actions` is the one facade
+that also defines something: `list_actions_in_session_dir` and `invoke_action_in_session_dir` stay
+here, because they read the session's `changeset.yaml` through `read_changeset`.
+
+The **per-session SQLite catalog lives in [`tddy-session-catalog`](../tddy-session-catalog/README.md)**
+and has **no facade here**. This crate does not depend on `sqlx`. A facade would put SQLite back
+into every dependent's build, so the catalog's consumers name `tddy_session_catalog` directly.
+
 `Presenter` holds seven fields: five owned state groups (`WorkflowRun`, `PendingQuestions`,
 `ActivityRecorder`, `ViewChannels`, `BackendSelection`) plus `state` and `tddy_data_dir`.
 

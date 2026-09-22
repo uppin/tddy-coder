@@ -8,8 +8,8 @@ use std::fs;
 use std::time::Duration;
 
 use tddy_core::session_actions::DiscoveryQuery;
-use tddy_core::session_catalog::read::catalog_db_path;
-use tddy_core::session_catalog::{store, PopulateCatalogTask, SessionCatalog};
+use tddy_session_catalog::read::catalog_db_path;
+use tddy_session_catalog::{store, PopulateCatalogTask, SessionCatalog};
 use tddy_task::{TaskRegistry, TaskStatus};
 use tokio::time::timeout;
 
@@ -57,7 +57,7 @@ async fn populating_with_the_real_build_provider_unifies_manifests_and_build_yam
         session_dir: session_dir.clone(),
         repo_root: Some(repo_root.clone()),
         tddy_data_dir: data_dir.clone(),
-        build_provider: tddy_core::session_catalog::build_catalog_provider(),
+        build_provider: tddy_session_catalog::build_catalog_provider(),
     };
     let registry = TaskRegistry::new();
     let handle = registry
