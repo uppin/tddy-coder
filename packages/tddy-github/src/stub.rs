@@ -6,11 +6,28 @@ use uuid::Uuid;
 
 use crate::provider::{DeviceLoginPoll, DeviceLoginStart, GitHubOAuthProvider, GitHubUser};
 
+/// How many polls of a stub device login answer `Pending` before it is approved — one, so a
+/// client sees the waiting state and then the approval, deterministically.
+pub const STUB_DEVICE_LOGIN_PENDING_POLLS: u32 = 1;
+
+/// The poll interval a stub device login hands out. Short, so a client driving it is not kept
+/// waiting, and non-zero, because zero is not an interval GitHub would ever send.
+pub const STUB_DEVICE_LOGIN_INTERVAL_SECONDS: u64 = 1;
+
 /// In-memory stub that mimics GitHub OAuth without HTTP calls.
 /// Pre-register code→user mappings via `register_code` before tests.
+///
+/// A device login completes as the user of the **first** code registered — the same user
+/// `exchange_code` returns for that code — after [`STUB_DEVICE_LOGIN_PENDING_POLLS`] pending polls.
 pub struct StubGitHubProvider {
     pending_states: Mutex<HashSet<String>>,
     code_to_user: Mutex<HashMap<String, GitHubUser>>,
+    /// The first code `register_code` was given, which a device login completes as.
+    first_registered_code: Mutex<Option<String>>,
+    /// Each started device code, with how many more polls it answers `Pending`.
+    device_logins: Mutex<HashMap<String, u32>>,
+    /// How many device logins have been started, so each gets its own codes.
+    device_logins_started: Mutex<u64>,
     authorize_base_url: String,
     client_id: String,
     /// When set, authorize_url returns a direct callback URL with the first registered code.
@@ -23,6 +40,9 @@ impl StubGitHubProvider {
         Self {
             pending_states: Mutex::new(HashSet::new()),
             code_to_user: Mutex::new(HashMap::new()),
+            first_registered_code: Mutex::new(None),
+            device_logins: Mutex::new(HashMap::new()),
+            device_logins_started: Mutex::new(0),
             authorize_base_url: authorize_base_url.trim_end_matches('/').to_string(),
             client_id: client_id.to_string(),
             callback_redirect_url: None,
@@ -35,6 +55,9 @@ impl StubGitHubProvider {
         Self {
             pending_states: Mutex::new(HashSet::new()),
             code_to_user: Mutex::new(HashMap::new()),
+            first_registered_code: Mutex::new(None),
+            device_logins: Mutex::new(HashMap::new()),
+            device_logins_started: Mutex::new(0),
             authorize_base_url: "https://github.com".to_string(),
             client_id: client_id.to_string(),
             callback_redirect_url: Some(callback_redirect_url.to_string()),
@@ -44,6 +67,10 @@ impl StubGitHubProvider {
     /// Register a test code→user mapping. When `exchange_code` is called with
     /// this code, it returns this user.
     pub fn register_code(&self, code: &str, user: GitHubUser) {
+        self.first_registered_code
+            .lock()
+            .unwrap()
+            .get_or_insert_with(|| code.to_string());
         self.code_to_user
             .lock()
             .unwrap()
@@ -95,15 +122,55 @@ impl GitHubOAuthProvider for StubGitHubProvider {
     }
 
     async fn start_device_login(&self) -> Result<DeviceLoginStart, String> {
-        // TODO(desktop-login): hand back a fixed device code and user code, and record how many
-        // polls must arrive before the stub reports approval.
-        todo!("StubGitHubProvider::start_device_login")
+        let number = {
+            let mut started = self.device_logins_started.lock().unwrap();
+            *started += 1;
+            *started
+        };
+        let device_code = format!("stub-device-code-{number}");
+        self.device_logins
+            .lock()
+            .unwrap()
+            .insert(device_code.clone(), STUB_DEVICE_LOGIN_PENDING_POLLS);
+        Ok(DeviceLoginStart {
+            device_code,
+            user_code: format!("STUB-{number:04}"),
+            verification_uri: format!("{}/login/device", self.authorize_base_url),
+            expires_in_seconds: 900,
+            interval_seconds: STUB_DEVICE_LOGIN_INTERVAL_SECONDS,
+        })
     }
 
-    async fn poll_device_login(&self, _device_code: &str) -> Result<DeviceLoginPoll, String> {
-        // TODO(desktop-login): count down the pending polls, then complete with the registered
-        // user — the same one `exchange_code` would return.
-        todo!("StubGitHubProvider::poll_device_login")
+    async fn poll_device_login(&self, device_code: &str) -> Result<DeviceLoginPoll, String> {
+        {
+            let mut logins = self.device_logins.lock().unwrap();
+            let pending = logins
+                .get_mut(device_code)
+                .ok_or_else(|| format!("unknown device code: {device_code}"))?;
+            if *pending > 0 {
+                *pending -= 1;
+                return Ok(DeviceLoginPoll::Pending);
+            }
+            // Approved: the code is spent, exactly as an OAuth state is.
+            logins.remove(device_code);
+        }
+        let code = self
+            .first_registered_code
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| "no user is registered to approve a device login".to_string())?;
+        let user = self
+            .code_to_user
+            .lock()
+            .unwrap()
+            .get(&code)
+            .cloned()
+            .ok_or_else(|| format!("unknown authorization code: {code}"))?;
+        Ok(DeviceLoginPoll::Complete {
+            access_token: format!("stub-access-token-{}", Uuid::new_v4()),
+            user,
+        })
     }
 
     fn issues_usable_access_token(&self) -> bool {

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -10,13 +10,19 @@ use crate::provider::{DeviceLoginPoll, DeviceLoginStart, GitHubOAuthProvider, Gi
 /// Real GitHub OAuth provider that calls GitHub's API endpoints.
 pub struct RealGitHubProvider {
     client_id: String,
-    client_secret: String,
+    /// `None` for a **public client** (RFC 6749 §2.1): one that cannot keep a secret — a desktop
+    /// application anyone can download — and so signs in by the device flow alone. The redirect
+    /// flow's code exchange posts this secret, so without one it refuses rather than trying.
+    client_secret: Option<String>,
     redirect_uri: String,
     /// Where the OAuth endpoints live — `https://github.com` in production.
     oauth_base_url: String,
     /// Where the REST API lives — `https://api.github.com` in production.
     api_base_url: String,
     pending_states: Mutex<HashSet<String>>,
+    /// The poll interval GitHub last set for each device code this provider started, so a
+    /// `slow_down` that names no interval of its own can still be widened from the right base.
+    device_poll_intervals: Mutex<HashMap<String, u64>>,
     http_client: reqwest::Client,
 }
 
@@ -26,9 +32,43 @@ pub const GITHUB_OAUTH_BASE_URL: &str = "https://github.com";
 /// GitHub's own REST host. The default for [`RealGitHubProvider::new`].
 pub const GITHUB_API_BASE_URL: &str = "https://api.github.com";
 
+/// The scopes every sign-in asks for, whichever flow carries it. `read:user` identifies the
+/// operator; `repo` is what lets the granted token read (and later repoint/merge) pull requests on a
+/// private repository — `read:user` alone cannot.
+const SCOPES: &str = "read:user repo";
+
+/// The `grant_type` that turns a device-flow poll into a token request (RFC 8628 §3.4).
+const DEVICE_CODE_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:device_code";
+
+/// GitHub's documented default for the device flow's minimum poll interval, used as the base to
+/// widen from only when a `slow_down` arrives for a device code this provider did not start.
+const DEFAULT_DEVICE_POLL_INTERVAL_SECONDS: u64 = 5;
+
+/// How far GitHub's documentation says to widen the interval on a `slow_down` that names none.
+const SLOW_DOWN_WIDENING_SECONDS: u64 = 5;
+
 #[derive(Deserialize)]
 struct AccessTokenResponse {
     access_token: String,
+}
+
+#[derive(Deserialize)]
+struct DeviceCodeResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    interval: u64,
+}
+
+/// One answer to a device-flow poll. GitHub answers `200 OK` whether or not the code is approved
+/// yet, so which of these fields is set is the whole of the outcome.
+#[derive(Deserialize)]
+struct DevicePollResponse {
+    access_token: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+    interval: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -40,6 +80,8 @@ struct GitHubApiUser {
 }
 
 impl RealGitHubProvider {
+    /// A confidential client: signs in by the redirect flow (and by the device flow too, which
+    /// never sends the secret).
     pub fn new(client_id: &str, client_secret: &str, redirect_uri: &str) -> Self {
         Self::new_with_base_urls(
             client_id,
@@ -52,11 +94,10 @@ impl RealGitHubProvider {
 
     /// The same provider pointed at other hosts.
     ///
-    /// This node doubles the crate's network surface — two more endpoints, six more error returns
-    /// — and none of it is reachable by a test while the hosts are string literals inside the
-    /// request builders. A test serves both halves locally and passes their address here. It is a
-    /// constructor rather than a cfg-gated branch precisely because it must be ordinary production
-    /// code: GitHub Enterprise is the same substitution.
+    /// None of the provider's network code is reachable by a test while the hosts are string
+    /// literals inside the request builders. A test serves both halves locally and passes their
+    /// address here. It is a constructor rather than a cfg-gated branch precisely because it must
+    /// be ordinary production code: GitHub Enterprise is the same substitution.
     pub fn new_with_base_urls(
         client_id: &str,
         client_secret: &str,
@@ -64,15 +105,110 @@ impl RealGitHubProvider {
         oauth_base_url: &str,
         api_base_url: &str,
     ) -> Self {
+        Self::build(
+            client_id,
+            Some(client_secret),
+            redirect_uri,
+            oauth_base_url,
+            api_base_url,
+        )
+    }
+
+    /// A **public client** — a `client_id` and no secret, the shape a desktop application ships
+    /// in. It signs in by the device flow; its redirect-flow code exchange is refused, because
+    /// that exchange cannot be made without a secret.
+    pub fn new_public(client_id: &str, redirect_uri: &str) -> Self {
+        Self::new_public_with_base_urls(
+            client_id,
+            redirect_uri,
+            GITHUB_OAUTH_BASE_URL,
+            GITHUB_API_BASE_URL,
+        )
+    }
+
+    /// [`Self::new_public`] pointed at other hosts — see [`Self::new_with_base_urls`].
+    pub fn new_public_with_base_urls(
+        client_id: &str,
+        redirect_uri: &str,
+        oauth_base_url: &str,
+        api_base_url: &str,
+    ) -> Self {
+        Self::build(client_id, None, redirect_uri, oauth_base_url, api_base_url)
+    }
+
+    fn build(
+        client_id: &str,
+        client_secret: Option<&str>,
+        redirect_uri: &str,
+        oauth_base_url: &str,
+        api_base_url: &str,
+    ) -> Self {
         Self {
             client_id: client_id.to_string(),
-            client_secret: client_secret.to_string(),
+            client_secret: client_secret.map(str::to_string),
             redirect_uri: redirect_uri.to_string(),
             oauth_base_url: oauth_base_url.trim_end_matches('/').to_string(),
             api_base_url: api_base_url.trim_end_matches('/').to_string(),
             pending_states: Mutex::new(HashSet::new()),
+            device_poll_intervals: Mutex::new(HashMap::new()),
             http_client: reqwest::Client::new(),
         }
+    }
+
+    /// The GitHub user `access_token` belongs to. Shared by both flows: whichever way the token
+    /// was granted, the operator is whoever GitHub says owns it.
+    async fn fetch_user(&self, access_token: &str) -> Result<GitHubUser, String> {
+        let user_resp = self
+            .http_client
+            .get(format!("{}/user", self.api_base_url))
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("User-Agent", "tddy-github")
+            .send()
+            .await
+            .map_err(|e| format!("user info request failed: {}", e))?;
+
+        if !user_resp.status().is_success() {
+            return Err(format!(
+                "user info request failed with status: {}",
+                user_resp.status()
+            ));
+        }
+
+        let api_user: GitHubApiUser = user_resp
+            .json()
+            .await
+            .map_err(|e| format!("failed to parse user response: {}", e))?;
+
+        Ok(GitHubUser {
+            id: api_user.id,
+            login: api_user.login,
+            avatar_url: api_user.avatar_url,
+            name: api_user.name.unwrap_or_default(),
+        })
+    }
+
+    /// The interval to obey after a `slow_down`: GitHub's own when it names one, otherwise the
+    /// last one set for this device code widened by the documented step. Remembered either way, so
+    /// a second `slow_down` widens from the first.
+    fn widened_interval(&self, device_code: &str, from_github: Option<u64>) -> u64 {
+        let mut intervals = self.device_poll_intervals.lock().unwrap();
+        let widened = from_github.unwrap_or_else(|| {
+            intervals
+                .get(device_code)
+                .copied()
+                .unwrap_or(DEFAULT_DEVICE_POLL_INTERVAL_SECONDS)
+                + SLOW_DOWN_WIDENING_SECONDS
+        });
+        intervals.insert(device_code.to_string(), widened);
+        widened
+    }
+
+    /// Forget a device code whose attempt has ended, whichever way it ended.
+    fn forget_device_code(&self, device_code: &str) {
+        self.device_poll_intervals
+            .lock()
+            .unwrap()
+            .remove(device_code);
     }
 }
 
@@ -96,6 +232,13 @@ impl GitHubOAuthProvider for RealGitHubProvider {
         if !state_valid {
             return Err("invalid or expired state parameter".to_string());
         }
+        let Some(client_secret) = self.client_secret.as_deref() else {
+            return Err(
+                "this daemon holds a public client id and no client secret, so it cannot exchange \
+                 an authorization code; sign in with the device flow"
+                    .to_string(),
+            );
+        };
 
         // Exchange code for access token
         let token_resp = self
@@ -104,7 +247,7 @@ impl GitHubOAuthProvider for RealGitHubProvider {
             .header("Accept", "application/json")
             .json(&serde_json::json!({
                 "client_id": self.client_id,
-                "client_secret": self.client_secret,
+                "client_secret": client_secret,
                 "code": code,
             }))
             .send()
@@ -123,52 +266,109 @@ impl GitHubOAuthProvider for RealGitHubProvider {
             .await
             .map_err(|e| format!("failed to parse token response: {}", e))?;
 
-        // Fetch user info
-        let user_resp = self
-            .http_client
-            .get(format!("{}/user", self.api_base_url))
-            .header(
-                "Authorization",
-                format!("Bearer {}", token_data.access_token),
-            )
-            .header("User-Agent", "tddy-github")
-            .send()
-            .await
-            .map_err(|e| format!("user info request failed: {}", e))?;
-
-        if !user_resp.status().is_success() {
-            return Err(format!(
-                "user info request failed with status: {}",
-                user_resp.status()
-            ));
-        }
-
-        let api_user: GitHubApiUser = user_resp
-            .json()
-            .await
-            .map_err(|e| format!("failed to parse user response: {}", e))?;
-
-        let user = GitHubUser {
-            id: api_user.id,
-            login: api_user.login,
-            avatar_url: api_user.avatar_url,
-            name: api_user.name.unwrap_or_default(),
-        };
-
+        let user = self.fetch_user(&token_data.access_token).await?;
         Ok((token_data.access_token, user))
     }
 
     async fn start_device_login(&self) -> Result<DeviceLoginStart, String> {
-        // TODO(desktop-login): POST {oauth_base_url}/login/device/code with `client_id` and the
-        // `read:user repo` scope, and no client secret.
-        todo!("RealGitHubProvider::start_device_login")
+        // No client secret, on purpose and whichever kind of client this is: the device flow
+        // authenticates with the public client id alone.
+        let resp = self
+            .http_client
+            .post(format!("{}/login/device/code", self.oauth_base_url))
+            .header("Accept", "application/json")
+            .json(&serde_json::json!({
+                "client_id": self.client_id,
+                "scope": SCOPES,
+            }))
+            .send()
+            .await
+            .map_err(|e| format!("device code request failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!(
+                "device code request failed with status: {}",
+                resp.status()
+            ));
+        }
+
+        let started: DeviceCodeResponse = resp
+            .json()
+            .await
+            .map_err(|e| format!("failed to parse device code response: {}", e))?;
+
+        self.device_poll_intervals
+            .lock()
+            .unwrap()
+            .insert(started.device_code.clone(), started.interval);
+        Ok(DeviceLoginStart {
+            device_code: started.device_code,
+            user_code: started.user_code,
+            verification_uri: started.verification_uri,
+            expires_in_seconds: started.expires_in,
+            interval_seconds: started.interval,
+        })
     }
 
-    async fn poll_device_login(&self, _device_code: &str) -> Result<DeviceLoginPoll, String> {
-        // TODO(desktop-login): POST {oauth_base_url}/login/oauth/access_token with
-        // `grant_type=urn:ietf:params:oauth:grant-type:device_code`, then map GitHub's `error`
-        // field onto the poll states and fetch the user from {api_base_url}/user on success.
-        todo!("RealGitHubProvider::poll_device_login")
+    async fn poll_device_login(&self, device_code: &str) -> Result<DeviceLoginPoll, String> {
+        let resp = self
+            .http_client
+            .post(format!("{}/login/oauth/access_token", self.oauth_base_url))
+            .header("Accept", "application/json")
+            .json(&serde_json::json!({
+                "client_id": self.client_id,
+                "device_code": device_code,
+                "grant_type": DEVICE_CODE_GRANT_TYPE,
+            }))
+            .send()
+            .await
+            .map_err(|e| format!("device login poll failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!(
+                "device login poll failed with status: {}",
+                resp.status()
+            ));
+        }
+
+        let polled: DevicePollResponse = resp
+            .json()
+            .await
+            .map_err(|e| format!("failed to parse device login poll response: {}", e))?;
+
+        match (polled.access_token, polled.error.as_deref()) {
+            (Some(access_token), None) => {
+                self.forget_device_code(device_code);
+                let user = self.fetch_user(&access_token).await?;
+                Ok(DeviceLoginPoll::Complete { access_token, user })
+            }
+            (None, Some("authorization_pending")) => Ok(DeviceLoginPoll::Pending),
+            (None, Some("slow_down")) => Ok(DeviceLoginPoll::SlowDown {
+                interval_seconds: self.widened_interval(device_code, polled.interval),
+            }),
+            (None, Some("expired_token")) => {
+                self.forget_device_code(device_code);
+                Ok(DeviceLoginPoll::Expired)
+            }
+            (None, Some("access_denied")) => {
+                self.forget_device_code(device_code);
+                Ok(DeviceLoginPoll::Denied)
+            }
+            (_, Some(error)) => {
+                self.forget_device_code(device_code);
+                Err(format!(
+                    "device login failed: {error}{}",
+                    polled
+                        .error_description
+                        .map(|description| format!(": {description}"))
+                        .unwrap_or_default()
+                ))
+            }
+            (None, None) => Err(
+                "failed to parse device login poll response: neither an access token nor an error"
+                    .to_string(),
+            ),
+        }
     }
 
     fn issues_usable_access_token(&self) -> bool {
