@@ -47,6 +47,23 @@ export interface ClientConfig {
    * exactly what the disabled state exists to prevent.
    */
   sandboxedCodebase?: { confinesFilesystem: boolean };
+  /**
+   * Which GitHub sign-in flow the serving daemon's `auth.AuthService` serves: `"redirect"`
+   * (`GetAuthUrl` / `ExchangeCode`) or `"device"` (`StartDeviceLogin` / `PollDeviceLogin`).
+   *
+   * Absent is a daemon that predates the device flow, which serves only the redirect flow — so the
+   * sign-in screen reads absence as the redirect flow, and never probes one flow to discover the
+   * other. A value this page does not recognise is read as absent.
+   */
+  authFlow?: AuthFlow;
+}
+
+/** The GitHub sign-in flows a daemon can declare. */
+export type AuthFlow = "redirect" | "device";
+
+/** The flow a payload declared, or `undefined` when it declared none this page recognises. */
+function authFlowOf(declared: string | undefined): AuthFlow | undefined {
+  return declared === "redirect" || declared === "device" ? declared : undefined;
 }
 
 /** The JSON `GET /api/config` serves — snake_case, as `tddy_coder::web_server::ClientConfig`. */
@@ -60,6 +77,7 @@ interface ClientConfigJson {
   allowed_agents?: ClientAllowedAgent[];
   debug?: string;
   sandboxed_codebase?: { confines_filesystem?: boolean };
+  auth_flow?: string;
 }
 
 /**
@@ -92,6 +110,7 @@ function fromJson(json: ClientConfigJson): ClientConfig {
       json.sandboxed_codebase !== undefined && json.sandboxed_codebase !== null,
       json.sandboxed_codebase?.confines_filesystem,
     ),
+    authFlow: authFlowOf(json.auth_flow),
   };
 }
 
@@ -132,5 +151,6 @@ export async function loadClientConfig(
       response.sandboxedCodebase !== undefined,
       response.sandboxedCodebase?.confinesFilesystem,
     ),
+    authFlow: authFlowOf(response.authFlow),
   };
 }

@@ -12,7 +12,7 @@
 //! the application, and the session that comes out the far end is the same session the redirect
 //! flow produces — same access token, same refresh token, same claims.
 
-use tddy_daemon_auth::auth::build_auth_entries;
+use tddy_daemon_auth::auth::{build_auth_entries, github_auth_flow, GitHubAuthFlow};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{MultiRpcService, RequestMetadata, RpcBridge, RpcMessage, ServiceEntry, Status};
 use tddy_service::proto::auth::{
@@ -43,6 +43,30 @@ async fn a_daemon_holding_only_a_public_client_id_registers_its_auth_service() {
         registered.contains(&"auth.AuthService"),
         "a public client id is enough to sign in; it registered {registered:?}"
     );
+}
+
+#[test]
+fn a_daemon_holding_only_a_public_client_id_declares_the_device_flow() {
+    // Given a desktop deployment configured with a client id and no secret
+    let (config, _dir) = a_daemon_with_a_client_id_and_no_secret();
+
+    // When the flow it serves is declared to its dashboard
+    let declared = github_auth_flow(&config);
+
+    // Then it is the device flow, the only one the provider it registers can complete
+    assert_eq!(declared, Some(GitHubAuthFlow::Device));
+}
+
+#[test]
+fn a_stub_daemon_declares_the_redirect_flow_its_dashboards_sign_in_with() {
+    // Given a stub daemon, whose provider can complete either flow
+    let (config, _dir) = a_stub_daemon();
+
+    // When the flow it serves is declared to its dashboard
+    let declared = github_auth_flow(&config);
+
+    // Then it is the redirect flow every dashboard driving a stub daemon signs in with
+    assert_eq!(declared.map(GitHubAuthFlow::as_str), Some("redirect"));
 }
 
 #[tokio::test]

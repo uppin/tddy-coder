@@ -12,7 +12,8 @@ use tddy_daemon::server::serving_sandboxed_codebase_support;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::daemon_config::{
     ClientAllowedAgent, DaemonConfigService as DaemonConfigServiceTrait, DaemonSettings,
-    GetClientConfigRequest, GetConfigRequest, ListenSettings, LiveKitSettings, UpdateConfigRequest,
+    GetClientConfigRequest, GetClientConfigResponse, GetConfigRequest, ListenSettings,
+    LiveKitSettings, UpdateConfigRequest,
 };
 use tokio::sync::Mutex;
 
@@ -56,9 +57,18 @@ struct ADaemonConfigService {
 }
 
 fn a_daemon_config_service() -> ADaemonConfigService {
+    a_daemon_config_service_started_with(&a_daemon_config_file())
+}
+
+/// The fixture service, started with `github` appended to the fixture configuration.
+fn a_daemon_config_service_with_github(github: &str) -> ADaemonConfigService {
+    a_daemon_config_service_started_with(&format!("{}{github}", a_daemon_config_file()))
+}
+
+fn a_daemon_config_service_started_with(config_file: &str) -> ADaemonConfigService {
     let dir = tempfile::tempdir().expect("no temp dir");
     let config_path = dir.path().join("daemon.yaml");
-    std::fs::write(&config_path, a_daemon_config_file()).expect("the config file was not written");
+    std::fs::write(&config_path, config_file).expect("the config file was not written");
     let config = DaemonConfig::load(&config_path).expect("the config fixture did not load");
     let common_room = Arc::new(RecordingCommonRoom::default());
 
@@ -409,6 +419,57 @@ async fn returns_the_jail_capability_the_web_bundle_otherwise_reads_from_api_con
             .map(|support| support.confines_filesystem),
         serving_sandboxed_codebase_support().map(|support| support.confines_filesystem)
     );
+}
+
+/// `GetClientConfig` as a page that has not signed in yet asks for it.
+async fn the_client_config_of(daemon: &ADaemonConfigService) -> GetClientConfigResponse {
+    daemon
+        .service
+        .get_client_config(Request::new(GetClientConfigRequest {
+            session_token: String::new(),
+        }))
+        .await
+        .expect("the client config was not served")
+        .into_inner()
+}
+
+#[tokio::test]
+async fn declares_the_device_flow_for_a_daemon_holding_only_a_client_id() {
+    // Given a desktop daemon holding a public client id and no secret
+    let daemon =
+        a_daemon_config_service_with_github("github:\n  client_id: \"Iv1.0123456789abcdef\"\n");
+
+    // When the page it hosts asks for the configuration it starts up with
+    let response = the_client_config_of(&daemon).await;
+
+    // Then it is told to sign in by the device flow, the same value `/api/config` carries
+    assert_eq!(response.auth_flow.as_deref(), Some("device"));
+}
+
+#[tokio::test]
+async fn declares_the_redirect_flow_for_a_daemon_holding_a_client_secret() {
+    // Given a daemon holding a client id and its secret — a confidential client
+    let daemon = a_daemon_config_service_with_github(
+        "github:\n  client_id: \"Iv1.0123456789abcdef\"\n  client_secret: \"the-secret\"\n",
+    );
+
+    // When the page it hosts asks for the configuration it starts up with
+    let response = the_client_config_of(&daemon).await;
+
+    // Then it is told to sign in by the redirect flow
+    assert_eq!(response.auth_flow.as_deref(), Some("redirect"));
+}
+
+#[tokio::test]
+async fn declares_no_sign_in_flow_for_a_daemon_without_github() {
+    // Given a daemon with no `github:` block, so no auth service to sign in to
+    let daemon = a_daemon_config_service();
+
+    // When the page it hosts asks for the configuration it starts up with
+    let response = the_client_config_of(&daemon).await;
+
+    // Then no flow is declared, as a daemon predating the device flow declares none
+    assert_eq!(response.auth_flow, None);
 }
 
 #[tokio::test]

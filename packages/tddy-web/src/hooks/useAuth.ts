@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { AuthService } from "../gen/auth_pb";
-import type { GitHubUser } from "../gen/auth_pb";
+import { AuthService, DeviceLoginState } from "../gen/auth_pb";
+import type { GitHubUser, PollDeviceLoginResponse } from "../gen/auth_pb";
 import { useHttpClient, useAuthTokenGate } from "../rpc/transportProvider";
 import { createSessionTokenStore, type TokenStorage } from "../rpc/sessionTokenStore";
 
@@ -26,6 +26,24 @@ export interface AuthState {
   /** True while the session store is minting a fresh access token from the refresh token. */
   isRefreshing: boolean;
 }
+
+/**
+ * Where a device-flow sign-in (`StartDeviceLogin` / `PollDeviceLogin`) stands.
+ *
+ * `awaiting-approval` carries what the operator needs to approve the attempt at GitHub. `denied`
+ * and `expired` are distinct because the operator's next move differs — a refusal was theirs, an
+ * expiry was the clock's — though both end the attempt and are left by starting a fresh one.
+ * `failed` is an attempt that ended on an error the daemon returned rather than on GitHub's answer.
+ */
+export type DeviceLogin =
+  | { phase: "idle" }
+  | { phase: "starting" }
+  | { phase: "awaiting-approval"; userCode: string; verificationUri: string }
+  | { phase: "denied" }
+  | { phase: "expired" }
+  | { phase: "failed"; error: string };
+
+const DEVICE_LOGIN_IDLE: DeviceLogin = { phase: "idle" };
 
 const LOGGED_OUT: AuthState = {
   user: null,
@@ -188,6 +206,23 @@ export function useAuth() {
     };
   }, [store]);
 
+  // Take up a session the daemon minted — by `ExchangeCode` or by an approved device login, which
+  // return the same triple. Both flows store it here, so both leave the operator signed in alike.
+  const adoptSession = useCallback(
+    (sessionToken: string, refreshToken: string, user: GitHubUser | undefined) => {
+      storage.set(sessionToken, refreshToken);
+      setState({
+        user: user ?? null,
+        isAuthenticated: true,
+        isLoading: false,
+        error: null,
+        sessionToken,
+        isRefreshing: false,
+      });
+    },
+    [storage],
+  );
+
   const login = useCallback(
     async (returnTo?: string) => {
       try {
@@ -219,15 +254,7 @@ export function useAuth() {
       sessionStorage.removeItem(OAUTH_STATE_KEY);
       try {
         const res = await client.exchangeCode({ code, state });
-        storage.set(res.sessionToken, res.refreshToken);
-        setState({
-          user: res.user ?? null,
-          isAuthenticated: true,
-          isLoading: false,
-          error: null,
-          sessionToken: res.sessionToken,
-          isRefreshing: false,
-        });
+        adoptSession(res.sessionToken, res.refreshToken, res.user);
       } catch (e) {
         storage.clear();
         setState({
@@ -236,8 +263,98 @@ export function useAuth() {
         });
       }
     },
-    [client, storage],
+    [client, storage, adoptSession],
   );
+
+  // The device-flow attempt in progress. Only the latest attempt may act on an answer: starting
+  // again (or unmounting) bumps `generation`, so a poll still in flight for the old device code
+  // lands on a dead attempt and schedules nothing.
+  const [deviceLogin, setDeviceLogin] = useState<DeviceLogin>(DEVICE_LOGIN_IDLE);
+  const deviceAttemptRef = useRef<{ generation: number; timer: ReturnType<typeof setTimeout> | null }>({
+    generation: 0,
+    timer: null,
+  });
+
+  const endDeviceAttempt = useCallback(() => {
+    const attempt = deviceAttemptRef.current;
+    attempt.generation += 1;
+    if (attempt.timer !== null) clearTimeout(attempt.timer);
+    attempt.timer = null;
+  }, []);
+
+  useEffect(() => endDeviceAttempt, [endDeviceAttempt]);
+
+  const startDeviceLogin = useCallback(async () => {
+    endDeviceAttempt();
+    const attempt = deviceAttemptRef.current;
+    const generation = attempt.generation;
+    const isCurrent = () => attempt.generation === generation;
+    const fail = (e: unknown, defaultMessage: string) => {
+      if (!isCurrent()) return;
+      setDeviceLogin({ phase: "failed", error: e instanceof Error ? e.message : defaultMessage });
+    };
+
+    setDeviceLogin({ phase: "starting" });
+    let grant;
+    try {
+      grant = await client.startDeviceLogin({});
+    } catch (e) {
+      fail(e, "Failed to start device sign-in");
+      return;
+    }
+    if (!isCurrent()) return;
+
+    const { deviceCode } = grant;
+    // GitHub's floor between polls. A slow-down answer raises it for every later poll.
+    let intervalMs = Number(grant.intervalSeconds) * 1000;
+
+    const answered = (res: PollDeviceLoginResponse) => {
+      switch (res.state) {
+        case DeviceLoginState.PENDING:
+          scheduleNextPoll();
+          return;
+        case DeviceLoginState.SLOW_DOWN:
+          intervalMs = Number(res.intervalSeconds) * 1000;
+          scheduleNextPoll();
+          return;
+        case DeviceLoginState.COMPLETE:
+          setDeviceLogin(DEVICE_LOGIN_IDLE);
+          adoptSession(res.sessionToken, res.refreshToken, res.user);
+          return;
+        case DeviceLoginState.DENIED:
+          setDeviceLogin({ phase: "denied" });
+          return;
+        case DeviceLoginState.EXPIRED:
+          setDeviceLogin({ phase: "expired" });
+          return;
+        default:
+          setDeviceLogin({ phase: "failed", error: `Unrecognised device sign-in state ${res.state}` });
+      }
+    };
+
+    const poll = async () => {
+      attempt.timer = null;
+      let res;
+      try {
+        res = await client.pollDeviceLogin({ deviceCode });
+      } catch (e) {
+        fail(e, "Device sign-in failed");
+        return;
+      }
+      if (isCurrent()) answered(res);
+    };
+
+    const scheduleNextPoll = () => {
+      attempt.timer = setTimeout(() => void poll(), intervalMs);
+    };
+
+    setDeviceLogin({
+      phase: "awaiting-approval",
+      userCode: grant.userCode,
+      verificationUri: grant.verificationUri,
+    });
+    scheduleNextPoll();
+  }, [client, adoptSession, endDeviceAttempt]);
 
   const logout = useCallback(async () => {
     const token = storage.getAccess();
@@ -252,5 +369,5 @@ export function useAuth() {
     setState(LOGGED_OUT);
   }, [client, storage]);
 
-  return { ...state, login, handleCallback, logout };
+  return { ...state, login, handleCallback, logout, deviceLogin, startDeviceLogin };
 }

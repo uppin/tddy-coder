@@ -227,6 +227,10 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
                         confines_filesystem: support.confines_filesystem,
                     },
                 ),
+            // The flow of the auth service this daemon registered, from the function that decided
+            // which one to register — the same one `/api/config` is built from.
+            auth_flow: tddy_daemon_auth::auth::github_auth_flow(&config)
+                .map(|flow| flow.as_str().to_string()),
         }))
     }
 }
