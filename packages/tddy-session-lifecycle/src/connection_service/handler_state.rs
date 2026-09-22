@@ -62,13 +62,11 @@ impl DaemonSessionHost {
         self.model_registry.clone()
     }
 
-    /// The store an operator's GitHub token is read from when a PR status is looked up on their
-    /// behalf, when one is wired.
+    /// The credential vaults an operator's GitHub token is read from when a PR status is looked up
+    /// on their behalf, when they are wired.
     #[must_use]
-    pub fn github_token_store(
-        &self,
-    ) -> Option<Arc<dyn tddy_github::token_store::GitHubTokenStore>> {
-        self.github_token_store.clone()
+    pub fn credential_vaults(&self) -> Option<Arc<tddy_daemon_auth::SessionVaults>> {
+        self.credential_vaults.clone()
     }
 
     /// The idle tracker this host bumps on every RPC, shared rather than copied, so a handler's

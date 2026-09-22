@@ -36,6 +36,12 @@ message ExchangeCodeResponse {
   GitHubUser user = 2;
   // Long-lived refresh token used only to mint fresh access tokens (never sent on normal RPCs).
   string refresh_token = 3;
+  // A wrap key for this session lineage's slot in the daemon's credential vault — not a stored
+  // credential. Alone it opens nothing: it is useful only together with the vault file, which never
+  // leaves the daemon's disk. Opaque; hold it beside the refresh token. Empty when the daemon keeps
+  // no vault for this login (a stub/demo login, or no `auth_storage`). The GitHub token itself is
+  // never carried on any response.
+  string vault_unlock_key = 4;
 }
 
 message GetAuthStatusRequest {
@@ -49,6 +55,10 @@ message GetAuthStatusResponse {
 message RefreshSessionRequest {
   // Long-lived refresh token presented to mint a fresh access token.
   string refresh_token = 1;
+  // The vault unlock key the last login or refresh returned, sent back so the daemon can reopen
+  // this user's credential vault after a restart. A wrap key, not a stored credential: alone it
+  // opens nothing. Presenting it rotates it — use the one in the response from now on.
+  string vault_unlock_key = 2;
 }
 message RefreshSessionResponse {
   // Freshly minted short-lived access token.
@@ -56,10 +66,18 @@ message RefreshSessionResponse {
   GitHubUser user = 2;
   // Freshly minted refresh token (sliding window) that replaces the presented one.
   string refresh_token = 3;
+  // The rotated vault unlock key that replaces the presented one; the presented one opens nothing
+  // any more. Empty when none was presented, or when the presented one no longer opens its slot —
+  // the session is still refreshed, but credential-backed reads stay unavailable until the next
+  // login. A wrap key, not a stored credential: alone it opens nothing.
+  string vault_unlock_key = 4;
 }
 
 message LogoutRequest {
   string session_token = 1;
+  // The vault unlock key this session lineage holds, so the daemon can remove its slot from the
+  // credential vault. A wrap key, not a stored credential. Empty removes nothing.
+  string vault_unlock_key = 2;
 }
 message LogoutResponse {}
 
@@ -99,10 +117,13 @@ message PollDeviceLoginResponse {
   DeviceLoginState state = 1;
   // Set only on SLOW_DOWN — the interval the client must adopt.
   uint64 interval_seconds = 2;
-  // All three set only on COMPLETE, and identical in meaning to `ExchangeCodeResponse`.
+  // All four set only on COMPLETE, and identical in meaning to `ExchangeCodeResponse`.
   string session_token = 3;
   GitHubUser user = 4;
   string refresh_token = 5;
+  // As `ExchangeCodeResponse.vault_unlock_key`: a wrap key for this lineage's vault slot, not a
+  // stored credential, and useless without the vault file.
+  string vault_unlock_key = 6;
 }
 
 // Mint a LiveKit room JWT for an already-authenticated caller.

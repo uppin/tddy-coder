@@ -8,6 +8,12 @@
  * the device wakes transparently refreshes instead of failing. When the refresh token itself is
  * rejected, both tokens are cleared and the caller is told the session has ended.
  *
+ * Beside the pair it keeps the **vault unlock key** the daemon handed this session lineage: a wrap
+ * key for the lineage's slot in the daemon's credential vault — not a stored credential, and
+ * useless without the vault file on the daemon's disk. Every refresh presents it, so a daemon that
+ * restarted can reopen the operator's stored credentials without a new login, and every refresh
+ * replaces it with the rotated one the daemon returns.
+ *
  * Storage, the auth client, and the clock are injected so the store is unit-testable without a DOM.
  */
 
@@ -18,7 +24,10 @@ import { AuthService } from "../gen/auth_pb";
 export interface TokenStorage {
   getAccess(): string | null;
   getRefresh(): string | null;
-  set(access: string, refresh: string): void;
+  /** The vault unlock key the last login or refresh returned; `null` when none is held. */
+  getVaultUnlockKey(): string | null;
+  /** Replace all three together — an empty `vaultUnlockKey` means the daemon handed none back. */
+  set(access: string, refresh: string, vaultUnlockKey: string): void;
   clear(): void;
 }
 
@@ -43,6 +52,13 @@ export interface SessionTokenStore {
    * possible — the server decides). `null` only when neither token is present.
    */
   ensureFreshAccessToken(): Promise<string | null>;
+  /**
+   * Refresh now, whether or not the access token is still fresh (single-flight like the above).
+   * A page load does this when it holds a vault unlock key, so a daemon that restarted since the
+   * last refresh reopens the operator's credentials straight away rather than when the access
+   * token next lapses.
+   */
+  refreshNow(): Promise<string>;
   /** True while a `RefreshSession` is in flight. */
   isRefreshing(): boolean;
 }
@@ -91,10 +107,13 @@ export function createSessionTokenStore(deps: SessionTokenStoreDeps): SessionTok
 
   async function refresh(): Promise<string> {
     const refreshToken = storage.getRefresh() ?? "";
+    const vaultUnlockKey = storage.getVaultUnlockKey() ?? "";
     onRefreshingChange?.(true);
     try {
-      const res = await authClient.refreshSession({ refreshToken });
-      storage.set(res.sessionToken, res.refreshToken);
+      const res = await authClient.refreshSession({ refreshToken, vaultUnlockKey });
+      // The presented unlock key opens nothing once the daemon has rotated it, so the returned one
+      // always replaces it — including an empty one, when the daemon could not reopen the vault.
+      storage.set(res.sessionToken, res.refreshToken, res.vaultUnlockKey);
       onAccessTokenChange?.(res.sessionToken);
       return res.sessionToken;
     } catch (err) {
@@ -113,9 +132,21 @@ export function createSessionTokenStore(deps: SessionTokenStoreDeps): SessionTok
     }
   }
 
+  function refreshSingleFlight(): Promise<string> {
+    if (!inFlight) {
+      inFlight = refresh().finally(() => {
+        inFlight = null;
+      });
+    }
+    return inFlight;
+  }
+
   return {
     isRefreshing() {
       return inFlight !== null;
+    },
+    refreshNow() {
+      return refreshSingleFlight();
     },
     ensureFreshAccessToken() {
       const access = storage.getAccess();
@@ -127,12 +158,7 @@ export function createSessionTokenStore(deps: SessionTokenStoreDeps): SessionTok
       if (!storage.getRefresh()) {
         return Promise.resolve<string | null>(access);
       }
-      if (!inFlight) {
-        inFlight = refresh().finally(() => {
-          inFlight = null;
-        });
-      }
-      return inFlight;
+      return refreshSingleFlight();
     },
   };
 }

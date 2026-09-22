@@ -6,9 +6,8 @@ pub mod provider;
 pub mod real;
 pub mod session_token_v2;
 pub mod stub;
-pub mod token_store;
 
-pub use auth_service::{AuthServiceImpl, LoginAdmission};
+pub use auth_service::{AuthServiceImpl, LoginAdmission, GITHUB_PROVIDER};
 pub use provider::{GitHubOAuthProvider, GitHubUser};
 pub use real::RealGitHubProvider;
 pub use session_token_v2::{
@@ -16,4 +15,3 @@ pub use session_token_v2::{
     SessionTokenVerifier, TokenKind, REFRESH_TOKEN_TTL, SESSION_TOKEN_TTL,
 };
 pub use stub::StubGitHubProvider;
-pub use token_store::GitHubTokenStore;

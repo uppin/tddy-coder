@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file auth.proto.
  */
 export const file_auth: GenFile = /*@__PURE__*/
-  fileDesc("CgphdXRoLnByb3RvEgRhdXRoIhMKEUdldEF1dGhVcmxSZXF1ZXN0IjoKEkdldEF1dGhVcmxSZXNwb25zZRIVCg1hdXRob3JpemVfdXJsGAEgASgJEg0KBXN0YXRlGAIgASgJIjIKE0V4Y2hhbmdlQ29kZVJlcXVlc3QSDAoEY29kZRgBIAEoCRINCgVzdGF0ZRgCIAEoCSJkChRFeGNoYW5nZUNvZGVSZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXISFQoNcmVmcmVzaF90b2tlbhgDIAEoCSItChRHZXRBdXRoU3RhdHVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIk4KFUdldEF1dGhTdGF0dXNSZXNwb25zZRIVCg1hdXRoZW50aWNhdGVkGAEgASgIEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXIiLgoVUmVmcmVzaFNlc3Npb25SZXF1ZXN0EhUKDXJlZnJlc2hfdG9rZW4YASABKAkiZgoWUmVmcmVzaFNlc3Npb25SZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXISFQoNcmVmcmVzaF90b2tlbhgDIAEoCSImCg1Mb2dvdXRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiEAoOTG9nb3V0UmVzcG9uc2UiGQoXU3RhcnREZXZpY2VMb2dpblJlcXVlc3QikgEKGFN0YXJ0RGV2aWNlTG9naW5SZXNwb25zZRITCgtkZXZpY2VfY29kZRgBIAEoCRIRCgl1c2VyX2NvZGUYAiABKAkSGAoQdmVyaWZpY2F0aW9uX3VyaRgDIAEoCRIaChJleHBpcmVzX2luX3NlY29uZHMYBCABKAQSGAoQaW50ZXJ2YWxfc2Vjb25kcxgFIAEoBCItChZQb2xsRGV2aWNlTG9naW5SZXF1ZXN0EhMKC2RldmljZV9jb2RlGAEgASgJIqgBChdQb2xsRGV2aWNlTG9naW5SZXNwb25zZRIlCgVzdGF0ZRgBIAEoDjIWLmF1dGguRGV2aWNlTG9naW5TdGF0ZRIYChBpbnRlcnZhbF9zZWNvbmRzGAIgASgEEhUKDXNlc3Npb25fdG9rZW4YAyABKAkSHgoEdXNlchgEIAEoCzIQLmF1dGguR2l0SHViVXNlchIVCg1yZWZyZXNoX3Rva2VuGAUgASgJIjAKF01pbnRMaXZlS2l0VG9rZW5SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiWQoYTWludExpdmVLaXRUb2tlblJlc3BvbnNlEg0KBXRva2VuGAEgASgJEgsKA3VybBgCIAEoCRIMCgRyb29tGAMgASgJEhMKC3R0bF9zZWNvbmRzGAQgASgEIkkKCkdpdEh1YlVzZXISDQoFbG9naW4YASABKAkSEgoKYXZhdGFyX3VybBgCIAEoCRIMCgRuYW1lGAMgASgJEgoKAmlkGAQgASgEKtgBChBEZXZpY2VMb2dpblN0YXRlEiIKHkRFVklDRV9MT0dJTl9TVEFURV9VTlNQRUNJRklFRBAAEh4KGkRFVklDRV9MT0dJTl9TVEFURV9QRU5ESU5HEAESIAocREVWSUNFX0xPR0lOX1NUQVRFX1NMT1dfRE9XThACEh0KGURFVklDRV9MT0dJTl9TVEFURV9ERU5JRUQQAxIeChpERVZJQ0VfTE9HSU5fU1RBVEVfRVhQSVJFRBAEEh8KG0RFVklDRV9MT0dJTl9TVEFURV9DT01QTEVURRAFMoQECgtBdXRoU2VydmljZRI/CgpHZXRBdXRoVXJsEhcuYXV0aC5HZXRBdXRoVXJsUmVxdWVzdBoYLmF1dGguR2V0QXV0aFVybFJlc3BvbnNlEkUKDEV4Y2hhbmdlQ29kZRIZLmF1dGguRXhjaGFuZ2VDb2RlUmVxdWVzdBoaLmF1dGguRXhjaGFuZ2VDb2RlUmVzcG9uc2USSAoNR2V0QXV0aFN0YXR1cxIaLmF1dGguR2V0QXV0aFN0YXR1c1JlcXVlc3QaGy5hdXRoLkdldEF1dGhTdGF0dXNSZXNwb25zZRJLCg5SZWZyZXNoU2Vzc2lvbhIbLmF1dGguUmVmcmVzaFNlc3Npb25SZXF1ZXN0GhwuYXV0aC5SZWZyZXNoU2Vzc2lvblJlc3BvbnNlEjMKBkxvZ291dBITLmF1dGguTG9nb3V0UmVxdWVzdBoULmF1dGguTG9nb3V0UmVzcG9uc2USUQoQU3RhcnREZXZpY2VMb2dpbhIdLmF1dGguU3RhcnREZXZpY2VMb2dpblJlcXVlc3QaHi5hdXRoLlN0YXJ0RGV2aWNlTG9naW5SZXNwb25zZRJOCg9Qb2xsRGV2aWNlTG9naW4SHC5hdXRoLlBvbGxEZXZpY2VMb2dpblJlcXVlc3QaHS5hdXRoLlBvbGxEZXZpY2VMb2dpblJlc3BvbnNlMmgKE0xpdmVLaXRUb2tlblNlcnZpY2USUQoQTWludExpdmVLaXRUb2tlbhIdLmF1dGguTWludExpdmVLaXRUb2tlblJlcXVlc3QaHi5hdXRoLk1pbnRMaXZlS2l0VG9rZW5SZXNwb25zZWIGcHJvdG8z");
+  fileDesc("CgphdXRoLnByb3RvEgRhdXRoIhMKEUdldEF1dGhVcmxSZXF1ZXN0IjoKEkdldEF1dGhVcmxSZXNwb25zZRIVCg1hdXRob3JpemVfdXJsGAEgASgJEg0KBXN0YXRlGAIgASgJIjIKE0V4Y2hhbmdlQ29kZVJlcXVlc3QSDAoEY29kZRgBIAEoCRINCgVzdGF0ZRgCIAEoCSJ+ChRFeGNoYW5nZUNvZGVSZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXISFQoNcmVmcmVzaF90b2tlbhgDIAEoCRIYChB2YXVsdF91bmxvY2tfa2V5GAQgASgJIi0KFEdldEF1dGhTdGF0dXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiTgoVR2V0QXV0aFN0YXR1c1Jlc3BvbnNlEhUKDWF1dGhlbnRpY2F0ZWQYASABKAgSHgoEdXNlchgCIAEoCzIQLmF1dGguR2l0SHViVXNlciJIChVSZWZyZXNoU2Vzc2lvblJlcXVlc3QSFQoNcmVmcmVzaF90b2tlbhgBIAEoCRIYChB2YXVsdF91bmxvY2tfa2V5GAIgASgJIoABChZSZWZyZXNoU2Vzc2lvblJlc3BvbnNlEhUKDXNlc3Npb25fdG9rZW4YASABKAkSHgoEdXNlchgCIAEoCzIQLmF1dGguR2l0SHViVXNlchIVCg1yZWZyZXNoX3Rva2VuGAMgASgJEhgKEHZhdWx0X3VubG9ja19rZXkYBCABKAkiQAoNTG9nb3V0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhgKEHZhdWx0X3VubG9ja19rZXkYAiABKAkiEAoOTG9nb3V0UmVzcG9uc2UiGQoXU3RhcnREZXZpY2VMb2dpblJlcXVlc3QikgEKGFN0YXJ0RGV2aWNlTG9naW5SZXNwb25zZRITCgtkZXZpY2VfY29kZRgBIAEoCRIRCgl1c2VyX2NvZGUYAiABKAkSGAoQdmVyaWZpY2F0aW9uX3VyaRgDIAEoCRIaChJleHBpcmVzX2luX3NlY29uZHMYBCABKAQSGAoQaW50ZXJ2YWxfc2Vjb25kcxgFIAEoBCItChZQb2xsRGV2aWNlTG9naW5SZXF1ZXN0EhMKC2RldmljZV9jb2RlGAEgASgJIsIBChdQb2xsRGV2aWNlTG9naW5SZXNwb25zZRIlCgVzdGF0ZRgBIAEoDjIWLmF1dGguRGV2aWNlTG9naW5TdGF0ZRIYChBpbnRlcnZhbF9zZWNvbmRzGAIgASgEEhUKDXNlc3Npb25fdG9rZW4YAyABKAkSHgoEdXNlchgEIAEoCzIQLmF1dGguR2l0SHViVXNlchIVCg1yZWZyZXNoX3Rva2VuGAUgASgJEhgKEHZhdWx0X3VubG9ja19rZXkYBiABKAkiMAoXTWludExpdmVLaXRUb2tlblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJZChhNaW50TGl2ZUtpdFRva2VuUmVzcG9uc2USDQoFdG9rZW4YASABKAkSCwoDdXJsGAIgASgJEgwKBHJvb20YAyABKAkSEwoLdHRsX3NlY29uZHMYBCABKAQiSQoKR2l0SHViVXNlchINCgVsb2dpbhgBIAEoCRISCgphdmF0YXJfdXJsGAIgASgJEgwKBG5hbWUYAyABKAkSCgoCaWQYBCABKAQq2AEKEERldmljZUxvZ2luU3RhdGUSIgoeREVWSUNFX0xPR0lOX1NUQVRFX1VOU1BFQ0lGSUVEEAASHgoaREVWSUNFX0xPR0lOX1NUQVRFX1BFTkRJTkcQARIgChxERVZJQ0VfTE9HSU5fU1RBVEVfU0xPV19ET1dOEAISHQoZREVWSUNFX0xPR0lOX1NUQVRFX0RFTklFRBADEh4KGkRFVklDRV9MT0dJTl9TVEFURV9FWFBJUkVEEAQSHwobREVWSUNFX0xPR0lOX1NUQVRFX0NPTVBMRVRFEAUyhAQKC0F1dGhTZXJ2aWNlEj8KCkdldEF1dGhVcmwSFy5hdXRoLkdldEF1dGhVcmxSZXF1ZXN0GhguYXV0aC5HZXRBdXRoVXJsUmVzcG9uc2USRQoMRXhjaGFuZ2VDb2RlEhkuYXV0aC5FeGNoYW5nZUNvZGVSZXF1ZXN0GhouYXV0aC5FeGNoYW5nZUNvZGVSZXNwb25zZRJICg1HZXRBdXRoU3RhdHVzEhouYXV0aC5HZXRBdXRoU3RhdHVzUmVxdWVzdBobLmF1dGguR2V0QXV0aFN0YXR1c1Jlc3BvbnNlEksKDlJlZnJlc2hTZXNzaW9uEhsuYXV0aC5SZWZyZXNoU2Vzc2lvblJlcXVlc3QaHC5hdXRoLlJlZnJlc2hTZXNzaW9uUmVzcG9uc2USMwoGTG9nb3V0EhMuYXV0aC5Mb2dvdXRSZXF1ZXN0GhQuYXV0aC5Mb2dvdXRSZXNwb25zZRJRChBTdGFydERldmljZUxvZ2luEh0uYXV0aC5TdGFydERldmljZUxvZ2luUmVxdWVzdBoeLmF1dGguU3RhcnREZXZpY2VMb2dpblJlc3BvbnNlEk4KD1BvbGxEZXZpY2VMb2dpbhIcLmF1dGguUG9sbERldmljZUxvZ2luUmVxdWVzdBodLmF1dGguUG9sbERldmljZUxvZ2luUmVzcG9uc2UyaAoTTGl2ZUtpdFRva2VuU2VydmljZRJRChBNaW50TGl2ZUtpdFRva2VuEh0uYXV0aC5NaW50TGl2ZUtpdFRva2VuUmVxdWVzdBoeLmF1dGguTWludExpdmVLaXRUb2tlblJlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message auth.GetAuthUrlRequest
@@ -91,6 +91,17 @@ export type ExchangeCodeResponse = Message<"auth.ExchangeCodeResponse"> & {
    * @generated from field: string refresh_token = 3;
    */
   refreshToken: string;
+
+  /**
+   * A wrap key for this session lineage's slot in the daemon's credential vault — not a stored
+   * credential. Alone it opens nothing: it is useful only together with the vault file, which never
+   * leaves the daemon's disk. Opaque; hold it beside the refresh token. Empty when the daemon keeps
+   * no vault for this login (a stub/demo login, or no `auth_storage`). The GitHub token itself is
+   * never carried on any response.
+   *
+   * @generated from field: string vault_unlock_key = 4;
+   */
+  vaultUnlockKey: string;
 };
 
 /**
@@ -149,6 +160,15 @@ export type RefreshSessionRequest = Message<"auth.RefreshSessionRequest"> & {
    * @generated from field: string refresh_token = 1;
    */
   refreshToken: string;
+
+  /**
+   * The vault unlock key the last login or refresh returned, sent back so the daemon can reopen
+   * this user's credential vault after a restart. A wrap key, not a stored credential: alone it
+   * opens nothing. Presenting it rotates it — use the one in the response from now on.
+   *
+   * @generated from field: string vault_unlock_key = 2;
+   */
+  vaultUnlockKey: string;
 };
 
 /**
@@ -180,6 +200,16 @@ export type RefreshSessionResponse = Message<"auth.RefreshSessionResponse"> & {
    * @generated from field: string refresh_token = 3;
    */
   refreshToken: string;
+
+  /**
+   * The rotated vault unlock key that replaces the presented one; the presented one opens nothing
+   * any more. Empty when none was presented, or when the presented one no longer opens its slot —
+   * the session is still refreshed, but credential-backed reads stay unavailable until the next
+   * login. A wrap key, not a stored credential: alone it opens nothing.
+   *
+   * @generated from field: string vault_unlock_key = 4;
+   */
+  vaultUnlockKey: string;
 };
 
 /**
@@ -197,6 +227,14 @@ export type LogoutRequest = Message<"auth.LogoutRequest"> & {
    * @generated from field: string session_token = 1;
    */
   sessionToken: string;
+
+  /**
+   * The vault unlock key this session lineage holds, so the daemon can remove its slot from the
+   * credential vault. A wrap key, not a stored credential. Empty removes nothing.
+   *
+   * @generated from field: string vault_unlock_key = 2;
+   */
+  vaultUnlockKey: string;
 };
 
 /**
@@ -309,7 +347,7 @@ export type PollDeviceLoginResponse = Message<"auth.PollDeviceLoginResponse"> & 
   intervalSeconds: bigint;
 
   /**
-   * All three set only on COMPLETE, and identical in meaning to `ExchangeCodeResponse`.
+   * All four set only on COMPLETE, and identical in meaning to `ExchangeCodeResponse`.
    *
    * @generated from field: string session_token = 3;
    */
@@ -324,6 +362,14 @@ export type PollDeviceLoginResponse = Message<"auth.PollDeviceLoginResponse"> & 
    * @generated from field: string refresh_token = 5;
    */
   refreshToken: string;
+
+  /**
+   * As `ExchangeCodeResponse.vault_unlock_key`: a wrap key for this lineage's vault slot, not a
+   * stored credential, and useless without the vault file.
+   *
+   * @generated from field: string vault_unlock_key = 6;
+   */
+  vaultUnlockKey: string;
 };
 
 /**

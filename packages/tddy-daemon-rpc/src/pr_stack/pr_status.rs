@@ -21,7 +21,9 @@ impl PrStackRpcHandler {
         branch: &str,
     ) -> tddy_service::proto::pr_stack::PrStatusView {
         use tddy_service::proto::pr_stack::PrStatusView;
-        use tddy_session_lifecycle::github_pr_credentials::{pr_lookup_for_caller, PrLookup};
+        use tddy_session_lifecycle::github_pr_credentials::{
+            pr_lookup_for_caller, retained_github_token, PrLookup,
+        };
         use tddy_workflow_recipes::orchestrate_pr_stack::github::PrLookupOutcome;
 
         // Both ways of failing to name a GitHub repository leave the lookup un-performable, so they
@@ -49,10 +51,13 @@ impl PrStackRpcHandler {
             .as_ref()
             .and_then(|g| g.stub)
             .unwrap_or(false);
-        let stored = self
-            .github_token_store
-            .as_ref()
-            .and_then(|store| store.get(github_login));
+        // A vault that exists but cannot be read right now is *unavailable* with its own reason —
+        // but a demo never reaches GitHub, so stub mode answers first whatever the vault says.
+        let stored = match retained_github_token(self.credential_vaults.as_deref(), github_login) {
+            Err(reason) if !stub_mode => return pr_status_unavailable(branch, reason),
+            Err(_) => None,
+            Ok(stored) => stored,
+        };
         let token = match pr_lookup_for_caller(stub_mode, stored.as_deref()) {
             PrLookup::Empty => return PrStatusView::default(),
             PrLookup::Unavailable(reason) => return pr_status_unavailable(branch, reason),

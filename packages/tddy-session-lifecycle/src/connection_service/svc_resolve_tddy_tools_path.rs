@@ -126,7 +126,7 @@ impl DaemonSessionHost {
             session_agent_inference: Arc::new(
                 crate::session_agent_inference::SessionAgentInferenceStore::new(),
             ),
-            github_token_store: None,
+            credential_vaults: None,
             session_tokens: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
             session_rooms: Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new()),
@@ -282,14 +282,12 @@ impl DaemonSessionHost {
         self.staging_base_dir = staging_base_dir;
     }
 
-    /// Act on the operator's own GitHub credential for PR-status reads (builder). The store is the
-    /// one the auth service writes to at login; without it, PR status reports itself unavailable.
-    pub fn with_github_token_store(
-        mut self,
-        store: Arc<dyn tddy_github::token_store::GitHubTokenStore>,
-    ) -> Self {
-        self.debug_assert_rpc_families_not_installed("with_github_token_store");
-        self.github_token_store = Some(store);
+    /// Act on the operator's own GitHub credential for PR-status reads (builder). The vaults are
+    /// the ones the auth service opens at login and reopens at refresh; without them, PR status
+    /// reports itself unavailable.
+    pub fn with_credential_vaults(mut self, vaults: Arc<tddy_daemon_auth::SessionVaults>) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_credential_vaults");
+        self.credential_vaults = Some(vaults);
         self
     }
 

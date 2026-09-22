@@ -13,6 +13,12 @@ class SessionInvalidError extends Error {}
 const ACCESS_TOKEN_KEY = "tddy_session_token";
 /** Long-lived refresh token used only to mint fresh access tokens. */
 const REFRESH_TOKEN_KEY = "tddy_refresh_token";
+/**
+ * The daemon's vault unlock key for this session lineage — a wrap key, not a stored credential.
+ * Alone it opens nothing; kept beside the refresh token so a refresh can reopen the operator's
+ * credentials after a daemon restart.
+ */
+const VAULT_UNLOCK_KEY_KEY = "tddy_vault_unlock_key";
 const OAUTH_STATE_KEY = "tddy_oauth_state";
 export const OAUTH_RETURN_TO_KEY = "tddy_oauth_return_to";
 
@@ -49,6 +55,7 @@ const DEVICE_LOGIN_IDLE: DeviceLogin = { phase: "idle" };
 interface MintedSession {
   sessionToken: string;
   refreshToken: string;
+  vaultUnlockKey: string;
   user?: GitHubUser;
 }
 
@@ -56,6 +63,8 @@ interface MintedSession {
 interface WholeSession {
   sessionToken: string;
   refreshToken: string;
+  /** The unlock key for this lineage's credential-vault slot — `""` when the daemon keeps none. */
+  vaultUnlockKey: string;
   user: GitHubUser;
 }
 
@@ -66,14 +75,15 @@ type SessionCheck = { whole: WholeSession } | { missing: string[] };
  * field the daemon never set as an absent message or an empty string; either is a missing part,
  * never one to fill in with a default.
  */
-function checkWholeSession({ sessionToken, refreshToken, user }: MintedSession): SessionCheck {
+function checkWholeSession({ sessionToken, refreshToken, vaultUnlockKey, user }: MintedSession): SessionCheck {
   const missing = [
     ...(user === undefined ? ["user"] : []),
     ...(sessionToken === "" ? ["session token"] : []),
     ...(refreshToken === "" ? ["refresh token"] : []),
   ];
   if (user === undefined || missing.length > 0) return { missing };
-  return { whole: { sessionToken, refreshToken, user } };
+  // An empty unlock key is not a missing part: a stub login, or a daemon with no vault, keeps none.
+  return { whole: { sessionToken, refreshToken, vaultUnlockKey, user } };
 }
 
 /** The error for a flow that `completed` without the session parts named in `missing`. */
@@ -206,13 +216,20 @@ function localStorageTokenStorage(): TokenStorage {
   return {
     getAccess: () => localStorage.getItem(ACCESS_TOKEN_KEY),
     getRefresh: () => localStorage.getItem(REFRESH_TOKEN_KEY),
-    set: (access, refresh) => {
+    getVaultUnlockKey: () => localStorage.getItem(VAULT_UNLOCK_KEY_KEY),
+    set: (access, refresh, vaultUnlockKey) => {
       localStorage.setItem(ACCESS_TOKEN_KEY, access);
       localStorage.setItem(REFRESH_TOKEN_KEY, refresh);
+      if (vaultUnlockKey) {
+        localStorage.setItem(VAULT_UNLOCK_KEY_KEY, vaultUnlockKey);
+      } else {
+        localStorage.removeItem(VAULT_UNLOCK_KEY_KEY);
+      }
     },
     clear: () => {
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
+      localStorage.removeItem(VAULT_UNLOCK_KEY_KEY);
     },
   };
 }
@@ -315,6 +332,12 @@ export function useAuth() {
         try {
           const { token, user } = await establishSession();
           if (cancelled) return;
+          // A daemon that restarted since this lineage last refreshed holds none of the operator's
+          // credentials open until a refresh presents the unlock key — do that now rather than
+          // when the access token next lapses. A failure is the store's to report, not a logout.
+          if (storage.getVaultUnlockKey() && storage.getRefresh()) {
+            void store.refreshNow().catch(() => {});
+          }
           setState(signedInState(user, token));
           return;
         } catch (err) {
@@ -359,10 +382,10 @@ export function useAuth() {
   }, [store]);
 
   // Take up a session the daemon minted — by `ExchangeCode` or by an approved device login, which
-  // return the same triple. Both flows store it here, so both leave the operator signed in alike.
+  // return the same fields. Both flows store it here, so both leave the operator signed in alike.
   const adoptSession = useCallback(
-    ({ sessionToken, refreshToken, user }: WholeSession) => {
-      storage.set(sessionToken, refreshToken);
+    ({ sessionToken, refreshToken, vaultUnlockKey, user }: WholeSession) => {
+      storage.set(sessionToken, refreshToken, vaultUnlockKey);
       setState(signedInState(user, sessionToken));
     },
     [storage],
@@ -467,9 +490,12 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     const token = storage.getAccess();
-    if (token) {
+    // Handed back so the daemon removes this lineage's vault unlock slot — even when the access
+    // token has lapsed, since the key itself identifies the slot.
+    const vaultUnlockKey = storage.getVaultUnlockKey() ?? "";
+    if (token || vaultUnlockKey) {
       try {
-        await client.logout({ sessionToken: token });
+        await client.logout({ sessionToken: token ?? "", vaultUnlockKey });
       } catch {
         // Ignore logout errors — the client discards its tokens regardless.
       }

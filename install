@@ -833,8 +833,8 @@ install_desktop() {
   echo "install:   shows anything but settings."
 
   mkdir -p "$TDDY_HOME" "$DESKTOP_LOG_DIR" "$DESKTOP_AUTH_STORAGE_PATH"
-  # Retained GitHub access tokens live here (github-tokens.json, mode 0600), and the umask must not
-  # get a say — the same rule the systemd modes apply to their own auth storage.
+  # Each user's sealed credential vault lives here (credentials-<hex login>.vault, mode 0600), and the
+  # umask must not get a say — the same rule the systemd modes apply to their own auth storage.
   chmod 0700 "$DESKTOP_AUTH_STORAGE_PATH"
   harden_installed_path "$TDDY_HOME"
 
@@ -1055,8 +1055,8 @@ elif [[ "$NO_SYSTEMCTL" != "1" ]]; then
   mkdir -p "$DAEMON_LOG_DIR" "$AUTH_STORAGE_PATH"
   echo "install: chowning ${DAEMON_LOG_DIR} and ${AUTH_STORAGE_DIR} to ${DAEMON_USER}:${DAEMON_GROUP}"
   chown -R "${DAEMON_USER}:${DAEMON_GROUP}" "$DAEMON_LOG_DIR" "$AUTH_STORAGE_DIR"
-  # Retained GitHub access tokens live here (github-tokens.json, mode 0600) — no reason for anyone
-  # but the daemon user to reach them, and the umask must not get a say.
+  # Each user's sealed credential vault lives here (credentials-<hex login>.vault, mode 0600) — no
+  # reason for anyone but the daemon user to reach them, and the umask must not get a say.
   chmod 0700 "$AUTH_STORAGE_PATH"
 fi
 
