@@ -1,11 +1,11 @@
-//! What `#carve` 5/9 delivers: git plumbing in `tddy-git`, and the GitHub REST client in the crate
+//! What `#carve` 6/11 delivers: git plumbing in `tddy-git`, and the GitHub REST client in the crate
 //! that was always meant to own it.
 //!
 //! Two bodies of low-level plumbing sit in crates that have nothing to do with them, and `#carve`
-//! 9/9 consumes both. `worktree.rs` is 1,606 production lines of `git` wrappers with **two**
-//! session-aware functions bolted on — its only `crate::changeset` import is consumed inside
-//! `setup_worktree_for_session_with_integration_base` and
-//! `setup_worktree_for_session_with_optional_chain_base`, and nothing else in the file names a
+//! 10/11 consumes both. `worktree.rs` is 1,606 production lines of `git` wrappers with **four**
+//! session-aware functions bolted on — `setup_worktree_for_session`, its `_with_integration_base`
+//! and `_with_optional_chain_base` variants, and
+//! `resolve_persisted_worktree_integration_base_for_session` — and nothing else in the file names a
 //! `tddy-core` symbol. Meanwhile 2,124 lines of GitHub REST live in a workflow-recipes crate while
 //! `tddy-github` has no PR surface at all.
 //!
@@ -21,8 +21,26 @@ fn package(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// A manifest, or empty when the crate does not exist — for asserting that it exists.
 fn manifest(name: &str) -> String {
     std::fs::read_to_string(package(name).join("Cargo.toml")).unwrap_or_default()
+}
+
+/// A manifest that must exist — for asserting what it does not contain, which an empty string
+/// would satisfy vacuously.
+fn required_manifest(name: &str) -> String {
+    std::fs::read_to_string(package(name).join("Cargo.toml"))
+        .unwrap_or_else(|err| panic!("`packages/{name}/Cargo.toml` could not be read: {err}"))
+}
+
+/// The modules a crate root declares: lines that, trimmed, are exactly `pub mod <name>;`.
+fn declared_modules(source: &str) -> Vec<String> {
+    source
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("pub mod "))
+        .filter_map(|rest| rest.strip_suffix(';'))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Everything before the first `#[cfg(test)]`.
@@ -65,14 +83,16 @@ fn tddy_git_is_a_crate_that_depends_on_no_other() {
 
 /// AC1 — nothing in `tddy-git` knows what a session is.
 ///
-/// The seam is exact: two functions stay behind, ~1,200 lines leave.
+/// The seam is exact: four functions stay behind, and `worktree.rs` drops from 1,606 production lines
+/// to 428.
 #[test]
 fn tddy_git_holds_nothing_session_aware() {
     // Given every source file of the new crate
     let source = package("tddy-git").join("src");
-    if !source.exists() {
-        panic!("`packages/tddy-git/src` does not exist yet");
-    }
+    assert!(
+        source.exists(),
+        "`packages/tddy-git/src` does not exist yet"
+    );
 
     // When each is searched for the session model
     let reaching: Vec<String> = std::fs::read_dir(&source)
@@ -92,39 +112,66 @@ fn tddy_git_holds_nothing_session_aware() {
     );
 }
 
-/// AC2 — `tddy-core::worktree` keeps only the session-aware layer, behind a facade.
+fn core_worktree_source() -> String {
+    std::fs::read_to_string(package("tddy-core").join("src/worktree.rs"))
+        .expect("tddy-core/src/worktree.rs")
+}
+
+/// AC2 — the plumbing left `tddy-core::worktree`, bringing it under its line budget.
 #[test]
-fn the_core_worktree_module_keeps_only_what_knows_about_sessions() {
+fn the_core_worktree_module_shrinks_below_its_line_budget() {
     // Given the module after the split
-    let text = std::fs::read_to_string(package("tddy-core").join("src/worktree.rs"))
-        .expect("tddy-core/src/worktree.rs");
+    let text = core_worktree_source();
+
+    // When its production lines are counted
     let lines = production(&text).lines().count();
 
-    // Then what is left is the session-aware layer and a facade
+    // Then it is under budget (a budget, so a threshold rather than an exact count)
     assert!(
         lines < 450,
         "`worktree.rs` is still {lines} production lines, so the plumbing did not leave"
     );
+}
+
+/// AC2 — the session-aware layer stays in `tddy-core::worktree`.
+#[test]
+fn the_core_worktree_module_keeps_the_session_aware_layer() {
+    // Given the module after the split
+    let text = core_worktree_source();
+
+    // When its production part is taken
+    let production = production(&text);
+
+    // Then the session-aware layer is still there
     assert!(
-        production(&text).contains("setup_worktree_for_session"),
+        production.contains("setup_worktree_for_session"),
         "the session-aware layer was moved out; it belongs in `tddy-core`"
     );
 }
 
 /// AC4 — `tddy-github` owns the PR REST surface.
+///
+/// Three modules moved: `github_pr`, `github_rest_common`, and `pr_api` — the renamed
+/// `orchestrate_pr_stack/github.rs`. Only a `pub mod` declaration counts; a comment naming the
+/// module does not.
 #[test]
 fn tddy_github_owns_the_pull_request_surface() {
     // Given the crate's own module root
     let lib = std::fs::read_to_string(package("tddy-github").join("src/lib.rs"))
         .expect("tddy-github/src/lib.rs");
 
-    // Then it publishes the three moved modules
-    for module in ["github_pr", "github_rest_common"] {
-        assert!(
-            lib.contains(module),
-            "`tddy-github` does not publish `{module}` — the REST client has not moved"
-        );
-    }
+    // When its module declarations are read
+    let declared = declared_modules(&lib);
+    let missing: Vec<&str> = ["github_pr", "github_rest_common", "pr_api"]
+        .into_iter()
+        .filter(|module| !declared.iter().any(|name| name == module))
+        .collect();
+
+    // Then it publishes all three moved modules
+    assert!(
+        missing.is_empty(),
+        "`tddy-github` does not publish these, so the REST client has not moved: {missing:?}"
+    );
 }
 
 /// AC6 — the move adds no dependency that could close a cycle.
@@ -139,7 +186,7 @@ fn tddy_github_owns_the_pull_request_surface() {
 #[test]
 fn tddy_github_gains_no_dependency_on_the_crate_the_client_left() {
     // Given its manifest
-    let text = manifest("tddy-github");
+    let text = required_manifest("tddy-github");
 
     // Then it does not depend on the crate the client left
     assert!(
