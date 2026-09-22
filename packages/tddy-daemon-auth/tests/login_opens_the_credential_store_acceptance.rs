@@ -37,7 +37,7 @@ async fn a_credential_store_sealed_under_another_key_refuses_the_login() {
     let storage = dir.path().join("auth");
     std::fs::create_dir_all(&storage).expect("the storage directory is created");
     CredentialStore::open_or_create(
-        &CredentialStore::path_in(&storage),
+        &CredentialStore::path_in(&storage, THE_LOGIN),
         A_CREDENTIAL_THIS_DAEMON_WILL_NEVER_HOLD,
         THE_LOGIN,
     )
@@ -63,7 +63,7 @@ async fn a_locked_credential_store_is_not_replaced_by_an_empty_one() {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let storage = dir.path().join("auth");
     std::fs::create_dir_all(&storage).expect("the storage directory is created");
-    let vault_path = CredentialStore::path_in(&storage);
+    let vault_path = CredentialStore::path_in(&storage, THE_LOGIN);
     CredentialStore::open_or_create(
         &vault_path,
         A_CREDENTIAL_THIS_DAEMON_WILL_NEVER_HOLD,
@@ -102,7 +102,7 @@ async fn a_stub_login_leaves_no_credential_store_behind() {
             signed_in
                 .map(|response| response.session_token.is_empty())
                 .map_err(|status| status.message),
-            CredentialStore::path_in(&storage).exists()
+            CredentialStore::path_in(&storage, THE_LOGIN).exists()
         ),
         (Ok(false), false),
         "a stub login must retain nothing and seal nothing"

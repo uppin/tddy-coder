@@ -22,7 +22,7 @@ const THE_METADATA_VALUE: &str = "repo,read:user";
 fn a_credential_written_in_one_session_opens_in_the_next() {
     // Given an operator who stored a credential and then signed out
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = CredentialStore::path_in(dir.path());
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
     let first_session = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
         .expect("a fresh vault opens");
     first_session
@@ -46,7 +46,7 @@ fn a_credential_written_in_one_session_opens_in_the_next() {
 fn the_file_on_disk_holds_no_plaintext_secret_label_or_metadata() {
     // Given a vault holding one credential
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = CredentialStore::path_in(dir.path());
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
     let vault = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
         .expect("a fresh vault opens");
     vault
@@ -73,7 +73,7 @@ fn the_file_on_disk_holds_no_plaintext_secret_label_or_metadata() {
 fn altering_a_stored_records_label_is_detected_rather_than_absorbed() {
     // Given a vault holding one credential, whose label someone edits on disk
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = CredentialStore::path_in(dir.path());
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
     let vault = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
         .expect("a fresh vault opens");
     vault
@@ -99,7 +99,7 @@ fn altering_a_stored_records_label_is_detected_rather_than_absorbed() {
 fn a_different_login_credential_locks_the_vault_and_changes_nothing_in_it() {
     // Given a vault sealed under one login credential
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = CredentialStore::path_in(dir.path());
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
     let vault = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
         .expect("a fresh vault opens");
     vault
@@ -124,7 +124,7 @@ fn a_different_login_credential_locks_the_vault_and_changes_nothing_in_it() {
 fn a_vault_sealed_for_one_subject_does_not_open_for_another() {
     // Given a vault sealed for one operator
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = CredentialStore::path_in(dir.path());
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
     CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
         .expect("a fresh vault opens");
 
@@ -141,7 +141,7 @@ fn a_vault_sealed_for_one_subject_does_not_open_for_another() {
 fn rewrapping_moves_the_vault_onto_the_new_key_and_off_the_old_one() {
     // Given a vault holding a credential, re-wrapped as a successful login would re-wrap it
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = CredentialStore::path_in(dir.path());
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
     let vault = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
         .expect("a fresh vault opens");
     vault
@@ -171,7 +171,7 @@ fn rewrapping_moves_the_vault_onto_the_new_key_and_off_the_old_one() {
 fn a_removed_credential_is_gone_and_the_others_are_not() {
     // Given a vault holding two accounts at the same provider
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = CredentialStore::path_in(dir.path());
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
     let vault = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
         .expect("a fresh vault opens");
     vault.put(a_github_credential()).expect("the first account");
@@ -199,7 +199,7 @@ fn a_removed_credential_is_gone_and_the_others_are_not() {
 fn listing_is_scoped_to_the_provider_it_names() {
     // Given a vault holding accounts at two providers
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = CredentialStore::path_in(dir.path());
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
     let vault = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
         .expect("a fresh vault opens");
     vault.put(a_github_credential()).expect("a github account");
