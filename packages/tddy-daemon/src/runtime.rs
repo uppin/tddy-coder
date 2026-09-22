@@ -881,9 +881,9 @@ pub async fn build(
 
         // The daemon's session-notification bus: Telegram takes the attention-worthy events
         // from the activity-status path, and `StreamSessionNotifications` relays every event
-        // to the browsers driving the drawer's indicators. Assembled here rather than left to
-        // `DaemonSessionHost::new` (which would build a Telegram-only bus) because the
-        // stream subscriber must be the very one the RPC handler subscribes to.
+        // to the browsers driving the drawer's indicators. Assembled here because
+        // `DaemonSessionHost::new` installs no bus of its own, and because the stream subscriber
+        // must be the very one the RPC handler subscribes to.
         let session_notification_bus = {
             let mut bus =
                 tddy_session_lifecycle::session_notifications::SessionNotificationBus::new();
@@ -954,7 +954,9 @@ pub async fn build(
                 user_resolver,
                 options.spawn_client.clone(),
                 livekit_discovery,
-                telegram_hooks.clone(),
+                telegram_hooks.clone().map(|hooks| {
+                    hooks as tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink
+                }),
                 Arc::clone(&shared_claude_cli_manager),
             )
             .with_session_rooms(Arc::clone(&shared_session_rooms))

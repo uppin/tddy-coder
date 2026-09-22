@@ -14,6 +14,8 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
 use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::session_notification_subscribers::TelegramNotificationSubscriber;
+use tddy_session_lifecycle::session_notifications::SessionNotificationBus;
 use tddy_session_lifecycle::telegram_notifier::{InMemoryTelegramSender, TelegramSessionWatcher};
 use tddy_session_lifecycle::telegram_session_subscriber::TelegramDaemonHooks;
 use tddy_telegram::telegram_tracked_session::{
@@ -82,6 +84,7 @@ fn write_claude_cli_session(
 /// Build a `DaemonSessionHost` wired with:
 /// - `sessions_base_for_user` pointing at `sessions_base`
 /// - `TelegramDaemonHooks` carrying `InMemoryTelegramSender` + a watcher sharing `tracked`
+/// - a notification bus carrying Telegram's subscriber — the shape `runtime.rs` assembles
 /// - A no-op user resolver (accepts OS_USER)
 fn make_service(
     sessions_base: PathBuf,
@@ -122,9 +125,13 @@ fn make_service(
         user_resolver,
         None,
         None,
-        Some(telegram),
+        Some(Arc::clone(&telegram) as _),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
+    .with_session_notification_bus(Arc::new(
+        SessionNotificationBus::new()
+            .with_subscriber(Arc::new(TelegramNotificationSubscriber::new(telegram))),
+    ))
 }
 
 /// Shared tracked coordinator with BOUND_CHAT already tracking SESSION_ID.

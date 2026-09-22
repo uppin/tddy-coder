@@ -16,7 +16,7 @@ use crate::multi_host::LocalOnlyEligibleDaemonSource;
 
 use crate::cli_session_manager::CliSessionManager;
 
-use crate::telegram_session_subscriber::TelegramDaemonHooks;
+use tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink;
 
 use std::sync::Arc;
 
@@ -72,7 +72,7 @@ impl DaemonSessionHost {
         user_resolver: tddy_daemon_kernel::SessionUserResolver,
         spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
         livekit_discovery: Option<LiveKitDiscoveryHandles>,
-        telegram: Option<Arc<TelegramDaemonHooks>>,
+        presenter_event_sink: Option<SharedPresenterEventSink>,
         claude_cli_manager: Arc<CliSessionManager>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
@@ -96,21 +96,6 @@ impl DaemonSessionHost {
         // report READY for a clone nobody built.
         let session_agent_clones =
             Arc::new(crate::session_agent_clone::SessionAgentCloneStore::new());
-        // A service given Telegram hooks and no explicit bus still notifies Telegram, because the
-        // notification bus is now the only path from `ReportSessionStatus` to a chat. Without this
-        // the hooks would be inert until a caller happened to install a bus, and "Telegram is
-        // configured" would stop meaning "Telegram is notified". `main.rs` overrides it with a bus
-        // carrying the notification stream alongside Telegram.
-        let session_notification_bus = telegram.as_ref().map(|hooks| {
-            Arc::new(
-                crate::session_notifications::SessionNotificationBus::new()
-                    .with_subscriber(Arc::new(
-                    crate::session_notification_subscribers::TelegramNotificationSubscriber::new(
-                        Arc::clone(hooks),
-                    ),
-                )),
-            )
-        });
         Self {
             config,
             sessions_base_for_user,
@@ -119,7 +104,7 @@ impl DaemonSessionHost {
             spawn_client,
             eligible_daemon_source,
             common_room_livekit_room,
-            telegram,
+            presenter_event_sink,
             claude_cli_manager,
             sandbox_manager: Arc::new(
                 tddy_daemon_sandbox::sandbox_session::SandboxSessionManager::new(),
@@ -156,7 +141,9 @@ impl DaemonSessionHost {
                 crate::session_admission_service::SessionAdmissionRegistry::new(),
             ),
             agent_conversations: Arc::new(tddy_session_agents::OpenAgentConversations::new()),
-            session_notification_bus,
+            // No bus until one is installed with `with_session_notification_bus`: the subscribers
+            // are the daemon's to choose, and this service names none of them.
+            session_notification_bus: None,
             sandbox_rpc_bridge: Arc::new(std::sync::OnceLock::new()),
         }
     }
@@ -312,9 +299,9 @@ impl DaemonSessionHost {
 
     /// Substitute the session-notification bus (builder pattern).
     ///
-    /// Replaces the Telegram-only bus [`Self::new`] builds from the hooks it was given, which is
-    /// what `main.rs` does to add the `StreamSessionNotifications` relay beside Telegram, and what
-    /// a test does to record what a publish reached.
+    /// [`Self::new`] installs none. `runtime.rs` installs the daemon's bus — Telegram's subscriber
+    /// beside the `StreamSessionNotifications` relay — and a test installs one to record what a
+    /// publish reached.
     pub fn with_session_notification_bus(
         mut self,
         bus: Arc<crate::session_notifications::SessionNotificationBus>,
@@ -427,9 +414,10 @@ impl DaemonSessionHost {
         }
     }
 
-    /// Start the presenter observer for a freshly spawned workflow session: Telegram's surface when
-    /// this daemon has one, and — when it has a bus and can resolve `os_user`'s sessions directory
-    /// to read the session's label from — the notification publish that raises its indicator.
+    /// Start the presenter observer for a freshly spawned workflow session: the injected
+    /// presenter-event sink (Telegram's surface) when this daemon has one, and — when it has a bus
+    /// and can resolve `os_user`'s sessions directory to read the session's label from — the
+    /// notification publish that raises its indicator.
     ///
     /// The two are independent. Gating the observer on Telegram would leave a workflow session's
     /// drawer dot permanently still on every daemon without a `telegram:` block, which is most of
@@ -460,8 +448,8 @@ impl DaemonSessionHost {
                 }
             }
         });
-        crate::telegram_session_subscriber::spawn_presenter_observer_task(
-            self.telegram.clone(),
+        crate::presenter_observer_task::spawn_presenter_observer_task(
+            self.presenter_event_sink.clone(),
             publishing,
             session_id,
             grpc_port,

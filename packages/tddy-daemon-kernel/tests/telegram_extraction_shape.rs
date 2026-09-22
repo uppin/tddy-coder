@@ -13,8 +13,9 @@
 use std::path::{Path, PathBuf};
 
 use tddy_daemon_kernel::presenter_observer::{
-    NoPresenterObserver, PresenterObserverSpawner, SharedPresenterObserver,
+    NoPresenterEventSink, PresenterEventSink, SharedPresenterEventSink,
 };
+use tddy_service::gen::ServerMessage;
 
 fn package(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -31,16 +32,22 @@ fn source_of(package_name: &str, relative: &str) -> String {
 ///
 /// A port that cannot be `Arc<dyn _>` is not a port — the whole point is that the service names no
 /// concrete type.
-#[test]
-fn the_port_is_a_trait_object_the_service_can_hold() {
-    // Given the no-op implementation a daemon with no observer injects
-    let observer: SharedPresenterObserver = std::sync::Arc::new(NoPresenterObserver);
+#[tokio::test]
+async fn the_port_is_a_trait_object_the_service_can_hold() {
+    // Given the no-op sink, held the way the connection service holds any sink
+    let sink: SharedPresenterEventSink = std::sync::Arc::new(NoPresenterEventSink);
 
-    // When a session starts
-    observer.spawn_presenter_observer("session-1", 51_234);
+    // When a presenter event of a session reaches it
+    let delivered = sink
+        .on_presenter_event("session-1", &ServerMessage::default())
+        .await;
 
-    // Then nothing is required of the caller — absence is a valid configuration, not an error
-    let _: &dyn PresenterObserverSpawner = observer.as_ref();
+    // Then it accepts the event — nothing is required of the caller behind the port
+    assert!(
+        delivered.is_ok(),
+        "the no-op sink refused an event: {delivered:?}"
+    );
+    let _: &dyn PresenterEventSink = sink.as_ref();
 }
 
 /// AC1 — `connection_service` names no Telegram symbol.

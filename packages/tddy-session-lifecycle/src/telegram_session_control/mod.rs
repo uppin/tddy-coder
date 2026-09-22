@@ -42,6 +42,7 @@ use crate::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
 use crate::user_sessions_path::projects_path_for_user;
+use tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink;
 use tddy_spawn::spawn_worker;
 use tddy_spawn::spawner::{self, SpawnOptions};
 

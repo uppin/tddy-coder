@@ -26,7 +26,6 @@ use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
 use crate::multi_host::EligibleDaemonSource;
 use crate::project_storage::{self};
-use crate::telegram_session_subscriber::TelegramDaemonHooks;
 use crate::user_sessions_path::projects_path_for_user;
 use crate::workspace_session;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
@@ -138,7 +137,9 @@ pub struct DaemonSessionHost {
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     /// When set, LiveKit **Room** handle for forwarding **StartSession** to peer daemons in `common_room`.
     common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
-    telegram: Option<Arc<TelegramDaemonHooks>>,
+    /// Where each presenter event of a workflow session goes besides the notification bus — the
+    /// Telegram chat surface, on a daemon that has one. `None` when no chat surface is configured.
+    presenter_event_sink: Option<tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink>,
     claude_cli_manager: Arc<CliSessionManager>,
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     sandbox_manager: Arc<tddy_daemon_sandbox::sandbox_session::SandboxSessionManager>,

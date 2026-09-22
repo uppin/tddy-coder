@@ -1,45 +1,58 @@
-//! The port `ConnectionServiceImpl` holds instead of a concrete Telegram type.
+//! The port a session's presenter observer delivers events through, without naming who receives
+//! them.
 //!
-//! `connection_service.rs:141` holds `telegram: Option<Arc<TelegramDaemonHooks>>`, and its **only**
-//! consumer is `svc_resolve_tddy_tools_path.rs:439`, passing it to
-//! `telegram_session_subscriber::spawn_presenter_observer_task`.
+//! When a workflow session starts, `tddy-session-lifecycle` connects to the child's
+//! `PresenterObserver` gRPC stream and hands every event to **two independent sinks**: the
+//! session-notification bus, which lights the session's drawer indicator in `tddy-web`, and — on a
+//! daemon with a `telegram:` block — the Telegram chat surface (elicitation keyboards, state lines).
+//! The observer runs when *either* exists, so it cannot be a spawner owned by Telegram: inverting
+//! the whole task onto the Telegram side would leave the indicator dark on every Telegram-less
+//! daemon, which is most of them.
 //!
-//! `TelegramDaemonHooks` is defined in `telegram_session_subscriber.rs` — one of the six modules
-//! `#carve` 7/9 moves out — so that one field is the entire reason a 7,403-line cluster cannot
-//! leave. Every other edge from the cluster points outward, at eight `tddy-session-lifecycle`
-//! modules, none of which reaches back.
+//! So the loop — connect with retry, read the stream, publish to the bus — stays with the connection
+//! service, and only the Telegram half is inverted. This trait is that half. The service holds an
+//! optional [`SharedPresenterEventSink`]; the daemon injects Telegram's implementation when a bot is
+//! configured.
 //!
-//! This port is where the daemon's own wiring meets the connection service, so it lives here beside
-//! the other symbols every daemon subsystem shares — `pub(crate)` does not cross a crate boundary,
-//! which is the same reason this crate exists at all.
+//! It lives here beside the other symbols every daemon subsystem shares, because `pub(crate)` does
+//! not cross a crate boundary — which is the same reason this crate exists at all.
 
 use std::sync::Arc;
 
-/// Starts whatever watches a session's presenter stream, without naming what that is.
+use async_trait::async_trait;
+use tddy_service::gen::ServerMessage;
+
+/// Receives each event from a session's presenter stream, without the observer learning what it is.
 ///
-/// The daemon injects an implementation; `connection_service` holds the trait object and never
-/// learns whether the other end is Telegram, something else, or nothing at all.
-///
-/// `None` is a first-class answer at the call site today — a daemon with no `telegram:` config block
-/// has no hooks — so an implementation that does nothing is a valid one, and the absence of a
-/// notifier is not an error to report.
-pub trait PresenterObserverSpawner: Send + Sync {
-    /// Begin observing the presenter stream of a session that has just started.
-    ///
-    /// `grpc_port` is the session's own port, which is what the observer connects to. Called once
-    /// per started session, from the spawn path, and must not block it.
-    fn spawn_presenter_observer(&self, session_id: &str, grpc_port: u16);
+/// An error ends that session's observer loop, exactly as a failed stream read does: the sink is
+/// telling the observer it can no longer follow the session.
+#[async_trait]
+pub trait PresenterEventSink: Send + Sync {
+    /// Handle one presenter event of `session_id`, in stream order.
+    async fn on_presenter_event(
+        &self,
+        session_id: &str,
+        event: &ServerMessage,
+    ) -> anyhow::Result<()>;
 }
 
-/// The implementation for a daemon with no observer configured.
+/// A sink that accepts every event and does nothing with it.
 ///
-/// Injecting this is what replaces `Option<Arc<TelegramDaemonHooks>>` being `None`, so the service
-/// holds one shape rather than branching on absence.
-pub struct NoPresenterObserver;
+/// For a caller that must hand over a sink and has nothing to deliver to. It is not how a daemon
+/// with no `telegram:` block is configured — that daemon passes no sink at all, so the observer
+/// runs only when a notification bus needs its events.
+pub struct NoPresenterEventSink;
 
-impl PresenterObserverSpawner for NoPresenterObserver {
-    fn spawn_presenter_observer(&self, _session_id: &str, _grpc_port: u16) {}
+#[async_trait]
+impl PresenterEventSink for NoPresenterEventSink {
+    async fn on_presenter_event(
+        &self,
+        _session_id: &str,
+        _event: &ServerMessage,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 /// The port as the connection service holds it.
-pub type SharedPresenterObserver = Arc<dyn PresenterObserverSpawner>;
+pub type SharedPresenterEventSink = Arc<dyn PresenterEventSink>;

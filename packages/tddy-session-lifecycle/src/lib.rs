@@ -97,6 +97,9 @@ pub use tddy_host_service::{
     remote_desktop_probe, ssh_agent, ssh_agent_add,
 };
 pub mod presenter_intent_client;
+/// The per-session presenter observer: one gRPC stream feeding the notification bus and, through the
+/// kernel's `PresenterEventSink` port, whichever chat surface the daemon injected.
+pub mod presenter_observer_task;
 pub mod pty_runtime;
 pub mod session_admission_service;
 /// Where a clone's checkout is on this host, plus a re-export of the clone store and the mirror

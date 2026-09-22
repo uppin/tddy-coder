@@ -684,8 +684,8 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             // is read from) on `TelegramWorkflowSpawn`, which every inbound-control harness
             // constructs by hand; adding it is a change of its own. The Telegram surface for these
             // sessions is unaffected — it never went through the bus.
-            crate::telegram_session_subscriber::spawn_presenter_observer_task(
-                Some(Arc::clone(hooks)),
+            crate::presenter_observer_task::spawn_presenter_observer_task(
+                Some(Arc::clone(hooks) as SharedPresenterEventSink),
                 None,
                 &result.session_id,
                 result.grpc_port,
