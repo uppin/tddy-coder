@@ -13,7 +13,7 @@ fn telegram_bot_rs() -> &'static str {
 fn telegram_session_control_rs() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../tddy-session-lifecycle/src/telegram_session_control.rs"
+        "/../tddy-session-lifecycle/src/telegram_session_control/workflow_spawn.rs"
     ))
 }
 
