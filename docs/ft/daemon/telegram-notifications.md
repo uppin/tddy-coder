@@ -39,7 +39,7 @@ Each notification is plain text. It includes:
 
 ## Behavior (library contract)
 
-The **`tddy_daemon::telegram_notifier`** module provides:
+The **`tddy_telegram_control::telegram_notifier`** module provides:
 
 - **`TelegramSessionWatcher`**: tracks last-seen status per session id. The **first** observation for an active session records a baseline and **does not** send a message. Each **subsequent** change in status triggers at most **one** send per configured chat id.
 - **Inactive sessions** (process not alive per caller-provided flag): no sends; internal baseline state for that session is not advanced from these ticks.
@@ -102,7 +102,7 @@ No PTY/ANSI scraping is involved.
 
 ### Implementation surface
 
-**`TelegramNotificationSubscriber`** (`tddy_daemon::session_notification_subscribers`) — one
+**`TelegramNotificationSubscriber`** (`tddy_telegram_control::telegram_notification_subscriber::TelegramNotificationSubscriber`) — one
 subscriber on the daemon's **session-notification bus**, which
 **`tddy_session_activity`'s `report_session_status`** publishes to after `update_activity_status`
 succeeds. It takes only `AttentionRequired` notifications from the activity-status path (declining
@@ -119,7 +119,7 @@ per-session indicators — are described in
 
 ## Presenter stream: elicitation (`ModeChanged`)
 
-With Telegram enabled, **`TelegramSessionWatcher::on_server_message`** classifies **`ServerMessage`** **`ModeChanged`** payloads from **`PresenterObserver.ObserveEvents`**. Modes that require a human gate—document review, markdown viewer, feature input, clarification (**`Select`** / **`MultiSelect`**), and free-text **`TextInput`**—produce Telegram traffic per qualifying event. Autonomous modes **`Running`** and **`Done`** do not produce elicitation Telegram lines. Identical **`ModeChanged`** signatures per session id dedupe repeat sends so stream replays do not flood configured chats. Module **`tddy_telegram::elicitation`** (re-exported as **`tddy_daemon::elicitation`**) centralizes classification, dedupe key material, and line templates; **[telegram-notifier.md](../../../packages/tddy-telegram/docs/telegram-notifier.md)** records the public hooks.
+With Telegram enabled, **`TelegramSessionWatcher::on_server_message`** classifies **`ServerMessage`** **`ModeChanged`** payloads from **`PresenterObserver.ObserveEvents`**. Modes that require a human gate—document review, markdown viewer, feature input, clarification (**`Select`** / **`MultiSelect`**), and free-text **`TextInput`**—produce Telegram traffic per qualifying event. Autonomous modes **`Running`** and **`Done`** do not produce elicitation Telegram lines. Identical **`ModeChanged`** signatures per session id dedupe repeat sends so stream replays do not flood configured chats. Module **`tddy_telegram::elicitation`** (re-exported as **`tddy_session_lifecycle::elicitation`**) centralizes classification, dedupe key material, and line templates; **[telegram-notifier.md](../../../packages/tddy-telegram/docs/telegram-notifier.md)** records the public hooks.
 
 ### Document review and markdown viewer
 
@@ -171,10 +171,10 @@ Automated coverage includes unit tests for labels, terminal-status classificatio
 
 ## Telegram session control (library harness)
 
-The **`tddy_daemon::telegram_session_control`** module implements parsing, chunking, **`changeset.yaml`** routing writes, presenter input bytes, and a **`TelegramSessionControlHarness`** for tests and future inbound integration. **`InMemoryTelegramSender`** stores optional inline keyboard labels for those tests. Inbound teloxide wiring and **`DaemonConfig`** flags for interactive control ship with the daemon binary when that path exists. Product reference: **[telegram-session-control.md](telegram-session-control.md)**.
+The **`tddy_telegram_control::telegram_session_control`** module implements parsing, chunking, **`changeset.yaml`** routing writes, presenter input bytes, and the **`TelegramSessionControlHarness`** that the daemon's **`telegram_bot`** dispatcher drives and the integration tests drive directly. **`InMemoryTelegramSender`** stores optional inline keyboard labels for those tests. Product reference: **[telegram-session-control.md](telegram-session-control.md)**.
 
 ## Related documentation
 
-- **[telegram-notifier.md](../../../packages/tddy-telegram/docs/telegram-notifier.md)** — implementation reference. The transport half lives in `tddy-telegram`; `TelegramSessionWatcher` is still `tddy-daemon`'s (`#unbundle` node 2).
+- **[telegram-notifier.md](../../../packages/tddy-telegram/docs/telegram-notifier.md)** — implementation reference. The transport half lives in `tddy-telegram`; `TelegramSessionWatcher` and the rest of the control plane in [`tddy-telegram-control`](../../../packages/tddy-telegram-control/README.md).
 - **[ConnectionService](../../../packages/tddy-daemon/docs/connection-service.md)** — session listing and metadata sources used elsewhere in the daemon.
 - **[systemd-install.md](systemd-install.md)** — where **`daemon.yaml`** is installed in production.

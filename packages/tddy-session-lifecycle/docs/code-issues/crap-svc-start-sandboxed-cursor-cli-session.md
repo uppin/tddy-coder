@@ -4,7 +4,7 @@
 **Category:** CRAP
 **Detected:** 2026-09-18 by `tddy-tools analyze coverage` + `report` (245 tests across 96 files, join rate 51.9%)
 **Metrics:** **CRAP 1,722** · complexity **41** · **never executed by any test** · rank **5/50** in this crate · 465 lines · nesting depth 3
-**Restructure:** **no** — tests first. Same rule as [`crap-telegram-bot-handlers`](crap-telegram-bot-handlers.md)
+**Restructure:** **no** — tests first. Same rule as `packages/tddy-telegram-control/docs/code-issues/crap-telegram-bot-handlers.md`
 **Status:** Open — **unclaimed**
 
 ## Measurement history

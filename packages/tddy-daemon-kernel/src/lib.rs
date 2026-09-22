@@ -18,7 +18,7 @@
 //! | Symbol | Reached by |
 //! |---|---|
 //! | [`AgentActivityHub`] | the sandbox subsystem (5 sites), `session_agent_inference.rs` |
-//! | [`now_unix_ms`] | the sandbox subsystem (2 sites), `telegram_session_subscriber.rs` |
+//! | [`now_unix_ms`] | the sandbox subsystem (2 sites), `tddy-session-lifecycle`'s `presenter_observer_task.rs` |
 //! | [`HOST_DOCUMENT_FRAME_BYTES`] | `context_files.rs` |
 //! | [`SessionUserResolver`], [`SessionsBaseResolver`] | `auth.rs`, and five further subsystems |
 //! | [`trim_to_option`] | duplicated inside `connection_service` — see below |
@@ -63,6 +63,7 @@ pub mod agent_tool_socket;
 pub mod config;
 pub mod daemon_identity;
 pub mod peer_forwarding;
+pub mod presenter_observer;
 pub mod privilege_drop;
 pub mod spawn_as_user;
 pub use agent_tool_socket::agent_tool_socket_path;

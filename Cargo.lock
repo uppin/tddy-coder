@@ -12100,6 +12100,7 @@ dependencies = [
  "tddy-spawn",
  "tddy-stdio",
  "tddy-task",
+ "tddy-telegram-control",
  "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-tool-engine",
@@ -12163,6 +12164,7 @@ dependencies = [
  "tddy-service",
  "tempfile",
  "tokio",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -13142,7 +13144,6 @@ dependencies = [
  "tddy-workflow",
  "tddy-workflow-recipes",
  "tddy-worktree-service",
- "teloxide",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -13320,6 +13321,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-telegram-control"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-daemon-livekit",
+ "tddy-github",
+ "tddy-projects",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-session-activity",
+ "tddy-session-lifecycle",
+ "tddy-spawn",
+ "tddy-telegram",
+ "tddy-testing-commons",
+ "teloxide",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-terminal-rpc"
 version = "0.1.0"
 dependencies = [
@@ -13363,6 +13394,7 @@ dependencies = [
  "tddy-sandbox-darwin",
  "tddy-sandbox-runner",
  "tddy-service",
+ "tddy-task",
  "tempfile",
  "tokio",
  "tokio-stream",

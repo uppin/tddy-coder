@@ -18,11 +18,10 @@ use tddy_rpc::{Code, Request};
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
-mod common;
-use common::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_service::proto::session::{
     ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
+use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -274,7 +273,7 @@ async fn managed_claude_cli_session_launches_claude_with_orchestration_prompt_fi
         .get(&session_id)
         .await
         .expect("session must be registered in the manager");
-    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
+    let output = a_capture_showing(&handle.capture, "ARGV:", PTY_STUB_OUTPUT).await;
     assert!(
         output.contains("--append-system-prompt-file"),
         "managed session must launch claude with --append-system-prompt-file; got: {output:?}"
@@ -312,7 +311,7 @@ async fn managed_claude_cli_session_launches_claude_with_tddy_socket_in_env() {
         .get(&session_id)
         .await
         .expect("session must be registered in the manager");
-    let output = a_capture_showing(&handle, "ENVDUMP TDDY_SOCKET=[", PTY_STUB_OUTPUT).await;
+    let output = a_capture_showing(&handle.capture, "ENVDUMP TDDY_SOCKET=[", PTY_STUB_OUTPUT).await;
     assert!(
         !output.contains("ENVDUMP TDDY_SOCKET=[]"),
         "managed session must inject a non-empty per-session TDDY_SOCKET; got: {output:?}"
@@ -385,7 +384,7 @@ async fn resuming_a_managed_claude_cli_session_re_wires_orchestration_and_socket
         .get(session_id)
         .await
         .expect("resumed session must be registered in the manager");
-    let output = a_capture_showing(&handle, "ENVDUMP", PTY_STUB_OUTPUT).await;
+    let output = a_capture_showing(&handle.capture, "ENVDUMP", PTY_STUB_OUTPUT).await;
     assert!(
         output.contains("--append-system-prompt-file"),
         "resumed managed session must re-inject the orchestration prompt; got: {output:?}"

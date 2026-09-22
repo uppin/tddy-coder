@@ -14,6 +14,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-19 | ~1930 | first detection; +87 in PR #518 |
+| 2026-09-22 | ~1931 | unchanged in substance — total 1,944 → 1,945; #494 (`#carve` 8/11) swapped the `telegram` field for `presenter_event_sink` and its doc comment, +1 line net |
 
 ## The number has to be taken by hand
 

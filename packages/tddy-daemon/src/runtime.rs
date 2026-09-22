@@ -30,7 +30,7 @@ use tddy_session_lifecycle::common_room_supervisor::{
     cloned_entries, CommonRoomSupervisorTask, CommonRoomTarget, DaemonCommonRoomConnector,
     PeerDiscoveryHandles, SupervisedCommonRoom,
 };
-use tddy_session_lifecycle::telegram_notifier::TelegramSender;
+use tddy_telegram_control::telegram_notifier::TelegramSender;
 
 /// Which process is hosting this runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -325,8 +325,8 @@ struct TelegramInbound {
     bot: Bot,
     harness: Arc<
         Mutex<
-            tddy_session_lifecycle::telegram_session_control::TelegramSessionControlHarness<
-                tddy_session_lifecycle::telegram_notifier::TeloxideSender,
+            tddy_telegram_control::telegram_session_control::TelegramSessionControlHarness<
+                tddy_telegram_control::telegram_notifier::TeloxideSender,
             >,
         >,
     >,
@@ -457,7 +457,7 @@ impl RuntimeTasks {
 
         if let Some(inbound) = self.telegram_inbound {
             handles.push(tokio::spawn(async move {
-                if let Err(e) = tddy_session_lifecycle::telegram_bot::run_telegram_bot(
+                if let Err(e) = tddy_telegram_control::telegram_bot::run_telegram_bot(
                     inbound.bot,
                     inbound.harness,
                 )
@@ -881,15 +881,15 @@ pub async fn build(
 
         // The daemon's session-notification bus: Telegram takes the attention-worthy events
         // from the activity-status path, and `StreamSessionNotifications` relays every event
-        // to the browsers driving the drawer's indicators. Assembled here rather than left to
-        // `DaemonSessionHost::new` (which would build a Telegram-only bus) because the
-        // stream subscriber must be the very one the RPC handler subscribes to.
+        // to the browsers driving the drawer's indicators. Assembled here because
+        // `DaemonSessionHost::new` installs no bus of its own, and because the stream subscriber
+        // must be the very one the RPC handler subscribes to.
         let session_notification_bus = {
             let mut bus =
                 tddy_session_lifecycle::session_notifications::SessionNotificationBus::new();
             if let Some(ref hooks) = telegram_hooks {
                 bus = bus.with_subscriber(Arc::new(
-                    tddy_session_lifecycle::session_notification_subscribers::TelegramNotificationSubscriber::new(
+                    tddy_telegram_control::telegram_notification_subscriber::TelegramNotificationSubscriber::new(
                         Arc::clone(hooks),
                     ),
                 ));
@@ -954,7 +954,9 @@ pub async fn build(
                 user_resolver,
                 options.spawn_client.clone(),
                 livekit_discovery,
-                telegram_hooks.clone(),
+                telegram_hooks.clone().map(|hooks| {
+                    hooks as tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink
+                }),
                 Arc::clone(&shared_claude_cli_manager),
             )
             .with_session_rooms(Arc::clone(&shared_session_rooms))
@@ -1403,7 +1405,7 @@ pub async fn build(
 /// What a configured Telegram bot contributes: the hooks every session-notification path publishes
 /// through, and the inbound dispatcher that serves the buttons an operator presses.
 struct TelegramWiring {
-    hooks: Option<Arc<tddy_session_lifecycle::telegram_session_subscriber::TelegramDaemonHooks>>,
+    hooks: Option<Arc<tddy_telegram_control::telegram_session_subscriber::TelegramDaemonHooks>>,
     inbound: Option<TelegramInbound>,
 }
 
@@ -1426,12 +1428,12 @@ fn build_telegram(
 
     let bot = Bot::new(tg.bot_token.clone());
     let teloxide_sender =
-        Arc::new(tddy_session_lifecycle::telegram_notifier::TeloxideSender::new(bot.clone()));
+        Arc::new(tddy_telegram_control::telegram_notifier::TeloxideSender::new(bot.clone()));
     let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
     let sender: Arc<dyn TelegramSender + Send + Sync> = teloxide_sender.clone();
-    let elicitation_select_options: tddy_session_lifecycle::telegram_notifier::ElicitationSelectOptionsCache =
+    let elicitation_select_options: tddy_telegram_control::telegram_notifier::ElicitationSelectOptionsCache =
         Arc::new(StdMutex::new(HashMap::new()));
-    let elicitation_multi_select_meta: tddy_session_lifecycle::telegram_notifier::ElicitationMultiSelectMetaCache =
+    let elicitation_multi_select_meta: tddy_telegram_control::telegram_notifier::ElicitationMultiSelectMetaCache =
         Arc::new(StdMutex::new(HashMap::new()));
     let active_elicitation = Arc::new(StdMutex::new(
         tddy_session_lifecycle::active_elicitation::ActiveElicitationCoordinator::new(),
@@ -1440,7 +1442,7 @@ fn build_telegram(
         tddy_session_lifecycle::telegram_tracked_session::TelegramTrackedSessionCoordinator::new(),
     ));
     let watcher = Arc::new(Mutex::new(
-        tddy_session_lifecycle::telegram_notifier::TelegramSessionWatcher::with_elicitation_caches_coordinator_and_tracked(
+        tddy_telegram_control::telegram_notifier::TelegramSessionWatcher::with_elicitation_caches_coordinator_and_tracked(
             elicitation_select_options.clone(),
             elicitation_multi_select_meta.clone(),
             active_elicitation.clone(),
@@ -1448,7 +1450,7 @@ fn build_telegram(
         ),
     ));
     let hooks = Arc::new(
-        tddy_session_lifecycle::telegram_session_subscriber::TelegramDaemonHooks {
+        tddy_telegram_control::telegram_session_subscriber::TelegramDaemonHooks {
             config: config.clone(),
             sender: sender.clone(),
             watcher,
@@ -1485,7 +1487,7 @@ fn build_telegram(
     };
 
     let workflow_spawn = Some(Arc::new(
-        tddy_session_lifecycle::telegram_session_control::TelegramWorkflowSpawn {
+        tddy_telegram_control::telegram_session_control::TelegramWorkflowSpawn {
             config: Arc::new(config.clone()),
             spawn_client: spawn_for_tg,
             os_user: user.clone(),
@@ -1500,7 +1502,7 @@ fn build_telegram(
         },
     ));
     let harness = Arc::new(Mutex::new(
-        tddy_session_lifecycle::telegram_session_control::TelegramSessionControlHarness::with_workflow_spawn_and_telegram_tracked(
+        tddy_telegram_control::telegram_session_control::TelegramSessionControlHarness::with_workflow_spawn_and_telegram_tracked(
             tg.chat_ids.clone(),
             sessions_base,
             teloxide_sender,

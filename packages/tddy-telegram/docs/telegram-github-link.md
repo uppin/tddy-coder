@@ -2,8 +2,8 @@
 
 Technical reference for **`tddy_telegram::telegram_github_link`**, moved out of `tddy-daemon` by
 `#unbundle` node 2. **`tddy-session-lifecycle`** re-exports it, so
-**`tddy_session_lifecycle::telegram_github_link`** also resolves. Its acceptance suite lives at
-**`packages/tddy-session-lifecycle/tests/telegram_github_link.rs`** until the rest of the subsystem follows.
+**`tddy_session_lifecycle::telegram_github_link`** also resolves. Its acceptance suite lives with the Telegram control plane that drives it, at
+**`packages/tddy-telegram-control/tests/telegram_github_link.rs`**.
 
 ## Purpose
 
@@ -29,7 +29,7 @@ Binds a **Telegram user id** to a **GitHub login** using the same **`daemon.yaml
 
 ## Tests
 
-- Integration: **`packages/tddy-session-lifecycle/tests/telegram_github_link.rs`**
+- Integration: **`packages/tddy-telegram-control/tests/telegram_github_link.rs`**
 - Unit: **`#[cfg(test)]`** in **`packages/tddy-telegram/src/telegram_github_link.rs`**
 
 ## Related

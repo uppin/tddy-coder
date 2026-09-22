@@ -98,6 +98,9 @@ tddy-screen-sharing = { path = "../tddy-screen-sharing" }
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
+# The Telegram control plane: `runtime.rs` builds the hooks, the inbound harness and the bot
+# dispatcher, and injects the hooks into `DaemonSessionHost` as its presenter-event sink.
+tddy-telegram-control = { path = "../tddy-telegram-control" }
 # Reached from `src/index_daemon/registry.rs`, not from a top-level source file.
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }

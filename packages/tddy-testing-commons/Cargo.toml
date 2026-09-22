@@ -10,6 +10,9 @@ tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-service = { path = "../tddy-service" }
+# `wait::a_capture_showing` polls a PTY's `TerminalCapture`. Already in this crate's graph through
+# `tddy-core` and `tddy-sandbox-runner`.
+tddy-task = { path = "../tddy-task" }
 async-trait = "0.1"
 bytes = "1"
 tempfile = "3"

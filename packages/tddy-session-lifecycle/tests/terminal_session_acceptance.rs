@@ -17,13 +17,12 @@ use tddy_rpc::{Code, Request};
 use tddy_session_lifecycle::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
-mod common;
-use common::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_terminal_rpc::proto::terminal_session::{
     ListTerminalSessionsRequest, SessionTerminalInput, StartTerminalSessionRequest,
     StopTerminalSessionRequest, StreamReplayMode, StreamTerminalOutputRequest,
     TerminalSessionService as TerminalSessionServiceTrait,
 };
+use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -222,7 +221,7 @@ async fn started_terminal_runs_login_shell_in_worktree() {
     let _ = handle.stdin_tx.send(Bytes::from_static(b"pwd\n"));
 
     // Then — the worktree's unique directory name appears in the captured output.
-    a_capture_showing(&handle, &marker, PTY_STUB_OUTPUT).await;
+    a_capture_showing(&handle.capture, &marker, PTY_STUB_OUTPUT).await;
 }
 
 /// **get_terminal_resolves_started_terminal_by_id**: `get_terminal` returns the started terminal
@@ -608,7 +607,7 @@ async fn send_terminal_input_targets_identified_terminal() {
         .get_terminal(SESSION_ID, &started)
         .await
         .expect("started terminal must exist");
-    a_capture_showing(&shell_handle, marker, PTY_STUB_OUTPUT).await;
+    a_capture_showing(&shell_handle.capture, marker, PTY_STUB_OUTPUT).await;
 
     // ...and the main terminal never sees it.
     let main_handle = manager

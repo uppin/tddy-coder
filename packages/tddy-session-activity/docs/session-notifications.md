@@ -37,8 +37,8 @@ tooltip read the same sentence. `os_user` is what scopes the stream — see **Au
 
 ## Naming
 
-The label is resolved on the daemon's side of the boundary (`tddy-daemon`'s `session_notifications`
-module, which keeps `SessionNotificationPublishing`), because `workflow_goal` comes from the
+The label is resolved on the daemon's side of the boundary (`tddy-session-lifecycle`'s
+`session_notifications` module, which keeps `SessionNotificationPublishing`), because `workflow_goal` comes from the
 session-list enrichment that serves `ListSessions`. This crate receives the resolved label through
 [`SessionLabels`](../src/service.rs), which is the seam.
 
@@ -76,8 +76,10 @@ indicator can stay alive; a chat must not receive the repeats.
 
 ## Subscribers
 
-**`TelegramNotificationSubscriber`** — in `tddy-daemon`, implementing this crate's trait from the
-far side of the crate boundary, which is what the trait is for — takes `AttentionRequired` **from
+**`TelegramNotificationSubscriber`** — in `tddy-telegram-control`
+(`telegram_notification_subscriber`), implementing this crate's trait from the far side of the
+crate boundary, which is what the trait is for; `tddy-daemon`'s `runtime.rs` adds it to the
+daemon's bus — takes `AttentionRequired` **from
 the activity-status path only**. It declines `Activity` (that kind exists for indicators; sending it would turn every tool
 call into a message) and declines `Presenter` (those elicitations already reach a chat through
 `telegram_notifier`, keyboards and per-chat FIFO included — taking them here would double-send).
@@ -94,14 +96,14 @@ indicators for turns that finished while the tab was closed.
 |---|---|
 | `tddy_session_activity::service::ActivityServiceImpl::report_session_status` | `ActivityStatus` |
 | `tddy_session_activity::service::ActivityServiceImpl::report_agent_activity` | `AgentToolCall` |
-| `tddy_daemon::telegram_session_subscriber::run_presenter_observer_loop` | `Presenter` |
+| `tddy_session_lifecycle::presenter_observer_task::run_presenter_observer_loop` | `Presenter` |
 
 The first two are `activity.ActivityService` methods. Before `#unbundle` node 7 they were
 `connection.ConnectionService`'s, and the hook clients that call them were re-pointed in the same
 PR.
 
-The presenter observer takes its two sinks — Telegram and the bus — **independently**, and is
-spawned when either exists. Gating it on Telegram left workflow-session indicators dead on every
+The presenter observer takes its two sinks — Telegram, through the `tddy-daemon-kernel`
+`PresenterEventSink` port, and the bus — **independently**, and is spawned when either exists. Gating it on Telegram left workflow-session indicators dead on every
 daemon without a `telegram:` block.
 
 ## Authorization
@@ -122,21 +124,20 @@ Telegram surface is unaffected, and web-started and resumed sessions publish nor
 
 ## Tests
 
-All of them are in **`packages/tddy-daemon/tests/`** and stayed there when the modules moved: each
-is pinned by `ConnectionServiceImpl` or `test_util::{test_service, TEST_TOKEN}`, and moving either
-would put `tddy-daemon` back on this crate's dependency path and defeat the extraction. They pass
-where they are, and they drive the same re-exports production does.
+None of them is in this crate:
 
-`session_notification_bus_unit` (classification table, fan-out, `wants` filtering, failure
-isolation), `telegram_notification_subscriber_unit` (interest filter, tracked-first routing,
-dedupe), `session_notification_presenter_unit`, `session_notification_label_unit`,
-`session_notifications_acceptance` (the real `ReportSessionStatus` RPC, including that neither the
-hook token nor the bot token reaches a notification), `session_notifications_stream_acceptance`
-(the RPC, its per-user scoping, and one subscription serving every session).
+| Suite | Crate | Covers |
+|---|---|---|
+| `session_notification_bus_unit` | `tddy-session-lifecycle` | classification table, fan-out, `wants` filtering, failure isolation |
+| `session_notification_presenter_unit` | `tddy-session-lifecycle` | presenter-event classification |
+| `session_notification_label_unit` | `tddy-session-lifecycle` | label resolution |
+| `session_notifications_stream_acceptance` | `tddy-session-lifecycle` | the RPC, its per-user scoping, and one subscription serving every session |
+| `telegram_notification_subscriber_unit` | `tddy-telegram-control` | interest filter, tracked-first routing, dedupe |
+| `session_notifications_acceptance` | `tddy-telegram-control` | the real `ReportSessionStatus` RPC reaching Telegram, including that neither the hook token nor the bot token reaches a notification |
 
 ⚠ **`tddy-session-activity` itself has no tests at all** — not a `tests/` directory, not a `#[cfg(test)]`
 module, across 1,573 production lines. Every assertion about this subsystem is made from
-`tddy-daemon`. Recorded in
+`tddy-session-lifecycle` and `tddy-telegram-control`. Recorded in
 [`docs/dev/todo/2026-09-12-tddy-session-activity-has-no-tests-of-its-own.md`](../../../docs/dev/todo/2026-09-12-tddy-session-activity-has-no-tests-of-its-own.md).
 
 ## Related

@@ -137,7 +137,7 @@ This unblocks `tddy-tools build --target <demo-vm:qcow2>`.
 
 When the demo link is ready, call `TelegramSender::send_message(chat_id, link_text)` for every configured
 `chat_id` in `TelegramConfig`. Reuse `send_daemon_lifecycle_message` pattern from
-`packages/tddy-daemon/src/telegram_notifier.rs:276`.
+`packages/tddy-telegram/src/sender.rs:211`.
 
 ### Web UI demo link
 

@@ -97,6 +97,9 @@ pub use tddy_host_service::{
     remote_desktop_probe, ssh_agent, ssh_agent_add,
 };
 pub mod presenter_intent_client;
+/// The per-session presenter observer: one gRPC stream feeding the notification bus and, through the
+/// kernel's `PresenterEventSink` port, whichever chat surface the daemon injected.
+pub mod presenter_observer_task;
 pub mod pty_runtime;
 pub mod session_admission_service;
 /// Where a clone's checkout is on this host, plus a re-export of the clone store and the mirror
@@ -116,10 +119,10 @@ pub mod relay_idle;
 pub mod remote_git_pack_execution;
 pub mod session_deletion;
 pub mod session_list_enrichment;
-/// The daemon's Telegram subscriber, plus a re-export of the stream subscriber that moved to
-/// `tddy-session-activity` with `#unbundle` node 7. Both are reached as
-/// `crate::session_notification_subscribers::X`, as before.
-pub mod session_notification_subscribers;
+/// The stream subscriber `tddy-web` reads, which moved to `tddy-session-activity` with `#unbundle`
+/// node 7 and is still reached as `crate::session_notification_subscribers::X`. The Telegram
+/// subscriber that used to sit beside it left with the control plane for `tddy-telegram-control`.
+pub use tddy_session_activity::session_notification_subscribers;
 /// A session's display label and the publish context built on it, plus a re-export of the
 /// notification bus, its event and its subscriber trait, which moved to `tddy-session-activity`
 /// with `#unbundle` node 7. All are reached as `crate::session_notifications::X`, as before.
@@ -129,12 +132,7 @@ pub mod session_toolcall;
 pub mod split_session;
 pub mod task_service;
 pub mod tddy_user_config;
-pub mod telegram_bot;
 pub use tddy_telegram::telegram_github_link;
-pub mod telegram_multi_select_shortcuts;
-pub mod telegram_notifier;
-pub mod telegram_session_control;
-pub mod telegram_session_subscriber;
 pub use tddy_telegram::telegram_tracked_session;
 pub mod terminal_session_adapter;
 pub use tddy_tool_engine::tool_call_log;
