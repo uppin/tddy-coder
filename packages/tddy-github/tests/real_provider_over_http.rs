@@ -160,10 +160,7 @@ async fn a_code_exchange_refuses_a_state_it_never_issued() {
 
     // Then it is refused before a single byte goes to GitHub
     assert_eq!(
-        (
-            exchanged.map(|_| ()),
-            github.received.lock().unwrap().len()
-        ),
+        (exchanged.map(|_| ()), github.received.lock().unwrap().len()),
         (Err("invalid or expired state parameter".to_string()), 0)
     );
 }
@@ -234,6 +231,117 @@ async fn a_code_exchange_returns_the_granted_token_and_the_user_it_belongs_to() 
     );
 }
 
+#[tokio::test]
+async fn a_code_exchange_whose_token_was_granted_but_whose_user_is_unreachable_names_the_user_leg()
+{
+    // Given a GitHub that grants a token, and a REST API nobody is answering
+    let oauth =
+        a_github_answering(vec![Answer::AccessToken("gho_a-granted-token".to_string())]).await;
+    let api = a_github_nobody_is_answering();
+
+    // When a code is exchanged
+    let provider = a_provider_split_across(&oauth, &api);
+    let (_, state) = provider.authorize_url();
+    let exchanged = provider.exchange_code("the-code", &state).await;
+
+    // Then the failure names the user leg, not the token leg that succeeded
+    assert_eq!(
+        exchanged
+            .map(|_| ())
+            .unwrap_err()
+            .split(':')
+            .next()
+            .map(str::to_string),
+        Some("user info request failed".to_string())
+    );
+}
+
+#[tokio::test]
+async fn a_slow_down_naming_no_interval_widens_the_one_github_set_by_five_seconds() {
+    // Given a device login GitHub started at a 5-second interval, then asks to slow down without
+    // saying by how much
+    let github = a_github_answering(vec![
+        Answer::DeviceCode {
+            user_code: "WDJB-MJHT".to_string(),
+            interval: 5,
+        },
+        Answer::PollError {
+            error: "slow_down".to_string(),
+            interval: None,
+        },
+    ])
+    .await;
+    let provider = the_provider(&github);
+    let started = provider
+        .start_device_login()
+        .await
+        .expect("GitHub issued a device code");
+
+    // When the device login is polled
+    let polled = provider.poll_device_login(&started.device_code).await;
+
+    // Then the interval is widened by the step GitHub documents
+    assert_eq!(
+        polled,
+        Ok(DeviceLoginPoll::SlowDown {
+            interval_seconds: 10
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_public_client_refuses_a_code_exchange_before_asking_github() {
+    // Given a provider holding a client id and no secret
+    let github = a_github_answering(vec![]).await;
+    let provider = a_public_client(&github);
+
+    // When a redirect-flow callback is exchanged through a state it did issue
+    let (_, state) = provider.authorize_url();
+    let exchanged = provider.exchange_code("the-code", &state).await;
+
+    // Then it is refused without a request — that exchange cannot be made without a secret
+    assert_eq!(
+        (exchanged.is_err(), github.received.lock().unwrap().len()),
+        (true, 0)
+    );
+}
+
+#[tokio::test]
+async fn a_public_client_signs_in_by_the_device_flow() {
+    // Given a provider holding a client id and no secret, and a GitHub that approves at once
+    let github = a_github_answering(vec![
+        Answer::DeviceCode {
+            user_code: "WDJB-MJHT".to_string(),
+            interval: 5,
+        },
+        Answer::AccessToken("gho_a-granted-token".to_string()),
+        Answer::User {
+            login: "operator".to_string(),
+        },
+    ])
+    .await;
+    let provider = a_public_client(&github);
+
+    // When a device login is started and polled
+    let started = provider
+        .start_device_login()
+        .await
+        .expect("GitHub issued a device code");
+    let polled = provider.poll_device_login(&started.device_code).await;
+
+    // Then it completes with the token GitHub granted and the user it belongs to
+    assert_eq!(
+        polled.map(|poll| match poll {
+            DeviceLoginPoll::Complete { access_token, user } => Some((access_token, user.login)),
+            _ => None,
+        }),
+        Ok(Some((
+            "gho_a-granted-token".to_string(),
+            "operator".to_string()
+        )))
+    );
+}
+
 /// Run one exchange against a GitHub, through a state that provider actually issued.
 async fn exchange_against(github: &AGitHub) -> Result<(), String> {
     let provider = the_provider(github);
@@ -257,6 +365,28 @@ fn the_provider(github: &AGitHub) -> RealGitHubProvider {
     RealGitHubProvider::new_with_base_urls(
         THE_CLIENT_ID,
         THE_SECRET,
+        "http://127.0.0.1/auth/callback",
+        &base,
+        &base,
+    )
+}
+
+/// A confidential client whose OAuth host is `oauth` and whose REST API is `api`.
+fn a_provider_split_across(oauth: &AGitHub, api: &AGitHub) -> RealGitHubProvider {
+    RealGitHubProvider::new_with_base_urls(
+        THE_CLIENT_ID,
+        THE_SECRET,
+        "http://127.0.0.1/auth/callback",
+        &format!("http://{}", oauth.address),
+        &format!("http://{}", api.address),
+    )
+}
+
+/// A public client — the desktop shape: a client id and no secret at all.
+fn a_public_client(github: &AGitHub) -> RealGitHubProvider {
+    let base = format!("http://{}", github.address);
+    RealGitHubProvider::new_public_with_base_urls(
+        THE_CLIENT_ID,
         "http://127.0.0.1/auth/callback",
         &base,
         &base,

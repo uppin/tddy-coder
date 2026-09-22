@@ -4,13 +4,13 @@ use async_trait::async_trait;
 
 use tddy_rpc::{Request, Response, Status};
 
-use crate::provider::{GitHubOAuthProvider, GitHubUser};
+use crate::provider::{DeviceLoginPoll, GitHubOAuthProvider, GitHubUser};
 use crate::session_token_v2::{
     SessionClaims, SessionTokenAuthority, SessionTokenSigner, TokenKind,
 };
 
 use tddy_service::proto::auth::{
-    AuthService as AuthServiceTrait, ExchangeCodeRequest, ExchangeCodeResponse,
+    AuthService as AuthServiceTrait, DeviceLoginState, ExchangeCodeRequest, ExchangeCodeResponse,
     GetAuthStatusRequest, GetAuthStatusResponse, GetAuthUrlRequest, GetAuthUrlResponse,
     GitHubUser as ProtoGitHubUser, LogoutRequest, LogoutResponse, PollDeviceLoginRequest,
     PollDeviceLoginResponse, RefreshSessionRequest, RefreshSessionResponse,
@@ -97,6 +97,68 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
     }
 }
 
+/// What a completed sign-in hands the client, whichever flow completed it.
+struct MintedSession {
+    session_token: String,
+    user: ProtoGitHubUser,
+    refresh_token: String,
+}
+
+impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
+    /// Finish a sign-in GitHub has vouched for: retain its access token, then mint the session.
+    ///
+    /// One implementation for both flows, so a device login and a redirect login cannot drift
+    /// into producing different sessions or retaining the credential under different rules.
+    fn complete_login(
+        &self,
+        access_token: &str,
+        user: &GitHubUser,
+    ) -> Result<MintedSession, Status> {
+        // Retain the operator's own credential for later server-side GitHub reads. A stub provider's
+        // token is synthetic and is never stored (D12), so a demo login holds none by construction.
+        //
+        // Retention failure fails the login. A session minted without its token is a half-login: the
+        // operator appears signed in while every GitHub-backed read silently reports itself
+        // unavailable, and re-authenticating is the one action that could fix it — which they have no
+        // reason to attempt, because they are already signed in. Failing here surfaces the real fault
+        // (an unwritable token store) at the moment it is caused and keeps retry the obvious remedy.
+        if self.provider.issues_usable_access_token() {
+            if let Some(ref store) = self.token_store {
+                store.put(&user.login, access_token).map_err(|e| {
+                    // The store's own error names server-side detail — the filesystem path it could
+                    // not write, the OS error behind it. That belongs in the daemon log, not in a
+                    // status handed to a browser, so the client is told only *what* failed and for
+                    // which login.
+                    log::error!(
+                        target: "tddy_github::auth_service",
+                        "could not retain the GitHub access token for login '{}': {e}",
+                        user.login
+                    );
+                    Status::internal(format!(
+                        "could not retain the GitHub access token for login '{}'",
+                        user.login
+                    ))
+                })?;
+            }
+        }
+
+        // Signed mode: return a stateless token any daemon that can resolve this daemon's key
+        // verifies. No server-side session state is kept.
+        let Some(Signing { ref signer, .. }) = self.signing else {
+            return Err(Status::failed_precondition(
+                "session token signing is not configured",
+            ));
+        };
+        // A short-lived access token for RPCs plus a long-lived refresh token to mint further
+        // access tokens without re-login.
+        Ok(MintedSession {
+            session_token: signer.mint_access(user),
+            user: to_proto_user(user),
+            refresh_token: signer.mint_refresh(user),
+        })
+    }
+}
+
 #[async_trait]
 impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
     async fn get_auth_url(
@@ -121,52 +183,11 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
             .await
             .map_err(Status::internal)?;
 
-        // Retain the operator's own credential for later server-side GitHub reads. A stub provider's
-        // token is synthetic and is never stored (D12), so a demo login holds none by construction.
-        //
-        // Retention failure fails the login. A session minted without its token is a half-login: the
-        // operator appears signed in while every GitHub-backed read silently reports itself
-        // unavailable, and re-authenticating is the one action that could fix it — which they have no
-        // reason to attempt, because they are already signed in. Failing here surfaces the real fault
-        // (an unwritable token store) at the moment it is caused and keeps retry the obvious remedy.
-        if self.provider.issues_usable_access_token() {
-            if let Some(ref store) = self.token_store {
-                store.put(&user.login, &access_token).map_err(|e| {
-                    // The store's own error names server-side detail — the filesystem path it could
-                    // not write, the OS error behind it. That belongs in the daemon log, not in a
-                    // status handed to a browser, so the client is told only *what* failed and for
-                    // which login.
-                    log::error!(
-                        target: "tddy_github::auth_service",
-                        "could not retain the GitHub access token for login '{}': {e}",
-                        user.login
-                    );
-                    Status::internal(format!(
-                        "could not retain the GitHub access token for login '{}'",
-                        user.login
-                    ))
-                })?;
-            }
-        }
-
-        let proto_user = to_proto_user(&user);
-
-        // Signed mode: return a stateless token any daemon that can resolve this daemon's key
-        // verifies. No server-side session state is kept.
-        let Some(Signing { ref signer, .. }) = self.signing else {
-            return Err(Status::failed_precondition(
-                "session token signing is not configured",
-            ));
-        };
-        // A short-lived access token for RPCs plus a long-lived refresh token to mint further
-        // access tokens without re-login.
-        let session_token = signer.mint_access(&user);
-        let refresh_token = signer.mint_refresh(&user);
-
+        let session = self.complete_login(&access_token, &user)?;
         Ok(Response::new(ExchangeCodeResponse {
-            session_token,
-            user: Some(proto_user),
-            refresh_token,
+            session_token: session.session_token,
+            user: Some(session.user),
+            refresh_token: session.refresh_token,
         }))
     }
 
@@ -246,20 +267,54 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
         &self,
         _request: Request<StartDeviceLoginRequest>,
     ) -> Result<Response<StartDeviceLoginResponse>, Status> {
-        // TODO(desktop-login): delegate to `GitHubOAuthProvider::start_device_login` and carry the
-        // five fields straight through. Nothing is remembered here — the device code is the
-        // client's to hold and present again.
-        todo!("AuthServiceImpl::start_device_login")
+        // Nothing is remembered here — the device code is the client's to hold and present again.
+        let started = self
+            .provider
+            .start_device_login()
+            .await
+            .map_err(Status::internal)?;
+        Ok(Response::new(StartDeviceLoginResponse {
+            device_code: started.device_code,
+            user_code: started.user_code,
+            verification_uri: started.verification_uri,
+            expires_in_seconds: started.expires_in_seconds,
+            interval_seconds: started.interval_seconds,
+        }))
     }
 
     async fn poll_device_login(
         &self,
-        _request: Request<PollDeviceLoginRequest>,
+        request: Request<PollDeviceLoginRequest>,
     ) -> Result<Response<PollDeviceLoginResponse>, Status> {
-        // TODO(desktop-login): map `DeviceLoginPoll` onto `DeviceLoginState`, and on `Complete`
-        // mint the same access + refresh pair `exchange_code` mints and retain the GitHub token
-        // through the same store.
-        todo!("AuthServiceImpl::poll_device_login")
+        let req = request.into_inner();
+        let polled = self
+            .provider
+            .poll_device_login(&req.device_code)
+            .await
+            .map_err(Status::internal)?;
+        let not_yet = |state: DeviceLoginState| PollDeviceLoginResponse {
+            state: state as i32,
+            ..Default::default()
+        };
+        Ok(Response::new(match polled {
+            DeviceLoginPoll::Pending => not_yet(DeviceLoginState::Pending),
+            DeviceLoginPoll::SlowDown { interval_seconds } => PollDeviceLoginResponse {
+                interval_seconds,
+                ..not_yet(DeviceLoginState::SlowDown)
+            },
+            DeviceLoginPoll::Denied => not_yet(DeviceLoginState::Denied),
+            DeviceLoginPoll::Expired => not_yet(DeviceLoginState::Expired),
+            DeviceLoginPoll::Complete { access_token, user } => {
+                let session = self.complete_login(&access_token, &user)?;
+                PollDeviceLoginResponse {
+                    state: DeviceLoginState::Complete as i32,
+                    interval_seconds: 0,
+                    session_token: session.session_token,
+                    user: Some(session.user),
+                    refresh_token: session.refresh_token,
+                }
+            }
+        }))
     }
 }
 

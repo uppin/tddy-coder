@@ -17,7 +17,7 @@
 
 use std::path::Path;
 
-use crate::config::UserMapping;
+use crate::config::{DaemonConfig, UserMapping};
 
 /// Why a deployment cannot enrol a first login.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,14 +59,51 @@ pub fn is_unenrolled(users: &[UserMapping]) -> bool {
 /// The file is rewritten in place, preserving everything else it holds, and the write is atomic —
 /// a half-written config is a daemon that will not start.
 pub fn enrol_first_login(
-    _config_path: &Path,
-    _github_user: &str,
-    _os_user: &str,
+    config_path: &Path,
+    github_user: &str,
+    os_user: &str,
 ) -> Result<UserMapping, EnrolmentRefusal> {
-    // TODO(desktop-login): re-read the file, refuse when `users:` is non-empty, append the row,
-    // and write it back through `tddy_core::atomic_file`. The running daemon's own
-    // `Arc<DaemonConfig>` is a separate question — see `apply_enrolment`.
-    todo!("enrol_first_login")
+    let not_writable = |reason: String| EnrolmentRefusal::ConfigNotWritable { reason };
+
+    // Re-read rather than trust the caller's snapshot: the file on disk is what decides whether
+    // this deployment has already enrolled somebody, including through a concurrent login.
+    let config = DaemonConfig::load(config_path).map_err(|e| not_writable(e.to_string()))?;
+    if let Some(enrolled) = config.users.first() {
+        return Err(EnrolmentRefusal::AlreadyEnrolled {
+            github_user: enrolled.github_user.clone(),
+        });
+    }
+
+    let mapping = UserMapping {
+        github_user: github_user.to_string(),
+        os_user: os_user.to_string(),
+    };
+
+    // Edit the document rather than re-serialise the typed config, so every key the operator
+    // wrote stays exactly as they wrote it and only `users:` changes.
+    // TODO: comments in the file are still lost — preserving them needs a comment-aware YAML
+    // editor, the same open question `DaemonConfigService`'s `write_config` records.
+    let contents = std::fs::read_to_string(config_path)
+        .map_err(|e| not_writable(format!("{}: {e}", config_path.display())))?;
+    let mut document: serde_yaml::Value = serde_yaml::from_str(&contents)
+        .map_err(|e| not_writable(format!("{}: {e}", config_path.display())))?;
+    let users = serde_yaml::to_value(std::slice::from_ref(&mapping))
+        .map_err(|e| not_writable(format!("failed to serialise the users row: {e}")))?;
+    match &mut document {
+        serde_yaml::Value::Mapping(root) => {
+            root.insert(serde_yaml::Value::String("users".to_string()), users);
+        }
+        _ => {
+            return Err(not_writable(format!(
+                "{} is not a YAML mapping",
+                config_path.display()
+            )))
+        }
+    }
+    let rewritten = serde_yaml::to_string(&document)
+        .map_err(|e| not_writable(format!("failed to serialise the config: {e}")))?;
+    tddy_core::atomic_file::write_atomic_labelled(config_path, rewritten).map_err(not_writable)?;
+    Ok(mapping)
 }
 
 /// Install an enrolled row into a config already in memory.
@@ -75,8 +112,6 @@ pub fn enrol_first_login(
 /// snapshot, so a login enrolled at run time would be refused until the next restart. This is the
 /// in-memory half, kept separate from the file write so the order is explicit — persist first,
 /// then apply, so a daemon never admits a login it failed to record.
-pub fn apply_enrolment(_config: &mut crate::config::DaemonConfig, _mapping: UserMapping) {
-    // TODO(desktop-login): push the row onto `config.users`. How the running daemon's shared
-    // `Arc<DaemonConfig>` picks it up is the auth side's to wire.
-    todo!("apply_enrolment")
+pub fn apply_enrolment(config: &mut DaemonConfig, mapping: UserMapping) {
+    config.users.push(mapping);
 }

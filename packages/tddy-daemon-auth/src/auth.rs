@@ -138,12 +138,20 @@ pub fn build_auth_entries_with(
             register_stub_codes(&stub, codes);
         }
         auth_service_entry(stub, tokens, github_token_store.clone())
-    } else if let (Some(id), Some(secret)) = (&github.client_id, &github.client_secret) {
+    } else if let Some(id) = &github.client_id {
         let redirect_uri = github
             .redirect_uri
             .clone()
             .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port));
-        let real = RealGitHubProvider::new(id, secret, &redirect_uri);
+        // Two configurations, neither a fallback for the other. With a secret this is a
+        // confidential client and serves the redirect flow exactly as it always has. Without one
+        // it is a public client — the shape a desktop install ships in, since a secret inside a
+        // downloadable application is public the day it ships — and signs in by the device flow,
+        // which authenticates with the client id alone.
+        let real = match &github.client_secret {
+            Some(secret) => RealGitHubProvider::new(id, secret, &redirect_uri),
+            None => RealGitHubProvider::new_public(id, &redirect_uri),
+        };
         auth_service_entry(real, tokens, github_token_store.clone())
     } else {
         return Ok(AuthBuildResult::unauthenticated());
