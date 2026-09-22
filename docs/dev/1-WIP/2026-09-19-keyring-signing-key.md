@@ -1,7 +1,7 @@
 # Changeset: Per-daemon signing identity for session tokens
 
 **Date**: 2026-09-19
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — implemented; awaiting CI and `/wrap-context-docs`
 **Type**: Architecture Change
 **Stack**: `#keyring` 1/9 — the root node · branch `feature/keyring/signing-key` · base
 `feature/carve/git-plumbing` (`#carve` 6/10, PR #492)
@@ -304,13 +304,17 @@ already rewrites, and both shrink as the secret-gated branches go; neither needs
 
 - [x] **PRD**: [PRD-2026-09-19-keyring-signing-key.md](../../ft/daemon/1-WIP/PRD-2026-09-19-keyring-signing-key.md)
 - [x] **Changeset**: this document
-- [ ] **Draft PR contract**: owned surface + failing tests published (wave 2, commit 2)
-- [ ] **Implementation**: `v2` format, keypair, port, adapter, rewiring across six packages
-- [ ] **Backlog fix — flaky tampered-signature test**: helper rewritten, 100 consecutive runs green
-- [ ] **Backlog fix — `auth_storage` posture**: startup warning when more permissive than `0700`
-- [ ] **Testing**: acceptance + unit tests passing, dependency-boundary tests passing unchanged
-- [ ] **Package Documentation**: READMEs and dev docs for the six packages
-- [ ] **Code Quality**: `cargo clippy -p <pkg> -- -D warnings` per touched package; CI green
+- [x] **Draft PR contract**: owned surface + failing tests published (wave 2, commit 2)
+- [x] **Implementation**: `v2` format, keypair, port, adapter, rewiring — across **eight**
+      packages, not six (see `## Implementation record`)
+- [x] **Backlog fix — flaky tampered-signature test**: helper rewritten, 100 consecutive runs green
+- [x] **Backlog fix — `auth_storage` posture**: startup warning when more permissive than `0700`
+- [x] **Testing**: acceptance + unit tests passing, dependency-boundary tests passing unchanged
+      (scoped local runs; see `## Implementation record` for the two environment failures)
+- [ ] **Package Documentation**: READMEs and `packages/tddy-github/docs/session-token.md` done;
+      the `packages/*/docs/` deltas are recorded below for `/wrap-context-docs` to apply
+- [ ] **Code Quality**: `cargo clippy -p <pkg> --all-targets -- -D warnings` clean per touched
+      package locally; **CI green still owed**
 
 ## Technical Changes
 
@@ -375,13 +379,16 @@ already rewrites, and both shrink as the secret-gated branches go; neither needs
 
 ## Implementation Milestones
 
-- [ ] **M1** — `v2` format in `session_token.rs`, with the flaky helper corrected in the same commit
-- [ ] **M2** — keypair generate/load, `0600` write, `auth_storage` permissions warning
-- [ ] **M3** — `KeyDirectory` in `tddy-daemon-auth`; the advertisement fields and
+- [x] **M1** — `v2` format in `session_token_v2.rs` (the module the contract pinned), with the
+      flaky helper corrected in the same commit
+- [x] **M2** — keypair generate/load, `0600` write, `auth_storage` permissions warning
+- [x] **M3** — `KeyDirectory` in `tddy-daemon-auth`; the advertisement fields and
       `peer_signing_public_key` in `tddy-daemon-livekit`; the adapter over them in `tddy-daemon`
-- [ ] **M4** — rewire `build_auth_entries`, `local_token.rs`, `runtime.rs`, `run.rs`
-- [ ] **M5** — migrate the two acceptance suites from `FLEET_SECRET` to per-daemon keys
-- [ ] **M6** — `desktop.yaml.production` and the three docs that state the barrier, plus the two
+- [x] **M4** — rewire `build_auth_entries`, `local_token.rs`, `runtime.rs`; `run.rs` needed no
+      change (see below); `v1` deleted
+- [x] **M5** — migrate the acceptance suites from `FLEET_SECRET` to per-daemon keys — twelve
+      suites, not two
+- [x] **M6** — `desktop.yaml.production` and the three docs that state the barrier, plus the two
       in-tree comments this node makes false: `packages/tddy-service/proto/auth.proto`'s
       `LiveKitTokenService` header ("The LiveKit API secret is also the HMAC key every daemon signs
       session tokens with") and `packages/tddy-github/src/token_store.rs`'s trait doc, which names
@@ -438,28 +445,152 @@ and `cargo clippy -p <pkg> -- -D warnings` per package. **Whole-workspace green 
 
 ## Acceptance Criteria
 
-- [ ] A daemon with **no `livekit:` block at all** completes a sign-in, and the token it issues
-      resolves to the user who signed in
-- [ ] A daemon generates its keypair on first boot, at mode `0600`, and **reuses** it on restart
-- [ ] A `v2` token minted by daemon A verifies on daemon B after B has seen A's published public key
-- [ ] A `v2` token whose key id names a daemon B has **not** seen is rejected — no fallback
-- [ ] A `v1` token is rejected
-- [ ] `livekit.api_secret` still mints a working LiveKit room JWT
-- [ ] Both crates' dependency-boundary tests pass **unchanged**
-- [ ] `verify_rejects_a_token_with_a_tampered_signature` passes 100 consecutive runs
-- [ ] The daemon warns once at startup when `auth_storage` is more permissive than `0700`
-- [ ] Access/refresh TTLs, `kind` enforcement in both directions, and logout behaviour are unchanged
+- [x] A daemon with **no `livekit:` block at all** completes a sign-in, and the token it issues
+      resolves to the user who signed in — `auth_without_livekit_acceptance.rs`
+- [x] A daemon generates its keypair on first boot, at mode `0600`, and **reuses** it on restart —
+      `signing_key::tests`, `auth::tests::a_token_issued_before_a_restart_still_authenticates_after_it`
+- [x] A `v2` token minted by daemon A verifies on daemon B after B has seen A's published public key
+      — `per_daemon_signing_identity_acceptance.rs`, and over a real common room in
+      `session_room_cross_host_acceptance.rs` / `remote_managed_worktree_cross_host_acceptance.rs`
+- [x] A `v2` token whose key id names a daemon B has **not** seen is rejected — no fallback
+- [x] A `v1` token is rejected — `verify_rejects_a_v1_token_as_an_unsupported_version`
+- [x] `livekit.api_secret` still mints a working LiveKit room JWT — `token_service_acceptance.rs`
+- [x] Both crates' dependency-boundary tests pass **unchanged**
+- [x] `verify_rejects_a_token_with_a_tampered_signature` passes 100 consecutive runs
+- [x] The daemon warns once at startup when `auth_storage` is more permissive than `0700`
+- [x] Access/refresh TTLs, `kind` enforcement in both directions, and logout behaviour are unchanged
+
+## Implementation record
+
+What `/green` found once the contract met the code. Each item is a place the plan above was wrong
+or silent, and what was done instead.
+
+### Measured corrections
+
+- **The module is `session_token_v2`, and `session_token.rs` is gone.** The contract's tests import
+  `tddy_github::session_token_v2::…`, so v2 kept that path and v1 was deleted outright; the crate
+  root re-exports v2 under the old names (`tddy_github::SessionTokenSigner`, …). `hmac` and
+  `subtle` left `tddy-github`'s manifest with it.
+- **`run.rs` needed no change.** `build_auth_service_entry`'s `(Some(id), Some(secret))` gate is on
+  `--github-client-id` / `--github-client-secret` — the OAuth app's credentials, which a real
+  provider genuinely needs — not on LiveKit. The CLI builds an *unsigned* `AuthServiceImpl` and never
+  held a session-token signer.
+- **`config.rs` held no LiveKit-for-auth gate** — that lived in `auth.rs`. Its change is two doc
+  comments (`auth_storage` now names the signing key; `LiveKitConfig::enabled` no longer claims
+  `api_secret` signs session tokens).
+- **Six signer construction sites, not four**, and **eight packages, not six.** Beyond `auth.rs`,
+  `local_token.rs`, `session_room.rs`'s minter and the acceptance suites, `tddy-session-lifecycle`'s
+  `split_session.rs` both verified callers' tokens and minted agents' own with `livekit.api_secret`,
+  and `runtime.rs` built two more signers from it (the local socket and `local_token.LocalTokenService`).
+  `tddy-session-lifecycle` and `tddy-worktree-service` are therefore touched too.
+- **Twelve suites carried a shared secret, not two.** `FLEET_SECRET` / `LK_API_SECRET` session
+  tokens were minted in `tddy-daemon-auth` (3 suites + `auth.rs`/`lib.rs` units), `tddy-github`
+  (`auth_service.rs` units, `github_token_retention_acceptance.rs`), `tddy-session-lifecycle`
+  (5 suites + `split_session.rs` and the cross-daemon units), `tddy-daemon` (4 suites) and
+  `tddy-worktree-service` (1). Every one now signs with a daemon key of its own; the cross-host
+  suites advertise each daemon's key on the real common room and verify through the real adapter.
+- **Two contract defects, fixed in production code.** `DaemonAdvertisementWire::signing_key_id`
+  lacked `#[serde(default)]`, so every advertisement without a key — any daemon not yet advertising
+  one — failed to parse (8 `tddy-daemon-livekit` tests). And the `session_token_v2` tests verified at
+  a fixed instant (Unix 1,800,000,000, 2027-01-15) tokens that `mint_access` stamps on the real clock,
+  which is past their five-minute expiry; the fixture's `now()` returns the real clock.
+
+### Decisions the plan left open
+
+- **Where the key lives without `auth_storage`.** `auth_storage` when configured; otherwise
+  `<tddy_data_dir>/auth/signing_key.pem` — the layout `./install` gives `auth_storage` anyway
+  (`signing_key_path`). The runtime passes its own resolved data dir (`TDDY_DATA_DIR` included) so
+  there is one rule, not two. Moving `auth_storage` moves the key: a daemon that finds none generates
+  a new identity, and every session it issued ends.
+- **First boot is race-safe.** The key is written through `write_atomic_with_mode` to a private
+  staging name and **hard-linked** into place, which, unlike a rename, refuses to replace an existing
+  file; the loser loads the winner's key. Two daemons (or parallel tests) booting on one data dir
+  otherwise each keep a different key and one of them silently signs with a key no restart finds.
+- **A key file other accounts can reach is refused, not repaired** — the contract's
+  `refuses_a_key_file_other_accounts_can_read`. The `auth_storage` *directory* is only warned about,
+  once, in `build_auth_entries_with` (`auth_storage_looser_than_owner_only`), per the decision in
+  `## Prerequisites`.
+- **The synchronous RPC gate and the asynchronous port.** `SessionUserResolver` is a sync closure
+  (62 call sites), `KeyDirectory` is async. `DirectorySessionTokenVerifier::verify_now` polls the
+  verification **once**; a lookup still pending is refused as `UnknownKeyId` rather than blocking an
+  RPC worker. The trait's doc states the resulting contract: a directory answers from what it holds.
+  The one production directory reads the registry's in-memory snapshot, so it always answers on the
+  first poll. **Open question for review**: whether `KeyDirectory` should become synchronous instead.
+- **`KeyDirectory::publish` on the common-room adapter** checks rather than sends. The room learns a
+  daemon's key from the advertisement the discovery loop publishes on every connection, and that
+  advertisement is fixed when the loop starts (`AdvertisedSigningKey` by value, per the contract), so
+  `publish` refuses a key other than the advertised one. An advertised key that does not hash to the
+  id it is advertised under is refused by the adapter, not handed to the verifier.
+- **`AuthServiceImpl::new_signed(provider, signer, authority)`** takes a `SessionTokenAuthority` —
+  a new one-method trait in `tddy-github` — so status checks and refreshes accept exactly the peers
+  the RPC gate accepts. `DirectorySessionTokenVerifier` implements it.
+- **One `SessionTokens` per daemon** (signer + verifier), built in `runtime.rs` and handed to
+  `build_auth_entries_with`, the local socket, `local_token.LocalTokenService` and
+  `DaemonSessionHost::with_session_tokens` (split and jailed-codebase agent credentials).
+  `build_auth_entries(config, …)` remains for a daemon with no fleet (standalone directory).
+- **`tddy_github::session_token_v2` re-exports the Ed25519 key types** (`Ed25519SigningKey`,
+  `Ed25519VerifyingKey`) so a dependent can name them without depending on `ed25519-dalek`.
+  `ed25519-dalek` (approved) was added to `tddy-daemon`, which decodes advertised SPKI keys; the
+  `pem` feature of it and `rand_core`'s `getrandom` were enabled in `tddy-daemon-auth`. No crate
+  entered `Cargo.lock`.
+
+### Verification (local, scoped — whole-workspace health is CI's)
+
+`./test --no-fail-fast -p <pkg>` against a reused LiveKit testkit container
+(`LIVEKIT_TESTKIT_WS_URL`), scoped to the packages this node touches:
+
+| Packages | Passed | Failed | What failed, and why |
+|---|---:|---:|---|
+| `tddy-github`, `tddy-daemon-auth`, `tddy-daemon-livekit`, `tddy-daemon-kernel` | 409 | 2 | Two LiveKit repro suites, `signal connection timed out` — both green on rerun |
+| `tddy-session-lifecycle`, `tddy-worktree-service`, `tddy-coder` | 1,342 | 39 | 16: four unmodified sandbox suites, `sandbox RPC bridge not installed` (pre-existing, same class as the master note on `sandbox_behavior_acceptance`). 1: `action_sandbox_acceptance::sandboxed_bash_pty_action_streams_output` hung 17 min in a PTY and was killed — another worktree on an unrelated branch hung identically. 18: `tddy-remote-git-repo` not built (`./test` does not build it) — 6/6 and 12/12 once built. 4: `session_room_acceptance` read other runs' participants in a fixed-name lobby — fixed below; 22/22 on rerun, two of them after one LiveKit timeout each |
+| `tddy-daemon` | 177 | 3 | `unbundle_endpoint` — fixed below. Two `session_agent_remote_acceptance` LiveKit timeouts — green on rerun |
+
+`packages/tddy-github/tests/git_plumbing_shape.rs` passes 5/5: the four failures this changeset says
+the `#carve` base carries are not present on this tree. `verify_rejects_a_token_with_a_tampered_signature`:
+**100/100** consecutive runs. `cargo clippy --all-targets -- -D warnings` is clean on all seven
+touched crates; `cargo build -p tddy-daemon -p tddy-coder` is clean.
+
+**Test changes beyond the migrations** — `session_room_acceptance` names its lobby afresh per
+fixture, and the three `tddy-daemon` cross-host suites name their common room afresh per run
+(requested by the developer): a fixed room shared a LiveKit server with every other checkout running
+the same suites. `unbundle_endpoint`'s closed module list admits `common_room_key_directory.rs`, with
+the reason beside it — the adapter can live in no other crate.
+
+### Package documentation deltas — to apply at `/wrap-context-docs`
+
+`packages/*/docs/` is not edited directly (CLAUDE.md). Each passage below is now false:
+
+- `packages/tddy-daemon-auth/docs/auth-service.md` § *One secret signs two things* (≈ line 35) —
+  replace with the rule in this crate's README § *One key signs one thing*; the neighbour link at
+  ≈ line 125 ("the other half of the one shared secret") and the `token_service_acceptance.rs` row
+  (≈ line 111) no longer describe a shared signer. Add `signing_key.rs` (`DaemonSigningKey`,
+  `KeyDirectory`, `DirectorySessionTokenVerifier`, `SessionTokens`, `load_signing_key`) and
+  `per_daemon_signing_identity_acceptance.rs` / `auth_without_livekit_acceptance.rs`.
+- `packages/tddy-daemon-livekit/docs/livekit-service.md` ≈ lines 84–85 — "the same secret that signs
+  session tokens"; add `AdvertisedSigningKey`, `peer_signing_public_key`,
+  `CommonRoomPeerRegistry::signing_public_key_for`.
+- `packages/tddy-desktop/docs/config-resolution-and-install.md` ≈ line 41 — "`livekit.api_secret` is
+  the only source of the token signer": an identity is now `github:` + `users:`.
+- `packages/tddy-worktree-service/docs/remote-git-service.md` ≈ line 74 — `LIVEKIT_API_SECRET` "signs
+  session tokens".
+- `packages/tddy-daemon/docs/daemon-endpoint.md` — add `common_room_key_directory` and the signing
+  identity's place in `runtime::build`.
+- Feature docs the PRD replaces at wrap: `docs/ft/daemon/session-auth.md` (lines 17, 98–99),
+  `docs/ft/daemon/auth-livekit-services.md` § *One secret signs two things*,
+  `docs/ft/daemon/daemon-settings.md` line 59, `docs/ft/daemon/livekit-peer-discovery.md`
+  § *Trust and security*.
 
 ## TODO
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Publish the draft-PR contract (owned surface + failing tests) — wave 2
-- [ ] M1 — `v2` token format + flaky helper
-- [ ] M2 — keypair and at-rest posture
-- [ ] M3 — port and adapter
-- [ ] M4 — rewire the four signer construction sites
-- [ ] M5 — migrate the acceptance suites
-- [ ] M6 — config template and docs
-- [ ] Package documentation for the six affected packages
+- [x] Publish the draft-PR contract (owned surface + failing tests) — wave 2
+- [x] M1 — `v2` token format + flaky helper
+- [x] M2 — keypair and at-rest posture
+- [x] M3 — port and adapter
+- [x] M4 — rewire the signer construction sites (six, not four)
+- [x] M5 — migrate the acceptance suites
+- [x] M6 — config template and docs
+- [ ] Package documentation — READMEs done; apply the `packages/*/docs/` deltas below at wrap
+- [ ] CI green (`scripts/ci-status.sh --watch`) — whole-workspace health is CI's to report
 - [ ] `/wrap-context-docs` — deletes the two ✅ RESOLVED HERE backlog entries named above
