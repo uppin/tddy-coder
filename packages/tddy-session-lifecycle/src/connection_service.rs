@@ -183,10 +183,10 @@ pub struct DaemonSessionHost {
     /// subscribes to, and shared across clones so the seed a listing paid for is not re-read by the
     /// next one.
     session_agent_inference: Arc<crate::session_agent_inference::SessionAgentInferenceStore>,
-    /// GitHub access tokens retained at web login, keyed by GitHub login — the credential the
-    /// PR-status reads act with. `None` (no `auth_storage` configured) means a real login's PR
-    /// status reads as *unavailable*, never as "no PR".
-    github_token_store: Option<Arc<dyn tddy_github::token_store::GitHubTokenStore>>,
+    /// Each operator's open credential vault, where the GitHub access token their login granted is
+    /// sealed — the credential the PR-status reads act with. `None` (no `auth_storage` configured)
+    /// means a real login's PR status reads as *unavailable*, never as "no PR".
+    credential_vaults: Option<Arc<tddy_daemon_auth::SessionVaults>>,
     /// This daemon's session-token signer and the verifier for every daemon's tokens — the same
     /// value `tddy_daemon_auth::build_auth_entries_with` built the RPC gate from. What mints an
     /// agent's own credential for a split or jailed-codebase session. `None` means this daemon

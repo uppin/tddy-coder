@@ -1022,8 +1022,8 @@ pub async fn build(
         if let Some(ref tracker) = idle_tracker {
             connection_impl = connection_impl.with_idle_tracker(tracker.clone());
         }
-        if let Some(store) = auth_result.github_token_store.clone() {
-            connection_impl = connection_impl.with_github_token_store(store);
+        if let Some(vaults) = auth_result.credential_vaults.clone() {
+            connection_impl = connection_impl.with_credential_vaults(vaults);
         }
         // Share one instance across transports: the LiveKit/HTTP RpcService server and the
         // local Unix-domain-socket tonic server both reference the same Arc, so a session

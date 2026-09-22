@@ -47,9 +47,9 @@ tddy_data_dir: "__TDDY_DATA_DIR__"
 
 # Where this daemon keeps its auth state: the Ed25519 key it signs session tokens with
 # (signing_key.pem, mode 0600, generated on first boot and reused on every boot after — deleting it
-# ends every signed-in session) and each GitHub login's retained access token (github-tokens.json,
-# mode 0600). The daemon REFUSES TO START when this is set and not writable, because a failed token
-# write would fail every login — ./install --desktop creates it mode 0700, and the daemon warns at
+# ends every signed-in session) and each GitHub login's retained access token, sealed in that user's
+# own credential vault (credentials-<hex login>.vault, mode 0600). The daemon REFUSES TO START when
+# this is set and not writable, because a failed credential write would fail every login — ./install --desktop creates it mode 0700, and the daemon warns at
 # startup if it has since been opened wider.
 auth_storage: "__AUTH_STORAGE_DIR__/auth"
 

@@ -44,3 +44,59 @@ pub fn pr_lookup_for_caller(stub_mode: bool, stored_token: Option<&str>) -> PrLo
         ),
     }
 }
+
+/// The GitHub access token retained for `login`, read from their open credential vault.
+///
+/// `Ok(None)` is "nothing is retained" — no `auth_storage`, or no vault for this login — which
+/// [`pr_lookup_for_caller`] turns into its own *sign in again* reason. `Err(reason)` is a vault that
+/// exists but cannot be read right now, carrying an operator-facing reason that names the remedy:
+///
+/// - **not open yet** — this daemon restarted since the login, and nothing has presented the
+///   browser's unlock key since. The remedy is the next session refresh, *not* a new login, so the
+///   reason says exactly that;
+/// - **open, but unreadable** — the vault was replaced or altered under the session. Logged with
+///   its server-side detail; the reason carries none of it.
+pub fn retained_github_token(
+    vaults: Option<&tddy_credentials::SessionVaults>,
+    login: &str,
+) -> Result<Option<String>, String> {
+    use tddy_credentials::{AccountId, ProviderId, VaultError};
+
+    let Some(vaults) = vaults else {
+        return Ok(None);
+    };
+    let Some(vault) = vaults.get(login) else {
+        if vaults.path_for(login).exists() {
+            log::info!(
+                target: "tddy_daemon::github_pr_credentials",
+                "the credential vault of '{login}' is not open on this daemon yet; it reopens at \
+                 that session's next refresh"
+            );
+            return Err(
+                "this daemon restarted since you signed in; your stored GitHub credential is \
+                 unlocked again on your next session refresh"
+                    .to_string(),
+            );
+        }
+        return Ok(None);
+    };
+    vault
+        .get(
+            &ProviderId::new(tddy_github::GITHUB_PROVIDER),
+            &AccountId::new(login),
+        )
+        .map(|record| record.map(|record| record.secret))
+        .map_err(|e| {
+            log::warn!(
+                target: "tddy_daemon::github_pr_credentials",
+                "the credential vault of '{login}' could not be read: {e}"
+            );
+            match e {
+                VaultError::Io(_) => {
+                    "the stored GitHub credential could not be read — sign in to GitHub again"
+                        .to_string()
+                }
+                refusal => format!("{refusal} — sign in to GitHub again"),
+            }
+        })
+}

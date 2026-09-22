@@ -96,6 +96,9 @@ impl DaemonRpc {
                 "RefreshSession",
                 RefreshSessionRequest {
                     refresh_token: refresh_token.to_string(),
+                    // A tool is not a browser session lineage: it was handed no vault unlock key,
+                    // so it has none to present, and its refresh reopens no credential vault.
+                    vault_unlock_key: String::new(),
                 },
             )
             .await?;

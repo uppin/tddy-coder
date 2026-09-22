@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tddy_github::token_store::GitHubTokenStore;
+use tddy_credentials::SessionVaults;
 use tddy_github::{
     AuthServiceImpl, GitHubOAuthProvider, RealGitHubProvider, StubGitHubProvider, TokenKind,
 };
@@ -28,13 +28,14 @@ use crate::signing_key::{
 };
 
 /// Result of building auth: RPC entries, a resolver for session token -> GitHub login, and the
-/// GitHub access tokens logins granted (the credential `ConnectionService` reads PRs with).
+/// credential vaults logins open (where `ConnectionService` reads each operator's GitHub token).
 pub struct AuthBuildResult {
     pub entries: Vec<ServiceEntry>,
     pub user_resolver: Option<SessionUserResolver>,
     /// `Some` when `auth_storage` is configured. Shared with `DaemonSessionHost`, which reads
-    /// the caller's token from it; `None` leaves PR status *unavailable* for a real login.
-    pub github_token_store: Option<Arc<dyn GitHubTokenStore>>,
+    /// the caller's token from their open vault; `None` leaves PR status *unavailable* for a real
+    /// login.
+    pub credential_vaults: Option<Arc<SessionVaults>>,
     /// The signer and verifier every entry above was built with — `Some` exactly when
     /// `user_resolver` is. Handed back so the rest of the daemon mints with the same key the
     /// resolver trusts.
@@ -111,7 +112,7 @@ impl AuthBuildResult {
         Self {
             entries: vec![],
             user_resolver: None,
-            github_token_store: None,
+            credential_vaults: None,
             session_tokens: None,
         }
     }
@@ -146,8 +147,8 @@ pub fn build_auth_entries(
 ///
 /// Signed tokens are stateless, so no session state is persisted.
 ///
-/// Fails when a configured `auth_storage` cannot hold a token file. Retention is a hard login
-/// dependency now (a failed `put` fails the exchange, PRD D13), so an unwritable path breaks *every*
+/// Fails when a configured `auth_storage` cannot hold a credential vault. Retention is a hard login
+/// dependency (a failed `put` fails the exchange, PRD D13), so an unwritable path breaks *every*
 /// login rather than merely degrading PR status — and `install` only creates and chowns the parent
 /// `/var/lib/tddy` on the root/systemd path, so it is a reachable misconfiguration.
 pub fn build_auth_entries_with(
@@ -161,22 +162,22 @@ pub fn build_auth_entries_with(
         None => return Ok(AuthBuildResult::unauthenticated()),
     };
 
-    // Where a real login's GitHub access token is retained, so the daemon can later read that
-    // operator's PRs. No `auth_storage` means no retention — PR status then reads as *unavailable*
-    // rather than as "no PR" (PR-stack UX recovery, D7/D8).
+    // Where each operator's credential vault lives — the GitHub access token a real login granted,
+    // sealed under a key that login derives, so the daemon can later read that operator's PRs. No
+    // `auth_storage` means no retention — PR status then reads as *unavailable* rather than as "no
+    // PR" (PR-stack UX recovery, D7/D8).
     //
     // A configured path is probed before it is trusted: created, written to, and the probe removed.
-    // Starting anyway and letting the store fail later is not an option — every login would then
+    // Starting anyway and letting the vault fail later is not an option — every login would then
     // fail with an internal error, one operator at a time, for a fault that is entirely visible at
     // boot. The probe runs for a stub provider too: a stub retains nothing, but the path the
     // operator configured is unusable either way, and skipping the check for one provider kind is
     // exactly the sort of quiet degradation this replaces.
-    let github_token_store: Option<Arc<dyn GitHubTokenStore>> = match config.auth_storage.as_ref() {
+    let credential_vaults = match config.auth_storage.as_ref() {
         Some(dir) => {
-            let store = crate::github_token_store::FileGitHubTokenStore::new(dir);
-            store.probe_writable().map_err(|e| {
+            probe_writable(dir).map_err(|e| {
                 anyhow::anyhow!(
-                    "config.auth_storage ({}) cannot hold GitHub access tokens: {e}. \
+                    "config.auth_storage ({}) cannot hold credential vaults: {e}. \
                      Every GitHub login fails until it is writable by the daemon user.",
                     dir.display()
                 )
@@ -186,7 +187,7 @@ pub fn build_auth_entries_with(
             if let Some(warning) = auth_storage_looser_than_owner_only(dir) {
                 log::warn!(target: "tddy_daemon::auth", "{warning}");
             }
-            Some(Arc::new(store) as Arc<dyn GitHubTokenStore>)
+            Some(Arc::new(SessionVaults::new(dir)))
         }
         None => None,
     };
@@ -204,7 +205,7 @@ pub fn build_auth_entries_with(
             if let Some(ref codes) = github.stub_codes {
                 register_stub_codes(&stub, codes);
             }
-            auth_service_entry(stub, tokens, github_token_store.clone())
+            auth_service_entry(stub, tokens, credential_vaults.clone())
         }
         // Two configurations, neither a fallback for the other. With a secret this is a
         // confidential client and serves the redirect flow exactly as it always has. Without one
@@ -214,12 +215,12 @@ pub fn build_auth_entries_with(
         Some(GitHubProviderKind::Confidential { client_id, secret }) => auth_service_entry(
             RealGitHubProvider::new(client_id, secret, &redirect_uri()),
             tokens,
-            github_token_store.clone(),
+            credential_vaults.clone(),
         ),
         Some(GitHubProviderKind::Public { client_id }) => auth_service_entry(
             RealGitHubProvider::new_public(client_id, &redirect_uri()),
             tokens,
-            github_token_store.clone(),
+            credential_vaults.clone(),
         ),
         None => return Ok(AuthBuildResult::unauthenticated()),
     };
@@ -249,7 +250,7 @@ pub fn build_auth_entries_with(
     Ok(AuthBuildResult {
         entries: vec![auth_entry, livekit_token_entry],
         user_resolver: Some(user_resolver),
-        github_token_store,
+        credential_vaults,
         session_tokens: Some(tokens.clone()),
     })
 }
@@ -546,26 +547,67 @@ fn register_stub_codes(stub: &StubGitHubProvider, codes: &str) {
 /// Wrap an OAuth provider in an `auth.AuthService` RPC entry that mints with this daemon's key and
 /// verifies presented tokens through the same verifier the RPC gate uses.
 ///
-/// `token_store`, when present, retains each real login's GitHub access token. A stub provider
-/// stores nothing regardless — its token is synthetic (PRD D12).
+/// `credential_vaults`, when present, is where each real login's GitHub access token is sealed. A
+/// stub provider stores nothing regardless — its token is synthetic (PRD D12).
 fn auth_service_entry<P: GitHubOAuthProvider>(
     provider: P,
     tokens: &SessionTokens,
-    token_store: Option<Arc<dyn GitHubTokenStore>>,
+    credential_vaults: Option<Arc<SessionVaults>>,
 ) -> ServiceEntry {
     let service = AuthServiceImpl::new_signed(
         provider,
         tokens.signer().clone(),
         Arc::clone(tokens.verifier()) as Arc<dyn tddy_github::SessionTokenAuthority>,
     );
-    let server = AuthServiceServer::new(match token_store {
-        Some(store) => service.with_token_store(store),
+    let server = AuthServiceServer::new(match credential_vaults {
+        Some(vaults) => service.with_credential_vaults(vaults),
         None => service,
     });
     ServiceEntry {
         name: "auth.AuthService",
         service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
     }
+}
+
+/// Basename of the file [`probe_writable`] creates and removes.
+const PROBE_FILE: &str = "credentials.probe";
+
+/// Owner-only: the directory holds every operator's credential vault.
+const OWNER_ONLY_DIR: u32 = 0o700;
+
+/// Create the `auth_storage` directory and prove a file can actually be written in it, removing
+/// the probe afterwards.
+///
+/// Called once at daemon startup. An unwritable `auth_storage` fails *every* real login (a failed
+/// retention fails the login, PRD D13), so it has to be surfaced at boot rather than to the first
+/// operator who tries to sign in.
+fn probe_writable(dir: &std::path::Path) -> Result<(), String> {
+    ensure_owner_only_dir(dir)?;
+    let probe = dir.join(PROBE_FILE);
+    tddy_core::atomic_file::write_atomic_with_mode(&probe, b"", 0o600)
+        .map_err(|e| format!("writing {}: {e}", probe.display()))?;
+    std::fs::remove_file(&probe).map_err(|e| format!("removing {}: {e}", probe.display()))
+}
+
+/// Create `dir` and its parents, owner-only from the moment they exist.
+///
+/// The mode is given to the *creation* rather than applied afterwards, for the same reason
+/// [`tddy_core::atomic_file`] passes it to `open`: a `create_dir_all` followed by `set_permissions`
+/// leaves a window in which the directory is listable at the process umask. A directory that
+/// already exists therefore keeps the mode it carries — the daemon creates the store's home, it
+/// does not re-impose a mode on one an operator has already set.
+fn ensure_owner_only_dir(dir: &std::path::Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(OWNER_ONLY_DIR)
+            .create(dir)
+            .map_err(|e| format!("creating {}: {e}", dir.display()))
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))
 }
 
 #[cfg(test)]
@@ -741,20 +783,27 @@ mod tests {
     // -------------------------------------------------------------------------
 
     #[test]
-    fn retains_tokens_in_the_configured_auth_storage_once_it_probes_writable() {
+    fn keeps_credential_vaults_in_the_configured_auth_storage_once_it_probes_writable() {
         // Given `auth_storage` at a path the daemon may create
         let storage = tempfile::tempdir().unwrap();
-        let (config, _dir) = a_config_storing_tokens_in(&storage.path().join("auth"));
+        let auth_storage = storage.path().join("auth");
+        let (config, _dir) = a_config_storing_tokens_in(&auth_storage);
 
         // When auth is wired
-        let store = build_auth_entries(&config, "127.0.0.1", 0)
+        let vaults = build_auth_entries(&config, "127.0.0.1", 0)
             .expect("a writable auth_storage should let the daemon start")
-            .github_token_store
-            .expect("a configured auth_storage should produce a token store");
-        store.put("operator", "gho_granted").unwrap();
+            .credential_vaults
+            .expect("a configured auth_storage should produce the credential vaults");
 
-        // Then the credential a login grants is retained where the operator configured it
-        assert_eq!(store.get("operator").as_deref(), Some("gho_granted"));
+        // Then each operator's vault lives where the operator configured, and the probe left
+        // nothing of its own behind
+        assert_eq!(
+            (
+                vaults.auth_storage_dir().to_path_buf(),
+                auth_storage.join(PROBE_FILE).exists()
+            ),
+            (auth_storage, false)
+        );
     }
 
     #[test]

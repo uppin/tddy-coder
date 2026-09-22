@@ -43,21 +43,40 @@ const SLID_REFRESH = mintToken("refresh", FAR_FUTURE_EXP, "slid-refresh");
 // Fakes
 // ---------------------------------------------------------------------------
 
-function anInMemoryStorage(access: string, refresh: string): TokenStorage {
+function anInMemoryStorage(access: string, refresh: string, vaultUnlockKey: string | null = null): TokenStorage {
   let accessToken: string | null = access;
   let refreshToken: string | null = refresh;
+  let unlockKey: string | null = vaultUnlockKey;
   return {
     getAccess: () => accessToken,
     getRefresh: () => refreshToken,
-    set: (a: string, r: string) => {
+    getVaultUnlockKey: () => unlockKey,
+    set: (a: string, r: string, k: string) => {
       accessToken = a;
       refreshToken = r;
+      unlockKey = k || null;
     },
     clear: () => {
       accessToken = null;
       refreshToken = null;
+      unlockKey = null;
     },
   };
+}
+
+const PRESENTED_UNLOCK_KEY = "6f70.slot.presented";
+const ROTATED_UNLOCK_KEY = "6f70.slot.rotated";
+
+/** Backend whose `RefreshSession` rotates the vault unlock key it is presented, as the daemon does. */
+function aRotatingRefreshBackend() {
+  return anInMemoryRpcBackend().implement(AuthService, {
+    refreshSession: async (req: { refreshToken?: string; vaultUnlockKey?: string }) => ({
+      sessionToken: REFRESHED_ACCESS,
+      refreshToken: SLID_REFRESH,
+      vaultUnlockKey: req.vaultUnlockKey === PRESENTED_UNLOCK_KEY ? ROTATED_UNLOCK_KEY : "",
+      user: undefined,
+    }),
+  });
 }
 
 /** Backend whose `RefreshSession` mints a fresh pair for a valid refresh token, else `Unauthenticated`. */
@@ -174,6 +193,35 @@ describe("createSessionTokenStore", () => {
     expect(storage.getAccess()).toBe(null);
     expect(storage.getRefresh()).toBe(null);
     expect(loggedOut).toBe(1);
+  });
+
+  it("presents the vault unlock key on refresh and keeps the rotated one in its place", async () => {
+    // Given — a lineage holding the unlock key its last refresh returned
+    const storage = anInMemoryStorage(EXPIRED_ACCESS, VALID_REFRESH, PRESENTED_UNLOCK_KEY);
+    const { store, backend } = aStore({ storage, backend: aRotatingRefreshBackend() });
+
+    // When — the token is refreshed
+    await store.ensureFreshAccessToken();
+
+    // Then — the daemon was handed the key, and the rotated one replaced it: the presented one
+    // opens nothing any more
+    expect(
+      backend.callsTo(AuthService.method.refreshSession).map((request) => request.vaultUnlockKey),
+    ).toEqual([PRESENTED_UNLOCK_KEY]);
+    expect(storage.getVaultUnlockKey()).toBe(ROTATED_UNLOCK_KEY);
+  });
+
+  it("refreshes on demand even while the access token is still fresh", async () => {
+    // Given — a fresh access token, as a page load after a daemon restart would find it
+    const storage = anInMemoryStorage(FRESH_STORED_ACCESS, VALID_REFRESH, PRESENTED_UNLOCK_KEY);
+    const { store, backend } = aStore({ storage, backend: aRotatingRefreshBackend() });
+
+    // When — the page asks for a refresh now, to reopen the operator's credentials
+    await store.refreshNow();
+
+    // Then — exactly one refresh ran, carrying the key
+    expect(backend.callsTo(AuthService.method.refreshSession)).toHaveLength(1);
+    expect(storage.getVaultUnlockKey()).toBe(ROTATED_UNLOCK_KEY);
   });
 
   it("keeps both tokens and does not report logged-out when a refresh fails transiently", async () => {

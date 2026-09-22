@@ -17,6 +17,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# Where a login's GitHub token is sealed — the operator's own credential vault, opened by the login.
+tddy-credentials = { path = "../tddy-credentials" }
 tddy-core = { path = "../tddy-core" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }

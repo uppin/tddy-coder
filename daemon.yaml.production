@@ -25,8 +25,9 @@ listen:
 
 web_bundle_path: "__WEB_BUNDLE_PATH__"
 
-# Where each GitHub login's access token is retained (github-tokens.json, mode 0600). Must be writable
-# by the daemon user or the daemon refuses to start — see the `github:` block below.
+# Where each GitHub login's access token is retained, sealed in that user's own credential vault
+# (credentials-<hex login>.vault, mode 0600; openable only from their login). Must be writable by the
+# daemon user or the daemon refuses to start — see the `github:` block below.
 auth_storage: "__AUTH_STORAGE_DIR__/auth"
 
 # tddy-supervisor — the root process that started this daemon as an unprivileged child. This block

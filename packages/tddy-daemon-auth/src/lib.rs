@@ -32,7 +32,6 @@ pub mod auth;
 mod codex_oauth_participant_metadata;
 pub mod codex_oauth_relay;
 pub mod github_pr_credentials;
-pub mod github_token_store;
 mod local_token;
 pub mod oauth_loopback_tunnel;
 pub mod signing_key;
@@ -60,14 +59,12 @@ pub use signing_key::{
     KeyDirectory, SessionTokens, StandaloneKeyDirectory, SIGNING_KEY_FILE,
 };
 
-/// Where the daemon keeps a user's GitHub token at rest.
+/// Where the daemon keeps each user's credentials at rest: their own vault, opened by a login.
 ///
-/// The trait is `tddy-github`'s, not this crate's: `AuthServiceImpl` writes through it at the end
-/// of an OAuth exchange and `DaemonSessionHost` reads through it when it looks up an
-/// operator's PRs, so a second definition here would be a second trait two crates could not pass
-/// to one another. [`github_token_store::FileGitHubTokenStore`] is this crate's implementation of
-/// it.
-pub use tddy_github::token_store::GitHubTokenStore;
+/// The type is `tddy-credentials`', not this crate's — `AuthServiceImpl` writes through it at the
+/// end of an OAuth exchange and `DaemonSessionHost` reads through it when it looks up an
+/// operator's PRs, and neither needs to reach through this crate to do so.
+pub use tddy_credentials::SessionVaults;
 
 #[cfg(test)]
 mod tests {
