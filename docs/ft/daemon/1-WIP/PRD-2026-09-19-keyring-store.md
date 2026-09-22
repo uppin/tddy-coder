@@ -121,6 +121,35 @@ is stated here because it is easy to lose.
 > `KEK`. A rotation observed while a session can still be established is therefore survivable; only
 > a rotation that happens with no live session and no old token costs the vault.
 
+**A daemon restart does not make anybody sign in again** (added at green, by the developer's
+decision). The daemon still holds no key; the **browser** does. The data key is wrapped by more
+than one slot: the login slot above, and one **unlock slot** per browser session lineage.
+
+```
+U            = 32 random bytes, minted per login and returned as `vault_unlock_key`
+unlock KEK   = HKDF-SHA256(ikm = U, info = "tddy-credentials/v1/unlock/" || slot id || "/" || subject)
+unlock slot  = AEAD(unlock KEK, DK)       — stored in the vault; U is not
+```
+
+- **Login** returns `U` beside the refresh token (`ExchangeCodeResponse.vault_unlock_key`, and
+  `PollDeviceLoginResponse` on `COMPLETE`). A stub login returns none and creates nothing.
+- **RefreshSession** takes `U` back. When the vault is not open — the daemon restarted — the daemon
+  opens it through that slot and registers it; either way it **rotates** the slot and returns `U'`,
+  so the presented key opens nothing afterwards. A key that does not open its slot is logged; the
+  refresh still succeeds with an empty key, and PR status stays unavailable until the next login.
+- **Logout** takes `U` and removes that lineage's slot.
+- At most **16** slots per vault; the least recently used is evicted.
+- Between a restart and the first refresh, PR status is *unavailable* with a reason naming the next
+  session refresh — never "sign in again". The web client refreshes on page load when it holds `U`.
+
+**The trade-off, stated.** `U` crosses the plain-http LAN origin and sits in `localStorage` beside
+the refresh token. It is a wrap key, not a stored credential: alone it opens nothing, and it is
+useful only together with the vault file on the daemon's disk. Rotation on every refresh and
+removal on logout bound how long a copied `U` stays useful.
+
+**One vault per user.** `auth_storage/credentials-<hex login>.vault` — a vault opens for one subject
+only, so one shared file would lock out every user after the first.
+
 **`GitHubTokenStore` and `FileGitHubTokenStore` are deleted.** The one external reader,
 `svc_pr_status_for_caller.rs:93`, moves to the new store's read path. `github-tokens.json` is not
 read, not migrated, and not renamed: on first login after this change the vault is created and the
@@ -156,6 +185,8 @@ the same half-login by a different route.
 | `tddy-daemon-auth` | `github_token_store.rs` **deleted**; `auth.rs:83-152` constructs the vault; the half-login rule extended to "cannot open" |
 | `tddy-daemon` | `runtime.rs:882` — the store's construction and injection |
 | `tddy-session-lifecycle` | `svc_pr_status_for_caller.rs:93` — the one external read, migrated |
+| `tddy-service` | `auth.proto` — additive `vault_unlock_key` fields on five messages, no new RPC |
+| `tddy-web` | the unlock key stored beside the refresh token, presented on refresh, sent on logout |
 
 **New external dependencies: none required.** `chacha20poly1305 0.10`, `argon2 0.5`, `sha2 0.10`,
 `hmac 0.12`, `subtle 2.6` and `rand` are already in the workspace, and HKDF-Extract/Expand is a
@@ -221,6 +252,11 @@ claimed by 2/9). No other package this node touches is unanalyzed.
       **gone** — no fallback read
 - [ ] PR-stack live status behaves identically: `Empty`, `Unavailable(reason)` and `Perform(token)`
       resolve exactly as before
+- [ ] After a daemon restart, a session refresh presenting the unlock key reopens the vault and PR
+      lookups perform with the stored token — **with no new login**
+- [ ] The unlock key rotates on every refresh; the presented one no longer opens its slot
+- [ ] Logout removes the lineage's unlock slot
+- [ ] The vault file never contains an unlock key; a stub login is handed none
 
 ## References
 
