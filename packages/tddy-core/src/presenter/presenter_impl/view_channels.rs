@@ -1,6 +1,11 @@
 //! The surfaces outside the presenter: the views it broadcasts to, the intents they send back,
 //! and the shared critical state they read. [`Presenter::handle_intent`] dispatches each intent to
 //! the partition that owns the state it changes.
+//!
+//! It also holds the inbox intents — `queue_prompt`, `edit_inbox_item`, `delete_inbox_item`.
+//! They are view-originated intents rather than workflow logic, and the private helpers they call
+//! (`log_activity`, `broadcast`) live in the parent, so any child can host them. `workflow_run.rs`,
+//! the other candidate, is at 469 production lines and cannot absorb them under the 500 budget.
 
 use super::Presenter;
 use crate::presenter::activity_prompt_log;
@@ -40,7 +45,7 @@ impl Presenter {
             UserIntent::RejectSessionDocument => self.reject_session_document(),
             UserIntent::RefineSessionDocument => self.refine_session_document(),
             UserIntent::DismissViewer => self.dismiss_viewer(),
-            UserIntent::AnswerSelect(idx) => self.answer_select(idx),
+            UserIntent::AnswerSelect(idx) => self.route_select_answer(idx),
             UserIntent::AnswerOther(text) => self.answer_other(text),
             UserIntent::AnswerMultiSelect(indices, other) => {
                 self.answer_multi_select(indices, other)

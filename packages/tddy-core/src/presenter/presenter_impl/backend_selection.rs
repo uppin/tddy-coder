@@ -169,8 +169,9 @@ impl Presenter {
         active
     }
 
-    /// Route a selection: to a pending backend or recipe pick, else to the current question.
-    pub(super) fn answer_select(&mut self, idx: usize) {
+    /// Route a selected option: to the pending backend selection, else to the pending `/recipe`
+    /// slash selection, else to the current question via `answer_selected_option`.
+    pub(super) fn route_select_answer(&mut self, idx: usize) {
         if self.backend.selection_pending {
             self.handle_backend_selection_answer(idx);
             return;

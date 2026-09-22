@@ -76,9 +76,9 @@ mod view_channels;
 mod wiring;
 mod workflow_run;
 
-/// Private helpers every partition calls. They stay in the parent because a private method
-/// declared here is visible to each child module, while one declared in a child is visible only
-/// to that child.
+/// Private helpers called from more than one partition. They stay in the parent because a private
+/// method declared here is visible to each child module, while one declared in a child is visible
+/// only to that child.
 impl Presenter {
     fn broadcast(&self, event: PresenterEvent) {
         if let Some(ref tx) = self.views.broadcast_tx {

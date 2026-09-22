@@ -1,5 +1,7 @@
 //! What the session records about the agent: its own tool calls, persisted and broadcast, and
-//! the agent-output lines folded into the activity log.
+//! the agent-output lines folded into the activity log. Also the progress and worktree handlers
+//! `poll_workflow` dispatches here — `on_progress` and `on_worktree_switched` — which keep the
+//! status bar and the worktree display current.
 
 use std::path::PathBuf;
 

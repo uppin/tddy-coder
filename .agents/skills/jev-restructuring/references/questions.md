@@ -17,7 +17,8 @@ that shifted.
 | Lines, fields, methods, nesting, params, complexity, CRAP | `tddy-tools analyze`, a parser | **Never Jev** |
 | "a reader must trace several branches", "the arms carry substantial logic", "no decisions to make" | Jev | Never a regex |
 
-This repo already has the scar that proves the first row. `god-object-presenter.md` records an
+This repo already has the scar that proves the first row. The `god-object-presenter` record (closed
+by #495; the note survives in `docs/dev/changesets/2026-09-22-carve-presenter-split.md`) recorded an
 earlier pass that reported **44 fields and 79 methods** for a struct with **37 and 46** — the
 fields were eyeballed and the `grep -c` ran over the test module. Jev counts worse than that
 pass did. Jaggedness #2 is not a style preference here.

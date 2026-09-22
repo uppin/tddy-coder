@@ -81,23 +81,32 @@ fn every_partition_module_carries_an_inherent_impl() {
     );
 }
 
-/// AC2 — the parent keeps the struct, its three state accessors and the module declarations.
+/// The production-line budget for the parent once the partition has taken its methods.
+const PARENT_BUDGET: usize = 250;
+
+/// AC2 — the parent shrinks under [`PARENT_BUDGET`] production lines but still declares the struct.
+///
+/// Size alone would pass a parent that handed the struct itself to a child module; the struct
+/// check is what makes the shrinkage mean "the methods left", not "everything left".
 #[test]
-fn the_parent_keeps_only_the_struct_and_its_accessors() {
+fn the_parent_shrinks_under_budget_but_keeps_the_struct() {
     // Given the parent after the partition
     let text =
         std::fs::read_to_string(src("presenter/presenter_impl.rs")).expect("presenter_impl.rs");
-    let lines = production(&text).lines().count();
+    let parent = production(&text);
 
-    // Then it is small
+    // When its production lines are counted
+    let lines = parent.lines().count();
+
+    // Then it is under budget
     assert!(
-        lines < 250,
-        "`presenter_impl.rs` is still {lines} production lines, so the partition did not happen"
+        lines < PARENT_BUDGET,
+        "`presenter_impl.rs` is still {lines} production lines (budget {PARENT_BUDGET}), so the partition did not happen"
     );
 
     // And it still declares the struct the partition is about
     assert!(
-        production(&text).contains("pub struct Presenter"),
+        declares_struct(&parent, "Presenter"),
         "the struct left the parent; only its methods were meant to"
     );
 }
@@ -177,16 +186,78 @@ fn pub_declared_method(line: &str) -> Option<&str> {
     after_fn.split(['(', '<']).next()
 }
 
-/// The parent and every partition module, each by the name it is reported under.
-fn presenter_impl_sources() -> Vec<(&'static str, PathBuf)> {
-    std::iter::once(("presenter_impl", src("presenter/presenter_impl.rs")))
-        .chain(PARTITION.into_iter().map(|module| {
-            (
-                module,
-                src(&format!("presenter/presenter_impl/{module}.rs")),
-            )
-        }))
+/// Where the partition modules live, relative to `src/`.
+const PARTITION_DIR: &str = "presenter/presenter_impl";
+
+/// The production text of the parent and of **every** `.rs` file under [`PARTITION_DIR`], each by
+/// the name it is reported under (`presenter_impl` for the parent, the file stem for a child),
+/// children sorted by path so reports are stable.
+///
+/// The directory is scanned rather than [`PARTITION`] listed, so a method moved into a module the
+/// partition does not name is checked all the same.
+fn presenter_impl_sources() -> Vec<(String, String)> {
+    let mut children: Vec<PathBuf> = std::fs::read_dir(src(PARTITION_DIR))
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+                .collect()
+        })
+        .unwrap_or_default();
+    children.sort();
+
+    std::iter::once((
+        "presenter_impl".to_string(),
+        src("presenter/presenter_impl.rs"),
+    ))
+    .chain(children.into_iter().map(|path| {
+        let stem = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        (stem, path)
+    }))
+    .map(|(name, path)| {
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("{} is unreadable: {err}", path.display()));
+        (name, production(&text))
+    })
+    .collect()
+}
+
+/// The [`PARTITION`] modules that have no file under [`PARTITION_DIR`].
+fn missing_partition_modules() -> Vec<&'static str> {
+    PARTITION
+        .into_iter()
+        .filter(|module| !src(&format!("{PARTITION_DIR}/{module}.rs")).exists())
         .collect()
+}
+
+/// Whether `text` declares `pub struct <name>` — the whole name, so `PresenterMoved` does not count.
+fn declares_struct(text: &str, name: &str) -> bool {
+    let needle = format!("pub struct {name}");
+    text.match_indices(&needle).any(|(at, _)| {
+        !text[at + needle.len()..]
+            .chars()
+            .next()
+            .is_some_and(|after| after.is_alphanumeric() || after == '_')
+    })
+}
+
+/// Whether `text` declares a method named exactly `name`: `fn <name>` not preceded by an
+/// identifier character and followed by `(` or `<`, so `fn collect_answers_all(` does not count
+/// for `collect_answers`.
+fn declares_method(text: &str, name: &str) -> bool {
+    let needle = format!("fn {name}");
+    text.match_indices(&needle).any(|(at, _)| {
+        let bounded_before = text[..at]
+            .chars()
+            .next_back()
+            .is_none_or(|before| !(before.is_alphanumeric() || before == '_'));
+        let bounded_after = matches!(text[at + needle.len()..].chars().next(), Some('(' | '<'));
+        bounded_before && bounded_after
+    })
 }
 
 /// AC5 — every method that was private before the partition is still private after it.
@@ -195,26 +266,56 @@ fn presenter_impl_sources() -> Vec<(&'static str, PathBuf)> {
 /// widened the surface to buy a file split, which is a bad trade nobody asked for.
 #[test]
 fn every_method_private_before_the_partition_stays_private() {
-    // Given the parent and every module the partition must produce
+    // Given the parent and every module under `presenter_impl/`, and the partition modules absent
     let sources = presenter_impl_sources();
+    let absent = missing_partition_modules();
 
     // When each is searched for a formerly private method declared with a `pub` prefix
-    let wrong: Vec<String> = sources
-        .into_iter()
-        .flat_map(|(module, path)| match std::fs::read_to_string(&path) {
-            Err(_) => vec![format!("{module} does not exist")],
-            Ok(text) => production(&text)
-                .lines()
+    let widened: Vec<String> = sources
+        .iter()
+        .flat_map(|(module, text)| {
+            text.lines()
                 .filter_map(pub_declared_method)
                 .filter(|method| PRIVATE_TODAY.contains(method))
-                .map(|method| format!("{module} widened `{method}`"))
-                .collect(),
+                .map(move |method| format!("{module} widened `{method}`"))
         })
         .collect();
 
-    // Then every one exists and none was widened
+    // Then every partition module exists
     assert!(
-        wrong.is_empty(),
-        "a formerly private method was widened to reach it across the partition, or a module is absent: {wrong:?}"
+        absent.is_empty(),
+        "these partition modules are absent, so the privacy check cannot cover them: {absent:?}"
+    );
+
+    // And no scanned file declares a `PRIVATE_TODAY` method with any `pub` prefix
+    assert!(
+        widened.is_empty(),
+        "a formerly private method was widened to reach it across the partition: {widened:?}"
+    );
+}
+
+/// AC5 — every method that was private before the partition is still declared under its name.
+///
+/// Without this, renaming a method and then widening it would slip past the privacy check above,
+/// which only looks for the names in [`PRIVATE_TODAY`].
+#[test]
+fn every_method_private_before_the_partition_is_still_declared() {
+    // Given the parent and every module under `presenter_impl/`
+    let sources = presenter_impl_sources();
+
+    // When each formerly private method is looked for as a `fn <name>(` or `fn <name><` declaration
+    let undeclared: Vec<&str> = PRIVATE_TODAY
+        .into_iter()
+        .filter(|method| {
+            !sources
+                .iter()
+                .any(|(_, text)| declares_method(text, method))
+        })
+        .collect();
+
+    // Then each of the 27 is declared in at least one scanned file
+    assert!(
+        undeclared.is_empty(),
+        "these formerly private methods are declared nowhere in `presenter_impl`, so they were renamed or removed: {undeclared:?}"
     );
 }
