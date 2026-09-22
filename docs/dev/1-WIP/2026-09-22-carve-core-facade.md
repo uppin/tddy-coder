@@ -235,7 +235,7 @@ and one **compile-level guard** pins that the public paths consumers use still r
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset — this document
-- [ ] Failing acceptance tests + path guard
+- [x] Failing acceptance tests + path guard
 - [ ] USER REVIEW — acceptance tests
 - [ ] ⛔ Stack cascaded onto master (developer)
 - [ ] TDD Green (`/green`)
