@@ -35,9 +35,14 @@ impl ProjectRpcHandler {
     /// A handler sharing `host`'s state — the same peer source, spawn client and room slot.
     #[must_use]
     pub fn from_host(host: &DaemonSessionHost) -> Self {
-        // TODO(#carve 11): clone the host's project fields once the host exposes them.
-        let _ = host;
-        todo!("ProjectRpcHandler::from_host")
+        Self {
+            config: host.config().clone(),
+            user_resolver: host.user_resolver(),
+            tddy_data_dir: host.tddy_data_dir().to_path_buf(),
+            eligible_daemon_source: host.eligible_daemon_source(),
+            spawn_client: host.spawn_client(),
+            common_room_livekit_room: host.common_room_livekit_room(),
+        }
     }
 }
 

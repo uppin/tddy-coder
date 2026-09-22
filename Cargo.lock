@@ -12663,6 +12663,8 @@ dependencies = [
  "tddy-core",
  "tddy-git",
  "tddy-github",
+ "tddy-rpc",
+ "tddy-service",
  "tddy-workflow",
  "tempfile",
 ]
@@ -13156,6 +13158,7 @@ dependencies = [
  "tddy-lsp",
  "tddy-lsp-executor",
  "tddy-model-registry",
+ "tddy-pr-stack",
  "tddy-projects",
  "tddy-pty",
  "tddy-rpc",

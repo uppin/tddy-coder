@@ -1295,6 +1295,8 @@ mod svc_session_files_ports;
 mod svc_activity_ports;
 
 mod family_proto_bridge;
+/// The host state `tddy-daemon-rpc`'s family handlers are built from.
+mod handler_state;
 mod project_coordinate_handlers;
 mod session_coordinate_handlers;
 mod svc_catalog_ports;

@@ -143,7 +143,6 @@ async fn the_assembled_daemon_answers_every_family_on_its_local_socket() {
         SessionServiceClient::new(channel.clone())
             .list_sessions(tddy_service::proto::session::ListSessionsRequest {
                 session_token: A_TOKEN_NO_DAEMON_ISSUED.to_string(),
-                ..Default::default()
             })
             .await,
     );

@@ -45,6 +45,8 @@ tddy-bsp = { path = "../tddy-bsp" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-demo-runner = { path = "../tddy-demo-runner" }
 tddy-github = { path = "../tddy-github" }
+# Defines `PrStackHandler`, which session start names for the stack paths it serves.
+tddy-pr-stack = { path = "../tddy-pr-stack" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-workflow = { path = "../tddy-workflow" }
 tddy-livekit = { path = "../tddy-livekit" }
