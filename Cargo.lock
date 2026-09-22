@@ -12199,6 +12199,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-daemon-rpc"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "livekit",
+ "tddy-daemon-kernel",
+ "tddy-daemon-sandbox",
+ "tddy-discovery",
+ "tddy-github",
+ "tddy-host-service",
+ "tddy-model-registry",
+ "tddy-projects",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-session-lifecycle",
+ "tddy-spawn",
+ "tddy-task",
+ "tddy-tool-engine",
+ "tddy-worktree-service",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-daemon-sandbox"
 version = "0.1.0"
 dependencies = [

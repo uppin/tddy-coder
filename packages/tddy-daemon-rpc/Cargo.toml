@@ -1,0 +1,34 @@
+[package]
+name = "tddy-daemon-rpc"
+version = "0.1.0"
+edition = "2021"
+description = "The daemon's RPC-family handlers, above the session lifecycle they call into"
+
+# Sits ABOVE `tddy-session-lifecycle`: it depends on the lifecycle crate the way `tddy-daemon` does,
+# and nothing below it may depend back — not even as a dev-dependency, which would build a second
+# copy of the lifecycle crate into the tests and fail to unify its types. That one-way edge is what
+# lets these handlers reach `tddy-daemon-sandbox`, `tddy-daemon-livekit` and `tddy-daemon-kernel`
+# without closing the cycles a move into each family's domain crate would.
+
+[dependencies]
+tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
+tddy-discovery = { path = "../tddy-discovery" }
+tddy-github = { path = "../tddy-github" }
+tddy-host-service = { path = "../tddy-host-service" }
+tddy-model-registry = { path = "../tddy-model-registry" }
+tddy-projects = { path = "../tddy-projects" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-service = { path = "../tddy-service" }
+tddy-spawn = { path = "../tddy-spawn" }
+tddy-task = { path = "../tddy-task" }
+tddy-tool-engine = { path = "../tddy-tool-engine" }
+tddy-worktree-service = { path = "../tddy-worktree-service" }
+async-trait = "0.1"
+livekit = "0.7"
+tokio = { version = "1", features = ["sync"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
+tempfile = "3"
