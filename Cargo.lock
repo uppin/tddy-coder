@@ -11755,6 +11755,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-agent-skills"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
 name = "tddy-bsp"
 version = "0.1.0"
 dependencies = [
@@ -12026,8 +12035,10 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
+ "tddy-agent-skills",
  "tddy-git",
  "tddy-graph",
+ "tddy-log",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-session-store",
@@ -12611,6 +12622,20 @@ dependencies = [
  "serial_test",
  "testcontainers",
  "tokio",
+]
+
+[[package]]
+name = "tddy-log"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "libc",
+ "log",
+ "once_cell",
+ "rstest 0.24.0",
+ "serde",
+ "serde_yaml",
+ "tempfile",
 ]
 
 [[package]]

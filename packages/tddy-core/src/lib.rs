@@ -1,7 +1,9 @@
 //! Core library for tddy-coder.
 
+pub use tddy_agent_skills::*;
+pub use tddy_log::*;
+
 pub mod agent_activity;
-pub mod agent_skills;
 pub mod atomic_file;
 pub mod backend;
 pub mod base_sync;
@@ -12,9 +14,7 @@ pub mod claude_hooks;
 pub mod cursor_hooks;
 pub mod elapsed_format;
 pub mod error;
-pub mod feature_start_slash;
 pub mod git_head;
-pub mod log_backend;
 pub mod output;
 pub mod post_workflow;
 pub mod presenter;
@@ -32,7 +32,6 @@ pub mod session_participant_metadata;
 pub mod source_path;
 pub mod spawn_env;
 pub mod ssh_exec;
-pub mod stdio_safety;
 pub mod stream;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -42,14 +41,6 @@ pub mod usage_watcher;
 pub mod workflow;
 pub mod worktree;
 
-pub use agent_skills::{
-    agents_skills_scan_cache_token, compose_prompt_skill_reference,
-    compose_prompt_with_selected_skill, folder_name_matches_frontmatter_name,
-    parse_skill_frontmatter, read_skill_markdown_body_for_compose, scan_skills_at_project_root,
-    slash_menu_entries, slash_menu_items, DiscoveredSkill, InvalidSkillEntry,
-    ParsedSkillFrontmatter, SkillMdParseError, SkillScanReport, SlashMenuEntry, SlashMenuItem,
-    AGENTS_SKILLS_DIR,
-};
 pub use atomic_file::{write_atomic, write_atomic_labelled};
 pub use backend::{
     backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,
@@ -76,18 +67,6 @@ pub use claude_hooks::{build_claude_hooks_settings, HookCommandParams};
 pub use cursor_hooks::build_cursor_hooks_settings;
 pub use elapsed_format::format_elapsed_compact;
 pub use error::{BackendError, ParseError, WorkflowError};
-pub use feature_start_slash::{
-    feature_slash_menu_start_command_labels,
-    next_session_recipe_cli_name_after_start_slash_structured_workflow_complete,
-    parse_feature_start_slash_line, remainder_after_start_slash_line,
-    DEFAULT_UNSPECIFIED_WORKFLOW_RECIPE_CLI_NAME, SHIPPED_WORKFLOW_RECIPE_CLI_NAMES,
-};
-pub use log_backend::{
-    config_has_file_output, default_log_config, find_matching_policy, get_buffered_logs,
-    init_tddy_logger, init_tddy_logger_legacy, matches_selector, redirect_debug_output,
-    resolve_log_defaults, resolve_logger, take_buffered_logs, DefaultLogPolicy, LogConfig,
-    LogOutput, LogPolicy, LogRotation, LogSelector, LoggerDefinition, MatchedPolicy,
-};
 pub use post_workflow::{
     github_pr_operator_question, post_workflow_elicitation_step_order,
     post_workflow_github_pr_operator_elicitation_pending, post_workflow_pr_status_display_line,

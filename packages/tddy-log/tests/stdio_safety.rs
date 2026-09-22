@@ -1,4 +1,4 @@
-//! Red-phase unit tests for the stdio-safe core (`tddy_core::stdio_safety`).
+//! Red-phase unit tests for the stdio-safe core (`tddy_log::stdio_safety`).
 //!
 //! `--stdio` mode dedicates a process's stdin/stdout to RPC framing (via `tddy-stdio`), which has
 //! zero tolerance for stray bytes on the peer's stdout. This module is the reusable core that
@@ -7,7 +7,7 @@
 //!
 //! See docs/ft/coder/1-WIP/PRD-2026-07-01-stdio-transport-for-grpc-binaries.md (Milestone 1).
 
-use tddy_core::LogConfig;
+use tddy_log::LogConfig;
 
 fn log_config_with_default_output(output_yaml: &str) -> LogConfig {
     let yaml = format!(
@@ -29,7 +29,7 @@ fn overrides_a_stdout_log_output_to_stderr_to_keep_fd1_clean_for_stdio_rpc() {
     let mut config = log_config_with_default_output("stdout");
 
     // When enforcing stdio-safe logging
-    tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut config);
+    tddy_log::stdio_safety::enforce_stdio_safe_log_output(&mut config);
 
     // Then the logger's output is forced to stderr
     let output = &config
@@ -38,7 +38,7 @@ fn overrides_a_stdout_log_output_to_stderr_to_keep_fd1_clean_for_stdio_rpc() {
         .expect("default logger")
         .output;
     assert!(
-        matches!(output, tddy_core::LogOutput::Stderr),
+        matches!(output, tddy_log::LogOutput::Stderr),
         "expected Stderr, got {output:?}"
     );
 }
@@ -60,7 +60,7 @@ fn leaves_non_stdout_log_outputs_unchanged(#[case] output_yaml: &str) {
     );
 
     // When enforcing stdio-safe logging
-    tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut config);
+    tddy_log::stdio_safety::enforce_stdio_safe_log_output(&mut config);
 
     // Then the output is untouched
     let after = format!(
@@ -90,7 +90,7 @@ default:
     .expect("parse log config fixture");
 
     // When enforcing stdio-safe logging
-    tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut config);
+    tddy_log::stdio_safety::enforce_stdio_safe_log_output(&mut config);
 
     // Then the file output is untouched
     let output = &config
@@ -99,7 +99,7 @@ default:
         .expect("default logger")
         .output;
     assert!(
-        matches!(output, tddy_core::LogOutput::File(path) if path == std::path::Path::new("logs/debug.log")),
+        matches!(output, tddy_log::LogOutput::File(path) if path == std::path::Path::new("logs/debug.log")),
         "expected the file output to be untouched, got {output:?}"
     );
 }
@@ -124,7 +124,7 @@ default:
     .expect("parse log config fixture");
 
     // When enforcing stdio-safe logging
-    let overridden = tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut config);
+    let overridden = tddy_log::stdio_safety::enforce_stdio_safe_log_output(&mut config);
 
     // Then exactly the two stdout loggers are counted
     assert_eq!(overridden, 2);
@@ -144,7 +144,7 @@ fn redirects_a_target_file_descriptor_to_a_log_file_and_closes_its_original_dest
     let log_path = log_dir.path().join("redirected.log");
 
     // When redirecting the pipe's write end to a log file
-    tddy_core::stdio_safety::redirect_fd_to_file(write_fd, &log_path)
+    tddy_log::stdio_safety::redirect_fd_to_file(write_fd, &log_path)
         .expect("redirect_fd_to_file should succeed");
 
     // Then the pipe's original write end is gone — the read end observes EOF immediately,
@@ -184,8 +184,7 @@ fn returns_an_error_when_the_log_file_path_is_unwritable() {
         std::path::Path::new("/nonexistent-tddy-stdio-safety-test-dir/redirected.log");
 
     // When / Then — the target descriptor is never touched if the file can't be created
-    let result =
-        tddy_core::stdio_safety::redirect_fd_to_file(libc::STDOUT_FILENO, missing_dir_path);
+    let result = tddy_log::stdio_safety::redirect_fd_to_file(libc::STDOUT_FILENO, missing_dir_path);
     assert!(
         result.is_err(),
         "expected an error for an unwritable log path"
@@ -198,7 +197,7 @@ fn overrides_a_stdout_destination_hidden_inside_a_fan_out() {
     let mut config = log_config_with_default_output(r#"[stdout, { file: "logs/debug.log" }]"#);
 
     // When enforcing stdio-safe logging
-    tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut config);
+    tddy_log::stdio_safety::enforce_stdio_safe_log_output(&mut config);
 
     // Then only the stdout member moved to stderr; the file member is untouched
     let output = &config
@@ -209,10 +208,10 @@ fn overrides_a_stdout_destination_hidden_inside_a_fan_out() {
     assert!(
         matches!(
             output,
-            tddy_core::LogOutput::Many(destinations)
+            tddy_log::LogOutput::Many(destinations)
                 if matches!(destinations.as_slice(), [
-                    tddy_core::LogOutput::Stderr,
-                    tddy_core::LogOutput::File(path),
+                    tddy_log::LogOutput::Stderr,
+                    tddy_log::LogOutput::File(path),
                 ] if path == std::path::Path::new("logs/debug.log"))
         ),
         "expected [stderr, file], got {output:?}"
@@ -225,7 +224,7 @@ fn collapses_a_fan_out_whose_destinations_are_identical_after_the_override() {
     let mut config = log_config_with_default_output("[stdout, stderr]");
 
     // When enforcing stdio-safe logging
-    tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut config);
+    tddy_log::stdio_safety::enforce_stdio_safe_log_output(&mut config);
 
     // Then it is a single stderr destination, so no line is written to stderr twice
     let output = &config
@@ -234,7 +233,7 @@ fn collapses_a_fan_out_whose_destinations_are_identical_after_the_override() {
         .expect("default logger")
         .output;
     assert!(
-        matches!(output, tddy_core::LogOutput::Stderr),
+        matches!(output, tddy_log::LogOutput::Stderr),
         "expected Stderr, got {output:?}"
     );
 }
@@ -257,7 +256,7 @@ default:
     .expect("parse log config fixture");
 
     // When enforcing stdio-safe logging
-    let overridden = tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut config);
+    let overridden = tddy_log::stdio_safety::enforce_stdio_safe_log_output(&mut config);
 
     // Then the fan-out logger counts once
     assert_eq!(overridden, 1);
@@ -277,7 +276,7 @@ fn leaves_a_fan_out_without_stdout_unchanged() {
     );
 
     // When enforcing stdio-safe logging
-    let overridden = tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut config);
+    let overridden = tddy_log::stdio_safety::enforce_stdio_safe_log_output(&mut config);
 
     // Then nothing is touched and nothing is counted
     let after = format!(

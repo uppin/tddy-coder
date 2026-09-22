@@ -1,0 +1,10 @@
+[package]
+name = "tddy-agent-skills"
+version = "0.1.0"
+edition = "2021"
+description = "Agent skills discovered under a project, composed into prompts, and the feature-start slash command"
+
+[dependencies]
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
