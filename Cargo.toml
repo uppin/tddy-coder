@@ -43,6 +43,7 @@ members = [
     "packages/tddy-worktree-service",
     "packages/tddy-model-registry",
     "packages/tddy-telegram",
+    "packages/tddy-telegram-control",
     "packages/tddy-screen-sharing",
     "packages/tddy-daemon-sandbox",
     "packages/tddy-spawn",

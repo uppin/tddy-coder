@@ -5,7 +5,7 @@
 **Detected:** 2026-09-15 by structural audit
 **Metrics:** **3,980 production lines** (4,476 total) · one `impl` block spanning **1272–3906** · **57 methods** · budget 500
 **Restructure:** required — `extract_module --to_file` × 7
-**Status:** Open — claimed by #494, in flight
+**Status:** Closed by #494 — delete at wrap, once this final measurement is in the change-history entry
 **Claimed by:** #494 — `#carve` 8/10 `telegram` · draft · `feature/carve/telegram`
 **Lands after:** #488, #489, #490, #498, #491, #492, #493
 
@@ -14,6 +14,7 @@
 | Run | Production lines | Impl span | Methods | Note |
 |---|---|---|---|---|
 | 2026-09-15 | 3,980 | 1272–3906 | 57 | first detection |
+| 2026-09-22 | 736 (largest module) | five `impl` blocks | 57 | closed by #494: `packages/tddy-telegram-control/src/telegram_session_control/` — `callbacks.rs` 736, `session_start.rs` 711, `pickers.rs` 705, `mod.rs` 539, `chaining_and_listing.rs` 518, `elicitation.rs` 456, `workflow_spawn.rs` 375 |
 
 ## What the tool found
 

@@ -5,7 +5,7 @@
 **Detected:** 2026-09-15 by structural audit
 **Metrics:** **1 field** · **1 call site** · blocks **7,403 lines** (19% of the crate) from leaving
 **Restructure:** required — replace the field with an injected port
-**Status:** Open — claimed by #494, in flight
+**Status:** Closed by #494 — delete at wrap, once this final measurement is in the change-history entry
 **Claimed by:** #494 — `#carve` 8/10 `telegram` · draft · `feature/carve/telegram`
 **Lands after:** #488, #489, #490, #498, #491, #492, #493
 
@@ -14,6 +14,7 @@
 | Run | Fields | Call sites | Lines blocked | Note |
 |---|---|---|---|---|
 | 2026-09-15 | 1 | 1 | 7,403 | first detection |
+| 2026-09-22 | 0 | 0 | 0 | closed by #494: `DaemonSessionHost` holds `presenter_event_sink: Option<SharedPresenterEventSink>`; the cluster is in `tddy-telegram-control` |
 
 ## What the tool found
 
@@ -49,6 +50,16 @@ shares already live, because `pub(crate)` does not cross a crate boundary. `tddy
 `Option<…>` being `None` is a first-class state today (a daemon with no `telegram:` block has no
 hooks), so ship a `NoPresenterObserver` implementation and let the service hold **one shape** rather
 than branching on absence.
+
+## How it was closed (#494)
+
+Not with the `PresenterObserverSpawner` proposed above. The observer has **two** independent sinks
+— the Telegram chat surface and the session-notification bus that lights the drawer indicator —
+and runs when either exists, so a Telegram-owned spawner would have left the indicator dark on
+every Telegram-less daemon. Only the Telegram half was inverted: the loop stayed in
+`presenter_observer_task.rs`, and `tddy-daemon-kernel::presenter_observer::PresenterEventSink` is
+what `TelegramDaemonHooks` implements. The service holds an honest `Option`, because the loop's
+"neither sink, don't spawn" rule needs to know there is no sink.
 
 ## If you are about to change this code
 

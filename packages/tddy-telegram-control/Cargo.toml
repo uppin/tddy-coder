@@ -1,0 +1,46 @@
+[package]
+name = "tddy-telegram-control"
+version = "0.1.0"
+edition = "2021"
+description = "The Telegram control plane: inbound session control, the session watcher, and Telegram's notification and presenter-event sinks"
+
+[lib]
+name = "tddy_telegram_control"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+uuid = { version = "1", features = ["v4"] }
+# The Telegram Bot API client: `telegram_bot`'s long-polling dispatcher. This crate is its only
+# user outside the transport in `tddy-telegram`.
+teloxide = { version = "0.17.0", features = ["macros", "rustls"], default-features = false }
+tddy-core = { path = "../tddy-core" }
+# `PresenterEventSink`, the port `TelegramDaemonHooks` implements, and `DaemonConfig`.
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+# `SessionRoomRegistry`: the harness's Delete stops hosting a session's room first.
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+tddy-service = { path = "../tddy-service" }
+# `TelegramNotificationSubscriber` is a subscriber of this crate's bus.
+tddy-session-activity = { path = "../tddy-session-activity" }
+tddy-spawn = { path = "../tddy-spawn" }
+# The two crates this one sits between. `tddy-telegram` is the transport and the chat-side state
+# (`TelegramSender`, the elicitation lease, the tracked-session gate); `tddy-session-lifecycle` is
+# the session machinery the control plane drives. It cannot live in either: `tddy-telegram` does
+# not depend on `tddy-session-lifecycle`, which depends on it.
+tddy-telegram = { path = "../tddy-telegram" }
+tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
+
+[dev-dependencies]
+tempfile = "3"
+serial_test = "3"
+tddy-github = { path = "../tddy-github" }
+tddy-projects = { path = "../tddy-projects" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-testing-commons = { path = "../tddy-testing-commons" }

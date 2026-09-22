@@ -17,6 +17,18 @@
 > The caveat below about `session_agent_remote_acceptance.rs` and
 > `remote_managed_worktree_cross_host_acceptance.rs` still applies as written: both stay in
 > `tddy-daemon`, because both exercise its composition root.
+>
+> **Relocation note (2026-09-22, `#carve` 8/11, #494).** The Telegram hotspots moved again, to the
+> new **`tddy-telegram-control`** crate, **unchanged and still untested** — that node neither
+> decomposes nor tests them:
+>
+> - `telegram_callback_handler` → `packages/tddy-telegram-control/src/telegram_bot.rs:368`
+> - `telegram_message_handler` → `packages/tddy-telegram-control/src/telegram_bot.rs:211`
+> - `telegram_session_control.rs` is now the directory module
+>   `packages/tddy-telegram-control/src/telegram_session_control/`, split into seven files; its
+>   `spawn_telegram_workflow` is in `pickers.rs`.
+>
+> Measure them against `tddy-telegram-control`'s test run. This entry stays open and unclaimed.
 **Source:** `analyze-coverage-export-and-harness-selection` (#466), `analyze coverage` + `report`
 
 The first CRAP report the repo has been able to produce. 2,159 tests captured, 9,064 instrumented

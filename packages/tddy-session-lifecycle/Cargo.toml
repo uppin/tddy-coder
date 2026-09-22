@@ -81,7 +81,6 @@ tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
-teloxide = { version = "0.17.0", features = ["macros", "rustls"], default-features = false }
 
 portable-pty = "0.9"
 # `default = ["agent"]` is the *server* side — tokio, futures, async-trait, service-binding and
@@ -103,8 +102,10 @@ tddy-worktree-service = { path = "../tddy-worktree-service" }
 tddy-screen-sharing = { path = "../tddy-screen-sharing" }
 # The moved telegram transport plus `active_elicitation`, `elicitation`,
 # `telegram_tracked_session` and `telegram_github_link`. `hmac`, `sha2` and `subtle` are the
-# OAuth-state signer's and left with it; `base64` stays, because `auth.rs` uses it too. `teloxide`
-# also stays — the four modules that keep it here are on the blocked side of the cycle.
+# OAuth-state signer's and left with it; `base64` stays, because `auth.rs` uses it too. Still a
+# dependency after the control plane left for `tddy-telegram-control`: `session_list_enrichment`
+# reads a session's pending elicitation through `elicitation`, and the four modules stay
+# re-exported here under their old paths.
 tddy-telegram = { path = "../tddy-telegram" }
 # The moved auth subsystem: `runtime.rs` calls `build_auth_entries`, and the daemon re-exports the
 # three of its seven modules that something here still names.
