@@ -3,7 +3,7 @@
 **Date**: 2026-09-19 (replanned 2026-09-22)
 **Status**: 🚧 In Progress — planned and red
 **Type**: Refactor (handler decomposition and crate move, no wire change)
-**Stack**: `#carve` 11/N — the first node of the size-reduction extension
+**Stack**: `#carve` 11/12 — the first node of the size-reduction extension; `#carve` 12/12 (#522, tddy-core) sits above it
 
 ## Initial Discovery
 
@@ -290,6 +290,10 @@ before and after, by design**:
   `set_self_handle` entry.
 - **The runtime-socket guard is green by design.** It is a regression guard for a refactor, not a
   specification of new behaviour.
+- **No unit tests beyond the acceptance set.** The node's new code is either moved code, which the
+  moved family suites (16 suites, ~5k lines) already pin, or shared components whose names and shape
+  this plan deliberately leaves to `/green`. Pinning those now would specify a design nobody has
+  chosen. The port has its own two tests.
 - **Move rather than widen.** A `pub(crate)` item only a handler uses moves to `tddy-daemon-rpc`.
   Widening it would keep the lines in the crate this node exists to shrink.
 
@@ -336,8 +340,8 @@ Constraints on those nodes, known now:
 - [x] Create changeset — this document
 - [x] Publish the draft-PR contract (`tddy-daemon-rpc` surface + failing tests)
 - [x] Run acceptance tests (verify they fail for the right reason; the guard passes)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — unit tests
+- [x] USER REVIEW — acceptance tests (approved 2026-09-22)
+- [x] TDD Red — unit tests: none added beyond the acceptance set; see Decisions
 - [ ] TDD Green (`/green`)
 - [ ] Move the four code-issue records
 - [ ] `/validate-changes`
