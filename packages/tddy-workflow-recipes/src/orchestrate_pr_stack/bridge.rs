@@ -12,6 +12,10 @@ use tddy_core::WorkflowError;
 
 use crate::plan_pr_stack::StackPlanOutput;
 
+/// Moved to [`tddy_pr_stack::pr_insight`] with the PR-inspection reads that need it; kept at this
+/// path so existing callers keep working.
+pub use tddy_pr_stack::pr_insight::pr_number_from_status_url;
+
 /// Seed the orchestrator's `Changeset.stack` from a completed `StackPlanOutput`.
 ///
 /// Reads the plan (passed directly — callers read `stack-plan.yaml` and parse it), validates
@@ -223,18 +227,4 @@ pub fn execute_stack_repoint(
     // Done — delete journal.
     let _ = delete_stack_op_journal(orchestrator_session_dir);
     Ok(())
-}
-
-/// Extract the PR number from a GitHub PR URL stored in `GithubPrStatus`.
-/// Parses `.../pull/{number}` from the URL.
-///
-/// This is the system's single mechanism for "which pull request is this node": `StackNode` carries
-/// no PR-number field, so every caller that needs one recovers it from the recorded URL. Public so
-/// the PR-inspection reads resolve a node the same way the merge and repoint paths already do —
-/// a second, differently-derived answer would be a second source of truth.
-pub fn pr_number_from_status_url(
-    status: Option<&tddy_core::changeset::GithubPrStatus>,
-) -> Option<u64> {
-    let url = status?.url.as_deref()?;
-    url.rsplit('/').next()?.parse::<u64>().ok()
 }

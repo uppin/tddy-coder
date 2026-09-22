@@ -40,9 +40,10 @@ real ref and code against a real signature while the implementation continues in
 
 This is a **content contract, not automation**. `GithubPrApi::create_pr(head, base, title, body)`
 (`tddy-github/src/pr_api.rs:97`) has no `draft` parameter and gains none here. Draft PRs are
-already *read* correctly — `pr_state_from_github` maps them to `PrState::Draft` (`pr_api.rs:68`) and
-`pr_status.phase` deliberately records a draft as `open` (`pr_stack/mod.rs:1397`). Opening a PR as a
-draft stays a human act; the document says what should be in it.
+already *read* correctly — `pr_state_from_github` maps them to `PrState::Draft` (`pr_api.rs:68`)
+and `pr_status.phase` deliberately records a draft as `open`
+(`tddy-pr-stack/src/stack_ops/adopt.rs:180`). Opening a PR as a draft stays a human act; the
+document says what should be in it.
 
 ## On-disk layout
 
@@ -75,8 +76,8 @@ basename of a `SessionContextDoc`") describes intent, not the implementation.
 field, and neither do `PlannedPr`, `AddPlannedPrRequest`, `PrAddPlannedInput` or the web wire type.
 The precedent against widening that surface speculatively is `AddPlannedPrInput.child_recipe`, which
 is accepted and silently dropped because `StackNode` has nowhere to put it
-(`pr_stack/mod.rs:600-610`). A helper resolves the pair of paths and reports which exist; if a node
-ever needs to point somewhere else, the field is additive then.
+(`tddy-pr-stack/src/stack_ops/nodes.rs:20-25`). A helper resolves the pair of paths and reports
+which exist; if a node ever needs to point somewhere else, the field is additive then.
 
 ## The `write-stack-docs` goal
 

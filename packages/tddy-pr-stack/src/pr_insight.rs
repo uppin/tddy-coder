@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use tddy_core::changeset::Stack;
 
-use super::github::{
+use tddy_github::pr_api::{
     CheckRun, GithubPrInsightApi, PrFile, PrIssueComment, PrReview, PrReviewComment, PrSearchHit,
     PrSearchQuery, PrState,
 };
@@ -272,16 +272,30 @@ fn effective_search_limit(requested: u32) -> u32 {
     }
 }
 
+/// Extract the PR number from a GitHub PR URL stored in `GithubPrStatus`.
+/// Parses `.../pull/{number}` from the URL.
+///
+/// This is the system's single mechanism for "which pull request is this node": `StackNode` carries
+/// no PR-number field, so every caller that needs one recovers it from the recorded URL. Public so
+/// the PR-inspection reads resolve a node the same way the merge and repoint paths already do —
+/// a second, differently-derived answer would be a second source of truth.
+pub fn pr_number_from_status_url(
+    status: Option<&tddy_core::changeset::GithubPrStatus>,
+) -> Option<u64> {
+    let url = status?.url.as_deref()?;
+    url.rsplit('/').next()?.parse::<u64>().ok()
+}
+
 /// The pull number a stack node refers to, recovered from the URL recorded in its `pr_status`.
 ///
 /// This is the system's existing "which PR is this node" mechanism (see
-/// `bridge::pr_number_from_status_url`); a node that records no PR URL is not addressable by
+/// [`pr_number_from_status_url`]); a node that records no PR URL is not addressable by
 /// `node_id` and says so rather than guessing a number.
 pub fn pull_number_for_node(stack: &Stack, node_id: &str) -> Result<u64, String> {
     let node = stack
         .node(node_id)
         .ok_or_else(|| format!("pull_number_for_node: node '{node_id}' not found"))?;
-    super::bridge::pr_number_from_status_url(node.pr_status.as_ref()).ok_or_else(|| {
+    pr_number_from_status_url(node.pr_status.as_ref()).ok_or_else(|| {
         format!(
             "pull_number_for_node: node '{node_id}' records no pull request url, so it cannot be \
              addressed by node id — name the pull number instead"

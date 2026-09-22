@@ -55,6 +55,7 @@ members = [
     "packages/tddy-session-lifecycle",
     "packages/tddy-projects",
     "packages/tddy-workflow-recipes",
+    "packages/tddy-pr-stack",
     "packages/tddy-actions",
     "packages/tddy-task",
     "packages/tddy-lsp",

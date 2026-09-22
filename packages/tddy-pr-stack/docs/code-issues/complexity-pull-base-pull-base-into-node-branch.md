@@ -1,6 +1,7 @@
 # complexity: pull_base_into_node_branch
 
-**Location:** `packages/tddy-workflow-recipes/src/pr_stack/mod.rs:1768` — `pull_base_into_node_branch`
+**Location:** `packages/tddy-pr-stack/src/stack_ops/pull_base.rs:84` — `pull_base_into_node_branch`
+**Moved:** 2026-09-22 by #496 (`#carve` 10/11) from `packages/tddy-workflow-recipes/src/pr_stack/mod.rs` — verbatim apart from `tddy_core::worktree::` → `tddy_git::` path rewrites; the finding moved with the code, it did not close
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **159 lines** · **nesting depth 4** · 7 parameters · 10 branch/match lines · 15 early exits
@@ -14,13 +15,14 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 159 | 4 | 10 | 15 | first detection |
+| 2026-09-22 | 158 | 4 | 10 | 15 | moved to `tddy-pr-stack` by #496 — −1 line is a rustfmt rewrap of a shortened path, no logic change |
 
 ## What the tool found
 
 The body is **159 lines**, 2.6x the 60-line ceiling at which `/analyze-clean-code` says a function must be refactored.
 
 The function carries **10 branch or match lines** and **15 early exits**
-(`return` / `?`). Its file is 3231 lines total, 1968 of them production, across 26 functions.
+(`return` / `?`). At detection its file (`pr_stack/mod.rs`) was 3231 lines total, 1968 of them production, across 26 functions; since #496 its home `stack_ops/pull_base.rs` is 267 production lines.
 
 **How this was found.** `/jev-restructuring` ranked it 63 of 3,503 production units by
 semantic shape (Jev classified it `unsure`). That ranking is **targeting only** and appears

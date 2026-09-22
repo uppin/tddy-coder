@@ -66,7 +66,7 @@ pub fn rebase_onto(
 /// Force-push `branch` to `remote`, aborting if `remote` no longer matches `expected_sha`.
 ///
 /// `remote` is a parameter rather than a literal `origin` because the caller resolves it with
-/// [`tddy_core::worktree::detect_default_remote_name`] and uses it for the fetch and the lease: a
+/// [`tddy_git::detect_default_remote_name`] and uses it for the fetch and the lease: a
 /// clone whose default remote is `upstream` would otherwise take its lease against one remote and
 /// push to another.
 #[allow(dead_code)]
@@ -439,7 +439,7 @@ fn unmerged_paths(dir: &std::path::Path) -> Result<Vec<String>, tddy_core::Workf
 /// Build or refresh a local integration ref (`stack-int/<node_id>`) from multiple parent tips.
 /// Returns the SHA of the resulting ref.
 #[allow(dead_code)]
-pub fn build_integration_ref(
+pub(crate) fn build_integration_ref(
     _repo_root: &std::path::Path,
     _node_id: &str,
     _parent_branches: &[String],

@@ -9,7 +9,7 @@ use tddy_core::workflow::context::Context;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::task::{NextAction, Task, TaskResult};
 
-use super::github::GithubPrApi;
+use tddy_github::pr_api::GithubPrApi;
 
 /// Coarse phase of a single child PR node as seen by the orchestrator.
 #[derive(Debug, Clone, PartialEq)]
@@ -328,11 +328,11 @@ impl Task for AssessTask {
                     }
                 })
                 .unwrap_or_default();
-            super::github::owner_repo_from_remote_url(&remote_url)
+            tddy_github::pr_api::owner_repo_from_remote_url(&remote_url)
                 .unwrap_or_else(|| context.get_sync::<String>("repo").unwrap_or_default())
         };
 
-        let gh = super::github::RealGithubPrApi::new(&github_owner_repo);
+        let gh = tddy_github::pr_api::RealGithubPrApi::new(&github_owner_repo);
 
         let views = assemble_views(&session_dir, &sessions_root, &stack, &gh, &default_branch)?;
         let autonomous_merge = context
@@ -597,30 +597,24 @@ mod tests {
         pr_number: u64,
         base: String,
     }
-    impl crate::orchestrate_pr_stack::github::GithubPrApi for AlwaysOpenMockGh {
+    impl tddy_github::pr_api::GithubPrApi for AlwaysOpenMockGh {
         fn get_open_pr(
             &self,
             _head: &str,
-        ) -> Result<Option<crate::orchestrate_pr_stack::github::PrRef>, tddy_core::WorkflowError>
-        {
-            Ok(Some(crate::orchestrate_pr_stack::github::PrRef {
+        ) -> Result<Option<tddy_github::pr_api::PrRef>, tddy_core::WorkflowError> {
+            Ok(Some(tddy_github::pr_api::PrRef {
                 number: self.pr_number,
                 head_sha: "sha".into(),
                 base_branch: self.base.clone(),
                 url: "https://github.com/o/r/pull/1".into(),
             }))
         }
-        fn get_pr_by_head(
-            &self,
-            _head: &str,
-        ) -> crate::orchestrate_pr_stack::github::PrLookupOutcome {
-            crate::orchestrate_pr_stack::github::PrLookupOutcome::Found(
-                crate::orchestrate_pr_stack::github::PrView {
-                    number: self.pr_number,
-                    url: "https://github.com/o/r/pull/1".into(),
-                    state: crate::orchestrate_pr_stack::github::PrState::Open,
-                },
-            )
+        fn get_pr_by_head(&self, _head: &str) -> tddy_github::pr_api::PrLookupOutcome {
+            tddy_github::pr_api::PrLookupOutcome::Found(tddy_github::pr_api::PrView {
+                number: self.pr_number,
+                url: "https://github.com/o/r/pull/1".into(),
+                state: tddy_github::pr_api::PrState::Open,
+            })
         }
         fn merge_pr(&self, _number: u64) -> Result<String, tddy_core::WorkflowError> {
             Ok("sha".into())
@@ -650,19 +644,15 @@ mod tests {
     }
 
     struct NoneOpenMockGh;
-    impl crate::orchestrate_pr_stack::github::GithubPrApi for NoneOpenMockGh {
+    impl tddy_github::pr_api::GithubPrApi for NoneOpenMockGh {
         fn get_open_pr(
             &self,
             _head: &str,
-        ) -> Result<Option<crate::orchestrate_pr_stack::github::PrRef>, tddy_core::WorkflowError>
-        {
+        ) -> Result<Option<tddy_github::pr_api::PrRef>, tddy_core::WorkflowError> {
             Ok(None)
         }
-        fn get_pr_by_head(
-            &self,
-            _head: &str,
-        ) -> crate::orchestrate_pr_stack::github::PrLookupOutcome {
-            crate::orchestrate_pr_stack::github::PrLookupOutcome::NotFound
+        fn get_pr_by_head(&self, _head: &str) -> tddy_github::pr_api::PrLookupOutcome {
+            tddy_github::pr_api::PrLookupOutcome::NotFound
         }
         fn merge_pr(&self, _number: u64) -> Result<String, tddy_core::WorkflowError> {
             Ok("sha".into())
