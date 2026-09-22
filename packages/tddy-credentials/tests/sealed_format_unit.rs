@@ -14,7 +14,7 @@ const THE_LOGIN_CREDENTIAL: &[u8] = b"gho_the_token_this_login_granted";
 fn a_header_naming_a_kdf_this_build_does_not_produce_is_reported_as_a_format_mismatch() {
     // Given a vault whose header names a derivation from a later build
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = CredentialStore::path_in(dir.path());
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
     CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
         .expect("a fresh vault opens");
     rewrite_the_header_field(&path, "kdf", "argon2id-and-something-else");
@@ -37,7 +37,7 @@ fn a_header_naming_a_kdf_this_build_does_not_produce_is_reported_as_a_format_mis
 fn a_header_from_a_later_format_version_is_reported_rather_than_read_as_this_one() {
     // Given a vault written by a newer build
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = CredentialStore::path_in(dir.path());
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
     CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
         .expect("a fresh vault opens");
     rewrite_the_header_field(&path, "format_version", "2");
@@ -59,7 +59,7 @@ fn a_header_from_a_later_format_version_is_reported_rather_than_read_as_this_one
 fn editing_the_headers_salt_cannot_quietly_move_the_vault_onto_another_key() {
     // Given a vault whose salt somebody replaced with one of their own choosing
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = CredentialStore::path_in(dir.path());
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
     CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
         .expect("a fresh vault opens");
     rewrite_the_header_field(&path, "salt", &"ab".repeat(32));

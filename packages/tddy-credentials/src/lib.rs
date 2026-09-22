@@ -31,10 +31,13 @@
 //! re-initialised silently. Every successful login calls [`SessionVault::rewrap`], so a rotation
 //! observed while a session can still be established costs nothing.
 
+mod kdf;
 pub mod record;
 pub mod secret;
+pub mod sessions;
 pub mod vault;
 
 pub use record::{AccountId, CredentialRecord, ProviderId};
 pub use secret::SecretBytes;
-pub use vault::{CredentialStore, SessionVault, VaultError, VAULT_FILE};
+pub use sessions::SessionVaults;
+pub use vault::{CredentialStore, SessionVault, UnlockKey, VaultError, MAX_UNLOCK_SLOTS};

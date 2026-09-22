@@ -33,4 +33,24 @@ impl std::fmt::Debug for SecretBytes {
     }
 }
 
-// TODO(keyring 3/9): implement — a volatile zeroing write plus a compiler fence.
+impl Drop for SecretBytes {
+    fn drop(&mut self) {
+        wipe(&mut self.0);
+    }
+}
+
+/// Overwrite `bytes` with zeroes in a way the optimiser may not elide.
+///
+/// A plain `fill(0)` on memory that is about to be freed is a dead store, and removing dead stores
+/// is exactly what an optimiser is for. Each byte is written volatile, and the fence stops the
+/// writes being reordered past whatever releases the memory afterwards.
+///
+/// Also used on the transient plaintext buffers a seal or open produces — an unwrapped data key,
+/// a serialised record — which live in a `Vec` rather than a [`SecretBytes`].
+pub(crate) fn wipe(bytes: &mut [u8]) {
+    for byte in bytes.iter_mut() {
+        // SAFETY: `byte` is a valid, aligned, exclusive reference for the whole write.
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
