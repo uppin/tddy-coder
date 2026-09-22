@@ -127,8 +127,8 @@ line 418 has been cut.
     **2 passing guards** on the cuts that must hold.
 - [x] Failing unit/integration tests — the same suite; the seam, not behaviour, is what this node is about
 - [x] Implement production code making tests pass (`/green`) — see [Green notes](#green-notes)
-- [ ] `/validate-changes`
-- [ ] `/pr-wrap` — correct the title, ready for review; **run the stack-wide backlog-delta sweep**
+- [x] `/validate-changes` — no blockers; should-fix items applied in `a79d09e5` (see Validation Results)
+- [ ] `/pr-wrap` — correct the title, ready for review. Steps 0–6 and 7.5 done 2026-09-22 (validation fixes, `stack_ops/` split under the 500-line budget, code issues reconciled). **Wrap + ready blocked on stack order**: #494 and #495 are still drafts and must ready/wrap first. Backlog-delta sweep belongs to the stack tip, which is now #520, not this node
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
 
 ## Green notes
