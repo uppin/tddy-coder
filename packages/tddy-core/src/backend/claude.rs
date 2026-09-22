@@ -3,11 +3,11 @@
 use super::{InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
 use crate::stream;
-use crate::workflow::recipe::PermissionHint;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+use tddy_workflow::PermissionHint;
 
 /// Resolve binary path for logging (which-like). Returns path as string for display.
 pub(crate) fn which_binary(binary: &Path) -> String {
@@ -769,8 +769,7 @@ impl ClaudeCodeBackend {
 mod claude_config_tests {
     use super::{goal_to_claude_config, ClaudeInvokeConfig, PermissionMode};
     use crate::backend::InvokeRequest;
-    use crate::workflow::ids::GoalId;
-    use crate::workflow::recipe::{GoalHints, PermissionHint};
+    use tddy_workflow::{GoalHints, GoalId, PermissionHint};
 
     fn minimal_invoke(hints: GoalHints) -> InvokeRequest {
         InvokeRequest {

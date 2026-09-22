@@ -106,7 +106,7 @@ measured in its new home.
 ## Scope
 
 - [ ] ⛔ Stack on master: cascade `/pr-stack-rebase` #494..#520, then this branch (the developer's to run)
-- [ ] Dead files deleted; `futures` dropped
+- [x] Dead files deleted; `futures` dropped
 - [ ] Cut 1, Cut 2, the two retargets
 - [ ] `tddy-log`, `tddy-agent-skills`
 - [ ] `tddy-changeset`, `tddy-session-worktree`, `tddy-session-actions`
@@ -156,9 +156,9 @@ tddy-core   (pub use facades only, ~140 lines)
 
 ## Implementation milestones
 
-- [ ] The path guard is green before anything moves
-- [ ] Dead files, `futures` — AC3
-- [ ] Cut 1 + retargets; tddy-core still builds as one crate — AC4 half
+- [x] The path guard is green before anything moves
+- [x] Dead files, `futures` — AC3
+- [x] Cut 1 + retargets; tddy-core still builds as one crate — AC4 half
 - [ ] `tddy-log`, `tddy-agent-skills` extracted
 - [ ] Cut 2; `tddy-changeset` extracted — AC4 other half
 - [ ] `tddy-session-worktree`, `tddy-session-actions` extracted

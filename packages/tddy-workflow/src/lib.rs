@@ -7,6 +7,7 @@
 
 pub mod artifact_paths;
 pub mod events;
+pub mod hints;
 pub mod ids;
 pub mod progress;
 pub mod questions;
@@ -19,6 +20,7 @@ pub use artifact_paths::{
 };
 
 pub use events::{WorkflowCompletePayload, WorkflowEvent};
+pub use hints::{GoalHints, PermissionHint};
 pub use ids::{GoalId, WorkflowState};
 pub use progress::ProgressEvent;
 pub use questions::{ClarificationQuestion, QuestionOption};

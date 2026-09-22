@@ -523,8 +523,7 @@ mod tests {
     use super::parse_cursor_model_list;
     use super::CursorBackend;
     use crate::backend::{InvokeRequest, SessionMode};
-    use crate::workflow::ids::GoalId;
-    use crate::workflow::recipe::{GoalHints, PermissionHint};
+    use tddy_workflow::{GoalHints, GoalId, PermissionHint};
 
     const LIST_MODELS_STDOUT: &str = "Available models\n\
         \n\

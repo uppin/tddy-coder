@@ -10,8 +10,6 @@ pub mod model_catalog;
 mod stub;
 mod tool_executor;
 
-use crate::workflow::ids::GoalId;
-use crate::workflow::recipe::GoalHints;
 pub use acp::ClaudeAcpBackend;
 pub use claude::{
     build_claude_args, read_claude_subagent_usages, read_claude_transcript_usage,
@@ -27,6 +25,7 @@ pub use model_catalog::{
 };
 pub use stub::StubBackend;
 pub use tddy_workflow::questions::{ClarificationQuestion, QuestionOption};
+use tddy_workflow::{GoalHints, GoalId};
 pub use tool_executor::{InMemoryToolExecutor, ProcessToolExecutor, ToolExecutor};
 
 /// Enum dispatch for CLI backend selection (avoids trait object overhead).
@@ -456,7 +455,7 @@ pub struct InvokeRequest {
 
 impl Default for InvokeRequest {
     fn default() -> Self {
-        use crate::workflow::recipe::{GoalHints, PermissionHint};
+        use tddy_workflow::{GoalHints, PermissionHint};
         Self {
             prompt: String::new(),
             system_prompt: None,

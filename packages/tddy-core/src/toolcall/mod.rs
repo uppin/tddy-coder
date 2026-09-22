@@ -124,8 +124,8 @@ pub fn take_submit_result_for_goal(goal: &str) -> Option<String> {
     None
 }
 
-use crate::ClarificationQuestion;
 use serde::Deserialize;
+use tddy_workflow::ClarificationQuestion;
 use tokio::sync::oneshot;
 
 /// Request from tddy-tools (internal, with response channel).

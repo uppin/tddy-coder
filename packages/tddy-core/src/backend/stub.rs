@@ -10,10 +10,10 @@ use super::{
 };
 use crate::error::BackendError;
 use crate::stream::ProgressEvent;
-use crate::workflow::ids::GoalId;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tddy_workflow::GoalId;
 
 fn emit_agent_exited(request: &InvokeRequest, exit_code: i32) {
     if let Some(ref sink) = request.progress_sink {

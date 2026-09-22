@@ -14,10 +14,10 @@ use crate::error::BackendError;
 use crate::stream::codex::{
     codex_jsonl_last_error_message, codex_stderr_brief_for_user, parse_codex_jsonl_output,
 };
-use crate::workflow::recipe::PermissionHint;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use tddy_workflow::PermissionHint;
 
 /// Basename under the TDDY artifact session directory; stores Codex CLI `thread_id` for `codex exec resume`.
 pub const CODEX_THREAD_ID_FILENAME: &str = "codex_thread_id";
@@ -494,8 +494,7 @@ impl super::CodingBackend for CodexBackend {
 mod tests {
     use super::*;
     use crate::backend::{InvokeRequest, SessionMode};
-    use crate::workflow::ids::GoalId;
-    use crate::workflow::recipe::{GoalHints, PermissionHint};
+    use tddy_workflow::{GoalHints, GoalId, PermissionHint};
 
     fn hints_tdd_plan_goal() -> GoalHints {
         GoalHints {
