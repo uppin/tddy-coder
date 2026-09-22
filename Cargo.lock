@@ -12015,7 +12015,6 @@ dependencies = [
  "async-trait",
  "chrono",
  "dashmap 6.2.1",
- "futures",
  "glob",
  "jsonschema 0.44.1",
  "libc",
