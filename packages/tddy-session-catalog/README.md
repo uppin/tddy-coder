@@ -23,6 +23,8 @@ it opened a catalog. Only the crates that actually use the catalog depend on thi
 | `provider` | the `BuildCatalogProvider` port and its process-global registration |
 | `error` | `CatalogError` |
 
+Schema, read path and port details: [docs/architecture.md](docs/architecture.md).
+
 ## Consumers
 
 There is **no facade at `tddy_core::session_catalog`**, because one would make `tddy-core` depend on

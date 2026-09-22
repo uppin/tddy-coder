@@ -31,9 +31,9 @@ Feature doc: [Models & Agents](../../../docs/ft/web/models-and-agents.md).
 
 ## Storage
 
-`<tddy-data-dir>/models.db`. Follows `tddy-core`'s `session_catalog` precedent: `sqlx` **runtime query
-API only** (no `query!` macro, so no compile-time database), WAL, `Normal` synchronous, 5 s busy
-timeout, `create_if_missing`, `foreign_keys(true)`.
+`<tddy-data-dir>/models.db`. Follows the session catalog's precedent (`tddy-session-catalog`'s
+`store`): `sqlx` **runtime query API only** (no `query!` macro, so no compile-time database), WAL,
+`Normal` synchronous, 5 s busy timeout, `create_if_missing`, `foreign_keys(true)`.
 
 **File mode.** The database is created `0600` via `OpenOptions::create_new().mode()` *before* sqlx
 opens it, so SQLite derives `-wal`/`-shm` from it; all three are re-`chmod`ded after `ensure_schema`,

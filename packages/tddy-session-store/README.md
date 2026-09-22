@@ -24,6 +24,9 @@ None of the three depends on `tddy-core`, so none can close a cycle.
 | `output` | session directory creation and naming, session file reads and writes, `default_tddy_data_dir` |
 | `session_actions` | action manifests: parsing, validation (`jsonschema`), discovery and listing, invocation on the action runtime, test-summary extraction |
 
+Details per module, including why `session_actions::runtime` is `#[doc(hidden)] pub`:
+[docs/architecture.md](docs/architecture.md).
+
 ## What stayed in `tddy-core`
 
 `tddy_core::{atomic_file, error, output, session_actions}` re-export this crate with `pub use …::*;`,

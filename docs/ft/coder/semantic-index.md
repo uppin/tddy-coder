@@ -38,7 +38,7 @@ the placement; there is exactly one worktree that counts, and the index is built
 `SemanticSearch` exists in the tool catalog today (`tddy-tool-engine`), but its implementation is a
 ripgrep-backed lexical fallback — there is no index, no embeddings, and no vector store anywhere in
 the workspace. The only persistence precedent is the per-session SQLite **session catalog**
-(`tddy-core::session_catalog`), which is populated by a [`tddy_task`] on worktree-open and whose
+(`tddy-session-catalog`), which is populated by a [`tddy_task`] on worktree-open and whose
 first read **blocks until the populate task is terminal**. This feature reuses that exact
 task-and-block pattern for indexing, and reuses the existing per-session tool-gating path (a tool
 named in the effective "replaced" set is dropped from the agent's allowlist and hard-disabled).
