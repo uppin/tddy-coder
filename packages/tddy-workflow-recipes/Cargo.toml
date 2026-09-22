@@ -13,6 +13,9 @@ tddy-core = { path = "../tddy-core" }
 # The GitHub REST client lives in tddy-github; `github_pr`, `github_rest_common` and
 # `orchestrate_pr_stack::github` are facades re-exporting it from their historical paths.
 tddy-github = { path = "../tddy-github" }
+# The PR-stack data model and its operations; `pr_stack` and `orchestrate_pr_stack` re-export it
+# from their historical paths.
+tddy-pr-stack = { path = "../tddy-pr-stack" }
 tddy-workflow = { path = "../tddy-workflow" }
 log = "0.4"
 async-trait = "0.1"

@@ -12629,6 +12629,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-pr-stack"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "tddy-core",
+ "tddy-git",
+ "tddy-github",
+ "tddy-workflow",
+ "tempfile",
+]
+
+[[package]]
 name = "tddy-projects"
 version = "0.1.0"
 dependencies = [
@@ -13618,6 +13635,7 @@ dependencies = [
  "serial_test",
  "tddy-core",
  "tddy-github",
+ "tddy-pr-stack",
  "tddy-rpc",
  "tddy-testing-commons",
  "tddy-workflow",

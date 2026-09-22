@@ -1,15 +1,18 @@
 //! **orchestrate-pr-stack** recipe: resumable idempotent loop that merges a PR stack to master.
 
 mod actions;
-mod assess;
 pub mod bridge;
-pub(crate) mod git_ops;
 pub mod github;
 mod hooks;
 mod internal_status;
 mod pr_actions;
-pub mod pr_insight;
 pub mod transient;
+
+// Moved to `tddy-pr-stack`; re-exported at their historical paths and visibilities so every
+// `orchestrate_pr_stack::{assess,git_ops,pr_insight}::…` path keeps resolving.
+use tddy_pr_stack::assess;
+pub(crate) use tddy_pr_stack::git_ops;
+pub use tddy_pr_stack::pr_insight;
 
 pub use actions::{MergeTask, RepointTask, SpawnTask};
 pub use assess::{

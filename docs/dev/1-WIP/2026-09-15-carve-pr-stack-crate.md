@@ -126,10 +126,63 @@ line 418 has been cut.
   - `tests/pr_stack_crate_shape.rs` — 3 failing (the crate does not exist, and nothing has moved);
     **2 passing guards** on the cuts that must hold.
 - [x] Failing unit/integration tests — the same suite; the seam, not behaviour, is what this node is about
-- [ ] Implement production code making tests pass (`/green`)
+- [x] Implement production code making tests pass (`/green`) — see [Green notes](#green-notes)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — correct the title, ready for review; **run the stack-wide backlog-delta sweep**
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
+
+## Green notes
+
+**Mechanism.** No `tddy-tools restructure` step was used: whole files moved with `git mv` (rename
+detected, blame kept), the `pr_stack/mod.rs` split was cut by line range, and every old path is a
+hand-written re-export. Phase order A → B → C → D held.
+
+**What moved** (`tddy-pr-stack`, 4,244 lines including tests):
+
+| From (`tddy-workflow-recipes/src/`) | To (`tddy-pr-stack/src/`) | How |
+|---|---|---|
+| `pr_stack/mod.rs` 454–1967 (production) and 2504–3198 (their unit tests) | `stack_ops.rs` | split by line range; `reseed_stack_from_plan_if_unspawned` (419–452) stayed |
+| `pr_stack/docs.rs` | `docs.rs` | `git mv`, byte-identical |
+| `orchestrate_pr_stack/{assess,git_ops,pr_insight}.rs` | same names | `git mv`, `super::github`/`crate::orchestrate_pr_stack::github` → `tddy_github::pr_api` |
+| `pr_number_from_status_url`, from `orchestrate_pr_stack/bridge.rs` | `pr_insight.rs` | cut and pasted; `pr_insight` and `stack_ops` both call it, and `bridge.rs` cannot move |
+
+**Facades.** `pr_stack/mod.rs`: `pub use tddy_pr_stack::docs;` and `pub use tddy_pr_stack::stack_ops::*;`.
+`orchestrate_pr_stack/mod.rs`: `use tddy_pr_stack::assess;`, `pub(crate) use tddy_pr_stack::git_ops;`,
+`pub use tddy_pr_stack::pr_insight;` — each at its old visibility. `bridge.rs`:
+`pub use tddy_pr_stack::pr_insight::pr_number_from_status_url;`. No external reference site edited.
+
+**Visibility widening — one.** `assign_missing_display_order` was `pub(crate)`; `bridge.rs`'s
+`seed_orchestrator_stack_from_plan` calls it across the new crate boundary, so it is `pub`, and the
+`stack_ops::*` glob now exposes it as `tddy_workflow_recipes::pr_stack::assign_missing_display_order`.
+
+**Path rewrites inside moved code.** `crate::orchestrate_pr_stack::{git_ops,pr_insight}` →
+`crate::{git_ops,pr_insight}`; `crate::orchestrate_pr_stack::github` → `tddy_github::pr_api`;
+`tddy_core::worktree::{detect_default_remote_name, worktree_path_for_branch,
+local_branch_name_for_remote, checked_out_branch_name}` → `tddy_git::…` (the same functions —
+`tddy_core::worktree` glob re-exports `tddy_git`). One doc comment on `AddPlannedPrInput::child_recipe`
+linked `crate::plan_pr_stack::{PlannedPr, planned_prs_into_stack_nodes}`; those links cannot resolve
+from the new crate, so it names them in prose instead.
+
+**Deviations from this changeset's premises.**
+
+1. **`EXPLORATION_BASENAME` did not cross the seam and was not moved.** Both references (old lines
+   355 and 376) are in `PrStackRecipe`'s `SessionArtifactManifest` impl, which stays. Nothing in the
+   moving set names it, so `writer.rs` is untouched.
+2. **`orchestrate_pr_stack/actions.rs` stayed.** It is not zero-dependency: `MergeTask`/`RepointTask`
+   call `super::bridge::{execute_stack_merge, execute_stack_repoint}`, and `bridge.rs` also holds
+   `seed_orchestrator_stack_from_plan`, which names `plan_pr_stack`. Moving `actions.rs` would mean
+   splitting `bridge.rs` and moving `transient.rs` too — beyond this node's scope.
+3. **`pr_insight.rs` was not zero-dependency either** — it called `super::bridge::pr_number_from_status_url`.
+   That pure function moved with it (above).
+4. **`tddy-pr-stack` also depends on `tddy-workflow`** (internal, already a recipes dependency):
+   `docs::node_doc_paths` calls `tddy_workflow::session_artifacts_root`. No external dependency was
+   added; `log`, `async-trait`, `serde`, `serde_json` and the dev-dependencies `tempfile`, `rstest`,
+   `pretty_assertions` are copied from `tddy-workflow-recipes`.
+
+**Pre-existing, environmental.** `pr_stack_artifact_paths_acceptance::a_plan_left_at_the_legacy_session_root_is_still_advertised_to_the_agent`
+fails under `./dev` on macOS: the nix shell's `TMPDIR` is `/tmp/nix-shell.*`, and
+`tddy_core::workflow::build_context_header` prints the canonical `/private/tmp/…` path. It passes
+5/5 with a canonical `TMPDIR`. Neither the test nor the code it exercises is touched here.
 
 ## Verification
 

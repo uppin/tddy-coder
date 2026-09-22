@@ -60,3 +60,23 @@ workflow-recipes crate.
 The three old paths are kept here as one-line `pub use` facades, so
 `tddy_workflow_recipes::github_pr::…` and `crate::orchestrate_pr_stack::github::…` keep resolving and
 no caller was edited. Write new code against `tddy_github` directly.
+
+## The PR-stack data model lives in `tddy-pr-stack`
+
+The stack operations that were the second half of `pr_stack/mod.rs` (every writer of
+`Changeset.stack`, and the node↔branch↔pull-request syncs), `pr_stack/docs.rs`, and
+`orchestrate_pr_stack/{assess,git_ops,pr_insight}.rs` moved to [`tddy-pr-stack`](../tddy-pr-stack/).
+None of it is a recipe, and twelve crates were compiling every recipe to reach it.
+
+What stayed is recipe-side by nature:
+
+- `PrStackRecipe`, its `WorkflowRecipe` and `SessionArtifactManifest` impls, `pr_stack/{hooks,bridge}.rs`.
+- `reseed_stack_from_plan_if_unspawned` — it names `plan_pr_stack`, which is mutually referenced with
+  `pr_stack` and cannot leave.
+- `orchestrate_pr_stack/bridge.rs` (`seed_orchestrator_stack_from_plan` names `plan_pr_stack`) and so
+  `orchestrate_pr_stack/actions.rs`, whose tasks call the bridge's merge and repoint.
+
+Every old path still resolves: `pr_stack` glob re-exports `tddy_pr_stack::stack_ops` and re-exports
+`docs`; `orchestrate_pr_stack` re-exports `assess`, `git_ops` and `pr_insight` at their old
+visibilities; `orchestrate_pr_stack::bridge::pr_number_from_status_url` re-exports the function from
+`tddy_pr_stack::pr_insight`. No caller was edited. Write new code against `tddy_pr_stack` directly.

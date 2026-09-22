@@ -66,7 +66,7 @@ pub fn rebase_onto(
 /// Force-push `branch` to `remote`, aborting if `remote` no longer matches `expected_sha`.
 ///
 /// `remote` is a parameter rather than a literal `origin` because the caller resolves it with
-/// [`tddy_core::worktree::detect_default_remote_name`] and uses it for the fetch and the lease: a
+/// [`tddy_git::detect_default_remote_name`] and uses it for the fetch and the lease: a
 /// clone whose default remote is `upstream` would otherwise take its lease against one remote and
 /// push to another.
 #[allow(dead_code)]
