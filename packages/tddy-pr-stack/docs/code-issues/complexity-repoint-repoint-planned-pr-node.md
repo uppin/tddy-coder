@@ -1,6 +1,7 @@
 # complexity: repoint_planned_pr_node
 
-**Location:** `packages/tddy-workflow-recipes/src/pr_stack/mod.rs:802` — `repoint_planned_pr_node`
+**Location:** `packages/tddy-pr-stack/src/stack_ops/repoint.rs:41` — `repoint_planned_pr_node`
+**Moved:** 2026-09-22 by #496 (`#carve` 10/11) from `packages/tddy-workflow-recipes/src/pr_stack/mod.rs` — verbatim apart from `tddy_core::worktree::` → `tddy_git::` path rewrites; the finding moved with the code, it did not close
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **79 lines** · **nesting depth 3** · 6 parameters · 3 branch/match lines · 3 early exits
@@ -14,13 +15,14 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 79 | 3 | 3 | 3 | first detection |
+| 2026-09-22 | 79 | 3 | 3 | 3 | moved to `tddy-pr-stack` by #496 — unchanged |
 
 ## What the tool found
 
 The body is **79 lines**, 1.3x the 60-line ceiling at which `/analyze-clean-code` says a function must be refactored.
 
 The function carries **3 branch or match lines** and **3 early exits**
-(`return` / `?`). Its file is 3231 lines total, 1968 of them production, across 26 functions.
+(`return` / `?`). At detection its file (`pr_stack/mod.rs`) was 3231 lines total, 1968 of them production, across 26 functions; since #496 its home `stack_ops/repoint.rs` is 228 production lines.
 
 **How this was found.** `/jev-restructuring` ranked it 94 of 3,503 production units by
 semantic shape (Jev classified it `none`). That ranking is **targeting only** and appears

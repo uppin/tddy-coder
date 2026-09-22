@@ -197,3 +197,59 @@ tddy-tools restructure verify --against HEAD
 As the stack tip, this node also runs the **backlog-delta sweep** at `/pr-wrap`: every entry the
 `#carve` stack wrote or edited is judged for whether one more node could close it while the context
 is still loaded.
+
+## Validation Results
+
+**Run:** 2026-09-22 (`/pr-wrap` validation passes), diff `origin/feature/carve/presenter-split...HEAD`
+(3 commits, leak-free).
+
+**Scoped gates:** `cargo clippy -p tddy-pr-stack -p tddy-workflow-recipes --all-targets -- -D warnings`
+clean; `./test -p tddy-pr-stack -p tddy-workflow-recipes` (with `TMPDIR=/private/tmp`) 543 passed,
+0 failed; test counts per moved file unchanged (stack_ops 23 + recipe 21 = old 44; assess 14, git_ops
+7, pr_insight 2, docs 12). `restructure verify` (AC5) not re-run here. Whole-workspace health: CI.
+
+### From /validate-changes
+
+- Stack boundary: ✅ nothing from `## Dependencies` implemented; no parent-owned files deleted;
+  `## Boundaries` respected (no `plan_pr_stack`/`writer`/`parser` moved, no consumer edited).
+- ⚠ Visibility: the changeset says "one widening", but at crate level `git_ops` (`pub(crate)` →
+  `pub mod`) and `assess` (private → `pub mod`) are widened too — unavoidable across a crate
+  boundary, but it newly publishes the panicking stub `git_ops::build_integration_ref`
+  (`unimplemented!`, unused anywhere).
+- ⚠ Stale `code-issues` records: `squatting-pr-stack-data-model.md` (closed by this PR — delete at
+  wrap, measurement into the change-history entry), `complexity-mod-pull-base-into-node-branch.md`
+  and `complexity-mod-repoint-planned-pr-node.md` (location now `tddy-pr-stack/src/stack_ops.rs`;
+  move/rename under `packages/tddy-pr-stack/docs/code-issues/`).
+- ⚠ PRD drift: FR1 still lists `actions.rs`, AC1 omits `tddy-workflow`, Snag 2 still says the const
+  moves — deviations are recorded here but not in the PRD.
+- nit: line counts (~4,230 / 4,244) vs actual 4,785 in `tddy-pr-stack/src`; node numbering 9/9 vs
+  10/10 (code-issue) vs 10/11 (commit a2bceddb).
+
+### From /validate-tests
+
+- ⚠ `tests/pr_stack_crate_shape.rs:48` — `text.contains("tddy-git")` is satisfied by `tddy-github`;
+  the `tddy-git` assertion is vacuous.
+- nit: `:134` asserts the bare name `reseed_stack_from_plan_if_unspawned` (a `pub use` or a call
+  would satisfy it) — assert `pub fn reseed_stack_from_plan_if_unspawned`.
+- nit: `:83` scans `src/` non-recursively; `:65` matches comments in the manifest.
+
+### From /validate-prod-ready
+
+- ⚠ `packages/tddy-pr-stack/Cargo.toml` — `serde_json` and dev-dependency `pretty_assertions` are
+  unused by any file in the crate (copied from recipes).
+- nit (pre-existing, now in a lib's public API): `git_ops.rs:38,72,99,441` `#[allow(dead_code)]` on
+  `pub fn`s is inert; `git_ops.rs:438` untracked `TODO` + `unimplemented!` stub.
+
+### From /analyze-clean-code
+
+- No new logic beyond facades and one verbatim-moved pure function; no findings on introduced code.
+  Pre-existing complexity in moved code is already tracked in the two `complexity-mod-*` records.
+
+### Docs
+
+- ⚠ `cargo doc -p tddy-pr-stack --no-deps`: **introduced** broken link `stack_ops.rs:274`
+  (`[reseed_stack_from_plan_if_unspawned]` stayed recipe-side); pre-existing private-item link
+  `stack_ops.rs:279` (`[next_free_node_id]`).
+- nit: recipes `README.md:69` "twelve crates were compiling every recipe" — they still do until they
+  switch to `tddy_pr_stack`; `docs/ft/coder/pr-stack-docs.md:44,78` cite `pr_stack/mod.rs:<line>`
+  (already stale; the code is now in `tddy-pr-stack`).

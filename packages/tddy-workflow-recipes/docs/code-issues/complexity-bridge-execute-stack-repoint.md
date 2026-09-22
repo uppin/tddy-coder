@@ -1,6 +1,6 @@
 # complexity: execute_stack_repoint
 
-**Location:** `packages/tddy-workflow-recipes/src/orchestrate_pr_stack/bridge.rs:106` — `execute_stack_repoint`
+**Location:** `packages/tddy-workflow-recipes/src/orchestrate_pr_stack/bridge.rs:110` — `execute_stack_repoint`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **121 lines** · **nesting depth 8** · 6 parameters · 11 branch/match lines · 3 early exits
@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 121 | 8 | 11 | 3 | first detection |
+| 2026-09-22 | 121 | 8 | 11 | 3 | unchanged — #496 touched `bridge.rs` (moved `pr_number_from_status_url` out, `use` of the new crate) but not this function; it stays recipe-side |
 
 ## What the tool found
 

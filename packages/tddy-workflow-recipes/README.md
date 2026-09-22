@@ -66,7 +66,9 @@ no caller was edited. Write new code against `tddy_github` directly.
 The stack operations that were the second half of `pr_stack/mod.rs` (every writer of
 `Changeset.stack`, and the node↔branch↔pull-request syncs), `pr_stack/docs.rs`, and
 `orchestrate_pr_stack/{assess,git_ops,pr_insight}.rs` moved to [`tddy-pr-stack`](../tddy-pr-stack/).
-None of it is a recipe, and twelve crates were compiling every recipe to reach it.
+None of it is a recipe. Consumers still reach it through the facades below, and so still compile
+every recipe, until they are re-pointed at `tddy_pr_stack` — see
+[`squatting-pr-stack-data-model`](docs/code-issues/squatting-pr-stack-data-model.md).
 
 What stayed is recipe-side by nature:
 
