@@ -187,6 +187,11 @@ pub struct DaemonSessionHost {
     /// PR-status reads act with. `None` (no `auth_storage` configured) means a real login's PR
     /// status reads as *unavailable*, never as "no PR".
     github_token_store: Option<Arc<dyn tddy_github::token_store::GitHubTokenStore>>,
+    /// This daemon's session-token signer and the verifier for every daemon's tokens — the same
+    /// value `tddy_daemon_auth::build_auth_entries_with` built the RPC gate from. What mints an
+    /// agent's own credential for a split or jailed-codebase session. `None` means this daemon
+    /// signs nothing, and a placement that needs a minted credential is refused.
+    session_tokens: Option<tddy_daemon_auth::SessionTokens>,
     /// Base of the pre-session attachment staging area; each caller's root is
     /// `{staging_base_dir}/{os_user}/`. Separate from `tddy_data_dir` so an abandoned batch is
     /// cleared by the host restart rather than living in the data dir forever. Defaults to

@@ -126,6 +126,7 @@ impl DaemonSessionHost {
                 crate::session_agent_inference::SessionAgentInferenceStore::new(),
             ),
             github_token_store: None,
+            session_tokens: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
             session_rooms: Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new()),
             model_registry: None,
@@ -284,6 +285,28 @@ impl DaemonSessionHost {
     ) -> Self {
         self.github_token_store = Some(store);
         self
+    }
+
+    /// Sign agents' credentials with this daemon's key and verify callers' through its key
+    /// directory (builder). Pass the very value the daemon's auth entries were built with, so the
+    /// credentials minted here are ones every gate on the fleet already trusts.
+    pub fn with_session_tokens(mut self, tokens: tddy_daemon_auth::SessionTokens) -> Self {
+        self.session_tokens = Some(tokens);
+        self
+    }
+
+    /// The signer and verifier an agent's own credential is minted with, or the refusal a daemon
+    /// that signs nothing gives.
+    pub(crate) fn session_tokens(
+        &self,
+    ) -> Result<&tddy_daemon_auth::SessionTokens, tddy_rpc::Status> {
+        self.session_tokens.as_ref().ok_or_else(|| {
+            tddy_rpc::Status::failed_precondition(
+                "this daemon signs no session tokens, so an agent's tool calls could not be \
+                 authenticated: configure `github:` — which gives the daemon its signing \
+                 identity — and retry",
+            )
+        })
     }
 
     /// Shared agent-activity hub, so the sandbox tool path can publish through the same channel the

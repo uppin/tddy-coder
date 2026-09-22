@@ -25,6 +25,7 @@ use std::time::Duration;
 
 use pretty_assertions::assert_eq;
 use serial_test::serial;
+use tddy_daemon_auth::SessionTokens;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_livekit::{LiveKitParticipant, RoomOptions};
 use tddy_livekit_testkit::LiveKitTestkit;
@@ -37,9 +38,9 @@ use tddy_worktree_service::remote_git_service::{
 const GITHUB_USER: &str = "testuser";
 const PROJECT_NAME: &str = "my-app";
 const PROJECT_ID: &str = "0198f1b0-0000-7000-8000-00000000e2e0";
-/// The secret this deployment shares. LiveKit's API secret *and* the session-token signing key —
-/// one value, which is the whole reason the client is never given it.
-const FLEET_SECRET: &str = "secret";
+/// LiveKit's API secret — a room credential, never given to the client: with it a client could
+/// mint itself into any room as anybody. Session tokens are signed with the daemon's own key.
+const LK_API_SECRET: &str = "secret";
 
 /// The OS user the daemon serves the project as. Unlike the admission suite — which stops before
 /// anything is spawned and can name any string — this suite runs a real `git` child, so the account
@@ -59,6 +60,8 @@ struct AServedProject {
     /// The daemon's Connect-HTTP root — the only address the client is given.
     daemon_url: String,
     ssh_command: String,
+    /// The daemon's signing identity — what the credentials a developer configures are signed with.
+    tokens: SessionTokens,
     _daemon: BackgroundTask,
     _daemon_http: BackgroundTask,
     _testkit: LiveKitTestkit,
@@ -189,15 +192,14 @@ fn a_github_user(login: &str) -> tddy_github::GitHubUser {
     }
 }
 
-/// An access token of the kind the web UI hands out, signed with the deployment's shared secret.
-fn an_access_token_for(login: &str) -> String {
-    tddy_github::SessionTokenSigner::new(FLEET_SECRET.as_bytes()).mint_access(&a_github_user(login))
+/// An access token of the kind the web UI hands out, signed with the daemon's own key.
+fn an_access_token_for(tokens: &SessionTokens, login: &str) -> String {
+    tokens.signer().mint_access(&a_github_user(login))
 }
 
 /// The 7-day credential a developer configures once.
-fn a_refresh_token_for(login: &str) -> String {
-    tddy_github::SessionTokenSigner::new(FLEET_SECRET.as_bytes())
-        .mint_refresh(&a_github_user(login))
+fn a_refresh_token_for(tokens: &SessionTokens, login: &str) -> String {
+    tokens.signer().mint_refresh(&a_github_user(login))
 }
 
 /// Stand up everything a `git clone` needs: a seeded repository, the daemon's LiveKit participant
@@ -233,8 +235,8 @@ async fn a_served_project(suffix: &str) -> AServedProject {
     )
     .expect("write projects.yaml");
 
-    // The same config the daemon would load: one mapped user, stub GitHub, and a LiveKit block
-    // whose `api_secret` is also the session-token signing key.
+    // The same config the daemon would load: one mapped user, stub GitHub, an `auth_storage` its
+    // signing key lives in, and a LiveKit block for the room.
     let config_dir = tempfile::tempdir().expect("tempdir");
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
@@ -242,9 +244,11 @@ async fn a_served_project(suffix: &str) -> AServedProject {
         format!(
             "users:\n  - github_user: \"{GITHUB_USER}\"\n    os_user: \"{}\"\n\
              github:\n  stub: true\n\
+             auth_storage: \"{}\"\n\
              livekit:\n  enabled: true\n  url: \"{ws_url}\"\n  api_key: \"devkey\"\n  \
-             api_secret: \"{FLEET_SECRET}\"\n  common_room: \"{room}\"\n",
-            serving_os_user()
+             api_secret: \"{LK_API_SECRET}\"\n  common_room: \"{room}\"\n",
+            serving_os_user(),
+            config_dir.path().join("auth").display()
         ),
     )
     .expect("write daemon.yaml");
@@ -258,6 +262,10 @@ async fn a_served_project(suffix: &str) -> AServedProject {
         .user_resolver
         .clone()
         .expect("auth must produce a resolver");
+    let tokens = auth
+        .session_tokens
+        .clone()
+        .expect("a daemon with github configured signs session tokens");
 
     let daemon_http_router = tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
         tddy_rpc::MultiRpcService::new(auth.entries),
@@ -302,7 +310,7 @@ async fn a_served_project(suffix: &str) -> AServedProject {
     let ssh_command = format!(
         "{} --daemon-url {daemon_url} --session-token {}",
         remote_git_repo_binary().display(),
-        an_access_token_for(GITHUB_USER)
+        an_access_token_for(&tokens, GITHUB_USER)
     );
 
     AServedProject {
@@ -311,6 +319,7 @@ async fn a_served_project(suffix: &str) -> AServedProject {
         daemon_instance_id,
         daemon_url,
         ssh_command,
+        tokens,
         _daemon: daemon,
         _daemon_http: daemon_http,
         _testkit: testkit,
@@ -435,7 +444,7 @@ async fn clones_with_a_refresh_token_alone_because_an_access_token_expires_in_fi
     let mut project = a_served_project("refresh-token").await;
     project.ssh_command = project.ssh_command_with(&format!(
         "--refresh-token {}",
-        a_refresh_token_for(GITHUB_USER)
+        a_refresh_token_for(&project.tokens, GITHUB_USER)
     ));
     let origin_head = local_git(&project.repo_path, &["rev-parse", "HEAD"]);
 

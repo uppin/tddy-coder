@@ -90,6 +90,7 @@ impl DaemonSessionHost {
         let remote = match livekit {
             Some(livekit) => crate::split_session::split_remote_tool_env(
                 livekit,
+                self.session_tokens()?,
                 session_id,
                 codebase_instance_id,
                 codebase_session_id,
@@ -123,7 +124,7 @@ impl DaemonSessionHost {
                 (None, true) => "livekit".to_string(),
             },
         );
-        if let Some(livekit) = livekit {
+        if livekit.is_some() {
             // This daemon runs the agent, so it is this session's facilitating daemon and hosts its room —
             // even though the checkout is on `codebase_instance_id`. Opened before the agent is spawned
             // (PRD FR2), and measured by asking the codebase daemon rather than by reading a filesystem
@@ -136,7 +137,7 @@ impl DaemonSessionHost {
             // than re-presenting `req.session_token`, which the codebase daemon stops accepting five
             // minutes in — see `RoomPollTokenMinter`.
             let token_minter = Arc::new(crate::split_session::RoomPollTokenMinter::new(
-                &livekit.api_secret,
+                self.session_tokens()?,
                 &req.session_token,
             )?);
             let remote_source = Arc::new(tddy_daemon_livekit::session_room::RemoteCheckout::new(
@@ -313,34 +314,16 @@ impl DaemonSessionHost {
     /// proof of who asked and expires minutes into a session that runs for hours, so forwarding it
     /// would tie the agent's whole toolchain to it.
     ///
-    /// A deployment with no `livekit.api_secret` signs no session tokens at all — that is the one
-    /// secret `tddy-daemon-auth` builds its signer from — and it is **refused here** rather than
-    /// falling back to forwarding the caller's credential. Forwarding it would hand the agent a
-    /// string this daemon cannot verify, to present on every tool call for the hours the session
-    /// runs.
+    /// A session host built without [`Self::with_session_tokens`] signs nothing, and it is
+    /// **refused here** rather than falling back to forwarding the caller's credential. Forwarding
+    /// it would hand the agent a string that expires minutes into a session that runs for hours.
     ///
-    /// Unreachable in production today, and deliberately a refusal rather than an
-    /// `unreachable!`: with `github:` configured and no secret, `tddy-daemon-auth` installs a
-    /// `user_resolver` that rejects *every* token (`auth.rs` — `None => Arc::new(|_| None)`), so
-    /// a gated RPC never reaches this function; with no `github:` at all the session host is
-    /// never built (`tddy-daemon/src/runtime.rs`). The refusal is what keeps a third deployment
-    /// shape from quietly reintroducing the fallback.
+    /// Unreachable in the daemon, which builds its session host with the same tokens its auth
+    /// entries were built from (`tddy-daemon/src/runtime.rs`), and deliberately a refusal rather
+    /// than an `unreachable!`: the refusal is what keeps another way of assembling a session host
+    /// from quietly reintroducing the fallback.
     pub(crate) fn agent_session_token_for(&self, caller_token: &str) -> Result<String, Status> {
-        match self
-            .config
-            .livekit
-            .as_ref()
-            .and_then(|livekit| livekit.api_secret.as_deref())
-            .map(str::trim)
-            .filter(|secret| !secret.is_empty())
-        {
-            Some(secret) => crate::split_session::mint_agent_session_token(secret, caller_token),
-            None => Err(Status::failed_precondition(
-                "this daemon signs no session tokens, so the agent's tool calls back to it could \
-                 not be authenticated: configure livekit.api_secret — the one secret a session \
-                 token is minted and verified with — and retry",
-            )),
-        }
+        crate::split_session::mint_agent_session_token(self.session_tokens()?, caller_token)
     }
 
     /// How long to wait for the codebase daemon's answer to a split session's forwarded start.

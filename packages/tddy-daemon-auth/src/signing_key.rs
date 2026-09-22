@@ -64,6 +64,25 @@ pub fn signing_key_path(config: &DaemonConfig) -> PathBuf {
     auth_dir.join(SIGNING_KEY_FILE)
 }
 
+/// Load the signing key of the daemon described by `config`, generating it on first boot.
+///
+/// A failure names the setting that chose the path, because that is what an operator changes:
+/// `config.auth_storage` when it is set, the data directory otherwise.
+pub fn load_signing_key(config: &DaemonConfig) -> anyhow::Result<DaemonSigningKey> {
+    let path = signing_key_path(config);
+    DaemonSigningKey::load_or_generate(&path).with_context(|| {
+        let setting = match &config.auth_storage {
+            Some(dir) => format!("config.auth_storage ({})", dir.display()),
+            None => format!("the data directory ({})", data_dir(config).display()),
+        };
+        format!(
+            "{setting} cannot hold this daemon's session-token signing key {}; no session can \
+             be signed or verified until it can",
+            path.display()
+        )
+    })
+}
+
 /// The daemon's data directory by the same rule the runtime applies to its own state: the
 /// configured `tddy_data_dir`, else the build profile's default (`tmp/.tddy` in a debug build),
 /// else `$HOME/.tddy`.

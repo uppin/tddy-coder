@@ -139,6 +139,13 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         // `SessionHost`, and its only caller is `runtime.rs`, which binds it at startup and
         // removes the socket on the way out.
         "agent_tool_socket.rs",
+        // The adapter that makes the common room `tddy-daemon-auth`'s `KeyDirectory`: it reads
+        // the signing keys peers advertise out of `tddy-daemon-livekit`'s registry. Wiring by the
+        // same criterion — no RPC method, no session state, built only by `runtime.rs` — and it
+        // can live nowhere else: the key directory is auth's port, and the LiveKit crate is barred
+        // from reaching auth by its own `dependency_boundary_unit`, so only the crate that
+        // depends on both can join them.
+        "common_room_key_directory.rs",
     ];
 
     let mut files = Vec::new();

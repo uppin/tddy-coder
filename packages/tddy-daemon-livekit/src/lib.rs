@@ -27,10 +27,13 @@
 //! of them. So the god object depended on this subsystem's abstractions rather than the reverse,
 //! which is the direction extraction wants and the reason this move is relocation, not redesign.
 //!
-//! Room JWTs are minted by `tddy-daemon-auth` from `config.livekit.api_secret` — the same secret
-//! that signs session tokens. [`SessionTokenMinter`] is a **port** so this crate never reaches for
-//! it, and `tests/dependency_boundary_unit.rs` pins that `tddy-daemon-auth` stays off this crate's
-//! dependency path. **This crate never derives its own.**
+//! Session tokens are signed by `tddy-daemon-auth` with the daemon's own Ed25519 key.
+//! [`SessionTokenMinter`] is a **port** so this crate never reaches for that key, and
+//! `tests/dependency_boundary_unit.rs` pins that `tddy-daemon-auth` stays off this crate's
+//! dependency path. **This crate never derives its own.** For the same reason the key this daemon
+//! advertises to its peers crosses into this crate only as the two opaque strings of
+//! [`AdvertisedSigningKey`]: the crate publishes them and reads peers' back
+//! ([`peer_signing_public_key`]), and parses none of them.
 
 pub mod common_room_supervisor;
 pub mod livekit_peer_discovery;

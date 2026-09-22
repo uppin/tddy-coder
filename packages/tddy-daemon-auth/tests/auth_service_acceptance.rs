@@ -7,6 +7,7 @@
 //! end it.
 
 use tddy_daemon_auth::auth::build_auth_entries;
+use tddy_daemon_auth::{load_signing_key, DaemonSigningKey, SIGNING_KEY_FILE};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{MultiRpcService, RequestMetadata, RpcBridge, RpcMessage, ServiceEntry, Status};
 use tddy_service::proto::auth::{
@@ -15,8 +16,6 @@ use tddy_service::proto::auth::{
     RefreshSessionResponse,
 };
 
-/// The secret that signs both session tokens and LiveKit room JWTs across a deployment.
-const FLEET_SECRET: &str = "shared-secret";
 /// The `github.stub_codes` mapping a demo sign-in completes through.
 const THE_CALLBACK_CODE: &str = "the-code";
 const THE_LOGIN: &str = "operator";
@@ -68,10 +67,10 @@ async fn exchanges_a_callback_code_for_a_session_token_naming_the_login() {
 }
 
 #[tokio::test]
-async fn reports_an_access_token_signed_with_the_fleet_secret_as_an_authenticated_session() {
-    // Given an access token minted with the secret this daemon verifies against
+async fn reports_an_access_token_this_daemon_signed_as_an_authenticated_session() {
+    // Given an access token minted with this daemon's own key
     let (config, _dir) = a_daemon_with_github_configured();
-    let session_token = an_access_token_for(THE_LOGIN);
+    let session_token = an_access_token_for(&config, THE_LOGIN);
 
     // When the web client asks whether it is still signed in
     let status: GetAuthStatusResponse = call(
@@ -90,11 +89,11 @@ async fn reports_an_access_token_signed_with_the_fleet_secret_as_an_authenticate
 }
 
 #[tokio::test]
-async fn refuses_a_session_token_signed_with_a_foreign_secret() {
-    // Given a token minted by a daemon holding a different secret
+async fn refuses_a_session_token_signed_by_a_daemon_it_has_never_heard_of() {
+    // Given a token minted by a daemon whose key this one was never told
     let (config, _dir) = a_daemon_with_github_configured();
-    let session_token = tddy_github::SessionTokenSigner::new(b"some-other-fleets-secret")
-        .mint_access(&a_github_user(THE_LOGIN));
+    let (stranger, _home) = a_stranger_daemon();
+    let session_token = stranger.signer().mint_access(&a_github_user(THE_LOGIN));
 
     // When the web client asks whether it is signed in
     let status: GetAuthStatusResponse = call(
@@ -113,7 +112,8 @@ async fn refuses_a_session_token_signed_with_a_foreign_secret() {
 async fn refreshes_a_session_into_a_fresh_access_token_for_the_same_login() {
     // Given the long-lived refresh token a sign-in also returned
     let (config, _dir) = a_daemon_with_github_configured();
-    let refresh_token = tddy_github::SessionTokenSigner::new(FLEET_SECRET.as_bytes())
+    let refresh_token = the_daemons_key(&config)
+        .signer()
         .mint_refresh(&a_github_user(THE_LOGIN));
 
     // When the web client extends its session with it
@@ -142,7 +142,7 @@ async fn refreshes_a_session_into_a_fresh_access_token_for_the_same_login() {
 async fn logs_out_without_needing_any_server_side_session_state() {
     // Given a signed-in operator's access token
     let (config, _dir) = a_daemon_with_github_configured();
-    let session_token = an_access_token_for(THE_LOGIN);
+    let session_token = an_access_token_for(&config, THE_LOGIN);
 
     // When they sign out
     let farewell: Result<LogoutResponse, Status> =
@@ -152,13 +152,15 @@ async fn logs_out_without_needing_any_server_side_session_state() {
     assert_eq!(farewell.map(|_| ()).map_err(|refusal| refusal.code), Ok(()));
 }
 
-/// A daemon with a stub GitHub app, one mapped operator, and the fleet's signing secret.
+/// A daemon with a stub GitHub app, one mapped operator, and an identity of its own under its
+/// `auth_storage`.
 fn a_daemon_with_github_configured() -> (DaemonConfig, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let yaml = format!(
         "users:\n  - github_user: \"{THE_LOGIN}\"\n    os_user: \"{THE_LOGIN}-os\"\n\
          github:\n  stub: true\n  stub_codes: \"{THE_CALLBACK_CODE}:{THE_LOGIN}\"\n\
-         livekit:\n  api_secret: \"{FLEET_SECRET}\"\n"
+         auth_storage: \"{}\"\n",
+        dir.path().join("auth").display()
     );
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).expect("the config is written");
@@ -184,8 +186,23 @@ fn a_github_user(login: &str) -> tddy_github::GitHubUser {
     }
 }
 
-fn an_access_token_for(login: &str) -> String {
-    tddy_github::SessionTokenSigner::new(FLEET_SECRET.as_bytes()).mint_access(&a_github_user(login))
+/// The key the daemon `config` describes signs with — the one its auth entries load.
+fn the_daemons_key(config: &DaemonConfig) -> DaemonSigningKey {
+    load_signing_key(config).expect("the daemon's signing key loads")
+}
+
+/// A daemon this one has never been told about, with a key of its own.
+fn a_stranger_daemon() -> (DaemonSigningKey, tempfile::TempDir) {
+    let home = tempfile::tempdir().expect("a temporary directory");
+    let key = DaemonSigningKey::load_or_generate(&home.path().join(SIGNING_KEY_FILE))
+        .expect("a stranger generates a keypair");
+    (key, home)
+}
+
+fn an_access_token_for(config: &DaemonConfig, login: &str) -> String {
+    the_daemons_key(config)
+        .signer()
+        .mint_access(&a_github_user(login))
 }
 
 /// The login the daemon's single identity function reads out of a token — the rule every other

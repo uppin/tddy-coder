@@ -120,9 +120,10 @@ impl DaemonSessionHost {
     /// Both refusals name **this** daemon. For a split session the tools are served on the codebase
     /// host while the error is rendered in the agent's transcript on the agent host, where an
     /// unattributed "invalid or expired session" reads as the agent host's own answer — and the two
-    /// likeliest split misconfigurations land here: daemons not sharing `livekit.api_secret` (a
-    /// session token is a stateless HMAC, verifiable only by daemons holding the same secret), and a
-    /// GitHub user mapped on the agent host but not on the codebase host. Each is also logged here,
+    /// likeliest split misconfigurations land here: a codebase host that has not learned the agent
+    /// host's signing key (a session token is verifiable only by a daemon that has seen its signer's
+    /// public key advertised in the common room), and a GitHub user mapped on the agent host but not
+    /// on the codebase host. Each is also logged here,
     /// because the operator debugging it is reading *this* daemon's log.
     pub(crate) fn authorize_exec_tool_caller(
         &self,
