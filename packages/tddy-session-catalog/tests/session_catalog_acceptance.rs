@@ -9,8 +9,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tddy_core::session_actions::{ActionSummary, DiscoveryQuery};
-use tddy_core::session_catalog::{BuildCatalogProvider, BuildTargetCatalogEntry, SessionCatalog};
+use tddy_session_catalog::{BuildCatalogProvider, BuildTargetCatalogEntry, SessionCatalog};
+use tddy_session_store::session_actions::{ActionSummary, DiscoveryQuery};
 use tddy_task::TaskRegistry;
 use tokio::time::timeout;
 

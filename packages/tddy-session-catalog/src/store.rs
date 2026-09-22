@@ -9,7 +9,7 @@ use sqlx::{Row, SqlitePool};
 
 use super::entry::{BuildTargetCatalogEntry, CatalogCapabilities, CatalogEntry};
 use super::error::CatalogError;
-use crate::session_actions::{ActionListResult, ActionSummary, DiscoveryQuery};
+use tddy_session_store::session_actions::{ActionListResult, ActionSummary, DiscoveryQuery};
 
 /// Open (creating if missing) a WAL-mode pool at `db_path` and ensure the schema exists.
 pub async fn open_pool(db_path: &Path) -> Result<SqlitePool, sqlx::Error> {

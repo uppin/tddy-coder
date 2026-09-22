@@ -25,7 +25,7 @@ fn tokio_runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
-pub(crate) fn block_on<F: Future>(f: F) -> F::Output {
+pub fn block_on<F: Future>(f: F) -> F::Output {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         return tokio::task::block_in_place(|| handle.block_on(f));
     }
@@ -91,7 +91,7 @@ pub(crate) async fn wait_task_terminal(handle: &TaskHandle) {
     }
 }
 
-pub(crate) fn write_channel_logs(
+pub fn write_channel_logs(
     handle: &TaskHandle,
     stdout_path: &Path,
     stderr_path: &Path,

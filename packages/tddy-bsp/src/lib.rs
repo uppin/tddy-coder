@@ -4,7 +4,7 @@
 //! - [`service::BspServiceImpl`] — the `bsp.BspService` RPC implementation (enumerate targets,
 //!   sources/output paths, reload, compile/test/run) served over the workspace's protobuf/Connect +
 //!   LiveKit transports.
-//! - [`provider`] — the enriched [`tddy_core::session_catalog::BuildCatalogProvider`] that projects
+//! - [`provider`] — the enriched [`tddy_session_catalog::BuildCatalogProvider`] that projects
 //!   `BUILD.yaml` targets (capabilities/tags/languages/sources/outputs/deps) into the per-session
 //!   catalog.
 //! - [`plugins::plugin_registry`] — the build-plugin set (`tddy-build` knows no target types; this

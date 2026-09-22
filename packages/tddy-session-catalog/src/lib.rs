@@ -1,9 +1,9 @@
 //! Per-session SQLite catalog: the single source of truth for what is listable in a session.
 //!
 //! Unifies two entry kinds into one indexed store at `<session_dir>/catalog.db`:
-//! - **action manifests** (the YAML actions of [`crate::session_actions`]), and
+//! - **action manifests** (the YAML actions of [`tddy_session_store::session_actions`]), and
 //! - **build targets** ("tddy targets"), auto-discovered from `BUILD.yaml` and supplied through the
-//!   [`provider::BuildCatalogProvider`] port (so `tddy-core` needs no dependency on `tddy-build`).
+//!   [`provider::BuildCatalogProvider`] port (so this crate needs no dependency on `tddy-build`).
 //!
 //! Each entry is stored as a JSON blob; a projected `package` column serves the first index
 //! ("list targets per package"). Population runs as a [`tddy_task`] on worktree-open, and the first

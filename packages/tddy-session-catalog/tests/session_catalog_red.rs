@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tddy_core::session_actions::{ActionListResult, ActionSummary, DiscoveryQuery};
-use tddy_core::session_catalog::read::catalog_db_path;
-use tddy_core::session_catalog::{
+use tddy_session_catalog::read::catalog_db_path;
+use tddy_session_catalog::{
     BuildCatalogProvider, BuildTargetCatalogEntry, CatalogEntry, CatalogEntryKind, SessionCatalog,
 };
+use tddy_session_store::session_actions::{ActionListResult, ActionSummary, DiscoveryQuery};
 use tddy_task::{TaskRegistry, TaskStatus};
 use tempfile::TempDir;
 use tokio::time::timeout;

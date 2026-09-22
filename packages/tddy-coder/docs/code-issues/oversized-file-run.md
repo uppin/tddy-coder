@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-19 | 2682 | 2679 → 2682 in this PR — a **three-line** change (`ClientConfig` gains one field) |
+| 2026-09-22 | 2682 | 2682 → 2682 in #493 — catalog paths repointed to `tddy_session_catalog`; not grown |
 
 ## What would close it — designed seams
 

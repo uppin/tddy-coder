@@ -23,7 +23,6 @@ pub mod session_action_pipeline;
 pub mod session_actions;
 pub mod session_activity;
 pub mod session_agent;
-pub mod session_catalog;
 pub mod session_chain;
 pub mod session_context;
 pub mod session_label;

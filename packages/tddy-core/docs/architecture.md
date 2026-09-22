@@ -132,46 +132,25 @@ How a branch stands against its base — behind/ahead counts and whether taking 
 - **TddyLogger**: Implements `log::Log`. Routes records to the logger chosen by the first matching policy. Format templating: `{timestamp}`, `{level}`, `{target}`, `{module}`, `{message}`.
 - **Log rotation**: On startup, existing file outputs are renamed to `{stem}.{ISO-8601}.{ext}`; rotated files beyond `max_rotated` are pruned. `TDDY_QUIET` switches default output to buffer for TUI display.
 
-### Atomic file writes (`atomic_file.rs`)
+### Session storage facades (`atomic_file`, `error`, `output`)
 
-The single way session and daemon state reaches disk. `std::fs::write` opens the target with
-`O_TRUNC`, discarding the previous contents before the first replacement byte lands, so a write that
-fails part-way — `ENOSPC` mid-write, or at writeback after a short `write` — leaves a **truncated or
-empty** file where the state used to be. A 0-byte `.session.yaml` does not read as "write failed"; it
-reads as "not a session", so the daemon and `tddy-web` drop a session whose agent process is still
-running and healthy.
+These three modules live in [`tddy-session-store`](../../tddy-session-store/docs/architecture.md).
+Each old path here is a one-line glob facade, `pub use tddy_session_store::<module>::*;`, so
+`tddy_core::atomic_file::write_atomic`, `tddy_core::error::WorkflowError`,
+`tddy_core::output::create_session_dir_in` and the rest resolve unchanged. New code names
+`tddy_session_store::…` directly.
 
-- **write_atomic(path, contents)**: writes a **per-call** swap file beside the target
-  (`.<basename>.<pid>.<uuid>.swap`), `write_all` + `sync_all`, carries over an existing target's
-  permission bits, `rename`s over the target, then best-effort `fsync`s the directory. Any failure is
-  cleaned up and reported with the target untouched. The swap name is per-call because two concurrent
-  writers sharing one fixed scratch name can publish each other's half-written bytes — which two
-  hand-rolled temp-then-rename implementations (`.changeset.yaml.tmp`, `job.json.tmp`) did before
-  they were folded into this module.
-- **write_atomic_labelled(path, contents)**: the same, with the target path folded into the error
-  string, since a bare `ENOSPC` names no file.
-- Consumers: everything that persists session or daemon state — `session_metadata.rs`,
-  `changeset.rs`, `output/writer.rs`, `workflow/session.rs`, `workflow/action_cache.rs`,
-  `session_action_jobs/runner.rs`, `session_actions/runtime.rs`, `backend/{codex,cursor}.rs`,
-  `presenter/presenter_impl.rs`, plus `tddy-workflow-recipes`, `tddy-daemon`
-  (`project_storage.rs`, `worktrees.rs`, `telegram_github_link.rs`, `connection_service.rs`,
-  `cursor_cli_spawn.rs`), `tddy-sandbox-recipes` and `tddy-tools`.
+- **`atomic_file`**: `write_atomic`, `write_atomic_with_mode`, `write_atomic_labelled`. This is the
+  single way session and daemon state reaches disk. See
+  [Atomic file writes](../../tddy-session-store/docs/architecture.md#atomic-file-writes-atomic_file).
+- **`error`**: `BackendError`, `WorkflowError`, `ParseError`.
+- **`output`**: session directory creation and path helpers. Structured-response parsing and the
+  TDD artifact writers live in `tddy-workflow-recipes`.
 
-Deliberately **not** routed through it: `/proc`, `/sys` and cgroup control files (kernel interfaces
-where a rename is meaningless and a plain write is the contract); ready markers, empty completion
-markers and short-lived curl body files (nothing reads them after a failed write); `tddy-build`'s
-action cache (the crate is deliberately standalone — no `tddy-*` deps — and already writes a uniquely
-named temp file, syncs and renames); and `tddy-tool-engine`'s writes, which target arbitrary
-repository files where replacing a symlink with a regular file would be a behaviour change.
-
-Atomic replacement changes the file's **inode**. Nothing in the repo watches session files via
-`notify`/inotify — `usage_watcher.rs` documents polling as a deliberate choice — so no reader depends
-on the inode surviving. Swap files are dotfiles ending in `.swap`, so directory scans filtering on
-`.md` (`inject_cross_references`) or on hidden files never pick one up.
-
-Still truncating in place, and worth converting separately: the daemon's secret stores
-(`github_token_store.rs`, `vnc_vault.rs`, `screen_sharing_vault.rs`). They are correct about mode
-`0600` on creation, so converting them needs a mode-aware variant of `write_atomic`.
+The per-session SQLite catalog lives in
+[`tddy-session-catalog`](../../tddy-session-catalog/docs/architecture.md) and has **no** facade
+here. `tddy-core` does not depend on `sqlx`, and a `tddy_core::session_catalog` facade would make it
+depend on SQLite again, so the catalog's consumers name `tddy_session_catalog` directly.
 
 ### Spawn environment (`spawn_env.rs`)
 
@@ -226,20 +205,20 @@ Guarantees fd 1 (stdout) carries only RPC frames when a process runs with `--std
 
 ### Session actions (`session_actions/`)
 
-- **Purpose**: Library support for declarative **`actions/*.yaml`** manifests beside session **`changeset.yaml`** (see [session-actions.md](../../../docs/ft/coder/session-actions.md), [session-layout.md](../../../docs/ft/coder/session-layout.md)). **`tddy-tools`** wires **`list-actions`**, **`invoke-action`**, and JSON output on top of this module.
-- **ActionManifest**: Versioned YAML (**`serde`**, **`deny_unknown_fields`**); **`parse_action_manifest_file`** / **`parse_action_manifest_yaml`** load a single manifest.
-- **list_action_summaries**: Lists **`id`**, **`summary`**, and schema-presence flags for manifests under **`<session_dir>/actions/`**.
-- **validate_action_arguments_json**: Compiles **`input_schema`** when present and validates **`--data`** JSON (**`jsonschema`**, default draft aligned with toolchain) before any subprocess runs.
-- **validate_authored_manifest**: Field checks for a subagent-*authored* manifest before it is established as an action file (non-empty argv, filename-safe **`id`** — letters/digits/`-`/`_` only, compilable **`input_schema`**). Shared by the in-jail `request_action` retry loop (**`tddy-tools`**) and the authoritative host-side `EstablishAction` handler (**`tddy-sandbox-app`**) so the two never drift — see [no-bash-mode.md](../../../docs/ft/coder/no-bash-mode.md).
-- **resolve_allowlisted_path**: Resolves **`output_path_arg`** string fields inside the canonical session directory or optional **`repo_path`** from **`changeset.yaml`**; traversal outside those roots fails closed for callers that map the error to tool exit **`3`**.
-- **ensure_action_architecture**: Enforces **`architecture`**: **`native`** or rustc-style prefix matching **`std::env::consts::ARCH`** before spawn.
-- **parse_test_summary_from_process_output** / **`TestSummary`**: Parses cargo-style **`test result:`** totals from combined stdout/stderr when **`result_kind`** is **`test_summary`**.
-- **run_manifest_command**: Spawns **`command[0]`** with argv capture via **`std::process::Command`**; UTF-8 decode uses replacement for invalid bytes. When **`result_kind`** is **`test_summary`**, the returned JSON includes a merged **`summary`** object (**`finalize_invocation_record`**).
-- **resolve_action_manifest_path**: Resolves **`actions/<action_id>.{yaml,yml}`** under **`--session-dir`**; mismatches surface as **`UnknownActionId`** for callers that map errors to tool exit semantics.
-- **`authoring`**: The rules a subagent-*authored* manifest must satisfy, and the retry guidance returned when it does not — including **`MAX_MANIFEST_BYTES`**. Here rather than in the crate that advertises `request_action` (`tddy-tools`) or the one that establishes it (`tddy-sandbox-app`), so the two can never drift.
-- **`session_dir`**: Resolves the session directory a session-action subcommand operates on, and logs under **`tddy_core::session_actions::session_dir`**.
-- **`tool_gate`** (**`SESSION_ACTION_TOOLS_ENV`** = `TDDY_SESSION_ACTION_TOOLS`, **`session_action_tools_enabled`**): Whether this session's host actually serves the three session-action tools. `request_action` / `list_actions` / `invoke_action` are host round-trips against a session directory that exists only on the host, and **the transport cannot answer whether they are served**: the in-jail socket carries both `tddy-sandbox-app`'s handler, which implements all three, and `tddy-daemon`'s, which implements none and answered `{"error":"unknown tool: ListActions","is_error":true}` to every call. So the **host declares it**, exactly as it declares an available language server with `TDDY_LSP_TOOLS`. Only a host that routes the three somewhere that answers them sets the variable; every other placement stays silent and the tools are not advertised. The gate lives here — the crate that owns session actions — because it is the only one both the advertiser and the implementer already name.
-- **Tests**: **`session_actions_red`**.
+- **Facade**: `pub use tddy_session_store::session_actions::*;`. Manifest parsing, discovery,
+  validation, authoring rules, invocation, test-summary parsing and the `tool_gate` all live in
+  [`tddy-session-store`](../../tddy-session-store/docs/architecture.md#session-actions-session_actions),
+  and every `tddy_core::session_actions::…` path resolves through the glob.
+- **`session_dir`** (stays here): **`list_actions_in_session_dir`**,
+  **`invoke_action_in_session_dir`** and **`ListActionsResponse`** list and invoke a session's
+  actions from a session directory alone. They take the repo root from the session's
+  `changeset.yaml` through **`read_changeset`** (matching **`WorkflowError::ChangesetMissing`**),
+  and the action store from the tddy data directory. The result has the same JSON shape a relayed
+  `list-actions` answers with. `tddy_tools::session_actions_cli` wraps them in the CLI's argument
+  parsing, stdout and exit codes. Logs go under **`tddy_core::session_actions::session_dir`**. This
+  file cannot move with the rest: `changeset` belongs to the workflow layer, which
+  `tddy-session-store` must not depend on.
+- **Tests**: **`session_actions_acceptance`**.
 
 ### Session action jobs (`session_action_jobs/`)
 
@@ -249,6 +228,7 @@ Guarantees fd 1 (stdout) carries only RPC frames when a process runs with `--std
 - **wait_session_action_job**: Polls subprocess exit via **`waitpid`** (**`WNOHANG`**) while **`job.json`** reflects **`running`**; **`timeout_ms: None`** or **`0`** means unbounded wait; a positive bound yields **`TimedOut { still_running }`** when the deadline elapses first.
 - **stop_session_action_job**: Sends **`SIGKILL`** to the process group on Unix, reaps the child, persists **`cancelled`** state, returns **`UnknownJob`** when the job directory is absent, and **`AlreadyFinished`** when the job is already terminal. **`stable_code`** on **`SessionActionJobsError::UnknownJob`** is **`unknown_job`**.
 - **Platform notes**: Async **`wait` / `stop` / `reap`** use **`libc`** on Unix targets; non-Unix builds surface **`JobState`** errors for those entry points.
+- **Runtime access**: the runner drives manifests through `tddy_session_store::session_actions::runtime` (`block_on`, `write_channel_logs`, the per-session task registry). That module is `#[doc(hidden)] pub` only so this runner can cross the crate boundary. It is not API. The runner stays in `tddy-core` because it needs `read_changeset`.
 - **Tests**: **`toolcall_jobs`** (tddy-core), **`session_action_jobs_acceptance`** (tddy-tools).
 
 ### Session action pipeline (`session_action_pipeline`)
@@ -262,26 +242,6 @@ Guarantees fd 1 (stdout) carries only RPC frames when a process runs with `--std
 
 - **JSON Schema validation**: All schema logic lives in **`tddy_workflow_recipes::{schema, schema_manifest}`**, next to the `goals.json` and `generated/` tree it is generated from. Schemas are embedded via `include_dir`; no schema files are written to disk. `tddy-tools submit --goal <goal>` validates JSON against the embedded schema before relaying to tddy-coder, and `tddy-tools get-schema <goal>` outputs the schema for inspection — the binary parses the arguments and owns the exit codes, the library answers about schemas. On validation failure, `tddy-tools` returns errors with a tip to run `get-schema`. The `red` schema defines an optional `source_file` on each `markers[]` item (file path where the marker was placed); `packages/tddy-core/schemas/red.schema.json` matches the embedded schema for tests and parity checks. See [json-schema.md](../../tddy-workflow-recipes/docs/json-schema.md).
 - **ProcessToolExecutor**: Invokes `tddy-tools submit --goal <goal> --data '<json>'` with TDDY_SOCKET set. tddy-core has no schema module.
-
-### Output (`output/`)
-
-- **extract_last_structured_block**: Extracts last `<structured-response>` block and optional `schema="..."` attribute. Used for validation before parsing.
-- **parse_planning_response**: Extracts PRD and TODO from structured-response or delimited text. Tries each structured-response block until one parses (handles system prompt example before model output).
-- **parse_acceptance_tests_response**: Extracts test summary, test_command, prerequisite_actions, run_single_or_selected_tests from acceptance-tests response.
-- **parse_red_response**: Extracts RedOutput (summary, tests, skeletons, markers, marker_results, run instructions) from red goal response. Uses last structured-response block (handles system prompt example before model output). After deserialize, rejects markers whose optional `source_file` path is classified as test-only (see `source_path`).
-- **validate_red_marker_source_paths**: Ensures every marker with `source_file` points at a production path; returns `ParseError::Malformed` when classification is test-only.
-- **source_path** (`source_path.rs`): `classify_rust_source_path` classifies slash-normalized paths: `tests` as a path segment or `*_test.rs` filename → test-only; otherwise production. Used for red marker placement validation only.
-- **parse_green_response**: Extracts GreenOutput (summary, tests, demo_results) from green goal response.
-- **write_artifacts**: Writes PRD.md, TODO.md, demo-plan.md to the plan directory.
-- **write_acceptance_tests_file / write_red_output_file / write_progress_file / write_demo_results_file**: Artifact writers.
-- **parse_evaluate_response**: Extracts EvaluateOutput (summary, risk_level, build_results, issues, changeset_sync, files_analyzed, test_impact, changed_files, affected_tests, validity_assessment) from evaluate-changes goal response. Uses rfind to locate last structured-response block. Uses Evaluate* types (EvaluateBuildResult, EvaluateIssue, etc.).
-- **parse_validate_subagents_response**: Extracts ValidateSubagentsOutput (goal, summary, tests_report_written, prod_ready_report_written, clean_code_report_written, refactoring_plan_written) from validate (subagent) goal response.
-- **parse_refactor_response**: Extracts RefactorOutput (goal, summary, items_completed, items_remaining) from refactor goal response.
-- **parse_update_docs_response**: Extracts UpdateDocsOutput (goal, summary, docs_updated) from update-docs goal response.
-- **write_evaluation_report**: Writes evaluation-report.md to plan_dir from EvaluateOutput.
-- **slugify_directory_name**: Generates directory names (YYYY-MM-DD-<slug>).
-- **create_session_dir_in**: Creates `{base}/sessions/{uuid}/` for stable session directory. Uses `SESSIONS_SUBDIR` constant. When `output_dir == "."`, CLI uses `$HOME/.tddy` as base; PlanTask uses `session_base` from context.
-- **session_lifecycle** (`session_lifecycle.rs`): `materialize_unified_session_directory`, `unified_session_dir_path`, `resolve_effective_session_id` (process-bound id wins over backend id), `validate_session_id_segment` / `SessionIdValidationError`, `UnifiedSessionTreeBootstrap` as the default `SessionLifecycleBootstrap` for the unified tree. Product reference: [session-layout.md](../../../docs/ft/coder/session-layout.md).
 
 ### Token accounting (`token_accounting.rs`)
 
