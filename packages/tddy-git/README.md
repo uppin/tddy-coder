@@ -17,8 +17,14 @@ coupling — `packages/tddy-github/tests/git_plumbing_shape.rs` asserts against 
 
 | Module | Owns |
 |---|---|
-| `lib.rs` | the 48 git wrappers: worktree creation and reuse, branch naming and collision retry, ref validation, remote detection, fetch, push, and `list_worktrees` |
-| `ssh_exec.rs` | OpenSSH helpers — `run_ssh_batch`, `shell_single_quote`, `default_remote_repo_root`, `contain_remote_path` |
+| `refs` | branch and ref names: local-name derivation, ref validation, slugs, free branch names |
+| `rev` | `git rev-parse` wrappers: resolved revisions and checked-out branch names |
+| `remote` | `GIT_SSH_COMMAND`, fetch, push, default-remote detection, integration-base resolution |
+| `worktree` | linked worktrees under `.worktrees/`: create, reuse, find, list, remove |
+| `ssh_worktree`, `ssh_exec` | session worktrees on a remote host, and the OpenSSH helpers they run through |
+
+The modules are private and re-exported at the root, so every item is `tddy_git::<item>`. Details
+per function: [docs/architecture.md](docs/architecture.md).
 
 `setup_worktree_for_session_over_ssh` lives here rather than in `tddy-core` despite its name: it is
 `git clone` plus `git worktree add` over SSH, parameterised by a session-id **string**. It never

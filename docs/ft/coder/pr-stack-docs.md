@@ -39,8 +39,8 @@ surface plus its failing tests, enough to open a draft PR against, so dependents
 real ref and code against a real signature while the implementation continues in the same PR.
 
 This is a **content contract, not automation**. `GithubPrApi::create_pr(head, base, title, body)`
-(`orchestrate_pr_stack/github.rs:97`) has no `draft` parameter and gains none here. Draft PRs are
-already *read* correctly — `pr_state_from_github` maps them to `PrState::Draft` (`github.rs:68`) and
+(`tddy-github/src/pr_api.rs:97`) has no `draft` parameter and gains none here. Draft PRs are
+already *read* correctly — `pr_state_from_github` maps them to `PrState::Draft` (`pr_api.rs:68`) and
 `pr_status.phase` deliberately records a draft as `open` (`pr_stack/mod.rs:1397`). Opening a PR as a
 draft stays a human act; the document says what should be in it.
 
