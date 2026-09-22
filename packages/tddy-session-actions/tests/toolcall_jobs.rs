@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
-use tddy_core::session_action_jobs::{
+use tddy_session_actions::session_action_jobs::{
     invoke_session_action, stop_session_action_job, wait_session_action_job, BlockingOutcomeBody,
     SessionActionInvokeOptions, SessionActionInvokeOutcome, SessionActionJobRegistry,
     SessionActionJobsError, SessionActionWaitOutcome,

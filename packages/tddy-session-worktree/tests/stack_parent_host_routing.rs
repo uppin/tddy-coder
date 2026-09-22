@@ -1,7 +1,7 @@
 //! Unit: **which host** resolves a spawn's PR-stack parent.
 //!
 //! `stack_parent` is a bare session id, and every resolver behind it
-//! ([`tddy_core::resolve_chain_base_ref`] and friends) reads
+//! ([`tddy_session_worktree::resolve_chain_base_ref`] and friends) reads
 //! `unified_session_dir_path(sessions_base, parent_session_id)` on the **local** filesystem. A
 //! stack whose orchestrator lives on another daemon is therefore not "not yet planned" but simply
 //! absent, and the spawn is refused with
@@ -18,7 +18,7 @@
 //!
 //! Feature: `docs/ft/coder/pr-stacking.md`
 
-use tddy_core::session_chain::{classify_stack_parent_route, StackParentRoute};
+use tddy_session_worktree::session_chain::{classify_stack_parent_route, StackParentRoute};
 
 /// The daemon the spawn request landed on — the one creating the child session.
 const SPAWNING_HOST: &str = "laptop-a";

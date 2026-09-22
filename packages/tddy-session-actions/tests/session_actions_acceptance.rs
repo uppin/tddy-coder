@@ -1,10 +1,10 @@
-//! Granular acceptance tests for `tddy_core::session_actions`.
+//! Granular acceptance tests for `tddy_session_actions::session_actions`.
 
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
-use tddy_core::session_actions::{
+use tddy_session_actions::session_actions::{
     ensure_action_architecture, list_action_summaries, parse_action_manifest_yaml,
     parse_test_summary_from_process_output, resolve_allowlisted_path, run_manifest_command,
     validate_action_arguments_json, ActionManifest, DiscoveryQuery, TestSummary,

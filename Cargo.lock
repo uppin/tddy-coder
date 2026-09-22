@@ -12062,7 +12062,9 @@ dependencies = [
  "tddy-log",
  "tddy-rpc",
  "tddy-sandbox",
+ "tddy-session-actions",
  "tddy-session-store",
+ "tddy-session-worktree",
  "tddy-stdio",
  "tddy-task",
  "tddy-testing-commons",
@@ -13091,6 +13093,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-session-actions"
+version = "0.1.0"
+dependencies = [
+ "glob",
+ "jsonschema 0.44.1",
+ "log",
+ "serde",
+ "serde_json",
+ "tddy-changeset",
+ "tddy-session-store",
+ "tddy-task",
+ "tddy-testing-commons",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tddy-session-activity"
 version = "0.1.0"
 dependencies = [
@@ -13323,6 +13342,18 @@ dependencies = [
  "tddy-service",
  "tddy-stdio",
  "tokio",
+]
+
+[[package]]
+name = "tddy-session-worktree"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "tddy-changeset",
+ "tddy-git",
+ "tddy-session-store",
+ "tddy-workflow",
+ "tempfile",
 ]
 
 [[package]]

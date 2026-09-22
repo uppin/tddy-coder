@@ -1,6 +1,6 @@
 //! Worktree materialization on an SSH target (no tddy-daemon on T).
 
-use tddy_core::setup_worktree_for_session_over_ssh;
+use tddy_session_worktree::setup_worktree_for_session_over_ssh;
 
 #[test]
 fn setup_worktree_for_session_over_ssh_returns_the_path_on_the_target() {

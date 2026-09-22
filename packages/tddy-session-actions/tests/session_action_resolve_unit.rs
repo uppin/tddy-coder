@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 
 use serde_json::json;
-use tddy_core::session_action_pipeline::{
+use tddy_session_actions::session_action_pipeline::{
     build_extended_channel_manifest, build_invocation_envelope_direct, merge_session_action_env,
     resolve_output_globs_sorted,
 };

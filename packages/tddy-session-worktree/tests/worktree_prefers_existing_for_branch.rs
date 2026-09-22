@@ -5,8 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tddy_core::changeset::{write_changeset, Changeset};
-use tddy_core::worktree::{
+use tddy_changeset::changeset::{write_changeset, Changeset};
+use tddy_session_worktree::worktree::{
     setup_worktree_for_session_with_integration_base,
     setup_worktree_for_session_with_optional_chain_base,
 };

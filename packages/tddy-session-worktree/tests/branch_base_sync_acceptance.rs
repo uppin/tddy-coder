@@ -1,7 +1,7 @@
 //! PRD acceptance: `docs/ft/coder/pr-stack-live-status.md § Panel UX` — the
 //! branch/base sync probe behind the PR-stack panel's "behind base / conflicts" badge.
 //!
-//! Pins `tddy_core::base_sync::branch_base_sync`: how a branch is compared against its base
+//! Pins `tddy_session_worktree::base_sync::branch_base_sync`: how a branch is compared against its base
 //! (remote-first for the base, local-first for the head, `<remote>/` prefixes normalised off),
 //! what the ahead/behind counts and conflicting paths mean, that the probe is read-only — it
 //! never touches the working tree, the index or `HEAD` — and that every "could not tell" case
@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use tddy_core::base_sync::{branch_base_sync, BranchBaseSync};
+use tddy_session_worktree::base_sync::{branch_base_sync, BranchBaseSync};
 
 // ---------------------------------------------------------------------------
 // Fixture — a real git repository built by a fluent builder. No test body below

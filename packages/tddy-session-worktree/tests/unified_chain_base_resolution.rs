@@ -9,10 +9,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tddy_core::changeset::{Stack, StackNode};
-use tddy_core::session_chain::{resolve_chain_base_for_session_spawn, resolve_chain_base_ref};
-use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::{write_changeset, Changeset};
+use tddy_changeset::changeset::{Stack, StackNode};
+use tddy_changeset::session_lifecycle::unified_session_dir_path;
+use tddy_changeset::{write_changeset, Changeset};
+use tddy_session_worktree::session_chain::{
+    resolve_chain_base_for_session_spawn, resolve_chain_base_ref,
+};
 
 fn scratch(label: &str) -> PathBuf {
     let p = std::env::temp_dir().join(format!(

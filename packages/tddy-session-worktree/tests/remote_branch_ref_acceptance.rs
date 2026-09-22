@@ -16,7 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tddy_core::worktree::remote_branch_ref_sha;
+use tddy_session_worktree::worktree::remote_branch_ref_sha;
 
 fn scratch(label: &str) -> PathBuf {
     let p = std::env::temp_dir().join(format!(

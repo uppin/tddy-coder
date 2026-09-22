@@ -3,7 +3,7 @@
 //! selector) wins over the stack-parent-resolved chain base; an empty override falls through
 //! to the stack-parent resolution (today's behavior).
 //!
-//! These tests define the API contract for `tddy_core::session_chain::select_worktree_base_ref`,
+//! These tests define the API contract for `tddy_session_worktree::session_chain::select_worktree_base_ref`,
 //! a pure helper the daemon spawn paths call to choose the value handed to
 //! `setup_worktree_for_session_with_optional_chain_base`. They fail (red) until the helper is
 //! added.
@@ -11,7 +11,7 @@
 //! PRD: docs/ft/coder/1-WIP/PRD-2026-07-27-planned-pr-base-branch-selection.md
 //! Changeset: docs/dev/1-WIP/2026-07-27-planned-pr-base-branch-selection.md
 
-use tddy_core::session_chain::select_worktree_base_ref;
+use tddy_session_worktree::session_chain::select_worktree_base_ref;
 
 /// **returns_the_explicit_override_when_it_is_non_empty** — A non-empty operator-chosen base
 /// ref wins over the stack-parent-resolved chain base, so a planned-PR child worktree bases off

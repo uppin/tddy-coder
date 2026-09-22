@@ -366,9 +366,9 @@ mod tests {
     use super::*;
     use crate::changeset::{write_changeset, Changeset, ChangesetState};
     use crate::session_lifecycle::unified_session_dir_path;
-    use crate::workflow::ids::WorkflowState;
     use std::fs;
     use std::process::Command;
+    use tddy_workflow::ids::WorkflowState;
 
     fn tmp_sessions_parent_with_branch(
         label: &str,

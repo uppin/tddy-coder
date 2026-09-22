@@ -109,7 +109,7 @@ measured in its new home.
 - [x] Dead files deleted; `futures` dropped
 - [x] Cut 1, Cut 2, the two retargets
 - [x] `tddy-log`, `tddy-agent-skills`
-- [ ] `tddy-changeset`, `tddy-session-worktree`, `tddy-session-actions`
+- [x] `tddy-changeset`, `tddy-session-worktree`, `tddy-session-actions`
 - [ ] `tddy-toolcall`, `tddy-agent-backend`
 - [ ] `tddy-workflow-engine`, `tddy-presenter`
 - [ ] `tddy-core` facades only
@@ -161,7 +161,7 @@ tddy-core   (pub use facades only, ~140 lines)
 - [x] Cut 1 + retargets; tddy-core still builds as one crate — AC4 half
 - [x] `tddy-log`, `tddy-agent-skills` extracted
 - [x] Cut 2; `tddy-changeset` extracted — AC4 other half
-- [ ] `tddy-session-worktree`, `tddy-session-actions` extracted
+- [x] `tddy-session-worktree`, `tddy-session-actions` extracted
 - [ ] `tddy-toolcall`, `tddy-agent-backend` extracted
 - [ ] `tddy-workflow-engine`, `tddy-presenter` extracted
 - [ ] `tddy-core` facades only — AC1; path guard still green

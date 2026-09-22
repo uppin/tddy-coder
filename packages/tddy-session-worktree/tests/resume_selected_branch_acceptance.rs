@@ -10,7 +10,7 @@
 //!
 //! `Changeset.branch` is the field the whole PR-stack recovery is keyed on — `QueryBranch` scans
 //! sessions by it, and a stack node is linked by it — so it has to hold the local branch name, which
-//! is also what [`tddy_core::worktree::local_branch_name`] resolves.
+//! is also what [`tddy_session_worktree::worktree::local_branch_name`] resolves.
 //!
 //! PRD: docs/ft/coder/pr-stack-live-status.md (C1, D2, D3).
 
@@ -18,9 +18,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tddy_core::changeset::BranchWorktreeIntent;
-use tddy_core::changeset::{read_changeset, write_changeset, Changeset, ChangesetWorkflow};
-use tddy_core::worktree::setup_worktree_for_session_with_integration_base;
+use tddy_changeset::changeset::BranchWorktreeIntent;
+use tddy_changeset::changeset::{read_changeset, write_changeset, Changeset, ChangesetWorkflow};
+use tddy_session_worktree::worktree::setup_worktree_for_session_with_integration_base;
 
 fn scratch(label: &str) -> PathBuf {
     let p = std::env::temp_dir().join(format!(
