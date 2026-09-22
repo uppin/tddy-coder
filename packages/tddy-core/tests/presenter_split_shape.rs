@@ -130,33 +130,91 @@ fn no_partition_module_exceeds_five_hundred_production_lines() {
     );
 }
 
-/// AC5 — no method became more visible than it was.
+/// The 27 of the 46 methods that were private before the partition. Each must still be private
+/// wherever it now lives: the partition moves them, it does not open them up.
 ///
-/// Of the 46, most are private. A partition that made them `pub` to reach them from a sibling module
-/// would have widened the crate's surface to buy a file split, which is a bad trade nobody asked for.
-#[test]
-fn the_partition_widens_no_method_beyond_the_crate() {
-    // Given every module the partition must produce
-    let wrong: Vec<String> = PARTITION
-        .into_iter()
-        .map(|module| {
+/// The two hub bodies (`handle_intent`, `poll_workflow`) were split into per-group handlers, and
+/// those handlers are the only methods allowed `pub(super)` — they are new, so no method's
+/// visibility changed to create them.
+const PRIVATE_TODAY: [&str; 27] = [
+    "broadcast",
+    "broadcast_mode_changed",
+    "broadcast_error_recovery",
+    "log_activity",
+    "agent_activity_head_commit",
+    "agent_activity_declared_paths",
+    "capture_agent_activity",
+    "flush_agent_output_buffer",
+    "finalize_agent_line_in_activity_log",
+    "sync_agent_partial_activity_log",
+    "prd_body_for_plan_review",
+    "approve_plan_from_review_or_viewer",
+    "select_highlight_matches",
+    "sync_select_highlight",
+    "clarification_answers_ready",
+    "send_clarification_answers",
+    "collect_answers",
+    "advance_to_next_question",
+    "start_workflow_from_pending_if_any",
+    "apply_deferred_backend_factory",
+    "handle_backend_selection_answer",
+    "handle_recipe_slash_selection_answer",
+    "restart_workflow",
+    "spawn_workflow",
+    "changeset_read_dir",
+    "finish_start_slash_structured_run_if_needed",
+    "try_handle_start_slash_line",
+];
+
+/// The method a line declares with some `pub` prefix (`pub`, `pub(super)`, `pub(crate)`,
+/// `pub(in …)`), if it declares one.
+fn pub_declared_method(line: &str) -> Option<&str> {
+    let line = line.trim_start();
+    if !line.starts_with("pub") {
+        return None;
+    }
+    let (_, after_fn) = line.split_once("fn ")?;
+    after_fn.split(['(', '<']).next()
+}
+
+/// The parent and every partition module, each by the name it is reported under.
+fn presenter_impl_sources() -> Vec<(&'static str, PathBuf)> {
+    std::iter::once(("presenter_impl", src("presenter/presenter_impl.rs")))
+        .chain(PARTITION.into_iter().map(|module| {
             (
                 module,
                 src(&format!("presenter/presenter_impl/{module}.rs")),
             )
-        })
-        .filter_map(|(module, path)| match std::fs::read_to_string(&path) {
-            Err(_) => Some(format!("{module} does not exist")),
+        }))
+        .collect()
+}
+
+/// AC5 — every method that was private before the partition is still private after it.
+///
+/// A partition that made them `pub` in any spelling to reach them from a sibling module would have
+/// widened the surface to buy a file split, which is a bad trade nobody asked for.
+#[test]
+fn every_method_private_before_the_partition_stays_private() {
+    // Given the parent and every module the partition must produce
+    let sources = presenter_impl_sources();
+
+    // When each is searched for a formerly private method declared with a `pub` prefix
+    let wrong: Vec<String> = sources
+        .into_iter()
+        .flat_map(|(module, path)| match std::fs::read_to_string(&path) {
+            Err(_) => vec![format!("{module} does not exist")],
             Ok(text) => production(&text)
                 .lines()
-                .any(|line| line.trim_start().starts_with("pub(super) fn"))
-                .then(|| format!("{module} widened a private method")),
+                .filter_map(pub_declared_method)
+                .filter(|method| PRIVATE_TODAY.contains(method))
+                .map(|method| format!("{module} widened `{method}`"))
+                .collect(),
         })
         .collect();
 
-    // Then every one exists and none reaches for a wider visibility than the methods had
+    // Then every one exists and none was widened
     assert!(
         wrong.is_empty(),
-        "widened a private method to reach it across the partition, or absent: {wrong:?}"
+        "a formerly private method was widened to reach it across the partition, or a module is absent: {wrong:?}"
     );
 }
