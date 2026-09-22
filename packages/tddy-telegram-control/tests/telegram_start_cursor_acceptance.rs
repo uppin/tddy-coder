@@ -9,12 +9,11 @@ use tddy_daemon_kernel::config::{CursorCliConfig, DaemonConfig};
 use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_telegram_control::telegram_notifier::InMemoryTelegramSender;
 
-mod common;
-use common::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_telegram_control::telegram_session_control::{
     collect_outbound_messages, read_changeset_routing_snapshot, StartCursorCommand,
     TelegramSessionControlHarness, TelegramWorkflowSpawn, CURSOR_CLI_MODELS,
 };
+use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
 const AUTHORIZED_CHAT: i64 = 777_002;
 const TEST_USER_ID: u64 = 43;
@@ -287,5 +286,5 @@ async fn start_cursor_model_callback_launches_cursor_cli_with_hooks() {
         .get(&session_id)
         .await
         .expect("session must be registered in CliSessionManager");
-    a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
+    a_capture_showing(&handle.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 }

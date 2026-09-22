@@ -9,9 +9,8 @@ use tddy_rpc::Request;
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
-mod common;
-use common::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
 // ---------------------------------------------------------------------------
 // Test helpers (shared with claude_cli_session_acceptance.rs patterns)
@@ -356,7 +355,7 @@ async fn claude_cli_session_pty_argv_includes_default_permission_mode() {
         .expect("start with echo-argv stub and no permission_mode must succeed");
 
     // Then
-    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
+    let output = a_capture_showing(&handle.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 
     assert!(
         output.contains("--permission-mode"),
@@ -395,7 +394,7 @@ async fn claude_cli_session_pty_argv_includes_explicit_permission_mode() {
         .expect("start with bypassPermissions must succeed");
 
     // Then
-    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
+    let output = a_capture_showing(&handle.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 
     assert!(
         output.contains("bypassPermissions"),
@@ -467,7 +466,7 @@ async fn start_session_rpc_threads_permission_mode_to_pty() {
         .await
         .expect("session must be registered in the shared manager");
 
-    a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
+    a_capture_showing(&handle.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -676,7 +675,7 @@ async fn resume_pty_argv_uses_default_permission_mode() {
         .expect("resume must succeed without permission_mode");
 
     // Then
-    let output = a_capture_showing(&handle2, "ARGV:", PTY_STUB_OUTPUT).await;
+    let output = a_capture_showing(&handle2.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 
     let argv_line = output
         .lines()

@@ -36,23 +36,5 @@ pub trait PresenterEventSink: Send + Sync {
     ) -> anyhow::Result<()>;
 }
 
-/// A sink that accepts every event and does nothing with it.
-///
-/// For a caller that must hand over a sink and has nothing to deliver to. It is not how a daemon
-/// with no `telegram:` block is configured — that daemon passes no sink at all, so the observer
-/// runs only when a notification bus needs its events.
-pub struct NoPresenterEventSink;
-
-#[async_trait]
-impl PresenterEventSink for NoPresenterEventSink {
-    async fn on_presenter_event(
-        &self,
-        _session_id: &str,
-        _event: &ServerMessage,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-}
-
 /// The port as the connection service holds it.
 pub type SharedPresenterEventSink = Arc<dyn PresenterEventSink>;

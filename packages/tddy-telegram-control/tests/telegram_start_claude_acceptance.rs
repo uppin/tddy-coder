@@ -19,12 +19,11 @@ use tddy_daemon_kernel::config::{ClaudeCliConfig, DaemonConfig};
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_telegram_control::telegram_notifier::InMemoryTelegramSender;
 
-mod common;
-use common::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_telegram_control::telegram_session_control::{
     collect_outbound_messages, read_changeset_routing_snapshot, StartClaudeCommand,
     TelegramSessionControlHarness, TelegramWorkflowSpawn, CLAUDE_CLI_MODELS, CURSOR_CLI_MODELS,
 };
+use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
 const AUTHORIZED_CHAT: i64 = 777_001;
 const TEST_USER_ID: u64 = 42;
@@ -504,7 +503,7 @@ async fn start_claude_uses_shared_manager() {
         .expect("session must be in ClaudeCliSessionManager after Telegram spawn");
 
     // And the PTY process is running (stub wrote ARGV output).
-    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
+    let output = a_capture_showing(&handle.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 
     assert!(
         output.contains("build a search feature"),

@@ -10,10 +10,20 @@ fn telegram_bot_rs() -> &'static str {
     ))
 }
 
-fn telegram_session_control_rs() -> &'static str {
+/// `telegram_session_control/workflow_spawn.rs` — defines the chain-base merge and wires the
+/// `tddy-core` chain-base helpers into it.
+fn workflow_spawn_rs() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../tddy-telegram-control/src/telegram_session_control/workflow_spawn.rs"
+    ))
+}
+
+/// `telegram_session_control/pickers.rs` — holds the Telegram spawn path that calls the merge.
+fn pickers_rs() -> &'static str {
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tddy-telegram-control/src/telegram_session_control/pickers.rs"
     ))
 }
 
@@ -45,7 +55,7 @@ fn live_telegram_bot_dispatches_tcp_chain_parent_callback() {
 #[test]
 fn telegram_chain_child_persists_parent_chain_base_on_default_flow() {
     // Given
-    let src = telegram_session_control_rs();
+    let src = workflow_spawn_rs();
 
     // When / Then
     assert!(
@@ -66,7 +76,7 @@ fn telegram_chain_child_persists_parent_chain_base_on_default_flow() {
 #[test]
 fn telegram_chain_explicit_branch_choice_not_silently_dropped() {
     // Given
-    let src = telegram_session_control_rs();
+    let src = pickers_rs();
 
     // When / Then
     assert!(

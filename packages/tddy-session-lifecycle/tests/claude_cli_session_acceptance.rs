@@ -13,12 +13,11 @@ use tddy_rpc::{Code, Request};
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
-mod common;
-use common::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_service::proto::session::{
     ListSessionsRequest, ResumeSessionRequest, SessionService as SessionServiceTrait,
     StartSessionRequest,
 };
+use tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -738,7 +737,7 @@ async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
         .expect("start with echo-argv stub and initial_prompt must succeed");
 
     // Then
-    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
+    let output = a_capture_showing(&handle.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 
     assert!(
         output.contains("build a hello world app"),
@@ -777,7 +776,7 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
         .expect("start with empty initial_prompt must succeed");
 
     // Then
-    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
+    let output = a_capture_showing(&handle.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 
     let argv_line = output
         .lines()
@@ -859,7 +858,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
         .await
         .expect("session must be present in the shared ClaudeCliSessionManager after start");
 
-    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
+    let output = a_capture_showing(&handle.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 
     assert!(
         output.contains("hello from rpc"),
@@ -905,7 +904,7 @@ async fn resume_does_not_replay_initial_prompt() {
         .expect("resume must succeed");
 
     // Then
-    let output = a_capture_showing(&handle2, "ARGV:", PTY_STUB_OUTPUT).await;
+    let output = a_capture_showing(&handle2.capture, "ARGV:", PTY_STUB_OUTPUT).await;
 
     let argv_line = output
         .lines()

@@ -12164,6 +12164,7 @@ dependencies = [
  "tddy-service",
  "tempfile",
  "tokio",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -13393,6 +13394,7 @@ dependencies = [
  "tddy-sandbox-darwin",
  "tddy-sandbox-runner",
  "tddy-service",
+ "tddy-task",
  "tempfile",
  "tokio",
  "tokio-stream",

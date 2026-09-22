@@ -16,7 +16,10 @@
 //!   not just the absence of success.
 
 use std::future::Future;
+use std::sync::Mutex;
 use std::time::Duration;
+
+use tddy_task::TerminalCapture;
 
 /// How often every helper here re-probes. Deliberately not caller-tunable: a test that needs a
 /// different cadence is a test whose probe is too expensive to poll, and it should be rewritten
@@ -78,6 +81,44 @@ pub fn eventually_blocking<T>(
         }
         std::thread::sleep(POLL_INTERVAL);
     }
+}
+
+/// How long a spawned stub gets to print its first marker to a PTY.
+///
+/// A safety net, not a prediction: this covers fork/exec, dynamic linking, shell startup and the
+/// daemon's own worktree setup, all of which stretch under a parallel test suite. Six copies of
+/// this wait once drifted to five different ceilings — 2000ms in one file and 10000ms in another
+/// for the *same* stub emitting the *same* marker — and the short ones failed under load as if the
+/// daemon had built the wrong command line. There is one ceiling now, and it is deliberately
+/// generous.
+pub const PTY_STUB_OUTPUT: Duration = Duration::from_secs(10);
+
+/// The terminal capture once it contains `needle`, or a panic naming what the PTY did show.
+///
+/// Takes the capture itself (a PTY handle's `capture` field) so this crate need not name any
+/// crate's handle type. Returns the capture so a caller can go on to assert on the surrounding
+/// output (the argv line a stub echoed, say) without re-reading it.
+pub async fn a_capture_showing(
+    capture: &Mutex<TerminalCapture>,
+    needle: &str,
+    within: Duration,
+) -> String {
+    eventually(
+        &format!("the PTY capture to show {needle:?}"),
+        within,
+        || {
+            let capture = capture.lock().expect("terminal capture lock");
+            let shown = String::from_utf8_lossy(capture.buffered_bytes()).to_string();
+            if shown.contains(needle) {
+                Ok(shown)
+            } else if shown.is_empty() {
+                Err("the PTY has produced no output at all".to_string())
+            } else {
+                Err(format!("the PTY has produced: {shown:?}"))
+            }
+        },
+    )
+    .await
 }
 
 fn timed_out(condition: &str, within: Duration, polls: u32, last: &str) -> String {
