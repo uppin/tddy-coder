@@ -33,6 +33,7 @@ members = [
     "packages/tddy-codegen",
     "packages/tddy-livekit-testkit",
     "packages/tddy-connectrpc",
+    "packages/tddy-git",
     "packages/tddy-github",
     "packages/tddy-daemon",
     "packages/tddy-daemon-kernel",

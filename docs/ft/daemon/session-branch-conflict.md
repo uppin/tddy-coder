@@ -154,7 +154,7 @@ daemon generates `claude-cli/<short-id>` / `workspace/<short-id>` and they canno
 
 ## Interaction with existing behaviour
 
-- `create_worktree_with_retry` (`packages/tddy-core/src/worktree.rs`) is unchanged and still the
+- `create_worktree_with_retry` (`packages/tddy-git/src/worktree.rs`) is unchanged and still the
   path for `on_branch_conflict = ""`, including the case where the colliding branch or worktree
   directory exists with no session behind it.
 - `suggested_branch_name` is computed by the same rule the retry loop uses (first free

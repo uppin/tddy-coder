@@ -14,7 +14,7 @@
 
 ## REST contract
 
-Shared constants and token resolution live in **`tddy-workflow-recipes::github_rest_common`** (`GITHUB_ACCEPT`, `GITHUB_API_VERSION`, **`github_token_from_env`**, **`github_env_token_present`**). **tddy-tools** re-exports the pieces used by GitHub PR helpers; merge-pr workflow curl calls use the same **`Accept`**, **`X-GitHub-Api-Version`**, and User-Agent values for consistency across the codebase.
+Shared constants and token resolution live in **`tddy_github::github_rest_common`** (`GITHUB_ACCEPT`, `GITHUB_API_VERSION`, **`github_token_from_env`**, **`github_env_token_present`**). **tddy-tools** re-exports the pieces used by GitHub PR helpers; merge-pr workflow curl calls use the same **`Accept`**, **`X-GitHub-Api-Version`**, and User-Agent values for consistency across the codebase.
 
 ## Workflow recipe behavior
 

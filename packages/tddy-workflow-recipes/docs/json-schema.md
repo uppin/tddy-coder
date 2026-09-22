@@ -17,7 +17,6 @@ registry, and what the build script validates.
 |--------|----------------|
 | `schema` | Embedded tree, `get_schema`, `validate_output`, common resource registration for `$ref`, `write_schema_to_path` |
 | `schema_manifest` | Parses embedded `schema-manifest.json` for `list_registered_goals()` |
-| `github_pr` | The GitHub pull-request REST client, over `github_rest_common` |
 
 ## The CLI that serves them
 

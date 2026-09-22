@@ -1,6 +1,6 @@
 # complexity: setup_worktree_for_session_with_integration_base
 
-**Location:** `packages/tddy-core/src/worktree.rs:817` — `setup_worktree_for_session_with_integration_base`
+**Location:** `packages/tddy-core/src/worktree.rs:16` — `setup_worktree_for_session_with_integration_base`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **153 lines** · **nesting depth 6** · 3 parameters · 5 branch/match lines · 24 early exits
@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 153 | 6 | 5 | 24 | first detection |
+| 2026-09-22 | 153 | 6 | 5 | 24 | **unchanged** — #492 (`#carve` 6/11) moved the git plumbing around it to `tddy-git`; the body is byte-identical. Its file is now 428 production lines across these 4 functions, not 1,607 |
 
 ## What the tool found
 
@@ -44,5 +45,7 @@ finding is a lead, not an issue.
 
 ## Related
 
-`packages/tddy-core/src/worktree.rs` is already covered by [`squatting-git-plumbing-worktree`](../../../tddy-core/docs/code-issues/squatting-git-plumbing-worktree.md) — claimed by #492.
-That record is about the file or type; this one is about the unit. Reconcile both together.
+`packages/tddy-core/src/worktree.rs` was covered by `squatting-git-plumbing-worktree` until #492
+closed it on 2026-09-22 by moving the file's git plumbing to `tddy-git` (see
+[the change entry](../changesets/2026-09-22-carve-git-plumbing.md)). This unit was not part of that
+fix: it stayed in `tddy-core`, byte-identical, and this record is still open.

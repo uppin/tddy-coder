@@ -34,24 +34,35 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Worktree (`worktree.rs`)
 
-- **FALLBACK_DEFAULT_INTEGRATION_BASE_REF**: `origin/master` — the last-resort default ref used when no remote can be detected (used by the `fetch_origin_master` helper). Project registry rows without `main_branch_ref` are resolved **live** by the daemon via `resolve_default_integration_base_ref_with_remote`, not this constant.
-- **detect_default_remote_name(repo_root) -> Option<String>**: Runs `git rev-parse --abbrev-ref @{upstream}` and returns the segment before the first `/` as the tracked remote. Returns `None` on a detached HEAD, a branch with no upstream, or any git error (the probe never errors the caller).
-- **validate_integration_base_ref**: Accepts any `<remote>/<single-branch-segment>` ref (the remote is not required to be `origin`); rejects empty, multi-segment paths, whitespace, and characters that could widen `git` invocation beyond a single branch argument. Pure string rules — no git probe.
-- **validate_chain_pr_integration_base_ref**: Accepts `<remote>/<path>` where `path` may contain `/` (multi-segment); rejects `..`, `--`, empty segments, whitespace, and shell-oriented metacharacters in the path. The remote is not required to be `origin`. Pure string rules — no git probe.
-- **fetch_integration_base**: Splits the validated ref on the first `/` into `(remote, branch)` and runs `git fetch <remote> <branch>` (single-segment).
-- **fetch_chain_pr_integration_base**: Validates with **validate_chain_pr_integration_base_ref**, splits the ref on the first `/` into `(remote, path)`, then runs `git fetch <remote> <path>`.
-- **resolve_default_integration_base_ref_with_remote(repo_root, preferred_remote)**: Chooses `preferred_remote` → `detect_default_remote_name(repo_root)` → `origin` (last resort), runs `git fetch <remote>`, then prefers `<remote>/master` if present, else `<remote>/main`, else follows `refs/remotes/<remote>/HEAD` when it resolves to a valid `<remote>/<branch>`. The bare **resolve_default_integration_base_ref** delegates with `None`.
-- **push_new_branch_to_remote(worktree_dir, branch, remote)**: Runs `git push -u <remote> <branch>`. The legacy **push_new_branch_to_origin** wraps it with `"origin"`.
-- **list_recent_remote_branches / list_recent_remote_branches_skip**: Accept a `remote: &str` and filter lines starting with `<remote>/`, skipping `<remote>/HEAD`.
-- **local_branch_name_for_remote(reference, remote) -> &str**: Strips one leading `<remote>/`. The legacy **local_branch_name** strips `origin/`.
-- **setup_worktree_for_session_with_integration_base**: Fetches the given integration base ref, creates a worktree from that ref via **create_worktree** / retry helper, updates changeset with `worktree`, `branch`, `repo_path`.
-- **setup_worktree_for_session_with_optional_chain_base**: Optional chain-PR base: with `None`, resolves default base, fetches, creates worktree, sets **effective_worktree_integration_base_ref** on the changeset; with `Some(ref)`, validates and fetches the multi-segment ref, creates the worktree from that tip, sets **effective_worktree_integration_base_ref** and **worktree_integration_base_ref**.
-- **resolve_persisted_worktree_integration_base_for_session**: Reads **changeset.yaml** and returns persisted effective ref, else user chain ref, else **resolve_default_integration_base_ref**.
-- **setup_worktree_for_session**: Resolves the default integration base ref, then calls **setup_worktree_for_session_with_integration_base**. Used by TUI and daemon after plan approval when no explicit ref is passed at this API layer.
-- **fetch_origin_master**: Equivalent to **fetch_integration_base** with **FALLBACK_DEFAULT_INTEGRATION_BASE_REF**.
-- **create_worktree**: Creates worktree with optional `start_point` (remote-tracking ref). Worktrees live in `.worktrees/` relative to repo root.
-- **first_free_suffixed_branch_name(repo_root, branch)**: The first `<branch>-<n>` (`n` from 1) no local branch holds — the name the private **create_worktree_with_retry** suffixing loop would land on, computed **without creating** a branch or worktree. Backs the `suggested_branch_name` a refused session creation reports (see [session-branch-conflict.md](../../../docs/ft/daemon/session-branch-conflict.md)); a repo whose refs cannot be listed reports nothing as taken and so suggests `<branch>-1`.
-- **ensure_worktree_for_acceptance_tests**: Uses `output_dir` from context (must be main repo root). When `backend_name == "stub"` (demo), skips worktree creation and uses `output_dir` directly. Otherwise calls `find_git_root(&output_dir)` to locate `.git`; fallback to `output_dir.parent()`. After creation, `cs.repo_path` is overwritten with worktree path; later goals use `worktree_dir`.
+The **session-aware** worktree layer: the functions that read and write a session's
+`changeset.yaml` to decide which worktree a session gets. Every `git` operation they perform is
+[`tddy-git`](../../tddy-git/docs/architecture.md)'s — this module re-exports that crate with
+`pub use tddy_git::*;`, so `tddy_core::worktree::<any git helper>` resolves, but the helpers are
+documented where they live.
+
+- **setup_worktree_for_session_with_integration_base**: Validates and fetches the given integration
+  base ref, then honours the changeset's `workflow.branch_worktree_intent` —
+  `NewBranchFromBase` creates `workflow.new_branch_name` from `workflow.selected_integration_base_ref`
+  (or the given ref); `WorkOnSelectedBranch` puts the worktree on the **local** form of
+  `workflow.selected_branch_to_work_on`, reusing an existing worktree for that branch. With no intent
+  it derives the branch from `branch_suggestion` → `branch` → `feature/<slug of name>`, reuses an
+  existing worktree for it, else creates one from the ref via the retry helper. Records `worktree`,
+  `branch` and `repo_path` on the changeset.
+- **setup_worktree_for_session_with_optional_chain_base**: Optional chain-PR base: with `None`,
+  resolves the default base, fetches, creates the worktree, sets
+  **effective_worktree_integration_base_ref** on the changeset; with `Some(ref)`, validates and
+  fetches the multi-segment ref, creates the worktree from that tip, and sets both
+  **effective_worktree_integration_base_ref** and **worktree_integration_base_ref**.
+- **resolve_persisted_worktree_integration_base_for_session**: Reads **changeset.yaml** and returns
+  the persisted effective ref, else the user chain ref, else
+  `tddy_git::resolve_default_integration_base_ref`.
+- **setup_worktree_for_session**: Resolves the default integration base ref, then calls
+  **setup_worktree_for_session_with_integration_base**. Used by TUI and daemon after plan approval
+  when no explicit ref is passed at this API layer.
+
+`ssh_exec` is likewise a facade over `tddy_git::ssh_exec`, and the remote-host variant
+`setup_worktree_for_session_over_ssh` lives in `tddy-git`: it takes a session id as a string and
+never reads a changeset.
 
 **Repo root resolution** (where `output_dir`/`repo_path` comes from):
 
