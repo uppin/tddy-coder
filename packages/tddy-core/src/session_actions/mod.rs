@@ -1,5 +1,6 @@
-//! Declarative session actions now live in [`tddy_session_store::session_actions`]; this path is
-//! kept so callers are not edited.
+//! Declarative session actions live in [`tddy_session_store::session_actions`]. Re-exported at its
+//! old path for existing callers; new code should name `tddy_session_store::session_actions`
+//! directly.
 //!
 //! Listing and invoking from a session directory alone stays here: it reads the session's
 //! `changeset.yaml` through [`crate::read_changeset`], which belongs to the workflow layer.

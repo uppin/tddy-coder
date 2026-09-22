@@ -1,7 +1,7 @@
 # PRD — the session storage layer leaves the god-crate, taking SQLite with it
 
 **Date:** 2026-09-15
-**Stack:** `#carve` 6/9
+**Stack:** `#carve` 7/11
 **Packages:** `packages/tddy-core`, `packages/tddy-session-store` (new), `packages/tddy-session-catalog` (new)
 **Product area:** [`docs/ft/coder`](../../ft/coder/)
 
@@ -24,7 +24,7 @@ compile a bundled C SQLite because of 854 lines in one directory.
 
 ```
 atomic_file  →  (nothing)
-error        →  backend::ClarificationQuestion        ← moves to tddy-workflow at #carve 4/9
+error        →  backend::ClarificationQuestion        ← moves to tddy-workflow at #carve 5/11
 output       →  atomic_file, error
 session_actions  →  atomic_file, output,
                     tddy-actions, tddy-task           ← runtime.rs, since #244 (missed at discovery)
@@ -33,7 +33,7 @@ session_catalog  →  session_actions
 ```
 
 `error.rs:3` (`use crate::backend::ClarificationQuestion;`, for one variant of `WorkflowError`) is
-one of three edges out of the group, not the only one. **`#carve` 4/9 moves `ClarificationQuestion`
+one of three edges out of the group, not the only one. **`#carve` 5/11 moves `ClarificationQuestion`
 to `tddy-workflow`**, which clears it. The other two were missed at discovery and found at `/green`:
 
 - **`session_actions/runtime.rs` → `tddy-actions`, `tddy-task`.** Every manifest runs as a task on
@@ -125,12 +125,12 @@ genuinely opens a database:
 - `backend/`, `presenter/`, `workflow/`, `toolcall/` — the remaining SCC.
 - Any change to the catalog's schema, queries or migration behaviour.
 
-## Why this needs 1/9 and 4/9, but not 3/9
+## Why this needs 1/10 and 5/11, but not 3/10
 
-- **`#carve` 1/9** — `session_actions/` and `session_catalog/` are **directories**, refused by
+- **`#carve` 1/10** — `session_actions/` and `session_catalog/` are **directories**, refused by
   `source_crate_of` today; and both moves leave `pub use` facades.
-- **`#carve` 4/9** — until `ClarificationQuestion` is in `tddy-workflow`, `error.rs` drags `backend`
+- **`#carve` 5/11** — until `ClarificationQuestion` is in `tddy-workflow`, `error.rs` drags `backend`
   and the whole group is unmovable. This is a **behaviour** dependency, not a scheduling one.
-- **Not 3/9** — the group is a **DAG, not a mutual cluster**. Moving leaf-first
+- **Not 3/10** — the group is a **DAG, not a mutual cluster**. Moving leaf-first
   (`atomic_file`, `error`, `output`, `session_actions`, then `session_catalog`) makes every rewrite
-  correct at the moment it is made, exactly as in `#carve` 5/9.
+  correct at the moment it is made, exactly as in `#carve` 6/11.

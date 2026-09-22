@@ -1,4 +1,4 @@
-# Initial discovery — `#carve` 6/9 `session-store`
+# Initial discovery — `#carve` 7/11 `session-store`
 
 **Scope:** `tddy-core`, `tddy-session-lifecycle`, `tddy-workflow-recipes`.
 **Explorations 1–3 are the whole-work dump for the `#carve` stack, copied here in full.** Exploration 4 is this node's own.
@@ -391,18 +391,22 @@ ClarificationNeeded { questions: Vec<ClarificationQuestion>, session_id: String 
 ### Findings
 
 **The whole group hinges on one DTO.** `ClarificationQuestion` is the only thing standing between a
-closed storage DAG and a group welded to the `tddy-core` SCC. `#carve` 4/9 moves it to
+closed storage DAG and a group welded to the `tddy-core` SCC. `#carve` 5/11 moves it to
 `tddy-workflow`; after that, `error.rs`'s import becomes `tddy_workflow::ClarificationQuestion` and
 the group has **no** edge into the rest of `tddy-core`.
 
 **Correction to the stack's edge set: `n4 → n6` is a real edge, and `n3 → n6` is not.**
+
+*Legend:* `nN` labels use the stack's original `/9` numbering: n1 = 1/10 (#488), n3 = 3/10 (#490),
+n4 = 5/11 (#491), n5 = 6/11 (#492), n6 = 7/11 (this node, #493), n7 = 8/11 (#494),
+n8 = 9/11 (#495), n9 = 10/11 (#496).
 
 - `n4 → n6` was missed when the decomposition was drawn, because the group was assumed to be a leaf
   cluster. It is a **behaviour** dependency: `error.rs` cannot move until the DTO has.
 - `n3 → n6` was assumed because the five modules reference each other. They do — but as a **DAG**
   (`atomic_file ← output ← session_actions ← session_catalog`, `error ← output`), not mutually. The
   cluster defect bites only on **mutual** references, so leaf-first ordering suffices, exactly as in
-  `#carve` 5/9.
+  `#carve` 6/11.
 
 **The waves are unaffected** — this node was already wave 3, and it still is. What changes is which
 parent it actually waits on. Its intra-wave ordering consequence (that `n4` now blocks three nodes to

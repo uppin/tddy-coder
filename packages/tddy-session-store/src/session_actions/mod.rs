@@ -9,6 +9,10 @@ mod invoke;
 mod list;
 mod manifest;
 mod paths;
+// Public only because `tddy_core::session_action_jobs::runner` — which stays in `tddy-core` because
+// it needs `read_changeset` — reaches it across the crate boundary. Not API. Note that `block_on`
+// panics when called from inside a current-thread runtime (it uses `block_in_place`).
+#[doc(hidden)]
 pub mod runtime;
 mod summary;
 mod tool_gate;

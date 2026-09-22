@@ -1,4 +1,4 @@
-//! Error types for tddy-core.
+//! Error types for the session storage layer, re-exported at `tddy_core::error`.
 
 use tddy_workflow::ClarificationQuestion;
 use thiserror::Error;
