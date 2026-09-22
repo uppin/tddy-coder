@@ -30,6 +30,34 @@ it from here, not from `tddy-daemon`.
 The sandbox-IPC **`HostRpcHandler` bridge** lives in **`tddy-daemon-sandbox`** (not here): it is the
 only caller that needed an `Arc` back into the old god object.
 
+**This crate names nothing Telegram.** The Telegram control plane is
+[`tddy-telegram-control`](../../tddy-telegram-control/README.md), which depends on this crate, and
+`teloxide` is not in this manifest. `tddy-telegram` stays a dependency because
+`session_list_enrichment` reads a session's pending elicitation through its `elicitation` module,
+and `active_elicitation`, `elicitation`, `telegram_github_link` and `telegram_tracked_session` stay
+re-exported here under their old paths.
+
+## The presenter observer
+
+When a workflow session starts, `DaemonSessionHost::maybe_spawn_presenter_observer` calls
+`presenter_observer_task::spawn_presenter_observer_task`, which connects to the child's
+`PresenterObserver` gRPC stream (90 attempts, 100 ms apart) and hands each event to **two
+independent sinks**:
+
+| Sink | Held as | What it does |
+|---|---|---|
+| presenter-event sink | `presenter_event_sink: Option<SharedPresenterEventSink>` — the [`tddy-daemon-kernel` port](../../tddy-daemon-kernel/docs/daemon-kernel.md#ports) | Telegram's chat surface, on a daemon that has one |
+| notification publishing | the host's session-notification bus, plus the caller's sessions base | publishes a `Presenter` notification so the session's drawer row shows a dot |
+
+The observer is spawned when **either** exists and not at all when neither does. Gating it on
+Telegram would leave the indicator dark on every daemon without a `telegram:` block.
+
+`DaemonSessionHost::new` takes the sink as a parameter and installs **no** notification bus.
+`tddy-daemon`'s `runtime.rs` installs the daemon's bus with `with_session_notification_bus`,
+because the `StreamSessionNotifications` subscriber on it must be the very one the RPC handler
+subscribes to. A test that needs a bus installs one the same way. With no bus, the observer runs
+for the sink alone.
+
 ## Transports
 
 `session.SessionService` registers on the daemon's HTTP `/rpc`, LiveKit common and session rooms, and

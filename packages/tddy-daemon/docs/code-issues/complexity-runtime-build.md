@@ -6,7 +6,7 @@
 **Metrics:** **806 lines** · **nesting depth 5** · 2 parameters · 18 branch/match lines · 10 early exits
 **Thresholds breached:** length 806 > 60; nesting 5 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-09-22 (806 → 833 lines since detection; +2 of it from #494) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 806 | 5 | 18 | 10 | first detection |
+| 2026-09-22 | 833 | 5 | — | — | 831 on master before #494; +2 from #494 (`#carve` 8/11), the `SharedPresenterEventSink` cast at the `DaemonSessionHost::new` call. Nesting by indentation unchanged; branches and exits not re-derived |
 
 ## What the tool found
 

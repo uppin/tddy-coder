@@ -1,8 +1,8 @@
 # 2026-09-22 — The Telegram control plane left `tddy-session-lifecycle` with five modules over budget
 
 **Category:** Deferred from `carve-telegram` (#494, `#carve` 8/11)
-**Source:** `/pr-wrap` file-length gate and `/analyze-clean-code` on #494; changeset
-`docs/dev/1-WIP/2026-09-15-carve-telegram.md`
+**Source:** `/pr-wrap` file-length gate and `/analyze-clean-code` on #494; change history
+`docs/dev/changesets/2026-09-22-carve-telegram.md`
 **Status:** open — **deferral consented by the developer** at `/pr-wrap`, 2026-09-22 ("move-only
 node; developer consent 2026-09-22 in /pr-wrap")
 
