@@ -45,9 +45,12 @@ log:
 # default ($HOME/.tddy) so that moving the install with INSTALL_TDDY_HOME moves the data with it.
 tddy_data_dir: "__TDDY_DATA_DIR__"
 
-# Where a GitHub login's access token is retained (github-tokens.json, mode 0600). The daemon
-# REFUSES TO START when this is set and not writable, because a failed token write would fail every
-# login — ./install --desktop creates it mode 0700.
+# Where this daemon keeps its auth state: the Ed25519 key it signs session tokens with
+# (signing_key.pem, mode 0600, generated on first boot and reused on every boot after — deleting it
+# ends every signed-in session) and each GitHub login's retained access token (github-tokens.json,
+# mode 0600). The daemon REFUSES TO START when this is set and not writable, because a failed token
+# write would fail every login — ./install --desktop creates it mode 0700, and the daemon warns at
+# startup if it has since been opened wider.
 auth_storage: "__AUTH_STORAGE_DIR__/auth"
 
 # NO `web_bundle_path:` ON PURPOSE: the dashboard is embedded in the application at build time, so
@@ -65,31 +68,28 @@ listen:
 
 # WHAT THIS INSTALL DOES NOT YET CONFIGURE: an identity.
 #
-# With the three blocks below left as they are, the application starts and its dashboard reaches the
+# With the two blocks below left as they are, the application starts and its dashboard reaches the
 # daemon's settings — and nothing else. No sessions, no hosts, no screen sharing. That is not a
 # degraded mode, it is the wiring: `github: None` makes `build_auth_entries` return no user resolver
 # (packages/tddy-daemon-auth/src/auth.rs), and every session service in `tddy_daemon::runtime` is
-# assembled inside `if let Some(user_resolver)`. Configuring sessions means all three together:
+# assembled inside `if let Some(user_resolver)`. Configuring sessions means both together:
 #
 #   1. `github:` — who may sign in. A real OAuth app, or `stub: true` for a single-operator machine
 #      where the login is an identity rather than a credential check. `redirect_uri` is deliberately
 #      omitted: the application derives it from `listen.web_port` so the callback reaches the
 #      listener it actually opened, and a value set here is overridden rather than honoured.
-#   2. `livekit.api_secret` — the ONLY source of the session-token signer, required even with no
-#      common room, since without it every token-gated RPC refuses including the settings service an
-#      operator would repair this from. `enabled:` governs the common room alone.
-#   3. `users:` — which OS user a login runs sessions as. A login with no entry is refused with
+#   2. `users:` — which OS user a login runs sessions as. A login with no entry is refused with
 #      `permission_denied: user not mapped to OS user` on every session RPC; there is deliberately no
 #      fallback to "whoever the daemon runs as". Peers in a common room must name the same login, so
 #      change `github_user` on every side together.
 #
+# NO `livekit:` BLOCK IS NEEDED TO SIGN IN. The daemon signs session tokens with its own key (see
+# `auth_storage` above); `livekit.api_secret` signs LiveKit room JWTs only, and is configured when
+# the application should join a common room.
+#
 # github:
 #   client_id: "<your-github-oauth-app-client-id>"
 #   client_secret: "<secret>"
-#
-# livekit:
-#   enabled: false
-#   api_secret: "<the secret every daemon in your deployment shares>"
 #
 users: []
 # - github_user: "octocat"

@@ -192,14 +192,17 @@ derives it from this port so the callback reaches the listener it actually opene
 `web_bundle_path` is absent on purpose. The dashboard is embedded in the application at build time,
 so there is no directory to serve it from.
 
-An **identity** is three blocks that stand or fall together, and without them the application starts
+An **identity** is two blocks that stand or fall together, and without them the application starts
 onto its settings and nothing else — no sessions, no hosts, no screen sharing:
 
 | Block | Why it is required |
 |---|---|
 | `github:` | Absent, the daemon builds no session-user resolver, and every session service is assembled behind one. |
-| `livekit.api_secret` | The only source of the session-token signer. Absent, every token-gated RPC refuses — including the settings service an operator would repair the configuration from. `enabled:` governs the common room alone. |
 | `users:` | Which OS user a login runs sessions as. A login with no entry is refused `permission_denied: user not mapped to OS user`; there is no fallback to whoever the daemon runs as. Peers sharing a common room must name the same login on every side. |
+
+No `livekit:` block is needed to sign in. The daemon signs session tokens with an Ed25519 key it
+generates for itself on first boot, `signing_key.pem` (mode `0600`) in `auth_storage`, and reuses it
+on every later boot; `livekit.api_secret` signs LiveKit room JWTs and nothing else.
 
 ## Installing it
 
