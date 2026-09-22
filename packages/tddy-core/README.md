@@ -49,6 +49,9 @@ into every dependent's build, so the catalog's consumers name `tddy_session_cata
 
 `Presenter` holds seven fields: five owned state groups (`WorkflowRun`, `PendingQuestions`,
 `ActivityRecorder`, `ViewChannels`, `BackendSelection`) plus `state` and `tddy_data_dir`.
+Its methods follow the same boundaries: `presenter/presenter_impl.rs` keeps the struct, the
+private helpers every group calls and the `poll_workflow` dispatcher, and one `impl Presenter`
+per group lives in `presenter_impl/{wiring,view_channels,activity,questions,backend_selection,workflow_run}.rs`.
 
 ## Documentation
 

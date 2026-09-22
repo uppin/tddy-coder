@@ -1,6 +1,7 @@
 # complexity: capture_agent_activity
 
-**Location:** `packages/tddy-core/src/presenter/presenter_impl.rs:315` — `capture_agent_activity`
+**Location:** `packages/tddy-core/src/presenter/presenter_impl/activity.rs:49` — `capture_agent_activity`
+**Moved:** 2026-09-22 from `presenter_impl.rs:214` — #495 (`#carve` 8/9) partitioned `presenter_impl.rs`; the body moved **verbatim** (whitespace-identical).
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **101 lines** · **nesting depth 4** · 1 parameters · 5 branch/match lines · 2 early exits
@@ -15,6 +16,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 101 | 4 | 5 | 2 | first detection |
 | 2026-09-19 | 101 | 4 | 5 | 2 | #491 rewrote every field access in this body (`self.<field>` → `self.<group>.<field>`). Nesting and branch structure **unchanged**; lines unchanged. The finding stands untouched. |
+| 2026-09-22 | 101 | 3¹ | 5 | 2 | Moved to `presenter_impl/activity.rs` by #495, body unchanged. **Unchanged** — the finding moved with it. ¹ brace-depth scan, reads one lower than the first-detection scan on this body; structure identical. |
 
 ## What the tool found
 
@@ -45,5 +47,4 @@ finding is a lead, not an issue.
 
 ## Related
 
-`packages/tddy-core/src/presenter/presenter_impl.rs` is already covered by [`god-object-presenter`](../../../tddy-core/docs/code-issues/god-object-presenter.md) — claimed by #491, #495.
-That record is about the file or type; this one is about the unit. Reconcile both together.
+The file-level [`god-object-presenter`] record was **closed by #495** on 2026-09-22: the 46-method `impl` became nine `impl Presenter` blocks across seven files (three in the parent, one per partition) along `#carve` 4/9's state boundaries (final measurement in [`docs/dev/changesets/2026-09-22-carve-presenter-split.md`](../../../../docs/dev/changesets/2026-09-22-carve-presenter-split.md)). This record is about the unit and stands on its own.

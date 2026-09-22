@@ -16,7 +16,7 @@ does that, deterministically, against a warm index. Jev only decides whether a c
 
 Nothing here counts. Lengths, nesting and CRAP come from `tddy-tools analyze`; feeding
 counts to a model is how this repo once recorded 44 fields and 79 methods for a struct
-that had 37 and 46 (see packages/tddy-core/docs/code-issues/god-object-presenter.md).
+that had 37 and 46 (see docs/dev/changesets/2026-09-22-carve-presenter-split.md).
 
 The key comes from `TYPESAFE_API_KEY`, exported or in the repo-root `.env` (gitignored) --
 the same loader semantics `./web-dev` and `./run-vm-testkit` use: an already-set variable

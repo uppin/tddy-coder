@@ -1,12 +1,12 @@
 # complexity: poll_workflow
 
-**Location:** `packages/tddy-core/src/presenter/presenter_impl.rs:1292` — `poll_workflow`
+**Location:** `packages/tddy-core/src/presenter/presenter_impl.rs:166` — `poll_workflow`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **235 lines** · **nesting depth 8** · 0 parameters · 20 branch/match lines · 1 early exits
 **Thresholds breached:** length 235 > 60; nesting 8 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — **partially fixed** 2026-09-22 by #495 (dispatcher is 32 lines / nesting 3; the remainder lives in one extracted handler) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -15,6 +15,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 235 | 8 | 20 | 1 | first detection |
 | 2026-09-19 | 236 | 8 | 20 | 1 | #491 rewrote every field access in this body (`self.<field>` → `self.<group>.<field>`). Nesting and branch structure **unchanged**; lines +1 (rustfmt rewrap). The finding stands untouched. |
+| 2026-09-22 | 32 | 3 | — | 1 | #495 split the body: each event arm moved verbatim into an `on_*` handler in the partition owning its state; `poll_workflow` is now a dispatcher (still in the parent). **The unit is clean.** One extracted handler still breaches: `on_workflow_complete` (`workflow_run.rs:403`, 66 lines, nesting 4). Brace-depth scan (reads 7 on the pre-split body where the first scan read 8). |
 
 ## What the tool found
 
@@ -35,9 +36,8 @@ Within its file this is the body a change to this area has to be read in full to
 
 ## What would close it
 
-Bring it under the `/analyze-clean-code` thresholds — length 235 > 60; nesting 8 > 4 — by `extract_method`
-along the branch structure. Anchor with `tddy-tools restructure anchors`, never by hand, then prove
-the seam with `restructure check --deep` against a warm index (`./run-index-daemon`).
+The dispatcher itself is under the thresholds. What remains is `on_workflow_complete` (`packages/tddy-core/src/presenter/presenter_impl/workflow_run.rs:403`) — length 66 > 60 — which #495 moved verbatim out of this body's `WorkflowComplete` arm. Bring it under the `/analyze-clean-code` thresholds by `extract_method`; then this record closes. Anchor with `tddy-tools restructure anchors`, never by hand, then prove the seam with `restructure check --deep` against a warm index (`./run-index-daemon`).
+
 
 ⚠ **Re-measure before acting.** This record was generated in a batch of 100 from one sweep. Confirm
 the numbers still hold and that the finding is real before spending a PR on it — an unverified
@@ -45,5 +45,4 @@ finding is a lead, not an issue.
 
 ## Related
 
-`packages/tddy-core/src/presenter/presenter_impl.rs` is already covered by [`god-object-presenter`](../../../tddy-core/docs/code-issues/god-object-presenter.md) — claimed by #491, #495.
-That record is about the file or type; this one is about the unit. Reconcile both together.
+The file-level [`god-object-presenter`] record was **closed by #495** on 2026-09-22: the 46-method `impl` became nine `impl Presenter` blocks across seven files (three in the parent, one per partition) along `#carve` 4/9's state boundaries (final measurement in [`docs/dev/changesets/2026-09-22-carve-presenter-split.md`](../../../../docs/dev/changesets/2026-09-22-carve-presenter-split.md)). This record is about the unit and stands on its own.
