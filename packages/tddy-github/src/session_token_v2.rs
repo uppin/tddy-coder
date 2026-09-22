@@ -11,50 +11,88 @@
 //! `ed25519_dalek::SigningKey` and hands back a `VerifyingKey`-shaped question, because
 //! `tddy-github` sits *below* the daemon's identity boundary in the crate graph: the crate that
 //! generates, persists and publishes the keypair (`tddy-daemon-auth`) depends on this one, so a
-//! type from there cannot appear in these signatures.
+//! type from there cannot appear in these signatures. What it offers that crate instead is
+//! [`SessionTokenAuthority`] — "is this token genuine, whoever signed it" — which the OAuth service
+//! here verifies through without knowing how a peer's key is found.
 //!
-//! **This module replaces [`crate::session_token`].** The `v1` HMAC format is still compiled and
-//! still serves every caller; the cutover — rewiring those callers and deleting `v1` — is the
-//! rest of this PR's work, and the two formats never coexist in a release.
+//! See `packages/tddy-github/docs/session-token.md` for the format in full.
 
 use std::fmt;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use async_trait::async_trait;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use ed25519_dalek::pkcs8::EncodePublicKey;
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::provider::GitHubUser;
-
-// The lifetimes are a property of the session, not of the signature algorithm, so `v2` keeps the
-// ones `v1` established rather than restating them.
-pub use crate::session_token::{TokenKind, REFRESH_TOKEN_TTL, SESSION_TOKEN_TTL};
 
 /// Version prefix / first token segment. A `v1` token presented to a `v2` verifier is
 /// [`SessionTokenError::UnsupportedVersion`], never a signature failure — the distinction is what
 /// makes a rollout diagnosable.
 pub const TOKEN_VERSION: &str = "v2";
 
+/// Lifetime of a freshly minted session token. Short by design: the web client refreshes well
+/// before expiry (see [`crate::auth_service`]/`RefreshSession`), and a leaked token is only
+/// valid for this window.
+pub const SESSION_TOKEN_TTL: Duration = Duration::from_secs(5 * 60);
+
+/// Lifetime of a freshly minted refresh token. Long by design and slid forward on every refresh:
+/// an actively-used session never has to re-login, while a device untouched for this long does.
+/// The refresh token is never sent on normal RPCs — it is used only to mint access tokens.
+pub const REFRESH_TOKEN_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// How many bytes of the SPKI digest a [`KeyId`] keeps. 128 bits: far past any collision a fleet
+/// of daemons could produce, and short enough to read in a log line.
+const KEY_ID_BYTES: usize = 16;
+
+/// Which credential a token is: a short-lived [`TokenKind::Access`] token that authenticates
+/// RPCs, or a long-lived [`TokenKind::Refresh`] token that only mints access tokens. Enforcing
+/// the kind keeps the two roles strictly separate — an access token cannot mint, and a refresh
+/// token cannot authenticate an RPC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TokenKind {
+    /// Short-lived credential presented on every RPC. The default for a payload with no `kind`
+    /// field.
+    #[default]
+    Access,
+    /// Long-lived credential presented only to `RefreshSession` to mint access tokens.
+    Refresh,
+}
+
 /// Names the key that signed a token: the SHA-256 digest of the key's SPKI DER encoding, base64url
 /// without padding, truncated to 16 bytes.
 ///
 /// Derived from the public key rather than assigned, so two daemons cannot collide on one and a
-/// daemon cannot change its own id without changing its key.
+/// daemon cannot change its own id without changing its key. The same derivation is also why a
+/// resolved key never goes stale: an id names exactly one key, forever.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct KeyId(String);
 
 impl KeyId {
     /// The id the given public key has, by definition.
     pub fn of(verifying_key: &VerifyingKey) -> Self {
-        // TODO(signing-key): implement
-        let _ = verifying_key;
-        todo!("KeyId::of")
+        let digest = Sha256::digest(spki_der(verifying_key));
+        Self(URL_SAFE_NO_PAD.encode(&digest[..KEY_ID_BYTES]))
     }
 
     /// Read an id back off the wire, rejecting anything that is not the shape [`KeyId::of`] emits.
+    ///
+    /// "The shape" is exact: 16 bytes in canonical unpadded base64url. A non-canonical spelling of
+    /// the same bytes is refused rather than normalised, so one key can never be named two ways.
     pub fn parse(value: &str) -> Result<Self, SessionTokenError> {
-        // TODO(signing-key): implement
-        let _ = value;
-        todo!("KeyId::parse")
+        let bytes = URL_SAFE_NO_PAD
+            .decode(value)
+            .map_err(|_| SessionTokenError::Malformed)?;
+        if bytes.len() != KEY_ID_BYTES || URL_SAFE_NO_PAD.encode(&bytes) != value {
+            return Err(SessionTokenError::Malformed);
+        }
+        Ok(Self(value.to_string()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -66,6 +104,31 @@ impl fmt::Display for KeyId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
+}
+
+impl TryFrom<String> for KeyId {
+    type Error = SessionTokenError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value)
+    }
+}
+
+impl From<KeyId> for String {
+    fn from(key_id: KeyId) -> Self {
+        key_id.0
+    }
+}
+
+/// A public key's SPKI DER encoding — what a daemon publishes, and what a [`KeyId`] digests.
+pub fn spki_der(verifying_key: &VerifyingKey) -> Vec<u8> {
+    verifying_key
+        .to_public_key_der()
+        // An Ed25519 key is 32 bytes under one fixed algorithm identifier; there is no input on
+        // which the encoder can fail.
+        .expect("an Ed25519 public key always encodes as SPKI DER")
+        .as_bytes()
+        .to_vec()
 }
 
 /// What a `v2` token carries. Identical to the `v1` payload but for [`SessionClaims::kid`], which
@@ -82,6 +145,18 @@ pub struct SessionClaims {
     pub exp: u64,
     #[serde(default)]
     pub kind: TokenKind,
+}
+
+impl SessionClaims {
+    /// The GitHub identity these claims assert.
+    pub fn user(&self) -> GitHubUser {
+        GitHubUser {
+            id: self.id,
+            login: self.login.clone(),
+            avatar_url: self.avatar_url.clone(),
+            name: self.name.clone(),
+        }
+    }
 }
 
 /// Why a token was rejected.
@@ -116,66 +191,96 @@ impl fmt::Display for SessionTokenError {
 
 impl std::error::Error for SessionTokenError {}
 
+/// Decides whether a session token is genuine, whichever daemon signed it.
+///
+/// The seam between the format (this crate) and key distribution (the daemon's identity crate):
+/// [`crate::AuthServiceImpl`] verifies through one of these and never learns how a peer's key was
+/// found. `tddy_daemon_auth::DirectorySessionTokenVerifier` is the daemon's implementation.
+#[async_trait]
+pub trait SessionTokenAuthority: Send + Sync {
+    /// The claims of `token` once its signature and expiry have been checked under the key it
+    /// names; otherwise the reason it was refused.
+    async fn verify(&self, token: &str) -> Result<SessionClaims, SessionTokenError>;
+}
+
 /// Mints `v2` tokens with one daemon's key.
 ///
-/// Holds the private key, so exactly one of these exists per daemon and it is constructed from
-/// whatever owns the key material — see `tddy_daemon_auth::DaemonSigningKey`.
+/// Holds the private key, so it is constructed from whatever owns the key material — see
+/// `tddy_daemon_auth::DaemonSigningKey`. Cloning copies the key; each copy zeroes its bytes on drop.
+#[derive(Clone)]
 pub struct SessionTokenSigner {
-    // TODO(signing-key): implement
-    _signing_key: SigningKey,
-    _key_id: KeyId,
+    signing_key: SigningKey,
+    key_id: KeyId,
 }
 
 impl SessionTokenSigner {
     /// Take ownership of a daemon's signing key. `key_id` must be [`KeyId::of`] the key's public
     /// half; passing any other id mints tokens no one can verify.
+    ///
+    /// # Panics
+    ///
+    /// When `key_id` is not the key's own id. That is a wiring fault, and a signer built from it
+    /// would mint tokens every verifier refuses — failing here names the fault where it was made.
     pub fn new(signing_key: SigningKey, key_id: KeyId) -> Self {
-        // TODO(signing-key): implement
-        let _ = (&signing_key, &key_id);
-        todo!("SessionTokenSigner::new")
+        assert_eq!(
+            key_id,
+            KeyId::of(&signing_key.verifying_key()),
+            "a session-token signer's key id must be the id of its own public key"
+        );
+        Self {
+            signing_key,
+            key_id,
+        }
     }
 
     /// The id this signer stamps into every token it mints.
     pub fn key_id(&self) -> &KeyId {
-        // TODO(signing-key): implement
-        todo!("SessionTokenSigner::key_id")
+        &self.key_id
     }
 
     /// The public half, for publishing to a key directory.
     pub fn verifying_key(&self) -> VerifyingKey {
-        // TODO(signing-key): implement
-        todo!("SessionTokenSigner::verifying_key")
+        self.signing_key.verifying_key()
     }
 
+    /// Mint an access token for `user` valid for [`SESSION_TOKEN_TTL`] from now.
     pub fn mint_access(&self, user: &GitHubUser) -> String {
-        // TODO(signing-key): implement
-        let _ = user;
-        todo!("SessionTokenSigner::mint_access")
+        self.mint_kind_with_issued_at(
+            user,
+            TokenKind::Access,
+            SystemTime::now(),
+            SESSION_TOKEN_TTL,
+        )
     }
 
+    /// Mint a refresh token for `user` valid for [`REFRESH_TOKEN_TTL`] from now.
     pub fn mint_refresh(&self, user: &GitHubUser) -> String {
-        // TODO(signing-key): implement
-        let _ = user;
-        todo!("SessionTokenSigner::mint_refresh")
+        self.mint_kind_with_issued_at(
+            user,
+            TokenKind::Refresh,
+            SystemTime::now(),
+            REFRESH_TOKEN_TTL,
+        )
     }
 
+    /// Mint an access token for `user` valid for `ttl` from now.
     pub fn mint(&self, user: &GitHubUser, ttl: Duration) -> String {
-        // TODO(signing-key): implement
-        let _ = (user, ttl);
-        todo!("SessionTokenSigner::mint")
+        self.mint_kind_with_issued_at(user, TokenKind::Access, SystemTime::now(), ttl)
     }
 
+    /// Mint an access token whose issue time is `issued_at` (expiry = `issued_at + ttl`). The clock
+    /// seam lets tests produce already-expired tokens deterministically without sleeping.
     pub fn mint_with_issued_at(
         &self,
         user: &GitHubUser,
         issued_at: SystemTime,
         ttl: Duration,
     ) -> String {
-        // TODO(signing-key): implement
-        let _ = (user, issued_at, ttl);
-        todo!("SessionTokenSigner::mint_with_issued_at")
+        self.mint_kind_with_issued_at(user, TokenKind::Access, issued_at, ttl)
     }
 
+    /// Mint a token of `kind` whose issue time is `issued_at` (expiry = `issued_at + ttl`). The
+    /// general seam behind the access/refresh helpers.
     pub fn mint_kind_with_issued_at(
         &self,
         user: &GitHubUser,
@@ -183,9 +288,25 @@ impl SessionTokenSigner {
         issued_at: SystemTime,
         ttl: Duration,
     ) -> String {
-        // TODO(signing-key): implement
-        let _ = (user, kind, issued_at, ttl);
-        todo!("SessionTokenSigner::mint_kind_with_issued_at")
+        let iat = unix_seconds(issued_at);
+        let claims = SessionClaims {
+            kid: self.key_id.clone(),
+            id: user.id,
+            login: user.login.clone(),
+            avatar_url: user.avatar_url.clone(),
+            name: user.name.clone(),
+            iat,
+            exp: iat.saturating_add(ttl.as_secs()),
+            kind,
+        };
+        // Serialization of a plain struct of owned primitives cannot fail.
+        let payload_json = serde_json::to_vec(&claims).expect("SessionClaims serializes");
+        let signing_input = format!("{TOKEN_VERSION}.{}", URL_SAFE_NO_PAD.encode(payload_json));
+        let signature = self.signing_key.sign(signing_input.as_bytes());
+        format!(
+            "{signing_input}.{}",
+            URL_SAFE_NO_PAD.encode(signature.to_bytes())
+        )
     }
 }
 
@@ -202,9 +323,7 @@ impl SessionTokenVerifier {
     /// The result is untrusted — it says which key to fetch, nothing more. A token is only ever
     /// trusted after [`SessionTokenVerifier::verify`] returns for that key.
     pub fn key_id_of(token: &str) -> Result<KeyId, SessionTokenError> {
-        // TODO(signing-key): implement
-        let _ = token;
-        todo!("SessionTokenVerifier::key_id_of")
+        Ok(ParsedToken::parse(token)?.claims.kid)
     }
 
     /// Check `token`'s signature under `verifying_key` and its expiry against `now`.
@@ -216,14 +335,79 @@ impl SessionTokenVerifier {
         verifying_key: &VerifyingKey,
         now: SystemTime,
     ) -> Result<SessionClaims, SessionTokenError> {
-        // TODO(signing-key): implement
-        let _ = (token, verifying_key, now);
-        todo!("SessionTokenVerifier::verify")
+        let parsed = ParsedToken::parse(token)?;
+        if parsed.claims.kid != KeyId::of(verifying_key) {
+            return Err(SessionTokenError::InvalidSignature);
+        }
+        verifying_key
+            .verify_strict(parsed.signing_input.as_bytes(), &parsed.signature)
+            .map_err(|_| SessionTokenError::InvalidSignature)?;
+        if unix_seconds(now) > parsed.claims.exp {
+            return Err(SessionTokenError::Expired);
+        }
+        Ok(parsed.claims)
     }
+}
+
+/// A token taken apart, with nothing about it checked yet.
+struct ParsedToken<'a> {
+    /// `v2.<payload>` — the bytes the signature covers.
+    signing_input: &'a str,
+    claims: SessionClaims,
+    signature: Signature,
+}
+
+impl<'a> ParsedToken<'a> {
+    fn parse(token: &'a str) -> Result<Self, SessionTokenError> {
+        let (signing_input, signature) =
+            token.rsplit_once('.').ok_or(SessionTokenError::Malformed)?;
+        let (version, payload) = signing_input
+            .split_once('.')
+            .ok_or(SessionTokenError::Malformed)?;
+        if version != TOKEN_VERSION {
+            return Err(if is_a_version_tag(version) {
+                SessionTokenError::UnsupportedVersion
+            } else {
+                SessionTokenError::Malformed
+            });
+        }
+        let payload = URL_SAFE_NO_PAD
+            .decode(payload)
+            .map_err(|_| SessionTokenError::Malformed)?;
+        let claims: SessionClaims =
+            serde_json::from_slice(&payload).map_err(|_| SessionTokenError::Malformed)?;
+        let signature: [u8; Signature::BYTE_SIZE] = URL_SAFE_NO_PAD
+            .decode(signature)
+            .map_err(|_| SessionTokenError::Malformed)?
+            .try_into()
+            .map_err(|_| SessionTokenError::Malformed)?;
+        Ok(Self {
+            signing_input,
+            claims,
+            signature: Signature::from_bytes(&signature),
+        })
+    }
+}
+
+/// `v` followed by digits: the first segment of *some* token format, just not this one.
+fn is_a_version_tag(segment: &str) -> bool {
+    segment
+        .strip_prefix('v')
+        .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Whole seconds since the Unix epoch; times at or before the epoch clamp to 0.
+fn unix_seconds(t: SystemTime) -> u64 {
+    t.duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
 mod tests {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
+
     use super::*;
 
     const THE_LOGIN: &str = "operator";
@@ -376,6 +560,110 @@ mod tests {
         assert_eq!(refusal.map(|_| ()), Err(SessionTokenError::Malformed));
     }
 
+    #[test]
+    fn verify_rejects_a_token_with_a_tampered_signature() {
+        // Given a valid token whose signature has had one bit flipped
+        let token = a_signer_for(the_first_key()).mint_access(&an_operator());
+        let tampered = with_tampered_signature(&token);
+
+        // When it is verified
+        let refusal =
+            SessionTokenVerifier::verify(&tampered, &the_first_key().verifying_key(), now());
+
+        // Then the signature check is what refuses it
+        assert_eq!(
+            refusal.map(|_| ()),
+            Err(SessionTokenError::InvalidSignature)
+        );
+    }
+
+    #[test]
+    fn a_minted_token_carries_the_identity_and_lifetime_it_was_minted_with() {
+        // Given a signer and the operator it mints for
+        let signer = a_signer_for(the_first_key());
+
+        // When a token with a five-minute life is minted and verified
+        let token = signer.mint_with_issued_at(&an_operator(), now(), Duration::from_secs(300));
+        let claims = SessionTokenVerifier::verify(&token, &the_first_key().verifying_key(), now())
+            .expect("a freshly minted token verifies");
+
+        // Then the operator comes back intact, valid for exactly the requested window
+        assert_eq!(
+            (
+                claims.user().login,
+                claims.user().id,
+                claims.exp - claims.iat
+            ),
+            (THE_LOGIN.to_string(), an_operator().id, 300)
+        );
+    }
+
+    #[test]
+    fn an_access_token_lives_five_minutes_and_a_refresh_token_seven_days() {
+        // Given one signer minting both credentials
+        let signer = a_signer_for(the_first_key());
+
+        // When each is minted and verified
+        let lifetime = |token: &str| {
+            let claims = SessionTokenVerifier::verify(
+                token,
+                &the_first_key().verifying_key(),
+                SystemTime::now(),
+            )
+            .expect("a freshly minted token verifies");
+            claims.exp - claims.iat
+        };
+
+        // Then the access token is short-lived and the refresh token outlives it by a week
+        assert_eq!(
+            (
+                lifetime(&signer.mint_access(&an_operator())),
+                lifetime(&signer.mint_refresh(&an_operator()))
+            ),
+            (5 * 60, 7 * 24 * 60 * 60)
+        );
+    }
+
+    #[test]
+    fn a_key_id_read_off_the_wire_must_be_exactly_the_shape_a_key_produces() {
+        // Given a genuine key id, and two strings that only resemble one
+        let genuine = KeyId::of(&the_first_key().verifying_key());
+        let too_short = &genuine.as_str()[..10];
+        let not_base64url = "!!!!!!!!!!!!!!!!!!!!!!";
+
+        // When each is parsed
+        let parsed = [genuine.as_str(), too_short, not_base64url].map(KeyId::parse);
+
+        // Then only the genuine one is an id — a looser parse would let one key be named two ways
+        assert_eq!(
+            parsed,
+            [
+                Ok(genuine.clone()),
+                Err(SessionTokenError::Malformed),
+                Err(SessionTokenError::Malformed)
+            ]
+        );
+    }
+
+    /// Flip one bit of the *decoded* signature and re-encode it.
+    ///
+    /// Tampering with a base64url character instead is not a signature change at all when the
+    /// character is the last one: a 64-byte signature leaves four must-be-zero bits there, so most
+    /// substitutions yield a non-canonical encoding that fails to *decode* — `Malformed`, not
+    /// `InvalidSignature` — depending on what the untampered signature happened to end in. Working
+    /// on the bytes makes the tampering the only thing that differs, on every run.
+    fn with_tampered_signature(token: &str) -> String {
+        let mut signature = URL_SAFE_NO_PAD
+            .decode(signature_segment(token))
+            .expect("a minted token's signature is base64url");
+        signature[0] ^= 0x01;
+        format!(
+            "{}.{}",
+            payload_segment(token),
+            URL_SAFE_NO_PAD.encode(signature)
+        )
+    }
+
     fn the_kind_of(token: &str) -> TokenKind {
         SessionTokenVerifier::verify(token, &the_first_key().verifying_key(), now())
             .expect("a freshly minted token verifies")
@@ -422,7 +710,9 @@ mod tests {
         }
     }
 
+    /// The clock tokens are verified against. The real one, because `mint_access` and
+    /// `mint_refresh` stamp the real one — a fixed instant would drift past their expiry.
     fn now() -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000)
+        SystemTime::now()
     }
 }
