@@ -54,7 +54,8 @@ pub use local_token::{build_local_token_entry, mint_local_token, LocalTokenError
 /// At the root for the same reason the four above are: `runtime.rs` wires the keypair, the
 /// directory implementation and the verifier together, and reaches into no module to do it.
 pub use signing_key::{
-    DaemonSigningKey, DirectorySessionTokenVerifier, KeyDirectory, SIGNING_KEY_FILE,
+    signing_key_path, DaemonSigningKey, DirectorySessionTokenVerifier, KeyDirectory, SessionTokens,
+    StandaloneKeyDirectory, SIGNING_KEY_FILE,
 };
 
 /// Where the daemon keeps a user's GitHub token at rest.

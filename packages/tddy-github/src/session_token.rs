@@ -24,30 +24,8 @@ const TOKEN_VERSION: &str = "v1";
 /// HMAC-SHA256 output size in bytes.
 const TAG_LEN: usize = 32;
 
-/// Lifetime of a freshly minted session token. Short by design: the web client refreshes well
-/// before expiry (see [`crate::auth_service`]/`RefreshSession`), and a leaked token is only
-/// valid for this window.
-pub const SESSION_TOKEN_TTL: Duration = Duration::from_secs(5 * 60);
-
-/// Lifetime of a freshly minted refresh token. Long by design and slid forward on every refresh:
-/// an actively-used session never has to re-login, while a device untouched for this long does.
-/// The refresh token is never sent on normal RPCs — it is used only to mint access tokens.
-pub const REFRESH_TOKEN_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-
-/// Which credential a token is: a short-lived [`TokenKind::Access`] token that authenticates
-/// RPCs, or a long-lived [`TokenKind::Refresh`] token that only mints access tokens. Enforcing
-/// the kind keeps the two roles strictly separate — an access token cannot mint, and a refresh
-/// token cannot authenticate an RPC.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum TokenKind {
-    /// Short-lived credential presented on every RPC. The default for a payload with no `kind`
-    /// field, so tokens minted before the kind claim existed still verify as access tokens.
-    #[default]
-    Access,
-    /// Long-lived credential presented only to `RefreshSession` to mint access tokens.
-    Refresh,
-}
+// The session's lifetimes and roles are `v2`'s; this format is on its way out.
+pub use crate::session_token_v2::{TokenKind, REFRESH_TOKEN_TTL, SESSION_TOKEN_TTL};
 
 /// The verified contents of a session token — the GitHub identity, the token kind, plus
 /// issue/expiry times (Unix seconds).

@@ -263,6 +263,9 @@ struct DaemonAdvertisementWire {
     max_attachment_bytes: u64,
     #[serde(default)]
     sandboxed_codebase: Option<SandboxedCodebaseSupport>,
+    // Both default: a daemon that advertises no signing key omits the pair, and its advertisement
+    // must still parse — it is still a peer, it just cannot have its tokens verified.
+    #[serde(default)]
     signing_key_id: String,
     #[serde(default)]
     signing_public_key: String,
@@ -532,6 +535,22 @@ impl CommonRoomPeerRegistry {
                 label: peer.advertisement.label.clone(),
             })
             .collect()
+    }
+
+    /// The signing public key the peer advertising `signing_key_id` published, exactly as it
+    /// advertised it (base64url SPKI DER), if any peer in the room does.
+    ///
+    /// What a daemon's key directory reads to verify a peer's session token. The bytes are handed
+    /// back undecoded: parsing and trusting them is the identity boundary's job, not discovery's.
+    pub fn signing_public_key_for(&self, signing_key_id: &str) -> Option<String> {
+        let peers: Vec<PeerDaemon> = self
+            .remotes
+            .read()
+            .expect("registry lock")
+            .values()
+            .cloned()
+            .collect();
+        peer_signing_public_key(&peers, signing_key_id).map(str::to_string)
     }
 
     /// Drop all remote rows (e.g. when discovery disconnects).
@@ -1901,6 +1920,25 @@ mod tests {
 
         // Then nothing matches — an empty id must never select an arbitrary peer
         assert_eq!(found, None);
+    }
+
+    #[test]
+    fn the_registry_answers_for_the_signing_key_a_peer_in_the_room_advertised() {
+        // Given a registry whose latest room snapshot holds a peer advertising a signing key
+        let registry = CommonRoomPeerRegistry::new();
+        registry.apply_snapshot(HashMap::from([(
+            "udoo".to_string(),
+            a_peer_advertising("udoo", "fzAyq1hLQ0hTpZ_p", "MCowBQYDK2VwAyEA"),
+        )]));
+
+        // When a token naming that key id is looked up, and one naming a key nobody advertised
+        let found = (
+            registry.signing_public_key_for("fzAyq1hLQ0hTpZ_p"),
+            registry.signing_public_key_for("somebody-else"),
+        );
+
+        // Then the advertised key comes back as advertised, and the stranger finds nothing
+        assert_eq!(found, (Some("MCowBQYDK2VwAyEA".to_string()), None));
     }
 
     fn a_peer_advertising(instance_id: &str, key_id: &str, public_key: &str) -> PeerDaemon {
