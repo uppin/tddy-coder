@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-daemon/src/runtime.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate, independently on #498 and #518
-**Metrics:** **1482 production lines** · budget 500 · **~3× over** · residue function `build` is **819 lines**
-**Thresholds breached:** length 1482 > 500; `build` 819 > 60
+**Metrics:** **1521 production lines** · budget 500 · **~3× over** · residue function `build` is **833 lines**
+**Thresholds breached:** length 1521 > 500; `build` 833 > 60
 **Restructure:** required — three `extract_module --to_file` seams **plus** function splitting
-**Status:** Open — pre-existing; both #498 and #518 grew it and deferred with explicit developer consent
+**Status:** Open — pre-existing; #498, #518 and #494 grew it and deferred with explicit developer consent
 
 ## Measurement history
 
@@ -16,6 +16,8 @@
 | 2026-09-19 | 1,423 | after #498 — three lines |
 | 2026-09-19 | 1,479 | after #518 — 59 lines |
 | 2026-09-19 | 1482 | both merged |
+| 2026-09-22 | 1,519 | master before #494 |
+| 2026-09-22 | 1,521 | after #494 (`#carve` 8/11) — two lines |
 
 ## What the gate found
 
@@ -27,6 +29,12 @@ three lines under `rustfmt`.
 
 **#518's is 59**: `DaemonChildren`, the `session_host` field, and the shutdown wiring that makes
 SIGTERM reach the workspace-jail registry.
+
+**#494's is two lines**: the Telegram hooks are injected into the connection service as a
+`SharedPresenterEventSink` (a `.map(|hooks| hooks as …)` cast that `rustfmt` wraps over three
+lines). Its other edits re-point `tddy_session_lifecycle::telegram_*` paths at
+`tddy_telegram_control` and rewrite one comment, with no net change in length. Deferred with the
+developer's consent at `/pr-wrap` — `docs/dev/todo/2026-09-22-telegram-control-plane-left-over-budget-by-a-move-only-node.md`.
 
 ## What would close it — designed seams
 

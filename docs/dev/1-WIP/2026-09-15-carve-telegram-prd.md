@@ -1,7 +1,7 @@
 # PRD — the Telegram control plane becomes its own crate
 
 **Date:** 2026-09-15
-**Stack:** `#carve` 7/9
+**Stack:** `#carve` 8/11
 **Packages:** `packages/tddy-session-lifecycle`, `packages/tddy-telegram-control` (new), `packages/tddy-daemon-kernel`, `packages/tddy-daemon`
 **Product area:** [`docs/ft/daemon`](../../ft/daemon/)
 
@@ -50,12 +50,16 @@ crate::telegram_session_subscriber::spawn_presenter_observer_task(
 
 ## What this PR delivers
 
-### FR1 — a `PresenterObserverSpawner` port
+### FR1 — a `PresenterEventSink` port
 
-`ConnectionServiceImpl` holds a port — a trait object owned by `tddy-daemon-kernel`, where the
-symbols every daemon subsystem shares already live — instead of a concrete `TelegramDaemonHooks`.
-`tddy-daemon`'s `runtime.rs` injects the Telegram adapter. `connection_service` no longer names
-anything Telegram.
+`ConnectionServiceImpl` holds a port — `Option<SharedPresenterEventSink>`, a trait object owned by
+`tddy-daemon-kernel`, where the symbols every daemon subsystem shares already live — instead of a
+concrete `TelegramDaemonHooks`. `tddy-daemon`'s `runtime.rs` injects the Telegram adapter.
+`connection_service` no longer names anything Telegram.
+
+Planned as a port for the whole observer *spawner*; reshaped during `/green` because the observer
+also feeds the session-notification bus and must run on Telegram-less daemons, so only its Telegram
+sink is inverted. See the changeset's Draft PR contract.
 
 ### FR2 — `telegram_session_control.rs` splits
 

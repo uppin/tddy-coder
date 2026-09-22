@@ -46,5 +46,5 @@ finding is a lead, not an issue.
 
 ## Related
 
-`packages/tddy-session-lifecycle/src/telegram_session_control.rs` is already covered by [`oversized-file-telegram-session-control`](../../../tddy-session-lifecycle/docs/code-issues/oversized-file-telegram-session-control.md) — claimed by #494.
+`packages/tddy-telegram-control/src/telegram_session_control/pickers.rs` is already covered by `packages/tddy-telegram-control/docs/code-issues/oversized-file-telegram-session-control-pickers.md`. (The whole-file record for the unsplit `telegram_session_control.rs` was closed by #494's seven-module split.)
 That record is about the file or type; this one is about the unit. Reconcile both together.

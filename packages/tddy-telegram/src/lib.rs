@@ -14,42 +14,27 @@
 //! - [`telegram_tracked_session`] — the per-chat tracked-session gate and traffic logging.
 //! - [`telegram_github_link`] — the Telegram user ↔ GitHub login binding.
 //!
-//! Four modules plus `telegram_notifier`'s policy half stayed in `tddy-daemon`, because moving
-//! them would invert the dependency:
+//! The other four — `telegram_session_control`, `telegram_bot`, `telegram_session_subscriber` and
+//! `telegram_multi_select_shortcuts` — plus `telegram_notifier`'s policy half
+//! (`TelegramSessionWatcher`) could not come here, because they drive the session lifecycle and
+//! `tddy-session-lifecycle` depends on this crate: holding them would close a cycle. They are the
+//! **control plane**, and since `#carve` 8/11 they live in `tddy-telegram-control`, which sits
+//! between this crate and `tddy-session-lifecycle` and depends on both.
 //!
-//! - `telegram_session_control` (4,472 lines) is an orchestrator of the daemon's session
-//!   lifecycle. It reaches fourteen daemon-owned modules — `spawner`, `session_room`,
-//!   `cli_session_manager`, `session_reader`, `session_deletion`, `session_list_enrichment`,
-//!   `spawn_worker`, `supervisor_client`, `supervisor_spawn`, `cursor_cli_spawn`,
-//!   `presenter_intent_client`, `user_sessions_path` among them — and holds several of them as
-//!   struct fields. None of those has left `tddy-daemon` yet; they belong to nodes 4 and 6-8.
-//! - `telegram_bot` reaches `telegram_session_control`, so it is blocked transitively.
-//! - `telegram_session_subscriber` reaches the daemon's `session_notifications`, and
-//!   `telegram_notifier`'s watcher reaches `telegram_session_control`.
-//! - `telegram_multi_select_shortcuts` needed only `InlineKeyboardRows`, which is now
-//!   [`sender`]'s, so its one edge is no longer a blocker — it was simply out of this step's
-//!   scope and is the next module to follow.
-//!
-//! `teloxide` therefore does **not** leave `tddy-daemon` in this node: `telegram_session_control`,
-//! `telegram_bot`, `telegram_notifier`'s watcher and `runtime` all still use it directly.
+//! `teloxide` is therefore used here (the transport) and by `tddy-telegram-control`'s
+//! `telegram_bot`; `tddy-daemon`'s `runtime` still builds the `Bot` itself.
 //!
 //! # Direction of dependency
 //!
-//! One way only: `tddy-daemon` depends on `tddy-telegram`, never the reverse. Nothing here names
-//! `tddy_daemon` as a path — the three doc references to the blocked modules are deliberately
-//! plain code spans, not intra-doc links, because this crate cannot see them.
+//! One way only: `tddy-session-lifecycle`, `tddy-session-activity` and `tddy-telegram-control`
+//! depend on `tddy-telegram`, never the reverse. Nothing here names either as a path — the doc references to the control
+//! plane are deliberately plain code spans, not intra-doc links, because this crate cannot see it.
 //!
-//! The daemon's `session_list_enrichment` and `session_notifications` call [`elicitation`], which
-//! is that same one-way edge; the modules that call *back* into them
-//! (`telegram_session_control`, `telegram_session_subscriber`) are exactly the ones held back, so
-//! the mutual pair stays inside `tddy-daemon`. Both pairs are recorded with their `file:line` in
-//! docs/dev/1-WIP/2026-09-09-unbundle-model-telegram-screen.md, "The telegram cycle".
+//! `tddy-session-lifecycle`'s `session_list_enrichment` and `tddy-session-activity`'s
+//! notifications call [`elicitation`], which is that same one-way edge; the modules that call
+//! *back* into them (`telegram_session_control`, `telegram_session_subscriber`) are the control
+//! plane, which now sits above both crates in `tddy-telegram-control`, so neither pair is mutual.
 
-// TODO(unbundle-node-2, M4): four telegram modules — `telegram_bot`,
-// `telegram_multi_select_shortcuts`, `telegram_session_control`, `telegram_session_subscriber` —
-// and `telegram_notifier`'s watcher half are still in `tddy-daemon`. All but
-// `telegram_multi_select_shortcuts` are blocked on the daemon's session machinery leaving first
-// (nodes 4 and 6-8), not on anything this crate is missing.
 pub mod active_elicitation;
 pub mod elicitation;
 pub mod sender;

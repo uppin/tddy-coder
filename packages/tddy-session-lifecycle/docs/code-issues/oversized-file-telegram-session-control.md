@@ -6,7 +6,7 @@
 **Metrics:** **3,980 production lines** (4,476 total) · one `impl` block spanning **1272–3906** · **57 methods** · budget 500
 **Restructure:** required — `extract_module --to_file` × 7
 **Status:** Closed by #494 — delete at wrap, once this final measurement is in the change-history entry
-**Claimed by:** #494 — `#carve` 8/10 `telegram` · draft · `feature/carve/telegram`
+**Claimed by:** #494 — `#carve` 8/11 `telegram` · draft · `feature/carve/telegram`
 **Lands after:** #488, #489, #490, #498, #491, #492, #493
 
 ## Measurement history

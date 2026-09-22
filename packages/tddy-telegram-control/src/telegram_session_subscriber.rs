@@ -5,6 +5,10 @@
 //! The observer loop itself — connect, stream, publish to the notification bus — is not here: it
 //! runs whether or not Telegram is configured, so it lives with the connection service in
 //! [`tddy_session_lifecycle::presenter_observer_task`].
+//!
+//! The module keeps its name from before the observer loop left it; it subscribes to nothing
+//! itself. Telegram's subscriber on the session-notification bus is
+//! [`crate::telegram_notification_subscriber`].
 
 use std::sync::Arc;
 

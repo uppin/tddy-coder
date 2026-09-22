@@ -6,7 +6,7 @@
 **Metrics:** **1 field** · **1 call site** · blocks **7,403 lines** (19% of the crate) from leaving
 **Restructure:** required — replace the field with an injected port
 **Status:** Closed by #494 — delete at wrap, once this final measurement is in the change-history entry
-**Claimed by:** #494 — `#carve` 8/10 `telegram` · draft · `feature/carve/telegram`
+**Claimed by:** #494 — `#carve` 8/11 `telegram` · draft · `feature/carve/telegram`
 **Lands after:** #488, #489, #490, #498, #491, #492, #493
 
 ## Measurement history

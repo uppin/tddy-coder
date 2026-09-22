@@ -3,7 +3,7 @@
 **Date**: 2026-09-15
 **Status**: 🚧 In Progress
 **Type**: Refactor + Architecture Change
-**Stack**: `#carve` 8/10
+**Stack**: `#carve` 8/11
 **PR**: [#494](https://github.com/uppin/tddy-coder/pull/494)
 
 PRD: [`2026-09-15-carve-telegram-prd.md`](./2026-09-15-carve-telegram-prd.md)
@@ -62,8 +62,8 @@ PRD: [`2026-09-15-carve-telegram-prd.md`](./2026-09-15-carve-telegram-prd.md)
 
 Published first:
 
-**Published** (commit 2): `tddy-daemon-kernel/src/presenter_observer.rs` —
-`PresenterObserverSpawner`, `SharedPresenterObserver` and `NoPresenterObserver`. It lives in the
+**Published** (commit 2, *history — superseded below*): `tddy-daemon-kernel/src/presenter_observer.rs` —
+a spawner port with a shared alias and a no-op implementation. It lives in the
 kernel beside the other symbols every daemon subsystem shares, for the same reason that crate
 exists: `pub(crate)` does not cross a crate boundary.
 
@@ -80,7 +80,6 @@ pub trait PresenterEventSink: Send + Sync {
     async fn on_presenter_event(&self, session_id: &str, event: &ServerMessage)
         -> anyhow::Result<()>;
 }
-pub struct NoPresenterEventSink;
 pub type SharedPresenterEventSink = Arc<dyn PresenterEventSink>;
 ```
 
@@ -90,8 +89,9 @@ pub type SharedPresenterEventSink = Arc<dyn PresenterEventSink>;
 - `TelegramDaemonHooks` implements the sink with the loop's former Telegram body — lock the watcher,
   `on_server_message`. An error ends the loop exactly as the `?` did.
 - The service holds an honest `Option`, not a no-op: the spawn rule has to know there is no sink, and
-  injecting `NoPresenterEventSink` would start an observer on a daemon with nothing to deliver to.
-  The no-op exists for callers that must hand over *a* sink.
+  injecting a no-op sink would start an observer on a daemon with nothing to deliver to. The kernel
+  therefore ships **no** no-op implementation — the one `/green` added had no production caller and
+  was removed at `/pr-wrap`; the shape suite proves the port with a recording sink of its own.
 
 **Consequence the plan did not anticipate:** `DaemonSessionHost::new` used to build a Telegram-only
 notification bus from the hooks it was given. A service holding a port cannot name
@@ -153,7 +153,7 @@ The stack's fullest **mechanical → manual → mechanical** node.
 | Phase | Kind | Work |
 |---|---|---|
 | **A** | mechanical | `extract_module --to_file` × 7 on `telegram_session_control.rs`. **`callbacks.rs` first** — the ~30 `parse_*` functions are free functions with no `self`, the cheapest seam, and lifting them shrinks the file 700 lines before anything harder is attempted |
-| **B** | manual | The `PresenterObserverSpawner` port in `tddy-daemon-kernel`; `connection_service`'s field; `runtime.rs`'s injection. **This is the design change** and the only hand-written behaviour in the node |
+| **B** | manual | The `PresenterEventSink` port in `tddy-daemon-kernel` (planned as a spawner port; reshaped during `/green`, see Draft PR contract); `connection_service`'s field; `runtime.rs`'s injection. **This is the design change** and the only hand-written behaviour in the node |
 | **C** | manual | `tddy-telegram-control`'s skeleton — `Cargo.toml`, `lib.rs`, workspace `members` |
 | **D** | mechanical | `move_module_to_crate` as a **cluster** — all six modules as one unit, `reexport: "glob"`. Requires `#carve` 3/9 |
 | **E** | manual | `tddy-daemon`'s `lib.rs` facade re-pointed; `teloxide` dropped from `tddy-session-lifecycle`; `README.md` × 2; annotate the CRAP backlog entry |
@@ -196,15 +196,60 @@ has been carved keeps the two diffs separable for review.
     `tddy-telegram-control` does not exist; the control plane is unsplit). **1 passing**:
     `the_port_is_a_trait_object_the_service_can_hold` — the port is real now, which is what the rest
     of the node is built on.
-- [x] Failing unit/integration tests — the same suite; AC2's Telegram-disabled start is exercised by `NoPresenterObserver`, which is the configuration it describes
+- [x] Failing unit/integration tests — the same suite. AC2's Telegram-disabled start is the
+  configuration every `tddy-session-lifecycle` start suite already runs: they build
+  `DaemonSessionHost::new(.., None /* presenter_event_sink */, ..)` and start a session through it
+  (e.g. `claude_cli_session_acceptance`). No shape test asserts it separately.
 - [x] Implement production code making tests pass (`/green`) — `telegram_extraction_shape` 6/6;
-  the port reshaped to `PresenterEventSink` (see Draft PR contract)
+  the port reshaped to `PresenterEventSink` (see Draft PR contract). 9/9 after the `/pr-wrap`
+  refactor (see Validation Results)
 - [x] Annotate the CRAP backlog entry with the handlers' new crate
 - [x] Code-issue records: the cycle and oversized-file records closed with a final measurement
   (delete at wrap); the seven open Telegram records moved to `tddy-telegram-control/docs/code-issues/`
-- [ ] `/validate-changes`
+- [x] `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code` — see
+  Validation Results
 - [ ] `/pr-wrap` — correct the title, ready for review
 - [ ] Add a changeset entry under `docs/dev/changesets/` (`/wrap-context-docs`)
+
+## Validation Results
+
+Four reports on 2026-09-22 (`/pr-wrap`), then one refactor pass that fixed what the node's
+boundary allows. The boundary held throughout: no behaviour change, relocated code unchanged, no
+log target or message changed, moved suites' assertions unchanged.
+
+| Report | Findings | Fixed | Deferred / not done |
+|---|---|---|---|
+| `/validate-changes` | 0 critical · 2 warning · 5 info | build gate re-run (below); changeset numbering aligned to 8/11; phase-2 source scan retargeted; `tests/common/mod.rs` duplicate removed | `docs/ft/daemon/telegram-session-control.md:5` → at wrap (list below); `DaemonSessionHost::new` installing no bus is a documented decision — mention it in the PR body |
+| `/validate-tests` | 1 critical · 6 warning · 3 info | **F1** AC4 parses `[dependencies]` with `toml` and asserts both back-edges absent in every table; **F2–F4** every read `expect`s, AC3 split into two tests with a recursive walk, budget hoisted to a constant and the test-module boundary is `#[cfg(test)]` + `mod`; **F5** positive AC1 test (`SharedPresenterEventSink`), AC2 claim corrected above; **F7** helper hoisted to `tddy_testing_commons::wait::{a_capture_showing, PTY_STUB_OUTPUT}`, both copies deleted; **F8** header 8/11; **F9** helpers renamed `workflow_spawn_rs()` / `pickers_rs()`, the override needle now scans the call site; **F10** port test renamed and proves delivery through a recording sink | **F6** (`as _` in `make_service`, single-delivery assertion) — not done: it would edit a moved suite beyond paths |
+| `/validate-prod-ready` | 0 blocker · 7 warning · 6 info | **W1** `NoPresenterEventSink` removed; **W2** `tddy-telegram` crate docs rewritten, `TODO(unbundle-node-2, M4)` removed as resolved (the modules live in `tddy-telegram-control`); **W4** code-issue links → backticked paths per the deferred-work rule; **W5** teloxide comment; **W6** `DaemonConfig` comment reworded (imports left, relocated code); **I1** false "`base64` stays because `auth.rs`" clause removed; **I5** stale `tddy_daemon::telegram_*` doc paths in `tddy-telegram` | **W3** package/feature docs → at wrap (list below); **W7** "neither Telegram…" log line kept by boundary |
+| `/analyze-clean-code` | 8/10 (B) on authored code, no must-refactor | #4 `session_start.rs` header; #7 no-op sink removed; #9 `telegram_session_subscriber` module doc says what it holds (not renamed) | #1–#3, #5 seams and the five modules over 500 → `oversized-file-telegram-session-control-*` records and `docs/dev/todo/2026-09-22-telegram-control-plane-left-over-budget-by-a-move-only-node.md` (developer consent, move-only node); #8 log target kept by boundary; #10 sink error ending the bus loop is pre-existing behaviour; #12 runtime cast left |
+
+Oversize measured to the first `#[cfg(test)]`: five new records in
+`packages/tddy-telegram-control/docs/code-issues/` (`callbacks.rs` 736, `session_start.rs` 711,
+`pickers.rs` 705, `mod.rs` 539, `chaining_and_listing.rs` 518), a new `oversized-file-telegram-notifier.md`
+(1,239 → 1,246), and `packages/tddy-daemon/docs/code-issues/oversized-file-runtime.md` updated
+(1,519 → 1,521).
+
+### Docs to update at wrap
+
+Stale since the move; not edited here because `packages/*/docs/` goes through this changeset:
+
+- `packages/tddy-session-activity/docs/session-notifications.md:79` — `TelegramNotificationSubscriber`
+  is in `tddy-telegram-control` (`telegram_notification_subscriber`), not `tddy-daemon`.
+- `packages/tddy-session-activity/docs/session-notifications.md:97` — the publish site is
+  `tddy_session_lifecycle::presenter_observer_task::run_presenter_observer_loop`.
+- `packages/tddy-telegram/docs/telegram-notifier.md:9-11, 51` — `TelegramSessionWatcher`,
+  `telegram_bot`, `telegram_session_control`, `telegram_session_subscriber` and
+  `TelegramNotificationSubscriber` live in `tddy-telegram-control`.
+- `docs/ft/daemon/telegram-session-control.md:5` — `tddy_telegram_control::telegram_session_control`.
+- `docs/ft/daemon/telegram-notifications.md:105` —
+  `tddy_telegram_control::telegram_notification_subscriber::TelegramNotificationSubscriber`.
+- `packages/tddy-session-lifecycle/docs/test-suites.md:3, 19` — there is no `tests/common/mod.rs`
+  any more; the PTY wait is `tddy_testing_commons::wait::a_capture_showing`.
+- Delete the two closed records, `packages/tddy-session-lifecycle/docs/code-issues/cycle-connection-service-telegram.md`
+  and `…/oversized-file-telegram-session-control.md`, once their final measurements are in the
+  change-history entry. (The cycle record's *What would close it* still describes the superseded
+  spawner port; its *How it was closed* section has the final shape.)
 
 ## Verification
 

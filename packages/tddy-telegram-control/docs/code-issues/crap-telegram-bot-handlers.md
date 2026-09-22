@@ -37,7 +37,7 @@ moves the risk without reducing it; the split is only safe once something catche
 
 ## Why this one is NOT claimed, deliberately
 
-**`#carve` 8/10 (#494) moves these functions to `tddy-telegram-control` unchanged and still
+**`#carve` 8/11 (#494) moves these functions to `tddy-telegram-control` unchanged and still
 untested.** That is a deliberate boundary, recorded in its changeset: decomposing or testing them
 inside a move would put behaviour risk into a node whose entire claim is that it has none, and would
 make the diff unreviewable.

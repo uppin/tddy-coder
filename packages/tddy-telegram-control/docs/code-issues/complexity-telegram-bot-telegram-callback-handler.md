@@ -46,5 +46,5 @@ finding is a lead, not an issue.
 
 ## Related
 
-`packages/tddy-session-lifecycle/src/telegram_bot.rs` is already covered by [`crap-telegram-bot-handlers`](../../../tddy-session-lifecycle/docs/code-issues/crap-telegram-bot-handlers.md).
+`packages/tddy-telegram-control/src/telegram_bot.rs` is already covered by `packages/tddy-telegram-control/docs/code-issues/crap-telegram-bot-handlers.md`.
 That record is about the file or type; this one is about the unit. Reconcile both together.

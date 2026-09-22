@@ -18,11 +18,12 @@ serde_json = "1"
 serde_yaml = "0.9"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 uuid = { version = "1", features = ["v4"] }
-# The Telegram Bot API client: `telegram_bot`'s long-polling dispatcher. This crate is its only
-# user outside the transport in `tddy-telegram`.
+# The Telegram Bot API client: `telegram_bot`'s long-polling dispatcher. Outside the transport in
+# `tddy-telegram`, its other user is `tddy-daemon`'s `runtime.rs`, which builds the `Bot`.
 teloxide = { version = "0.17.0", features = ["macros", "rustls"], default-features = false }
 tddy-core = { path = "../tddy-core" }
-# `PresenterEventSink`, the port `TelegramDaemonHooks` implements, and `DaemonConfig`.
+# `PresenterEventSink`, the port `TelegramDaemonHooks` implements. (`DaemonConfig` is the kernel's
+# too, but this crate names it through `tddy_session_lifecycle::config`, which re-exports it.)
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # `SessionRoomRegistry`: the harness's Delete stops hosting a session's room first.
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
