@@ -33,6 +33,35 @@ fn production(text: &str) -> String {
     }
 }
 
+/// Whether `manifest` declares `name` as a dependency key — `name = …` or `name.workspace = …` —
+/// rather than merely containing it: `tddy-git` is a prefix of `tddy-github`, and a comment naming a
+/// crate declares nothing.
+fn declares_dependency(manifest: &str, name: &str) -> bool {
+    manifest.lines().any(|line| {
+        line.trim_start()
+            .strip_prefix(name)
+            .map(str::trim_start)
+            .is_some_and(|rest| rest.starts_with('=') || rest.starts_with('.'))
+    })
+}
+
+/// Every `.rs` file under `dir`, at any depth — a module split into a directory is still source.
+fn rust_sources(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(dir)
+        .expect("a readable source directory")
+        .flatten()
+    {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(rust_sources(&path));
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            found.push(path);
+        }
+    }
+    found
+}
+
 /// AC1 — the new crate exists and depends on the three crates the moved code actually needs.
 #[test]
 fn the_stack_crate_depends_on_what_the_moved_code_names() {
@@ -47,7 +76,7 @@ fn the_stack_crate_depends_on_what_the_moved_code_names() {
     // Then it names the three it consumes
     for needed in ["tddy-core", "tddy-git", "tddy-github"] {
         assert!(
-            text.contains(needed),
+            declares_dependency(&text, needed),
             "`tddy-pr-stack` does not depend on `{needed}`, which the moved operations name"
         );
     }
@@ -62,7 +91,7 @@ fn the_stack_crate_does_not_depend_on_the_recipes_it_left() {
 
     // Then the origin is not among its dependencies
     assert!(
-        !text.contains("tddy-workflow-recipes"),
+        !declares_dependency(&text, "tddy-workflow-recipes"),
         "`tddy-pr-stack` depends on the crate it left, which is the cycle the seam exists to avoid"
     );
 }
@@ -72,7 +101,7 @@ fn the_stack_crate_does_not_depend_on_the_recipes_it_left() {
 /// This is the criterion the whole seam was measured against.
 #[test]
 fn the_stack_crate_names_nothing_recipe_side() {
-    // Given every source file of the new crate
+    // Given every source file of the new crate, at any depth
     let source = package("tddy-pr-stack").join("src");
     assert!(
         source.exists(),
@@ -80,16 +109,20 @@ fn the_stack_crate_names_nothing_recipe_side() {
     );
 
     // When each is searched for what had to stay behind
-    let reaching: Vec<String> = std::fs::read_dir(&source)
-        .expect("the source directory")
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            let text = production(&std::fs::read_to_string(entry.path()).unwrap_or_default());
+    let reaching: Vec<String> = rust_sources(&source)
+        .into_iter()
+        .filter(|path| {
+            let text = production(&std::fs::read_to_string(path).unwrap_or_default());
             ["plan_pr_stack", "::writer", "::parser"]
                 .iter()
                 .any(|name| text.contains(name))
         })
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .map(|path| {
+            path.strip_prefix(&source)
+                .unwrap_or(&path)
+                .display()
+                .to_string()
+        })
         .collect();
 
     // Then none of them does
@@ -131,7 +164,7 @@ fn the_plan_to_stack_bridge_stays_behind() {
 
     // Then the one operation that could not travel is still here
     assert!(
-        text.contains("reseed_stack_from_plan_if_unspawned"),
+        text.contains("pub fn reseed_stack_from_plan_if_unspawned"),
         "`reseed_stack_from_plan_if_unspawned` moved, but it names `plan_pr_stack`, which is \
          mutually referenced with `pr_stack` and cannot come"
     );

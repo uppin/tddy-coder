@@ -439,7 +439,7 @@ fn unmerged_paths(dir: &std::path::Path) -> Result<Vec<String>, tddy_core::Workf
 /// Build or refresh a local integration ref (`stack-int/<node_id>`) from multiple parent tips.
 /// Returns the SHA of the resulting ref.
 #[allow(dead_code)]
-pub fn build_integration_ref(
+pub(crate) fn build_integration_ref(
     _repo_root: &std::path::Path,
     _node_id: &str,
     _parent_branches: &[String],
