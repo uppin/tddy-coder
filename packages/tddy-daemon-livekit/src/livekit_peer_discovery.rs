@@ -588,7 +588,7 @@ fn host_sighting_from_peer(peer: &PeerDaemon) -> HostSighting {
 /// Classify a common-room participant, returning its daemon advertisement **only** when the
 /// participant is a genuine `tddy-daemon` — not a browser or a coder/session participant.
 ///
-/// Mirrors the web UI's `inferParticipantRole` (`tddy-web/src/hooks/useRoomParticipants.ts`):
+/// Mirrors the web UI's `inferParticipantRole` (`tddy-web/src/lib/participantRole.ts`):
 /// browser identities (`web-`/`browser-`) and coder/session identities (`server`, `server…`,
 /// `daemon-<uuid>…`) are never daemons — even when they publish advertisement-shaped metadata — and
 /// a daemon must publish a valid advertisement (no identity fallback). Only daemons own projects, so
@@ -602,21 +602,14 @@ fn peer_daemon_from_participant_fields(
     metadata: &str,
     local_instance_id: &str,
 ) -> Option<PeerDaemon> {
-    let id_trim = identity.trim();
-    if id_trim.starts_with("web-") || id_trim.starts_with("browser-") {
-        return None;
-    }
-    // A coder/session participant joins with a `server…` or `daemon-<uuid>` identity; it is never a
-    // host daemon even if its metadata happens to look like an advertisement.
-    if id_trim == "server" || id_trim.starts_with("server") || id_trim.starts_with("daemon-") {
-        return None;
-    }
-    // A split session's agent holds a join token granting `can_update_own_metadata`, and this
-    // function's only evidence is self-declared metadata — so an agent running model-authored code
-    // could otherwise publish a daemon advertisement and insert a host of its choosing into every
-    // daemon's eligible list and the web's host picker. Its identity prefix is reserved for exactly
-    // this refusal (`tddy_daemon_kernel::daemon_identity::SPLIT_AGENT_IDENTITY_PREFIX`).
-    if id_trim.starts_with(tddy_daemon_kernel::daemon_identity::SPLIT_AGENT_IDENTITY_PREFIX) {
+    // Browser (`web-`/`browser-`), coder/session (`server…`, `daemon-<uuid>…`), split-agent and
+    // remote-git identities are never daemons, even when their metadata looks like an
+    // advertisement: each holds a join token that may update its own metadata, and this function's
+    // only other evidence is that self-declared metadata. The rule is
+    // `tddy_service::may_be_daemon_discovery_identity` — the same function every client-facing mint
+    // refuses identities by — so an advertised signing key is only ever read from an identity no
+    // client can be minted: one a daemon minted for itself.
+    if !tddy_service::may_be_daemon_discovery_identity(identity) {
         return None;
     }
     let peer = parse_peer_daemon_json(metadata.trim()).ok()?;
@@ -2013,6 +2006,42 @@ mod tests {
             got.is_none(),
             "a split session's agent is not an eligible daemon, whatever metadata it publishes"
         );
+    }
+
+    #[test]
+    fn eligible_daemon_rejects_a_remote_git_client_advertising_a_signing_key() {
+        // Given a `tddy-remote-git-repo` client, admitted to the common room by
+        // `MintLiveKitToken` with a JWT that may update its own metadata, advertising a key
+        let meta = r#"{"instance_id":"attacker-host","label":"Build server","signing_key_id":"k1","signing_public_key":"cHVi"}"#;
+
+        // When
+        let got = peer_daemon_from_participant_fields(
+            "remote-git-0b6f4d1e-3a7f-7b03-88d2-f50bb7efb2f0",
+            meta,
+            "local-host",
+        );
+
+        // Then it is not a daemon, so no peer ever reads its key
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn eligible_daemon_rejects_every_identity_a_client_facing_mint_hands_out() {
+        // Given advertisement metadata carrying a signing key, and one identity under each prefix
+        // `token.TokenService` will mint for a client
+        let meta = r#"{"instance_id":"attacker-host","label":"Build server","signing_key_id":"k1","signing_public_key":"cHVi"}"#;
+        let client_identities = ["web-alice", "browser-presenter-x1", "server-7"];
+
+        // When each is classified
+        let taken_for_daemons: Vec<&str> = client_identities
+            .into_iter()
+            .filter(|identity| {
+                peer_daemon_from_participant_fields(identity, meta, "local-host").is_some()
+            })
+            .collect();
+
+        // Then none is — an advertised key is only read from an identity a daemon minted itself
+        assert_eq!(taken_for_daemons, Vec::<&str>::new());
     }
 
     #[test]

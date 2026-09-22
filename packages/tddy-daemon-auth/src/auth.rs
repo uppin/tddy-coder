@@ -341,8 +341,12 @@ pub const MINTED_ROOM_TOKEN_TTL: Duration = Duration::from_secs(3600);
 
 /// Prefix of every server-generated participant identity. Deliberately not `daemon-`: that prefix
 /// addresses a daemon's RPC-serving participant, and a client able to choose it could join the
-/// common room *as* a daemon and be sent other participants' calls.
-pub const MINTED_IDENTITY_PREFIX: &str = "remote-git-";
+/// common room *as* a daemon and be sent other participants' calls. Nor a bare id: peer discovery
+/// reads a signing key from a bare id's advertisement, and this JWT may update its own metadata.
+/// Defined beside the rule that makes discovery skip it
+/// ([`tddy_service::may_be_daemon_discovery_identity`]).
+pub const MINTED_IDENTITY_PREFIX: &str =
+    tddy_service::participant_identity::REMOTE_GIT_IDENTITY_PREFIX;
 
 /// `auth.LiveKitTokenService`: mints a LiveKit room JWT for a caller that already holds a valid
 /// daemon access token.

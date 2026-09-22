@@ -101,7 +101,7 @@ mod livekit_tests {
         // When — client calls GenerateToken RPC for a new participant
         let request = GenerateTokenRequest {
             room: ROOM_NAME.to_string(),
-            identity: "new-participant".to_string(),
+            identity: "web-new-participant".to_string(),
             session_token: String::new(),
         };
         let request_bytes = request.encode_to_vec();
