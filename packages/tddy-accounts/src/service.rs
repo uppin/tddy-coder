@@ -3,13 +3,18 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::accounts::{
-    AccountsService, ListAccountsRequest, ListAccountsResponse, RemoveAccountRequest,
-    RemoveAccountResponse, SetAccountLabelRequest, SetAccountLabelResponse,
+    AccountSummary, AccountsService, ListAccountsRequest, ListAccountsResponse, ProviderAccounts,
+    RemoveAccountRequest, RemoveAccountResponse, SetAccountLabelRequest, SetAccountLabelResponse,
 };
 
-use crate::store::AccountStore;
+use crate::store::{AccountStore, AccountsError};
+
+/// The metadata key a record's provider-side identifier is read from — a GitHub login, a
+/// Cloudflare account id. Shown beside the label; never a credential.
+const SUBJECT_METADATA_KEY: &str = "subject";
 
 /// Serves `accounts.AccountsService` by reading and curating one [`AccountStore`].
 pub struct AccountsServiceImpl<S> {
@@ -27,26 +32,111 @@ impl<S> AccountsServiceImpl<S> {
 impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
     async fn list_accounts(
         &self,
-        _request: Request<ListAccountsRequest>,
+        request: Request<ListAccountsRequest>,
     ) -> Result<Response<ListAccountsResponse>, Status> {
-        let _ = &self.store;
-        todo!("(#keyring 4/9): group the session's records by provider, with Locked as a field")
+        let request = request.into_inner();
+        // `Locked` is the one refusal that is an answer rather than an error: the vault exists and
+        // this session cannot open it, which the screen explains instead of showing an empty list.
+        let response = match self.store.list(&request.session_token) {
+            Ok(records) => ListAccountsResponse {
+                providers: grouped_by_provider(&records),
+                vault_locked: false,
+            },
+            Err(AccountsError::Locked) => ListAccountsResponse {
+                providers: Vec::new(),
+                vault_locked: true,
+            },
+            Err(refusal) => return Err(status_for(refusal)),
+        };
+        Ok(Response::new(response))
     }
 
     async fn set_account_label(
         &self,
-        _request: Request<SetAccountLabelRequest>,
+        request: Request<SetAccountLabelRequest>,
     ) -> Result<Response<SetAccountLabelResponse>, Status> {
-        let _ = &self.store;
-        todo!("(#keyring 4/9): rename one record, leaving its account id untouched")
+        let request = request.into_inner();
+        let renamed = self
+            .store
+            .set_label(
+                &request.session_token,
+                &ProviderId::new(request.provider),
+                &AccountId::new(request.account_id),
+                &request.label,
+            )
+            .map_err(status_for)?;
+        Ok(Response::new(SetAccountLabelResponse {
+            account: Some(summary_of(&renamed)),
+        }))
     }
 
     async fn remove_account(
         &self,
-        _request: Request<RemoveAccountRequest>,
+        request: Request<RemoveAccountRequest>,
     ) -> Result<Response<RemoveAccountResponse>, Status> {
-        let _ = &self.store;
-        todo!("(#keyring 4/9): forget one record and answer with what remains")
+        let request = request.into_inner();
+        self.store
+            .remove(
+                &request.session_token,
+                &ProviderId::new(request.provider),
+                &AccountId::new(request.account_id),
+            )
+            .map_err(status_for)?;
+        let remaining = self
+            .store
+            .list(&request.session_token)
+            .map_err(status_for)?;
+        Ok(Response::new(RemoveAccountResponse {
+            providers: grouped_by_provider(&remaining),
+        }))
+    }
+}
+
+/// Group records by provider in the order the store returned them — the store already orders by
+/// `(provider, account)`, so this never re-sorts.
+fn grouped_by_provider(records: &[CredentialRecord]) -> Vec<ProviderAccounts> {
+    let mut groups: Vec<ProviderAccounts> = Vec::new();
+    for record in records {
+        let provider = record.provider.as_str();
+        let summary = summary_of(record);
+        match groups.iter_mut().find(|group| group.provider == provider) {
+            Some(group) => group.accounts.push(summary),
+            None => groups.push(ProviderAccounts {
+                provider: provider.to_string(),
+                accounts: vec![summary],
+            }),
+        }
+    }
+    groups
+}
+
+/// What a person may see of a record. The secret is reduced to whether one is present.
+fn summary_of(record: &CredentialRecord) -> AccountSummary {
+    AccountSummary {
+        provider: record.provider.as_str().to_string(),
+        account_id: record.account.as_str().to_string(),
+        label: record.label.clone(),
+        subject: record
+            .metadata
+            .get(SUBJECT_METADATA_KEY)
+            .cloned()
+            .unwrap_or_default(),
+        updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
+        has_secret: !record.secret.is_empty(),
+    }
+}
+
+/// The RPC status a refusal becomes wherever it is an error rather than an answer.
+fn status_for(refusal: AccountsError) -> Status {
+    match refusal {
+        AccountsError::NoSuchSession => {
+            Status::unauthenticated("the session token names no signed-in session")
+        }
+        AccountsError::Locked => Status::failed_precondition(
+            "the credential store cannot be opened with this session's key; \
+             it was sealed under a different login and its accounts must be re-linked",
+        ),
+        AccountsError::Unavailable(reason) => Status::internal(reason),
     }
 }
 

@@ -13,6 +13,8 @@
 
 mod service;
 mod store;
+mod vault_store;
 
 pub use service::{build_accounts_entry, AccountsServiceImpl};
 pub use store::{AccountStore, AccountsError};
+pub use vault_store::{SessionSubjectResolver, SessionVaultAccountStore};
