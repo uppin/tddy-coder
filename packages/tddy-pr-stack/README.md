@@ -24,3 +24,6 @@ source file here, at any depth, may name `plan_pr_stack`, `::writer` or `::parse
 | `assess.rs` | `AssessTask`, node views, `decide_next_action`, `effective_base_ref` | `orchestrate_pr_stack::assess` |
 | `git_ops.rs` | rebase / merge-base / force-push / commit / push helpers | `orchestrate_pr_stack::git_ops` |
 | `pr_insight.rs` | read-side shaping for the PR-inspection tools; `pr_number_from_status_url` | `orchestrate_pr_stack::pr_insight` |
+
+Dependencies, the seam tests, each module's surface and what stays recipe-side:
+[docs/architecture.md](docs/architecture.md).

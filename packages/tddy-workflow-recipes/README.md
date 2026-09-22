@@ -63,22 +63,23 @@ no caller was edited. Write new code against `tddy_github` directly.
 
 ## The PR-stack data model lives in `tddy-pr-stack`
 
-The stack operations that were the second half of `pr_stack/mod.rs` (every writer of
-`Changeset.stack`, and the node↔branch↔pull-request syncs), `pr_stack/docs.rs`, and
-`orchestrate_pr_stack/{assess,git_ops,pr_insight}.rs` moved to [`tddy-pr-stack`](../tddy-pr-stack/).
-None of it is a recipe. Consumers still reach it through the facades below, and so still compile
-every recipe, until they are re-pointed at `tddy_pr_stack` — see
+The stack operations (every writer of `Changeset.stack`, and the node↔branch↔pull-request syncs),
+the per-PR documents, and the `assess`, `git_ops` and `pr_insight` modules live in
+[`tddy-pr-stack`](../tddy-pr-stack/) — see its
+[architecture](../tddy-pr-stack/docs/architecture.md). None of it is a recipe. Consumers that reach
+it through the re-exports below still compile every recipe to do so, until they name
+`tddy_pr_stack` directly — see
 [`squatting-pr-stack-data-model`](docs/code-issues/squatting-pr-stack-data-model.md).
 
-What stayed is recipe-side by nature:
+What is here is recipe-side by nature:
 
 - `PrStackRecipe`, its `WorkflowRecipe` and `SessionArtifactManifest` impls, `pr_stack/{hooks,bridge}.rs`.
 - `reseed_stack_from_plan_if_unspawned` — it names `plan_pr_stack`, which is mutually referenced with
-  `pr_stack` and cannot leave.
+  `pr_stack`.
 - `orchestrate_pr_stack/bridge.rs` (`seed_orchestrator_stack_from_plan` names `plan_pr_stack`) and so
   `orchestrate_pr_stack/actions.rs`, whose tasks call the bridge's merge and repoint.
 
-Every old path still resolves: `pr_stack` glob re-exports `tddy_pr_stack::stack_ops` and re-exports
-`docs`; `orchestrate_pr_stack` re-exports `assess`, `git_ops` and `pr_insight` at their old
+Every historical path resolves: `pr_stack` glob re-exports `tddy_pr_stack::stack_ops` and re-exports
+`docs`; `orchestrate_pr_stack` re-exports `assess`, `git_ops` and `pr_insight` at their historical
 visibilities; `orchestrate_pr_stack::bridge::pr_number_from_status_url` re-exports the function from
-`tddy_pr_stack::pr_insight`. No caller was edited. Write new code against `tddy_pr_stack` directly.
+`tddy_pr_stack::pr_insight`. Write new code against `tddy_pr_stack` directly.
