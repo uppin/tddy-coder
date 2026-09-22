@@ -108,7 +108,7 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 18] = [
+    const ENDPOINT: [&str; 19] = [
         "main.rs",
         "lib.rs",
         "server.rs",
