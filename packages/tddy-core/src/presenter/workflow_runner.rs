@@ -844,7 +844,7 @@ pub fn run_workflow(
             .filter(|s| !s.trim().is_empty())
     });
     let start_goal = match cs.as_ref() {
-        Some(c) => crate::changeset::start_goal_for_session_continue(recipe.as_ref(), c),
+        Some(c) => crate::workflow::start_goal_for_session_continue(recipe.as_ref(), c),
         None => recipe.start_goal(),
     };
     let start_is_full = start_goal == recipe.start_goal();

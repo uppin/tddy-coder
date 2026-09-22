@@ -13,8 +13,8 @@
 //!
 //! PRD: docs/ft/coder/pr-stack-live-status.md § capability 5.
 
-use tddy_core::changeset::{GithubPrStatus, Stack, StackNode};
-use tddy_core::WorkflowError;
+use tddy_changeset::changeset::{GithubPrStatus, Stack, StackNode};
+use tddy_session_store::error::WorkflowError;
 
 // --- builders ---------------------------------------------------------------
 

@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use tddy_core::changeset::{
+use tddy_changeset::changeset::{
     read_changeset, write_changeset, Changeset, GithubPrStatus, PrInternalStatus, Stack, StackNode,
 };
 

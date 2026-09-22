@@ -10,8 +10,20 @@
 
 use std::path::{Path, PathBuf};
 
+/// The crate each module group read here moved into when `tddy-core` became a wiring point, keyed
+/// by the group's top-level path under `src/`.
+const HOMES: [(&str, &str); 1] = [("changeset", "tddy-changeset")];
+
 fn src(relative: &str) -> PathBuf {
+    let group = relative.split(['/', '.']).next().unwrap_or_default();
+    let home = HOMES
+        .iter()
+        .find(|(moved, _)| *moved == group)
+        .map_or("tddy-core", |(_, home)| home);
     Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the packages directory")
+        .join(home)
         .join("src")
         .join(relative)
 }

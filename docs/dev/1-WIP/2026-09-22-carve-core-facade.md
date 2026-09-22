@@ -107,7 +107,7 @@ measured in its new home.
 
 - [ ] ⛔ Stack on master: cascade `/pr-stack-rebase` #494..#520, then this branch (the developer's to run)
 - [x] Dead files deleted; `futures` dropped
-- [ ] Cut 1, Cut 2, the two retargets
+- [x] Cut 1, Cut 2, the two retargets
 - [x] `tddy-log`, `tddy-agent-skills`
 - [ ] `tddy-changeset`, `tddy-session-worktree`, `tddy-session-actions`
 - [ ] `tddy-toolcall`, `tddy-agent-backend`
@@ -160,7 +160,7 @@ tddy-core   (pub use facades only, ~140 lines)
 - [x] Dead files, `futures` — AC3
 - [x] Cut 1 + retargets; tddy-core still builds as one crate — AC4 half
 - [x] `tddy-log`, `tddy-agent-skills` extracted
-- [ ] Cut 2; `tddy-changeset` extracted — AC4 other half
+- [x] Cut 2; `tddy-changeset` extracted — AC4 other half
 - [ ] `tddy-session-worktree`, `tddy-session-actions` extracted
 - [ ] `tddy-toolcall`, `tddy-agent-backend` extracted
 - [ ] `tddy-workflow-engine`, `tddy-presenter` extracted

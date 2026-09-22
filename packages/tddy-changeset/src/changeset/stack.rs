@@ -6,9 +6,9 @@
 use super::io::{read_changeset, write_changeset_atomic};
 use super::model::{GithubPrStatus, PrInternalStatus};
 use crate::error::WorkflowError;
-use crate::workflow::ids::WorkflowState;
 use std::collections::BTreeMap;
 use std::path::Path;
+use tddy_workflow::ids::WorkflowState;
 
 /// PR-stack DAG carried by the ORCHESTRATOR session's changeset.
 /// Each node is a child PR session reference.
@@ -762,7 +762,7 @@ mod stack_tests {
 
     #[test]
     fn sync_stack_node_from_child_propagates_state_and_pr_status() {
-        use crate::workflow::ids::WorkflowState;
+        use tddy_workflow::ids::WorkflowState;
         let orch_tmp = tempfile::tempdir().unwrap();
         let sessions_tmp = tempfile::tempdir().unwrap();
         let orch_dir = orch_tmp.path();

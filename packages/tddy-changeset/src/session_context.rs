@@ -1,9 +1,9 @@
 //! Merge JSON into workflow session files for the `set-session-context` CLI.
 
-use crate::workflow::session::Session;
 use anyhow::{bail, Context as AnyhowContext, Result};
 use std::fs;
 use std::path::Path;
+use tddy_graph::session::Session;
 
 /// Maximum length for a single context key string (aligned with safe identifier storage).
 const MAX_CONTEXT_KEY_BYTES: usize = 256;

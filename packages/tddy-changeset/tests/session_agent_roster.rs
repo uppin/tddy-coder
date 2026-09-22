@@ -1,5 +1,5 @@
 //! Unit tests: a session's agent roster as persisted in `.session.yaml`
-//! (`tddy_core::session_agent`, `tddy_core::session_metadata`).
+//! (`tddy_changeset::session_agent`, `tddy_changeset::session_metadata`).
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md (AC4, AC10, AC11)
 //!
@@ -9,8 +9,8 @@
 //! roster survives the session file, because a roster is operator intent and a resume that
 //! silently drops it starts the session as something else.
 
-use tddy_core::session_agent::{AgentId, SessionAgentRecord};
-use tddy_core::session_metadata::{
+use tddy_changeset::session_agent::{AgentId, SessionAgentRecord};
+use tddy_changeset::session_metadata::{
     read_session_metadata, write_session_metadata, SessionMetadata, SESSION_METADATA_FILENAME,
 };
 

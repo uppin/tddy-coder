@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use pretty_assertions::assert_eq;
 use rstest::rstest;
-use tddy_core::agent_activity::declared_paths;
+use tddy_changeset::agent_activity::declared_paths;
 
 // ---------------------------------------------------------------------------
 // Builders

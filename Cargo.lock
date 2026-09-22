@@ -11884,6 +11884,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-changeset"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tddy-graph",
+ "tddy-session-store",
+ "tddy-testing-commons",
+ "tddy-workflow",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tddy-code-analysis"
 version = "0.1.0"
 dependencies = [
@@ -12036,6 +12056,7 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tddy-agent-skills",
+ "tddy-changeset",
  "tddy-git",
  "tddy-graph",
  "tddy-log",

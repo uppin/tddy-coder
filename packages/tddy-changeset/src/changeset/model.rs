@@ -4,8 +4,8 @@
 //! does that, and [`super::merge`] derives a session's next move from what is stored here.
 
 use super::stack::Stack;
-use crate::workflow::ids::WorkflowState;
 use std::collections::BTreeMap;
+use tddy_workflow::ids::WorkflowState;
 
 /// One Q&A pair from planning clarification (question asked + user's answer).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -163,7 +163,7 @@ pub enum BranchWorktreeIntent {
 }
 
 impl BranchWorktreeIntent {
-    /// Stable string for [`crate::workflow::context::Context`] keys and RPC (matches serde `snake_case`).
+    /// Stable string for [`tddy_graph::context::Context`] keys and RPC (matches serde `snake_case`).
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::NewBranchFromBase => "new_branch_from_base",

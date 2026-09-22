@@ -8,7 +8,7 @@
 //! tests are the Rust half of that parity — each case mirrors a case in
 //! `packages/tddy-web/src/utils/sessionDrawerLabel.test.ts`.
 
-use tddy_core::session_label::session_display_label;
+use tddy_changeset::session_label::session_display_label;
 
 const A_SESSION_ID: &str = "018f1234-5678-7abc-8def-123456789abc";
 

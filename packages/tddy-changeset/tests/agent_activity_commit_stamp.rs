@@ -7,7 +7,7 @@
 //! session.
 
 use pretty_assertions::assert_eq;
-use tddy_core::agent_activity::{
+use tddy_changeset::agent_activity::{
     append_agent_activity, read_agent_activity, AgentActivityRecord, STATUS_COMPLETED,
 };
 

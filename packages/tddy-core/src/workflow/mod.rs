@@ -64,6 +64,9 @@ pub mod backend_invoke_task;
 pub mod controller;
 pub mod engine;
 pub mod goal_conditions;
+mod session_continue;
+
+pub use session_continue::start_goal_for_session_continue;
 
 use crate::error::WorkflowError;
 use std::path::{Path, PathBuf};

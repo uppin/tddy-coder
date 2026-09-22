@@ -30,6 +30,7 @@ tddy-workflow = { path = "../tddy-workflow" }
 # The groups carved out of this crate, each re-exported at its old paths.
 tddy-log = { path = "../tddy-log" }
 tddy-agent-skills = { path = "../tddy-agent-skills" }
+tddy-changeset = { path = "../tddy-changeset" }
 # The storage layer: `atomic_file`, `error`, `output` and `session_actions`, re-exported at their
 # old paths. It depends on no crate that depends on `tddy-core`.
 tddy-session-store = { path = "../tddy-session-store" }

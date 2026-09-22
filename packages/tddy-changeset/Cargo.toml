@@ -1,0 +1,27 @@
+[package]
+name = "tddy-changeset"
+version = "0.1.0"
+edition = "2021"
+description = "The changeset manifest, the PR-stack model, the unified session directory and per-session metadata"
+
+[dependencies]
+# `session_context` moved in from `tddy-tools` with `anyhow::Result` and `with_context` messages
+# that are part of what the CLI prints (see `tddy-core`'s manifest).
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "2"
+tddy-workflow = { path = "../tddy-workflow" }
+# `atomic_file`, `error` and `output`. The store depends on no crate above it.
+tddy-session-store = { path = "../tddy-session-store" }
+# The graph `Context` and `Session` the manifest is merged into.
+tddy-graph = { path = "../tddy-graph" }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+tempfile = "3"
+tddy-testing-commons = { path = "../tddy-testing-commons" }

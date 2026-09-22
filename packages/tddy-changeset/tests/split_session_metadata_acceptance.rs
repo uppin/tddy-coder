@@ -8,7 +8,7 @@
 //! `SessionMetadata` uses `deny_unknown_fields`, so every new field is a breaking read for older
 //! daemons and an absent field must stay absent on the wire rather than serialize as null.
 
-use tddy_core::SessionMetadata;
+use tddy_changeset::SessionMetadata;
 
 fn a_session_yaml_with_codebase_placement() -> String {
     r#"

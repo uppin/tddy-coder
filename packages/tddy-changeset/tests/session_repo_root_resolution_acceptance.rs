@@ -16,7 +16,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tddy_core::repo_root_for_session;
+use tddy_changeset::repo_root_for_session;
 use tddy_testing_commons::{a_changeset, a_session_metadata, fs::write_session_yaml};
 
 /// The main checkout a pr-stack orchestrator plans over.
@@ -37,13 +37,15 @@ fn a_session_dir(temp: &tempfile::TempDir) -> PathBuf {
 /// `changeset.yaml` naming the checkout — the shape a session with its own worktree has.
 fn a_changeset_recording_the_repo(session_dir: &Path, repo_path: &str) {
     let changeset = a_changeset().with_repo_path(repo_path).build();
-    tddy_core::write_changeset(session_dir, &changeset).expect("write changeset in test setup");
+    tddy_changeset::write_changeset(session_dir, &changeset)
+        .expect("write changeset in test setup");
 }
 
 /// `changeset.yaml` for a pr-stack orchestrator: it carries a recipe and no repo path at all.
 fn a_changeset_recording_no_repo(session_dir: &Path) {
     let changeset = a_changeset().with_recipe("pr-stack").build();
-    tddy_core::write_changeset(session_dir, &changeset).expect("write changeset in test setup");
+    tddy_changeset::write_changeset(session_dir, &changeset)
+        .expect("write changeset in test setup");
 }
 
 /// `.session.yaml` naming the checkout the session was started over.

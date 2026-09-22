@@ -3,7 +3,7 @@
 use log::{debug, info};
 
 use crate::changeset::{BranchWorktreeIntent, Changeset, ChangesetWorkflow};
-use crate::workflow::context::Context;
+use tddy_graph::context::Context;
 
 /// Resolved naming/checkout plan from persisted workflow + changeset fields.
 #[derive(Debug, Clone, PartialEq, Eq)]

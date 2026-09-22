@@ -11,10 +11,10 @@
 //! PRD: docs/ft/coder/pr-stack-live-status.md § capability 5.
 
 use std::path::Path;
-use tddy_core::changeset::{
+use tddy_changeset::changeset::{
     read_stack_with_resolved_branches, resolve_stack_node_branch, Changeset, Stack, StackNode,
 };
-use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_changeset::session_lifecycle::unified_session_dir_path;
 
 // --- builders ---------------------------------------------------------------
 
@@ -82,7 +82,7 @@ fn a_branchless_child_session(sessions_root: &Path, session_id: &str) {
 fn a_child_session(sessions_root: &Path, session_id: &str, changeset: Changeset) {
     let dir = unified_session_dir_path(sessions_root, session_id);
     std::fs::create_dir_all(&dir).expect("create child session dir");
-    tddy_core::changeset::write_changeset(&dir, &changeset).expect("write child changeset");
+    tddy_changeset::changeset::write_changeset(&dir, &changeset).expect("write child changeset");
 }
 
 /// A pr-stack orchestrator session owning `stack`.
@@ -95,7 +95,8 @@ fn an_orchestrator_with_stack(sessions_root: &Path, session_id: &str, nodes: Vec
         branch: None,
         ..Changeset::default()
     };
-    tddy_core::changeset::write_changeset(&dir, &changeset).expect("write orchestrator changeset");
+    tddy_changeset::changeset::write_changeset(&dir, &changeset)
+        .expect("write orchestrator changeset");
 }
 
 fn a_sessions_root() -> tempfile::TempDir {

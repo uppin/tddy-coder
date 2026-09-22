@@ -15,7 +15,9 @@
 //! PRD: docs/ft/coder/pr-stack-live-status.md § Cross-host planned PRs (D37).
 
 use serde_json::Value;
-use tddy_core::session_participant_metadata::{session_metadata_json, SessionParticipantMetadata};
+use tddy_changeset::session_participant_metadata::{
+    session_metadata_json, SessionParticipantMetadata,
+};
 
 /// A stack child's block, fully populated — every field a scenario might read.
 fn a_stack_child_block() -> SessionParticipantMetadata {
