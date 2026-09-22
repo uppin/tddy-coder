@@ -8,6 +8,7 @@ use tddy_coder::web_server::{
     ClientSandboxedCodebaseSupport,
 };
 use tddy_connectrpc::connect_router;
+use tddy_daemon_auth::auth::GitHubAuthFlow;
 use tddy_rpc::{MultiRpcService, RpcBridge};
 
 use crate::config::DaemonConfig;
@@ -43,6 +44,10 @@ pub struct RunServerOptions {
     /// a host that does not serve the placement at all, and the key is then left off `/api/config`.
     /// Built by [`serving_sandboxed_codebase_support`], never restated from a platform string.
     pub sandboxed_codebase: Option<ClientSandboxedCodebaseSupport>,
+    /// The GitHub sign-in flow this daemon's `auth.AuthService` serves, from
+    /// [`tddy_daemon_auth::auth::github_auth_flow`] — the function `GetClientConfig` reads too.
+    /// `None` is a daemon with no auth service, and the key is then left off `/api/config`.
+    pub auth_flow: Option<GitHubAuthFlow>,
     /// Startup snapshot of the agent allowlist, for the UI before `ListAgents` hydrates it.
     pub allowed_agents: Vec<ClientAllowedAgent>,
     /// Browser `DEBUG` mask served at `/api/config` (daemon `debug`). `None` = off.
@@ -80,6 +85,7 @@ pub async fn run_server(options: RunServerOptions) -> anyhow::Result<()> {
         livekit_enabled,
         daemon_instance_id,
         sandboxed_codebase,
+        auth_flow,
         allowed_agents,
         debug,
         lifecycle_telegram,
@@ -109,6 +115,7 @@ pub async fn run_server(options: RunServerOptions) -> anyhow::Result<()> {
         daemon_instance_id: Some(daemon_instance_id),
         livekit_enabled: Some(livekit_enabled),
         sandboxed_codebase,
+        auth_flow: auth_flow.map(|flow| flow.as_str().to_string()),
     };
 
     let shutdown_copy = lifecycle_telegram.clone();

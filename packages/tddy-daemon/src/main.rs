@@ -183,6 +183,9 @@ fn main() -> anyhow::Result<()> {
             // function — so a daemon with no common room still tells the page it serves whether it
             // can hold a jailed checkout, and what that jail confines.
             sandboxed_codebase: tddy_daemon::server::serving_sandboxed_codebase_support(),
+            // The flow of the auth service `daemon.entries` registered, decided by the same function
+            // that registered it — and the one `GetClientConfig` answers from.
+            auth_flow: tddy_daemon_auth::auth::github_auth_flow(&daemon.config),
             allowed_agents,
             debug: web_debug,
             lifecycle_telegram: daemon.lifecycle_telegram,

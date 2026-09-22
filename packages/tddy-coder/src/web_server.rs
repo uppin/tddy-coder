@@ -77,6 +77,12 @@ pub struct ClientConfig {
     /// nothing" — the control is disabled with the reason rather than offered.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sandboxed_codebase: Option<ClientSandboxedCodebaseSupport>,
+    /// Which GitHub sign-in flow the serving daemon's `auth.AuthService` serves: `"redirect"` or
+    /// `"device"` — the same values `GetClientConfig` carries in `auth_flow`. `None` is a host with
+    /// no auth service (a daemon without `github:`, or the standalone tddy-coder web server), and
+    /// the key is then left off the wire, as a daemon predating the device flow leaves it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_flow: Option<String>,
 }
 
 /// Serve static files from `bundle_path` on the given `host` and `port`.
@@ -164,6 +170,7 @@ mod tests {
             daemon_instance_id: None,
             livekit_enabled: None,
             sandboxed_codebase: None,
+            auth_flow: None,
         }
     }
 

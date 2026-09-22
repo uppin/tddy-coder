@@ -235,7 +235,7 @@ open them, because its own `tddy-github` finding is the one in its path.
 - [ ] **Base-URL seam** in `RealGitHubProvider`, with the six error returns covered — **before** the device flow
 - [ ] **Implementation**: device flow, RPCs, the gate, enrolment, the web sign-in screen
 - [ ] **Decisions answered**: OAuth App vs GitHub App, verified against the live API; client-id placement
-- [ ] **Testing**: acceptance + unit; the single `tddy-web` spec under change
+- [~] **Testing**: acceptance + unit; the single `tddy-web` spec under change
 - [ ] **Package Documentation**: the six packages above
 - [ ] **Code Quality**: scoped clippy per package; CI green
 
@@ -286,6 +286,13 @@ open them, because its own `tddy-github` finding is the one in its path.
 #### tddy-web
 - **Integration**: the device-flow sign-in screen — user code, verification URI, poll, expiry,
   denial.
+  - [x] Written (red): `packages/tddy-web/cypress/component/DeviceLoginAcceptance.cy.tsx` — 22
+    tests. Pins `DeviceLoginPanel` (`src/components/DeviceLoginPanel.tsx`), `DaemonLoginScreen`
+    extracted from `src/index.tsx` to `src/components/DaemonLoginScreen.tsx` with an `authFlow`
+    prop, and `ClientConfig.authFlow` read from `/api/config`'s `auth_flow`. **The flow signal is
+    an assumption awaiting confirmation**: no signal existed, so the daemon has to publish
+    `auth_flow` (`"device"` | `"redirect"`) in `/api/config` *and* in `GetClientConfigResponse`
+    (the Tauri page reads the RPC mirror, and the spec covers only the JSON path).
 
 ## Implementation Milestones
 
@@ -337,6 +344,18 @@ and `tsc` is not a gate in this repo. JS dependencies install through the local 
 
 `./test -p tddy-github -p tddy-daemon-auth -p tddy-daemon-kernel -p tddy-service`, scoped clippy per
 package, and the single web spec. Whole-workspace green comes from CI.
+
+## Refactoring Needed
+
+### From @red (TDD Red Phase)
+
+- `cypress/support/rpc/deviceLoginBackend.ts` reuses `CURRENT_ACCESS_TOKEN` / `VALID_REFRESH_TOKEN`
+  from `durableSessionBackend.ts`, which mints `v1.` tokens; the daemon now mints `v2`. Harmless for
+  the client, which only decodes `exp`, but a shared `v2` fixture belongs in one place.
+- The poll-timing tests flush one real macrotask before every `cy.tick` (`letTheAnswerInFlightLand`),
+  because a poll is recorded when sent and answered a few promise hops later. Any other
+  `cy.clock`-driven polling spec over the in-memory transport needs the same helper; it belongs in
+  `cypress/support/` once a second spec wants it.
 
 ## Acceptance Criteria
 

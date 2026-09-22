@@ -1214,6 +1214,8 @@ fn build_client_config(args: &Args) -> crate::web_server::ClientConfig {
         // The standalone web server provisions no `--workspace-tools` jail, so it advertises no
         // sandboxed-codebase placement: the key is left off the wire entirely.
         sandboxed_codebase: None,
+        // …and registers no GitHub auth service, so it declares no sign-in flow.
+        auth_flow: None,
     }
 }
 

@@ -29,6 +29,19 @@ export const TEST_IDS = {
   // Auth
   githubLoginButton: "github-login-button",
   userLogin: "user-login",
+  /** Device-flow sign-in: the button that asks the daemon for a device code (and, once an attempt
+   * has ended in denial or expiry, the one that asks for a fresh one). */
+  deviceLoginStart: "device-login-start",
+  /** Device-flow sign-in: the short code the operator types at GitHub. */
+  deviceLoginUserCode: "device-login-user-code",
+  /** Device-flow sign-in: the link to GitHub's verification page. */
+  deviceLoginVerificationLink: "device-login-verification-link",
+  /** Device-flow sign-in: the attempt ended because the operator refused it at GitHub. */
+  deviceLoginDenied: "device-login-denied",
+  /** Device-flow sign-in: the attempt ended because the codes outlived their window. */
+  deviceLoginExpired: "device-login-expired",
+  /** Probe: the shared auth context's view of the operator — `signed-in:<login>` or `signed-out`. */
+  authProbeStatus: "auth-probe-status",
 
   // App / Connection
   livekitUrl: "livekit-url",

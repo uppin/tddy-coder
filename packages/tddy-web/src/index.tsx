@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Room } from "livekit-client";
 import { RpcTransportProvider, useHttpTransport } from "./rpc/transportProvider";
-import { loadClientConfig } from "./rpc/clientConfig";
+import { loadClientConfig, type ClientConfig } from "./rpc/clientConfig";
 import { AuthProvider, useAuthContext } from "./hooks/authProvider";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
 import { ConnectionProviders } from "./rpc/connections/registry";
@@ -43,7 +43,7 @@ function HmrOverlay() {
 }
 
 import { applyDebugMaskFromConfig, applyDebugMaskFromUrl } from "./lib/debugMask";
-import { GitHubLoginButton } from "./components/GitHubLoginButton";
+import { DaemonLoginScreen } from "./components/DaemonLoginScreen";
 import { AuthCallback } from "./components/AuthCallback";
 import { LiveKitAppPage } from "./components/livekit/LiveKitAppPage";
 import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
@@ -70,24 +70,6 @@ import {
 } from "./routing/appRoutes";
 import { useAppLocation } from "./routing/useAppLocation";
 import { ConnectionForm } from "./components/connection/StandaloneConnectionScreen";
-import { formClassName } from "./components/connection/standaloneFormStyles";
-
-function DaemonLoginScreen({ path, login, authError }: { path: string; login: (returnTo?: string) => void; authError: string | null }) {
-  return (
-    <div className={`${formClassName} flex flex-col gap-4 pt-12`}>
-      <h1 className="text-2xl font-semibold m-0">Sign in</h1>
-      <p className="text-sm text-muted-foreground m-0">
-        Sign in with GitHub to continue to tddy-web.
-      </p>
-      {authError ? (
-        <p data-testid="auth-flow-error" className="text-sm text-destructive m-0">
-          {authError}
-        </p>
-      ) : null}
-      <GitHubLoginButton onClick={() => login(path)} />
-    </div>
-  );
-}
 
 /**
  * Test-injection seam for `SelectedDaemonProvider`'s `room`/`daemons` overrides (mirrors
@@ -115,6 +97,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
     daemonInstanceId?: string;
     allowedAgents?: { id: string; label: string }[];
     sandboxedCodebase?: { confinesFilesystem: boolean };
+    authFlow?: ClientConfig["authFlow"];
   }>({ daemonMode: null });
 
   useEffect(() => {
@@ -132,6 +115,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
           // descriptor, and the sandboxed-codebase control would stay disabled on every daemon
           // that does not join a common room.
           sandboxedCodebase: config?.sandboxedCodebase,
+          authFlow: config?.authFlow,
         });
       })
       .catch(() => setAppConfig({ daemonMode: false }));
@@ -179,7 +163,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
         <div className="p-6">Loading…</div>
       ) : daemonMode === true ? (
         !isAuthenticated ? (
-          <DaemonLoginScreen path={path} login={login} authError={authError} />
+          <DaemonLoginScreen path={path} login={login} authError={authError} authFlow={appConfig.authFlow} />
         ) : (
           /* `LocalHostConnections` sits above `SelectedDaemonProvider`, which is what offers the
              common room: precedence is registration order and a parent renders first, so the
