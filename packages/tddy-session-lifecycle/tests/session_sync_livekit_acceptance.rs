@@ -34,6 +34,7 @@ use std::time::Duration;
 use serial_test::serial;
 use tddy_core::agent_activity::{append_agent_activity, AgentActivityRecord, STATUS_COMPLETED};
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_daemon_auth::SessionTokens;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_livekit::{LiveKitParticipant, RoomOptions};
 use tddy_livekit_testkit::LiveKitTestkit;
@@ -62,10 +63,10 @@ const COMMON_ROOM: &str = "session-sync-e2e-lobby";
 
 const LK_API_KEY: &str = "devkey";
 
-/// The one secret this deployment shares: LiveKit's API secret *and* the key session tokens are
-/// signed with. The syncer holds it because no minted token admits it to a session room — recorded
-/// in the PRD as a real widening of the trust surface.
-const FLEET_SECRET: &str = "secret";
+/// LiveKit's API secret. The syncer holds it because no minted token admits it to a session room —
+/// recorded in the PRD as a widening of the trust surface. It is a room credential only: session
+/// tokens are signed with the daemon's own key, so holding it mints no identity.
+const LK_API_SECRET: &str = "secret";
 
 const GITHUB_USER: &str = "testuser";
 const PROJECT_NAME: &str = "session-sync-app";
@@ -136,6 +137,8 @@ struct AMirroredSession {
     /// The syncer's failure, if it stopped. `run` returns only on error, so anything in here ends
     /// the test immediately rather than as a timeout with no explanation.
     syncer_failure: Arc<OnceLock<String>>,
+    /// The daemon's signing identity, which the browser's access tokens here are signed with.
+    tokens: SessionTokens,
     /// `None` until [`AMirroredSession::with_a_syncer_attached`] has run; the room has to be warm
     /// before a mirror is built from it.
     _syncer: Option<AbortOnDrop>,
@@ -185,7 +188,11 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
 
     let config_dir = tempfile::tempdir().expect("tempdir");
     let config_path = config_dir.path().join("daemon.yaml");
-    std::fs::write(&config_path, a_daemon_yaml(&ws_url, &agent_binary)).expect("write daemon.yaml");
+    std::fs::write(
+        &config_path,
+        a_daemon_yaml(&ws_url, &agent_binary, &config_dir.path().join("auth")),
+    )
+    .expect("write daemon.yaml");
     let config = DaemonConfig::load(&config_path).expect("daemon.yaml must load");
 
     // The daemon's real auth wiring: one resolver verifies the session token everywhere, as in
@@ -196,6 +203,10 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
         .user_resolver
         .clone()
         .expect("a daemon configured with github: stub must produce a resolver");
+    let tokens = auth
+        .session_tokens
+        .clone()
+        .expect("a daemon configured with github: stub signs session tokens");
 
     let sessions_base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -242,12 +253,12 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
     )
     .await;
 
-    let session_id = a_started_session(&connections, suffix).await;
+    let session_id = a_started_session(&connections, &tokens, suffix).await;
     // A session's room is opened by the first connection to it, not by its creation — and warming
     // that room below needs it open. In production the syncer's own attach is that first
     // connection; here the room has to be warm *before* the syncer arrives, so the connect is made
     // on its own.
-    a_client_connects_to(&connections, &session_id).await;
+    a_client_connects_to(&connections, &tokens, &session_id).await;
     let session_dir = unified_session_dir_path(&data_dir, &session_id);
     let worktree = worktree_of(&session_dir);
 
@@ -258,6 +269,7 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
         repo,
         mirror: home.path().join("mirror"),
         syncer_failure: Arc::new(OnceLock::new()),
+        tokens,
         _syncer: None,
         _daemon_http: daemon_http,
         _lobby: lobby,
@@ -294,10 +306,10 @@ impl AMirroredSession {
             livekit: LiveKitCredentials {
                 url: ws_url.to_string(),
                 api_key: LK_API_KEY.to_string(),
-                api_secret: FLEET_SECRET.to_string(),
+                api_secret: LK_API_SECRET.to_string(),
             },
             daemon_url: daemon_url.to_string(),
-            token: DaemonToken::Access(an_access_token_for(GITHUB_USER)),
+            token: DaemonToken::Access(an_access_token_for(&self.tokens, GITHUB_USER)),
             // The same budget the assertions wait on, because it bounds the same things: how long
             // the daemon may be absent from the room, and how long a delta stream may say nothing
             // before it is declared wedged.
@@ -562,32 +574,31 @@ fn a_project_at(repo: &Path) -> ProjectData {
 }
 
 /// The `daemon.yaml` of a daemon that runs agents, hosts their rooms and serves its projects.
-fn a_daemon_yaml(ws_url: &str, agent_binary: &Path) -> String {
+fn a_daemon_yaml(ws_url: &str, agent_binary: &Path, auth_storage: &Path) -> String {
     format!(
         "daemon_instance_id: {INSTANCE_ID}\n\
          users:\n  - github_user: \"{GITHUB_USER}\"\n    os_user: \"{}\"\n\
          github:\n  stub: true\n\
+         auth_storage: {}\n\
          claude_cli:\n  binary_path: {}\n\
          session_room:\n  poll_interval_ms: {POLL_INTERVAL_MS}\n\
          livekit:\n  enabled: true\n  url: {ws_url}\n  api_key: {LK_API_KEY}\n  \
-         api_secret: {FLEET_SECRET}\n  \
+         api_secret: {LK_API_SECRET}\n  \
          common_room: {COMMON_ROOM}\n",
         serving_os_user(),
+        auth_storage.display(),
         agent_binary.display(),
     )
 }
 
-/// The access token a signed-in browser would present, signed with the secret this deployment
-/// shares.
-fn an_access_token_for(login: &str) -> String {
-    tddy_github::SessionTokenSigner::new(FLEET_SECRET.as_bytes()).mint_access(
-        &tddy_github::GitHubUser {
-            id: 4242,
-            login: login.to_string(),
-            avatar_url: String::new(),
-            name: login.to_string(),
-        },
-    )
+/// The access token a signed-in browser would present, signed with the daemon's own key.
+fn an_access_token_for(tokens: &SessionTokens, login: &str) -> String {
+    tokens.signer().mint_access(&tddy_github::GitHubUser {
+        id: 4242,
+        login: login.to_string(),
+        avatar_url: String::new(),
+        name: login.to_string(),
+    })
 }
 
 /// The OS user the daemon serves the project as. It has to exist: the git transport resolves it
@@ -624,10 +635,14 @@ async fn a_git_remote_in_the_lobby(
 }
 
 /// Start the session whose worktree is mirrored, exactly as the web dashboard would.
-async fn a_started_session(connections: &DaemonSessionHost, suffix: &str) -> String {
+async fn a_started_session(
+    connections: &DaemonSessionHost,
+    tokens: &SessionTokens,
+    suffix: &str,
+) -> String {
     let started = connections
         .start_session(tddy_rpc::Request::new(StartSessionRequest {
-            session_token: an_access_token_for(GITHUB_USER),
+            session_token: an_access_token_for(tokens, GITHUB_USER),
             project_id: PROJECT_ID.to_string(),
             session_type: "claude-cli".to_string(),
             model: "claude-opus-5".to_string(),
@@ -642,10 +657,14 @@ async fn a_started_session(connections: &DaemonSessionHost, suffix: &str) -> Str
 }
 
 /// Connect to the session, which is what opens the room its worktree is measured in.
-async fn a_client_connects_to(connections: &DaemonSessionHost, session_id: &str) {
+async fn a_client_connects_to(
+    connections: &DaemonSessionHost,
+    tokens: &SessionTokens,
+    session_id: &str,
+) {
     connections
         .connect_session(tddy_rpc::Request::new(ConnectSessionRequest {
-            session_token: an_access_token_for(GITHUB_USER),
+            session_token: an_access_token_for(tokens, GITHUB_USER),
             session_id: session_id.to_string(),
         }))
         .await

@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tddy_core::backend::RemoteToolEnv;
+use tddy_daemon_auth::SessionTokens;
 use tddy_github::{GitHubUser, SessionTokenError, SessionTokenSigner, TokenKind};
 use tddy_rpc::Status;
 
@@ -338,17 +339,16 @@ pub fn split_claude_extra_args(
 /// It is minted under the *verified* caller's identity, never the claimed one: the login in these
 /// claims is what the codebase daemon looks up in its own `users[]` table to pick the OS user the
 /// tools run as, so a token this daemon could not verify would be this daemon choosing a user on
-/// another host's behalf. `livekit.api_secret` is the deployment-wide signing secret
-/// (`auth::build_auth_entries`), which is exactly why the codebase daemon will accept what is minted
-/// here. Every failure is a refusal rather than a fallback to forwarding the caller's token: an
-/// expired, forged or malformed credential must not buy a session-length one.
+/// another host's behalf. It is signed with this daemon's own key, which the codebase daemon
+/// resolves from this daemon's common-room advertisement — which is exactly why it will accept
+/// what is minted here. Every failure is a refusal rather than a fallback to forwarding the
+/// caller's token: an expired, forged or malformed credential must not buy a session-length one.
 pub(crate) fn mint_agent_session_token(
-    api_secret: &str,
+    tokens: &SessionTokens,
     caller_token: &str,
 ) -> Result<String, Status> {
-    let signer = SessionTokenSigner::new(api_secret.as_bytes());
-    let caller = verified_caller(&signer, caller_token)?;
-    Ok(signer.mint(&caller, SPLIT_AGENT_TOKEN_TTL))
+    let caller = verified_caller(tokens, caller_token)?;
+    Ok(tokens.signer().mint(&caller, SPLIT_AGENT_TOKEN_TTL))
 }
 
 /// The identity a caller's token *proves*, or a refusal.
@@ -360,19 +360,30 @@ pub(crate) fn mint_agent_session_token(
 /// daemon choosing a user on another host's behalf. Every failure is a refusal rather than a
 /// fallback to forwarding the caller's token: an expired, forged or malformed credential must not
 /// buy a minted one.
-fn verified_caller(signer: &SessionTokenSigner, caller_token: &str) -> Result<GitHubUser, Status> {
-    let claims = signer.verify(caller_token).map_err(|e| match e {
-        SessionTokenError::Expired => Status::unauthenticated(
-            "cannot wire a split session: the caller's session token has expired",
-        ),
-        SessionTokenError::InvalidSignature => Status::unauthenticated(
-            "cannot wire a split session: the caller's session token is not signed by this \
-             deployment's secret",
-        ),
-        SessionTokenError::Malformed => Status::unauthenticated(
-            "cannot wire a split session: the caller's session token is malformed",
-        ),
-    })?;
+fn verified_caller(tokens: &SessionTokens, caller_token: &str) -> Result<GitHubUser, Status> {
+    let claims = tokens
+        .verifier()
+        .verify_now(caller_token)
+        .map_err(|e| match e {
+            SessionTokenError::Expired => Status::unauthenticated(
+                "cannot wire a split session: the caller's session token has expired",
+            ),
+            SessionTokenError::InvalidSignature => Status::unauthenticated(
+                "cannot wire a split session: the caller's session token does not verify under \
+                 the key it names",
+            ),
+            SessionTokenError::Malformed => Status::unauthenticated(
+                "cannot wire a split session: the caller's session token is malformed",
+            ),
+            SessionTokenError::UnsupportedVersion => Status::unauthenticated(
+                "cannot wire a split session: the caller's session token is in a format this \
+                 daemon no longer accepts — sign in again",
+            ),
+            SessionTokenError::UnknownKeyId(key_id) => Status::unauthenticated(format!(
+                "cannot wire a split session: the caller's session token is signed by key \
+                 {key_id}, which no daemon this one knows has published"
+            )),
+        })?;
     // A refresh token mints access tokens and never authenticates an RPC (see [`TokenKind`]), so
     // accepting one here would let the credential a browser keeps at rest authorize a whole
     // session's toolchain on the codebase host.
@@ -382,12 +393,7 @@ fn verified_caller(signer: &SessionTokenSigner, caller_token: &str) -> Result<Gi
              authenticates an RPC",
         ));
     }
-    Ok(GitHubUser {
-        id: claims.id,
-        login: claims.login,
-        avatar_url: claims.avatar_url,
-        name: claims.name,
-    })
+    Ok(claims.user())
 }
 
 /// The credential the facilitating daemon's room poller presents to the codebase daemon, minted
@@ -398,7 +404,7 @@ fn verified_caller(signer: &SessionTokenSigner, caller_token: &str) -> Result<Gi
 /// that would give the room five minutes ([`tddy_github::SESSION_TOKEN_TTL`]) of working life and
 /// then a silent, permanent `Unauthenticated`. Unlike the agent — which lives in another process
 /// and has to be handed something up front (see [`mint_agent_session_token`]) — the poller runs
-/// inside the daemon that holds the signing secret, so it keeps the *identity* and signs a
+/// inside the daemon that holds the signing key, so it keeps the *identity* and signs a
 /// short-lived token per poll: no expiry ceiling on the room, and no long-lived bearer token at
 /// rest in this process.
 pub struct RoomPollTokenMinter {
@@ -410,10 +416,12 @@ pub struct RoomPollTokenMinter {
 impl RoomPollTokenMinter {
     /// Verify the caller once, here, so a session whose room could never authenticate anything
     /// fails to start rather than starting and then measuring nothing forever.
-    pub fn new(api_secret: &str, caller_token: &str) -> Result<Self, Status> {
-        let signer = SessionTokenSigner::new(api_secret.as_bytes());
-        let caller = verified_caller(&signer, caller_token)?;
-        Ok(Self { signer, caller })
+    pub fn new(tokens: &SessionTokens, caller_token: &str) -> Result<Self, Status> {
+        let caller = verified_caller(tokens, caller_token)?;
+        Ok(Self {
+            signer: tokens.signer().clone(),
+            caller,
+        })
     }
 }
 
@@ -442,15 +450,17 @@ impl tddy_daemon_livekit::session_room::SessionTokenMinter for RoomPollTokenMint
 /// it is the forwarding hint the room's host routes on to reach the checkout.
 ///
 /// `session_token` is the *caller's* credential and is never forwarded: it is proof of who asked,
-/// and the agent gets one of its own minted from it (see [`mint_agent_session_token`]).
+/// and the agent gets one of its own minted from it with `tokens` (see
+/// [`mint_agent_session_token`]).
 pub fn split_remote_tool_env(
     livekit: &SplitLiveKitRoom,
+    tokens: &SessionTokens,
     session_id: &str,
     codebase_instance_id: &str,
     codebase_session_id: &str,
     session_token: &str,
 ) -> Result<RemoteToolEnv, Status> {
-    let agent_session_token = mint_agent_session_token(&livekit.api_secret, session_token)?;
+    let agent_session_token = mint_agent_session_token(tokens, session_token)?;
     let identity = split_agent_participant_identity(session_id);
     let token = tddy_livekit::TokenGenerator::new(
         livekit.api_key.clone(),
@@ -520,7 +530,7 @@ pub fn colocated_jail_tool_env(
     }
 }
 
-/// The room a split session's agent joins, and the credentials to mint its token.
+/// The room a split session's agent joins, and the LiveKit credentials to mint its join token.
 pub struct SplitLiveKitRoom {
     pub room: String,
     pub url: String,
@@ -599,6 +609,7 @@ pub struct SplitSpawnTarget<'a> {
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_split_agent_wiring(
     config: &crate::config::DaemonConfig,
+    tokens: &SessionTokens,
     session_dir: &Path,
     tddy_tools_path: &str,
     target: &SplitSpawnTarget<'_>,
@@ -622,6 +633,7 @@ pub fn prepare_split_agent_wiring(
     )?;
     let remote = split_remote_tool_env(
         &livekit,
+        tokens,
         session_id,
         codebase_instance_id,
         codebase_session_id,
@@ -689,9 +701,11 @@ mod ssh_client_tests {
 mod tests {
     use super::*;
 
+    use std::sync::Arc;
     use std::time::SystemTime;
 
-    use tddy_github::{GitHubUser, SessionClaims, SessionTokenSigner, SESSION_TOKEN_TTL};
+    use tddy_daemon_auth::{DaemonSigningKey, StandaloneKeyDirectory, SIGNING_KEY_FILE};
+    use tddy_github::{GitHubUser, SessionClaims, SessionTokenVerifier, SESSION_TOKEN_TTL};
 
     /// The session room as the facilitating daemon resolved it: its name, and the identity that
     /// daemon serves RPC on inside it. The two travel together because only the daemon that hosts a
@@ -717,13 +731,25 @@ mod tests {
             .map(|(_, v)| v)
     }
 
-    /// The one secret every daemon in the deployment shares. It is `a_room()`'s `api_secret`, and
-    /// `auth::build_auth_entries` signs session tokens with the very same value — which is what
-    /// makes a token minted on the agent host verifiable on the codebase host.
-    const SHARED_SIGNING_SECRET: &[u8] = b"secret";
+    /// The daemon running the agent — the one the operator signed in on — with a signing identity
+    /// of its own. The codebase daemon learns its public key from the common room; that key, and
+    /// no shared secret, is what makes a token minted here verifiable over there.
+    struct AnAgentHost {
+        key: DaemonSigningKey,
+        tokens: SessionTokens,
+        _home: tempfile::TempDir,
+    }
 
-    fn the_shared_signer() -> SessionTokenSigner {
-        SessionTokenSigner::new(SHARED_SIGNING_SECRET)
+    fn an_agent_host() -> AnAgentHost {
+        let home = tempfile::tempdir().unwrap();
+        let key = DaemonSigningKey::load_or_generate(&home.path().join(SIGNING_KEY_FILE))
+            .expect("the agent host generates its keypair");
+        let tokens = SessionTokens::new(&key, Arc::new(StandaloneKeyDirectory));
+        AnAgentHost {
+            key,
+            tokens,
+            _home: home,
+        }
     }
 
     /// The operator who pressed *start* in the browser. Their GitHub login is what the codebase
@@ -741,50 +767,55 @@ mod tests {
     ///
     /// The browser holds a refresh token and re-mints this well before expiry; a spawned agent
     /// holds neither, so whatever is left here is all it would ever get.
-    fn a_caller_token_with_seconds_left(seconds: u64) -> String {
-        the_shared_signer().mint(&a_signed_in_operator(), Duration::from_secs(seconds))
-    }
+    impl AnAgentHost {
+        fn a_caller_token_with_seconds_left(&self, seconds: u64) -> String {
+            self.tokens
+                .signer()
+                .mint(&a_signed_in_operator(), Duration::from_secs(seconds))
+        }
 
-    /// A caller token as freshly minted as one ever is — the full five minutes.
-    fn a_caller_token() -> String {
-        a_caller_token_with_seconds_left(SESSION_TOKEN_TTL.as_secs())
-    }
+        /// A caller token as freshly minted as one ever is — the full five minutes.
+        fn a_caller_token(&self) -> String {
+            self.a_caller_token_with_seconds_left(SESSION_TOKEN_TTL.as_secs())
+        }
 
-    /// A caller token whose five minutes ran out ten minutes ago.
-    fn an_expired_caller_token() -> String {
-        the_shared_signer().mint_with_issued_at(
-            &a_signed_in_operator(),
-            SystemTime::now() - Duration::from_secs(900),
-            SESSION_TOKEN_TTL,
-        )
-    }
+        /// A caller token whose five minutes ran out ten minutes ago.
+        fn an_expired_caller_token(&self) -> String {
+            self.tokens.signer().mint_with_issued_at(
+                &a_signed_in_operator(),
+                SystemTime::now() - Duration::from_secs(900),
+                SESSION_TOKEN_TTL,
+            )
+        }
 
-    /// The long-lived credential the browser keeps to mint access tokens with. Never a valid RPC
-    /// credential, so never a valid thing to wire a session's whole toolchain on.
-    fn a_caller_refresh_token() -> String {
-        the_shared_signer().mint_refresh(&a_signed_in_operator())
-    }
+        /// The long-lived credential the browser keeps to mint access tokens with. Never a valid
+        /// RPC credential, so never a valid thing to wire a session's whole toolchain on.
+        fn a_caller_refresh_token(&self) -> String {
+            self.tokens.signer().mint_refresh(&a_signed_in_operator())
+        }
 
-    fn split_env_for_caller(caller_token: &str) -> Result<RemoteToolEnv, Status> {
-        split_remote_tool_env(
-            &a_room(),
-            "agent-side-session",
-            "workstation-b",
-            "codebase-side-session",
-            caller_token,
-        )
+        fn split_env_for_caller(&self, caller_token: &str) -> Result<RemoteToolEnv, Status> {
+            split_remote_tool_env(
+                &a_room(),
+                &self.tokens,
+                "agent-side-session",
+                "workstation-b",
+                "codebase-side-session",
+                caller_token,
+            )
+        }
+
+        /// The claims a codebase daemon that learned this host's public key would read off the
+        /// agent's token.
+        fn claims_the_codebase_daemon_would_read(&self, token: &str) -> SessionClaims {
+            SessionTokenVerifier::verify(token, &self.key.verifying_key(), SystemTime::now())
+                .expect("the agent's token must verify under the agent host's published key")
+        }
     }
 
     fn the_agents_session_token(env: &RemoteToolEnv) -> String {
         env_value(env, "TDDY_REMOTE_SESSION_TOKEN")
             .expect("the agent must be given a session token")
-    }
-
-    /// The claims a codebase daemon holding the shared secret would read off the agent's token.
-    fn claims_the_codebase_daemon_would_read(token: &str) -> SessionClaims {
-        the_shared_signer()
-            .verify(token)
-            .expect("the agent's token must verify with the shared signing secret")
     }
 
     struct WiringRefusal(Status);
@@ -813,25 +844,31 @@ mod tests {
     fn the_agents_session_token_outlives_the_callers_five_minute_access_token() {
         // Given a caller whose access token has 88 seconds left on it — the browser refreshes its
         // own well before expiry, but a spawned agent has no refresh token and no way to ask
-        let caller_token = a_caller_token_with_seconds_left(88);
+        let host = an_agent_host();
+        let caller_token = host.a_caller_token_with_seconds_left(88);
 
         // When
-        let env = split_env_for_caller(&caller_token).expect("mint split env");
+        let env = host
+            .split_env_for_caller(&caller_token)
+            .expect("mint split env");
 
         // Then the agent is given a credential of its own, with the same life as the LiveKit join
         // token minted beside it. Copying the caller's instead leaves every remote tool call
         // failing UNAUTHENTICATED on the codebase daemon 88 seconds into the session.
-        let claims = claims_the_codebase_daemon_would_read(&the_agents_session_token(&env));
+        let claims = host.claims_the_codebase_daemon_would_read(&the_agents_session_token(&env));
         assert_eq!(claims.exp - claims.iat, SPLIT_AGENT_TOKEN_TTL.as_secs());
     }
 
     #[test]
     fn the_agent_gets_a_credential_of_its_own_under_the_callers_identity() {
         // Given
-        let caller_token = a_caller_token();
+        let host = an_agent_host();
+        let caller_token = host.a_caller_token();
 
         // When
-        let env = split_env_for_caller(&caller_token).expect("mint split env");
+        let env = host
+            .split_env_for_caller(&caller_token)
+            .expect("mint split env");
 
         // Then the agent holds a token that is not the caller's — the caller's is refreshed in the
         // browser and dies in the agent's environment — minted under the same GitHub login, which
@@ -839,15 +876,19 @@ mod tests {
         let agent_token = the_agents_session_token(&env);
         assert_ne!(agent_token, caller_token);
         assert_eq!(
-            claims_the_codebase_daemon_would_read(&agent_token).login,
+            host.claims_the_codebase_daemon_would_read(&agent_token)
+                .login,
             "uppin"
         );
     }
 
     #[test]
     fn wiring_is_refused_when_the_callers_token_has_already_expired() {
+        // Given
+        let host = an_agent_host();
+
         // When
-        let result = split_env_for_caller(&an_expired_caller_token());
+        let result = host.split_env_for_caller(&host.an_expired_caller_token());
 
         // Then — minting a session-length credential from an identity nobody proved would let an
         // expired login start a fully-privileged session on another host
@@ -856,8 +897,11 @@ mod tests {
 
     #[test]
     fn wiring_is_refused_when_the_caller_presents_a_refresh_token() {
+        // Given
+        let host = an_agent_host();
+
         // When
-        let result = split_env_for_caller(&a_caller_refresh_token());
+        let result = host.split_env_for_caller(&host.a_caller_refresh_token());
 
         // Then — a refresh token only mints access tokens and never authenticates an RPC.
         // Accepting one here would let the credential the browser keeps at rest authorize a
@@ -866,14 +910,31 @@ mod tests {
     }
 
     #[test]
+    fn wiring_is_refused_when_the_callers_token_names_a_key_nobody_published() {
+        // Given a caller token signed by a daemon this one has never heard of
+        let host = an_agent_host();
+        let stranger = an_agent_host();
+        let foreign_token = stranger.a_caller_token();
+
+        // When
+        let result = host.split_env_for_caller(&foreign_token);
+
+        // Then — minting under an identity this daemon cannot verify would be it choosing an OS
+        // user on the codebase host for somebody it knows nothing about
+        assert_wiring_refused(result).has_message_containing(stranger.key.key_id().as_str());
+    }
+
+    #[test]
     fn the_agent_is_pointed_at_the_codebase_hosts_session_not_its_own() {
+        let host = an_agent_host();
         // When
         let env = split_remote_tool_env(
             &a_room(),
+            &host.tokens,
             "agent-side-session",
             "workstation-b",
             "codebase-side-session",
-            &a_caller_token(),
+            &host.a_caller_token(),
         )
         .expect("mint split env");
 
@@ -887,16 +948,18 @@ mod tests {
 
     #[test]
     fn the_agent_addresses_the_daemon_that_hosts_the_room_it_joins() {
+        let host = an_agent_host();
         // Given the room this session's facilitating daemon opened and serves RPC in
         let room = a_room_hosted_by("workstation-a");
 
         // When the agent is wired for a checkout that lives on a different daemon entirely
         let env = split_remote_tool_env(
             &room,
+            &host.tokens,
             "agent-side-session",
             "workstation-b",
             "codebase-side-session",
-            &a_caller_token(),
+            &host.a_caller_token(),
         )
         .expect("mint split env");
 
@@ -911,16 +974,18 @@ mod tests {
 
     #[test]
     fn the_codebase_daemon_is_named_as_the_forwarding_destination_not_as_the_rpc_server() {
+        let host = an_agent_host();
         // Given the same room, hosted by the daemon running the agent
         let room = a_room_hosted_by("workstation-a");
 
         // When the agent is wired for a checkout on `workstation-b`
         let env = split_remote_tool_env(
             &room,
+            &host.tokens,
             "agent-side-session",
             "workstation-b",
             "codebase-side-session",
-            &a_caller_token(),
+            &host.a_caller_token(),
         )
         .expect("mint split env");
 
@@ -935,13 +1000,15 @@ mod tests {
 
     #[test]
     fn the_agent_receives_a_scoped_join_token_and_never_the_api_secret() {
+        let host = an_agent_host();
         // When
         let env = split_remote_tool_env(
             &a_room(),
+            &host.tokens,
             "sid",
             "workstation-b",
             "codebase-sid",
-            &a_caller_token(),
+            &host.a_caller_token(),
         )
         .expect("mint split env");
 

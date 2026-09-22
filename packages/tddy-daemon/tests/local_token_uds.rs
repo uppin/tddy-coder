@@ -31,9 +31,10 @@ use std::time::{Duration, Instant};
 use hyper_util::rt::TokioIo;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::local_socket_server::{serve_connection_uds, LocalSocketServices};
+use tddy_daemon_auth::{DaemonSigningKey, SIGNING_KEY_FILE};
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_daemon_livekit::{build_livekit_service, RoomRoster, RosterError};
-use tddy_github::{SessionTokenSigner, TokenKind};
+use tddy_github::{SessionTokenSigner, SessionTokenVerifier, TokenKind};
 use tddy_service::proto::activity::{ActivityServiceTonicAdapter, ReportSessionStatusRequest};
 use tddy_service::proto::catalog::CatalogServiceTonicAdapter;
 use tddy_service::proto::demo_vm::DemoVmServiceTonicAdapter;
@@ -70,7 +71,13 @@ use tonic::transport::{Channel, Endpoint};
 /// How long a stream is given to produce its first frame before the test fails rather than hangs.
 const A_FRAME_ARRIVES_WITHIN: Duration = Duration::from_secs(5);
 
-const TEST_SECRET: &[u8] = b"local-socket-test-secret";
+/// The daemon's signing identity, as the wiring layer would hand the socket its signer.
+fn a_daemon_key() -> (DaemonSigningKey, tempfile::TempDir) {
+    let home = tempfile::tempdir().expect("create key tempdir");
+    let key = DaemonSigningKey::load_or_generate(&home.path().join(SIGNING_KEY_FILE))
+        .expect("the daemon generates its keypair");
+    (key, home)
+}
 
 /// The OS username the test process runs as — a real, passwd-resolvable name, obtained through the
 /// very lookup the production adapter injects, so the peer uid over the loopback socket maps back
@@ -222,10 +229,10 @@ async fn connect_local_token_client(socket_path: &Path) -> LocalTokenServiceClie
 
 #[tokio::test]
 async fn mints_an_access_token_for_the_mapped_local_peer() {
-    // Given — the current OS user is mapped to a GitHub login, and a shared signer is configured
-    let signer = SessionTokenSigner::new(TEST_SECRET);
+    // Given — the current OS user is mapped to a GitHub login, and the daemon's signer is wired
+    let (key, _key_home) = a_daemon_key();
     let config = a_daemon_config_mapping(&current_username(), "octocat-local");
-    let (socket_path, _dir, _shutdown) = start_local_socket_server(config, Some(signer.clone()));
+    let (socket_path, _dir, _shutdown) = start_local_socket_server(config, Some(key.signer()));
     let mut client = connect_local_token_client(&socket_path).await;
 
     // When
@@ -235,10 +242,13 @@ async fn mints_an_access_token_for_the_mapped_local_peer() {
         .expect("mint local token")
         .into_inner();
 
-    // Then — the token verifies to the mapped login as an access token
-    let claims = signer
-        .verify(&response.session_token)
-        .expect("minted token verifies with the shared signer");
+    // Then — the token verifies to the mapped login as an access token, under the daemon's key
+    let claims = SessionTokenVerifier::verify(
+        &response.session_token,
+        &key.verifying_key(),
+        std::time::SystemTime::now(),
+    )
+    .expect("minted token verifies under the daemon's public key");
     assert_eq!(claims.login, "octocat-local");
     assert_eq!(claims.kind, TokenKind::Access);
 }
@@ -246,9 +256,9 @@ async fn mints_an_access_token_for_the_mapped_local_peer() {
 #[tokio::test]
 async fn denies_minting_for_an_unmapped_local_peer() {
     // Given — the config maps a different OS user, so the caller's peer uid resolves to no mapping
-    let signer = SessionTokenSigner::new(TEST_SECRET);
+    let (key, _key_home) = a_daemon_key();
     let config = a_daemon_config_mapping("someone-else", "octocat-local");
-    let (socket_path, _dir, _shutdown) = start_local_socket_server(config, Some(signer));
+    let (socket_path, _dir, _shutdown) = start_local_socket_server(config, Some(key.signer()));
     let mut client = connect_local_token_client(&socket_path).await;
 
     // When

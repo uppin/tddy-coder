@@ -30,6 +30,10 @@ use sha2::{Digest, Sha256};
 
 use crate::provider::GitHubUser;
 
+/// The key types this module's signatures are written in, so a dependent can name them without
+/// depending on `ed25519-dalek` itself.
+pub use ed25519_dalek::{SigningKey as Ed25519SigningKey, VerifyingKey as Ed25519VerifyingKey};
+
 /// Version prefix / first token segment. A `v1` token presented to a `v2` verifier is
 /// [`SessionTokenError::UnsupportedVersion`], never a signature failure — the distinction is what
 /// makes a rollout diagnosable.
@@ -459,8 +463,7 @@ mod tests {
     #[test]
     fn verify_rejects_a_v1_token_as_an_unsupported_version() {
         // Given a token in the HMAC format this one replaces
-        let v1 = crate::session_token::SessionTokenSigner::new(b"a-fleet-secret")
-            .mint_access(&an_operator());
+        let v1 = a_v1_token();
 
         // When a v2 verifier is given it
         let refusal = SessionTokenVerifier::verify(&v1, &the_first_key().verifying_key(), now());
@@ -668,6 +671,16 @@ mod tests {
         SessionTokenVerifier::verify(token, &the_first_key().verifying_key(), now())
             .expect("a freshly minted token verifies")
             .kind
+    }
+
+    /// A token in the retired `v1` shape — `v1.<payload>.<32-byte HMAC tag>` — as a browser that
+    /// signed in before the cutover still holds one.
+    fn a_v1_token() -> String {
+        let payload = URL_SAFE_NO_PAD.encode(
+            r#"{"id":1,"login":"operator","avatar_url":"","name":"operator","iat":0,"exp":9999999999,"kind":"access"}"#,
+        );
+        let tag = URL_SAFE_NO_PAD.encode([0x5au8; 32]);
+        format!("v1.{payload}.{tag}")
     }
 
     /// The payload half of a token — `v2.<payload>` — which is what the signature covers.

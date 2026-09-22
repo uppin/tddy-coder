@@ -61,3 +61,7 @@ tddy-session-files = { path = "../tddy-session-files" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 # `in_jail_conversation_acceptance` reads the jail's task registry; nothing in `src/` does.
 tddy-task = { path = "../tddy-task" }
+# The cross-daemon token and sandboxed-codebase suites give each daemon a signing identity of its
+# own (`DaemonSigningKey`, `SessionTokens`). An existing workspace crate the lifecycle crate
+# already depends on.
+tddy-daemon-auth = { path = "../tddy-daemon-auth" }

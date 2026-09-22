@@ -2038,12 +2038,12 @@ pub struct RemoteCheckout {
 /// [`tddy_github::SESSION_TOKEN_TTL`] — five minutes — while a room outlives the agent it belongs
 /// to, so anything frozen at session start stops being accepted by the codebase daemon long before
 /// the room stops asking, and every poll after that reads as an unreachable peer. This daemon holds
-/// the deployment's signing secret, so it can issue one per poll and needs no long-lived bearer
-/// token in memory at all.
+/// its own signing key, so it can issue one per poll and needs no long-lived bearer token in memory
+/// at all.
 ///
-/// Infallible: a minter can only be built where a signing secret and a verified identity are
-/// already proven to exist, so "nothing to sign with" is a precondition of constructing one and
-/// never a condition a poll has to handle.
+/// Infallible: a minter can only be built where a signing key and a verified identity are already
+/// proven to exist, so "nothing to sign with" is a precondition of constructing one and never a
+/// condition a poll has to handle.
 pub trait SessionTokenMinter: Send + Sync {
     fn mint(&self) -> String;
 }
@@ -2971,7 +2971,7 @@ mod remote_checkout_tests {
         }
     }
 
-    /// A signing secret holder that issues a distinguishable credential each time it is asked, so a
+    /// A signing-key holder that issues a distinguishable credential each time it is asked, so a
     /// poll reusing a stored one is visible rather than merely likely: two real tokens minted in the
     /// same second are byte-identical, which would make "they differ" untestable.
     struct CountingMinter {

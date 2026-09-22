@@ -27,11 +27,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
+use tddy_daemon_auth::{DaemonSigningKey, SessionTokens, StandaloneKeyDirectory};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_daemon_sandbox::workspace_tool_sandbox::RUNNER_PID_FILE;
-use tddy_github::{GitHubUser, SessionTokenSigner};
+use tddy_github::GitHubUser;
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
@@ -39,11 +40,6 @@ use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145b77";
-
-/// The deployment secret this daemon signs its session tokens with — what lets it mint the agent
-/// a credential of its own for the tool calls it makes back here. Without it the start is refused
-/// rather than forwarding the caller's token, so the fixture below would never reach a jail.
-const LK_API_SECRET: &str = "secret";
 
 /// Long enough for a jailed `sh -c` to finish, short enough that a wedged jail fails the test
 /// rather than hanging the suite.
@@ -88,18 +84,37 @@ fn current_os_user() -> String {
         .into_owned()
 }
 
-/// The credential the browser presents, signed with [`LK_API_SECRET`] so this daemon can verify it
+/// This daemon's signing identity: the key the browser's credential below is signed with, and the
+/// one the daemon mints the agent a credential of its own with for the tool calls it makes back
+/// here. A daemon given none refuses the start rather than forwarding the caller's token, so every
+/// test below would exercise that refusal. Kept in the test target's scratch directory, so the
+/// suite has one identity across its tests.
+fn this_daemons_session_tokens() -> &'static SessionTokens {
+    static TOKENS: OnceLock<SessionTokens> = OnceLock::new();
+    TOKENS.get_or_init(|| {
+        let key = DaemonSigningKey::load_or_generate(
+            &Path::new(env!("CARGO_TARGET_TMPDIR"))
+                .join("sandboxed-codebase-seatbelt-signing_key.pem"),
+        )
+        .expect("the daemon generates its keypair");
+        SessionTokens::new(&key, Arc::new(StandaloneKeyDirectory))
+    })
+}
+
+/// The credential the browser presents, signed with [`this_daemons_session_tokens`]'s key so this daemon can verify it
 /// and mint the agent's own from the identity it proves. Minted once and shared, because the
 /// request and the daemon's user resolver have to agree on the very same string.
 fn a_caller_token() -> &'static str {
     static TOKEN: OnceLock<String> = OnceLock::new();
     TOKEN.get_or_init(|| {
-        SessionTokenSigner::new(LK_API_SECRET.as_bytes()).mint_access(&GitHubUser {
-            id: 4242,
-            login: current_os_user(),
-            avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
-            name: "Test User".to_string(),
-        })
+        this_daemons_session_tokens()
+            .signer()
+            .mint_access(&GitHubUser {
+                id: 4242,
+                login: current_os_user(),
+                avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
+                name: "Test User".to_string(),
+            })
     })
 }
 
@@ -115,8 +130,6 @@ users:
     os_user: "{user}"
 claude_cli:
   binary_path: /bin/cat
-livekit:
-  api_secret: "{LK_API_SECRET}"
 "#
     );
     let config: DaemonConfig = serde_yaml::from_str(&yaml).expect("config must parse");
@@ -131,16 +144,19 @@ livekit:
             None
         }
     });
-    TestDaemon::from_host(DaemonSessionHost::new(
-        config,
-        resolver,
-        sessions_base,
-        user_resolver,
-        None,
-        None,
-        None,
-        Arc::new(ClaudeCliSessionManager::new()),
-    ))
+    TestDaemon::from_host(
+        DaemonSessionHost::new(
+            config,
+            resolver,
+            sessions_base,
+            user_resolver,
+            None,
+            None,
+            None,
+            Arc::new(ClaudeCliSessionManager::new()),
+        )
+        .with_session_tokens(this_daemons_session_tokens().clone()),
+    )
 }
 
 fn run_git(cwd: &Path, args: &[&str]) {

@@ -11,12 +11,14 @@
 //! and `loopback_tunnel.LoopbackTunnelService` — were **already their own protos**, so no wire
 //! coordinate changes here and no client migrates.
 //!
-//! # One secret signs two things
+//! # One key signs one thing
 //!
-//! `config.livekit.api_secret` signs **both** LiveKit room JWTs and session tokens, through
-//! `tddy_github::SessionTokenSigner`. Splitting auth from LiveKit into two crates does not split
-//! that secret, and **neither crate may start deriving its own** — a second signer would silently
-//! partition which tokens each half accepts.
+//! Each daemon signs session tokens with an Ed25519 key of its own ([`DaemonSigningKey`]), and
+//! `config.livekit.api_secret` signs LiveKit room JWTs and nothing else. A token names the key that
+//! signed it, so a daemon verifying a peer's token resolves that key through a [`KeyDirectory`]
+//! rather than sharing a secret with it. The daemon holds **one** [`SessionTokens`] and every
+//! signer in it — the login flow, the local-socket mint, a split session's agent credential —
+//! comes from that one value: a second key would be a second identity no peer was told about.
 //!
 //! # This crate is smaller than "auth" suggests
 //!
@@ -44,8 +46,8 @@ pub mod token_provider;
 /// GitHub configuration has no way to resolve a token — and in that state `runtime.rs` registers
 /// **no session services at all**, which is a deliberate refusal rather than an oversight.
 pub use auth::{
-    build_auth_entries, build_token_service_entry, session_token_authenticator, AuthBuildResult,
-    LiveKitTokenServiceImpl,
+    build_auth_entries, build_auth_entries_with, build_token_service_entry,
+    session_token_authenticator, AuthBuildResult, LiveKitTokenServiceImpl,
 };
 pub use local_token::{build_local_token_entry, mint_local_token, LocalTokenError};
 
@@ -54,8 +56,8 @@ pub use local_token::{build_local_token_entry, mint_local_token, LocalTokenError
 /// At the root for the same reason the four above are: `runtime.rs` wires the keypair, the
 /// directory implementation and the verifier together, and reaches into no module to do it.
 pub use signing_key::{
-    signing_key_path, DaemonSigningKey, DirectorySessionTokenVerifier, KeyDirectory, SessionTokens,
-    StandaloneKeyDirectory, SIGNING_KEY_FILE,
+    load_signing_key, signing_key_path, DaemonSigningKey, DirectorySessionTokenVerifier,
+    KeyDirectory, SessionTokens, StandaloneKeyDirectory, SIGNING_KEY_FILE,
 };
 
 /// Where the daemon keeps a user's GitHub token at rest.
@@ -109,11 +111,19 @@ mod unbundle_local_token_tests {
 
     use tddy_github::SessionTokenSigner;
 
-    use super::{build_local_token_entry, mint_local_token};
+    use super::{build_local_token_entry, mint_local_token, DaemonSigningKey, SIGNING_KEY_FILE};
+
+    /// A signer over a key of its own, as the daemon's wiring layer would hold.
+    fn a_daemons_signer() -> (Arc<SessionTokenSigner>, tempfile::TempDir) {
+        let home = tempfile::tempdir().unwrap();
+        let key = DaemonSigningKey::load_or_generate(&home.path().join(SIGNING_KEY_FILE))
+            .expect("a daemon generates a keypair");
+        (Arc::new(key.signer()), home)
+    }
 
     #[test]
     fn names_the_service_family_q_moves_to() {
-        let signer = Arc::new(SessionTokenSigner::new(b"family-q-name-test"));
+        let (signer, _home) = a_daemons_signer();
         assert_eq!(
             build_local_token_entry(signer).name,
             "local_token.LocalTokenService"
@@ -125,7 +135,7 @@ mod unbundle_local_token_tests {
     #[test]
     fn mints_for_an_identity_the_transport_already_resolved() {
         // Given a signer the wiring layer would have installed
-        let signer = Arc::new(SessionTokenSigner::new(b"family-q-mint-test"));
+        let (signer, _home) = a_daemons_signer();
         build_local_token_entry(signer);
 
         // When

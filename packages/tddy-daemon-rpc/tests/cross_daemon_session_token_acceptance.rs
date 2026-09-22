@@ -2,31 +2,27 @@
 //!
 //! Moved from `tddy-session-lifecycle`'s in-crate tests with the project handlers it calls.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
+use tddy_daemon_auth::{DaemonSigningKey, KeyDirectory, SessionTokens, SIGNING_KEY_FILE};
 use tddy_daemon_kernel::SessionsBaseResolver;
 use tddy_daemon_rpc::test_util::TestDaemon;
+use tddy_github::session_token_v2::{Ed25519VerifyingKey, KeyId};
 use tddy_rpc::Request;
 use tddy_service::proto::project::{ListProjectsRequest, ProjectService};
 use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
-/// A daemon config with GitHub auth enabled and, when `api_secret` is `Some`, a LiveKit
-/// secret that signs/verifies session tokens. Maps GitHub login "u" to OS user "u".
-fn a_daemon_config(
-    api_secret: Option<&str>,
-) -> (
+/// A daemon config with GitHub auth enabled, mapping GitHub login "u" to OS user "u", and not one
+/// line of LiveKit — no secret any two daemons could share.
+fn a_daemon_config() -> (
     tddy_session_lifecycle::config::DaemonConfig,
     tempfile::TempDir,
 ) {
     let dir = tempfile::tempdir().unwrap();
-    let livekit = match api_secret {
-        Some(s) => format!("livekit:\n  api_secret: \"{s}\"\n"),
-        None => String::new(),
-    };
-    let yaml = format!(
-        "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\n{livekit}"
-    );
+    let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\n";
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
     let config = tddy_session_lifecycle::config::DaemonConfig::load(&path).unwrap();
@@ -42,16 +38,51 @@ fn a_github_user(login: &str) -> tddy_github::GitHubUser {
     }
 }
 
+/// A daemon's signing identity, in a data directory of its own.
+fn a_daemon_key() -> (DaemonSigningKey, tempfile::TempDir) {
+    let home = tempfile::tempdir().unwrap();
+    let key = DaemonSigningKey::load_or_generate(&home.path().join(SIGNING_KEY_FILE))
+        .expect("a daemon generates a keypair");
+    (key, home)
+}
+
+/// The fleet's key distribution as a fake: every daemon announces onto it and reads back from it.
+#[derive(Default)]
+struct AFleet {
+    announced: Mutex<HashMap<KeyId, Ed25519VerifyingKey>>,
+}
+
+#[async_trait]
+impl KeyDirectory for AFleet {
+    async fn publish(
+        &self,
+        key_id: &KeyId,
+        public_key: &Ed25519VerifyingKey,
+    ) -> anyhow::Result<()> {
+        self.announced
+            .lock()
+            .unwrap()
+            .insert(key_id.clone(), *public_key);
+        Ok(())
+    }
+
+    async fn public_key_for(&self, key_id: &KeyId) -> anyhow::Result<Option<Ed25519VerifyingKey>> {
+        Ok(self.announced.lock().unwrap().get(key_id).copied())
+    }
+}
+
 /// A ConnectionService whose `user_resolver` is exactly the one the daemon's auth wiring
-/// produces for `config` — i.e. what a *peer* daemon verifies incoming tokens with.
+/// produces for `config` and `tokens` — i.e. what a *peer* daemon verifies incoming tokens with.
 fn a_peer_daemon(
     config: tddy_session_lifecycle::config::DaemonConfig,
+    tokens: &SessionTokens,
     data_dir: std::path::PathBuf,
 ) -> TestDaemon {
-    let resolver = tddy_session_lifecycle::auth::build_auth_entries(&config, "127.0.0.1", 0)
-        .expect("auth wiring should build")
-        .user_resolver
-        .expect("auth wiring should produce a session resolver");
+    let resolver =
+        tddy_session_lifecycle::auth::build_auth_entries_with(&config, "127.0.0.1", 0, tokens)
+            .expect("auth wiring should build")
+            .user_resolver
+            .expect("auth wiring should produce a session resolver");
     let base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     TestDaemon::from_host(DaemonSessionHost::new(
@@ -67,13 +98,27 @@ fn a_peer_daemon(
 }
 
 #[tokio::test]
-async fn a_peer_daemon_accepts_a_token_minted_with_the_same_shared_secret() {
-    // Given a peer daemon whose auth is wired with a shared signing secret
-    let (config, dir) = a_daemon_config(Some("shared-secret"));
-    let service = a_peer_daemon(config, dir.path().to_path_buf());
-    // and a token minted by another daemon holding that same secret
-    let signer = tddy_github::SessionTokenSigner::new(b"shared-secret");
-    let token = signer.mint(&a_github_user("u"), tddy_github::SESSION_TOKEN_TTL);
+async fn a_peer_daemon_accepts_a_token_minted_by_a_daemon_whose_key_it_has_learned() {
+    // Given two daemons in one fleet, each with a key of its own, both having announced it
+    let fleet = Arc::new(AFleet::default());
+    let (minting_daemon, _minting_home) = a_daemon_key();
+    let (peer_key, _peer_home) = a_daemon_key();
+    for daemon in [&minting_daemon, &peer_key] {
+        fleet
+            .publish(&daemon.key_id(), &daemon.verifying_key())
+            .await
+            .unwrap();
+    }
+    let (config, dir) = a_daemon_config();
+    let service = a_peer_daemon(
+        config,
+        &SessionTokens::new(&peer_key, fleet.clone()),
+        dir.path().to_path_buf(),
+    );
+    // and a token the other daemon minted
+    let token = minting_daemon
+        .signer()
+        .mint(&a_github_user("u"), tddy_github::SESSION_TOKEN_TTL);
 
     // When the peer lists projects with that token
     let request = Request::new(ListProjectsRequest {
@@ -82,21 +127,28 @@ async fn a_peer_daemon_accepts_a_token_minted_with_the_same_shared_secret() {
     });
     let result = service.list_projects(request).await;
 
-    // Then the peer accepts it — no "invalid or expired session"
+    // Then the peer accepts it — no "invalid or expired session", and no shared secret
     assert!(
         result.is_ok(),
-        "peer daemon should accept a token signed with the shared secret"
+        "peer daemon should accept a token signed by a daemon whose key it has learned"
     );
 }
 
 #[tokio::test]
-async fn a_peer_daemon_rejects_a_token_signed_with_a_different_secret() {
-    // Given a peer daemon wired with one signing secret
-    let (config, dir) = a_daemon_config(Some("this-daemons-secret"));
-    let service = a_peer_daemon(config, dir.path().to_path_buf());
-    // and a token minted with a different secret
-    let foreign = tddy_github::SessionTokenSigner::new(b"some-other-secret");
-    let token = foreign.mint(&a_github_user("u"), tddy_github::SESSION_TOKEN_TTL);
+async fn a_peer_daemon_rejects_a_token_signed_by_a_daemon_it_has_never_heard_of() {
+    // Given a peer daemon whose fleet has never heard of the minting daemon
+    let (peer_key, _peer_home) = a_daemon_key();
+    let (config, dir) = a_daemon_config();
+    let service = a_peer_daemon(
+        config,
+        &SessionTokens::new(&peer_key, Arc::new(AFleet::default())),
+        dir.path().to_path_buf(),
+    );
+    // and a token minted by that stranger
+    let (stranger, _stranger_home) = a_daemon_key();
+    let token = stranger
+        .signer()
+        .mint(&a_github_user("u"), tddy_github::SESSION_TOKEN_TTL);
 
     // When the peer lists projects with that token
     let request = Request::new(ListProjectsRequest {
@@ -105,7 +157,7 @@ async fn a_peer_daemon_rejects_a_token_signed_with_a_different_secret() {
     });
     let result = service.list_projects(request).await;
 
-    // Then the peer rejects it as an invalid session
-    let err = result.expect_err("a token signed with a foreign secret must be rejected");
+    // Then the peer rejects it as an invalid session — an unknown signer is not a signer to trust
+    let err = result.expect_err("a token from an unannounced daemon must be rejected");
     assert_eq!(err.code, tddy_rpc::Code::Unauthenticated);
 }
