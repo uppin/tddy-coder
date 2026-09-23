@@ -3,7 +3,7 @@
 **Date**: 2026-09-23
 **Status**: 🚧 In Progress — planned
 **Type**: Bug Fix
-**Stack**: `#carve` 13/15, between `core-split` (#522) and `lifecycle-wiring` (the destructure node)
+**PR**: #527, standalone on `master` and **outside the `#carve` stack** (developer, 2026-09-23). Consumed by #524, the destructure node
 
 ## Initial Discovery
 
@@ -93,9 +93,7 @@ keeps the destructure node engine-driven, and the fix outlives it.
 
 ## Dependencies
 
-| Parent node | What it delivers | How this PR consumes it | This PR does NOT |
-|---|---|---|---|
-| `12` core-split (#522) | `tddy-core` as facades | nothing directly; it is the parent only because the stack is a line | touch `tddy-core` or the nine crates |
+None. This PR is based on `master` and is not part of a stack.
 
 ## Draft PR contract
 
@@ -105,10 +103,11 @@ surface here.
 
 ## Green wave
 
-**Wave:** after #522, and before the destructure node.
-**Greenable independently:** **yes.** Its tests use the engine's own fixture crates.
-**Concurrent with:** nothing.
-**Blocks:** the destructure node's refused plans (`01`, `02`, `05`, `08`, `10`).
+**Standalone.** It can be greened and merged on its own; its tests use the engine's fixture crates.
+
+**Consumed by:** #524 (`#carve` 13/14), whose refused plans (`01`, `02`, `05`, `08`, `10`) need the fixed
+engine in their own tree. So this merges to `master` first, and the stack picks it up on its next
+rebase onto `master`.
 
 ## Prerequisites
 
@@ -150,8 +149,8 @@ Scoped verification: `./test -p tddy-code-restructuring` (and `-p tddy-tools` if
 ## Decisions & trade-offs
 
 - **Fix the engine rather than hand-split.** The developer's decision (2026-09-23).
-- **A separate node below the destructure node.** That keeps the engine change reviewable on its own,
-  and makes the destructure node a pure consumer.
+- **A standalone PR outside the stack** (developer, 2026-09-23). The engine is not `#carve` work.
+  Keeping it off the stack avoids restacking three PRs, and lets it merge on its own schedule.
 
 ## Refactoring needed
 
