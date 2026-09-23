@@ -163,7 +163,8 @@ Three things about it are deliberate:
   crate, not in `tddy-credentials`.
 - **Its three error variants are exactly the three outcomes the PRD refuses to collapse**, plus the
   refused token. `Locked` becomes `vault_locked: true`, `Unavailable` becomes an RPC error carrying
-  the reason, `NoSuchSession` becomes a refusal — and an `Ok(vec![])` becomes an empty list. Four
+  the reason meant for the person (an I/O failure's text names server-side paths, so the client gets
+  a fixed path-free sentence and the daemon log gets the full error with its subject), `NoSuchSession` becomes a refusal — and an `Ok(vec![])` becomes an empty list. Four
   inputs, four distinguishable responses, which is what the acceptance tests assert.
 
 ## Green wave

@@ -28,28 +28,30 @@ impl SessionVaultAccountStore {
         Self { vaults, subject_of }
     }
 
-    /// The open vault the token's session may read.
+    /// The subject the token's session belongs to, and the open vault it may read.
     ///
     /// A signed-in subject whose vault is not open *here* — the daemon restarted and the browser
     /// has not refreshed its session yet — is [`AccountsError::Unavailable`], naming why. Not
     /// `Locked`: nothing says the key would fail, and `Locked` tells the person to re-link. Not an
     /// empty listing either: the vault may hold accounts this daemon simply cannot read yet.
-    fn vault_for(&self, session_token: &str) -> Result<Arc<SessionVault>, AccountsError> {
+    fn vault_for(&self, session_token: &str) -> Result<(String, Arc<SessionVault>), AccountsError> {
         let subject = (self.subject_of)(session_token).ok_or(AccountsError::NoSuchSession)?;
-        self.vaults.get(&subject).ok_or_else(|| {
-            AccountsError::Unavailable(format!(
+        match self.vaults.get(&subject) {
+            Some(vault) => Ok((subject, vault)),
+            None => Err(AccountsError::Unavailable(format!(
                 "the credential store for {subject} is not open on this daemon; \
                  it opens when you sign in, or when your session next refreshes"
-            ))
-        })
+            ))),
+        }
     }
 }
 
 impl AccountStore for SessionVaultAccountStore {
     fn list(&self, session_token: &str) -> Result<Vec<CredentialRecord>, AccountsError> {
-        self.vault_for(session_token)?
+        let (subject, vault) = self.vault_for(session_token)?;
+        vault
             .list(None)
-            .map_err(refusal_of)
+            .map_err(|error| refusal_of(&subject, error))
     }
 
     fn set_label(
@@ -59,20 +61,22 @@ impl AccountStore for SessionVaultAccountStore {
         account: &AccountId,
         label: &str,
     ) -> Result<CredentialRecord, AccountsError> {
-        let vault = self.vault_for(session_token)?;
+        let (subject, vault) = self.vault_for(session_token)?;
         // TODO(keyring): the read and the write are two vault operations, each serialised on its
         // own. A write to the same record landing between them (a link flow refreshing the secret)
         // is overwritten with the secret read here. `SessionVault` offers no read-modify-write.
         let mut record = vault
             .get(provider, account)
-            .map_err(refusal_of)?
+            .map_err(|error| refusal_of(&subject, error))?
             .ok_or_else(|| {
                 AccountsError::Unavailable(format!(
                     "no {provider} account {account} is linked, so there is nothing to rename"
                 ))
             })?;
         record.label = label.to_string();
-        vault.put(record.clone()).map_err(refusal_of)?;
+        vault
+            .put(record.clone())
+            .map_err(|error| refusal_of(&subject, error))?;
         Ok(record)
     }
 
@@ -82,17 +86,34 @@ impl AccountStore for SessionVaultAccountStore {
         provider: &ProviderId,
         account: &AccountId,
     ) -> Result<(), AccountsError> {
-        self.vault_for(session_token)?
+        let (subject, vault) = self.vault_for(session_token)?;
+        vault
             .remove(provider, account)
-            .map_err(refusal_of)
+            .map_err(|error| refusal_of(&subject, error))
     }
 }
 
-/// `Locked` keeps its meaning; every other vault failure is unavailable, with its reason intact.
-fn refusal_of(error: VaultError) -> AccountsError {
+/// What a person is told when the vault could not be read or written. Deliberately path-free.
+const STORE_UNREADABLE: &str = "the credential store could not be read or written on this daemon";
+
+/// `Locked` keeps its meaning. The other failures are unavailable, told to the person only as far
+/// as `VaultError` means them to be: `Io` names server-side detail (file paths, OS errors), so the
+/// client gets [`STORE_UNREADABLE`] and the log gets the full error with the subject it belongs
+/// to. `FormatMismatch` and `Crypto` are fixed sentences about the store itself and stay verbatim —
+/// they tell the operator which remedy applies.
+fn refusal_of(subject: &str, error: VaultError) -> AccountsError {
     match error {
         VaultError::Locked => AccountsError::Locked,
-        other => AccountsError::Unavailable(other.to_string()),
+        VaultError::Io(_) => {
+            log::error!(
+                target: "tddy_accounts",
+                "credential store for {subject} could not be read or written: {error}"
+            );
+            AccountsError::Unavailable(STORE_UNREADABLE.to_string())
+        }
+        told @ (VaultError::FormatMismatch { .. } | VaultError::Crypto) => {
+            AccountsError::Unavailable(told.to_string())
+        }
     }
 }
 
@@ -271,16 +292,32 @@ mod tests {
     }
 
     #[test]
-    fn a_locked_vault_stays_locked_and_other_failures_keep_their_reason() {
+    fn a_locked_vault_stays_locked() {
+        assert_eq!(refusal_of(ADA, VaultError::Locked), AccountsError::Locked);
+    }
+
+    #[test]
+    fn an_io_failure_reaches_the_client_without_the_path_it_names() {
+        // Given
+        let failure = VaultError::Io(
+            "/var/lib/tddy/auth/credentials-ada.vault: permission denied".to_string(),
+        );
+
+        // When
+        let refusal = refusal_of(ADA, failure);
+
+        // Then
         assert_eq!(
-            (
-                refusal_of(VaultError::Locked),
-                refusal_of(VaultError::Io("disk full".to_string()))
-            ),
-            (
-                AccountsError::Locked,
-                AccountsError::Unavailable("disk full".to_string())
-            )
+            refusal,
+            AccountsError::Unavailable(STORE_UNREADABLE.to_string())
+        );
+    }
+
+    #[test]
+    fn a_failure_meant_for_the_person_keeps_its_reason() {
+        assert_eq!(
+            refusal_of(ADA, VaultError::Crypto),
+            AccountsError::Unavailable(VaultError::Crypto.to_string())
         );
     }
 }

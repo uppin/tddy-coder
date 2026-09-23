@@ -13,6 +13,7 @@ tddy-credentials = { path = "../tddy-credentials" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 async-trait = "0.1"
+log = "0.4"
 prost = "0.13"
 
 [dev-dependencies]
