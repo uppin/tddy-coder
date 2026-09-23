@@ -3,7 +3,7 @@
 **Date**: 2026-09-23
 **Status**: 🚧 In Progress — planned
 **Type**: Refactor (in-crate restructure; no behaviour change)
-**Stack**: `#carve` 13/14, on top of `core-split` (#522)
+**Stack**: `#carve` 14/15, on top of `restructure-engine-fixes` (#527), which sits on `core-split` (#522)
 
 ## Initial Discovery
 
@@ -189,6 +189,7 @@ clean checks took 2–14 s.
 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
+| `13` restructure-engine-fixes (#527) | the fixed `tddy-tools restructure`: E1, E2 and E3 no longer refuse correct plans | runs the refused plans against the engine in this branch's tree | touch `tddy-code-restructuring` |
 | `12` core-split (#522) | `tddy-core` as facades over nine crates | lifecycle keeps naming `tddy_core::…`, and those paths resolve through the facades | touch `tddy-core` or the nine crates, or repoint lifecycle's `tddy_core::` imports |
 
 ## Draft PR contract
@@ -201,7 +202,7 @@ characterisation tests.
 ## Green wave
 
 **Wave:** after #522.
-**Greenable independently:** **not until #522 is green and #527 (the engine fixes) has reached this branch.** It inherits #522's three open failures
+**Greenable independently:** **not until #522 and #527 (the engine fixes, directly below) are green.** It inherits #522's three open failures
 (`git_plumbing_shape` ×2, `session_store_shape` ×1). The baseline is taken later, at the developer's
 call (2026-09-23), and records them by name if they are still red.
 **Concurrent with:** nothing.
@@ -212,7 +213,7 @@ call (2026-09-23), and records them by name if they are still red.
 | Item | Verdict | What this change does about it |
 |---|---|---|
 | #522 not yet green (3 known failures) | ⛔ **BLOCKING the baseline** | The baseline is taken later; it records the 3 by name if still red |
-| Engine defects E1 (import loop), E2 (`req: _`), E3 (`impl`-seam refusal), in "Restructure plans" | ⛔ **BLOCKING** the seams they refuse | **Fixed in #527**, a standalone PR on `master` outside this stack (developer, 2026-09-23). The refused plans (`01`, `02`, `05`, `08`, `10`) wait until #527 is on `master` and this branch has been rebased to include it. Then they are re-run with `check --deep` |
+| Engine defects E1 (import loop), E2 (`req: _`), E3 (`impl`-seam refusal), in "Restructure plans" | ⛔ **BLOCKING** the seams they refuse | **Fixed in #527**, the node directly below this one. The refused plans (`01`, `02`, `05`, `08`, `10`) wait for #527's green, then this branch is rebased onto it and the plans are re-run with `check --deep` |
 | `docs/code-issues/crap-svc-start-sandboxed-cursor-cli-session.md`: "**Restructure: no — tests first**" | ⛔ **BLOCKING** for that function | Characterisation tests land before its seams are cut |
 | The 10 `complexity-*.md` records (`start_session_core`, `start_sandboxed_claude_cli_session`, `spawn_cursor_cli_session_inner`, `resume_session_at_session_coordinate`, `spawn_split_agent`, `delete_paired_codebase_session`, `start_split_claude_cli_session`, `ensure_project_available_for_start`, `resume_claude_cli_session`, `handle_rpc`) | ✅ **RESOLVED HERE** | Extract-method, then re-measure. Delete the record, or narrow it if the fix is partial |
 | The 5 `oversized-file-*.md` records (`connection_service`, `session_coordinate_handlers`, `split_session`, `svc_spawn_split_agent`, `svc_start_session_core`) | ✅ **RESOLVED HERE** | Split below 500, then re-measure and delete. Their designed seams are the starting point |
