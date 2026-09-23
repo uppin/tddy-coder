@@ -105,7 +105,7 @@ measured in its new home.
 
 ## Scope
 
-- [ ] ⛔ Stack on master: cascade `/pr-stack-rebase` #494..#520, then this branch (the developer's to run)
+- [x] Stack on master: #494..#520 merged; this branch rebased onto `master` (2026-09-23)
 - [x] Dead files deleted; `futures` dropped
 - [x] Cut 1, Cut 2, the two retargets
 - [x] `tddy-log`, `tddy-agent-skills`
@@ -166,7 +166,7 @@ tddy-core   (pub use facades only, ~140 lines)
 - [x] `tddy-workflow-engine`, `tddy-presenter` extracted
 - [x] `tddy-core` facades only — AC1; path guard still green
 - [x] Test files and code-issue records moved; AC2, AC5, AC6 and AC8 green
-- [ ] ⚠ AC7 — two consumer tests read tddy-core source files by path (see Validation results); needs a developer decision
+- [x] AC7 — held, with three test retargets as the recorded exception (see "Test premises retargeted")
 
 ## Testing plan
 
@@ -342,6 +342,23 @@ and one **compile-level guard** pins that the public paths consumers use still r
   columns. Behaviour unchanged.
 - Doc-link text at `recipe.rs:202` and `client_wire.rs:47` now shows the new paths.
 
+### Test premises retargeted, 2026-09-23
+
+On CI (`0fb4fb85`), 7,129 of 7,132 Rust tests passed. The three failures were tests from earlier
+nodes that read source files or manifests at paths this PR moved. Each is retargeted to where the
+code now lives, and each keeps its original claim.
+
+| Test | Old premise | Retarget |
+|---|---|---|
+| `tddy-integration-tests` `workflow_goal_conditions_acceptance` | `include_str!` of `tddy-core/src/presenter/workflow_runner.rs` | `tddy-presenter/src/presenter/workflow_runner.rs` (`0fb4fb85`) |
+| `tddy-github` `git_plumbing_shape` (2 tests, #carve 6) | the session-aware layer stays in `tddy-core/src/worktree.rs` | it stays with the session model, in `tddy-session-worktree/src/worktree.rs`; tests renamed `the_session_worktree_module_*` |
+| `tddy-core` `session_store_shape` (#carve 7) | `jsonschema` stays in `tddy-core` because `session_action_pipeline.rs` does | `jsonschema` stays with the pipeline, now in `tddy-session-actions`; renamed `jsonschema_stays_with_the_session_action_pipeline` |
+
+- The first two are **consumer edits**, the explicit exception to AC7: a test that reads a file by
+  path is the one thing a facade cannot preserve.
+- No production code in any consumer changed.
+- Scoped run: `tddy-core` + `tddy-github` 85 passed, 0 failed; fmt and clippy clean.
+
 ## TODO
 
 - [x] Record initial discovery
@@ -350,8 +367,8 @@ and one **compile-level guard** pins that the public paths consumers use still r
 - [x] Create changeset — this document
 - [x] Failing acceptance tests + path guard
 - [ ] USER REVIEW — acceptance tests
-- [ ] ⛔ Stack cascaded onto master (developer)
-- [ ] TDD Green (`/green`)
+- [x] Stack on master (#520 merged; rebased)
+- [x] TDD Green (`/green`)
 - [x] Move code-issue records
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`

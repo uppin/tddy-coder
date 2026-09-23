@@ -241,22 +241,23 @@ fn the_god_crate_no_longer_declares_a_database() {
     );
 }
 
-/// AC1 — and it keeps `jsonschema`, which does **not** leave.
+/// AC1 — `jsonschema` does **not** leave with the store: it stays with the module that names it.
 ///
-/// `session_actions/validate.rs` moves, but `session_action_pipeline.rs` stays and still names it.
-/// Claiming otherwise would be wrong, and an earlier note in this stack did.
+/// `session_actions/validate.rs` moved to the store, but `session_action_pipeline.rs` did not, and it
+/// still validates against a schema. When this node landed the pipeline stayed in `tddy-core`;
+/// `#carve` 12 moved it into `tddy-session-actions`, and the dependency moved with it.
 #[test]
-fn the_god_crate_keeps_the_dependency_that_does_not_leave() {
-    // Given its manifest
-    let text = required_manifest("tddy-core");
+fn jsonschema_stays_with_the_session_action_pipeline() {
+    // Given the manifest of the crate that now holds the pipeline
+    let text = required_manifest("tddy-session-actions");
 
     // When its dependencies are listed
     let dependencies = workspace_dependencies(&text);
 
-    // Then `jsonschema` is still among them, because a module that stays still needs it
+    // Then `jsonschema` is among them, because the pipeline still needs it
     assert!(
         dependencies.iter().any(|name| name == "jsonschema"),
-        "`jsonschema` was removed, but `session_action_pipeline.rs` stays in `tddy-core` and names it"
+        "`jsonschema` was dropped, but `session_action_pipeline.rs` in `tddy-session-actions` names it"
     );
 }
 
