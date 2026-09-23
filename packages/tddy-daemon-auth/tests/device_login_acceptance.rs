@@ -155,10 +155,14 @@ fn a_stub_daemon() -> (DaemonConfig, tempfile::TempDir) {
     ))
 }
 
+/// `auth_storage` is a directory of this test's own, so the signing key a sign-in generates lives
+/// and dies with the test rather than in the checkout.
 fn a_daemon_configured_with(github: &str) -> (DaemonConfig, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let yaml = format!(
-        "users:\n  - github_user: \"{THE_LOGIN}\"\n    os_user: \"{THE_LOGIN}-os\"\n{github}"
+        "users:\n  - github_user: \"{THE_LOGIN}\"\n    os_user: \"{THE_LOGIN}-os\"\n{github}\
+         auth_storage: \"{}\"\n",
+        dir.path().join("auth").display()
     );
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).expect("the config is written");
