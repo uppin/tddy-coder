@@ -26,6 +26,10 @@ use std::time::{Duration, Instant};
 use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
 
+mod imports;
+
+use imports::names_bound;
+
 /// LSP `SymbolKind::Object` — how rust-analyzer reports an `impl` block. Its members are reached
 /// through the type, never through a module path, which is why a seam may move a whole `impl` freely
 /// and may not cut one in half.
@@ -1686,49 +1690,6 @@ impl RustBackend {
         Ok(reach)
     }
 
-    /// Import every name the relocated items lost, until the server reports none left to import.
-    ///
-    /// Extracting a module moves items away from the `use` declarations that gave their references
-    /// meaning: the declarations stay in the parent and the names go unresolved in the new scope.
-    /// rust-analyzer will not carry them across, but it will say which names it cannot resolve and
-    /// what would resolve each one — so every path written here is still the server's own.
-    ///
-    /// One import per pass. Each inserts a `use` line that moves everything below it, and a name
-    /// that looked unimportable often becomes resolvable once the name it hung off is restored.
-    ///
-    /// Every import is *verified* before it is kept: the trial text goes back to the server and the
-    /// name it was meant to resolve has to stop being unresolved. rust-analyzer offers imports that
-    /// resolve nothing — one for an inherent associated function, one naming a path two module levels
-    /// too high — and the difference between a good and a useless offer is not readable from its
-    /// title. Trusting the title wrote four `use` lines that did not compile across one real
-    /// restructure, in a run that reported success.
-    fn restore_imports(
-        &mut self,
-        uri: &str,
-        extracted: &str,
-        module: &str,
-        moved: &[MovedItem],
-        reexport: Reexport,
-    ) -> Result<String> {
-        let mut text = extracted.to_string();
-        // Names every offered path failed. Re-asking one would be offered the same useless import
-        // again, and every pass would insert another copy of it.
-        let mut unimportable: Vec<String> = Vec::new();
-
-        for _ in 0..IMPORT_PASSES {
-            self.did_change(uri, &text)?;
-
-            match self.next_import(uri, &text, module, moved, reexport, &mut unimportable)? {
-                Some(imported) => text = imported,
-                None => return Ok(text),
-            }
-        }
-
-        Err(server_defect(format!(
-            "rust-analyzer was still offering imports after {IMPORT_PASSES} passes"
-        )))
-    }
-
     /// Drop the `use` lines the assist wrote that cannot be an import the move lost.
     ///
     /// rust-analyzer's `extract_module` writes the new module's imports itself, and this runs before
@@ -1753,150 +1714,6 @@ impl RustBackend {
         let block = module_bounds(&source, module)?;
 
         Ok(without_dead_imports(&source, &block, &unresolved).join("\n"))
-    }
-
-    /// The text with one more import restored, or `None` once no name is left to import.
-    ///
-    /// A name with no import offered is skipped rather than refused: most of them are methods and
-    /// fields that are unresolved only because their receiver's type is, and they come back on
-    /// their own once it does. What is left when no import remains is for the compiler to judge.
-    #[allow(clippy::too_many_arguments)]
-    fn next_import(
-        &mut self,
-        uri: &str,
-        text: &str,
-        module: &str,
-        moved: &[MovedItem],
-        reexport: Reexport,
-        unimportable: &mut Vec<String>,
-    ) -> Result<Option<String>> {
-        let mut asked: Vec<String> = Vec::new();
-        let unresolved = self.unresolved_names(uri, text)?;
-
-        for name in &unresolved {
-            // One import serves every occurrence of a name, and a name that offered none here will
-            // not offer one at its next occurrence either.
-            if asked.contains(&name.text) || unimportable.contains(&name.text) {
-                continue;
-            }
-            asked.push(name.text.clone());
-
-            // A name reached through a qualifier is an associated item or a field, and no `use`
-            // binds either. rust-analyzer offers one anyway — `use super::new_with_config;` for a
-            // constructor called as `NativePDFContextManager::new_with_config` — and that import
-            // resolves nothing while looking exactly like a good one.
-            if reached_through_qualifier(text, &name.position) {
-                unimportable.push(name.text.clone());
-                continue;
-            }
-
-            // Already bound in this module and still unresolved: the binding that exists is the
-            // broken one, and a second is `E0252` however well its path reads.
-            if already_bound(text, module, &name.text)? {
-                unimportable.push(name.text.clone());
-                continue;
-            }
-
-            // A name this seam's own facade will re-export. The facade is written *after* this
-            // pass, so the server sees the name as unresolved and offers a path through the new
-            // module — and the named import it writes is private, which then *shadows* the
-            // `pub use module::*;` added moments later. The facade is left present and inert, and
-            // an outside caller gets `E0603` on a symbol the facade was asked to keep reachable.
-            if facade_will_bind(&name.text, moved, reexport) {
-                unimportable.push(name.text.clone());
-                continue;
-            }
-
-            // A name the parent binds under an alias — `ProbeOutcome as ProtoProbeOutcome`, which
-            // is how every generated proto type in this workspace is referred to. rust-analyzer
-            // offers the *unaliased* path, which does not bind the alias, so asking the server can
-            // only produce a `use` that resolves nothing and the run then refuses. The parent's own
-            // declaration already says what the moved code meant, so reconstruct it from there.
-            if let Some(path) = alias_target(text, module, &name.text) {
-                return Ok(Some(with_module_import(
-                    text,
-                    module,
-                    &format!("use {path} as {};", name.text),
-                )?));
-            }
-
-            let actions = self.request_settled(
-                "textDocument/codeAction",
-                json!({
-                    "textDocument": { "uri": uri },
-                    "range": { "start": name.position, "end": name.position },
-                    "context": { "diagnostics": [], "only": ["quickfix"] }
-                }),
-            )?;
-
-            let offered: Vec<String> = actions
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|action| action.get("title").and_then(Value::as_str))
-                .filter(|title| title.starts_with(IMPORT_TITLE))
-                .map(str::to_string)
-                .collect();
-
-            if offered.is_empty() {
-                // rust-analyzer offers `Import` for items, not for a bare module path, so a name
-                // the parent reached through `use crate::tool_engine;` is unresolved in the moved
-                // code with nothing on offer for it — and skipping silently is how three modules
-                // landed referencing an unlinked crate. The parent's own declaration says what it
-                // meant, exactly as for an alias.
-                if let Some(path) = parent_binding(text, module, &name.text) {
-                    return Ok(Some(with_module_import(
-                        text,
-                        module,
-                        &format!("use {path};"),
-                    )?));
-                }
-                continue;
-            }
-
-            let ordered = import_order(text, &offered).ok_or_else(|| {
-                seam_refusal(format!(
-                    "`{}` could be imported {} ways and neither rust-analyzer nor this file's own \
-                     imports say which the moved code meant: {}",
-                    name.text,
-                    offered.len(),
-                    offered.join(", ")
-                ))
-            })?;
-
-            // How many occurrences the import has to account for. Counted rather than asked as a
-            // yes/no, because one name is routinely unresolved in several places and only the
-            // occurrence this import was offered for is the one it can answer for.
-            let before = occurrences_of(&unresolved, &name.text);
-
-            for title in &ordered {
-                let action = titled(&actions, &title.to_lowercase())
-                    .ok_or_else(|| server_defect("the import offered could not be read back"))?;
-                let resolved = self.request_settled("codeAction/resolve", action)?;
-                let trial = apply_lsp_edit(text, edits_for(&resolved, uri)?);
-
-                self.did_change(uri, &trial)?;
-
-                let after = occurrences_of(&self.unresolved_names(uri, &trial)?, &name.text);
-                if after < before {
-                    return Ok(Some(trial));
-                }
-            }
-
-            // Every path the server offered leaves the name unresolved. Writing one anyway is how a
-            // successful run lands source that does not compile, so the operation says which name it
-            // could not import and what it tried.
-            return Err(seam_refusal(format!(
-                "no import rust-analyzer offered for `{}` left fewer of its {} unresolved \
-                 occurrence(s) — tried {}. Writing one anyway is how a run reports success over a \
-                 `use` that resolves nothing.",
-                name.text,
-                before,
-                ordered.join(", ")
-            )));
-        }
-
-        Ok(None)
     }
 
     /// Every identifier in the open document that the server cannot resolve, in source order.
@@ -2998,12 +2815,9 @@ fn simple_import(line: &str) -> Option<String> {
     Some(only.clone())
 }
 
-/// The final segment of every path a line's `use` declaration binds.
+/// Every name a line's `use` declaration binds — an alias where it carries one.
 fn bound_names(line: &str) -> Vec<String> {
-    imported_paths(line)
-        .iter()
-        .filter_map(|path| path.rsplit("::").next().map(str::to_string))
-        .collect()
+    names_bound(line)
 }
 
 /// Whether the server reports any unresolved name on the given zero-based line.
@@ -3069,9 +2883,7 @@ fn already_bound(text: &str, module: &str, name: &str) -> Result<bool> {
     let block = module_bounds(&source, module)?;
     let body = source[block.opened..block.closed].join("\n");
 
-    Ok(imported_paths(&body)
-        .iter()
-        .any(|path| path.rsplit("::").next() == Some(name)))
+    Ok(names_bound(&body).iter().any(|bound| bound == name))
 }
 
 /// The path an `Import` quickfix names, read out of its title.
