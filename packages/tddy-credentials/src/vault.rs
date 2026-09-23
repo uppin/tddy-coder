@@ -58,18 +58,27 @@
 //! must hash back to it, so a sealed record cannot be moved into another account's slot and still
 //! open.
 
-use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+mod crypto;
+mod format;
+mod unlock;
 
-use chacha20poly1305::aead::{Aead, OsRng, Payload};
-use chacha20poly1305::{AeadCore, ChaCha20Poly1305, KeyInit};
-use rand::RngCore;
-use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+
 use subtle::ConstantTimeEq;
 
-use crate::kdf::{from_hex, hkdf_expand, hkdf_sha256, keyed_name, to_hex};
+use crate::kdf::{hkdf_expand, keyed_name, to_hex};
 use crate::record::{AccountId, CredentialRecord, ProviderId};
 use crate::secret::{wipe, SecretBytes};
+use crypto::{
+    check_verifier, derive_kek, open, random_32, record_aad, seal, unwrap_data_key, wrap_data_key,
+    VERIFIER_AAD, VERIFIER_PLAINTEXT,
+};
+use format::{
+    header_aad, info_for, read_vault_file, serialised, write_vault_file, Header, SealedRecord,
+    VaultFile, FORMAT_VERSION, KDF, KDF_VERSION,
+};
+
+pub use unlock::{UnlockKey, MAX_UNLOCK_SLOTS};
 
 /// Why a vault operation did not happen.
 ///
@@ -107,43 +116,8 @@ pub enum VaultError {
 /// only exists once a login has produced one.
 pub struct CredentialStore;
 
-/// The one format version this build reads and writes.
-const FORMAT_VERSION: u32 = 1;
-/// The one key derivation this build uses.
-const KDF: &str = "hkdf-sha256";
-const KDF_VERSION: u32 = 1;
-/// Prefix of the HKDF `info`; the subject follows it.
-const INFO_PREFIX: &str = "tddy-credentials/v1/";
-/// What the verifier seals.
-const VERIFIER_PLAINTEXT: &[u8] = b"tddy-credentials/v1/verifier";
-const VERIFIER_AAD: &[u8] = b"tddy-credentials/v1/verifier";
 /// Domain separation for the subkey that names records.
 const RECORD_ID_INFO: &[u8] = b"tddy-credentials/v1/record-id";
-/// Prefix of a record's associated data; its `id` follows it.
-const RECORD_AAD_PREFIX: &[u8] = b"tddy-credentials/v1/record/";
-/// Domain separation for an unlock slot's derivation; the slot id and subject follow it.
-const UNLOCK_INFO_PREFIX: &str = "tddy-credentials/v1/unlock/";
-/// How many browser session lineages may hold an unlock slot on one vault at once.
-///
-/// Sixteen is several browsers and devices per user with room for ones abandoned without a
-/// logout; the least recently used is evicted past it, and that browser's next refresh after a
-/// restart simply cannot reopen the vault — the same outcome as a lineage that never had a slot.
-pub const MAX_UNLOCK_SLOTS: usize = 16;
-/// Owner-only: the file is ciphertext, but a readable one is a copy for an offline attempt.
-const OWNER_ONLY_FILE: u32 = 0o600;
-
-/// Serialises every read-modify-write of a vault file in this process.
-///
-/// Two sessions of the same user are two [`SessionVault`]s over one file, so a per-handle lock
-/// would let the second writer drop the first writer's record. Process-wide for the reason the
-/// token store this replaces gave: nothing guarantees one handle owns a path.
-static WRITE_LOCK: Mutex<()> = Mutex::new(());
-
-fn serialised() -> std::sync::MutexGuard<'static, ()> {
-    // A poisoned lock means an earlier write panicked; the state it guards is re-read from disk
-    // under the lock, so there is no torn in-memory state to inherit.
-    WRITE_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
-}
 
 impl CredentialStore {
     /// Where `subject`'s vault lives inside an `auth_storage` directory.
@@ -183,33 +157,6 @@ impl CredentialStore {
         }
     }
 
-    /// Open the vault at `path` through the unlock slot `unlock` names, without a login.
-    ///
-    /// For a session refresh after a daemon restart: the browser presents the [`UnlockKey`] it was
-    /// handed. A slot that is gone (logged out, evicted) or a key that does not open it is
-    /// [`VaultError::Locked`], and nothing is changed. So is an absent file — a refresh never
-    /// creates a vault.
-    pub fn open_with_unlock_key(
-        path: &Path,
-        unlock: &UnlockKey,
-    ) -> Result<SessionVault, VaultError> {
-        let file = read_vault_file(path)?.ok_or(VaultError::Locked)?;
-        let slot = file
-            .unlock_slots
-            .iter()
-            .find(|slot| slot.id == unlock.slot_id)
-            .ok_or(VaultError::Locked)?;
-        let kek = unlock_kek(&unlock.key, &slot.id, &unlock.subject);
-        let data_key = unwrap_data_key(
-            &kek,
-            &slot.nonce,
-            &slot.ciphertext,
-            &unlock_aad(&slot.id, &unlock.subject),
-        )?;
-        check_verifier(&file.verifier, &data_key)?;
-        Ok(session(path, &unlock.subject, data_key))
-    }
-
     /// Open the vault at `path` if one exists; `Ok(None)` when there is none. Never creates one.
     ///
     /// For a login that must not leave a vault behind — a stub login, whose credential is
@@ -223,80 +170,6 @@ impl CredentialStore {
             Some(file) => open_file(path, &file, ikm, subject).map(Some),
             None => Ok(None),
         }
-    }
-}
-
-/// The key to one unlock slot: what a browser session lineage holds so that its refresh can reopen
-/// the vault after a daemon restart without a new login.
-///
-/// **A wrap key, not a stored credential.** Alone it opens nothing — it is useful only together
-/// with the vault file, which never leaves the daemon's disk — and it is rotated on every refresh
-/// that presents it. The trade-off is stated in `docs/credential-store.md`: it crosses the same
-/// plain-http LAN origin the session token does, and a copy of it is worth nothing without the
-/// daemon's `auth_storage`.
-///
-/// Carries the subject and slot id beside the key, so a logout can find and remove its slot from
-/// the key alone, whether or not its access token is still valid.
-pub struct UnlockKey {
-    subject: String,
-    slot_id: String,
-    key: SecretBytes,
-}
-
-impl UnlockKey {
-    /// Whose vault this opens.
-    #[must_use]
-    pub fn subject(&self) -> &str {
-        &self.subject
-    }
-
-    /// Which unlock slot of that vault this opens.
-    #[must_use]
-    pub fn slot_id(&self) -> &str {
-        &self.slot_id
-    }
-
-    /// The opaque form a client stores and sends back: `<hex subject>.<slot id>.<hex key>`.
-    #[must_use]
-    pub fn to_wire(&self) -> String {
-        format!(
-            "{}.{}.{}",
-            to_hex(self.subject.as_bytes()),
-            self.slot_id,
-            to_hex(self.key.expose())
-        )
-    }
-
-    /// Parse [`Self::to_wire`]'s form; `None` for anything else, including an empty string.
-    #[must_use]
-    pub fn from_wire(wire: &str) -> Option<Self> {
-        let mut parts = wire.split('.');
-        let (subject, slot_id, key) = (parts.next()?, parts.next()?, parts.next()?);
-        if parts.next().is_some() || slot_id.is_empty() || from_hex(slot_id).is_none() {
-            return None;
-        }
-        let subject = String::from_utf8(from_hex(subject)?).ok()?;
-        let mut key = from_hex(key)?;
-        let bytes = <[u8; 32]>::try_from(key.as_slice()).ok();
-        wipe(&mut key);
-        let mut bytes = bytes?;
-        let key = SecretBytes::new(bytes);
-        wipe(&mut bytes);
-        Some(Self {
-            subject,
-            slot_id: slot_id.to_string(),
-            key,
-        })
-    }
-}
-
-impl std::fmt::Debug for UnlockKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("UnlockKey")
-            .field("subject", &self.subject)
-            .field("slot_id", &self.slot_id)
-            .field("key", &self.key)
-            .finish()
     }
 }
 
@@ -397,88 +270,6 @@ impl SessionVault {
         write_vault_file(&self.path, &file)
     }
 
-    /// Wrap the data key in a fresh unlock slot and hand back the only key that opens it.
-    ///
-    /// The returned key is for one browser session lineage to hold and present at its refresh; it
-    /// is not written anywhere by this crate. Past [`MAX_UNLOCK_SLOTS`], the least recently used
-    /// slot is evicted.
-    pub fn add_unlock_slot(&self) -> Result<UnlockKey, VaultError> {
-        let _serialised = serialised();
-        let mut file = self.load()?;
-        let (slot, unlock) = self.new_unlock_slot(to_hex(&random_16()))?;
-        file.unlock_slots.push(slot);
-        let excess = file.unlock_slots.len().saturating_sub(MAX_UNLOCK_SLOTS);
-        file.unlock_slots.drain(..excess);
-        write_vault_file(&self.path, &file)?;
-        Ok(unlock)
-    }
-
-    /// Replace the wrap in slot `slot_id` under a new key, and hand that key back; the previous one
-    /// opens nothing afterwards. The slot becomes the most recently used.
-    ///
-    /// A slot that is gone is [`VaultError::Locked`] — the lineage it belonged to has no way back
-    /// in until its next login.
-    pub fn rotate_unlock_slot(&self, slot_id: &str) -> Result<UnlockKey, VaultError> {
-        let _serialised = serialised();
-        let mut file = self.load()?;
-        let at = file
-            .unlock_slots
-            .iter()
-            .position(|slot| slot.id == slot_id)
-            .ok_or(VaultError::Locked)?;
-        file.unlock_slots.remove(at);
-        let (slot, unlock) = self.new_unlock_slot(slot_id.to_string())?;
-        file.unlock_slots.push(slot);
-        write_vault_file(&self.path, &file)?;
-        Ok(unlock)
-    }
-
-    /// Remove slot `slot_id`. Removing one that is not there is `Ok`.
-    pub fn remove_unlock_slot(&self, slot_id: &str) -> Result<(), VaultError> {
-        let _serialised = serialised();
-        let mut file = self.load()?;
-        let before = file.unlock_slots.len();
-        file.unlock_slots.retain(|slot| slot.id != slot_id);
-        if file.unlock_slots.len() == before {
-            return Ok(());
-        }
-        write_vault_file(&self.path, &file)
-    }
-
-    /// The ids of the unlock slots this vault holds, least recently used first.
-    pub fn unlock_slot_ids(&self) -> Result<Vec<String>, VaultError> {
-        Ok(self
-            .load()?
-            .unlock_slots
-            .into_iter()
-            .map(|slot| slot.id)
-            .collect())
-    }
-
-    fn new_unlock_slot(&self, id: String) -> Result<(UnlockSlot, UnlockKey), VaultError> {
-        let mut fresh = random_32();
-        let key = SecretBytes::new(fresh);
-        wipe(&mut fresh);
-        let kek = unlock_kek(&key, &id, &self.subject);
-        let sealed = seal(
-            &kek,
-            self.data_key.expose(),
-            &unlock_aad(&id, &self.subject),
-        )?;
-        Ok((
-            UnlockSlot {
-                id: id.clone(),
-                nonce: sealed.nonce,
-                ciphertext: sealed.ciphertext,
-            },
-            UnlockKey {
-                subject: self.subject.clone(),
-                slot_id: id,
-                key,
-            },
-        ))
-    }
-
     /// Re-read the file and prove this session's data key still opens it.
     ///
     /// A file replaced under a live session — by anything but this crate's own writes, which never
@@ -541,191 +332,6 @@ impl SessionVault {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Header {
-    format_version: u32,
-    kdf: String,
-    kdf_version: u32,
-    salt: String,
-    info: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Sealed {
-    nonce: String,
-    ciphertext: String,
-}
-
-/// One browser session lineage's wrap of the data key. The key that opens it is not in the file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct UnlockSlot {
-    id: String,
-    nonce: String,
-    ciphertext: String,
-}
-
-/// Field order matters to anyone reading the file: the ciphertext is last in each record, and the
-/// records are last in the file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SealedRecord {
-    id: String,
-    nonce: String,
-    ciphertext: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct VaultFile {
-    header: Header,
-    wrapped_data_key: Sealed,
-    unlock_slots: Vec<UnlockSlot>,
-    verifier: Sealed,
-    records: Vec<SealedRecord>,
-}
-
-fn info_for(subject: &str) -> String {
-    format!("{INFO_PREFIX}{subject}")
-}
-
-fn record_aad(id: &str) -> Vec<u8> {
-    [RECORD_AAD_PREFIX, id.as_bytes()].concat()
-}
-
-fn header_aad(header: &Header) -> Result<Vec<u8>, VaultError> {
-    serde_json::to_vec(header).map_err(|_| VaultError::Crypto)
-}
-
-fn random_16() -> [u8; 16] {
-    let mut bytes = [0u8; 16];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
-    bytes
-}
-
-fn unlock_info(slot_id: &str, subject: &str) -> String {
-    format!("{UNLOCK_INFO_PREFIX}{slot_id}/{subject}")
-}
-
-/// An unlock slot's KEK. The unlock key is already 32 uniformly random bytes, so the HKDF salt is
-/// empty; the slot id and subject in `info` bind the key to the one slot of the one vault.
-fn unlock_kek(unlock_key: &SecretBytes, slot_id: &str, subject: &str) -> SecretBytes {
-    hkdf_sha256(
-        &[],
-        unlock_key.expose(),
-        unlock_info(slot_id, subject).as_bytes(),
-    )
-}
-
-/// An unlock slot's associated data: the derivation it was made under, and which slot it is.
-fn unlock_aad(slot_id: &str, subject: &str) -> Vec<u8> {
-    format!(
-        "{FORMAT_VERSION}/{KDF}/{KDF_VERSION}/{}",
-        unlock_info(slot_id, subject)
-    )
-    .into_bytes()
-}
-
-/// Unwrap a data key from one wrap slot. A key that does not open it is [`VaultError::Locked`].
-fn unwrap_data_key(
-    kek: &SecretBytes,
-    nonce: &str,
-    ciphertext: &str,
-    aad: &[u8],
-) -> Result<SecretBytes, VaultError> {
-    // A key that does not unwrap the data key is the wrong key — the expected consequence of a
-    // rotated credential, a slot re-wrapped since, or another subject's file — never corruption to
-    // be "repaired".
-    let mut unwrapped = open(kek, nonce, ciphertext, aad).map_err(|_| VaultError::Locked)?;
-    let Ok(mut bytes) = <[u8; 32]>::try_from(unwrapped.as_slice()) else {
-        wipe(&mut unwrapped);
-        return Err(VaultError::Crypto);
-    };
-    wipe(&mut unwrapped);
-    let data_key = SecretBytes::new(bytes);
-    wipe(&mut bytes);
-    Ok(data_key)
-}
-
-fn random_32() -> [u8; 32] {
-    let mut bytes = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
-    bytes
-}
-
-fn derive_kek(header: &Header, ikm: &[u8], subject: &str) -> Result<SecretBytes, VaultError> {
-    let salt = from_hex(&header.salt).ok_or(VaultError::Crypto)?;
-    Ok(hkdf_sha256(&salt, ikm, info_for(subject).as_bytes()))
-}
-
-fn wrap_data_key(
-    header: &Header,
-    ikm: &[u8],
-    subject: &str,
-    data_key: &SecretBytes,
-) -> Result<Sealed, VaultError> {
-    let kek = derive_kek(header, ikm, subject)?;
-    seal(&kek, data_key.expose(), &header_aad(header)?)
-}
-
-fn cipher(key: &SecretBytes) -> ChaCha20Poly1305 {
-    // TODO(keyring): the cipher holds its own copy of the key schedule, which is not wiped when it
-    // drops; that needs `chacha20poly1305`'s `zeroize` feature, a CLAUDE.md § ASK decision.
-    ChaCha20Poly1305::new(key.expose().into())
-}
-
-fn seal(key: &SecretBytes, plaintext: &[u8], aad: &[u8]) -> Result<Sealed, VaultError> {
-    let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
-    let ciphertext = cipher(key)
-        .encrypt(
-            &nonce,
-            Payload {
-                msg: plaintext,
-                aad,
-            },
-        )
-        .map_err(|_| VaultError::Crypto)?;
-    Ok(Sealed {
-        nonce: to_hex(&nonce),
-        ciphertext: to_hex(&ciphertext),
-    })
-}
-
-/// Open one sealed unit. Any failure — malformed hex, a wrong nonce length, a tag that does not
-/// authenticate — is [`VaultError::Crypto`]; the caller decides when that means `Locked` instead.
-fn open(
-    key: &SecretBytes,
-    nonce: &str,
-    ciphertext: &str,
-    aad: &[u8],
-) -> Result<Vec<u8>, VaultError> {
-    let nonce = from_hex(nonce).ok_or(VaultError::Crypto)?;
-    let ciphertext = from_hex(ciphertext).ok_or(VaultError::Crypto)?;
-    if nonce.len() != 12 {
-        return Err(VaultError::Crypto);
-    }
-    cipher(key)
-        .decrypt(
-            chacha20poly1305::Nonce::from_slice(&nonce),
-            Payload {
-                msg: &ciphertext,
-                aad,
-            },
-        )
-        .map_err(|_| VaultError::Crypto)
-}
-
-fn check_verifier(verifier: &Sealed, data_key: &SecretBytes) -> Result<(), VaultError> {
-    let plaintext = open(
-        data_key,
-        &verifier.nonce,
-        &verifier.ciphertext,
-        VERIFIER_AAD,
-    )?;
-    if bool::from(plaintext.as_slice().ct_eq(VERIFIER_PLAINTEXT)) {
-        Ok(())
-    } else {
-        Err(VaultError::Crypto)
-    }
-}
-
 /// Session keys for a data key: the key itself and the subkey that names records.
 fn session(path: &Path, subject: &str, data_key: SecretBytes) -> SessionVault {
     let record_id_key = hkdf_expand(&data_key, RECORD_ID_INFO);
@@ -775,62 +381,6 @@ fn open_file(
     // The data key authenticated under the KEK, so a verifier that fails under it is corruption.
     check_verifier(&file.verifier, &data_key)?;
     Ok(session(path, subject, data_key))
-}
-
-/// Read and parse the vault at `path`; `Ok(None)` when there is no file.
-fn read_vault_file(path: &Path) -> Result<Option<VaultFile>, VaultError> {
-    let raw = match std::fs::read(path) {
-        Ok(raw) => raw,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(VaultError::Io(format!("reading {}: {e}", path.display()))),
-    };
-    let document: serde_json::Value =
-        serde_json::from_slice(&raw).map_err(|_| VaultError::Crypto)?;
-    check_format(&document)?;
-    serde_json::from_value(document)
-        .map(Some)
-        .map_err(|_| VaultError::Crypto)
-}
-
-/// Refuse, by name, a header this build does not write — before anything tries to decrypt.
-fn check_format(document: &serde_json::Value) -> Result<(), VaultError> {
-    let field = |name: &str| document.get("header").and_then(|header| header.get(name));
-    let mismatch = |expected: String, found: String| VaultError::FormatMismatch { expected, found };
-
-    let format_version = field("format_version");
-    if format_version != Some(&serde_json::Value::from(FORMAT_VERSION)) {
-        return Err(mismatch(
-            FORMAT_VERSION.to_string(),
-            describe(format_version),
-        ));
-    }
-    let kdf = field("kdf");
-    if kdf.and_then(serde_json::Value::as_str) != Some(KDF) {
-        return Err(mismatch(KDF.to_string(), describe(kdf)));
-    }
-    let kdf_version = field("kdf_version");
-    if kdf_version != Some(&serde_json::Value::from(KDF_VERSION)) {
-        return Err(mismatch(
-            format!("{KDF} v{KDF_VERSION}"),
-            format!("{KDF} v{}", describe(kdf_version)),
-        ));
-    }
-    Ok(())
-}
-
-fn describe(value: Option<&serde_json::Value>) -> String {
-    match value {
-        Some(serde_json::Value::String(text)) => text.clone(),
-        Some(other) => other.to_string(),
-        None => "an unversioned".to_string(),
-    }
-}
-
-fn write_vault_file(path: &Path, file: &VaultFile) -> Result<(), VaultError> {
-    let bytes = serde_json::to_vec_pretty(file)
-        .map_err(|e| VaultError::Io(format!("serialising {}: {e}", path.display())))?;
-    tddy_core::atomic_file::write_atomic_with_mode(path, bytes, OWNER_ONLY_FILE)
-        .map_err(|e| VaultError::Io(format!("writing {}: {e}", path.display())))
 }
 
 #[cfg(test)]
