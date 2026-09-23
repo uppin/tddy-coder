@@ -200,7 +200,10 @@ async fn a_served_check_is_recorded_as_one_arrival_and_one_outcome() {
 
     // When the check is served to the end of its stream
     let events = daemon
-        .check(tddy_rpc::Request::new(a_check_of(&plan, workspace.path())))
+        .check(tddy_rpc::Request::direct(a_check_of(
+            &plan,
+            workspace.path(),
+        )))
         .await
         .expect("a shallow check of a sound plan is served")
         .into_inner();
@@ -230,7 +233,7 @@ async fn a_refused_check_is_recorded_with_the_status_its_caller_was_given() {
 
     // When it is served
     let refusal = daemon
-        .check(tddy_rpc::Request::new(CheckRequest {
+        .check(tddy_rpc::Request::direct(CheckRequest {
             workspace_root: root.clone(),
             plan: String::new(),
             deep: false,
@@ -265,7 +268,7 @@ async fn a_request_whose_root_cannot_be_resolved_is_recorded_as_the_refusal_it_g
 
     // When it is served
     let refusal = daemon
-        .warm(tddy_rpc::Request::new(WarmRequest {
+        .warm(tddy_rpc::Request::direct(WarmRequest {
             workspace_root: relative.to_string(),
         }))
         .await
@@ -312,7 +315,10 @@ async fn a_check_whose_caller_hangs_up_is_recorded_as_cancelled() {
 
     // When its caller takes the stream and goes away without reading it
     let events = daemon
-        .check(tddy_rpc::Request::new(a_check_of(&plan, workspace.path())))
+        .check(tddy_rpc::Request::direct(a_check_of(
+            &plan,
+            workspace.path(),
+        )))
         .await
         .expect("a shallow check of a sound plan is served")
         .into_inner();

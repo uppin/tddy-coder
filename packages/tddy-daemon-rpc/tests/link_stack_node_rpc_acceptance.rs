@@ -132,7 +132,7 @@ async fn records_the_child_session_on_the_named_planned_node() {
 
     // When
     service
-        .link_stack_node(Request::new(a_link_request("n1")))
+        .link_stack_node(Request::direct(a_link_request("n1")))
         .await
         .expect("LinkStackNode must succeed on the daemon that owns the orchestrator");
 
@@ -154,7 +154,7 @@ async fn records_the_branch_the_child_created_on_the_named_planned_node() {
 
     // When
     service
-        .link_stack_node(Request::new(a_link_request("n1")))
+        .link_stack_node(Request::direct(a_link_request("n1")))
         .await
         .expect("LinkStackNode must succeed");
 
@@ -176,7 +176,7 @@ async fn answers_with_the_plan_as_it_stands_after_the_link() {
 
     // When
     let plan_json = service
-        .link_stack_node(Request::new(a_link_request("n1")))
+        .link_stack_node(Request::direct(a_link_request("n1")))
         .await
         .expect("LinkStackNode must succeed")
         .into_inner()
@@ -205,7 +205,7 @@ async fn refuses_a_node_id_the_plan_does_not_hold() {
 
     // When
     let err = service
-        .link_stack_node(Request::new(a_link_request("no-such-node")))
+        .link_stack_node(Request::direct(a_link_request("no-such-node")))
         .await
         .expect_err("a link that lands nowhere must be reported, never reported as done");
 
@@ -244,7 +244,7 @@ async fn refuses_a_session_that_is_not_a_pr_stack_orchestrator() {
 
     // When
     let err = service
-        .link_stack_node(Request::new(a_link_request("n1")))
+        .link_stack_node(Request::direct(a_link_request("n1")))
         .await
         .expect_err("LinkStackNode must refuse a session that carries no stack");
 
@@ -270,7 +270,7 @@ async fn requires_a_node_id_rather_than_deriving_one_from_the_branch() {
 
     // When
     let err = service
-        .link_stack_node(Request::new(a_link_request("")))
+        .link_stack_node(Request::direct(a_link_request("")))
         .await
         .expect_err("LinkStackNode must refuse an unnamed node");
 
@@ -305,7 +305,7 @@ async fn routes_a_request_naming_another_daemon_instead_of_answering_from_local_
     let mut req = a_link_request("n1");
     req.daemon_instance_id = "fabricated-peer-not-in-discovery".to_string();
     let err = service
-        .link_stack_node(Request::new(req))
+        .link_stack_node(Request::direct(req))
         .await
         .expect_err("a request addressed to an unreachable peer must not be answered locally");
 
@@ -348,7 +348,7 @@ async fn refuses_a_link_that_names_no_branch() {
     let mut req = a_link_request("n1");
     req.branch = "   ".to_string();
     let err = service
-        .link_stack_node(Request::new(req))
+        .link_stack_node(Request::direct(req))
         .await
         .expect_err("a link that would record no branch must be refused, not reported as done");
 
@@ -382,7 +382,7 @@ async fn refuses_a_link_that_names_no_child_session() {
     let mut req = a_link_request("n1");
     req.child_session_id = String::new();
     let err = service
-        .link_stack_node(Request::new(req))
+        .link_stack_node(Request::direct(req))
         .await
         .expect_err("a link names the session that materialized the node");
 
@@ -417,7 +417,7 @@ async fn refuses_a_caller_whose_session_token_is_not_valid() {
     let mut req = a_link_request("n1");
     req.session_token = "expired-session-token".to_string();
     let err = service
-        .link_stack_node(Request::new(req))
+        .link_stack_node(Request::direct(req))
         .await
         .expect_err("an unauthenticated caller must be refused");
 
@@ -452,7 +452,7 @@ async fn refuses_an_orchestrator_session_id_that_walks_out_of_the_sessions_tree(
     let mut req = a_link_request("n1");
     req.orchestrator_session_id = "../other-user".to_string();
     let err = service
-        .link_stack_node(Request::new(req))
+        .link_stack_node(Request::direct(req))
         .await
         .expect_err("a traversing session id must never be resolved to a path");
 

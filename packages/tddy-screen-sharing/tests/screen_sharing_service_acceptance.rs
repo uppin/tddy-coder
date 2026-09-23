@@ -76,7 +76,7 @@ async fn invalid_token_is_rejected() {
 
     // When — list targets with a bad token
     let err = svc
-        .list_targets(Request::new(ListTargetsRequest {
+        .list_targets(Request::direct(ListTargetsRequest {
             session_token: "bad-token".to_string(),
             session_id: SESSION_ID.to_string(),
         }))
@@ -107,7 +107,7 @@ async fn add_target_before_unlock_is_rejected() {
 
     // When — add a target without first unlocking
     let err = svc
-        .add_target(Request::new(AddTargetRequest {
+        .add_target(Request::direct(AddTargetRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             label: "Test VM".to_string(),
@@ -143,7 +143,7 @@ async fn unlock_then_add_vnc_target_then_list_returns_vnc_protocol() {
     let (svc, _cache) = make_service(tmp.path());
 
     // When — unlock
-    svc.unlock_vault(Request::new(UnlockVaultRequest {
+    svc.unlock_vault(Request::direct(UnlockVaultRequest {
         session_token: VALID_TOKEN.to_string(),
         session_id: SESSION_ID.to_string(),
         passphrase: PASSPHRASE.to_string(),
@@ -152,7 +152,7 @@ async fn unlock_then_add_vnc_target_then_list_returns_vnc_protocol() {
     .expect("unlock must succeed");
 
     // When — add a VNC target
-    svc.add_target(Request::new(AddTargetRequest {
+    svc.add_target(Request::direct(AddTargetRequest {
         session_token: VALID_TOKEN.to_string(),
         session_id: SESSION_ID.to_string(),
         label: "VNC Dev Box".to_string(),
@@ -167,7 +167,7 @@ async fn unlock_then_add_vnc_target_then_list_returns_vnc_protocol() {
 
     // When — list
     let list_resp = svc
-        .list_targets(Request::new(ListTargetsRequest {
+        .list_targets(Request::direct(ListTargetsRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
         }))
@@ -204,7 +204,7 @@ async fn unlock_then_add_rdp_target_then_list_returns_rdp_protocol() {
     let (svc, _cache) = make_service(tmp.path());
 
     // When — unlock
-    svc.unlock_vault(Request::new(UnlockVaultRequest {
+    svc.unlock_vault(Request::direct(UnlockVaultRequest {
         session_token: VALID_TOKEN.to_string(),
         session_id: SESSION_ID.to_string(),
         passphrase: PASSPHRASE.to_string(),
@@ -213,7 +213,7 @@ async fn unlock_then_add_rdp_target_then_list_returns_rdp_protocol() {
     .expect("unlock must succeed");
 
     // When — add an RDP target
-    svc.add_target(Request::new(AddTargetRequest {
+    svc.add_target(Request::direct(AddTargetRequest {
         session_token: VALID_TOKEN.to_string(),
         session_id: SESSION_ID.to_string(),
         label: "Windows Dev Box".to_string(),
@@ -228,7 +228,7 @@ async fn unlock_then_add_rdp_target_then_list_returns_rdp_protocol() {
 
     // When — list
     let list_resp = svc
-        .list_targets(Request::new(ListTargetsRequest {
+        .list_targets(Request::direct(ListTargetsRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
         }))
@@ -264,7 +264,7 @@ async fn wrong_passphrase_is_rejected_by_unlock() {
     let _session = session_dir(tmp.path());
     let (svc, _cache) = make_service(tmp.path());
 
-    svc.unlock_vault(Request::new(UnlockVaultRequest {
+    svc.unlock_vault(Request::direct(UnlockVaultRequest {
         session_token: VALID_TOKEN.to_string(),
         session_id: SESSION_ID.to_string(),
         passphrase: PASSPHRASE.to_string(),
@@ -277,7 +277,7 @@ async fn wrong_passphrase_is_rejected_by_unlock() {
 
     // When — try unlocking with wrong passphrase
     let err = svc2
-        .unlock_vault(Request::new(UnlockVaultRequest {
+        .unlock_vault(Request::direct(UnlockVaultRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             passphrase: "wrong-passphrase".to_string(),
@@ -324,7 +324,7 @@ async fn start_stream_returns_screenshare_prefixed_track_and_identity() {
     let (svc, _cache) = make_service(tmp.path());
 
     // Unlock the vault first
-    svc.unlock_vault(Request::new(UnlockVaultRequest {
+    svc.unlock_vault(Request::direct(UnlockVaultRequest {
         session_token: VALID_TOKEN.to_string(),
         session_id: SESSION_ID.to_string(),
         passphrase: PASSPHRASE.to_string(),
@@ -334,7 +334,7 @@ async fn start_stream_returns_screenshare_prefixed_track_and_identity() {
 
     // Add a target (password-less VNC for simplicity)
     let target = svc
-        .add_target(Request::new(AddTargetRequest {
+        .add_target(Request::direct(AddTargetRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             label: "Test VM".to_string(),
@@ -351,7 +351,7 @@ async fn start_stream_returns_screenshare_prefixed_track_and_identity() {
 
     // When — start stream
     let resp = svc
-        .start_stream(Request::new(StartStreamRequest {
+        .start_stream(Request::direct(StartStreamRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             target_id: target_id.clone(),

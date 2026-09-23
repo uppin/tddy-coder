@@ -542,7 +542,7 @@ async fn a_sandboxed_codebase_start_places_the_worktree_in_a_local_workspace_ses
 
     // When a session asks for its codebase to be jailed
     let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
+        .start_session(Request::direct(a_sandboxed_codebase_request()))
         .await
         .expect("a jailed-codebase session must start")
         .into_inner();
@@ -578,7 +578,7 @@ async fn a_sandboxed_codebase_start_pairs_its_checkout_with_this_daemon() {
 
     // When a session asks for its codebase to be jailed
     let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
+        .start_session(Request::direct(a_sandboxed_codebase_request()))
         .await
         .expect("a jailed-codebase session must start")
         .into_inner();
@@ -616,7 +616,7 @@ async fn a_sandboxed_codebase_start_leaves_its_agent_unjailed() {
 
     // When a session asks for its codebase to be jailed
     let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
+        .start_session(Request::direct(a_sandboxed_codebase_request()))
         .await
         .expect("a jailed-codebase session must start")
         .into_inner();
@@ -651,7 +651,7 @@ async fn a_sandboxed_codebase_session_starts_with_no_common_room_configured() {
 
     // When a session asks for its codebase to be jailed
     let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
+        .start_session(Request::direct(a_sandboxed_codebase_request()))
         .await
         .expect("both halves are on this host, so no room is needed to pair them")
         .into_inner();
@@ -692,7 +692,7 @@ async fn start_session_refuses_a_jailed_codebase_alongside_a_codebase_host() {
 
     // When
     let status = service
-        .start_session(Request::new(request))
+        .start_session(Request::direct(request))
         .await
         .expect_err("asking for both forms of the same inversion must be refused");
 
@@ -723,7 +723,7 @@ async fn start_session_refuses_a_jailed_codebase_alongside_the_agent_sandbox() {
 
     // When
     let status = service
-        .start_session(Request::new(request))
+        .start_session(Request::direct(request))
         .await
         .expect_err("opposite placements must be refused, not resolved to either");
 
@@ -764,7 +764,7 @@ async fn a_jailed_codebase_session_that_skips_permissions_is_still_jailed() {
 
     // When
     let started = service
-        .start_session(Request::new(request))
+        .start_session(Request::direct(request))
         .await
         .expect("the bypass is the operator's to take; it is not a reason to refuse the placement")
         .into_inner();
@@ -791,7 +791,7 @@ async fn start_session_refuses_a_jailed_codebase_on_a_cursor_cli_session() {
 
     // When
     let status = service
-        .start_session(Request::new(request))
+        .start_session(Request::direct(request))
         .await
         .expect_err("cursor-agent's tool surface cannot be withdrawn, so this confines nothing");
 
@@ -830,7 +830,7 @@ async fn managing_a_jailed_codebase_session_leaves_its_checkout_in_the_jail() {
 
     // When a session asks for its codebase to be jailed AND for the managed workflow over it
     let started = service
-        .start_session(Request::new(a_managed_sandboxed_codebase_request()))
+        .start_session(Request::direct(a_managed_sandboxed_codebase_request()))
         .await
         .expect("orchestration and confinement are orthogonal, so both must be served")
         .into_inner();
@@ -870,7 +870,7 @@ async fn a_specialized_agent_on_a_jailed_codebase_session_is_held_by_the_codebas
     let sessions_tmp = tempfile::tempdir().unwrap();
     let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
     let started = service
-        .start_session(Request::new(a_managed_sandboxed_codebase_request()))
+        .start_session(Request::direct(a_managed_sandboxed_codebase_request()))
         .await
         .expect("a managed jailed-codebase session must start")
         .into_inner();

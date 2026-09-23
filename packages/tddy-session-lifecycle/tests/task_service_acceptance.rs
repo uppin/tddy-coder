@@ -44,7 +44,7 @@ async fn call<Req: Message, Resp: Message + Default>(
     let payload = req.encode_to_vec();
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("tasks.TaskService", method, &[msg])
@@ -70,7 +70,7 @@ async fn call_streaming<Req: Message, Resp: Message + Default>(
     let payload = req.encode_to_vec();
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("tasks.TaskService", method, &[msg])
@@ -101,7 +101,7 @@ async fn collect_streaming_until_idle<Req: Message, Resp: Message + Default>(
     let payload = req.encode_to_vec();
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("tasks.TaskService", method, &[msg])
@@ -132,7 +132,7 @@ async fn assert_unauthenticated(
 ) {
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("tasks.TaskService", method, &[msg])
@@ -372,7 +372,7 @@ async fn watch_task_with_remote_daemon_instance_id_returns_failed_precondition()
     .encode_to_vec();
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("tasks.TaskService", "WatchTask", &[msg])
@@ -438,7 +438,7 @@ async fn cancel_nonexistent_task_returns_not_found() {
     .encode_to_vec();
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("tasks.TaskService", "CancelTask", &[msg])
@@ -518,7 +518,7 @@ async fn send_input_to_output_only_channel_returns_failed_precondition() {
     .encode_to_vec();
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("tasks.TaskService", "SendInput", &[msg])
@@ -721,7 +721,7 @@ async fn watch_task_list_with_remote_daemon_instance_id_returns_failed_precondit
     .encode_to_vec();
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("tasks.TaskService", "WatchTaskList", &[msg])

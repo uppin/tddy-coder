@@ -1937,6 +1937,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         reader,
                         writer,
                         crate::conversation_spawn_relay::NoopRpcService,
+                        tddy_rpc::RequestTransport::UnixSocket,
                     );
                     let _ = stdio_client_tx.send(Some(client));
                     tokio::spawn(endpoint.run());

@@ -160,7 +160,7 @@ async fn exchange(
     state: &str,
 ) -> ExchangeCodeResponse {
     service
-        .exchange_code(Request::new(ExchangeCodeRequest {
+        .exchange_code(Request::direct(ExchangeCodeRequest {
             code: code.to_string(),
             state: state.to_string(),
         }))
@@ -190,7 +190,7 @@ async fn fails_the_login_when_the_access_token_cannot_be_retained() {
 
     // When
     let err = service
-        .exchange_code(Request::new(ExchangeCodeRequest {
+        .exchange_code(Request::direct(ExchangeCodeRequest {
             code: "login-code".to_string(),
             state: "s".to_string(),
         }))
@@ -215,7 +215,7 @@ async fn keeps_the_servers_storage_path_out_of_the_failure_the_client_is_shown()
 
     // When
     let err = service
-        .exchange_code(Request::new(ExchangeCodeRequest {
+        .exchange_code(Request::direct(ExchangeCodeRequest {
             code: "login-code".to_string(),
             state: "s".to_string(),
         }))

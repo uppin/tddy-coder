@@ -249,7 +249,7 @@ impl DaemonSessionHost {
     ) -> Result<Vec<(String, Vec<String>)>, Status> {
         let roster = self
             .session_agents_service()
-            .list_session_agents(Request::new(ListSessionAgentsRequest {
+            .list_session_agents(Request::direct(ListSessionAgentsRequest {
                 session_token: session_token.to_string(),
                 session_id: codebase_session.to_string(),
                 daemon_instance_id: codebase_daemon.to_string(),

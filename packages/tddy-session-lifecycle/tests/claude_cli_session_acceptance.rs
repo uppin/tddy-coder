@@ -167,7 +167,7 @@ async fn claude_cli_session_metadata_fields_persisted() {
 
     // When
     let resp = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             tool_path: String::new(),
             project_id: TEST_PROJECT_ID.to_string(),
@@ -256,7 +256,7 @@ async fn claude_cli_session_livekit_fields_empty() {
 
     // When
     let inner = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             tool_path: String::new(),
             project_id: TEST_PROJECT_ID.to_string(),
@@ -365,7 +365,7 @@ users:
 
     // When
     let sessions = service
-        .list_sessions(Request::new(ListSessionsRequest {
+        .list_sessions(Request::direct(ListSessionsRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -451,7 +451,7 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
 
     // When
     let resp = service
-        .resume_session(Request::new(ResumeSessionRequest {
+        .resume_session(Request::direct(ResumeSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: session_id.to_string(),
         }))
@@ -504,7 +504,7 @@ users:
 
     // When
     let err = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             tool_path: String::new(),
             project_id: TEST_PROJECT_ID.to_string(),
@@ -555,7 +555,7 @@ async fn claude_cli_start_session_requires_project() {
 
     // When — Empty project_id → InvalidArgument.
     let err = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             tool_path: String::new(),
             project_id: String::new(), // empty
@@ -588,7 +588,7 @@ async fn claude_cli_start_session_requires_project() {
 
     // When — Unknown project_id → NotFound.
     let err2 = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             tool_path: String::new(),
             project_id: "no-such-project".to_string(),
@@ -824,7 +824,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
 
     // When
     let resp = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             tool_path: String::new(),
             project_id: TEST_PROJECT_ID.to_string(),

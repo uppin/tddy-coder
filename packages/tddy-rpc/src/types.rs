@@ -1,11 +1,15 @@
 //! Request, Response, and Streaming wrappers (tonic-mirrored).
 
-use crate::message::RequestMetadata;
+use crate::message::{RequestMetadata, RequestTransport};
 use crate::status::Status;
 use futures_core::Stream;
 use std::pin::Pin;
 
-/// Wraps a message with optional metadata (e.g. sender identity).
+/// Wraps a message with the metadata of how it arrived (transport, sender identity).
+///
+/// There is no transport-less constructor: a request is either stamped by the host that received
+/// it ([`Self::with_metadata`], [`Self::from_rpc_message`]) or says, by [`Self::direct`], that it
+/// was made in code and arrived over nothing.
 #[derive(Debug)]
 pub struct Request<T> {
     inner: T,
@@ -13,11 +17,10 @@ pub struct Request<T> {
 }
 
 impl<T> Request<T> {
-    pub fn new(inner: T) -> Self {
-        Self {
-            inner,
-            metadata: RequestMetadata::default(),
-        }
+    /// A request one component of this process makes on another in code — received over no
+    /// transport ([`RequestTransport::Direct`]).
+    pub fn direct(inner: T) -> Self {
+        Self::with_metadata(inner, RequestMetadata::over(RequestTransport::Direct))
     }
 
     pub fn with_metadata(inner: T, metadata: RequestMetadata) -> Self {
@@ -103,9 +106,13 @@ mod tonic_impl {
         }
     }
 
+    /// A request a tonic server received arrived over gRPC, whatever its sender claims.
     impl<T> From<tonic::Request<T>> for Request<T> {
         fn from(r: tonic::Request<T>) -> Self {
-            Request::new(r.into_inner())
+            Request::with_metadata(
+                r.into_inner(),
+                RequestMetadata::over(RequestTransport::Grpc),
+            )
         }
     }
 

@@ -211,7 +211,7 @@ async fn call<Req: prost::Message, Res: prost::Message + Default>(
     }]));
     let message = RpcMessage {
         payload: request.encode_to_vec(),
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     match bridge
         .handle_messages("auth.AuthService", method, &[message])

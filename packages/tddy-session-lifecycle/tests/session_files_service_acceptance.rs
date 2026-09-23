@@ -101,7 +101,10 @@ async fn calling<Req: prost::Message>(
     method: &str,
     request: &Req,
 ) -> Result<Vec<u8>, Status> {
-    let message = RpcMessage::new(request.encode_to_vec(), Default::default());
+    let message = RpcMessage::new(
+        request.encode_to_vec(),
+        tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+    );
     match service
         .handle_rpc("session_files.SessionFilesService", method, &message)
         .await

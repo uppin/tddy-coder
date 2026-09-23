@@ -50,7 +50,7 @@ async fn list_session_workflow_files_returns_allowlisted_basenames() {
 
     // When
     let response = service
-        .list_session_workflow_files(Request::new(ListSessionWorkflowFilesRequest {
+        .list_session_workflow_files(Request::direct(ListSessionWorkflowFilesRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
         }))
@@ -108,7 +108,7 @@ async fn read_session_workflow_file_rejects_path_outside_session_dir() {
         "/etc/passwd",
     ] {
         let err = service
-            .read_session_workflow_file(Request::new(ReadSessionWorkflowFileRequest {
+            .read_session_workflow_file(Request::direct(ReadSessionWorkflowFileRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: session_id.to_string(),
                 basename: malicious.to_string(),
@@ -154,7 +154,7 @@ async fn read_session_workflow_file_returns_utf8_content_for_yaml() {
 
     // When
     let response = service
-        .read_session_workflow_file(Request::new(ReadSessionWorkflowFileRequest {
+        .read_session_workflow_file(Request::direct(ReadSessionWorkflowFileRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
             basename: "changeset.yaml".to_string(),

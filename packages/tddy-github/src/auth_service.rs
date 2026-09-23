@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use tddy_rpc::{Request, Response, Status};
+use tddy_rpc::{Request, RequestTransport, Response, Status};
 
 use crate::provider::{DeviceLoginPoll, GitHubOAuthProvider, GitHubUser};
 use crate::session_token_v2::{
@@ -42,8 +42,12 @@ fn proto_user_from_claims(claims: &SessionClaims) -> ProtoGitHubUser {
 /// the daemon's `users:` map; this is the narrow seam through which the daemon that does may act
 /// on a login — enrol it, admit it, or refuse it — before a session exists for it. A refusal fails
 /// the login with the returned status, and nothing is retained for it.
+///
+/// `transport` is how the completing call reached this daemon, as the host that received it
+/// stamped it — never anything the caller wrote — so an admission may act differently for the
+/// person at the machine than for a caller in a LiveKit room or on a socket.
 pub trait LoginAdmission: Send + Sync {
-    fn admit(&self, github_login: &str) -> Result<(), Status>;
+    fn admit(&self, github_login: &str, transport: RequestTransport) -> Result<(), Status>;
 }
 
 /// Auth service implementation. Delegates OAuth to a GitHubOAuthProvider and issues stateless
@@ -132,15 +136,18 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
     ///
     /// One implementation for both flows, so a device login and a redirect login cannot drift
     /// into producing different sessions or retaining the credential under different rules.
+    ///
+    /// `transport` is the completing call's, as its host stamped it; admission is told it.
     fn complete_login(
         &self,
         access_token: &str,
         user: &GitHubUser,
+        transport: RequestTransport,
     ) -> Result<MintedSession, Status> {
         // Admission first: a login this daemon refuses must leave nothing behind — no retained
         // GitHub credential, no session.
         if let Some(ref admission) = self.admission {
-            admission.admit(&user.login)?;
+            admission.admit(&user.login, transport)?;
         }
 
         // Retain the operator's own credential for later server-side GitHub reads. A stub provider's
@@ -210,6 +217,7 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
         &self,
         request: Request<ExchangeCodeRequest>,
     ) -> Result<Response<ExchangeCodeResponse>, Status> {
+        let transport = request.metadata().transport();
         let req = request.into_inner();
         let (access_token, user) = self
             .provider
@@ -217,7 +225,7 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
             .await
             .map_err(Status::internal)?;
 
-        let session = self.complete_login(&access_token, &user)?;
+        let session = self.complete_login(&access_token, &user, transport)?;
         Ok(Response::new(ExchangeCodeResponse {
             session_token: session.session_token,
             user: Some(session.user),
@@ -320,6 +328,7 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
         &self,
         request: Request<PollDeviceLoginRequest>,
     ) -> Result<Response<PollDeviceLoginResponse>, Status> {
+        let transport = request.metadata().transport();
         let req = request.into_inner();
         let polled = self
             .provider
@@ -339,7 +348,7 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
             DeviceLoginPoll::Denied => not_yet(DeviceLoginState::Denied),
             DeviceLoginPoll::Expired => not_yet(DeviceLoginState::Expired),
             DeviceLoginPoll::Complete { access_token, user } => {
-                let session = self.complete_login(&access_token, &user)?;
+                let session = self.complete_login(&access_token, &user, transport)?;
                 PollDeviceLoginResponse {
                     state: DeviceLoginState::Complete as i32,
                     interval_seconds: 0,
@@ -384,7 +393,7 @@ mod tests {
         };
         let msg = tddy_rpc::RpcMessage {
             payload: prost::Message::encode_to_vec(&req),
-            metadata: Default::default(),
+            metadata: tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
         let resp = bridge
             .handle_messages("auth.AuthService", "GetAuthStatus", &[msg])
@@ -417,7 +426,7 @@ mod tests {
         };
         let msg = tddy_rpc::RpcMessage {
             payload: prost::Message::encode_to_vec(&req),
-            metadata: Default::default(),
+            metadata: tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
         let resp = bridge
             .handle_messages("auth.AuthService", "ExchangeCode", &[msg])
@@ -442,7 +451,7 @@ mod tests {
         };
         let msg = tddy_rpc::RpcMessage {
             payload: prost::Message::encode_to_vec(&req),
-            metadata: Default::default(),
+            metadata: tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
         let resp = bridge
             .handle_messages("auth.AuthService", "GetAuthStatus", &[msg])
@@ -522,7 +531,7 @@ mod tests {
     ) -> String {
         let msg = tddy_rpc::RpcMessage {
             payload: prost::Message::encode_to_vec(&GetAuthUrlRequest {}),
-            metadata: Default::default(),
+            metadata: tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
         let resp = bridge
             .handle_messages("auth.AuthService", "GetAuthUrl", &[msg])
@@ -626,7 +635,7 @@ mod tests {
         };
         let msg = tddy_rpc::RpcMessage {
             payload: prost::Message::encode_to_vec(&exchange_req),
-            metadata: Default::default(),
+            metadata: tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
         let result = bridge
             .handle_messages("auth.AuthService", "ExchangeCode", &[msg])
@@ -647,7 +656,7 @@ mod tests {
         stub.register_code("login-code", user);
         let service = a_signed_service(stub, &daemon, &[&daemon]);
         let state = service
-            .get_auth_url(Request::new(GetAuthUrlRequest {}))
+            .get_auth_url(Request::direct(GetAuthUrlRequest {}))
             .await
             .expect("auth url")
             .into_inner()
@@ -655,7 +664,7 @@ mod tests {
 
         // When a code is exchanged
         let resp = service
-            .exchange_code(Request::new(ExchangeCodeRequest {
+            .exchange_code(Request::direct(ExchangeCodeRequest {
                 code: "login-code".to_string(),
                 state,
             }))
@@ -683,7 +692,7 @@ mod tests {
 
         // When the session is refreshed
         let resp = service
-            .refresh_session(Request::new(RefreshSessionRequest { refresh_token }))
+            .refresh_session(Request::direct(RefreshSessionRequest { refresh_token }))
             .await
             .expect("refresh of a valid refresh token should succeed")
             .into_inner();
@@ -707,7 +716,7 @@ mod tests {
 
         // When it is presented to refresh
         let result = service
-            .refresh_session(Request::new(RefreshSessionRequest {
+            .refresh_session(Request::direct(RefreshSessionRequest {
                 refresh_token: access_token,
             }))
             .await;
@@ -734,7 +743,7 @@ mod tests {
 
         // When a refresh is attempted
         let result = service
-            .refresh_session(Request::new(RefreshSessionRequest {
+            .refresh_session(Request::direct(RefreshSessionRequest {
                 refresh_token: expired,
             }))
             .await;
@@ -750,7 +759,7 @@ mod tests {
     struct RefusesEveryLogin;
 
     impl LoginAdmission for RefusesEveryLogin {
-        fn admit(&self, github_login: &str) -> Result<(), Status> {
+        fn admit(&self, github_login: &str, _transport: RequestTransport) -> Result<(), Status> {
             Err(Status::permission_denied(format!(
                 "{github_login} is not admitted here"
             )))
@@ -774,7 +783,7 @@ mod tests {
                 code: "login-code".to_string(),
                 state,
             }),
-            metadata: Default::default(),
+            metadata: tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
         let refusal = bridge
             .handle_messages("auth.AuthService", "ExchangeCode", &[msg])
@@ -788,6 +797,114 @@ mod tests {
                 tddy_rpc::Code::PermissionDenied,
                 "testuser is not admitted here".to_string()
             ))
+        );
+    }
+
+    /// Records the transport of every login it is asked about, and admits each.
+    #[derive(Default)]
+    struct RecordsTransports(std::sync::Mutex<Vec<RequestTransport>>);
+
+    impl LoginAdmission for RecordsTransports {
+        fn admit(&self, _github_login: &str, transport: RequestTransport) -> Result<(), Status> {
+            self.0.lock().unwrap().push(transport);
+            Ok(())
+        }
+    }
+
+    /// A signed service over a stub that knows `user` as `login-code`, asking `admission` about
+    /// every completed login.
+    fn a_bridge_admitting_through(
+        admission: Arc<RecordsTransports>,
+    ) -> RpcBridge<AuthServiceServer<AuthServiceImpl<StubGitHubProvider>>> {
+        let daemon = a_daemon_key(9);
+        let (stub, user) = setup();
+        stub.register_code("login-code", user);
+        let service = a_signed_service(stub, &daemon, &[&daemon]).with_login_admission(admission);
+        RpcBridge::new(AuthServiceServer::new(service))
+    }
+
+    /// Call `method` with `request` as a host serving `transport` would hand it over.
+    async fn call_over<Res: prost::Message + Default>(
+        bridge: &RpcBridge<AuthServiceServer<AuthServiceImpl<StubGitHubProvider>>>,
+        transport: RequestTransport,
+        method: &str,
+        request: impl prost::Message,
+    ) -> Res {
+        let message = tddy_rpc::RpcMessage::new(
+            request.encode_to_vec(),
+            tddy_rpc::RequestMetadata::over(transport),
+        );
+        match bridge
+            .handle_messages("auth.AuthService", method, &[message])
+            .await
+            .unwrap_or_else(|status| panic!("{method} failed: {status:?}"))
+        {
+            tddy_rpc::ResponseBody::Complete(chunks) => {
+                Res::decode(&chunks[0][..]).expect("a unary response decodes")
+            }
+            _ => panic!("{method} is unary"),
+        }
+    }
+
+    #[tokio::test]
+    async fn admission_is_told_the_transport_a_redirect_login_completed_over() {
+        // Given a signed service whose admission records what it is told
+        let admission = Arc::new(RecordsTransports::default());
+        let bridge = a_bridge_admitting_through(Arc::clone(&admission));
+        let state = do_get_auth_url_state(&bridge).await;
+
+        // When the exchange arrives over the LiveKit room
+        let _: ExchangeCodeResponse = call_over(
+            &bridge,
+            RequestTransport::LiveKit,
+            "ExchangeCode",
+            ExchangeCodeRequest {
+                code: "login-code".to_string(),
+                state,
+            },
+        )
+        .await;
+
+        // Then admission was told exactly that
+        assert_eq!(
+            *admission.0.lock().unwrap(),
+            vec![RequestTransport::LiveKit]
+        );
+    }
+
+    #[tokio::test]
+    async fn admission_is_told_the_transport_a_device_login_completed_over() {
+        // Given a signed service whose admission records what it is told, and a started device login
+        let admission = Arc::new(RecordsTransports::default());
+        let bridge = a_bridge_admitting_through(Arc::clone(&admission));
+        let started: StartDeviceLoginResponse = call_over(
+            &bridge,
+            RequestTransport::InProcess,
+            "StartDeviceLogin",
+            StartDeviceLoginRequest {},
+        )
+        .await;
+
+        // When it is polled to completion over a Unix socket
+        loop {
+            let polled: PollDeviceLoginResponse = call_over(
+                &bridge,
+                RequestTransport::UnixSocket,
+                "PollDeviceLogin",
+                PollDeviceLoginRequest {
+                    device_code: started.device_code.clone(),
+                },
+            )
+            .await;
+            if polled.state() == DeviceLoginState::Complete {
+                break;
+            }
+        }
+
+        // Then admission was told the transport of the poll that completed it
+        assert_eq!(
+            *admission.0.lock().unwrap(),
+            vec![RequestTransport::UnixSocket]
         );
     }
 }

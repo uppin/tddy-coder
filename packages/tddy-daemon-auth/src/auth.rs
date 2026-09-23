@@ -872,7 +872,7 @@ mod tests {
         session_token: &str,
     ) -> Result<MintLiveKitTokenResponse, Status> {
         service
-            .mint_live_kit_token(Request::new(MintLiveKitTokenRequest {
+            .mint_live_kit_token(Request::direct(MintLiveKitTokenRequest {
                 session_token: session_token.to_string(),
             }))
             .await
@@ -1087,7 +1087,7 @@ mod tests {
         let bridge = tddy_rpc::RpcBridge::new(tddy_rpc::MultiRpcService::new(vec![entry]));
         let message = tddy_rpc::RpcMessage {
             payload: request.encode_to_vec(),
-            metadata: tddy_rpc::RequestMetadata::default(),
+            metadata: tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
         let body = bridge
             .handle_messages("token.TokenService", "GenerateToken", &[message])

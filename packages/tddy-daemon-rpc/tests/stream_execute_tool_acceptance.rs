@@ -86,7 +86,7 @@ async fn a_workspace_session() -> Workspace {
     let service = test_service(sessions.path().to_path_buf());
 
     let started = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: PROJECT_ID.to_string(),
             session_type: "workspace".to_string(),
@@ -193,7 +193,7 @@ async fn a_result_larger_than_one_frame_reassembles_byte_for_byte() {
     // When it is read over the streaming RPC
     let stream = workspace
         .service
-        .stream_execute_tool(Request::new(a_read_request(
+        .stream_execute_tool(Request::direct(a_read_request(
             &workspace.session_id,
             "large.txt",
         )))
@@ -251,7 +251,7 @@ async fn a_streamed_tool_result_equals_the_unary_result_for_the_same_call() {
     // When the same call is made over both RPCs
     let unary = workspace
         .service
-        .execute_tool(Request::new(a_read_request(
+        .execute_tool(Request::direct(a_read_request(
             &workspace.session_id,
             "small.txt",
         )))
@@ -260,7 +260,7 @@ async fn a_streamed_tool_result_equals_the_unary_result_for_the_same_call() {
         .into_inner();
     let stream = workspace
         .service
-        .stream_execute_tool(Request::new(a_read_request(
+        .stream_execute_tool(Request::direct(a_read_request(
             &workspace.session_id,
             "small.txt",
         )))
@@ -304,7 +304,7 @@ async fn a_tool_error_is_reported_on_the_final_frame_rather_than_as_a_stream_err
     // When an unknown tool is invoked
     let stream = workspace
         .service
-        .stream_execute_tool(Request::new(ExecuteToolRequest {
+        .stream_execute_tool(Request::direct(ExecuteToolRequest {
             tool_name: "NoSuchTool".to_string(),
             ..a_read_request(&workspace.session_id, "irrelevant.txt")
         }))

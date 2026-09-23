@@ -61,7 +61,12 @@ impl SupervisorClient {
         let (reader, writer) = stream.into_split();
         // The supervisor never calls back into its callers, so the service hosted for the inbound
         // direction refuses everything rather than pretending to offer a surface.
-        let (transport, endpoint) = StdioEndpoint::from_duplex(reader, writer, NoInboundService);
+        let (transport, endpoint) = StdioEndpoint::from_duplex(
+            reader,
+            writer,
+            NoInboundService,
+            tddy_rpc::RequestTransport::UnixSocket,
+        );
         Ok(SupervisorClient {
             socket_path: socket_path.to_path_buf(),
             transport,

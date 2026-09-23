@@ -21,6 +21,14 @@
   - `desktop.yaml.production` — a public `client_id` by default, `client_secret` absent
 - **tddy-web**: [capability-gating.md](../../../packages/tddy-web/docs/capability-gating.md)
   - the sign-in screen: show the user code, open the verification URI, poll, handle expiry/denial
+- **V1 — transport-stamped request metadata** (see *Decisions during green*):
+  - **tddy-rpc**: `RequestTransport`, `RequestMetadata::over` (no `Default`), `Request::direct`
+    (no `Request::new`), `ServerEngine::new(service, transport)`, `start_bidi_stream(.., metadata, ..)`
+  - **tddy-tauri-rpc**, **tddy-livekit**, **tddy-stdio**, **tddy-connectrpc**, **tddy-codegen**,
+    **tddy-service** (tonic supplement): the stamping hosts
+  - **tddy-github** (`LoginAdmission::admit`), **tddy-daemon-auth** (`FirstLoginEnrolment`)
+  - every crate that built a request or metadata — `Request::direct` / an explicit transport at each
+    site; no behaviour change there
 
 ## Related Feature Documentation
 
@@ -319,6 +327,50 @@ open them, because its own `tddy-github` finding is the one in its path.
   - `runtime::build` refuses an embedded host that serves sign-in to an empty `users:` but names
     no config file, instead of silently assembling a desktop that can never enrol.
 
+- **V1 — transport-stamped request metadata (developer, 2026-09-23):** option 2 of *V1 options*.
+  Enrolment is decided by how the completing call reached the daemon, stamped by the host that
+  received it, never by anything the caller wrote. Applied as:
+  - `tddy_rpc::RequestTransport { InProcess, LiveKit, UnixSocket, Pipe, Http, Grpc, Direct }`, and
+    `RequestMetadata.transport` (private field, read through `transport()`). `Direct` is a call one
+    component makes on another in code, received over nothing.
+  - **No default metadata.** `RequestMetadata` no longer derives `Default` and can only be built
+    through `RequestMetadata::over(transport)`; `Request::new(inner)` is gone — a request is either
+    stamped by its host (`with_metadata`, `from_rpc_message`) or says `Request::direct(inner)`. Every
+    construction site, tests included, names its transport (~590 `Request::new` → `Request::direct`,
+    ~90 metadata sites).
+  - **Hosts stamp, envelopes cannot.** `ServerEngine::new(service, transport)` takes the transport
+    once from its host and stamps every dispatched message with it; the envelope's
+    `sender_identity` and `metadata` map (the fields a sender writes) are never read for it, and the
+    proto has no transport field. A generic endpoint that cannot tell its channel's kind
+    (`StdioEndpoint::from_duplex`) takes the transport from whoever opened the channel.
+  - `RpcService::start_bidi_stream` gains a `metadata: RequestMetadata` parameter, so a bidi
+    handler's `Request` carries its session's stamp instead of a false one (the generated handler
+    used to build it with `Request::new`).
+  - `LoginAdmission::admit(github_login, transport)`; `complete_login` takes the transport, read by
+    both `exchange_code` and `poll_device_login` before `into_inner`. `FirstLoginEnrolment` matches
+    the transport **exhaustively** — only `InProcess` enrols; any other on an unenrolled desktop logs,
+    writes nothing and admits the login unmapped (its RPCs refused `permission_denied`). A transport
+    added later must be decided there. A server has no admission and is unaffected.
+  - **Forwarding** needs no special case: `forward_to_peer` sends only the request bytes, and the
+    receiving daemon's `LiveKitParticipant` stamps it `LiveKit`. A login forwarded from a desktop's
+    window is, on the peer, a login from the room. Pinned by
+    `tddy-daemon-livekit/tests/forwarded_rpc_is_stamped_by_the_receiver.rs`.
+
+### Transports and their stamping sites
+
+| Transport | Host | Stamping site |
+|---|---|---|
+| `InProcess` | Tauri IPC — `WebviewRpcHost`, `MultiConnectionHost` (the desktop's window) | `tddy-tauri-rpc/src/host.rs:95`, `src/multi_host.rs:120` |
+| `LiveKit` | `LiveKitParticipant::connect` / `::join` — the common room, session rooms, peer forwards | `tddy-livekit/src/participant.rs:338`, `:495` |
+| `UnixSocket` | `StdioEndpoint::from_duplex` over a Unix socket: agent tool socket, sandbox tool socket, toolcall listener, supervisor socket, host-session socket | `tddy-daemon/src/agent_tool_socket.rs:71`; `tddy-sandbox-runner/src/runner.rs:1699`; `tddy-sandbox-app/src/sandboxed_session.rs:688`; `tddy-toolcall/src/toolcall/listener.rs:200`; `tddy-session-lifecycle/src/session_toolcall.rs:123`; `…/connection_service/svc_start_claude_cli_session.rs:224`; `tddy-supervisor/src/server.rs:596`; `tddy-coder/src/run.rs:1940`; clients (host a no-callback service): `tddy-session-tool-client/src/lib.rs:777`, `tddy-toolcall/src/toolcall/client.rs:73`, `tddy-supervisor/src/client.rs:68` |
+| `Pipe` | a parent/child's stdio: `StdioEndpoint::from_process_stdio`, `from_child_stdio`; a jail's piped stdio | `tddy-stdio/src/endpoint.rs:87`, `:120`; `tddy-daemon-sandbox/src/sandbox_session.rs:210` |
+| `Http` | Connect-RPC `/rpc` router | `tddy-connectrpc/src/router.rs:182` (`over_http`) |
+| `Grpc` | tonic: codegen'd `*TonicAdapter`, the exec-tool supplement, `From<tonic::Request>` | `tddy-codegen/src/generator.rs:1081`, `:1094`; `tddy-service/exec_tool_tonic_adapter_supplement.rs:32,55,72,88`; `tddy-rpc/src/types.rs:114` |
+| `Direct` | none — `Request::direct`, a call in code | every in-process delegation (e.g. `daemon_rpc_handler.rs`, `token_service.rs`) and handler-level tests |
+
+The engine stamps at `tddy-rpc/src/server_engine.rs` `metadata_of` (unary, client-streaming
+fragments, bidi open and continuations, and the bidi session's own metadata).
+
 ## Implementation Milestones
 
 - [x] **M1** — base-URL seam in `RealGitHubProvider`; six error returns covered
@@ -384,8 +436,8 @@ package, and the single web spec. Whole-workspace green comes from CI.
 
 ### From @validate-changes (2026-09-23)
 
-- **Enrolment is reachable from the LiveKit common room.** Decide and fix before merge (V1 below).
-  ⚠ Still open: no unspoofable transport signal exists; options recorded under *V1 options*.
+- ~~**Enrolment is reachable from the LiveKit common room.**~~ — done (V1): transport-stamped
+  request metadata; only an in-process login enrols.
 - ~~Bound `RealGitHubProvider::device_poll_intervals`~~ — done (V4).
 - ~~Floor the client's poll interval~~ — done as a protocol error rather than a floor (V5).
 - `admit` does synchronous file I/O under a `std::sync::Mutex` on an async RPC task
@@ -438,7 +490,7 @@ without consent. Re-run after freeing space:
 
 | # | Severity | Where | Finding |
 |---|---|---|---|
-| V1 | 🔴 High (security) — ⚠ **OPEN, blocked on a decision** (see *V1 options* below) | `runtime.rs:1467-1470`, `runtime.rs:584`, `first_login_admission.rs:43` | An embedded daemon serves **every** entry, `auth.AuthService` included, on the LiveKit common room, and it attaches enrolment to that same service. On an **unenrolled** desktop that has a `livekit:` block, any room peer can run `StartDeviceLogin` / `PollDeviceLogin` with its own GitHub account. It then becomes the one enrolled operator, mapped to the desktop's OS user. A fresh install has no `livekit:`, but an install that got past barrier 2 and stalled at barrier 3 has exactly that shape. Proposal: enrol only for a login that arrives over the in-process (Tauri) bridge, or refuse enrolment while the common room is served. No test covers either transport. |
+| V1 | ✅ Resolved (was 🔴 High, security) | `runtime.rs:1467-1470`, `runtime.rs:584`, `first_login_admission.rs:43` | An embedded daemon serves **every** entry, `auth.AuthService` included, on the LiveKit common room, and it attaches enrolment to that same service. On an **unenrolled** desktop that has a `livekit:` block, any room peer can run `StartDeviceLogin` / `PollDeviceLogin` with its own GitHub account. It then becomes the one enrolled operator, mapped to the desktop's OS user. A fresh install has no `livekit:`, but an install that got past barrier 2 and stalled at barrier 3 has exactly that shape. Proposal: enrol only for a login that arrives over the in-process (Tauri) bridge, or refuse enrolment while the common room is served. No test covers either transport. **Resolved (green, option 2 — developer's choice):** every serving host stamps `RequestMetadata`'s transport itself, and `FirstLoginEnrolment` enrols only a login completed `InProcess`; a login over the common room or the agent tool socket is minted unmapped and writes nothing. See *Decisions during green* and *Transports and their stamping sites*. Pinned end to end over the real `LiveKitParticipant` and the runtime's own agent tool socket (`first_login_enrolment_acceptance`, four new tests). |
 | V2 | 🟠 Medium | `first_login_enrolment.rs:84` | The first login rewrites `~/.tddy/desktop.yaml` via `serde_yaml::Value` and **strips every comment**, including the whole explanatory header `desktop.yaml.production` renders. Recorded as a TODO, but it hits every desktop on its first run. |
 | V3 | 🟠 Medium | `desktop.yaml.production:90-92` | M8 is not done, so the last acceptance criterion (a fresh install signs in with no edit) is unmet, and the file still tells operators to add a `client_secret`. |
 | V4 | ✅ Resolved | `real.rs` `device_attempts` | `device_poll_intervals` gains an entry for every started (or slowed-down) device code and loses it only on a terminal answer, so abandoned attempts accumulate. `StartDeviceLogin` is unauthenticated, though every entry costs a successful GitHub call. **Resolved (green):** each entry records its code's `expires_in` deadline (`DeviceAttempt`); every start and poll prunes closed windows (`open_device_attempts`), and Complete / Denied / Expired / any other error remove the entry. Pinned by `a_device_code_is_forgotten_once_its_window_has_passed` and `…_once_github_answers_it_expired`. |
@@ -448,6 +500,10 @@ without consent. Re-run after freeing space:
 | V8 | ℹ Info | PRD § Technical Impact | OAuth App was chosen, but the device-flow response has not been checked against the live API for the absence of an expiring `refresh_token`. |
 
 ### V1 options (green, 2026-09-23)
+
+> **Decided: option 2, transport-stamped metadata** (developer, 2026-09-23). Implemented as
+> recorded under *Decisions during green*; the options below are kept as the record of what was
+> weighed.
 
 The fix needs a signal that says which transport a login arrived on, set by the transport and not
 by the caller. **None exists today.** `tddy_rpc::RequestMetadata` carries only `sender_identity`,
@@ -511,5 +567,9 @@ options, for the developer:
 - [~] Answer the OAuth App / GitHub App question against the live API — **OAuth App** decided; live-API check still owed
 - [x] Decide and record the client-id placement — rendered into `desktop.yaml.production`
 - [ ] Package documentation for the six affected packages
+- [ ] Package documentation for V1's API change, at wrap: `tddy-rpc` (the transport stamp and who
+      sets it) and `tddy-stdio` (`from_duplex` now takes the transport its opener names — also
+      worth a line where `packages/tddy-toolcall/docs/architecture.md` and
+      `docs/ft/coder/rpc-multi-transport.md` describe `from_duplex`)
 - [ ] `/wrap-context-docs` — deletes `2026-09-18-desktop-install-configures-no-identity.md` and the
       `missing-tests-real-exchange-code` record this node claims

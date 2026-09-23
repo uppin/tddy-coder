@@ -98,7 +98,7 @@ async fn a_refused_lookup(request: AgentActivityDeltaRequest) -> Status {
     let service = test_service(sessions.path().to_path_buf());
     service
         .activity_service()
-        .stream_agent_activity_delta(Request::new(request))
+        .stream_agent_activity_delta(Request::direct(request))
         .await
         .expect_err("expected the lookup to be refused rather than streamed")
 }

@@ -38,7 +38,7 @@ fn make_unit_service(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
 async fn delete_session_unit_rejects_invalid_token() {
     let temp = tempfile::tempdir().unwrap();
     let service = make_unit_service(temp.path().to_path_buf());
-    let request = Request::new(DeleteSessionRequest {
+    let request = Request::direct(DeleteSessionRequest {
         session_token: "bad-token".to_string(),
         session_id: "any-session".to_string(),
     });
@@ -58,7 +58,7 @@ async fn delete_session_unit_rejects_invalid_token() {
 async fn delete_session_unit_accepts_daemon_direct_caller_with_valid_token() {
     let temp = tempfile::tempdir().unwrap();
     let service = make_unit_service(temp.path().to_path_buf());
-    let request = Request::new(DeleteSessionRequest {
+    let request = Request::direct(DeleteSessionRequest {
         session_token: "valid".to_string(),
         session_id: "no-such-session".to_string(),
     });

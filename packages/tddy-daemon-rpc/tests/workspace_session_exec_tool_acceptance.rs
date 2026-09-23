@@ -104,7 +104,7 @@ async fn workspace_session_execute_tool_write_then_read_round_trips() {
 
     // When
     let start_resp = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_type: "workspace".to_string(),
             project_id: TEST_PROJECT_ID.to_string(),
@@ -116,7 +116,7 @@ async fn workspace_session_execute_tool_write_then_read_round_trips() {
 
     // When — Write a file via ExecuteTool.
     let write_resp = service
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: session_id.clone(),
             tool_name: "Write".to_string(),
@@ -135,7 +135,7 @@ async fn workspace_session_execute_tool_write_then_read_round_trips() {
 
     // When — Read it back via ExecuteTool.
     let read_resp = service
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: session_id.clone(),
             tool_name: "Read".to_string(),

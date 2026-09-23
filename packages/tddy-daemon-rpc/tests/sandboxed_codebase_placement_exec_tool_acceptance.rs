@@ -291,7 +291,7 @@ async fn a_sandboxed_codebase_sessions_tool_call_is_served_by_its_jail() {
     let sessions_tmp = tempfile::tempdir().unwrap();
     let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
     let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
+        .start_session(Request::direct(a_sandboxed_codebase_request()))
         .await
         .expect("a jailed-codebase session must start")
         .into_inner();
@@ -299,7 +299,7 @@ async fn a_sandboxed_codebase_sessions_tool_call_is_served_by_its_jail() {
 
     // When the agent reads a file through the session its MCP addresses
     let response = service
-        .execute_tool(Request::new(a_read_of(&checkout)))
+        .execute_tool(Request::direct(a_read_of(&checkout)))
         .await
         .expect("a jailed checkout must serve its own tool calls")
         .into_inner();
@@ -336,7 +336,7 @@ async fn a_sandboxed_codebase_sessions_tool_call_is_refused_when_its_jail_is_gon
     let started = {
         let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
         let started = service
-            .start_session(Request::new(a_sandboxed_codebase_request()))
+            .start_session(Request::direct(a_sandboxed_codebase_request()))
             .await
             .expect("a jailed-codebase session must start")
             .into_inner();
@@ -352,7 +352,7 @@ async fn a_sandboxed_codebase_sessions_tool_call_is_refused_when_its_jail_is_gon
 
     // When the agent reads a file
     let response = restarted
-        .execute_tool(Request::new(a_read_of(&checkout)))
+        .execute_tool(Request::direct(a_read_of(&checkout)))
         .await
         .expect("the refusal is the tool's answer, not a transport failure")
         .into_inner();

@@ -96,7 +96,7 @@ fn a_service_with(
 
 async fn known_hosts_of(service: &HostServiceImpl) -> Vec<KnownHostEntry> {
     service
-        .list_known_hosts(Request::new(ListKnownHostsRequest {
+        .list_known_hosts(Request::direct(ListKnownHostsRequest {
             session_token: "valid".to_string(),
         }))
         .await
@@ -119,7 +119,7 @@ async fn list_known_hosts_rejects_an_invalid_token() {
 
     // When a request arrives with a token no session ever issued
     let result = service
-        .list_known_hosts(Request::new(ListKnownHostsRequest {
+        .list_known_hosts(Request::direct(ListKnownHostsRequest {
             session_token: "nope".to_string(),
         }))
         .await;

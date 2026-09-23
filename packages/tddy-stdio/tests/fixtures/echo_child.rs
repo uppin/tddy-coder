@@ -58,6 +58,7 @@ impl RpcService for EchoService {
         &self,
         service: &str,
         method: &str,
+        _metadata: tddy_rpc::RequestMetadata,
         mut input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, Status> {
         assert_eq!(service, "test.EchoService");

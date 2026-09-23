@@ -12,13 +12,21 @@
 //!
 //! Which deployments enrol is decided where the daemon is assembled — an embedded desktop host
 //! only. A server with an empty `users:` never has this admission, and refuses as it always has.
+//!
+//! Which *logins* enrol is decided by the transport the completing call arrived on, as the host
+//! that received it stamped it: only [`RequestTransport::InProcess`], the desktop application's
+//! own webview. The same `auth.AuthService` is served on the LiveKit common room and the agent
+//! tool socket too, and a login completed over either is somebody who is not necessarily at this
+//! machine — a room peer, a co-located process. On an unenrolled desktop such a login is not
+//! enrolled and nothing is written; it completes as any unmapped login does, and its RPCs are
+//! refused.
 
 use std::path::PathBuf;
 
 use tddy_daemon_kernel::first_login_enrolment::EnrolmentRefusal;
 use tddy_daemon_kernel::live_users::LiveUsers;
 use tddy_github::LoginAdmission;
-use tddy_rpc::Status;
+use tddy_rpc::{RequestTransport, Status};
 
 /// Enrols a desktop deployment's first login as the OS user the daemon runs as.
 pub struct FirstLoginEnrolment {
@@ -40,9 +48,27 @@ impl FirstLoginEnrolment {
 }
 
 impl LoginAdmission for FirstLoginEnrolment {
-    fn admit(&self, github_login: &str) -> Result<(), Status> {
+    fn admit(&self, github_login: &str, transport: RequestTransport) -> Result<(), Status> {
         if self.users.os_user_for_github(github_login).is_some() {
             return Ok(());
+        }
+        // Exhaustive on purpose: a transport added later must be decided here, not inherit
+        // enrolment by falling into a wildcard.
+        match transport {
+            RequestTransport::InProcess => {}
+            RequestTransport::LiveKit
+            | RequestTransport::UnixSocket
+            | RequestTransport::Pipe
+            | RequestTransport::Http
+            | RequestTransport::Grpc
+            | RequestTransport::Direct => {
+                log::warn!(
+                    target: "tddy_daemon::auth",
+                    "GitHub user {github_login} signed in over {transport:?}, not this desktop's \
+                     own window; it is not enrolled, so its RPCs are refused"
+                );
+                return Ok(());
+            }
         }
         match self
             .users

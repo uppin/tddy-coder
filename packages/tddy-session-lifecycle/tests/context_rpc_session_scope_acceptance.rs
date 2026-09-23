@@ -115,7 +115,7 @@ async fn a_session_paired_with(split_agent: Option<SplitAgentPlacement>) -> ASes
     let service = std::sync::Arc::new(test_service(sessions.path().to_path_buf()));
 
     let started = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: PROJECT_ID.to_string(),
             session_type: "workspace".to_string(),
@@ -170,7 +170,7 @@ impl ASession {
     async fn manifest_paths_asked_as(&self, agent: &str) -> Vec<String> {
         let mut stream = self
             .service
-            .stream_context_manifest(Request::new(ContextManifestRequest {
+            .stream_context_manifest(Request::direct(ContextManifestRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -195,7 +195,7 @@ impl ASession {
     ) -> Result<Vec<u8>, tddy_rpc::Status> {
         let mut stream = self
             .service
-            .stream_read_context_file(Request::new(ReadContextFileRequest {
+            .stream_read_context_file(Request::direct(ReadContextFileRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -220,7 +220,7 @@ impl ASession {
     ) -> Result<BTreeMap<String, Vec<u8>>, tddy_rpc::Status> {
         let mut stream = self
             .service
-            .stream_read_context_file_batch(Request::new(ReadContextFileBatchRequest {
+            .stream_read_context_file_batch(Request::direct(ReadContextFileBatchRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),

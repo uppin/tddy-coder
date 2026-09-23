@@ -54,7 +54,7 @@ mod codegen_acceptance {
         let payload = req.encode_to_vec();
         let msg = RpcMessage {
             payload,
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
 
         // When — routing the message through the bridge
@@ -79,7 +79,7 @@ mod codegen_acceptance {
         let bridge = create_echo_bridge();
         let msg = RpcMessage {
             payload: vec![],
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
 
         // When — dispatching to an unknown method name
@@ -97,7 +97,7 @@ mod codegen_acceptance {
         let bridge = create_echo_bridge();
         let msg = RpcMessage {
             payload: vec![],
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
 
         // When — routing to an unregistered service name
@@ -128,7 +128,7 @@ mod codegen_acceptance {
             };
             tx.send(RpcMessage {
                 payload: req.encode_to_vec(),
-                metadata: RequestMetadata::default(),
+                metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
             })
             .await
             .unwrap();
@@ -137,7 +137,12 @@ mod codegen_acceptance {
 
         // When — opening a bidi stream and draining all responses
         let result = bridge
-            .start_bidi_stream("test.EchoService", "EchoBidiStream", rx)
+            .start_bidi_stream(
+                "test.EchoService",
+                "EchoBidiStream",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                rx,
+            )
             .await;
         let handle = result.expect("start_bidi_stream should succeed");
 
@@ -164,7 +169,15 @@ mod codegen_acceptance {
         let (_tx, rx) = tokio::sync::mpsc::channel::<RpcMessage>(1);
 
         // When / Then — opening the stream immediately returns an error naming the unknown service
-        match bridge.start_bidi_stream("unknown.Svc", "Foo", rx).await {
+        match bridge
+            .start_bidi_stream(
+                "unknown.Svc",
+                "Foo",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                rx,
+            )
+            .await
+        {
             Err(status) => assert!(
                 status.message.contains("Unknown service"),
                 "expected 'Unknown service' in error, got: {}",
@@ -182,7 +195,12 @@ mod codegen_acceptance {
 
         // When / Then — opening the stream immediately returns an error naming the unknown method
         match bridge
-            .start_bidi_stream("test.EchoService", "NonExistent", rx)
+            .start_bidi_stream(
+                "test.EchoService",
+                "NonExistent",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                rx,
+            )
             .await
         {
             Err(status) => assert!(
@@ -295,7 +313,7 @@ mod bidi_session_tests {
                     message: text.to_string(),
                 }
                 .encode_to_vec(),
-                metadata: RequestMetadata::default(),
+                metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
             })
             .await
             .unwrap();
@@ -304,7 +322,12 @@ mod bidi_session_tests {
 
         // When — opening a single bidi stream and draining all responses
         let handle = bridge
-            .start_bidi_stream("test.EchoService", "EchoBidiStream", rx)
+            .start_bidi_stream(
+                "test.EchoService",
+                "EchoBidiStream",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                rx,
+            )
             .await
             .expect("start_bidi_stream should succeed");
 
@@ -351,7 +374,7 @@ mod bidi_session_tests {
                         message: text.to_string(),
                     }
                     .encode_to_vec(),
-                    metadata: RequestMetadata::default(),
+                    metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
                 })
                 .await
                 .unwrap();
@@ -359,7 +382,12 @@ mod bidi_session_tests {
             drop(tx);
 
             let handle = bridge
-                .start_bidi_stream("test.EchoService", "EchoBidiStream", rx)
+                .start_bidi_stream(
+                    "test.EchoService",
+                    "EchoBidiStream",
+                    tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                    rx,
+                )
                 .await
                 .expect("start_bidi_stream should succeed");
 
@@ -434,7 +462,7 @@ mod token_service_acceptance {
         };
         let msg = RpcMessage {
             payload: req.encode_to_vec(),
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
 
         // When — calling GenerateToken via the bridge
@@ -467,7 +495,7 @@ mod token_service_acceptance {
         };
         let msg = RpcMessage {
             payload: req.encode_to_vec(),
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
 
         // When — calling RefreshToken via the bridge
@@ -724,14 +752,19 @@ mod tddy_remote_livekit_acceptance {
                 )),
             }
             .encode_to_vec(),
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         })
         .await
         .unwrap();
         drop(tx);
 
         let handle = bridge
-            .start_bidi_stream("tddy.v1.TddyRemote", "Stream", rx)
+            .start_bidi_stream(
+                "tddy.v1.TddyRemote",
+                "Stream",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                rx,
+            )
             .await
             .expect("start_bidi_stream should succeed");
 
@@ -920,14 +953,19 @@ mod session_view_adapter_surface_acceptance {
                 )),
             }
             .encode_to_vec(),
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         })
         .await
         .unwrap();
         drop(tx);
 
         let handle = RpcBridge::new(surface)
-            .start_bidi_stream("tddy.v1.TddyRemote", "Stream", rx)
+            .start_bidi_stream(
+                "tddy.v1.TddyRemote",
+                "Stream",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                rx,
+            )
             .await
             .expect("session surface must route tddy.v1.TddyRemote/Stream to the Presenter");
 
@@ -1015,13 +1053,18 @@ mod session_view_adapter_surface_acceptance {
                 )),
             }
             .encode_to_vec(),
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         })
         .await
         .unwrap();
 
         let handle = RpcBridge::new(surface)
-            .start_bidi_stream("tddy.acp.v1.AcpService", "Session", rx)
+            .start_bidi_stream(
+                "tddy.acp.v1.AcpService",
+                "Session",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                rx,
+            )
             .await
             .expect("session surface must route tddy.acp.v1.AcpService/Session");
         let mut output_rx = match handle.output {
@@ -1097,13 +1140,18 @@ mod session_view_adapter_surface_acceptance {
                 )),
             }
             .encode_to_vec(),
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         })
         .await
         .unwrap();
 
         let handle = RpcBridge::new(surface)
-            .start_bidi_stream("tddy.acp.v1.AcpService", "Session", rx)
+            .start_bidi_stream(
+                "tddy.acp.v1.AcpService",
+                "Session",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                rx,
+            )
             .await
             .expect("route AcpService/Session");
         let mut output_rx = match handle.output {
@@ -1185,7 +1233,7 @@ mod session_view_adapter_surface_acceptance {
 
         let rpc = |msg: AcpClientMessage| RpcMessage {
             payload: msg.encode_to_vec(),
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
 
         let (tx, rx) = tokio_mpsc::channel::<RpcMessage>(64);
@@ -1213,7 +1261,12 @@ mod session_view_adapter_surface_acceptance {
         .unwrap();
 
         let handle = RpcBridge::new(surface)
-            .start_bidi_stream("tddy.acp.v1.AcpService", "Session", rx)
+            .start_bidi_stream(
+                "tddy.acp.v1.AcpService",
+                "Session",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                rx,
+            )
             .await
             .expect("route AcpService/Session");
         let mut output_rx = match handle.output {
@@ -1266,13 +1319,18 @@ mod session_view_adapter_surface_acceptance {
         // Eager open frame (no intent) opens the stream / `connect_view` without submitting anything.
         tx.send(RpcMessage {
             payload: ClientMessage { intent: None }.encode_to_vec(),
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         })
         .await
         .unwrap();
 
         let handle = RpcBridge::new(surface)
-            .start_bidi_stream("tddy.v1.TddyRemote", "Stream", rx)
+            .start_bidi_stream(
+                "tddy.v1.TddyRemote",
+                "Stream",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                rx,
+            )
             .await
             .expect("session surface must route tddy.v1.TddyRemote/Stream to the Presenter");
         let mut output_rx = match handle.output {
@@ -1484,7 +1542,7 @@ mod reflection_acceptance {
         };
         RpcMessage {
             payload: req.encode_to_vec(),
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         }
     }
 
@@ -1495,7 +1553,7 @@ mod reflection_acceptance {
         };
         RpcMessage {
             payload: req.encode_to_vec(),
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         }
     }
 
@@ -1506,7 +1564,7 @@ mod reflection_acceptance {
         };
         RpcMessage {
             payload: req.encode_to_vec(),
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         }
     }
 
@@ -1566,6 +1624,7 @@ mod reflection_acceptance {
             .start_bidi_stream(
                 "grpc.reflection.v1.ServerReflection",
                 "ServerReflectionInfo",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
                 rx,
             )
             .await
@@ -1626,6 +1685,7 @@ mod reflection_acceptance {
             .start_bidi_stream(
                 "grpc.reflection.v1.ServerReflection",
                 "ServerReflectionInfo",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
                 rx,
             )
             .await
@@ -1683,6 +1743,7 @@ mod reflection_acceptance {
             .start_bidi_stream(
                 "grpc.reflection.v1.ServerReflection",
                 "ServerReflectionInfo",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
                 rx,
             )
             .await
@@ -1737,6 +1798,7 @@ mod reflection_acceptance {
             .start_bidi_stream(
                 "grpc.reflection.v1.ServerReflection",
                 "ServerReflectionInfo",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
                 rx,
             )
             .await

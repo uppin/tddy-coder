@@ -129,7 +129,7 @@ async fn add_project_to_host_locally_clones_and_persists_the_row_reusing_the_giv
 
     // When
     let response = service
-        .add_project_to_host(Request::new(a_request(GIVEN_PROJECT_ID, &source)))
+        .add_project_to_host(Request::direct(a_request(GIVEN_PROJECT_ID, &source)))
         .await
         .expect("add_project_to_host succeeds");
 
@@ -183,7 +183,7 @@ async fn add_project_to_host_is_idempotent_when_the_project_id_already_exists_on
 
     // When — adding the same project_id again
     let response = service
-        .add_project_to_host(Request::new(a_request(
+        .add_project_to_host(Request::direct(a_request(
             GIVEN_PROJECT_ID,
             "https://example.com/alpha.git",
         )))
@@ -220,7 +220,10 @@ async fn add_project_to_host_rejects_an_empty_project_id() {
 
     // When
     let result = service
-        .add_project_to_host(Request::new(a_request("", "https://example.com/alpha.git")))
+        .add_project_to_host(Request::direct(a_request(
+            "",
+            "https://example.com/alpha.git",
+        )))
         .await;
 
     // Then

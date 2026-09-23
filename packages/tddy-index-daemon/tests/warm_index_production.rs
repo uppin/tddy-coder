@@ -102,7 +102,7 @@ async fn anchoring(entry: &tddy_rpc::ServiceEntry, root: &Path) -> Duration {
     };
     let message = tddy_rpc::RpcMessage::new(
         request.encode_to_vec(),
-        tddy_rpc::RequestMetadata::default(),
+        tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     );
     let started = Instant::now();
     let answer = entry
@@ -132,7 +132,7 @@ async fn warming(entry: &tddy_rpc::ServiceEntry, root: &Path) -> (Duration, Vec<
     };
     let message = tddy_rpc::RpcMessage::new(
         request.encode_to_vec(),
-        tddy_rpc::RequestMetadata::default(),
+        tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     );
     let started = Instant::now();
     let answer = entry.service.handle_rpc(entry.name, "Warm", &message).await;
@@ -248,7 +248,7 @@ async fn two_roots_in_one_process_each_answer_from_their_own_index() {
     let held: WorkspacesResponse = {
         let message = tddy_rpc::RpcMessage::new(
             WorkspacesRequest {}.encode_to_vec(),
-            tddy_rpc::RequestMetadata::default(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         );
         let answer = entry
             .service

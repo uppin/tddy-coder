@@ -173,7 +173,7 @@ async fn execute_tool_with_known_remote_instance_id_returns_failed_precondition_
 
     // When
     let status = service
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: NONEXISTENT_SESSION_ID.to_string(),
             tool_name: "Read".to_string(),
@@ -215,7 +215,7 @@ async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument()
 
     // When
     let status = service
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: NONEXISTENT_SESSION_ID.to_string(),
             tool_name: "Read".to_string(),
@@ -250,7 +250,7 @@ async fn list_exec_tools_with_known_remote_instance_id_returns_failed_preconditi
 
     // When
     let status = service
-        .list_exec_tools(Request::new(ListExecToolsRequest {
+        .list_exec_tools(Request::direct(ListExecToolsRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: REMOTE_PEER_ID.to_string(), // known peer, no room
         }))
@@ -290,7 +290,7 @@ async fn list_exec_tools_with_unknown_instance_id_returns_invalid_argument() {
 
     // When
     let status = service
-        .list_exec_tools(Request::new(ListExecToolsRequest {
+        .list_exec_tools(Request::direct(ListExecToolsRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: "totally-unknown-daemon".to_string(),
         }))

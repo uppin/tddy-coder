@@ -175,7 +175,7 @@ async fn tooling_asked_of(
     host: &str,
 ) -> Result<GetHostToolingResponse, Status> {
     service
-        .get_host_tooling(Request::new(GetHostToolingRequest {
+        .get_host_tooling(Request::direct(GetHostToolingRequest {
             session_token: session_token.to_string(),
             daemon_instance_id: host.to_string(),
         }))

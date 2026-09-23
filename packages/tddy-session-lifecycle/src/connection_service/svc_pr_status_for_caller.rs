@@ -72,7 +72,7 @@ impl DaemonSessionHost {
                 let base_ref = self
                     .rpc_families()?
                     .pr_stack_handler()
-                    .resolve_stack_base(Request::new(ResolveStackBaseRequest {
+                    .resolve_stack_base(Request::direct(ResolveStackBaseRequest {
                         session_token: lookup.session_token.to_string(),
                         daemon_instance_id,
                         stack_parent: lookup.stack_parent.unwrap_or_default().trim().to_string(),
@@ -178,7 +178,7 @@ impl DaemonSessionHost {
         }
         self.rpc_families()?
             .pr_stack_handler()
-            .link_stack_node(Request::new(LinkStackNodeRequest {
+            .link_stack_node(Request::direct(LinkStackNodeRequest {
                 session_token: link.session_token.to_string(),
                 daemon_instance_id: link.orchestrator_daemon_instance_id.trim().to_string(),
                 orchestrator_session_id: link.orchestrator_session_id.trim().to_string(),

@@ -435,7 +435,7 @@ async fn start_session_rpc_threads_permission_mode_to_pty() {
 
     // When
     let resp = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             tool_path: String::new(),
             project_id: TEST_PROJECT_ID.to_string(),

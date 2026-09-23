@@ -161,7 +161,7 @@ fn a_service_with_both_subscribers(
 async fn report_status(service: &DaemonSessionHost, status: &str) {
     service
         .activity_service()
-        .report_session_status(Request::new(ReportSessionStatusRequest {
+        .report_session_status(Request::direct(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
             os_user: OS_USER.to_string(),

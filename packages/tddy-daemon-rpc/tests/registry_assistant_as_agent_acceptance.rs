@@ -123,7 +123,7 @@ impl Harness {
     /// a peer's remote-id resolution both read.
     async fn when_listing_the_subagents_it_offers(&self) -> Vec<SubagentInfo> {
         self.service
-            .list_subagents(Request::new(ListSubagentsRequest {}))
+            .list_subagents(Request::direct(ListSubagentsRequest {}))
             .await
             .expect("ListSubagents must succeed")
             .into_inner()
@@ -134,7 +134,7 @@ impl Harness {
     /// how far the request got: rejected at the agent gate, or past it.
     async fn when_starting_a_session_as(&self, agent: &str) -> tddy_rpc::Status {
         self.service
-            .start_session(Request::new(StartSessionRequest {
+            .start_session(Request::direct(StartSessionRequest {
                 session_token: VALID_TOKEN.to_string(),
                 tool_path: "/bin/true".to_string(),
                 project_id: "no-such-project".to_string(),

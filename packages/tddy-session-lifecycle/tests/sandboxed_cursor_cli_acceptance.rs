@@ -224,7 +224,7 @@ async fn sandboxed_cursor_cli_start_persists_metadata_and_empty_livekit() {
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let resp = service
-        .start_session(Request::new(sandbox_cursor_start_request()))
+        .start_session(Request::direct(sandbox_cursor_start_request()))
         .await
         .expect("sandbox cursor StartSession must succeed");
     let inner = resp.into_inner();
@@ -267,14 +267,14 @@ async fn sandboxed_cursor_cli_connect_session_returns_empty_livekit() {
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let session_id = service
-        .start_session(Request::new(sandbox_cursor_start_request()))
+        .start_session(Request::direct(sandbox_cursor_start_request()))
         .await
         .expect("StartSession")
         .into_inner()
         .session_id;
 
     let connect = service
-        .connect_session(Request::new(ConnectSessionRequest {
+        .connect_session(Request::direct(ConnectSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id,
         }))
@@ -306,7 +306,7 @@ async fn sandboxed_cursor_cli_terminal_io_round_trips() {
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let session_id = service
-        .start_session(Request::new(sandbox_cursor_start_request()))
+        .start_session(Request::direct(sandbox_cursor_start_request()))
         .await
         .expect("StartSession")
         .into_inner()
@@ -314,7 +314,7 @@ async fn sandboxed_cursor_cli_terminal_io_round_trips() {
 
     let stream_resp = service
         .terminal_session_service()
-        .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
+        .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: session_id.clone(),
             terminal_id: String::new(),
@@ -388,7 +388,7 @@ async fn sandboxed_cursor_cli_start_wires_specialized_agents_env_and_metadata() 
     };
 
     let resp = service
-        .start_session(Request::new(request))
+        .start_session(Request::direct(request))
         .await
         .expect("StartSession with specialized_agents");
     let inner = resp.into_inner();
@@ -400,7 +400,7 @@ async fn sandboxed_cursor_cli_start_wires_specialized_agents_env_and_metadata() 
 
     let stream_resp = service
         .terminal_session_service()
-        .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
+        .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: inner.session_id.clone(),
             terminal_id: String::new(),

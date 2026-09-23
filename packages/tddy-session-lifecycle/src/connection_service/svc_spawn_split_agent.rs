@@ -432,7 +432,7 @@ impl DaemonSessionHost {
         // so `split_pairing` answers `None` for it.
         if codebase_daemon == local_instance_id_for_config(&self.config) {
             let deleted = Box::pin(self.delete_session_at_session_coordinate(
-                tddy_rpc::Request::new(DeleteSessionRequest {
+                tddy_rpc::Request::direct(DeleteSessionRequest {
                     session_token: session_token.to_string(),
                     session_id: codebase_session.to_string(),
                 }),

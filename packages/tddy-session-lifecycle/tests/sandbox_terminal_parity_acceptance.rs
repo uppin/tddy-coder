@@ -629,7 +629,7 @@ impl ADaemonServingAJailedSession {
     async fn a_browser_screen_claims_control(&self) {
         let granted = self
             .terminals
-            .claim_terminal_control(Request::new(ClaimTerminalControlRequest {
+            .claim_terminal_control(Request::direct(ClaimTerminalControlRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: SESSION_ID.to_string(),
                 screen_id: A_BROWSER_SCREEN.to_string(),
@@ -648,7 +648,7 @@ impl ADaemonServingAJailedSession {
     /// `tddy-sandbox-app` has none to send and no RPC to claim one with.
     async fn the_jail_sends(&self, keystrokes: &[u8]) {
         self.terminals
-            .send_terminal_input(Request::new(a_jails_input(keystrokes)))
+            .send_terminal_input(Request::direct(a_jails_input(keystrokes)))
             .await
             .expect("the in-jail bridge's input reaches its own PTY");
     }
@@ -663,7 +663,7 @@ impl ADaemonServingAJailedSession {
             .send(a_jails_input(b"\x1b]resize;120;40\x07"))
             .expect("the stream's first frame");
         self.terminals
-            .stream_session_terminal_io(Request::new(tddy_rpc::Streaming::new(
+            .stream_session_terminal_io(Request::direct(tddy_rpc::Streaming::new(
                 tokio_stream::wrappers::UnboundedReceiverStream::new(chunks).map(Ok),
             )))
             .await

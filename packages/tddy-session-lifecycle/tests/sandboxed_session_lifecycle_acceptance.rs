@@ -162,7 +162,7 @@ async fn delete_sandbox_session_stops_child_and_removes_directory() {
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let resp = service
-        .start_session(Request::new(sandbox_start_request()))
+        .start_session(Request::direct(sandbox_start_request()))
         .await
         .expect("StartSession");
     let session_id = resp.into_inner().session_id;
@@ -172,7 +172,7 @@ async fn delete_sandbox_session_stops_child_and_removes_directory() {
 
     // When
     service
-        .delete_session(Request::new(DeleteSessionRequest {
+        .delete_session(Request::direct(DeleteSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: session_id.clone(),
         }))
@@ -202,7 +202,7 @@ async fn resume_sandbox_session_respawns_and_updates_pid() {
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let session_id = service
-        .start_session(Request::new(sandbox_start_request()))
+        .start_session(Request::direct(sandbox_start_request()))
         .await
         .expect("StartSession")
         .into_inner()
@@ -215,7 +215,7 @@ async fn resume_sandbox_session_respawns_and_updates_pid() {
 
     // When
     service
-        .resume_session(Request::new(ResumeSessionRequest {
+        .resume_session(Request::direct(ResumeSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: session_id.clone(),
         }))

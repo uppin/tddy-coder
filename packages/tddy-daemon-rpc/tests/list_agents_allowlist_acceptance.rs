@@ -114,7 +114,7 @@ allowed_tools:
 
     // When
     let response = service
-        .list_agents(Request::new(ListAgentsRequest {}))
+        .list_agents(Request::direct(ListAgentsRequest {}))
         .await
         .expect("ListAgents must succeed");
     let agents = response.into_inner().agents;
@@ -156,7 +156,7 @@ allowed_agents:
 
     // When
     let response = service
-        .list_tools(Request::new(ListToolsRequest {}))
+        .list_tools(Request::direct(ListToolsRequest {}))
         .await
         .expect("ListTools must succeed");
     let tools = response.into_inner().tools;
@@ -187,7 +187,7 @@ allowed_agents:
     let _sessions_tmp = tempfile::tempdir().unwrap();
     let sessions_base = _sessions_tmp.path().to_path_buf();
     let service = service_with_config(config, sessions_base);
-    let request = Request::new(StartSessionRequest {
+    let request = Request::direct(StartSessionRequest {
         session_token: "valid-token".to_string(),
         tool_path: "/bin/true".to_string(),
         project_id: "ignored-before-validation-order".to_string(),

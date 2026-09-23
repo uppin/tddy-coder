@@ -203,7 +203,7 @@ impl Orchestrator {
 
     async fn start_from_the_dialog(&self) -> String {
         self.service
-            .start_session(Request::new(self.dialog_start_request()))
+            .start_session(Request::direct(self.dialog_start_request()))
             .await
             .expect("the dialog's StartSession must succeed")
             .into_inner()

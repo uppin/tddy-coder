@@ -44,21 +44,21 @@ impl Verdict {
 pub(crate) async fn run_once(service: &CodeIndexServiceImpl, requested: Requested) -> Verdict {
     match requested {
         Requested::Check(request) => {
-            let streamed = service.check(tddy_rpc::Request::new(request)).await;
+            let streamed = service.check(tddy_rpc::Request::direct(request)).await;
             checked(streamed).await
         }
         Requested::Apply(request) => {
             // Read before the request is handed over, because the summary at the end of the run
             // has to say whether the tree was written to and the events do not carry that.
             let rehearsal = request.dry_run;
-            let streamed = service.apply(tddy_rpc::Request::new(request)).await;
+            let streamed = service.apply(tddy_rpc::Request::direct(request)).await;
             applied(streamed, rehearsal).await
         }
         Requested::Anchors(request) => {
             // Likewise: the anchor document names the file the range is in, and the answer carries
             // the range alone.
             let file = request.file.clone();
-            match service.anchors(tddy_rpc::Request::new(request)).await {
+            match service.anchors(tddy_rpc::Request::direct(request)).await {
                 Ok(response) => {
                     render::anchors(&file, &response.into_inner());
                     Verdict::Held
@@ -67,7 +67,10 @@ pub(crate) async fn run_once(service: &CodeIndexServiceImpl, requested: Requeste
             }
         }
         Requested::PlanStatus(request) => {
-            match service.plan_status(tddy_rpc::Request::new(request)).await {
+            match service
+                .plan_status(tddy_rpc::Request::direct(request))
+                .await
+            {
                 Ok(response) => {
                     render::plan_status(&response.into_inner());
                     Verdict::Held
@@ -76,24 +79,26 @@ pub(crate) async fn run_once(service: &CodeIndexServiceImpl, requested: Requeste
             }
         }
         Requested::Coverage(request) => {
-            let streamed = service.coverage(tddy_rpc::Request::new(request)).await;
+            let streamed = service.coverage(tddy_rpc::Request::direct(request)).await;
             analysed(streamed, interrupted()).await
         }
         Requested::DuplicateTests(request) => {
             let streamed = service
-                .duplicate_tests(tddy_rpc::Request::new(request))
+                .duplicate_tests(tddy_rpc::Request::direct(request))
                 .await;
             analysed(streamed, interrupted()).await
         }
-        Requested::Report(request) => match service.report(tddy_rpc::Request::new(request)).await {
-            Ok(response) => {
-                render::report(&response.into_inner());
-                Verdict::Held
+        Requested::Report(request) => {
+            match service.report(tddy_rpc::Request::direct(request)).await {
+                Ok(response) => {
+                    render::report(&response.into_inner());
+                    Verdict::Held
+                }
+                Err(refusal) => refused(&refusal),
             }
-            Err(refusal) => refused(&refusal),
-        },
+        }
         Requested::Complexity(request) => {
-            match service.complexity(tddy_rpc::Request::new(request)).await {
+            match service.complexity(tddy_rpc::Request::direct(request)).await {
                 Ok(response) => {
                     render::complexity(&response.into_inner());
                     Verdict::Held
@@ -101,20 +106,22 @@ pub(crate) async fn run_once(service: &CodeIndexServiceImpl, requested: Requeste
                 Err(refusal) => refused(&refusal),
             }
         }
-        Requested::Verify(request) => match service.verify(tddy_rpc::Request::new(request)).await {
-            Ok(response) => {
-                let comparison = response.into_inner();
-                render::verify(&comparison);
-                // A comparison that does not hold is the answer, not an error — and what this
-                // caller means by it is a failed run.
-                if comparison.holds {
-                    Verdict::Held
-                } else {
-                    Verdict::Refused
+        Requested::Verify(request) => {
+            match service.verify(tddy_rpc::Request::direct(request)).await {
+                Ok(response) => {
+                    let comparison = response.into_inner();
+                    render::verify(&comparison);
+                    // A comparison that does not hold is the answer, not an error — and what this
+                    // caller means by it is a failed run.
+                    if comparison.holds {
+                        Verdict::Held
+                    } else {
+                        Verdict::Refused
+                    }
                 }
+                Err(refusal) => refused(&refusal),
             }
-            Err(refusal) => refused(&refusal),
-        },
+        }
     }
 }
 

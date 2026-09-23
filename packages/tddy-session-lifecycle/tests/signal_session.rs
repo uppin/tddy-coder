@@ -38,7 +38,7 @@ async fn signal_session_sends_sigint_to_pid() {
 
     // When
     let response = service
-        .signal_session(Request::new(SignalSessionRequest {
+        .signal_session(Request::direct(SignalSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: "test-session".to_string(),
             signal: Signal::Sigint as i32,
@@ -82,7 +82,7 @@ async fn signal_session_returns_error_for_dead_pid() {
 
     // When
     let result = service
-        .signal_session(Request::new(SignalSessionRequest {
+        .signal_session(Request::direct(SignalSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: "dead-session".to_string(),
             signal: Signal::Sigterm as i32,
@@ -110,7 +110,7 @@ async fn signal_session_rejects_unauthenticated_request() {
 
     // When
     let result = service
-        .signal_session(Request::new(SignalSessionRequest {
+        .signal_session(Request::direct(SignalSessionRequest {
             session_token: "invalid-token".to_string(),
             session_id: "any-session".to_string(),
             signal: Signal::Sigint as i32,

@@ -16,6 +16,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch, Mutex};
 
 use tddy_rpc::server_engine::ServerEngine;
+use tddy_rpc::RequestTransport;
 
 use crate::chunking;
 use crate::envelope::{decode_request, encode_response};
@@ -333,7 +334,8 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         projects_registry_dir: Option<PathBuf>,
     ) -> Result<Self, livekit::RoomError> {
         log::debug!("LiveKitParticipant::connect url={}", url);
-        let server = Arc::new(ServerEngine::new(service));
+        // Whoever the room admitted sent it — stamped here, never read from the envelope.
+        let server = Arc::new(ServerEngine::new(service, RequestTransport::LiveKit));
         let (room, events) = Room::connect(url, token, room_options).await?;
         log::info!(
             "[echo_server] LiveKitParticipant connected, identity={:?}",
@@ -490,7 +492,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         codex_oauth_watch: Option<PathBuf>,
         projects_registry_dir: Option<PathBuf>,
     ) -> anyhow::Result<JoinedParticipant<S>> {
-        let server = Arc::new(ServerEngine::new(service));
+        let server = Arc::new(ServerEngine::new(service, RequestTransport::LiveKit));
         let shared_publisher = SharedPublisher::new();
         let (outgoing_tx, outgoing_rx) = mpsc::channel(OUTGOING_QUEUE_CAPACITY);
         // Long-lived: survives every reconnect, since `shared_publisher` (not a

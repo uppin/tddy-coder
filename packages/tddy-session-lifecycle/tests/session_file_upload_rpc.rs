@@ -263,7 +263,7 @@ async fn upload_session_file_chunk_rejects_an_invalid_session_token() {
 
     // When
     let err = service
-        .upload_session_file_chunk(Request::new(UploadSessionFileChunkRequest {
+        .upload_session_file_chunk(Request::direct(UploadSessionFileChunkRequest {
             session_token: "bad".to_string(),
             session_id: SESSION_ID.to_string(),
             upload_id: UPLOAD_ID.to_string(),

@@ -182,7 +182,10 @@ mod tests {
 
     /// The unary answer to one method of the served implementation, decoded.
     async fn unary_answer(served: &ServedCoordinate, method: &str, request: &[u8]) -> Vec<u8> {
-        let message = RpcMessage::new(request.to_vec(), Default::default());
+        let message = RpcMessage::new(
+            request.to_vec(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        );
         match served.handle_rpc(SERVICE, method, &message).await {
             RpcResult::Unary(Ok(bytes)) => bytes,
             RpcResult::Unary(Err(status)) => panic!("{method} was refused: {status:?}"),
@@ -262,7 +265,10 @@ mod tests {
             session_token: "a-token-from-another-host".to_string(),
             session_id: SESSION_ID.to_string(),
         };
-        let message = RpcMessage::new(request.encode_to_vec(), Default::default());
+        let message = RpcMessage::new(
+            request.encode_to_vec(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        );
 
         // When
         let outcome = served

@@ -174,7 +174,7 @@ fn refuses_a_context_manifest_whose_read_does_not_return_inside_the_hosts_budget
     // When
     let refusal = the_refusal_when_the_read_cannot_start(|| {
         host.service
-            .stream_context_manifest(Request::new(a_manifest_request()))
+            .stream_context_manifest(Request::direct(a_manifest_request()))
     });
 
     // Then — the message names the key an operator raises, because nothing else tells them
@@ -193,7 +193,7 @@ fn refuses_a_context_file_read_that_does_not_return_inside_the_hosts_budget() {
     // When
     let refusal = the_refusal_when_the_read_cannot_start(|| {
         host.service
-            .stream_read_context_file(Request::new(a_read_of("CLAUDE.md")))
+            .stream_read_context_file(Request::direct(a_read_of("CLAUDE.md")))
     });
 
     // Then
@@ -212,7 +212,7 @@ fn refuses_a_context_file_batch_whose_read_does_not_return_inside_the_hosts_budg
     // When
     let refusal = the_refusal_when_the_read_cannot_start(|| {
         host.service
-            .stream_read_context_file_batch(Request::new(a_batch_read_of(&["CLAUDE.md"])))
+            .stream_read_context_file_batch(Request::direct(a_batch_read_of(&["CLAUDE.md"])))
     });
 
     // Then

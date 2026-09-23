@@ -141,7 +141,7 @@ async fn list_projects_awaits_an_async_peer_source_on_a_current_thread_runtime()
 
     // When
     let response = service
-        .list_projects(Request::new(ListProjectsRequest {
+        .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: false,
         }))

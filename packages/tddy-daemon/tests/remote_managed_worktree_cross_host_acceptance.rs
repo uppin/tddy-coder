@@ -496,7 +496,7 @@ fn session_directories_on(sessions_base: &Path) -> Vec<String> {
 
 async fn sessions_on(service: &DaemonSessionHost) -> Vec<String> {
     service
-        .list_sessions(Request::new(ListSessionsRequest {
+        .list_sessions(Request::direct(ListSessionsRequest {
             session_token: a_caller_token().to_string(),
         }))
         .await
@@ -636,7 +636,7 @@ async fn a_split_session_creates_a_workspace_session_on_the_codebase_daemon() {
     // When the agent host starts a session whose codebase is placed on the other host
     let started = hosts
         .agent
-        .start_session(Request::new(a_split_session_request()))
+        .start_session(Request::direct(a_split_session_request()))
         .await
         .expect("a split session must start")
         .into_inner();
@@ -674,7 +674,7 @@ async fn a_split_session_records_its_pairing_and_holds_no_local_repo_path() {
     // When
     let started = hosts
         .agent
-        .start_session(Request::new(a_split_session_request()))
+        .start_session(Request::direct(a_split_session_request()))
         .await
         .expect("a split session must start")
         .into_inner();
@@ -701,7 +701,7 @@ async fn a_split_session_addresses_tools_at_the_codebase_session_not_its_own() {
     let hosts = split_hosts().await;
     let started = hosts
         .agent
-        .start_session(Request::new(a_split_session_request()))
+        .start_session(Request::direct(a_split_session_request()))
         .await
         .expect("a split session must start")
         .into_inner();
@@ -713,7 +713,7 @@ async fn a_split_session_addresses_tools_at_the_codebase_session_not_its_own() {
     // When a tool is executed against the recorded codebase session on the codebase host
     let response = hosts
         .agent
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: a_caller_token().to_string(),
             session_id: codebase_session_id.clone(),
             tool_name: "Write".to_string(),
@@ -748,7 +748,7 @@ async fn a_tool_call_from_the_agent_host_reads_back_what_it_wrote_on_the_codebas
     let hosts = split_hosts().await;
     let started = hosts
         .agent
-        .start_session(Request::new(a_split_session_request()))
+        .start_session(Request::direct(a_split_session_request()))
         .await
         .expect("a split session must start")
         .into_inner();
@@ -758,7 +758,7 @@ async fn a_tool_call_from_the_agent_host_reads_back_what_it_wrote_on_the_codebas
 
     hosts
         .agent
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: a_caller_token().to_string(),
             session_id: codebase_session_id.clone(),
             tool_name: "Write".to_string(),
@@ -772,7 +772,7 @@ async fn a_tool_call_from_the_agent_host_reads_back_what_it_wrote_on_the_codebas
     // When it is read back over the same path
     let response = hosts
         .agent
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: a_caller_token().to_string(),
             session_id: codebase_session_id,
             tool_name: "Read".to_string(),
@@ -796,7 +796,7 @@ async fn deleting_a_split_session_deletes_the_paired_workspace_session_and_its_w
     let hosts = split_hosts().await;
     let started = hosts
         .agent
-        .start_session(Request::new(a_split_session_request()))
+        .start_session(Request::direct(a_split_session_request()))
         .await
         .expect("a split session must start")
         .into_inner();
@@ -812,7 +812,7 @@ async fn deleting_a_split_session_deletes_the_paired_workspace_session_and_its_w
     // When the agent-host session is deleted
     hosts
         .agent
-        .delete_session(Request::new(DeleteSessionRequest {
+        .delete_session(Request::direct(DeleteSessionRequest {
             session_token: a_caller_token().to_string(),
             session_id: started.session_id.clone(),
         }))
@@ -842,7 +842,7 @@ async fn deleting_a_split_session_succeeds_when_the_codebase_daemon_no_longer_ha
     let hosts = split_hosts().await;
     let started = hosts
         .agent
-        .start_session(Request::new(a_split_session_request()))
+        .start_session(Request::direct(a_split_session_request()))
         .await
         .expect("a split session must start")
         .into_inner();
@@ -851,7 +851,7 @@ async fn deleting_a_split_session_succeeds_when_the_codebase_daemon_no_longer_ha
         .expect("codebase session id");
     hosts
         .codebase
-        .delete_session(Request::new(DeleteSessionRequest {
+        .delete_session(Request::direct(DeleteSessionRequest {
             session_token: a_caller_token().to_string(),
             session_id: codebase_session_id.clone(),
         }))
@@ -861,7 +861,7 @@ async fn deleting_a_split_session_succeeds_when_the_codebase_daemon_no_longer_ha
     // When the agent-host session is deleted
     hosts
         .agent
-        .delete_session(Request::new(DeleteSessionRequest {
+        .delete_session(Request::direct(DeleteSessionRequest {
             session_token: a_caller_token().to_string(),
             session_id: started.session_id.clone(),
         }))
@@ -889,7 +889,7 @@ async fn a_worktree_failure_on_the_codebase_daemon_leaves_no_session_behind() {
     // When
     hosts
         .agent
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             branch_worktree_intent: "work_on_selected_branch".to_string(),
             selected_branch_to_work_on: "no-such-branch-anywhere".to_string(),
             ..a_split_session_request()
@@ -920,7 +920,7 @@ async fn a_failed_agent_spawn_tears_down_the_workspace_session_on_the_codebase_d
     // When
     hosts
         .agent
-        .start_session(Request::new(a_split_session_request()))
+        .start_session(Request::direct(a_split_session_request()))
         .await
         .expect_err("a split start whose agent cannot spawn must fail");
 
@@ -965,7 +965,7 @@ async fn a_split_session_started_with_sandbox_sandboxes_the_codebase_half_and_le
     // When the agent host starts a split session that also asks to be sandboxed
     let started = hosts
         .agent
-        .start_session(Request::new(a_sandboxed_split_session_request()))
+        .start_session(Request::direct(a_sandboxed_split_session_request()))
         .await
         .expect("a sandboxed split start must succeed once the refusal is gone")
         .into_inner();
@@ -1014,7 +1014,7 @@ async fn a_tool_call_on_a_sandboxed_split_session_runs_in_the_jail_on_the_codeba
     .await;
     let started = hosts
         .agent
-        .start_session(Request::new(a_sandboxed_split_session_request()))
+        .start_session(Request::direct(a_sandboxed_split_session_request()))
         .await
         .expect("a sandboxed split start must succeed")
         .into_inner();
@@ -1030,7 +1030,7 @@ async fn a_tool_call_on_a_sandboxed_split_session_runs_in_the_jail_on_the_codeba
     // When a tool is executed against the recorded codebase session on the codebase host
     let response = hosts
         .agent
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: a_caller_token().to_string(),
             session_id: codebase_session_id.clone(),
             tool_name: "Write".to_string(),

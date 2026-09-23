@@ -208,7 +208,7 @@ async fn query(service: &TestDaemon, branch: &str) -> BranchResolution {
 /// Resolve `branch`, comparing it against `base_branch`.
 async fn query_against(service: &TestDaemon, branch: &str, base_branch: &str) -> BranchResolution {
     service
-        .query_branch(Request::new(QueryBranchRequest {
+        .query_branch(Request::direct(QueryBranchRequest {
             session_token: TOKEN.to_string(),
             session_id: ORCHESTRATOR.to_string(),
             branch: branch.to_string(),

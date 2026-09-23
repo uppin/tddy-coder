@@ -189,7 +189,7 @@ impl CodebaseHost {
 
     async fn start_sandboxed_workspace(&self) -> String {
         self.service
-            .start_session(Request::new(StartSessionRequest {
+            .start_session(Request::direct(StartSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_type: "workspace".to_string(),
                 project_id: PROJECT_ID.to_string(),
@@ -204,7 +204,7 @@ impl CodebaseHost {
 
     async fn resume(&self, session_id: &str) -> Result<(), Status> {
         self.service
-            .resume_session(Request::new(ResumeSessionRequest {
+            .resume_session(Request::direct(ResumeSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: session_id.to_string(),
             }))
@@ -214,7 +214,7 @@ impl CodebaseHost {
 
     async fn execute_tool(&self, session_id: &str, tool: &str, args: &str) -> ExecuteToolResponse {
         self.service
-            .execute_tool(Request::new(a_tool_request(session_id, tool, args)))
+            .execute_tool(Request::direct(a_tool_request(session_id, tool, args)))
             .await
             .expect("ExecuteTool must not fail at the RPC level")
             .into_inner()
@@ -264,7 +264,7 @@ async fn execute_tool_on(
     args: &str,
 ) -> ExecuteToolResponse {
     service
-        .execute_tool(Request::new(a_tool_request(session_id, tool, args)))
+        .execute_tool(Request::direct(a_tool_request(session_id, tool, args)))
         .await
         .expect("ExecuteTool must not fail at the RPC level")
         .into_inner()
@@ -273,7 +273,7 @@ async fn execute_tool_on(
 /// Delete a session against a bare service (the restarted daemon).
 async fn delete_on(service: &TestDaemon, session_id: &str) {
     service
-        .delete_session(Request::new(DeleteSessionRequest {
+        .delete_session(Request::direct(DeleteSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
         }))
@@ -314,7 +314,7 @@ async fn a_resume_re_provisions_the_jail_for_a_sandboxed_workspace_session_after
 
     // When the session is resumed on the restarted daemon
     restarted
-        .resume_session(Request::new(ResumeSessionRequest {
+        .resume_session(Request::direct(ResumeSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.clone(),
         }))

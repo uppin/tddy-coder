@@ -114,7 +114,7 @@ async fn a_sandboxed_workspace_session(sandbox: bool) -> SeededWorkspace {
         .with_workspace_sandbox_provisioner(provisioner as Arc<dyn WorkspaceSandboxProvisioner>);
 
     let started = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_type: "workspace".to_string(),
             project_id: PROJECT_ID.to_string(),

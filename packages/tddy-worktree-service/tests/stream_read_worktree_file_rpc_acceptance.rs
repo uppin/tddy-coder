@@ -164,7 +164,7 @@ impl StreamedFile {
 async fn a_streamed_read(served: &ServedWorktree, rel_path: &str) -> StreamedFile {
     let mut stream = served
         .service
-        .stream_read_worktree_file(Request::new(a_read_request(served, rel_path)))
+        .stream_read_worktree_file(Request::direct(a_read_request(served, rel_path)))
         .await
         .unwrap_or_else(|e| panic!("StreamReadWorktreeFile must serve {rel_path}: {e:?}"))
         .into_inner();
@@ -185,7 +185,7 @@ async fn a_streamed_read(served: &ServedWorktree, rel_path: &str) -> StreamedFil
 async fn a_refused_read(served: &ServedWorktree, rel_path: &str) -> Code {
     match served
         .service
-        .stream_read_worktree_file(Request::new(a_read_request(served, rel_path)))
+        .stream_read_worktree_file(Request::direct(a_read_request(served, rel_path)))
         .await
     {
         Err(status) => status.code(),
@@ -313,7 +313,7 @@ async fn refuses_an_unknown_session_token() {
     // When it is asked for
     let status = served
         .service
-        .stream_read_worktree_file(Request::new(request))
+        .stream_read_worktree_file(Request::direct(request))
         .await
         .expect_err("an unknown token must be refused");
 

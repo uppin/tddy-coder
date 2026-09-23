@@ -129,7 +129,7 @@ async fn a_sandboxed_workspace_session() -> JailedWorkspace {
     std::fs::write(&host_secret_file, HOST_SECRET).expect("write host secret");
 
     let started = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_type: "workspace".to_string(),
             project_id: PROJECT_ID.to_string(),
@@ -168,7 +168,7 @@ async fn a_sandboxed_workspace_session() -> JailedWorkspace {
 impl JailedWorkspace {
     async fn execute_tool(&self, tool: &str, args: serde_json::Value) -> ExecuteToolResponse {
         self.service
-            .execute_tool(Request::new(ExecuteToolRequest {
+            .execute_tool(Request::direct(ExecuteToolRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),

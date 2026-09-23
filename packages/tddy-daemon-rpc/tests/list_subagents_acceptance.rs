@@ -69,7 +69,7 @@ async fn list_subagents_offers_nothing_with_no_user_agents_dir() {
 
     // When
     let response = service
-        .list_subagents(Request::new(ListSubagentsRequest {}))
+        .list_subagents(Request::direct(ListSubagentsRequest {}))
         .await
         .expect("ListSubagents must succeed even with no <tddyhome>/agents directory");
 
@@ -98,7 +98,7 @@ async fn list_subagents_includes_a_def_written_to_tddyhome_agents_dir() {
 
     // When
     let response = service
-        .list_subagents(Request::new(ListSubagentsRequest {}))
+        .list_subagents(Request::direct(ListSubagentsRequest {}))
         .await
         .expect("ListSubagents must succeed");
 

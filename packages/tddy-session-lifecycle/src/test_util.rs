@@ -293,7 +293,7 @@ pub async fn wait_until_peer_discovered(
     let deadline = std::time::Instant::now() + timeout;
     loop {
         let daemons = hosts
-            .list_eligible_daemons(tddy_rpc::Request::new(
+            .list_eligible_daemons(tddy_rpc::Request::direct(
                 tddy_service::proto::host::ListEligibleDaemonsRequest {
                     session_token: session_token.to_string(),
                 },

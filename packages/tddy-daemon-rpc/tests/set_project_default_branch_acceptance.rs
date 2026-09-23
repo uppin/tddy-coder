@@ -98,13 +98,13 @@ async fn set_project_default_branch_persists_the_ref_and_list_projects_reports_i
 
     // When — the operator sets the project's default branch to a remote branch
     service
-        .set_project_default_branch(Request::new(a_set_request("origin/main")))
+        .set_project_default_branch(Request::direct(a_set_request("origin/main")))
         .await
         .expect("set_project_default_branch succeeds");
 
     // Then — ListProjects surfaces the stored default on the project entry
     let listed = service
-        .list_projects(Request::new(ListProjectsRequest {
+        .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: true,
         }))
@@ -137,7 +137,7 @@ async fn set_project_default_branch_accepts_a_slash_containing_remote_branch() {
 
     // When
     service
-        .set_project_default_branch(Request::new(a_set_request("origin/release/2025")))
+        .set_project_default_branch(Request::direct(a_set_request("origin/release/2025")))
         .await
         .expect("multi-segment remote branch is a legal default");
 
@@ -163,7 +163,7 @@ async fn set_project_default_branch_rejects_an_unsafe_ref_without_mutating_the_r
 
     // When
     let result = service
-        .set_project_default_branch(Request::new(a_set_request("origin/main;rm -rf /")))
+        .set_project_default_branch(Request::direct(a_set_request("origin/main;rm -rf /")))
         .await;
 
     // Then — rejected as invalid_argument and the row keeps its previous (unset) default
@@ -189,7 +189,7 @@ async fn set_project_default_branch_rejects_an_unknown_project() {
 
     // When — no project is registered
     let result = service
-        .set_project_default_branch(Request::new(SetProjectDefaultBranchRequest {
+        .set_project_default_branch(Request::direct(SetProjectDefaultBranchRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: "does-not-exist".to_string(),
             main_branch_ref: "origin/main".to_string(),

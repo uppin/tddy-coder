@@ -242,6 +242,7 @@ fn start_fake_host_relay(dir: &std::path::Path) -> (std::path::PathBuf, Recorded
                 FakeHostToolService {
                     recorded: recorded_for_task.clone(),
                 },
+                tddy_rpc::RequestTransport::UnixSocket,
             );
             tokio::spawn(endpoint.run());
         }

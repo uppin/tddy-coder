@@ -241,7 +241,7 @@ impl HostWithAnEncryptedKey {
         request: AddHostKeyRequest,
         ciphertext: Vec<u8>,
     ) -> AddHostKeyResponse {
-        let started = self.service.add_host_key(Request::new(request));
+        let started = self.service.add_host_key(Request::direct(request));
 
         let (added, _answered) = tokio::time::timeout(ADD_KEY_WINDOW, async {
             tokio::join!(started, self.answer_the_prompt_with(ciphertext))
@@ -277,7 +277,7 @@ impl HostWithAnEncryptedKey {
     async fn first_prompt_on_the_feed_of(&self, token: &str) -> Option<HostPromptEvent> {
         let mut feed = self
             .service
-            .stream_host_prompts(Request::new(StreamHostPromptsRequest {
+            .stream_host_prompts(Request::direct(StreamHostPromptsRequest {
                 session_token: token.to_string(),
                 daemon_instance_id: String::new(),
             }))
@@ -299,7 +299,7 @@ impl HostWithAnEncryptedKey {
         ciphertext: Vec<u8>,
     ) -> AnswerHostPromptResponse {
         self.service
-            .answer_host_prompt(Request::new(AnswerHostPromptRequest {
+            .answer_host_prompt(Request::direct(AnswerHostPromptRequest {
                 session_token: token.to_string(),
                 daemon_instance_id: String::new(),
                 prompt_id: prompt_id.to_string(),
@@ -621,7 +621,7 @@ async fn answer_host_prompt_rejects_an_invalid_token() {
 
     // When an answer arrives on a session this host does not know
     let refused = service
-        .answer_host_prompt(Request::new(AnswerHostPromptRequest {
+        .answer_host_prompt(Request::direct(AnswerHostPromptRequest {
             session_token: "not-a-token".to_string(),
             daemon_instance_id: String::new(),
             prompt_id: "any-prompt".to_string(),
@@ -967,10 +967,11 @@ async fn refuses_an_add_addressed_to_a_host_this_daemon_does_not_know() {
     // When they address the add to a different host
     let refused = tokio::time::timeout(
         ROUTING_WINDOW,
-        host.service.add_host_key(Request::new(AddHostKeyRequest {
-            daemon_instance_id: AN_UNKNOWN_HOST.to_string(),
-            ..host.an_add_of_their_key()
-        })),
+        host.service
+            .add_host_key(Request::direct(AddHostKeyRequest {
+                daemon_instance_id: AN_UNKNOWN_HOST.to_string(),
+                ..host.an_add_of_their_key()
+            })),
     )
     .await
     .expect(
@@ -1022,7 +1023,7 @@ async fn refuses_an_answer_addressed_to_a_host_this_daemon_does_not_know() {
     // When an answer is addressed to a different host
     let refused = host
         .service
-        .answer_host_prompt(Request::new(AnswerHostPromptRequest {
+        .answer_host_prompt(Request::direct(AnswerHostPromptRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: AN_UNKNOWN_HOST.to_string(),
             prompt_id: "a-prompt-on-another-host".to_string(),
@@ -1047,7 +1048,7 @@ async fn refuses_a_prompt_feed_addressed_to_a_host_this_daemon_does_not_know() {
     // When a feed is opened against a different host
     let refused = host
         .service
-        .stream_host_prompts(Request::new(StreamHostPromptsRequest {
+        .stream_host_prompts(Request::direct(StreamHostPromptsRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: AN_UNKNOWN_HOST.to_string(),
         }))
@@ -1083,7 +1084,8 @@ impl HostWithAnEncryptedKey {
     ) -> Result<Vec<HostKeyCandidate>, Status> {
         tokio::time::timeout(
             LISTING_WINDOW,
-            self.service.list_host_key_candidates(Request::new(request)),
+            self.service
+                .list_host_key_candidates(Request::direct(request)),
         )
         .await
         .expect("a listing reads one directory and must not hang")

@@ -167,7 +167,7 @@ async fn waiting_for_input_transition_alerts_tracked_chat() {
     // When
     let response = service
         .activity_service()
-        .report_session_status(Request::new(ReportSessionStatusRequest {
+        .report_session_status(Request::direct(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
             os_user: OS_USER.to_string(),
@@ -216,7 +216,7 @@ async fn done_transition_alerts_tracked_chat() {
     // When
     service
         .activity_service()
-        .report_session_status(Request::new(ReportSessionStatusRequest {
+        .report_session_status(Request::direct(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
             os_user: OS_USER.to_string(),
@@ -259,7 +259,7 @@ async fn repeated_same_status_does_not_realert() {
     for _ in 0..2 {
         service
             .activity_service()
-            .report_session_status(Request::new(ReportSessionStatusRequest {
+            .report_session_status(Request::direct(ReportSessionStatusRequest {
                 session_id: SESSION_ID.to_string(),
                 hook_token: TEST_HOOK_TOKEN.to_string(),
                 os_user: OS_USER.to_string(),
@@ -303,7 +303,7 @@ async fn untracked_session_falls_back_to_configured_chat_ids() {
     // When
     let resp = service
         .activity_service()
-        .report_session_status(Request::new(ReportSessionStatusRequest {
+        .report_session_status(Request::direct(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
             os_user: OS_USER.to_string(),
@@ -346,7 +346,7 @@ async fn running_status_does_not_alert() {
     // When
     service
         .activity_service()
-        .report_session_status(Request::new(ReportSessionStatusRequest {
+        .report_session_status(Request::direct(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
             os_user: OS_USER.to_string(),

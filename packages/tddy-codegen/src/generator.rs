@@ -674,8 +674,8 @@ fn generate_start_bidi_stream(service: &Service, buf: &mut String, rpc: &str) {
     writeln!(buf).unwrap();
     writeln!(
         buf,
-        "    async fn start_bidi_stream(&self, service: &str, method: &str, mut input_rx: mpsc::Receiver<{}::RpcMessage>) -> Result<{}::BidiStreamOutput, {}::Status> {{",
-        rpc, rpc, rpc
+        "    async fn start_bidi_stream(&self, service: &str, method: &str, metadata: {}::RequestMetadata, mut input_rx: mpsc::Receiver<{}::RpcMessage>) -> Result<{}::BidiStreamOutput, {}::Status> {{",
+        rpc, rpc, rpc, rpc
     ).unwrap();
     writeln!(buf, "        if service != Self::NAME {{").unwrap();
     writeln!(
@@ -756,7 +756,7 @@ fn generate_start_bidi_stream(service: &Service, buf: &mut String, rpc: &str) {
         ).unwrap();
         writeln!(
             buf,
-            "                let request = {}::Request::new(streaming);",
+            "                let request = {}::Request::with_metadata(streaming, metadata);",
             rpc
         )
         .unwrap();
@@ -1063,6 +1063,9 @@ fn write_stream_assoc_type(method: &Method, stream_assoc: &str, output: &str, bu
 /// shape hands the decoded message straight through. Either way the refusal is converted outward
 /// through the one shared pair, so a given refusal cannot reach two transports as two different
 /// gRPC codes.
+///
+/// The request is stamped `RequestTransport::Grpc` here: the adapter is only ever served by a
+/// tonic server, and nothing in the tonic request's metadata a client sets is carried over.
 fn write_delegation(service: &Service, method: &Method, buf: &mut String, rpc: &str) {
     let svc = &service.name;
     let rpc_method = to_snake_case(&method.name);
@@ -1075,8 +1078,8 @@ fn write_delegation(service: &Service, method: &Method, buf: &mut String, rpc: &
         .unwrap();
         writeln!(
             buf,
-            "        let rpc_request = {}::Request::new({}::Streaming::new(inbound));",
-            rpc, rpc
+            "        let rpc_request = {}::Request::with_metadata({}::Streaming::new(inbound), {}::RequestMetadata::over({}::RequestTransport::Grpc));",
+            rpc, rpc, rpc, rpc
         )
         .unwrap();
         writeln!(
@@ -1088,8 +1091,8 @@ fn write_delegation(service: &Service, method: &Method, buf: &mut String, rpc: &
     } else {
         writeln!(
             buf,
-            "        let resp = {}::{}(&*self.inner, {}::Request::new(request.into_inner()))",
-            svc, rpc_method, rpc
+            "        let resp = {}::{}(&*self.inner, {}::Request::with_metadata(request.into_inner(), {}::RequestMetadata::over({}::RequestTransport::Grpc)))",
+            svc, rpc_method, rpc, rpc, rpc
         )
         .unwrap();
     }

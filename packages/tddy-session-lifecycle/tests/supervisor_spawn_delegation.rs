@@ -426,7 +426,7 @@ async fn refuses_to_start_a_session_when_the_declared_supervisor_is_unreachable(
 
     // When
     let error = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: PROJECT_ID.to_string(),
             tool_path: tool.to_str().unwrap().to_string(),

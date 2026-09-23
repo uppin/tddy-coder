@@ -51,8 +51,12 @@ async fn relay_accepts_submit_when_presenter_never_polls() {
     let client = tokio::spawn(async move {
         let stream = UnixStream::connect(path).await.expect("connect");
         let (read_half, write_half) = tokio::io::split(stream);
-        let (rpc_client, endpoint) =
-            tddy_stdio::StdioEndpoint::from_duplex(read_half, write_half, NoCallbackService);
+        let (rpc_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+            read_half,
+            write_half,
+            NoCallbackService,
+            tddy_rpc::RequestTransport::UnixSocket,
+        );
         tokio::spawn(endpoint.run());
 
         let request = json!({

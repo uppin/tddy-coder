@@ -61,7 +61,7 @@ impl BspService for DaemonBspService {
     ) -> Result<Response<WorkspaceBuildTargetsResponse>, Status> {
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.workspace_build_targets(Request::new(req)).await
+        svc.workspace_build_targets(Request::direct(req)).await
     }
 
     async fn workspace_reload(
@@ -70,7 +70,7 @@ impl BspService for DaemonBspService {
     ) -> Result<Response<WorkspaceReloadResponse>, Status> {
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.workspace_reload(Request::new(req)).await
+        svc.workspace_reload(Request::direct(req)).await
     }
 
     async fn build_target_sources(
@@ -79,7 +79,7 @@ impl BspService for DaemonBspService {
     ) -> Result<Response<BuildTargetSourcesResponse>, Status> {
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.build_target_sources(Request::new(req)).await
+        svc.build_target_sources(Request::direct(req)).await
     }
 
     async fn build_target_output_paths(
@@ -88,7 +88,7 @@ impl BspService for DaemonBspService {
     ) -> Result<Response<BuildTargetOutputPathsResponse>, Status> {
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.build_target_output_paths(Request::new(req)).await
+        svc.build_target_output_paths(Request::direct(req)).await
     }
 
     async fn build_target_compile(
@@ -97,7 +97,7 @@ impl BspService for DaemonBspService {
     ) -> Result<Response<BuildTargetActionResponse>, Status> {
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.build_target_compile(Request::new(req)).await
+        svc.build_target_compile(Request::direct(req)).await
     }
 
     async fn build_target_test(
@@ -106,7 +106,7 @@ impl BspService for DaemonBspService {
     ) -> Result<Response<BuildTargetActionResponse>, Status> {
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.build_target_test(Request::new(req)).await
+        svc.build_target_test(Request::direct(req)).await
     }
 
     async fn build_target_run(
@@ -115,7 +115,7 @@ impl BspService for DaemonBspService {
     ) -> Result<Response<BuildTargetActionResponse>, Status> {
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.build_target_run(Request::new(req)).await
+        svc.build_target_run(Request::direct(req)).await
     }
 }
 
@@ -159,7 +159,7 @@ targets:
 
         // When
         let resp = svc
-            .workspace_build_targets(Request::new(WorkspaceBuildTargetsRequest {
+            .workspace_build_targets(Request::direct(WorkspaceBuildTargetsRequest {
                 session_token: "good".to_string(),
                 session_id: "s1".to_string(),
             }))
@@ -186,7 +186,7 @@ targets:
 
         // When
         let err = svc
-            .workspace_build_targets(Request::new(WorkspaceBuildTargetsRequest {
+            .workspace_build_targets(Request::direct(WorkspaceBuildTargetsRequest {
                 session_token: "bad".to_string(),
                 session_id: "s1".to_string(),
             }))

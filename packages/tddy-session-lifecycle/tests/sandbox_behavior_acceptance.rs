@@ -164,7 +164,7 @@ async fn collect_terminal_text_until(
 ) -> String {
     let resp = service
         .terminal_session_service()
-        .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
+        .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: session_id.to_string(),
             terminal_id: "main".to_string(),
@@ -245,7 +245,7 @@ async fn sandboxed_session_streams_demo_tui_dimensions_in_terminal() {
 
     // When
     let session_id = service
-        .start_session(Request::new(sandbox_start_request()))
+        .start_session(Request::direct(sandbox_start_request()))
         .await
         .expect("StartSession")
         .into_inner()
@@ -277,7 +277,7 @@ async fn sandboxed_session_spawn_manifest_records_session_channel_egress() {
 
     // When
     let session_id = service
-        .start_session(Request::new(sandbox_start_request()))
+        .start_session(Request::direct(sandbox_start_request()))
         .await
         .expect("StartSession")
         .into_inner()
@@ -317,7 +317,7 @@ async fn sandboxed_session_relays_claude_llm_egress_via_session_channel() {
 
     // When
     let session_id = service
-        .start_session(Request::new(sandbox_start_request()))
+        .start_session(Request::direct(sandbox_start_request()))
         .await
         .expect("StartSession")
         .into_inner()
@@ -357,7 +357,7 @@ async fn sandboxed_session_denies_direct_outbound_network_from_jail() {
 
     // When
     let session_id = service
-        .start_session(Request::new(sandbox_start_request()))
+        .start_session(Request::direct(sandbox_start_request()))
         .await
         .expect("StartSession")
         .into_inner()
@@ -401,7 +401,7 @@ async fn sandboxed_session_child_is_alive_after_demo_tui_start() {
 
     // When
     let session_id = service
-        .start_session(Request::new(sandbox_start_request()))
+        .start_session(Request::direct(sandbox_start_request()))
         .await
         .expect("StartSession")
         .into_inner()

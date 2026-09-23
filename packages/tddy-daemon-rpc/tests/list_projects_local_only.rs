@@ -101,7 +101,7 @@ async fn list_projects_with_local_only_skips_peer_fan_out() {
 
     // When
     let response = service
-        .list_projects(Request::new(ListProjectsRequest {
+        .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: true,
         }))
@@ -124,7 +124,7 @@ async fn list_projects_without_local_only_merges_peer_rows() {
 
     // When
     let response = service
-        .list_projects(Request::new(ListProjectsRequest {
+        .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: false,
         }))

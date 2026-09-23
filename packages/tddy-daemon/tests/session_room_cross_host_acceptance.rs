@@ -432,7 +432,7 @@ impl SplitSession {
 
         let started = agent
             .service
-            .start_session(Request::new(StartSessionRequest {
+            .start_session(Request::direct(StartSessionRequest {
                 session_token: a_caller_token().to_string(),
                 project_id: TEST_PROJECT_ID.to_string(),
                 session_type: "claude-cli".to_string(),

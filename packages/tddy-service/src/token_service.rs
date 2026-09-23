@@ -203,7 +203,7 @@ mod tests {
         request: GenerateTokenRequest,
     ) -> Result<GenerateTokenResponse, Status> {
         service
-            .generate_token(Request::new(request))
+            .generate_token(Request::direct(request))
             .await
             .map(Response::into_inner)
     }
@@ -213,7 +213,7 @@ mod tests {
         request: RefreshTokenRequest,
     ) -> Result<RefreshTokenResponse, Status> {
         service
-            .refresh_token(Request::new(request))
+            .refresh_token(Request::direct(request))
             .await
             .map(Response::into_inner)
     }

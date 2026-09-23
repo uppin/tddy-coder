@@ -78,7 +78,7 @@ fn write_unit_session(session_dir: &std::path::Path, pid: u32) {
 async fn signal_session_unit_rejects_invalid_token() {
     let temp = tempfile::tempdir().unwrap();
     let service = make_unit_service(temp.path().to_path_buf());
-    let request = Request::new(SignalSessionRequest {
+    let request = Request::direct(SignalSessionRequest {
         session_token: "bad-token".to_string(),
         session_id: "any".to_string(),
         signal: Signal::Sigint as i32,
@@ -94,7 +94,7 @@ async fn signal_session_unit_rejects_invalid_token() {
 async fn signal_session_unit_returns_error_for_missing_session() {
     let temp = tempfile::tempdir().unwrap();
     let service = make_unit_service(temp.path().to_path_buf());
-    let request = Request::new(SignalSessionRequest {
+    let request = Request::direct(SignalSessionRequest {
         session_token: "valid".to_string(),
         session_id: "no-such-session".to_string(),
         signal: Signal::Sigterm as i32,
@@ -121,7 +121,7 @@ async fn signal_session_unit_sigkill_reaches_live_process() {
     write_unit_session(&session_dir, pid);
 
     let service = make_unit_service(sessions_base);
-    let request = Request::new(SignalSessionRequest {
+    let request = Request::direct(SignalSessionRequest {
         session_token: "valid".to_string(),
         session_id: "sigkill-session".to_string(),
         signal: Signal::Sigkill as i32,

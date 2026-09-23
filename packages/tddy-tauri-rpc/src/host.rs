@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tddy_rpc::envelope::{self, RpcResponse};
 use tddy_rpc::server_engine::ServerEngine;
-use tddy_rpc::RpcService;
+use tddy_rpc::{RequestTransport, RpcService};
 use tokio::sync::{mpsc, Mutex};
 
 /// Bounded, so a webview that stops reading its IPC channel applies backpressure to the engine
@@ -87,9 +87,12 @@ struct Connection {
 
 impl<S: RpcService> WebviewRpcHost<S> {
     /// Host `service`. No webview is connected until [`Self::connect`] is called.
+    ///
+    /// Every request is stamped [`RequestTransport::InProcess`]: a frame reaches this host only
+    /// through the application's own IPC bridge, whatever its envelope says.
     pub fn new(service: S) -> Self {
         Self {
-            engine: Arc::new(ServerEngine::new(service)),
+            engine: Arc::new(ServerEngine::new(service, RequestTransport::InProcess)),
             connection: Arc::new(Mutex::new(None)),
         }
     }

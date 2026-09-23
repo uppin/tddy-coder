@@ -146,7 +146,7 @@ async fn start_with_ssh_config_host_materializes_a_remote_worktree_path_on_metad
 
     // When
     let session_id = service
-        .start_session(Request::new(ssh_exec_start_request()))
+        .start_session(Request::direct(ssh_exec_start_request()))
         .await
         .expect("StartSession with ssh_config_host must succeed")
         .into_inner()

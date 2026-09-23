@@ -685,6 +685,7 @@ async fn serve_host_tool_ipc(
                     read_half,
                     write_half,
                     HostToolIpcService { jail },
+                    tddy_rpc::RequestTransport::UnixSocket,
                 );
                 endpoint.run().await;
             });

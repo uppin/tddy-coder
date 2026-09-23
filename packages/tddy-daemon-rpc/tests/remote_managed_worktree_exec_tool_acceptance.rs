@@ -205,7 +205,7 @@ async fn an_exec_tool_refused_over_an_unverifiable_token_names_the_daemon_that_r
 
     // When
     let status = service
-        .execute_tool(Request::new(an_exec_tool_request("minted-elsewhere")))
+        .execute_tool(Request::direct(an_exec_tool_request("minted-elsewhere")))
         .await
         .expect_err("an unverifiable session token must be refused");
 
@@ -232,7 +232,7 @@ async fn an_exec_tool_refused_for_an_unmapped_user_names_the_daemon_that_refused
 
     // When
     let status = service
-        .execute_tool(Request::new(an_exec_tool_request(TEST_TOKEN)))
+        .execute_tool(Request::direct(an_exec_tool_request(TEST_TOKEN)))
         .await
         .expect_err("a user with no OS mapping must be refused");
 

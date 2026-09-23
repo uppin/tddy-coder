@@ -1375,7 +1375,7 @@ mod tests {
             port: u32,
         ) -> Result<String, Status> {
             self.service
-                .add_host_target(Request::new(AddHostTargetRequest {
+                .add_host_target(Request::direct(AddHostTargetRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
                     daemon_instance_id: host.to_string(),
                     label: THE_DESKTOPS_LABEL.to_string(),
@@ -1405,7 +1405,7 @@ mod tests {
             target_id: &str,
         ) -> Result<StartStreamResponse, Status> {
             self.service
-                .start_host_stream(Request::new(StartHostStreamRequest {
+                .start_host_stream(Request::direct(StartHostStreamRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
                     daemon_instance_id: host.to_string(),
                     target_id: target_id.to_string(),
@@ -1463,7 +1463,7 @@ mod tests {
             target_id: &str,
         ) -> Result<(), Status> {
             self.service
-                .stop_host_stream(Request::new(StopHostStreamRequest {
+                .stop_host_stream(Request::direct(StopHostStreamRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
                     daemon_instance_id: host.to_string(),
                     target_id: target_id.to_string(),
@@ -1475,7 +1475,7 @@ mod tests {
         /// The ids of the desktops attached to `host`, as the Hosts screen lists them.
         async fn the_desktops_of(&self, host: &str) -> Vec<String> {
             self.service
-                .list_host_targets(Request::new(ListHostTargetsRequest {
+                .list_host_targets(Request::direct(ListHostTargetsRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
                     daemon_instance_id: host.to_string(),
                 }))
@@ -1491,7 +1491,7 @@ mod tests {
         /// The ids of the desktops in the session's own vault.
         async fn the_desktops_of_the_session(&self) -> Vec<String> {
             self.service
-                .list_targets(Request::new(ListTargetsRequest {
+                .list_targets(Request::direct(ListTargetsRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
                     session_id: A_SESSION.to_string(),
                 }))
@@ -1509,7 +1509,7 @@ mod tests {
 
         async fn a_stranger_lists_the_desktops_of(&self, host: &str) -> Status {
             self.service
-                .list_host_targets(Request::new(ListHostTargetsRequest {
+                .list_host_targets(Request::direct(ListHostTargetsRequest {
                     session_token: A_TOKEN_THIS_DAEMON_DOES_NOT_KNOW.to_string(),
                     daemon_instance_id: host.to_string(),
                 }))
@@ -1519,7 +1519,7 @@ mod tests {
 
         async fn a_stranger_attaches_a_desktop_to(&self, host: &str) -> Status {
             self.service
-                .add_host_target(Request::new(AddHostTargetRequest {
+                .add_host_target(Request::direct(AddHostTargetRequest {
                     session_token: A_TOKEN_THIS_DAEMON_DOES_NOT_KNOW.to_string(),
                     daemon_instance_id: host.to_string(),
                     label: THE_DESKTOPS_LABEL.to_string(),
@@ -1534,7 +1534,7 @@ mod tests {
 
         async fn a_stranger_opens_the_desktop_of(&self, host: &str, target_id: &str) -> Status {
             self.service
-                .start_host_stream(Request::new(StartHostStreamRequest {
+                .start_host_stream(Request::direct(StartHostStreamRequest {
                     session_token: A_TOKEN_THIS_DAEMON_DOES_NOT_KNOW.to_string(),
                     daemon_instance_id: host.to_string(),
                     target_id: target_id.to_string(),
@@ -1545,7 +1545,7 @@ mod tests {
 
         async fn a_stranger_closes_the_desktop_of(&self, host: &str, target_id: &str) -> Status {
             self.service
-                .stop_host_stream(Request::new(StopHostStreamRequest {
+                .stop_host_stream(Request::direct(StopHostStreamRequest {
                     session_token: A_TOKEN_THIS_DAEMON_DOES_NOT_KNOW.to_string(),
                     daemon_instance_id: host.to_string(),
                     target_id: target_id.to_string(),
@@ -1579,7 +1579,7 @@ mod tests {
             .expect("a session's metadata");
 
             self.service
-                .unlock_vault(Request::new(UnlockVaultRequest {
+                .unlock_vault(Request::direct(UnlockVaultRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
                     session_id: A_SESSION.to_string(),
                     passphrase: A_VAULT_PASSPHRASE.to_string(),
@@ -1588,7 +1588,7 @@ mod tests {
                 .expect("unlocking the session's vault");
 
             self.service
-                .add_target(Request::new(AddTargetRequest {
+                .add_target(Request::direct(AddTargetRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
                     session_id: A_SESSION.to_string(),
                     label: "dev box".to_string(),
@@ -1608,7 +1608,7 @@ mod tests {
 
         async fn open_the_session_desktop(&self, target_id: &str) -> StartStreamResponse {
             self.service
-                .start_stream(Request::new(StartStreamRequest {
+                .start_stream(Request::direct(StartStreamRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
                     session_id: A_SESSION.to_string(),
                     target_id: target_id.to_string(),

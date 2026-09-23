@@ -69,12 +69,17 @@ async fn a_transport_playing(frames: Vec<ExecuteToolChunk>) -> Arc<dyn RpcClient
         server_read,
         server_write,
         FramePlayingExecuteTool { frames },
+        tddy_rpc::RequestTransport::UnixSocket,
     );
     tokio::spawn(server_endpoint.run());
 
     let (client_read, client_write) = tokio::io::split(client_side);
-    let (client, client_endpoint) =
-        tddy_stdio::StdioEndpoint::from_duplex(client_read, client_write, NoCallbackService);
+    let (client, client_endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+        client_read,
+        client_write,
+        NoCallbackService,
+        tddy_rpc::RequestTransport::UnixSocket,
+    );
     tokio::spawn(client_endpoint.run());
     client
 }

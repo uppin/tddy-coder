@@ -69,7 +69,7 @@ async fn list_worktrees_rejects_invalid_session() {
 
     // When
     let err = service
-        .list_worktrees_for_project(Request::new(ListWorktreesForProjectRequest {
+        .list_worktrees_for_project(Request::direct(ListWorktreesForProjectRequest {
             session_token: "bad".to_string(),
             project_id: "p1".to_string(),
             refresh: false,
@@ -91,7 +91,7 @@ async fn list_worktrees_unknown_project_not_found() {
 
     // When
     let err = service
-        .list_worktrees_for_project(Request::new(ListWorktreesForProjectRequest {
+        .list_worktrees_for_project(Request::direct(ListWorktreesForProjectRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: "00000000-0000-0000-0000-000000000099".to_string(),
             refresh: false,
@@ -112,7 +112,7 @@ async fn remove_worktree_empty_path_invalid_argument() {
 
     // When
     let err = service
-        .remove_worktree(Request::new(RemoveWorktreeRequest {
+        .remove_worktree(Request::direct(RemoveWorktreeRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: "any".to_string(),
             worktree_path: "".to_string(),
@@ -176,7 +176,7 @@ async fn list_worktrees_refresh_returns_git_worktree_rows() {
 
     // When
     let res = service
-        .list_worktrees_for_project(Request::new(ListWorktreesForProjectRequest {
+        .list_worktrees_for_project(Request::direct(ListWorktreesForProjectRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: project_id.clone(),
             refresh: true,
@@ -208,7 +208,7 @@ async fn clean_worktree_rejects_invalid_session() {
 
     // When
     let err = service
-        .clean_worktree(Request::new(CleanWorktreeRequest {
+        .clean_worktree(Request::direct(CleanWorktreeRequest {
             session_token: "bad".to_string(),
             project_id: "p1".to_string(),
             worktree_path: "/some/wt".to_string(),
@@ -229,7 +229,7 @@ async fn clean_worktree_empty_path_invalid_argument() {
 
     // When
     let err = service
-        .clean_worktree(Request::new(CleanWorktreeRequest {
+        .clean_worktree(Request::direct(CleanWorktreeRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: "any".to_string(),
             worktree_path: "".to_string(),
@@ -280,7 +280,7 @@ async fn clean_worktree_primary_is_failed_precondition() {
 
     // When the primary worktree path is passed to CleanWorktree
     let err = service
-        .clean_worktree(Request::new(CleanWorktreeRequest {
+        .clean_worktree(Request::direct(CleanWorktreeRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id,
             worktree_path: main_repo_path.display().to_string(),
@@ -350,7 +350,7 @@ async fn clean_worktree_clears_secondary_and_invalidates_cache() {
 
     // Populate the stats cache via a refreshing list.
     service
-        .list_worktrees_for_project(Request::new(ListWorktreesForProjectRequest {
+        .list_worktrees_for_project(Request::direct(ListWorktreesForProjectRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: project_id.clone(),
             refresh: true,
@@ -360,7 +360,7 @@ async fn clean_worktree_clears_secondary_and_invalidates_cache() {
 
     // When the secondary worktree is cleared
     let resp = service
-        .clean_worktree(Request::new(CleanWorktreeRequest {
+        .clean_worktree(Request::direct(CleanWorktreeRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: project_id.clone(),
             worktree_path: wt.display().to_string(),
@@ -377,7 +377,7 @@ async fn clean_worktree_clears_secondary_and_invalidates_cache() {
     assert!(!ignored.exists(), "ignored target/build.o must be removed");
 
     let cached = service
-        .list_worktrees_for_project(Request::new(ListWorktreesForProjectRequest {
+        .list_worktrees_for_project(Request::direct(ListWorktreesForProjectRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id,
             refresh: false,
@@ -403,7 +403,7 @@ async fn restore_session_worktree_rejects_invalid_session() {
 
     // When
     let err = service
-        .restore_session_worktree(Request::new(RestoreSessionWorktreeRequest {
+        .restore_session_worktree(Request::direct(RestoreSessionWorktreeRequest {
             session_token: "bad".to_string(),
             project_id: "p1".to_string(),
             session_id: "s1".to_string(),
@@ -471,7 +471,7 @@ async fn restore_session_worktree_recreates_worktree_from_changeset() {
 
     // When the session's worktree is restored
     let resp = service
-        .restore_session_worktree(Request::new(RestoreSessionWorktreeRequest {
+        .restore_session_worktree(Request::direct(RestoreSessionWorktreeRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id,
             session_id: session_id.to_string(),

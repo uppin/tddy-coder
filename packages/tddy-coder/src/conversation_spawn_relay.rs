@@ -151,9 +151,14 @@ mod tests {
                 session_id: session_id.to_string(),
                 seen: seen.clone(),
             },
+            tddy_rpc::RequestTransport::UnixSocket,
         );
-        let (coder_client, coder_endpoint) =
-            StdioEndpoint::from_duplex(c_read, c_write, NoopRpcService);
+        let (coder_client, coder_endpoint) = StdioEndpoint::from_duplex(
+            c_read,
+            c_write,
+            NoopRpcService,
+            tddy_rpc::RequestTransport::UnixSocket,
+        );
         tokio::spawn(daemon_endpoint.run());
         tokio::spawn(coder_endpoint.run());
         let (tx, rx) = reverse_client_channel();
@@ -199,8 +204,14 @@ mod tests {
                 session_id: "c2".to_string(),
                 seen: seen.clone(),
             },
+            tddy_rpc::RequestTransport::UnixSocket,
         );
-        let (cc, ce) = StdioEndpoint::from_duplex(c_read, c_write, NoopRpcService);
+        let (cc, ce) = StdioEndpoint::from_duplex(
+            c_read,
+            c_write,
+            NoopRpcService,
+            tddy_rpc::RequestTransport::UnixSocket,
+        );
         tokio::spawn(de.run());
         tokio::spawn(ce.run());
         let (tx, rx) = reverse_client_channel();

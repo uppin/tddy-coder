@@ -268,7 +268,7 @@ async fn resuming_a_sandboxed_codebase_session_re_provisions_its_jail() {
     let started = {
         let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
         let started = service
-            .start_session(Request::new(a_sandboxed_codebase_request()))
+            .start_session(Request::direct(a_sandboxed_codebase_request()))
             .await
             .expect("a jailed-codebase session must start")
             .into_inner();
@@ -293,7 +293,7 @@ async fn resuming_a_sandboxed_codebase_session_re_provisions_its_jail() {
 
     // When the session is resumed
     restarted
-        .resume_session(Request::new(ResumeSessionRequest {
+        .resume_session(Request::direct(ResumeSessionRequest {
             session_token: a_caller_token().to_string(),
             session_id: started.session_id.clone(),
         }))
@@ -303,7 +303,7 @@ async fn resuming_a_sandboxed_codebase_session_re_provisions_its_jail() {
     // Then its tool calls are served again — the jail was re-provisioned from persisted metadata,
     // not silently redirected to the bare host worktree
     let response = restarted
-        .execute_tool(Request::new(a_read_of(&checkout)))
+        .execute_tool(Request::direct(a_read_of(&checkout)))
         .await
         .expect("a resumed jailed checkout must serve its tool calls")
         .into_inner();

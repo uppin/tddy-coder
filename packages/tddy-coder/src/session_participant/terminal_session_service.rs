@@ -142,13 +142,14 @@ impl RpcService for CoderTerminalSessionRpc {
         &self,
         service: &str,
         method: &str,
+        metadata: tddy_rpc::RequestMetadata,
         input_rx: tokio::sync::mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, Status> {
         if !Self::serves(method) {
             return Err(Self::refusal(method));
         }
         self.served
-            .start_bidi_stream(service, method, input_rx)
+            .start_bidi_stream(service, method, metadata, input_rx)
             .await
     }
 }

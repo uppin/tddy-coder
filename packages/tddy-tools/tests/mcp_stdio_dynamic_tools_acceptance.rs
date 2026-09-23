@@ -173,6 +173,7 @@ async fn mcp_tools_call_over_stdio_forwards_dynamic_tool_through_sandbox_ipc() {
                     read_half,
                     write_half,
                     FakeToolExecService,
+                    tddy_rpc::RequestTransport::UnixSocket,
                 );
                 endpoint.run().await;
             });

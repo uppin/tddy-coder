@@ -274,7 +274,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         loop {
             let rows = tddy_service::proto::host::HostService::list_eligible_daemons(
                 &hosts_a,
-                Request::new(tddy_service::proto::host::ListEligibleDaemonsRequest {
+                Request::direct(tddy_service::proto::host::ListEligibleDaemonsRequest {
                     session_token: "valid-token".to_string(),
                 }),
             )
@@ -294,7 +294,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     // Then
     // A forwards ListExecTools to B — the relay must route to B and return B's catalog.
     let resp = service_a
-        .list_exec_tools(Request::new(ListExecToolsRequest {
+        .list_exec_tools(Request::direct(ListExecToolsRequest {
             session_token: "valid-token".to_string(),
             daemon_instance_id: RELAY_PEER_ID.to_string(), // relay to B
         }))

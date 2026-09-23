@@ -24,7 +24,7 @@ use tempfile::TempDir;
 const TEARDOWN_WINDOW: Duration = Duration::from_millis(300);
 
 fn a_request(token: &str) -> Request<StreamHostPromptsRequest> {
-    Request::new(StreamHostPromptsRequest {
+    Request::direct(StreamHostPromptsRequest {
         session_token: token.to_string(),
         daemon_instance_id: String::new(),
     })

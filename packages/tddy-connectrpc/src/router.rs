@@ -10,7 +10,7 @@ use axum::{
 };
 use futures::stream::StreamExt;
 use std::sync::Arc;
-use tddy_rpc::{RequestMetadata, RpcMessage};
+use tddy_rpc::{RequestMetadata, RequestTransport, RpcMessage};
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::envelope::{parse_envelope_frames, wrap_end_stream, wrap_envelope};
@@ -83,10 +83,7 @@ async fn handle_rpc<S: tddy_rpc::RpcService>(
             }
             Ok(frames) => frames
                 .into_iter()
-                .map(|payload| RpcMessage {
-                    payload,
-                    metadata: RequestMetadata::default(),
-                })
+                .map(|payload| RpcMessage::new(payload, over_http()))
                 .collect(),
             Err(e) => {
                 return error_response(
@@ -96,10 +93,7 @@ async fn handle_rpc<S: tddy_rpc::RpcService>(
             }
         }
     } else {
-        vec![RpcMessage {
-            payload: body.to_vec(),
-            metadata: RequestMetadata::default(),
-        }]
+        vec![RpcMessage::new(body.to_vec(), over_http())]
     };
 
     match bridge.handle_messages(&service, &method, &messages).await {
@@ -180,6 +174,12 @@ async fn handle_rpc<S: tddy_rpc::RpcService>(
         }
         Err(status) => error_response(status, protocol),
     }
+}
+
+/// Every request this router hands the bridge arrived over HTTP, stamped here rather than read
+/// from a header a client could set.
+fn over_http() -> RequestMetadata {
+    RequestMetadata::over(RequestTransport::Http)
 }
 
 fn error_response(status: tddy_rpc::Status, _protocol: RequestProtocol) -> Response {

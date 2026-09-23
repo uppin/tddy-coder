@@ -154,7 +154,7 @@ async fn stream_host_stats_rejects_an_invalid_token() {
 
     // When an unauthenticated caller subscribes to the host-stats stream
     let result = service
-        .stream_host_stats(Request::new(StreamHostStatsRequest {
+        .stream_host_stats(Request::direct(StreamHostStatsRequest {
             session_token: "bad-token".to_string(),
         }))
         .await;
@@ -182,7 +182,7 @@ async fn stream_host_stats_emits_cpu_and_disk_immediately_on_subscribe() {
 
     // When an authenticated caller subscribes
     let mut stream = service
-        .stream_host_stats(Request::new(StreamHostStatsRequest {
+        .stream_host_stats(Request::direct(StreamHostStatsRequest {
             session_token: "valid".to_string(),
         }))
         .await
@@ -209,7 +209,7 @@ async fn stream_host_stats_refreshes_cpu_on_the_fast_cadence() {
 
     // When a caller subscribes and reads two successive events
     let mut stream = service
-        .stream_host_stats(Request::new(StreamHostStatsRequest {
+        .stream_host_stats(Request::direct(StreamHostStatsRequest {
             session_token: "valid".to_string(),
         }))
         .await
@@ -238,7 +238,7 @@ async fn stream_host_stats_refreshes_disk_on_the_slow_cadence() {
 
     // When a caller subscribes and reads two successive events
     let mut stream = service
-        .stream_host_stats(Request::new(StreamHostStatsRequest {
+        .stream_host_stats(Request::direct(StreamHostStatsRequest {
             session_token: "valid".to_string(),
         }))
         .await
@@ -265,7 +265,7 @@ async fn stream_host_stats_emits_memory_and_load_immediately_on_subscribe() {
     let service = make_unit_service().with_host_stats(Arc::new(SequencedHostStats::new()));
 
     let mut stream = service
-        .stream_host_stats(Request::new(StreamHostStatsRequest {
+        .stream_host_stats(Request::direct(StreamHostStatsRequest {
             session_token: "valid".to_string(),
         }))
         .await
@@ -292,7 +292,7 @@ async fn stream_host_stats_refreshes_memory_on_the_fast_cadence() {
         .with_host_stats_intervals(Duration::from_millis(20), Duration::from_secs(30));
 
     let mut stream = service
-        .stream_host_stats(Request::new(StreamHostStatsRequest {
+        .stream_host_stats(Request::direct(StreamHostStatsRequest {
             session_token: "valid".to_string(),
         }))
         .await
@@ -321,7 +321,7 @@ async fn stream_host_stats_still_refreshes_disk_on_the_slow_cadence() {
         .with_host_stats_intervals(Duration::from_millis(20), Duration::from_secs(30));
 
     let mut stream = service
-        .stream_host_stats(Request::new(StreamHostStatsRequest {
+        .stream_host_stats(Request::direct(StreamHostStatsRequest {
             session_token: "valid".to_string(),
         }))
         .await
@@ -353,7 +353,7 @@ async fn stream_host_stats_marks_load_average_unreported_when_the_provider_has_n
     }));
 
     let mut stream = service
-        .stream_host_stats(Request::new(StreamHostStatsRequest {
+        .stream_host_stats(Request::direct(StreamHostStatsRequest {
             session_token: "valid".to_string(),
         }))
         .await

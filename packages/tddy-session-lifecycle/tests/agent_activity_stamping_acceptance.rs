@@ -120,7 +120,7 @@ async fn a_recorded_call(
     session
         .service
         .activity_service()
-        .report_agent_activity(Request::new(ReportAgentActivityRequest {
+        .report_agent_activity(Request::direct(ReportAgentActivityRequest {
             session_id: session.session_id.clone(),
             hook_token: HOOK_TOKEN.to_string(),
             os_user: TEST_USER.to_string(),

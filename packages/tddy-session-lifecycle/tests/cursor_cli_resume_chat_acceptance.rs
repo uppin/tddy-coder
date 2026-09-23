@@ -227,7 +227,7 @@ impl CursorCliDaemon {
     async fn start_a_cursor_cli_session(&self) -> String {
         let response = self
             .service
-            .start_session(Request::new(a_cursor_cli_start_request()))
+            .start_session(Request::direct(a_cursor_cli_start_request()))
             .await
             .expect("StartSession cursor-cli must succeed");
         response.into_inner().session_id
@@ -264,7 +264,7 @@ impl CursorCliDaemon {
 
     async fn resume(&self, session_id: &str) {
         self.service
-            .resume_session(Request::new(ResumeSessionRequest {
+            .resume_session(Request::direct(ResumeSessionRequest {
                 session_token: VALID_TOKEN.to_string(),
                 session_id: session_id.to_string(),
             }))

@@ -185,7 +185,7 @@ impl SettingsBuilder {
 }
 
 fn an_update_of(settings: DaemonSettings) -> Request<UpdateConfigRequest> {
-    Request::new(UpdateConfigRequest {
+    Request::direct(UpdateConfigRequest {
         session_token: VALID_TOKEN.to_string(),
         settings: Some(settings),
     })
@@ -203,7 +203,7 @@ async fn returns_the_effective_configuration_with_the_livekit_api_secret_redacte
     // When its configuration is read
     let response = daemon
         .service
-        .get_config(Request::new(GetConfigRequest {
+        .get_config(Request::direct(GetConfigRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -233,7 +233,7 @@ async fn reports_the_path_of_the_file_an_update_will_be_written_to() {
     // When its configuration is read
     let response = daemon
         .service
-        .get_config(Request::new(GetConfigRequest {
+        .get_config(Request::direct(GetConfigRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -375,7 +375,7 @@ async fn returns_the_client_config_the_web_bundle_otherwise_fetches_over_http() 
     // When the client config is requested over RPC
     let response = daemon
         .service
-        .get_client_config(Request::new(GetClientConfigRequest {
+        .get_client_config(Request::direct(GetClientConfigRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -404,7 +404,7 @@ async fn returns_the_jail_capability_the_web_bundle_otherwise_reads_from_api_con
     // When that page asks for the configuration it starts up with
     let response = daemon
         .service
-        .get_client_config(Request::new(GetClientConfigRequest {
+        .get_client_config(Request::direct(GetClientConfigRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -425,7 +425,7 @@ async fn returns_the_jail_capability_the_web_bundle_otherwise_reads_from_api_con
 async fn the_client_config_of(daemon: &ADaemonConfigService) -> GetClientConfigResponse {
     daemon
         .service
-        .get_client_config(Request::new(GetClientConfigRequest {
+        .get_client_config(Request::direct(GetClientConfigRequest {
             session_token: String::new(),
         }))
         .await
@@ -480,7 +480,7 @@ async fn serves_the_client_config_to_a_caller_that_has_not_signed_in_yet() {
     // When that page asks for the config that tells it there is a daemon to sign in to
     let response = daemon
         .service
-        .get_client_config(Request::new(GetClientConfigRequest {
+        .get_client_config(Request::direct(GetClientConfigRequest {
             session_token: String::new(),
         }))
         .await
@@ -500,7 +500,7 @@ async fn refuses_to_return_the_configuration_to_a_caller_without_a_valid_session
     // When a caller presents a token the daemon does not accept
     let status = daemon
         .service
-        .get_config(Request::new(GetConfigRequest {
+        .get_config(Request::direct(GetConfigRequest {
             session_token: "not-a-token".to_string(),
         }))
         .await
@@ -519,7 +519,7 @@ async fn refuses_to_write_the_configuration_for_a_caller_without_a_valid_session
     // When a caller presents a token the daemon does not accept
     let status = daemon
         .service
-        .update_config(Request::new(UpdateConfigRequest {
+        .update_config(Request::direct(UpdateConfigRequest {
             session_token: "not-a-token".to_string(),
             settings: Some(the_current_settings().with_web_port(9911).build()),
         }))
@@ -637,7 +637,7 @@ async fn reports_the_common_room_as_switched_off_to_the_page_the_daemon_serves()
     // When a page asks for the configuration it starts up with
     let response = daemon
         .service
-        .get_client_config(Request::new(GetClientConfigRequest {
+        .get_client_config(Request::direct(GetClientConfigRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -657,7 +657,7 @@ async fn reports_the_common_room_as_switched_on_to_the_page_the_daemon_serves() 
     // When a page asks for the configuration it starts up with
     let response = daemon
         .service
-        .get_client_config(Request::new(GetClientConfigRequest {
+        .get_client_config(Request::direct(GetClientConfigRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await

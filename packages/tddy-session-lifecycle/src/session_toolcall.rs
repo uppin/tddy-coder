@@ -116,8 +116,12 @@ pub fn start_session_toolcall_listener(
             .with_child_spawn_handler(child_spawn_handler.clone())
             .with_conversation_spawn_handler(conversation_spawn_handler.clone());
             let (reader, writer) = stream.into_split();
-            let (_client, endpoint) =
-                tddy_stdio::StdioEndpoint::from_duplex(reader, writer, service);
+            let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+                reader,
+                writer,
+                service,
+                tddy_rpc::RequestTransport::UnixSocket,
+            );
             tokio::spawn(endpoint.run());
         }
     });

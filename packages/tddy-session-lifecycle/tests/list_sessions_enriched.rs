@@ -47,7 +47,7 @@ state:
 
     // When
     let response = service
-        .list_sessions(Request::new(ListSessionsRequest {
+        .list_sessions(Request::direct(ListSessionsRequest {
             session_token: TEST_TOKEN.to_string(),
         }))
         .await
@@ -95,7 +95,7 @@ async fn list_sessions_sets_pending_elicitation_from_session_metadata() {
 
     // When
     let response = service
-        .list_sessions(Request::new(ListSessionsRequest {
+        .list_sessions(Request::direct(ListSessionsRequest {
             session_token: TEST_TOKEN.to_string(),
         }))
         .await
