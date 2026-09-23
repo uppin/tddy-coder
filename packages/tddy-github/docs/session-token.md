@@ -49,8 +49,8 @@ The same SPKI DER (`session_token_v2::spki_der`) is what a daemon publishes as i
 
 ## Signing
 
-`SessionTokenSigner::new(signing_key, key_id)` takes the daemon's `ed25519_dalek::SigningKey` and the
-`KeyId` of its public half (a mismatch is a wiring fault and panics). `mint_access` and
+`SessionTokenSigner::new(signing_key)` takes the daemon's `ed25519_dalek::SigningKey` and derives the
+`KeyId` from its public half, so a signer can never stamp an id that is not its own. `mint_access` and
 `mint_refresh` mint the two credentials with their fixed lifetimes; `mint_kind_with_issued_at` is the
 general seam, with a clock argument so a test can mint an already-expired token without sleeping.
 
@@ -82,7 +82,7 @@ for a caller that does not care how the key was found — `AuthServiceImpl` veri
 
 | Variant | When |
 |---|---|
-| `Malformed` | Not `<version>.<payload>.<signature>`; a segment that is not base64url / JSON; a signature that is not 64 bytes; a `kid` that is not a key id |
+| `Malformed` | Not `<version>.<payload>.<signature>`; a segment that is not base64url / JSON; claims missing a field, `kind` included; a signature that is not 64 bytes; a `kid` that is not a key id |
 | `UnsupportedVersion` | A well-formed token of another version — a `v1` token, most of all. Reported by version rather than as a bad signature, so a rollout is diagnosable |
 | `InvalidSignature` | The signature does not verify, or the key supplied is not the key the token names |
 | `Expired` | Correctly signed, but `exp` has passed |
@@ -94,5 +94,5 @@ other key, and a `v1` token is refused, not migrated.
 ## `v1`, retired
 
 `v1` was `v1.<payload>.<32-byte HMAC-SHA256 tag>`, keyed on `livekit.api_secret` — one secret every
-daemon in a deployment held. It was removed outright when `v2` landed (`#keyring` 1/9): there was no
-migration window, and every client signed in under `v1` signs in once more.
+daemon in a deployment held. It is not implemented: a `v1` token is `UnsupportedVersion`, with no
+migration window, so a client still holding one signs in again.

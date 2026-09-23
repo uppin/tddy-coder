@@ -6,7 +6,7 @@
 **Metrics:** **806 lines** · **nesting depth 5** · 2 parameters · 18 branch/match lines · 10 early exits
 **Thresholds breached:** length 806 > 60; nesting 5 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — regressed 2026-09-22 (806 → 833 lines since detection; +2 of it from #494) — **unclaimed**
+**Status:** Open — regressed 2026-09-23 (806 → 878 lines since detection; +2 from #494, +45 from #508) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -16,6 +16,7 @@
 | 2026-09-18 | 806 | 5 | 18 | 10 | first detection |
 | 2026-09-22 | 833 | 5 | — | — | 831 on master before #494; +2 from #494 (`#carve` 8/11), the `SharedPresenterEventSink` cast at the `DaemonSessionHost::new` call. Nesting by indentation unchanged; branches and exits not re-derived |
 | 2026-09-23 | 833 | 5 | — | — | touched by #520 (`#carve` 11/12) and **unchanged by it**, now at `runtime.rs:563`: `RpcHandlers::install(host)` added five lines and the four families' service and entry construction left for `RpcHandlers`, net zero. Nesting and `return`/`?` count identical to master; branches not re-derived |
+| 2026-09-23 | 878 | 5 | 20 | 14 | 833 on `origin/master` (`4e260d7f`, after #520) → 878 after #508 (`#keyring` 1/9): the common-room peer registry resolved once before auth, the signing-key load, the `KeyDirectory` choice (`CommonRoomKeyDirectory` vs `StandaloneKeyDirectory`), `build_auth_entries_with`, and the advertised key handed to discovery. Same scan on master gives 18 branches / 13 exits, so #508 added 2 and 1; the first row's 10 exits used a different exit count. Nesting by indentation identical on master and HEAD. Split deferred to a follow-up after `#keyring` lands, as for `oversized-file-runtime` |
 
 ## What the tool found
 

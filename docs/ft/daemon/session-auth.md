@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Authenticate a web client against **any** daemon in a LiveKit deployment with a single GitHub login, and keep that session durable across device sleep / tab-background without forcing re-login. Two stateless, HMAC-signed tokens carry the GitHub identity: a short-lived **access token** used on every RPC, and a long-lived **refresh token** used only to mint fresh access tokens. Every daemon verifies both independently using the secret they all share, so no per-daemon session store or cross-daemon session propagation is required.
+Authenticate a web client against **any** daemon in a LiveKit deployment with a single GitHub login, and keep that session durable across device sleep / tab-background without forcing re-login. Two stateless, Ed25519-signed tokens carry the GitHub identity: a short-lived **access token** used on every RPC, and a long-lived **refresh token** used only to mint fresh access tokens. Each daemon signs with a keypair of its own, and a token names the key that signed it; any daemon verifies a token against that key — its own, or the public key the signing daemon advertises on the common room — so no per-daemon session store, cross-daemon session propagation or shared secret is required.
 
 ## Problem this replaces
 
@@ -12,10 +12,12 @@ That stateless single-token design (below, unchanged) still had a client-side ga
 
 ## Token model
 
-- **Format:** `v1.<base64url(payload)>.<base64url(tag)>` where `payload` is JSON `{ id, login, avatar_url, name, iat, exp, kind }` and `tag = HMAC-SHA256(secret, "v1.<base64url(payload)>")`.
-- **Kind:** `kind` is `"access"` or `"refresh"` (missing `kind` — a pre-upgrade token already in a browser — deserializes as `"access"`, so existing sessions keep working).
-- **Signing key:** `livekit.api_secret` — the one secret identical on every daemon (it already signs LiveKit room JWTs). No dedicated signing-key config is introduced.
-- **Verification:** strip the `v1.` prefix, recompute the tag, compare in constant time (`subtle::ct_eq`), then reject if `now > exp`. On success the four GitHub identity fields (plus `kind`) are recovered from the payload — no lookup.
+- **Format:** `v2.<base64url(claims)>.<base64url(signature)>` where `claims` is JSON `{ kid, id, login, avatar_url, name, iat, exp, kind }` and `signature` is the 64-byte Ed25519 signature over `"v2.<base64url(claims)>"`. Byte-level detail: [`packages/tddy-github/docs/session-token.md`](../../../packages/tddy-github/docs/session-token.md).
+- **Key id:** `kid` is derived from the signer's public key (the first 16 bytes of the SHA-256 of its SPKI DER, base64url) — never assigned — so an id names exactly one key, forever.
+- **Kind:** `kind` is `"access"` or `"refresh"`, and is required: a payload without it is malformed.
+- **Signing key:** each daemon's own Ed25519 keypair, `signing_key.pem` (mode `0600`) in `auth_storage` — or in `<tddy_data_dir>/auth` when `auth_storage` is unset. Generated on first boot and reused on every later boot. It never leaves the host; only its public half is published. `livekit.api_secret` plays no part in session tokens.
+- **Verification:** read the token's `kid` (untrusted — it only says which key to fetch), resolve it to a public key — this daemon's own, or one a peer advertised — check the claims name that key, verify the signature strictly, then reject if `now > exp`. On success the four GitHub identity fields (plus `kind`) are recovered from the claims — no session lookup.
+- **Versions:** only `v2` is accepted. A `v1` token (the retired HMAC format) is refused as an unsupported version, with no migration window — a client holding one signs in again.
 - **Expiry:** an **access** token has a short **5-minute** TTL; a **refresh** token has a **7-day sliding** TTL (each successful `RefreshSession` mints a new refresh token dated 7 days out, so an actively-used session never has to re-login — see [Durable sessions](#durable-sessions-access--refresh-tokens)).
 
 ## Behavior
@@ -24,7 +26,7 @@ That stateless single-token design (below, unchanged) still had a client-side ga
 `ExchangeCode` completes the GitHub OAuth handshake and returns **both** a freshly signed access token and a freshly signed refresh token. Nothing is stored server-side.
 
 ### Verification (every RPC)
-`ConnectionService` (and `ActionService` / `TaskService`) gate each call on the same `session_token`. The daemon's session-user resolver **verifies the signature and expiry, and requires `kind == access`** — rather than looking the token up in a local map. Any daemon holding the shared secret accepts a token any other daemon minted; a refresh token presented as an RPC token is rejected.
+`ConnectionService` (and `ActionService` / `TaskService`) gate each call on the same `session_token`. The daemon's session-user resolver **verifies the signature and expiry, and requires `kind == access`** — rather than looking the token up in a local map. A daemon accepts a token another daemon minted once it has learned that daemon's public key from the common room; a token whose key it has not learned is refused, never tried against another key. A refresh token presented as an RPC token is rejected.
 
 ### Refresh
 `RefreshSession(refresh_token)` verifies a currently-valid, **refresh**-kind token and returns a new access token **and** a new refresh token (sliding 7-day window). An access-kind token, an expired token, or a forged token is rejected — the client must re-login. See [Durable sessions](#durable-sessions-access--refresh-tokens) for why this is a two-token exchange rather than the older single-token refresh.
@@ -64,7 +66,7 @@ systemd — so a live PR read as "no PR".
   path: `github-tokens.json` at mode `0600` in a `0700` directory, writes serialised on a process-wide
   mutex and published via `.tmp` + `fsync` + `rename` (an interrupted in-place write parsed as an empty
   map, i.e. lost *every* operator's token at once).
-- **The token never leaves the server.** It is not part of the HMAC session token and is never returned
+- **The token never leaves the server.** It is not part of the session token and is never returned
   to the client, so it cannot end up in browser storage on a plain-http origin.
 - **A login that cannot retain its token fails.** A session minted without its token is a half-login:
   the operator appears signed in while every GitHub-backed read reports itself *unavailable*, and
@@ -95,15 +97,18 @@ systemd — so a live PR read as "no PR".
 
 ## Security / configuration
 
-- The shared secret is `livekit.api_secret`. When **no** secret is configured the daemon still starts, but auth is non-functional: minting/refresh return an error and the resolver rejects every token (all token-gated RPCs return `Unauthenticated`). **There is no fallback to the legacy local-map behavior.**
-- All daemons intended to share sessions must be configured with the **same** `livekit.api_secret` (already required to join the same LiveKit room).
-- Verification is constant-time to avoid tag-comparison timing leaks.
+- **Authentication needs no `livekit:` block.** A daemon with a `github:` block signs and verifies session tokens whether or not LiveKit is configured, so a sign-in completes and every token-gated RPC — including the settings service an operator repairs the configuration from — answers. `livekit.api_secret` signs LiveKit room JWTs and nothing else.
+- **The key file is guarded, not repaired.** It is written at mode `0600` before any byte of it exists (via `write_atomic_with_mode`), and a key file another account can read is refused at startup rather than tightened — it may already have been read, and the operator is the one to judge that. A present but unparseable key is also refused; the daemon never regenerates over an identity peers have learned. An `auth_storage` directory more permissive than `0700` is warned about once at startup and left as the operator set it.
+- **The key location has no guess.** `auth_storage` when configured, else `<tddy_data_dir>/auth`; the daemon refuses to start when neither is known. Moving `auth_storage` moves the key: a daemon that finds no key generates a new identity, and every session it issued ends.
+- **Sharing sessions across daemons means sharing a common room.** Peers learn each other's public keys from the `livekit.common_room` advertisement, so daemons that should accept each other's tokens must join the same room. A single daemon, or a desktop install, needs no room: it verifies its own tokens with its own key.
+- **Which participants' keys are believed** is decided by one rule both the mint and discovery read — see [LiveKit peer discovery § Trust model](livekit-peer-discovery.md#trust-model). A signed-in web user cannot be minted an identity discovery would read a key from.
+- **Revocation costs a restart.** A peer key, once learned, is remembered for the life of the verifying process — safe against forgery (an id names one key), and it keeps peers' tokens verifying through a common-room reconnect. The trade is that a peer that left the room, was removed, or had its key compromised keeps having new tokens accepted until each verifying daemon restarts. There is no revocation list or expiry on learned keys.
 - Out of scope: refreshing the GitHub OAuth token itself (the OAuth App's user tokens don't expire and have no refresh token), server-side session revocation, and moving RPC auth from the request body to an `Authorization` header (would touch every daemon service method and all web call sites).
 
 ## Related documentation
 
-- [The identity boundary and the LiveKit service](auth-livekit-services.md) — where the signing, verifying and credential-holding code lives, and why the one shared secret is not split when the crates are.
+- [The identity boundary and the LiveKit service](auth-livekit-services.md) — where the signing, verifying and credential-holding code lives, and how a peer's key reaches the verifier without the LiveKit crate reaching auth.
 - [docs/ft/web/daemon-selector-livekit-rpc.md](../web/daemon-selector-livekit-rpc.md) — daemon switching in the web UI (the surface where the original cross-daemon bug appeared).
 - [docs/ft/daemon/livekit-peer-discovery.md](livekit-peer-discovery.md) — peer fan-out that forwards `session_token` between daemons.
-- `packages/tddy-github/src/session_token.rs` — signer/verifier implementation (`TokenKind`, `mint_access`/`mint_refresh`, `REFRESH_TOKEN_TTL`).
+- `packages/tddy-github/src/session_token_v2.rs` — the token format, signer and verifier (`KeyId`, `TokenKind`, `mint_access`/`mint_refresh`, `REFRESH_TOKEN_TTL`); `packages/tddy-daemon-auth/src/signing_key.rs` — the daemon's keypair and the `KeyDirectory` port.
 - `packages/tddy-web/src/rpc/sessionTokenStore.ts`, `packages/tddy-web/src/rpc/authGateInterceptor.ts` — client-side durable-session implementation.

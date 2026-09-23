@@ -37,9 +37,9 @@ The second half matters as much as the first: session tokens are signed by the a
 daemon's own key, and the only way this crate reaches minting is the `SessionTokenMinter` **port**.
 If that port stopped being one, this crate could grow a second signer. The same rule shapes key
 distribution: this daemon's public signing key rides its common-room advertisement as two opaque
-strings (`AdvertisedSigningKey`), and `peer_signing_public_key` / `CommonRoomPeerRegistry::
-signing_public_key_for` hand a peer's back undecoded — `tddy-daemon` turns them into the auth crate's
-`KeyDirectory`.
+strings (`AdvertisedSigningKey`), and `peer_signing_public_keys` / `CommonRoomPeerRegistry::
+signing_public_keys_for` hand back every candidate advertised under an id, undecoded — `tddy-daemon`
+turns them into the auth crate's `KeyDirectory`.
 
 **The ports point the right way already.** `session_room` defines `SessionTerminalBridge`,
 `WorktreeSource`, `SessionTokenMinter` and `RemoteSnapshotSource`, and `ConnectionServiceImpl`

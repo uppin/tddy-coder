@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-daemon/src/runtime.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate, independently on #498 and #518
-**Metrics:** **1,562 production lines** (2026-09-23; 1,513 before #508) · budget 500 · **~3× over** · residue function `build` is **833 lines**
-**Thresholds breached:** length 1562 > 500; `build` 833 > 60
+**Metrics:** **1,562 production lines** (2026-09-23; 1,513 before #508) · budget 500 · **~3× over** · residue function `build` is **878 lines** (833 before #508)
+**Thresholds breached:** length 1562 > 500; `build` 878 > 60
 **Restructure:** required — three `extract_module --to_file` seams **plus** function splitting
-**Status:** Open — pre-existing; #498, #518 and #494 grew it and deferred with explicit developer consent
+**Status:** Open — pre-existing; #498, #518 and #494 grew it and deferred with explicit developer consent; #508 grew it and deferred the split because dependents #509–#513 touch this file
 
 ## Measurement history
 

@@ -34,6 +34,15 @@ stays exactly one definition of each.
   consuming crate, is authoring rather than moving, and every later node would repeat it.
 - **Anything the moving families do not reach.** `pty_registry.rs` was moved here and then retracted
   untouched on exactly that test.
+- **The daemon's signing key and key directory.** They are auth's (`tddy-daemon-auth`), and they
+  must not land here even if several crates reach them: `peer_forwarding.rs` makes this crate carry
+  the LiveKit SDK, which cannot enter `tddy-tools`' `--no-default-features` in-jail build, so
+  anything placed here inherits that unreachability.
+- **The participant-identity rule.** `SPLIT_AGENT_IDENTITY_PREFIX` and the other non-daemon
+  prefixes are defined in `tddy_service::participant_identity`, beside
+  `may_be_daemon_discovery_identity`, because the kernel depends on `tddy-service` and the rule must
+  be one both the mint and discovery read. `daemon_identity` re-exports the split-agent prefix for
+  the crates that mint agents' identities.
 
 ## Ports
 

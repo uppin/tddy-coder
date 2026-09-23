@@ -208,22 +208,22 @@ record turns that from a preference into a constraint.
 
 ## Acceptance Criteria
 
-- [ ] A daemon with **no `livekit:` block at all** completes a sign-in, and the token it issues
+- [x] A daemon with **no `livekit:` block at all** completes a sign-in, and the token it issues
       resolves to the user who signed in ([session-auth.md](../session-auth.md)). Registration was
       never the barrier — measured, `auth.AuthService` is registered without `livekit:` today;
       the sign-in fails one step later at `ExchangeCode`, with
       `FailedPrecondition: "session token signing is not configured"`
-- [ ] A daemon generates its keypair on first boot, at mode `0600`, and **reuses** it on restart
-- [ ] A `v2` token minted by daemon A verifies on daemon B after B has seen A's published public key
+- [x] A daemon generates its keypair on first boot, at mode `0600`, and **reuses** it on restart
+- [x] A `v2` token minted by daemon A verifies on daemon B after B has seen A's published public key
       ([livekit-peer-discovery.md](../livekit-peer-discovery.md))
-- [ ] A `v2` token whose key id names a daemon B has **not** seen is rejected — no fallback
-- [ ] A `v1` token is rejected
-- [ ] `livekit.api_secret` still mints a working LiveKit room JWT
+- [x] A `v2` token whose key id names a daemon B has **not** seen is rejected — no fallback
+- [x] A `v1` token is rejected
+- [x] `livekit.api_secret` still mints a working LiveKit room JWT
       ([auth-livekit-services.md](../auth-livekit-services.md))
-- [ ] Both crates' dependency-boundary tests pass **unchanged**
-- [ ] `verify_rejects_a_token_with_a_tampered_signature` passes 100 consecutive runs
-- [ ] The daemon warns once at startup when `auth_storage` is more permissive than `0700`
-- [ ] Access/refresh TTLs, `kind` enforcement in both directions, and logout behaviour are unchanged
+- [x] Both crates' dependency-boundary tests pass **unchanged**
+- [x] `verify_rejects_a_token_with_a_tampered_signature` passes 100 consecutive runs
+- [x] The daemon warns once at startup when `auth_storage` is more permissive than `0700`
+- [x] Access/refresh TTLs, `kind` enforcement in both directions, and logout behaviour are unchanged
 
 ## References
 

@@ -49,7 +49,7 @@ key**, which would be an identity no peer was told about.
 ## Documentation
 
 ### Technical implementation (how)
-- [The identity boundary](./docs/auth-service.md) — what is here, the shared secret, and secrets at rest
+- [The identity boundary](./docs/auth-service.md) — what is here, the signing key and the key directory, and secrets at rest
 - [`codex_oauth_relay`](./docs/codex-oauth-relay.md) — authorize-URL validation and callback parsing
 - [OAuth loopback tunnel](./docs/oauth-loopback-tunnel.md) — the operator TCP listener and its LiveKit bridge
 - [Changesets](./docs/changesets/) — applied changeset history

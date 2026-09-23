@@ -217,8 +217,8 @@ the client also accepts the **7-day refresh token** and exchanges it for an acce
 There is deliberately **no LiveKit setting here at all**. `LIVEKIT_API_SECRET` mints a room JWT for
 any room under any identity, so a client that held it could join the common room *as* a daemon —
 under `daemon-<id>`, and be handed the RPC calls addressed to it, or under a bare id peer discovery
-takes for a daemon's. (It no longer signs session tokens: since `#keyring` 1/9 each daemon signs
-those with an Ed25519 key of its own — see [session-auth.md](session-auth.md).) The client therefore
+takes for a daemon's. (It does not sign session tokens: each daemon signs those with an Ed25519 key
+of its own — see [session-auth.md](session-auth.md).) The client therefore
 asks the daemon for a room JWT, under an identity the daemon generates (`remote-git-<uuid>`) and
 peer discovery never reads an advertisement from:
 
@@ -268,10 +268,10 @@ else on the room. Two changes close that:
   (`tddy_service::RESERVED_DAEMON_IDENTITY_PREFIX`, the constant `daemon_rpc_identity` composes
   from), on **every** registration — including the session coder's, which is unauthenticated by
   design because a coder holds no session-token signer.
-- Since `#keyring` 1/9 it also refuses every identity peer discovery could take for a daemon's
+- It also refuses every identity peer discovery could take for a daemon's
   **discovery** participant — the bare-id participant whose advertisement carries the key peers
   verify its session tokens with. Only browser (`web-…`, `browser-…`) and the other non-daemon
-  prefixes are minted, by the same rule discovery reads (`tddy_service::may_be_daemon_discovery_identity`),
+  prefixes (`server…`, `split-agent-…`, `remote-git-…`, `screenshare-host-…`) are minted, by the same rule discovery reads (`tddy_service::may_be_daemon_discovery_identity`),
   so no caller can join the common room as a "daemon" and advertise a signing key of its own. See
   [livekit-peer-discovery.md](livekit-peer-discovery.md) § Trust model.
 

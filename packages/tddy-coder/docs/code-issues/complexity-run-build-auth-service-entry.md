@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 65 | 6 | 8 | 0 | first detection |
+| 2026-09-23 | 65 | 6 | 8 | 0 | unchanged — #508 (`#keyring` 1/9) planned to shrink it and did not touch it: its `(Some(id), Some(secret))` gate is on the GitHub OAuth app's credentials, not on LiveKit, and the CLI never held a session-token signer. `run.rs` has no diff in #508; the same scan gives identical lines, depth and exits on `origin/master` and HEAD |
 
 ## What the tool found
 

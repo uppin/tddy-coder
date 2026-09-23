@@ -1,7 +1,7 @@
 # Changeset: Per-daemon signing identity for session tokens
 
 **Date**: 2026-09-19
-**Status**: 🚧 In Progress — implemented; awaiting CI and `/wrap-context-docs`
+**Status**: ✅ Complete — wrapped 2026-09-23 (`/pr-wrap` step 7); CI on the final tip still pending
 **Type**: Architecture Change
 **Stack**: `#keyring` 1/9 — the root node · branch `feature/keyring/signing-key` · base `master`
 (PR #508). It was planned on `feature/carve/git-plumbing` (`#carve` 6/10, PR #492); #492 merged on
@@ -324,10 +324,12 @@ already rewrites, and both shrink as the secret-gated branches go; neither needs
 - [x] **Backlog fix — `auth_storage` posture**: startup warning when more permissive than `0700`
 - [x] **Testing**: acceptance + unit tests passing, dependency-boundary tests passing unchanged
       (scoped local runs; see `## Implementation record` for the two environment failures)
-- [ ] **Package Documentation**: READMEs and `packages/tddy-github/docs/session-token.md` done;
-      the `packages/*/docs/` deltas are recorded below for `/wrap-context-docs` to apply
-- [ ] **Code Quality**: `cargo clippy -p <pkg> --all-targets -- -D warnings` clean per touched
-      package locally; **CI green still owed**
+- [x] **Package Documentation**: READMEs, `packages/tddy-github/docs/session-token.md`, and every
+      `packages/*/docs/` delta below applied at `/wrap-context-docs` (2026-09-23)
+- [x] **Code Quality**: `cargo clippy -p <pkg> --all-targets -- -D warnings` clean per touched
+      package locally. **Deferred to CI**: whole-workspace green is CI's to report
+      (`scripts/ci-status.sh 508`), pending on `4721a571` at wrap; CI on `21b11f78` was 7148/7149
+      with the one failure (`test_placement`) fixed in `4721a571`
 
 ## Technical Changes
 
@@ -1113,7 +1115,7 @@ closes it.
 - [x] M4 — rewire the signer construction sites (six, not four)
 - [x] M5 — migrate the acceptance suites
 - [x] M6 — config template and docs
-- [ ] Package documentation — READMEs done; apply the `packages/*/docs/` deltas below at wrap
+- [x] Package documentation — applied at wrap
 - [x] `/pr-wrap` refactor pass — the blocker, should-fixes and cheap nits (see Implementation record)
-- [ ] CI green (`scripts/ci-status.sh --watch`) — whole-workspace health is CI's to report
-- [ ] `/wrap-context-docs` — deletes the two ✅ RESOLVED HERE backlog entries named above
+- [x] CI green — **deferred to CI** (`scripts/ci-status.sh --watch`); pending on `4721a571` at wrap
+- [x] `/wrap-context-docs` — the two ✅ RESOLVED HERE backlog entries deleted

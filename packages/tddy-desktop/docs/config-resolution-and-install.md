@@ -37,12 +37,14 @@ things about it are not obvious:
   rather than honoured, so the callback always reaches the listener that was actually opened.
 - **`web_bundle_path` is absent**, because `tauri.conf.json` points `frontendDist` at
   `packages/tddy-web/dist` and the bundle is baked into the binary at build time.
-- **An identity is three blocks at once.** `github:` decides whether `build_auth_entries` returns a
-  session-user resolver at all; `livekit.api_secret` is the only source of the token signer, so
-  without it every token-gated RPC refuses even with a resolver present; `users:` maps a login to an
-  OS user with no fallback. Every session service in `tddy_daemon::runtime` is assembled inside
-  `if let Some(user_resolver)`, so missing any of the three leaves an application that starts, shows
-  its settings, and offers no sessions, hosts or screen sharing.
+- **An identity is two blocks at once.** `github:` decides whether the daemon loads a signing key
+  and returns a session-user resolver at all; `users:` maps a login to an OS user with no fallback.
+  Every session service in `tddy_daemon::runtime` is assembled inside `if let Some(user_resolver)`,
+  so missing either leaves an application that starts, shows its settings, and offers no sessions,
+  hosts or screen sharing. **No `livekit:` block is needed**: the daemon signs session tokens with
+  an Ed25519 key it generates on first boot (`signing_key.pem`, mode `0600`, in `auth_storage`) and
+  verifies them with the same key — a desktop has no peers, so its key directory is
+  `StandaloneKeyDirectory`. `livekit.api_secret`, when present, signs room JWTs only.
 
 ## What `./install --desktop` installs
 

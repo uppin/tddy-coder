@@ -6,7 +6,7 @@
 **Metrics:** **502 production lines** (counted to the first `#[cfg(test)]`) · budget 500
 **Thresholds breached:** length 502 > 500
 **Restructure:** `extract_module --to_file`, after a two-brace impl split — seam designed, not applied
-**Status:** Open — **unclaimed**
+**Status:** Open — partially fixed (505 production lines, 5 over budget) — **unclaimed**
 **Verified:** ⚠ seams hand-verified caller-free by grep; the cut itself is **not** proven by `check --deep`
 
 ## Measurement history
@@ -15,6 +15,7 @@
 |---|---|---|
 | 2026-09-19 | 502 | first detection — **this PR pushed it over**, 398 → 502 |
 | 2026-09-23 | 520 | touched by #520 (`#carve` 11/12) and **unchanged by it** (one-line change: the room roster passed as a builder). 520 on master before #520 — the 502 → 520 growth predates it and is unattributed. The file has no `#[cfg(test)]`, so the count is its whole length |
+| 2026-09-23 | 505 | 520 on `origin/master` (`4e260d7f`, after #520; grown by earlier merges) → 505 after #508 (`#keyring` 1/9): `agent_session_token_for` lost its `livekit.api_secret` lookup and refusal (−18 net), offset by the `SplitSpawnTarget` literal at the `split_remote_tool_env` call (+3). The file has no `#[cfg(test)]`, so production = total |
 
 ## What the tool found
 
@@ -35,7 +36,9 @@ through the type (`svc_materialize_staged_attachment.rs:345,371,404`,
 re-snapshot, then `extract_module --to_file` over the trailing block →
 `svc_spawn_split_agent/codebase_session_teardown.rs`.
 
-**Estimate:** ~156 lines out (+3 for the brace split) → parent **~349**.
+**Estimate:** ~156 lines out (+3 for the brace split) → parent **~349**. The file is 5 lines over
+budget as of 2026-09-23, so any cut of the trailing block closes this record; the seam above is
+still the one designed for it.
 
 ## Constraints a later session must know
 

@@ -6,7 +6,7 @@
 **Metrics:** ~**1,634 production lines** of 1,647 total · budget 500 · **3.3× over**
 **Thresholds breached:** length ~1634 > 500
 **Restructure:** `extract_module --to_file` — seam not yet designed
-**Status:** Open — partially fixed 2026-09-23 by #520 (~1,931 → ~1,634; still 3.3× over) — **unclaimed**
+**Status:** Open — partially fixed 2026-09-23 by #520 (~1,931 → ~1,634; still 3.3× over), then regressed +5 production lines by #508 — **unclaimed**
 **Verified:** ⚠ the automated count is **wrong for this file** — see below
 
 ## Measurement history
@@ -16,6 +16,7 @@
 | 2026-09-19 | ~1930 | first detection; +87 in PR #518 |
 | 2026-09-22 | ~1931 | unchanged in substance — total 1,944 → 1,945; #494 (`#carve` 8/11) swapped the `telegram` field for `presenter_event_sink` and its doc comment, +1 line net |
 | 2026-09-23 | ~1634 | #520 (`#carve` 11/12): total 1,945 → 1,647 (−298). The free functions only the four moved RPC families used left for `tddy-daemon-rpc` — `merge_listed_projects_with_peers`, `require_pr_stack_orchestrator`, `owner_repo_from_repo_root`, the `base_sync_*` helpers, the `agent_models_cache` group, the path guard and result framing — with four test-module declarations. Same method as the rows above (lines before the trailing test-module declaration, `:1635`). Excluding every `#[cfg(test)]` item and its doc comment: 1,859 → 1,569 |
+| 2026-09-23 | ~1639 | total 1,647 on `origin/master` (`4e260d7f`, after #520) → 1,652 after #508 (`#keyring` 1/9): the `session_tokens: Option<SessionTokens>` field on `DaemonSessionHost` and its doc comment — all five lines production, none test. Split deferred to a follow-up after `#keyring` lands, since dependents #509–#513 touch this file |
 
 ## The number has to be taken by hand
 
