@@ -1,7 +1,7 @@
 # Initial discovery: carve-lifecycle-wiring
 
 **Date**: 2026-09-23
-**Changeset**: [2026-09-23-carve-lifecycle-wiring.md](./2026-09-23-carve-lifecycle-wiring.md)
+**Changeset**: [2026-09-23-carve-lifecycle-destructure.md](./2026-09-23-carve-lifecycle-destructure.md) (phase 1). The phase 2 split is planned in the node above it.
 
 This is a read-only survey of `packages/tddy-session-lifecycle` on top of #522 (`feature/carve/core-split`,
 `0fb4fb85`). Nothing was built or edited to produce it.
@@ -103,8 +103,8 @@ they are.
 | `livekit_bridge.rs` | ~300 |
 
 `strip_resize` (1126-1167) is byte-identical to `tddy-coder/src/session_participant/terminal_manager.rs:355`,
-and a third variant sits in `tddy-sandbox-runner/src/runner.rs:1009`. It belongs in
-`tddy_terminal_rpc::pty_relay`.
+and a third variant sits in `tddy-sandbox-runner/src/runner.rs:1009`. The changeset puts the one
+shared copy in `tddy-pty` (DRY #12), because `tddy-sandbox-runner` should depend only on a light crate.
 
 ### `cursor_cli_spawn.rs` (524 → ~200)
 
