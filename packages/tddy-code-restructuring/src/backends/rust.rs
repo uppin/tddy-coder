@@ -17,7 +17,6 @@ use crate::plan::{Anchor, Reexport, RefactorKind, RefactorOp};
 use crate::registry::{Language, LanguageBackend, Workspace};
 use crate::{RestructureError, Result};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -26,8 +25,12 @@ use std::time::{Duration, Instant};
 use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
 
+mod chatter;
 mod impl_seam;
 mod imports;
+mod readiness;
+
+pub use chatter::ServerChatter;
 
 use impl_seam::{refuse_impl_sibling_references, with_method_calls_restored};
 use imports::names_bound;
@@ -313,176 +316,6 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
         }),
         _ => None,
     }
-}
-
-/// What the server has said about its own progress while a request was in flight.
-///
-/// `request` used to drop every message it was not waiting for, which is why a run that spent two
-/// minutes loading a crate graph showed nothing at all and then failed claiming the plan was
-/// malformed. Folding those messages in costs one match per message and turns the wait into
-/// something a developer can watch.
-///
-/// **Published because the fold is not this backend's alone.** `tddy-index-daemon` observes the
-/// same two notifications — `$/progress` and `experimental/serverStatus` — to answer "is this
-/// root's graph loaded?", and there is exactly one right way to read them: a title arrives only
-/// with `begin` and has to be carried forward per token, the same phase reports once per file
-/// scanned, and the furthest percentage is not the last one. A second reading of that would drift
-/// from this one, and the two would then disagree about a load they were both watching.
-#[derive(Default)]
-pub struct ServerChatter {
-    /// The title of each work-done progress token in flight, by token. A title arrives only with
-    /// `begin`, so it has to be carried forward to the `report` lines that follow — and per token,
-    /// because rust-analyzer runs several phases at once and a single field would attribute one
-    /// phase's reports to another's title.
-    titles: HashMap<String, String>,
-    /// The last line built, which is what the timeout message needs in order to say where the
-    /// server got to.
-    last: Option<String>,
-    /// What was last printed for each token, deduplicated per token for the same reason the titles
-    /// are: two phases running at once would otherwise each defeat the other's deduplication.
-    shown: HashMap<String, String>,
-    /// Whether the server has reported itself quiescent — an extension, so never the only signal.
-    quiescent: bool,
-    /// The furthest percentage any phase reported, and the phase it belonged to.
-    ///
-    /// Kept apart from `last` because the two answer different questions and the server routinely
-    /// makes them disagree: it counts files inside a phase, then emits sub-steps carrying no
-    /// percentage at all (`working: tddy_desktop (lib)`). A timeout landing on one of those had a
-    /// `last` with no number in it, so the message could not say how far the index had got — which
-    /// is the one thing a reader needs in order to decide whether raising the budget will help.
-    furthest: Option<(u64, String)>,
-}
-
-impl ServerChatter {
-    /// Fold one server-sent message in, and return the line worth printing for it.
-    ///
-    /// A message that answers a request carries no `method`, which is what keeps every result out
-    /// of the progress stream without having to know the ids in flight.
-    pub fn absorb(&mut self, message: &Value) -> Option<String> {
-        match message.get("method").and_then(Value::as_str)? {
-            "$/progress" => self.progress(message.get("params")?),
-            "experimental/serverStatus" => {
-                self.quiescent = message
-                    .get("params")?
-                    .get("quiescent")
-                    .and_then(Value::as_bool)?;
-                None
-            }
-            _ => None,
-        }
-    }
-
-    /// Fold one `$/progress` notification in.
-    ///
-    /// The title arrives only with `begin`, so it is held and reused for the `report` lines that
-    /// follow it — without that, a report reads as a bare percentage with nothing to attach it to.
-    /// Lines are deduplicated on the phase and its percentage rather than on the whole line, because
-    /// the server reports one notification per *file* scanned and each carries a different absolute
-    /// path. Printing all of them buries the phases; one line per percent of each phase is the
-    /// progress a reader can actually follow. A notification with no percentage — every `begin`, and
-    /// the sub-steps of a phase that does not count — falls back to the line itself.
-    fn progress(&mut self, params: &Value) -> Option<String> {
-        let token = token_key(params.get("token")?);
-        let value = params.get("value")?;
-        match value.get("kind").and_then(Value::as_str)? {
-            "begin" => {
-                if let Some(title) = value.get("title").and_then(Value::as_str) {
-                    self.titles.insert(token.clone(), title.to_string());
-                }
-            }
-            "end" => {
-                self.titles.remove(&token);
-                return None;
-            }
-            _ => {}
-        }
-
-        let title = self.titles.get(&token).map(String::as_str);
-        let line = progress_line(title, value);
-        self.last = Some(line.clone());
-
-        if let Some(percentage) = value.get("percentage").and_then(Value::as_u64) {
-            let phase = title.unwrap_or("working").to_string();
-            if self
-                .furthest
-                .as_ref()
-                .is_none_or(|(seen, _)| percentage >= *seen)
-            {
-                self.furthest = Some((percentage, phase));
-            }
-        }
-
-        let key = match value.get("percentage").and_then(Value::as_u64) {
-            Some(percentage) => percentage.to_string(),
-            None => line.clone(),
-        };
-        if self.shown.get(&token) == Some(&key) {
-            return None;
-        }
-        self.shown.insert(token, key);
-        Some(line)
-    }
-}
-
-impl ServerChatter {
-    /// Where the index got to, for a message that has to explain a timeout.
-    ///
-    /// The last line on its own is not enough: it is often a sub-step with no percentage. This
-    /// pairs it with the furthest percentage seen, so the reader can tell a server that stalled at
-    /// 12% from one that timed out at 99% — the first wants investigating, the second wants a
-    /// bigger budget.
-    pub fn how_far(&self) -> String {
-        let last = self
-            .last
-            .clone()
-            .unwrap_or_else(|| "nothing reported".to_string());
-        match &self.furthest {
-            Some((percentage, phase)) => format!("{last}; furthest {phase} {percentage}%"),
-            None => last,
-        }
-    }
-
-    /// Whether the server has reported its own graph loaded and queryable.
-    ///
-    /// `experimental/serverStatus` is an extension, so a `false` here means "has not said so",
-    /// never "is not loaded" — which is why [`RustBackend::ensure_indexed`] treats it as a shortcut
-    /// out of a hover probe rather than as the probe itself. A consumer with no probe available has
-    /// only this, and must say so rather than presenting it as the stronger claim.
-    pub fn quiescent(&self) -> bool {
-        self.quiescent
-    }
-
-    /// The furthest percentage any phase has reported, and the phase it belonged to.
-    ///
-    /// Kept apart from the last line for the reason the field states: the server counts files
-    /// inside a phase and then emits sub-steps carrying no percentage at all, so the last line is
-    /// routinely the one with no number in it.
-    pub fn furthest(&self) -> Option<(u64, &str)> {
-        self.furthest
-            .as_ref()
-            .map(|(percentage, phase)| (*percentage, phase.as_str()))
-    }
-}
-
-/// A progress token as a map key. The specification allows a string or a number.
-fn token_key(token: &Value) -> String {
-    match token.as_str() {
-        Some(text) => text.to_string(),
-        None => token.to_string(),
-    }
-}
-
-/// One progress notification as a line: what the server is doing, where it has got to, and how far.
-fn progress_line(title: Option<&str>, value: &Value) -> String {
-    let mut line = title.unwrap_or("working").to_string();
-    if let Some(message) = value.get("message").and_then(Value::as_str) {
-        line.push_str(": ");
-        line.push_str(message);
-    }
-    if let Some(percentage) = value.get("percentage").and_then(Value::as_u64) {
-        line.push_str(&format!(" ({percentage}%)"));
-    }
-    line
 }
 
 /// rust-analyzer answers `codeAction` with an empty list until it has finished loading the crate
@@ -1933,75 +1766,6 @@ impl RustBackend {
         }
 
         Ok(WorkspaceEdit { changes })
-    }
-
-    /// Wait, once per process, for the crate graph to load — with the server's progress on screen.
-    ///
-    /// Every request that needs name resolution is answered emptily until rust-analyzer has loaded
-    /// the graph, so waiting for it here once is what keeps every later wait short. On a real crate
-    /// the alternative is paid per operation, and `survey_moved_items` pays it per moved item.
-    ///
-    /// Hover is the authority, because it is the cheapest request that needs the graph and it is the
-    /// same signal a rename is gated on. `serverStatus` is only a shortcut out: it is an extension,
-    /// so a server that never sends it still has to get past this.
-    ///
-    /// A document with no symbols has nothing to hover, so the warm-up is skipped rather than spent
-    /// on a position that would never resolve — which leaves `indexed` false, and the first real
-    /// wait doing the waiting instead.
-    fn ensure_indexed(&mut self, uri: &str) -> Result<()> {
-        if self.indexed {
-            return Ok(());
-        }
-        (self.progress)("warming crate index (until ready, or until you stop waiting)");
-        let symbols = self.request_settled(
-            "textDocument/documentSymbol",
-            json!({ "textDocument": { "uri": uri } }),
-        )?;
-        let Some(probe) = first_symbol_position(&symbols) else {
-            (self.progress)("no indexable symbols in file; skipping warm-up");
-            return Ok(());
-        };
-
-        let started = Instant::now();
-        loop {
-            let hover = self.request_settled(
-                "textDocument/hover",
-                json!({ "textDocument": { "uri": uri }, "position": probe }),
-            )?;
-
-            if !hover.is_null() || self.chatter.quiescent {
-                self.indexed = true;
-                (self.progress)("crate index ready");
-                return Ok(());
-            }
-            if !self.keep_waiting(INDEXING_POLL) {
-                return Err(self.incomplete_index(started.elapsed()));
-            }
-        }
-    }
-
-    /// Block until the server can resolve names at `position`.
-    ///
-    /// `documentSymbol` is answered from the syntax tree and so succeeds immediately, but a rename
-    /// needs the crate graph. Hover is the cheapest request that also needs it, so a non-null hover
-    /// is the signal that a rename will be accepted.
-    fn wait_until_resolved(&mut self, uri: &str, position: &Value) -> Result<()> {
-        (self.progress)("waiting for type inference at the anchor");
-        let started = Instant::now();
-        loop {
-            let hover = self.request_settled(
-                "textDocument/hover",
-                json!({ "textDocument": { "uri": uri }, "position": position }),
-            )?;
-
-            if !hover.is_null() {
-                self.indexed = true;
-                return Ok(());
-            }
-            if !self.keep_waiting(INDEXING_POLL) {
-                return Err(self.incomplete_index(started.elapsed()));
-            }
-        }
     }
 
     /// Where a named symbol is declared in the open document.
