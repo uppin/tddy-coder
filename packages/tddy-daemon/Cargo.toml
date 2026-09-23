@@ -95,6 +95,8 @@ tddy-worktree-service = { path = "../tddy-worktree-service" }
 # The moved screen-sharing subsystem: `runtime.rs` builds its service and registers the entry it
 # returns. `argon2`, `chacha20poly1305` and `rand` are the vault's, and left with it.
 tddy-screen-sharing = { path = "../tddy-screen-sharing" }
+# The accounts service over the credential vaults auth opens: `runtime.rs` registers its entry.
+tddy-accounts = { path = "../tddy-accounts" }
 # The moved auth subsystem: `runtime.rs` calls `build_auth_entries`, and the daemon re-exports the
 # three of its seven modules that something here still names.
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }

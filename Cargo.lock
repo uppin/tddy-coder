@@ -11720,6 +11720,7 @@ name = "tddy-accounts"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "log",
  "pretty_assertions",
  "prost 0.13.5",
  "tddy-credentials",
@@ -12108,6 +12109,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
+ "tddy-accounts",
  "tddy-actions",
  "tddy-bsp",
  "tddy-coder",

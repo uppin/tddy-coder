@@ -21,8 +21,11 @@ pub enum AccountsError {
     /// A vault exists and this session's key does not unwrap it — the login credential changed.
     /// Recoverable by re-linking, which is why the screen must say so rather than show nothing.
     Locked,
-    /// I/O, corruption, or anything else that is neither of the above. Carries the reason verbatim;
-    /// a swallowed reason is what turns a one-line fix into an afternoon.
+    /// I/O, corruption, or anything else that is neither of the above. Carries the reason **meant
+    /// for the person** — which is not always the underlying error's text: an I/O failure names
+    /// server-side paths, so it arrives here as a fixed, path-free sentence and its full detail is
+    /// logged on the daemon instead. Never empty; a swallowed reason is what turns a one-line fix
+    /// into an afternoon.
     Unavailable(String),
 }
 

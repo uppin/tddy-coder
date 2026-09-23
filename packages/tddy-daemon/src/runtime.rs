@@ -818,6 +818,7 @@ pub async fn build(
             })
         };
         let ss_user_resolver = user_resolver.clone();
+        let accounts_user_resolver = user_resolver.clone();
         let remote_git_user_resolver = user_resolver.clone();
         // Every project a daemon serves is resolved against *that OS user's own* registry, so
         // this mirrors `sessions_base_resolver` one directory down.
@@ -1394,6 +1395,17 @@ pub async fn build(
         // The entry comes from `tddy-screen-sharing` rather than being assembled here: the
         // subsystem's whole contract with this wiring layer is the `ServiceEntry` it returns.
         rpc_entries.push(tddy_screen_sharing::build_screen_sharing_entry(ss_svc));
+
+        // AccountsService — what the caller's credential vault holds, never a secret. The session
+        // token resolves to the GitHub login, which is the vault's subject. Not registered without
+        // `auth_storage`: there is no vault to show, and nothing stands in for one.
+        if let Some(vaults) = auth_result.credential_vaults.clone() {
+            rpc_entries.push(tddy_accounts::build_accounts_entry(
+                tddy_accounts::AccountsServiceImpl::new(Arc::new(
+                    tddy_accounts::SessionVaultAccountStore::new(vaults, accounts_user_resolver),
+                )),
+            ));
+        }
     }
 
     // The daemon's own settings, read and written by its UI. Registered for every host — a desktop
