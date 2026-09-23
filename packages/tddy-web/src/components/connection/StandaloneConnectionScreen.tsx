@@ -266,7 +266,7 @@ export function ConnectionForm() {
           id="livekit-identity"
           data-testid="livekit-identity"
           type="text"
-          placeholder="client"
+          placeholder="web-client"
           value={identity}
           onChange={(e) => setIdentity(e.target.value)}
           className={inputClassName}

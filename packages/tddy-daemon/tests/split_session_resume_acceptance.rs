@@ -33,12 +33,14 @@ use std::time::Duration;
 use serial_test::serial;
 use tddy_core::session_agent::SessionAgentRecord;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
+use tddy_daemon::common_room_key_directory::{advertised_signing_key, CommonRoomKeyDirectory};
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::runtime::spawn_common_room_discovery_task;
+use tddy_daemon_auth::{DaemonSigningKey, SessionTokens, StandaloneKeyDirectory};
 use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
-use tddy_github::{GitHubUser, SessionTokenSigner};
+use tddy_github::GitHubUser;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{ResumeSessionRequest, SessionService as SessionServiceTrait};
@@ -51,8 +53,8 @@ use tddy_testing_commons::wait::eventually_blocking;
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-/// The deployment-wide secret both daemons' `livekit:` blocks hold. It signs LiveKit room JWTs *and*
-/// session tokens, which is what lets the codebase daemon verify a credential minted here.
+/// The LiveKit credential both daemons' `livekit:` blocks hold. It signs room JWTs and nothing
+/// else: session tokens are signed with each daemon's own key.
 const LK_API_SECRET: &str = "secret";
 const MODEL: &str = "claude-opus-5";
 const PROJECT_ID: &str = "split-resume-proj";
@@ -68,7 +70,14 @@ const CODEBASE_SESSION_ID: &str = "0199bbbb-0000-7000-8000-00000000000b";
 const CODEBASE_INSTANCE_ID: &str = "split-resume-workstation-b";
 /// This daemon — the one resuming the session, hosting its room, and running the agent.
 const FACILITATING_INSTANCE_ID: &str = "split-resume-laptop-a";
-const COMMON_ROOM: &str = "split-resume-room";
+/// The common room both daemons meet in, named afresh for each run of this suite. The LiveKit
+/// server is shared with every other checkout running these suites against the same testkit
+/// container, and daemons with this suite's fixed instance ids in a fixed room would discover — and
+/// collide with — another run's.
+fn the_common_room() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(|| format!("split-resume-room-{}", uuid::Uuid::new_v4()))
+}
 
 /// The exec-catalog tool the roster's agent takes over in the withdrawal test. `Grep` because it has
 /// a native Claude built-in of the same name, so both routes to it are observable in one argv.
@@ -92,19 +101,33 @@ const PEER_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(45);
 // Fixtures
 // ---------------------------------------------------------------------------
 
-/// The credential the browser presents on `ResumeSession`, signed with [`LK_API_SECRET`] so both
-/// daemons can verify it. Minted once and shared, because the request and the daemons' user
-/// resolvers have to agree on the very same string — and the routed roster read carries this token
-/// to the codebase host, which authorizes the session directory it reads with it.
+/// A daemon's signing identity, by instance id. Kept in a directory this test process owns, so
+/// each daemon in this suite keeps one identity across its tests — as a real one keeps it across
+/// restarts — and the caller token below, minted once, stays verifiable; and so no run signs with
+/// a key another run, or another checkout sharing the target directory, left behind.
+fn the_signing_key_of(instance_id: &str) -> DaemonSigningKey {
+    static KEYS: OnceLock<tempfile::TempDir> = OnceLock::new();
+    let keys = KEYS.get_or_init(|| tempfile::tempdir().expect("a directory for this run's keys"));
+    DaemonSigningKey::load_or_generate(&keys.path().join(format!("{instance_id}-signing_key.pem")))
+        .expect("a daemon generates its keypair")
+}
+
+/// The credential the browser presents on `ResumeSession`, signed by this daemon — the one the
+/// operator signed in on — so the agent's own credential can be minted from the identity it proves.
+/// Minted once and shared, because the request and the daemons' user resolvers have to agree on the
+/// very same string — and the routed roster read carries this token to the codebase host, which
+/// authorizes the session directory it reads with it.
 fn a_caller_token() -> &'static str {
     static TOKEN: OnceLock<String> = OnceLock::new();
     TOKEN.get_or_init(|| {
-        SessionTokenSigner::new(LK_API_SECRET.as_bytes()).mint_access(&GitHubUser {
-            id: 4242,
-            login: current_os_user(),
-            avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
-            name: "Test User".to_string(),
-        })
+        the_signing_key_of(FACILITATING_INSTANCE_ID)
+            .signer()
+            .mint_access(&GitHubUser {
+                id: 4242,
+                login: current_os_user(),
+                avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
+                name: "Test User".to_string(),
+            })
     })
 }
 
@@ -150,6 +173,7 @@ fn a_daemon_config(
     let dir = tempfile::tempdir().unwrap();
     let user = current_os_user();
     let claude_binary = claude_binary.display();
+    let common_room = the_common_room();
     let yaml = format!(
         r#"
 daemon_instance_id: "{instance_id}"
@@ -166,7 +190,7 @@ livekit:
   url: {ws_url}
   api_key: devkey
   api_secret: {LK_API_SECRET}
-  common_room: {COMMON_ROOM}
+  common_room: {common_room}
 "#
     );
     let config_path = dir.path().join("daemon.yaml");
@@ -178,6 +202,12 @@ livekit:
 /// A service wired to the real common room, so it can be discovered as a peer and can route a call
 /// to one.
 fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost {
+    let key = the_signing_key_of(
+        config
+            .daemon_instance_id
+            .as_deref()
+            .expect("a split fixture names its daemon"),
+    );
     let tddy_data_dir = sessions_base.clone();
     let resolver: SessionsBaseResolver = Arc::new(move |_| Some(sessions_base.clone()));
     let resolved_user = current_os_user();
@@ -187,24 +217,35 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
     let config_arc = Arc::new(config.clone());
     let registry = Arc::new(CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-    spawn_common_room_discovery_task(config_arc.clone(), registry.clone(), room_slot.clone());
+    let directory = Arc::new(CommonRoomKeyDirectory::new(Arc::clone(&registry)));
+    let advertised = advertised_signing_key(&key);
+    let tokens = SessionTokens::new(&key, directory);
+    spawn_common_room_discovery_task(
+        config_arc.clone(),
+        registry.clone(),
+        room_slot.clone(),
+        advertised,
+    );
     let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
     );
 
-    tddy_daemon_rpc::RpcHandlers::install(DaemonSessionHost::new(
-        config,
-        resolver,
-        tddy_data_dir,
-        user_resolver,
-        None,
-        Some(LiveKitDiscoveryHandles {
-            eligible_daemon_source: eligible,
-            common_room_livekit_room: room_slot,
-        }),
-        None,
-        Arc::new(ClaudeCliSessionManager::new()),
-    ))
+    tddy_daemon_rpc::RpcHandlers::install(
+        DaemonSessionHost::new(
+            config,
+            resolver,
+            tddy_data_dir,
+            user_resolver,
+            None,
+            Some(LiveKitDiscoveryHandles {
+                eligible_daemon_source: eligible,
+                common_room_livekit_room: room_slot,
+            }),
+            None,
+            Arc::new(ClaudeCliSessionManager::new()),
+        )
+        .with_session_tokens(tokens),
+    )
     .0
 }
 
@@ -222,7 +263,7 @@ async fn serve_on_the_common_room(
     service: Arc<DaemonSessionHost>,
 ) -> tokio::task::JoinHandle<()> {
     let token = livekit
-        .generate_token(COMMON_ROOM, &rpc_identity(instance_id))
+        .generate_token(the_common_room(), &rpc_identity(instance_id))
         .expect("LiveKit token for a daemon's RPC participant");
     test_util::serve_daemon_rpc_participant(ws_url, &token, &service).await
 }
@@ -782,7 +823,11 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
         discovery,
         None,
         Arc::new(ClaudeCliSessionManager::new()),
-    );
+    )
+    .with_session_tokens(SessionTokens::new(
+        &the_signing_key_of(FACILITATING_INSTANCE_ID),
+        Arc::new(StandaloneKeyDirectory),
+    ));
 
     let status = service
         .resume_session(Request::new(ResumeSessionRequest {

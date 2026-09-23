@@ -27,10 +27,13 @@
 //! of them. So the god object depended on this subsystem's abstractions rather than the reverse,
 //! which is the direction extraction wants and the reason this move is relocation, not redesign.
 //!
-//! Room JWTs are minted by `tddy-daemon-auth` from `config.livekit.api_secret` — the same secret
-//! that signs session tokens. [`SessionTokenMinter`] is a **port** so this crate never reaches for
-//! it, and `tests/dependency_boundary_unit.rs` pins that `tddy-daemon-auth` stays off this crate's
-//! dependency path. **This crate never derives its own.**
+//! Session tokens are signed by `tddy-daemon-auth` with the daemon's own Ed25519 key.
+//! [`SessionTokenMinter`] is a **port** so this crate never reaches for that key, and
+//! `tests/dependency_boundary_unit.rs` pins that `tddy-daemon-auth` stays off this crate's
+//! dependency path. **This crate never derives its own.** For the same reason the key this daemon
+//! advertises to its peers crosses into this crate only as the two opaque strings of
+//! [`AdvertisedSigningKey`]: the crate publishes them and reads peers' back
+//! ([`peer_signing_public_keys`]), and parses none of them.
 
 pub mod common_room_supervisor;
 pub mod livekit_peer_discovery;
@@ -39,7 +42,9 @@ pub mod livekit_service;
 pub mod session_room;
 
 pub use common_room_supervisor::{CommonRoomSupervisor, SupervisedCommonRoom};
-pub use livekit_peer_discovery::{daemon_rpc_identity, CommonRoomPeerRegistry};
+pub use livekit_peer_discovery::{
+    daemon_rpc_identity, peer_signing_public_keys, AdvertisedSigningKey, CommonRoomPeerRegistry,
+};
 pub use livekit_rooms_stream::{RoomRoster, RosterError};
 pub use livekit_service::{build_livekit_entry, build_livekit_service, LiveKitServiceImpl};
 pub use session_room::{

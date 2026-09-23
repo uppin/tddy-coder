@@ -56,11 +56,12 @@ It governs the **common room only**:
 - **Off:** no target for the supervisor, no peer discovery assembled, no advertisement published,
   and no common-room token minted by either mint. The web app constructs no `Room` and mints no
   token; the host directory reports the LiveKit source as `idle`, never `error`.
-- **Still on either way:** `livekit.api_secret` signs this daemon's session tokens, so a daemon with
-  the common room off still authenticates its own gated RPCs — including `DaemonConfigService`, the
-  one an operator switches it back on from. Reading "disabled" as "the block is absent" would be a
-  lockout. Per-session rooms, screen sharing and the `#/livekit` rooms panel read the same block for
-  their own purposes and are not governed by the flag.
+- **Still on either way:** authentication. A daemon signs session tokens with its own Ed25519 key,
+  not with anything in the `livekit:` block, so a daemon with the common room off — or with no
+  `livekit:` block at all — still authenticates its own gated RPCs, including `DaemonConfigService`,
+  the one an operator switches it back on from. Per-session rooms, screen sharing and the
+  `#/livekit` rooms panel read the same block for their own purposes and are not governed by the
+  flag.
 
 ## Runtime reconfiguration
 

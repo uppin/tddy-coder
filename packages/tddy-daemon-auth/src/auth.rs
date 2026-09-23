@@ -6,8 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tddy_github::token_store::GitHubTokenStore;
 use tddy_github::{
-    AuthServiceImpl, GitHubOAuthProvider, RealGitHubProvider, SessionTokenSigner,
-    StubGitHubProvider, TokenKind,
+    AuthServiceImpl, GitHubOAuthProvider, RealGitHubProvider, StubGitHubProvider, TokenKind,
 };
 use tddy_livekit::TokenGenerator;
 use tddy_rpc::{Request, Response, ServiceEntry, Status};
@@ -24,6 +23,10 @@ use tddy_service::{AuthServiceServer, LiveKitTokenServiceServer};
 use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig};
 use tddy_daemon_kernel::SessionUserResolver;
 
+use crate::signing_key::{
+    auth_storage_looser_than_owner_only, load_signing_key, SessionTokens, StandaloneKeyDirectory,
+};
+
 /// Result of building auth: RPC entries, a resolver for session token -> GitHub login, and the
 /// GitHub access tokens logins granted (the credential `ConnectionService` reads PRs with).
 pub struct AuthBuildResult {
@@ -32,43 +35,67 @@ pub struct AuthBuildResult {
     /// `Some` when `auth_storage` is configured. Shared with `DaemonSessionHost`, which reads
     /// the caller's token from it; `None` leaves PR status *unavailable* for a real login.
     pub github_token_store: Option<Arc<dyn GitHubTokenStore>>,
+    /// The signer and verifier every entry above was built with — `Some` exactly when
+    /// `user_resolver` is. Handed back so the rest of the daemon mints with the same key the
+    /// resolver trusts.
+    pub session_tokens: Option<SessionTokens>,
 }
 
-/// Build RPC entries for AuthService when GitHub is configured.
-/// Returns entries and a user resolver for ConnectionService.
+impl AuthBuildResult {
+    /// A daemon with no way to authenticate anybody.
+    fn unauthenticated() -> Self {
+        Self {
+            entries: vec![],
+            user_resolver: None,
+            github_token_store: None,
+            session_tokens: None,
+        }
+    }
+}
+
+/// Build RPC entries for AuthService when GitHub is configured, for a daemon that belongs to no
+/// fleet: it signs with its own key (loaded from, or generated into, [`signing_key_path`]) and
+/// verifies only the tokens it minted itself.
 ///
-/// Session tokens are stateless, HMAC-signed tokens (see `tddy_github::session_token`) keyed on
-/// the shared `livekit.api_secret`, so a token minted by one daemon is verifiable by every daemon
-/// that holds the same secret. When no secret is configured the daemon still starts, but auth is
-/// non-functional: minting fails and the resolver rejects every token.
-///
-/// Signed tokens are stateless, so no session state is persisted — hence no data-dir argument.
-///
-/// Fails when a configured `auth_storage` cannot hold a token file. Retention is a hard login
-/// dependency now (a failed `put` fails the exchange, PRD D13), so an unwritable path breaks *every*
-/// login rather than merely degrading PR status — and `install` only creates and chowns the parent
-/// `/var/lib/tddy` on the root/systemd path, so it is a reachable misconfiguration.
+/// A daemon in a common room verifies its peers' tokens too, and is assembled with
+/// [`build_auth_entries_with`] and a key directory that can resolve them.
 pub fn build_auth_entries(
     config: &DaemonConfig,
     web_host: &str,
     web_port: u16,
 ) -> anyhow::Result<AuthBuildResult> {
+    if config.github.is_none() {
+        return Ok(AuthBuildResult::unauthenticated());
+    }
+    let key = load_signing_key(config)?;
+    let tokens = SessionTokens::new(&key, Arc::new(StandaloneKeyDirectory));
+    build_auth_entries_with(config, web_host, web_port, &tokens)
+}
+
+/// Build RPC entries for AuthService when GitHub is configured, signing and verifying with
+/// `tokens`. Returns entries and a user resolver for ConnectionService.
+///
+/// Session tokens are stateless `v2` tokens (see `tddy_github::session_token_v2`) signed with this
+/// daemon's own Ed25519 key, so a token minted here is verifiable by every daemon that has learned
+/// that key's public half. Nothing about signing depends on the `livekit:` block: a daemon with no
+/// media configuration at all authenticates its users.
+///
+/// Signed tokens are stateless, so no session state is persisted.
+///
+/// Fails when a configured `auth_storage` cannot hold a token file. Retention is a hard login
+/// dependency now (a failed `put` fails the exchange, PRD D13), so an unwritable path breaks *every*
+/// login rather than merely degrading PR status — and `install` only creates and chowns the parent
+/// `/var/lib/tddy` on the root/systemd path, so it is a reachable misconfiguration.
+pub fn build_auth_entries_with(
+    config: &DaemonConfig,
+    web_host: &str,
+    web_port: u16,
+    tokens: &SessionTokens,
+) -> anyhow::Result<AuthBuildResult> {
     let github = match &config.github {
         Some(g) => g,
-        None => {
-            return Ok(AuthBuildResult {
-                entries: vec![],
-                user_resolver: None,
-                github_token_store: None,
-            });
-        }
+        None => return Ok(AuthBuildResult::unauthenticated()),
     };
-
-    // The one secret every daemon in a deployment shares (it also signs LiveKit room JWTs).
-    let signing_secret = config.livekit.as_ref().and_then(|lk| lk.api_secret.clone());
-    let signer = signing_secret
-        .as_deref()
-        .map(|s| SessionTokenSigner::new(s.as_bytes()));
 
     // Where a real login's GitHub access token is retained, so the daemon can later read that
     // operator's PRs. No `auth_storage` means no retention — PR status then reads as *unavailable*
@@ -90,6 +117,11 @@ pub fn build_auth_entries(
                     dir.display()
                 )
             })?;
+            // Said once, here, at startup — and not repaired: see
+            // `auth_storage_looser_than_owner_only`.
+            if let Some(warning) = auth_storage_looser_than_owner_only(dir) {
+                log::warn!(target: crate::AUTH_LOG_TARGET, "{warning}");
+            }
             Some(Arc::new(store) as Arc<dyn GitHubTokenStore>)
         }
         None => None,
@@ -105,36 +137,29 @@ pub fn build_auth_entries(
         if let Some(ref codes) = github.stub_codes {
             register_stub_codes(&stub, codes);
         }
-        auth_service_entry(stub, signer.clone(), github_token_store.clone())
+        auth_service_entry(stub, tokens, github_token_store.clone())
     } else if let (Some(id), Some(secret)) = (&github.client_id, &github.client_secret) {
         let redirect_uri = github
             .redirect_uri
             .clone()
             .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port));
         let real = RealGitHubProvider::new(id, secret, &redirect_uri);
-        auth_service_entry(real, signer.clone(), github_token_store.clone())
+        auth_service_entry(real, tokens, github_token_store.clone())
     } else {
-        return Ok(AuthBuildResult {
-            entries: vec![],
-            user_resolver: None,
-            github_token_store: None,
-        });
+        return Ok(AuthBuildResult::unauthenticated());
     };
 
-    // Verify the token's signature/expiry and extract the login. Only access-kind tokens
-    // authenticate an RPC — a long-lived refresh token is rejected here so it cannot be used as
-    // an RPC credential. With no signer, every token is rejected (returns `None`), so all
-    // token-gated RPCs are unauthenticated.
-    let user_resolver: SessionUserResolver = match signer {
-        Some(signer) => Arc::new(move |token: &str| {
-            signer
-                .verify(token)
-                .ok()
-                .filter(|c| c.kind == TokenKind::Access)
-                .map(|c| c.login)
-        }),
-        None => Arc::new(|_: &str| None),
-    };
+    // Verify the token's signature/expiry under the key it names and extract the login. Only
+    // access-kind tokens authenticate an RPC — a long-lived refresh token is rejected here so it
+    // cannot be used as an RPC credential.
+    let verifier = Arc::clone(tokens.verifier());
+    let user_resolver: SessionUserResolver = Arc::new(move |token: &str| {
+        verifier
+            .verify_now(token)
+            .ok()
+            .filter(|c| c.kind == TokenKind::Access)
+            .map(|c| c.login)
+    });
 
     // The room-JWT mint. It is an entry of its own rather than a method on `auth.AuthService`
     // because it needs the daemon's own config (LiveKit endpoint, common room, `users:` map),
@@ -150,6 +175,7 @@ pub fn build_auth_entries(
         entries: vec![auth_entry, livekit_token_entry],
         user_resolver: Some(user_resolver),
         github_token_store,
+        session_tokens: Some(tokens.clone()),
     })
 }
 
@@ -170,7 +196,7 @@ pub fn session_token_authenticator(
         }
         None => {
             log::warn!(
-                target: "tddy_daemon::auth",
+                target: crate::AUTH_LOG_TARGET,
                 "serving {service_name} with no way to verify a session token — every call will be \
                  refused. Configure `github:` to make it usable."
             );
@@ -315,15 +341,20 @@ pub const MINTED_ROOM_TOKEN_TTL: Duration = Duration::from_secs(3600);
 
 /// Prefix of every server-generated participant identity. Deliberately not `daemon-`: that prefix
 /// addresses a daemon's RPC-serving participant, and a client able to choose it could join the
-/// common room *as* a daemon and be sent other participants' calls.
-pub const MINTED_IDENTITY_PREFIX: &str = "remote-git-";
+/// common room *as* a daemon and be sent other participants' calls. Nor a bare id: peer discovery
+/// reads a signing key from a bare id's advertisement, and this JWT may update its own metadata.
+/// Defined beside the rule that makes discovery skip it
+/// ([`tddy_service::may_be_daemon_discovery_identity`]).
+pub const MINTED_IDENTITY_PREFIX: &str =
+    tddy_service::participant_identity::REMOTE_GIT_IDENTITY_PREFIX;
 
 /// `auth.LiveKitTokenService`: mints a LiveKit room JWT for a caller that already holds a valid
 /// daemon access token.
 ///
-/// The LiveKit API secret never leaves the daemon. It is the same HMAC key
-/// [`SessionTokenSigner`] uses, so a client holding it could sign an access token for any GitHub
-/// user on the fleet — which would make every `session_token` check in the daemon decorative.
+/// The LiveKit API secret never leaves the daemon: a client holding it could mint itself a room JWT
+/// for any room under any identity, including a `daemon-*` one. It no longer signs session tokens —
+/// those are signed with the daemon's own key — so the blast radius of a leak is the room, not the
+/// fleet's identities.
 pub struct LiveKitTokenServiceImpl {
     user_resolver: SessionUserResolver,
     config: Arc<DaemonConfig>,
@@ -403,7 +434,7 @@ impl LiveKitTokenServiceTrait for LiveKitTokenServiceImpl {
         .map_err(|e| Status::internal(format!("could not mint a livekit token: {e}")))?;
 
         log::info!(
-            target: "tddy_daemon::auth",
+            target: crate::AUTH_LOG_TARGET,
             "minted a {}s livekit token for {login} (os user {os_user}) in room {room}",
             MINTED_ROOM_TOKEN_TTL.as_secs()
         );
@@ -441,26 +472,25 @@ fn register_stub_codes(stub: &StubGitHubProvider, codes: &str) {
     }
 }
 
-/// Wrap an OAuth provider in an `auth.AuthService` RPC entry. When a signer is present, tokens are
-/// stateless HMAC-signed tokens; otherwise the service cannot mint and every token is rejected.
+/// Wrap an OAuth provider in an `auth.AuthService` RPC entry that mints with this daemon's key and
+/// verifies presented tokens through the same verifier the RPC gate uses.
 ///
 /// `token_store`, when present, retains each real login's GitHub access token. A stub provider
 /// stores nothing regardless — its token is synthetic (PRD D12).
 fn auth_service_entry<P: GitHubOAuthProvider>(
     provider: P,
-    signer: Option<SessionTokenSigner>,
+    tokens: &SessionTokens,
     token_store: Option<Arc<dyn GitHubTokenStore>>,
 ) -> ServiceEntry {
-    let with_store = |service: AuthServiceImpl<P>| match token_store {
+    let service = AuthServiceImpl::new_signed(
+        provider,
+        tokens.signer().clone(),
+        Arc::clone(tokens.verifier()) as Arc<dyn tddy_github::SessionTokenAuthority>,
+    );
+    let server = AuthServiceServer::new(match token_store {
         Some(store) => service.with_token_store(store),
         None => service,
-    };
-    let server = match signer {
-        Some(signer) => {
-            AuthServiceServer::new(with_store(AuthServiceImpl::new_signed(provider, signer)))
-        }
-        None => AuthServiceServer::new(with_store(AuthServiceImpl::new(provider))),
-    };
+    });
     ServiceEntry {
         name: "auth.AuthService",
         service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
@@ -470,22 +500,40 @@ fn auth_service_entry<P: GitHubOAuthProvider>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signing_key::{signing_key_path, DaemonSigningKey};
     use tddy_service::proto::token::{GenerateTokenRequest, GenerateTokenResponse};
 
-    /// A daemon config with GitHub auth enabled and, when `api_secret` is `Some`, a LiveKit
-    /// secret used to sign/verify session tokens.
-    fn a_config(api_secret: Option<&str>) -> (DaemonConfig, tempfile::TempDir) {
+    /// A daemon config with GitHub auth enabled and an `auth_storage` of its own — so an identity
+    /// of its own — and not one line of LiveKit.
+    fn a_config() -> (DaemonConfig, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let livekit = match api_secret {
-            Some(s) => format!("livekit:\n  api_secret: \"{s}\"\n"),
-            None => String::new(),
-        };
         let yaml = format!(
-            "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\n{livekit}"
+            "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\n\
+             auth_storage: \"{}\"\n",
+            dir.path().join("auth").display()
         );
         let path = dir.path().join("config.yaml");
         std::fs::write(&path, yaml).unwrap();
         (DaemonConfig::load(&path).unwrap(), dir)
+    }
+
+    /// The key the daemon described by `config` signs with — the very file `build_auth_entries`
+    /// loads, so a token minted with it is one that daemon issued.
+    fn the_daemons_key(config: &DaemonConfig) -> DaemonSigningKey {
+        DaemonSigningKey::load_or_generate(
+            &signing_key_path(config).expect("the test config names an auth_storage"),
+        )
+        .expect("a daemon's signing key loads")
+    }
+
+    /// Another daemon, with an identity this one has never been told about.
+    fn a_stranger_daemon() -> (DaemonSigningKey, tempfile::TempDir) {
+        let home = tempfile::tempdir().unwrap();
+        let key = DaemonSigningKey::load_or_generate(
+            &home.path().join(crate::signing_key::SIGNING_KEY_FILE),
+        )
+        .expect("a stranger generates a keypair");
+        (key, home)
     }
 
     /// A daemon config whose `auth_storage` — where a login's GitHub access token is retained —
@@ -495,7 +543,7 @@ mod tests {
     ) -> (DaemonConfig, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let yaml = format!(
-            "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\nlivekit:\n  api_secret: \"shared-secret\"\nauth_storage: \"{}\"\n",
+            "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\nauth_storage: \"{}\"\n",
             auth_storage.display()
         );
         let path = dir.path().join("config.yaml");
@@ -513,15 +561,16 @@ mod tests {
     }
 
     #[test]
-    fn the_resolver_accepts_a_token_signed_with_the_configured_secret() {
-        // Given auth wired with a shared signing secret
-        let (config, _dir) = a_config(Some("shared-secret"));
+    fn the_resolver_accepts_a_token_this_daemon_signed() {
+        // Given auth wired for a daemon
+        let (config, _dir) = a_config();
         let resolver = build_auth_entries(&config, "127.0.0.1", 0)
             .expect("auth should build")
             .user_resolver
             .expect("auth should produce a resolver");
-        // and a token minted with that same secret
-        let token = tddy_github::SessionTokenSigner::new(b"shared-secret")
+        // and a token minted with that daemon's own key
+        let token = the_daemons_key(&config)
+            .signer()
             .mint(&a_github_user("u"), tddy_github::SESSION_TOKEN_TTL);
 
         // When the resolver resolves it
@@ -532,15 +581,17 @@ mod tests {
     }
 
     #[test]
-    fn the_resolver_rejects_a_token_signed_with_a_foreign_secret() {
-        // Given auth wired with one signing secret
-        let (config, _dir) = a_config(Some("this-daemons-secret"));
+    fn the_resolver_rejects_a_token_signed_by_a_daemon_it_has_never_heard_of() {
+        // Given auth wired for a daemon that belongs to no fleet
+        let (config, _dir) = a_config();
         let resolver = build_auth_entries(&config, "127.0.0.1", 0)
             .expect("auth should build")
             .user_resolver
             .expect("auth should produce a resolver");
-        // and a token minted with a different secret
-        let token = tddy_github::SessionTokenSigner::new(b"some-other-secret")
+        // and a token minted by some other daemon's key
+        let (stranger, _home) = a_stranger_daemon();
+        let token = stranger
+            .signer()
             .mint(&a_github_user("u"), tddy_github::SESSION_TOKEN_TTL);
 
         // When the resolver resolves it
@@ -552,15 +603,16 @@ mod tests {
 
     #[test]
     fn the_resolver_accepts_an_access_kind_token() {
-        // Given auth wired with a shared signing secret
-        let (config, _dir) = a_config(Some("shared-secret"));
+        // Given auth wired for a daemon
+        let (config, _dir) = a_config();
         let resolver = build_auth_entries(&config, "127.0.0.1", 0)
             .expect("auth should build")
             .user_resolver
             .expect("auth should produce a resolver");
-        // and an access-kind token minted with that secret
-        let token =
-            tddy_github::SessionTokenSigner::new(b"shared-secret").mint_access(&a_github_user("u"));
+        // and an access-kind token minted with its key
+        let token = the_daemons_key(&config)
+            .signer()
+            .mint_access(&a_github_user("u"));
 
         // When the resolver resolves it
         let login = (resolver)(&token);
@@ -571,14 +623,15 @@ mod tests {
 
     #[test]
     fn the_resolver_rejects_a_refresh_kind_token() {
-        // Given auth wired with a shared signing secret
-        let (config, _dir) = a_config(Some("shared-secret"));
+        // Given auth wired for a daemon
+        let (config, _dir) = a_config();
         let resolver = build_auth_entries(&config, "127.0.0.1", 0)
             .expect("auth should build")
             .user_resolver
             .expect("auth should produce a resolver");
-        // and a *refresh*-kind token minted with that same secret
-        let refresh = tddy_github::SessionTokenSigner::new(b"shared-secret")
+        // and a *refresh*-kind token minted with its own key
+        let refresh = the_daemons_key(&config)
+            .signer()
             .mint_refresh(&a_github_user("u"));
 
         // When the resolver resolves it
@@ -592,22 +645,25 @@ mod tests {
     }
 
     #[test]
-    fn the_resolver_rejects_every_token_when_no_secret_is_configured() {
-        // Given auth wired without a signing secret
-        let (config, _dir) = a_config(None);
-        let resolver = build_auth_entries(&config, "127.0.0.1", 0)
+    fn a_token_issued_before_a_restart_still_authenticates_after_it() {
+        // Given a daemon that issued a token, and then restarted
+        let (config, _dir) = a_config();
+        let before_restart = build_auth_entries(&config, "127.0.0.1", 0)
             .expect("auth should build")
+            .session_tokens
+            .expect("a daemon with github configured signs tokens");
+        let token = before_restart.signer().mint_access(&a_github_user("u"));
+        let after_restart = build_auth_entries(&config, "127.0.0.1", 0)
+            .expect("auth should build after a restart")
             .user_resolver
             .expect("auth should produce a resolver");
-        // and any signed token
-        let token = tddy_github::SessionTokenSigner::new(b"some-secret")
-            .mint(&a_github_user("u"), tddy_github::SESSION_TOKEN_TTL);
 
-        // When the resolver resolves it
-        let login = (resolver)(&token);
+        // When the restarted daemon resolves the token
+        let login = (after_restart)(&token);
 
-        // Then no token can be authenticated — there is no secret to verify against
-        assert_eq!(login, None);
+        // Then it is still the operator's — the identity was reloaded, not regenerated, so a
+        // restart does not end every live session
+        assert_eq!(login.as_deref(), Some("u"));
     }
 
     // -------------------------------------------------------------------------
@@ -659,20 +715,22 @@ mod tests {
 
     // -------------------------------------------------------------------------
     // `auth.LiveKitTokenService` — the daemon mints the room JWT so no client ever holds
-    // `livekit.api_secret`, which is also the key that signs every session token on the fleet.
+    // `livekit.api_secret`, with which it could mint itself into any room as anybody.
     // -------------------------------------------------------------------------
 
-    /// The one secret a deployment shares. Signs session tokens *and* LiveKit JWTs, which is
-    /// exactly why a client must never be given it.
-    const FLEET_SECRET: &str = "shared-secret";
+    /// The LiveKit API secret the deployment's rooms trust. It signs room JWTs and nothing else —
+    /// session tokens are signed with each daemon's own key.
+    const LIVEKIT_API_SECRET: &str = "shared-secret";
     const COMMON_ROOM: &str = "tddy-lobby";
 
-    /// A daemon with GitHub auth, one mapped operator, and `livekit_yaml` appended verbatim.
+    /// A daemon with GitHub auth, one mapped operator, an identity of its own, and `livekit_yaml`
+    /// appended verbatim.
     fn a_daemon(livekit_yaml: &str) -> (DaemonConfig, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let yaml = format!(
             "users:\n  - github_user: \"operator\"\n    os_user: \"operator-os\"\n\
-             github:\n  stub: true\n{livekit_yaml}"
+             github:\n  stub: true\nauth_storage: \"{}\"\n{livekit_yaml}",
+            dir.path().join("auth").display()
         );
         let path = dir.path().join("config.yaml");
         std::fs::write(&path, yaml).unwrap();
@@ -683,7 +741,7 @@ mod tests {
     fn a_daemon_serving_a_common_room() -> (DaemonConfig, tempfile::TempDir) {
         a_daemon(&format!(
             "livekit:\n  enabled: true\n  url: \"ws://livekit.internal:7880\"\n  api_key: \"devkey\"\n  \
-             api_secret: \"{FLEET_SECRET}\"\n  common_room: \"{COMMON_ROOM}\"\n"
+             api_secret: \"{LIVEKIT_API_SECRET}\"\n  common_room: \"{COMMON_ROOM}\"\n"
         ))
     }
 
@@ -692,7 +750,7 @@ mod tests {
     fn a_daemon_with_its_common_room_switched_off() -> (DaemonConfig, tempfile::TempDir) {
         a_daemon(&format!(
             "livekit:\n  enabled: false\n  url: \"ws://livekit.internal:7880\"\n  api_key: \"devkey\"\n  \
-             api_secret: \"{FLEET_SECRET}\"\n  common_room: \"{COMMON_ROOM}\"\n"
+             api_secret: \"{LIVEKIT_API_SECRET}\"\n  common_room: \"{COMMON_ROOM}\"\n"
         ))
     }
 
@@ -705,8 +763,11 @@ mod tests {
         LiveKitTokenServiceImpl::new(user_resolver, Arc::new(config.clone()))
     }
 
-    fn an_access_token_for(login: &str) -> String {
-        SessionTokenSigner::new(FLEET_SECRET.as_bytes()).mint_access(&a_github_user(login))
+    /// An access token for `login`, issued by the daemon `config` describes.
+    fn an_access_token_for(config: &DaemonConfig, login: &str) -> String {
+        the_daemons_key(config)
+            .signer()
+            .mint_access(&a_github_user(login))
     }
 
     async fn mint_with(
@@ -738,7 +799,7 @@ mod tests {
         let (config, _dir) = a_daemon_serving_a_common_room();
 
         // When
-        let minted = mint_with(&a_mint(&config), &an_access_token_for("operator"))
+        let minted = mint_with(&a_mint(&config), &an_access_token_for(&config, "operator"))
             .await
             .expect("a mapped operator must be able to mint");
 
@@ -754,7 +815,7 @@ mod tests {
         let (config, _dir) = a_daemon_serving_a_common_room();
 
         // When
-        let minted = mint_with(&a_mint(&config), &an_access_token_for("operator"))
+        let minted = mint_with(&a_mint(&config), &an_access_token_for(&config, "operator"))
             .await
             .expect("must mint");
 
@@ -769,7 +830,7 @@ mod tests {
         let (config, _dir) = a_daemon_serving_a_common_room();
 
         // When
-        let minted = mint_with(&a_mint(&config), &an_access_token_for("operator"))
+        let minted = mint_with(&a_mint(&config), &an_access_token_for(&config, "operator"))
             .await
             .expect("must mint");
 
@@ -792,7 +853,7 @@ mod tests {
         // Given two callers presenting the same operator's token
         let (config, _dir) = a_daemon_serving_a_common_room();
         let mint = a_mint(&config);
-        let token = an_access_token_for("operator");
+        let token = an_access_token_for(&config, "operator");
 
         // When
         let first = mint_with(&mint, &token).await.expect("must mint");
@@ -811,11 +872,11 @@ mod tests {
         let (config, _dir) = a_daemon(&format!(
             "livekit:\n  enabled: true\n  url: \"ws://127.0.0.1:7880\"\n  \
              public_url: \"wss://livekit.example:443\"\n  api_key: \"devkey\"\n  \
-             api_secret: \"{FLEET_SECRET}\"\n  common_room: \"{COMMON_ROOM}\"\n"
+             api_secret: \"{LIVEKIT_API_SECRET}\"\n  common_room: \"{COMMON_ROOM}\"\n"
         ));
 
         // When
-        let minted = mint_with(&a_mint(&config), &an_access_token_for("operator"))
+        let minted = mint_with(&a_mint(&config), &an_access_token_for(&config, "operator"))
             .await
             .expect("must mint");
 
@@ -824,11 +885,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refuses_a_session_token_signed_with_a_foreign_secret() {
-        // Given a token minted by something that does not hold this fleet's secret
+    async fn refuses_a_session_token_signed_by_a_daemon_it_has_never_heard_of() {
+        // Given a token minted by a key this daemon has no record of
         let (config, _dir) = a_daemon_serving_a_common_room();
-        let forged =
-            SessionTokenSigner::new(b"some-other-secret").mint_access(&a_github_user("operator"));
+        let (stranger, _home) = a_stranger_daemon();
+        let forged = stranger.signer().mint_access(&a_github_user("operator"));
 
         // When
         let refusal = mint_with(&a_mint(&config), &forged)
@@ -843,7 +904,8 @@ mod tests {
     async fn refuses_a_refresh_kind_token_because_it_is_not_an_rpc_credential() {
         // Given the 7-day refresh token, presented where an access token belongs
         let (config, _dir) = a_daemon_serving_a_common_room();
-        let refresh = SessionTokenSigner::new(FLEET_SECRET.as_bytes())
+        let refresh = the_daemons_key(&config)
+            .signer()
             .mint_refresh(&a_github_user("operator"));
 
         // When
@@ -861,9 +923,12 @@ mod tests {
         let (config, _dir) = a_daemon_serving_a_common_room();
 
         // When
-        let refusal = mint_with(&a_mint(&config), &an_access_token_for("a-stranger"))
-            .await
-            .expect_err("an unmapped login must mint nothing");
+        let refusal = mint_with(
+            &a_mint(&config),
+            &an_access_token_for(&config, "a-stranger"),
+        )
+        .await
+        .expect_err("an unmapped login must mint nothing");
 
         // Then it is refused by name — the login authenticated, it is just not served here
         assert_eq!(refusal.code, tddy_rpc::Code::PermissionDenied);
@@ -876,11 +941,13 @@ mod tests {
 
     #[tokio::test]
     async fn refuses_to_mint_when_the_daemon_has_no_common_room_configured() {
-        // Given a daemon with a signing secret but no LiveKit endpoint or room
-        let (config, _dir) = a_daemon(&format!("livekit:\n  api_secret: \"{FLEET_SECRET}\"\n"));
+        // Given a daemon with a LiveKit api_secret but no LiveKit endpoint or room
+        let (config, _dir) = a_daemon(&format!(
+            "livekit:\n  api_secret: \"{LIVEKIT_API_SECRET}\"\n"
+        ));
 
         // When
-        let refusal = mint_with(&a_mint(&config), &an_access_token_for("operator"))
+        let refusal = mint_with(&a_mint(&config), &an_access_token_for(&config, "operator"))
             .await
             .expect_err("an unconfigured daemon must mint nothing");
 
@@ -945,7 +1012,7 @@ mod tests {
         // When
         let minted = generate_through(
             a_registered_mint(&config),
-            a_generate_request(&an_access_token_for("operator")),
+            a_generate_request(&an_access_token_for(&config, "operator")),
         )
         .await
         .expect("an authenticated caller must be able to mint");
@@ -970,11 +1037,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refuses_a_daemons_mint_caller_whose_token_was_signed_with_a_foreign_secret() {
-        // Given a token minted by something that does not hold this fleet's secret
+    async fn refuses_a_daemons_mint_caller_whose_token_was_signed_by_an_unknown_daemon() {
+        // Given a token minted by a key this daemon has no record of
         let (config, _dir) = a_daemon_serving_a_common_room();
-        let forged =
-            SessionTokenSigner::new(b"some-other-secret").mint_access(&a_github_user("operator"));
+        let (stranger, _home) = a_stranger_daemon();
+        let forged = stranger.signer().mint_access(&a_github_user("operator"));
 
         // When
         let refusal = generate_through(a_registered_mint(&config), a_generate_request(&forged))
@@ -989,7 +1056,8 @@ mod tests {
     async fn refuses_a_refresh_kind_token_on_the_daemons_mint() {
         // Given the 7-day refresh token, presented where an access token belongs
         let (config, _dir) = a_daemon_serving_a_common_room();
-        let refresh = SessionTokenSigner::new(FLEET_SECRET.as_bytes())
+        let refresh = the_daemons_key(&config)
+            .signer()
             .mint_refresh(&a_github_user("operator"));
 
         // When
@@ -1009,7 +1077,7 @@ mod tests {
         let (config, _dir) = a_daemon_serving_a_common_room();
         let request = GenerateTokenRequest {
             identity: tddy_daemon_kernel::peer_forwarding::daemon_rpc_identity("udoo"),
-            ..a_generate_request(&an_access_token_for("operator"))
+            ..a_generate_request(&an_access_token_for(&config, "operator"))
         };
 
         // When
@@ -1027,16 +1095,19 @@ mod tests {
         // authenticate a caller
         let (config, _dir) = a_daemon(&format!(
             "livekit:\n  enabled: true\n  url: \"ws://livekit.internal:7880\"\n  \
-             api_key: \"devkey\"\n  api_secret: \"{FLEET_SECRET}\"\n  \
+             api_key: \"devkey\"\n  api_secret: \"{LIVEKIT_API_SECRET}\"\n  \
              common_room: \"{COMMON_ROOM}\"\n"
         ));
         let entry = build_token_service_entry(&config, None)
             .expect("livekit credentials alone should still register the mint");
 
         // When a caller presents a token that would verify on an authenticated daemon
-        let refusal = generate_through(entry, a_generate_request(&an_access_token_for("operator")))
-            .await
-            .expect_err("a daemon that can verify nothing must admit nobody");
+        let refusal = generate_through(
+            entry,
+            a_generate_request(&an_access_token_for(&config, "operator")),
+        )
+        .await
+        .expect_err("a daemon that can verify nothing must admit nobody");
 
         // Then it is closed rather than open — an unverifiable deployment mints nothing
         assert_eq!(refusal.code, tddy_rpc::Code::Unauthenticated);
@@ -1044,8 +1115,10 @@ mod tests {
 
     #[test]
     fn registers_no_mint_when_the_daemon_holds_no_livekit_api_credentials() {
-        // Given a daemon with a signing secret but no LiveKit api_key
-        let (config, _dir) = a_daemon(&format!("livekit:\n  api_secret: \"{FLEET_SECRET}\"\n"));
+        // Given a daemon with a LiveKit api_secret but no api_key
+        let (config, _dir) = a_daemon(&format!(
+            "livekit:\n  api_secret: \"{LIVEKIT_API_SECRET}\"\n"
+        ));
 
         // When
         let entry = build_token_service_entry(&config, None);
@@ -1092,23 +1165,23 @@ mod tests {
     // -------------------------------------------------------------------------
     // The operator's switch, and the lockout it must never cause.
     //
-    // `livekit.api_secret` signs this daemon's *session tokens* as well as its room JWTs. Reading
-    // "switched off" as "the block is absent" would leave the daemon with no signer, so every
-    // token-gated RPC would refuse — including `DaemonConfigService`, the one an operator turns
-    // LiveKit back on from. The switch governs the common room and nothing else.
+    // Switching the common room off must not disarm session-token authentication, or it would
+    // lock the operator out of `DaemonConfigService` — the one they turn LiveKit back on from. The
+    // daemon's signing key is its own and has nothing to do with the `livekit:` block, so this
+    // holds by construction; the test keeps it that way. The switch governs the common room and
+    // nothing else.
     // -------------------------------------------------------------------------
 
     #[test]
     fn keeps_authenticating_gated_rpcs_when_the_common_room_is_switched_off() {
-        // Given a daemon whose common room the operator switched off, still holding the fleet secret
+        // Given a daemon whose common room the operator switched off
         let (config, _dir) = a_daemon_with_its_common_room_switched_off();
         let resolver = build_auth_entries(&config, "127.0.0.1", 0)
             .expect("auth should build")
             .user_resolver
             .expect("auth should produce a resolver");
-        // and an operator's access token signed with that secret
-        let token = SessionTokenSigner::new(FLEET_SECRET.as_bytes())
-            .mint_access(&a_github_user("operator"));
+        // and an operator's access token that daemon issued
+        let token = an_access_token_for(&config, "operator");
 
         // When a gated RPC resolves the caller
         let login = (resolver)(&token);
@@ -1128,7 +1201,7 @@ mod tests {
         let (config, _dir) = a_daemon_with_its_common_room_switched_off();
 
         // When an authenticated operator asks for a room token
-        let refusal = mint_with(&a_mint(&config), &an_access_token_for("operator"))
+        let refusal = mint_with(&a_mint(&config), &an_access_token_for(&config, "operator"))
             .await
             .expect_err("a daemon told not to join its common room must mint no way in");
 
@@ -1166,7 +1239,7 @@ mod tests {
         // When the web UI asks for a token naming that common room
         let refusal = generate_through(
             a_registered_mint(&config),
-            a_generate_request(&an_access_token_for("operator")),
+            a_generate_request(&an_access_token_for(&config, "operator")),
         )
         .await
         .expect_err("the web mint must not admit a caller to a switched-off common room");
@@ -1182,7 +1255,7 @@ mod tests {
         let (config, _dir) = a_daemon_with_its_common_room_switched_off();
         let request = GenerateTokenRequest {
             room: "session-abc123".to_string(),
-            ..a_generate_request(&an_access_token_for("operator"))
+            ..a_generate_request(&an_access_token_for(&config, "operator"))
         };
 
         // When the web UI asks for it

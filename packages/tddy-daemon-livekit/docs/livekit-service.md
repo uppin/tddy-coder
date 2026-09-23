@@ -9,7 +9,7 @@ stream.
 | Module | What is in it |
 |---|---|
 | `session_room` | the per-session room — naming, the poll loop, the WIP ref and the delta ring, and the four trait ports. Detail: [session-room.md](./session-room.md) |
-| `livekit_peer_discovery` | the `daemon-*` metadata advertisement, `CommonRoomPeerRegistry`, `daemon_rpc_identity`, and the forwarding helpers |
+| `livekit_peer_discovery` | the metadata advertisement (with `AdvertisedSigningKey`), `CommonRoomPeerRegistry`, `peer_signing_public_keys`, `daemon_rpc_identity`, and the forwarding helpers |
 | `common_room_supervisor` | the `CommonRoomSupervisor` trait and `SupervisedCommonRoom` — joining the common room and keeping it joined |
 | `livekit_rooms_stream` | `RoomRoster`, `RosterError`, and `pump_rooms`, the 3 s poller behind the rooms stream |
 | `livekit_service` | `LiveKitServiceImpl` and `build_livekit_entry` — **authored here**, because family T needs a service to be served by once it leaves `ConnectionServiceImpl` |
@@ -81,10 +81,36 @@ The god object depended on this subsystem's abstractions rather than the reverse
 direction extraction wants and the reason this move is relocation rather than redesign.
 
 `SessionTokenMinter` is the load-bearing one. Room JWTs are minted by
-[`tddy-daemon-auth`](../../tddy-daemon-auth/docs/auth-service.md) from `config.livekit.api_secret`
-— the same secret that signs session tokens. Keeping minting behind a port is what stops this crate
-growing a second signer, and `tests/dependency_boundary_unit.rs` pins `tddy-daemon-auth` off this
-crate's dependency path so the port cannot quietly stop being one.
+[`tddy-daemon-auth`](../../tddy-daemon-auth/docs/auth-service.md) from `config.livekit.api_secret`,
+which signs room JWTs and nothing else. Keeping minting behind a port is what stops this crate
+growing a signer of its own, and `tests/dependency_boundary_unit.rs` pins `tddy-daemon-auth` off
+this crate's dependency path so the port cannot quietly stop being one.
+
+## Signing keys ride the advertisement, as opaque strings
+
+Each daemon signs session tokens with an Ed25519 key of its own, and a peer verifies them against
+the public key the daemon advertises here. This crate carries that key **without understanding
+it**: `AdvertisedSigningKey { key_id, public_key }` is two strings — the key id and the base64url
+SPKI DER — built by `tddy-daemon` from `tddy_daemon_auth::DaemonSigningKey` and handed to the
+discovery loop, which publishes them as `signing_key_id` / `signing_public_key` on every
+(re)connection. Both fields are `#[serde(default)]`, so an advertisement without a key still parses
+and its peer's tokens are simply refused. `AdvertisedSigningKey::default()` advertises no key and
+exists for suites that run discovery without a signing identity; `runtime::build` starts the loop
+only for a daemon that signs.
+
+On the read side, `peer_signing_public_keys(peers, key_id)` and
+`CommonRoomPeerRegistry::signing_public_keys_for(key_id)` return **every** candidate advertised
+under an id, still as strings. The decoding and the check that a candidate hashes to its id belong
+to `tddy-daemon`'s `CommonRoomKeyDirectory`, the `tddy_daemon_auth::KeyDirectory` adapter — it
+cannot live here, since `KeyDirectory` is an auth-owned trait and this crate may not reach auth.
+
+**Who may be taken for a daemon** is `tddy_service::may_be_daemon_discovery_identity`: discovery
+reads an advertisement only from an identity outside `NON_DAEMON_IDENTITY_PREFIXES` — browser
+(`web-`, `browser-`), coder/session (`server…`, `daemon-…`), `split-agent-`, `remote-git-` and
+`screenshare-host-`. Every client-facing mint (`token.TokenService`) refuses exactly the identities
+that predicate allows, so a key is only ever read from an identity a daemon minted for itself. The
+rule lives in `tddy-service`, the lowest crate both the mint and this crate reach, so the two sides
+cannot drift.
 
 ## Four edges had to be cut
 
@@ -94,7 +120,7 @@ chosen rather than defaulted.
 
 | Edge | Cut, and why that direction |
 |---|---|
-| `livekit_peer_discovery` → `split_session::SPLIT_AGENT_IDENTITY_PREFIX` | the constant is lifted to `tddy_daemon_kernel::daemon_identity`, whose charter is already "the identity names several crates need", and `split_session` re-exports it. Defining it here instead would make the **producer** of the identity depend on the crate that *refuses* it, and would break again when `split_session` moves to a third crate |
+| `livekit_peer_discovery` → `split_session::SPLIT_AGENT_IDENTITY_PREFIX` | the constant lives in `tddy_service::participant_identity`, beside the rule that refuses it, and `tddy_daemon_kernel::daemon_identity` re-exports it for the crates that mint agents' identities; `split_session` re-exports that. Defining it here instead would make the **producer** of the identity depend on the crate that *refuses* it, and would break again when `split_session` moves to a third crate |
 | `common_room_supervisor` → `daemon_config_service` → `livekit_peer_discovery` | the `CommonRoomSupervisor` **trait** moves to `common_room_supervisor`, beside its one implementation, and `daemon_config_service` re-exports it. Re-pointing the return leg alone does not do it: the trait import is a `livekit → daemon` edge whether or not it closes a loop. The return leg was re-pointed too, from a re-export in a departing module to its real home, `tddy_daemon_kernel::daemon_identity::local_instance_id_for_config` |
 | `session_room` → `session_attachments::list_session_attachments` | the listing is lifted to `tddy_workflow::artifact_paths`, beside the `session_attachments_root` that names the very directory it reads, and the daemon re-exports it. Not the kernel: this is a filesystem convention `tddy-workflow` already owns, not a daemon identity |
 | `livekit_peer_discovery` → `oauth_loopback_tunnel` | not a cycle, but a forbidden direction — the LiveKit crate must not reach the identity boundary. `spawn_oauth_loopback_tunnel` moves to `tddy_daemon_auth::oauth_loopback_tunnel`, the module whose supervisor it starts. `spawn_common_room_discovery_task`, which composes that supervisor with the discovery loop, moves to `tddy-daemon`'s `runtime.rs` — after the split that is the only crate holding both halves |

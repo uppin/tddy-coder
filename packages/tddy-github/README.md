@@ -11,7 +11,7 @@ pull requests.
 |---|---|
 | `provider.rs`, `real.rs`, `stub.rs` | the `GitHubOAuthProvider` trait, its live implementation and the test stub |
 | `auth_service.rs` | the gRPC `AuthService` implementation over `tddy_service::proto::auth` |
-| `session_token.rs` | `SessionTokenSigner`, `SessionClaims`, token kinds and TTLs |
+| `session_token_v2.rs` | the `v2` session-token format — Ed25519 over a payload naming its signer's key id: `SessionTokenSigner`, `SessionTokenVerifier`, `SessionTokenAuthority`, `KeyId`, `SessionClaims`, token kinds and TTLs. See [docs/session-token.md](docs/session-token.md) |
 | `token_store.rs` | `GitHubTokenStore` |
 
 ### Pull requests

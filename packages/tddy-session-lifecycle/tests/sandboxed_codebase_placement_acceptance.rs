@@ -12,9 +12,8 @@
 //! (`session_type == "workspace" && sandbox == Some(true)`) lands them in the jail unchanged.
 //!
 //! These tests need **no common room**, and one of them asserts exactly that: a placement whose
-//! whole point is that both halves are on this host must not require one. The `livekit:` block in
-//! the fixture config carries `api_secret` and nothing else — the deployment's session-token
-//! signer, not a room: `livekit.enabled` defaults to false and no `common_room` is named.
+//! whole point is that both halves are on this host must not require one. The fixture config has
+//! no `livekit:` block at all — the daemon signs its session tokens with a key of its own.
 //!
 //! Everything here is asserted through the RPC surface or through what the daemon persisted —
 //! `StartSession`, `ExecuteTool`, and `.session.yaml`. The agent's argv and its `TDDY_REMOTE_*`
@@ -34,9 +33,10 @@ use std::sync::{Arc, OnceLock};
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
+use tddy_daemon_auth::{DaemonSigningKey, SessionTokens, StandaloneKeyDirectory};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
-use tddy_github::{GitHubUser, SessionTokenSigner};
+use tddy_github::GitHubUser;
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::Request;
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
@@ -50,11 +50,6 @@ type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 const LOCAL_INSTANCE_ID: &str = "workstation";
-/// The deployment secret this daemon signs its session tokens with. It is what lets the daemon
-/// mint the agent's own credential for the tool calls it makes back here — without it the start
-/// is refused rather than forwarding the caller's token onward, so a fixture without one would
-/// exercise a refusal instead of the placement.
-const LK_API_SECRET: &str = "secret";
 const A_PEER_ID: &str = "laptop-b";
 /// A specialized agent this deployment offers, as the create-session form would name it.
 const A_SPECIALIZED_AGENT: &str = "fastcontext";
@@ -80,18 +75,36 @@ impl EligibleDaemonSource for MockEligibleDaemonSource {
     }
 }
 
-/// The credential the browser presents, signed with [`LK_API_SECRET`] so this daemon can verify
+/// This daemon's signing identity: the key the browser's credential below is signed with, and the
+/// one the daemon mints the agent a credential of its own with for the tool calls it makes back
+/// here. A daemon given none refuses the start rather than forwarding the caller's token, so every
+/// test below would exercise that refusal. Generated once per test process, so the suite has one
+/// identity across its tests and no run inherits another's key; the key file's directory is
+/// dropped as soon as the key is in memory.
+fn this_daemons_session_tokens() -> &'static SessionTokens {
+    static TOKENS: OnceLock<SessionTokens> = OnceLock::new();
+    TOKENS.get_or_init(|| {
+        let home = tempfile::tempdir().expect("a directory for the daemon's key");
+        let key = DaemonSigningKey::load_or_generate(&home.path().join("signing_key.pem"))
+            .expect("the daemon generates its keypair");
+        SessionTokens::new(&key, Arc::new(StandaloneKeyDirectory))
+    })
+}
+
+/// The credential the browser presents, signed with [`this_daemons_session_tokens`]'s key so this daemon can verify
 /// it and mint the agent's own from the identity it proves. Minted once and shared, because the
 /// request and the daemon's user resolver have to agree on the very same string.
 fn a_caller_token() -> &'static str {
     static TOKEN: OnceLock<String> = OnceLock::new();
     TOKEN.get_or_init(|| {
-        SessionTokenSigner::new(LK_API_SECRET.as_bytes()).mint_access(&GitHubUser {
-            id: 4242,
-            login: current_os_user(),
-            avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
-            name: "Test User".to_string(),
-        })
+        this_daemons_session_tokens()
+            .signer()
+            .mint_access(&GitHubUser {
+                id: 4242,
+                login: current_os_user(),
+                avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
+                name: "Test User".to_string(),
+            })
     })
 }
 
@@ -165,8 +178,6 @@ users:
 daemon_instance_id: "{LOCAL_INSTANCE_ID}"
 claude_cli:
   binary_path: /bin/cat
-livekit:
-  api_secret: "{LK_API_SECRET}"
 "#
     );
     serde_yaml::from_str(&yaml).expect("config must parse")
@@ -208,16 +219,19 @@ fn a_daemon(sessions_base: PathBuf, discovery: Option<LiveKitDiscoveryHandles>) 
         let base = sessions_base.clone();
         Arc::new(move |_| Some(base.clone()))
     };
-    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
-        test_config(),
-        resolver,
-        sessions_base,
-        user_resolver_valid(),
-        None,
-        discovery,
-        None,
-        Arc::new(ClaudeCliSessionManager::new()),
-    )))
+    TestDaemon::from_arc(Arc::new(
+        DaemonSessionHost::new(
+            test_config(),
+            resolver,
+            sessions_base,
+            user_resolver_valid(),
+            None,
+            discovery,
+            None,
+            Arc::new(ClaudeCliSessionManager::new()),
+        )
+        .with_session_tokens(this_daemons_session_tokens().clone()),
+    ))
 }
 
 /// A daemon with **no LiveKit discovery at all** — no eligible-peer source, no common room.
@@ -226,10 +240,8 @@ fn a_daemon(sessions_base: PathBuf, discovery: Option<LiveKitDiscoveryHandles>) 
 /// has never joined a room must still serve it. A fixture carrying discovery handles would let a
 /// hidden dependency on peer discovery pass unnoticed.
 ///
-/// Its config does carry `livekit.api_secret`, which is not a room: `livekit.enabled` defaults to
-/// false and no `common_room` is named, so nothing here joins one. That secret is the deployment's
-/// session-token signer (`tddy-daemon-auth`), and it is the whole reason this daemon can mint the
-/// agent a credential of its own instead of refusing the start.
+/// Its config has no `livekit:` block at all. What lets it mint the agent a credential of its own
+/// instead of refusing the start is its own signing identity ([`this_daemons_session_tokens`]).
 fn a_daemon_with_no_common_room(sessions_base: PathBuf) -> TestDaemon {
     a_daemon(sessions_base, None)
 }

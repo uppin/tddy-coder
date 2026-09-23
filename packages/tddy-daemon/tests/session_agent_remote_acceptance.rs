@@ -274,6 +274,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             Arc::new(config),
             Arc::new(tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new()),
             Arc::new(tokio::sync::RwLock::new(None)),
+            Default::default(),
         );
 
         let token = livekit
@@ -323,8 +324,9 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     // advertised to peers via `listen.advertise_url`.
     //
     // The mint's resolver is the fleet's own `user_resolver` (the same one `DaemonSessionHost`
-    // uses), not the HMAC verifier `auth::build_auth_entries` would build — the fleet authenticates
-    // with the plain `TEST_TOKEN`, which is not a signed token, so the HMAC path would refuse it.
+    // uses), not the signature-verifying resolver `auth::build_auth_entries` would build — the fleet
+    // authenticates with the plain `TEST_TOKEN`, which is not a signed token, so that path would
+    // refuse it.
     let livekit_token_entry = tddy_rpc::ServiceEntry {
         name: "auth.LiveKitTokenService",
         service: Arc::new(LiveKitTokenServiceServer::new(
@@ -360,6 +362,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         config_arc.clone(),
         registry.clone(),
         room_slot.clone(),
+        Default::default(),
     );
     let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(

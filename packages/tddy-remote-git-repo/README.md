@@ -44,8 +44,9 @@ git -C my-app push origin feat/my-branch
 Two settings, both about the daemon: where it is, and who you are. **No LiveKit credential of any
 kind.** The daemon mints the room JWT itself (`auth.LiveKitTokenService/MintLiveKitToken`) and
 returns the LiveKit URL and room along with it. That is not a convenience — `LIVEKIT_API_SECRET`
-is also the HMAC key every daemon signs session tokens with, so anyone holding it could mint an
-access token for any GitHub user on the fleet.
+mints a room JWT for any room under any identity, a daemon's included, so a client holding it could
+join the common room *as* a daemon and be handed other participants' calls. (It no longer signs
+session tokens: each daemon signs those with an Ed25519 key of its own.)
 
 The remote is `<daemon-instance-id>:<project>`:
 

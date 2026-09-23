@@ -429,7 +429,7 @@ mod token_service_acceptance {
 
         let req = GenerateTokenRequest {
             room: "test-room".to_string(),
-            identity: "test-identity".to_string(),
+            identity: "web-test-identity".to_string(),
             session_token: String::new(),
         };
         let msg = RpcMessage {
@@ -450,7 +450,7 @@ mod token_service_acceptance {
         };
         assert_eq!(chunks.len(), 1);
         let resp = GenerateTokenResponse::decode(&chunks[0][..]).expect("decode response");
-        assert_eq!(resp.token, "mock-token-test-room-test-identity");
+        assert_eq!(resp.token, "mock-token-test-room-web-test-identity");
         assert_eq!(resp.ttl_seconds, 120);
     }
 
@@ -462,7 +462,7 @@ mod token_service_acceptance {
 
         let req = crate::proto::token::RefreshTokenRequest {
             room: "other-room".to_string(),
-            identity: "other-identity".to_string(),
+            identity: "web-other-identity".to_string(),
             session_token: String::new(),
         };
         let msg = RpcMessage {
@@ -484,7 +484,7 @@ mod token_service_acceptance {
         assert_eq!(chunks.len(), 1);
         let resp = crate::proto::token::RefreshTokenResponse::decode(&chunks[0][..])
             .expect("decode response");
-        assert_eq!(resp.token, "mock-token-other-room-other-identity");
+        assert_eq!(resp.token, "mock-token-other-room-web-other-identity");
         assert_eq!(resp.ttl_seconds, 120);
     }
 }

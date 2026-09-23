@@ -8,8 +8,8 @@ use tokio::net::TcpListener;
 
 /// A config with a LiveKit block and an allowlist, so the roster under test is the interesting one
 /// rather than the minimum — every conditional registration in the bootstrap is exercised by both
-/// hosts or by neither.
-fn a_daemon_config_with_a_livekit_block(web_port: u16) -> DaemonConfig {
+/// hosts or by neither. Its state goes under `data_dir`, never under the checkout.
+fn a_daemon_config_with_a_livekit_block(web_port: u16, data_dir: &std::path::Path) -> DaemonConfig {
     let yaml = format!(
         r#"
 listen:
@@ -26,7 +26,10 @@ allowed_agents:
     label: "Stub"
 "#
     );
-    serde_yaml::from_str(&yaml).expect("the config fixture did not parse")
+    let mut config: DaemonConfig =
+        serde_yaml::from_str(&yaml).expect("the config fixture did not parse");
+    config.tddy_data_dir = Some(data_dir.to_path_buf());
+    config
 }
 
 /// A port that is free at this moment, so a later bind attempt distinguishes "nothing took it"
@@ -45,16 +48,17 @@ async fn a_free_tcp_port() -> u16 {
 async fn builds_the_same_service_roster_for_the_embedded_runtime_as_for_the_binary_runtime() {
     // Given one configuration
     let port = a_free_tcp_port().await;
+    let data_dir = tempfile::tempdir().expect("a data directory");
 
     // When it is built once for the binary and once for an embedding process
     let binary = runtime::build(
-        a_daemon_config_with_a_livekit_block(port),
+        a_daemon_config_with_a_livekit_block(port, data_dir.path()),
         RuntimeOptions::for_binary(),
     )
     .await
     .expect("the binary runtime did not build");
     let embedded = runtime::build(
-        a_daemon_config_with_a_livekit_block(port),
+        a_daemon_config_with_a_livekit_block(port, data_dir.path()),
         RuntimeOptions::for_embedded(),
     )
     .await
@@ -68,10 +72,11 @@ async fn builds_the_same_service_roster_for_the_embedded_runtime_as_for_the_bina
 async fn leaves_the_configured_web_port_unbound_when_built_for_an_embedded_host() {
     // Given a configuration naming a web port that is free
     let port = a_free_tcp_port().await;
+    let data_dir = tempfile::tempdir().expect("a data directory");
 
     // When the runtime is built for an embedding process
     let _runtime = runtime::build(
-        a_daemon_config_with_a_livekit_block(port),
+        a_daemon_config_with_a_livekit_block(port, data_dir.path()),
         RuntimeOptions::for_embedded(),
     )
     .await
@@ -87,7 +92,8 @@ async fn leaves_the_configured_web_port_unbound_when_built_for_an_embedded_host(
 async fn keeps_a_host_supplied_oauth_redirect_out_of_the_configuration_it_would_persist() {
     // Given a daemon whose configuration names where GitHub should send a sign-in back
     let port = a_free_tcp_port().await;
-    let mut config = a_daemon_config_with_a_livekit_block(port);
+    let data_dir = tempfile::tempdir().expect("a data directory");
+    let mut config = a_daemon_config_with_a_livekit_block(port, data_dir.path());
     config.github =
         Some(serde_yaml::from_str("redirect_uri: https://tddy.example/auth/callback").unwrap());
 

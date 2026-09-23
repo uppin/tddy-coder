@@ -9,6 +9,8 @@ name = "tddy_daemon_auth"
 path = "src/lib.rs"
 
 [dependencies]
+ed25519-dalek = { version = "2.2", features = ["pkcs8", "pem", "rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 anyhow = "1"
 async-trait = "0.1"
 log = "0.4"

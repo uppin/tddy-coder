@@ -2,7 +2,7 @@
 
 **Product area:** daemon
 **Status:** Active
-**Updated:** 2026-09-09
+**Updated:** 2026-09-23
 
 ## Summary
 
@@ -41,23 +41,37 @@ because it discovers services through gRPC ServerReflection rather than a compil
 `connection.ConnectionService` for the rooms stream gets `unimplemented`; nothing else is affected.
 This is the repo's standing policy — break freely, migrate every consumer in the same change.
 
-## One secret signs two things
+## One key signs one thing
 
-`config.livekit.api_secret` signs **both** LiveKit room JWTs and session tokens, through
-`tddy_github::SessionTokenSigner`. Session tokens are stateless and HMAC-signed on that key, which
-is precisely how [cross-daemon session authentication](session-auth.md) works: a token minted by one
-daemon is verifiable by every daemon holding the same secret, with no session store and no
-propagation.
+Each daemon signs session tokens with an **Ed25519 keypair of its own** (`DaemonSigningKey`,
+generated on first boot into `auth_storage` and reused after), and `config.livekit.api_secret`
+signs LiveKit room JWTs and nothing else. A token names its signer's key id, so
+[cross-daemon session authentication](session-auth.md) needs no shared secret: a daemon verifies
+its own tokens with its own key, and a peer's against the public key that peer advertises on the
+common room. Neither the LiveKit credential nor its absence decides whether a daemon can
+authenticate — a daemon with no `livekit:` block at all signs, verifies, and completes a sign-in.
 
-Auth and LiveKit being separate crates does **not** separate that secret, and **neither crate
-derives its own**. A second signer would silently partition which tokens each half accepts, and the
-partition would stay invisible until a cross-daemon call failed. The rule is held structurally
-rather than by convention: `tddy-daemon-livekit` reaches minting through a `SessionTokenMinter`
-**port**, and a test walks its manifest closure to prove `tddy-daemon-auth` is not on its dependency
-path — so the port cannot quietly stop being one.
+Every signer and verifier in a daemon comes from its **one** `SessionTokens` value, built once in
+`runtime::build` and handed to the login flow, the local socket's mint and the split-session agent
+credentials. No path constructs a second key: that would be an identity no peer was told about,
+and tokens signed with it would silently fail everywhere else.
+
+**Key distribution is a port, so the LiveKit crate never reaches auth.** `tddy-daemon-auth`
+declares the `KeyDirectory` trait ("what public key does key id `kid` name?") and its
+`StandaloneKeyDirectory` for a daemon with no fleet. `tddy-daemon-livekit` carries a daemon's key
+on its common-room advertisement as two **opaque strings** (`AdvertisedSigningKey`: the key id and
+the base64url SPKI DER) and hands peers' strings back undecoded. The adapter between them,
+`CommonRoomKeyDirectory`, lives in `tddy-daemon` — the one crate that depends on both. Room JWTs
+cross the same boundary the other way, through the `SessionTokenMinter` port. The rule is held
+structurally: a test walks `tddy-daemon-livekit`'s manifest closure to prove `tddy-daemon-auth` is
+not on its dependency path, so neither port can quietly stop being one.
 
 The same test, on both crates, proves `tddy-daemon` is absent from either dependency path. That is
 what makes each extraction real rather than a re-export.
+
+**Which participant's key is believed** is one predicate, `tddy_service::may_be_daemon_discovery_identity`,
+read by both peer discovery and every client-facing LiveKit mint — see
+[LiveKit peer discovery § Trust model](livekit-peer-discovery.md#trust-model).
 
 ## Where the seam is drawn
 
@@ -78,10 +92,10 @@ what makes each extraction real rather than a re-export.
 
 ## Related documentation
 
-- [`packages/tddy-daemon-auth/docs/auth-service.md`](../../../packages/tddy-daemon-auth/docs/auth-service.md) — the identity boundary, the shared secret, and secrets at rest
+- [`packages/tddy-daemon-auth/docs/auth-service.md`](../../../packages/tddy-daemon-auth/docs/auth-service.md) — the identity boundary, the signing key, and secrets at rest
 - [`packages/tddy-daemon-livekit/docs/livekit-service.md`](../../../packages/tddy-daemon-livekit/docs/livekit-service.md) — the rooms stream and the cut edges
 - [`packages/tddy-daemon/docs/connection-service.md`](../../../packages/tddy-daemon/docs/connection-service.md) — the other 72 methods
 - [Host and worktree services](host-worktree-services.md) — why the daemon is split at all
-- [Cross-daemon session authentication](session-auth.md) — what the shared secret buys
+- [Cross-daemon session authentication](session-auth.md) — the token format and how a peer's token is verified
 - [Codex OAuth relay](codex-oauth-relay.md) — the OAuth surfaces the identity crate serves
 - [LiveKit rooms panel](../web/livekit-rooms-panel.md) — the web client of `livekit.LiveKitService`

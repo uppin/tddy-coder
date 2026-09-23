@@ -303,10 +303,11 @@ pub fn resolve_os_user(
 /// Both refusals name **this** daemon. For a split session the tools are served on the codebase
 /// host while the error is rendered in the agent's transcript on the agent host, where an
 /// unattributed "invalid or expired session" reads as the agent host's own answer — and the two
-/// likeliest split misconfigurations land here: daemons not sharing `livekit.api_secret` (a
-/// session token is a stateless HMAC, verifiable only by daemons holding the same secret), and a
-/// GitHub user mapped on the agent host but not on the codebase host. Each is also logged here,
-/// because the operator debugging it is reading *this* daemon's log.
+/// likeliest split misconfigurations land here: a codebase host that has not learned the agent
+/// host's signing key (a session token is verifiable only by a daemon that has seen its signer's
+/// public key advertised in the common room), and a GitHub user mapped on the agent host but not
+/// on the codebase host. Each is also logged here, because the operator debugging it is reading
+/// *this* daemon's log.
 pub fn authorize_exec_tool_caller<'c>(
     config: &'c DaemonConfig,
     user_resolver: &SessionUserResolver,
@@ -315,12 +316,12 @@ pub fn authorize_exec_tool_caller<'c>(
     let local_instance_id = local_instance_id_for_config(config);
     let Some(github_user) = (user_resolver)(&req.session_token) else {
         log::warn!(
-            "exec tool {tool:?} for session {session} refused on daemon {local_instance_id}: the session token could not be verified here (a split session's agent presents a token minted by its agent daemon, so both daemons must share livekit.api_secret)",
+            "exec tool {tool:?} for session {session} refused on daemon {local_instance_id}: the session token could not be verified here (a split session's agent presents a token its agent daemon signed with its own key, so this daemon must have seen that daemon's signing key advertised in the common room)",
             tool = req.tool_name,
             session = req.session_id
         );
         return Err(Status::unauthenticated(format!(
-            "daemon {local_instance_id} could not verify the session token (invalid or expired there); a split session's tools run on the daemon holding the codebase, which verifies the token with its own livekit.api_secret"
+            "daemon {local_instance_id} could not verify the session token (invalid or expired there); a split session's tools run on the daemon holding the codebase, which verifies the token against the agent daemon's signing key as advertised in the common room"
         )));
     };
     let Some(os_user) = config.os_user_for_github(&github_user) else {

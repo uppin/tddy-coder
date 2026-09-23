@@ -18,6 +18,7 @@ pub mod convert_acp;
 pub mod echo_service;
 pub mod loopback_tunnel_service;
 pub mod observer_service;
+pub mod participant_identity;
 pub mod presenter_intent_service;
 pub mod reflection_service;
 pub mod service;
@@ -37,6 +38,10 @@ pub use convert::{client_message_to_intent, event_to_server_message, snapshot_re
 pub use echo_service::{create_echo_bridge, EchoServiceImpl};
 pub use loopback_tunnel_service::LoopbackTunnelServiceImpl;
 pub use observer_service::PresenterObserverService;
+pub use participant_identity::{
+    may_be_daemon_discovery_identity, RESERVED_DAEMON_IDENTITY_PREFIX,
+    SCREEN_SHARE_HOST_IDENTITY_PREFIX, SPLIT_AGENT_IDENTITY_PREFIX,
+};
 pub use presenter_intent_service::PresenterIntentService;
 pub use proto::acp::{AcpService, AcpServiceServer};
 pub use proto::actions::ActionServiceServer;
@@ -77,9 +82,7 @@ pub use tddy_rpc::Status;
 pub use terminal_service::{
     start_virtual_tui_session, TerminalServiceVirtualTui, VirtualTuiSession,
 };
-pub use token_service::{
-    SessionTokenAuthenticator, TokenProvider, TokenServiceImpl, RESERVED_DAEMON_IDENTITY_PREFIX,
-};
+pub use token_service::{SessionTokenAuthenticator, TokenProvider, TokenServiceImpl};
 pub use tonic_status::{to_rpc_status, to_tonic_status};
 
 pub mod gen {

@@ -292,7 +292,7 @@ async fn token_service_generate_token_returns_200_with_token_and_ttl() {
 
     let req = GenerateTokenRequest {
         room: "my-room".to_string(),
-        identity: "client".to_string(),
+        identity: "web-client".to_string(),
         session_token: String::new(),
     };
     let body_bytes = req.encode_to_vec();
@@ -327,6 +327,6 @@ async fn token_service_generate_token_returns_200_with_token_and_ttl() {
         .await
         .unwrap();
     let resp = GenerateTokenResponse::decode(&body[..]).expect("decode response");
-    assert_eq!(resp.token, "test-jwt-my-room-client");
+    assert_eq!(resp.token, "test-jwt-my-room-web-client");
     assert_eq!(resp.ttl_seconds, 600);
 }

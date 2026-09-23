@@ -22,7 +22,9 @@ use tddy_service::proto::auth::{
 };
 use tddy_service::proto::token::{GenerateTokenRequest, GenerateTokenResponse};
 
-const FLEET_SECRET: &str = "shared-secret";
+/// The LiveKit credential `token.TokenService` mints room JWTs with — nothing to do with the session
+/// token that gates it.
+const LIVEKIT_API_SECRET: &str = "shared-secret";
 const API_KEY: &str = "devkey";
 const COMMON_ROOM: &str = "tddy-lobby";
 const THE_CALLBACK_CODE: &str = "the-code";
@@ -48,17 +50,22 @@ async fn admits_a_caller_holding_a_token_this_crates_sign_in_minted() {
 }
 
 #[tokio::test]
-async fn refuses_a_caller_holding_a_token_another_fleet_signed() {
-    // Given a token minted with a secret this deployment does not hold
+async fn refuses_a_caller_holding_a_token_a_daemon_it_never_heard_of_signed() {
+    // Given a token minted by a daemon whose key this deployment was never told
     let (config, _dir) = a_daemon_serving_a_common_room();
-    let foreign_token = tddy_github::SessionTokenSigner::new(b"another-fleets-secret").mint_access(
-        &tddy_github::GitHubUser {
-            id: 1,
-            login: THE_LOGIN.to_string(),
-            avatar_url: String::new(),
-            name: THE_LOGIN.to_string(),
-        },
-    );
+    let stranger_home = tempfile::tempdir().expect("a temporary directory");
+    let stranger = tddy_daemon_auth::DaemonSigningKey::load_or_generate(
+        &stranger_home
+            .path()
+            .join(tddy_daemon_auth::SIGNING_KEY_FILE),
+    )
+    .expect("a stranger generates a keypair");
+    let foreign_token = stranger.signer().mint_access(&tddy_github::GitHubUser {
+        id: 1,
+        login: THE_LOGIN.to_string(),
+        avatar_url: String::new(),
+        name: THE_LOGIN.to_string(),
+    });
 
     // When it is presented to the same cross-crate service
     let refusal = mint_through(the_web_mint(&config), &foreign_token).await;
@@ -117,9 +124,11 @@ fn a_daemon_serving_a_common_room() -> (DaemonConfig, tempfile::TempDir) {
     let yaml = format!(
         "users:\n  - github_user: \"{THE_LOGIN}\"\n    os_user: \"{THE_LOGIN}-os\"\n\
          github:\n  stub: true\n  stub_codes: \"{THE_CALLBACK_CODE}:{THE_LOGIN}\"\n\
+         auth_storage: \"{}\"\n\
          livekit:\n  enabled: true\n  url: \"ws://livekit.internal:7880\"\n  \
-         api_key: \"{API_KEY}\"\n  api_secret: \"{FLEET_SECRET}\"\n  \
-         common_room: \"{COMMON_ROOM}\"\n"
+         api_key: \"{API_KEY}\"\n  api_secret: \"{LIVEKIT_API_SECRET}\"\n  \
+         common_room: \"{COMMON_ROOM}\"\n",
+        dir.path().join("auth").display()
     );
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).expect("the config is written");

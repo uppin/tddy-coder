@@ -61,6 +61,7 @@ fn spawn_common_room_discovery(
         config_arc,
         registry,
         room_slot.clone(),
+        Default::default(),
     );
     room_slot
 }

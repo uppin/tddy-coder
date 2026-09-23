@@ -71,7 +71,7 @@ is added.
 
 The environment is **built, never inherited**. `setpriv` is deliberately environment-preserving, so
 a child crossing a uid boundary would otherwise receive every variable the daemon was started with —
-including `LIVEKIT_API_SECRET`, which signs session tokens, and which `git receive-pack` hooks and
+including `LIVEKIT_API_SECRET`, which mints a room JWT for any room under any identity, and which `git receive-pack` hooks and
 `uploadpack.packObjectsHook` would see. `spawn_with_env` clears the environment and hands the child
 exactly the `HOME`/`PATH` that `pty_runtime::pty_user_env_overrides` computes for the target user;
 that is also what makes git read the right `.gitconfig`. **Local** pack spawn uses this path.

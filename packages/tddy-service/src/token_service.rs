@@ -5,6 +5,9 @@ use std::sync::Arc;
 
 use tddy_rpc::{Request, Response, Status};
 
+use crate::participant_identity::{
+    may_be_daemon_discovery_identity, NON_DAEMON_IDENTITY_PREFIXES, RESERVED_DAEMON_IDENTITY_PREFIX,
+};
 use crate::proto::token::{
     GenerateTokenRequest, GenerateTokenResponse, RefreshTokenRequest, RefreshTokenResponse,
     TokenService as TokenServiceTrait,
@@ -26,15 +29,6 @@ pub trait TokenProvider: Send + Sync + 'static {
 /// the very resolver (signature, expiry, access-kind) that gates its every other RPC, and its
 /// config stays on the daemon side.
 pub type SessionTokenAuthenticator = Arc<dyn Fn(&str) -> bool + Send + Sync>;
-
-/// Prefix of the LiveKit identity a daemon **serves** its RPC on —
-/// `tddy_daemon::livekit_peer_discovery::daemon_rpc_identity` composes its identities from this
-/// constant so the two cannot drift.
-///
-/// This service mints no identity carrying it, on any registration. A participant admitted to a
-/// room under a `daemon-*` identity is handed the RPC calls other participants address to that
-/// daemon, so a caller free to choose it would be reading everyone else's traffic.
-pub const RESERVED_DAEMON_IDENTITY_PREFIX: &str = "daemon-";
 
 /// Token service implementation. Delegates to a TokenProvider.
 pub struct TokenServiceImpl<P: TokenProvider> {
@@ -63,8 +57,9 @@ impl<P: TokenProvider> TokenServiceImpl<P> {
         }
     }
 
-    /// Mint one JWT, applying both gates in turn: the caller must authenticate (where an
-    /// authenticator is installed), and the identity it asks for must not be a daemon's.
+    /// Mint one JWT, applying every gate in turn: the caller must authenticate (where an
+    /// authenticator is installed), and the identity it asks for must be neither a daemon's RPC
+    /// identity nor one peer discovery could take for a daemon.
     fn mint(
         &self,
         session_token: &str,
@@ -80,6 +75,7 @@ impl<P: TokenProvider> TokenServiceImpl<P> {
             }
         }
         refuse_reserved_identity(identity)?;
+        refuse_daemon_discovery_identity(identity)?;
         let token = self
             .provider
             .generate_token(room, identity)
@@ -102,6 +98,24 @@ fn refuse_reserved_identity(identity: &str) -> Result<(), Status> {
         return Err(Status::permission_denied(format!(
             "identity \"{identity}\" is reserved: \"{RESERVED_DAEMON_IDENTITY_PREFIX}\" addresses \
              a daemon's RPC-serving participant, which is handed other participants' calls"
+        )));
+    }
+    Ok(())
+}
+
+/// Refuse an identity peer discovery could take for a daemon's discovery participant.
+///
+/// That participant's advertisement is what peers learn a daemon's session-token signing key from,
+/// and this JWT may update its own metadata. A caller minted such an identity could join the common
+/// room, advertise a keypair of its own and sign tokens for any login that every daemon accepts —
+/// so the mint hands out only identities [`may_be_daemon_discovery_identity`] rules out, whatever
+/// the room. The rule is that function's, not a list kept here, so the two sides cannot drift.
+fn refuse_daemon_discovery_identity(identity: &str) -> Result<(), Status> {
+    if may_be_daemon_discovery_identity(identity) {
+        return Err(Status::permission_denied(format!(
+            "identity \"{identity}\" could be taken for a daemon's common-room participant, whose \
+             advertisement peers trust; a client identity must begin with one of {:?}",
+            NON_DAEMON_IDENTITY_PREFIXES
         )));
     }
     Ok(())
@@ -316,6 +330,101 @@ mod tests {
 
         // Then
         assert_eq!(minted.token, "jwt:tddy-lobby:web-daemon-watcher");
+    }
+
+    // -------------------------------------------------------------------------
+    // Daemon-eligible identities — the ones peer discovery would read an advertisement, and a
+    // signing key, from. Refused on every registration, whatever the room.
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn refuses_an_identity_peer_discovery_could_take_for_a_daemon() {
+        // Given an authenticated caller asking for a bare id — the shape of a daemon's discovery
+        // identity, under which an advertised signing key is believed
+        let request = GenerateTokenRequest {
+            room: "tddy-common-room".to_string(),
+            identity: "evil-host".to_string(),
+            session_token: AN_ACCEPTED_SESSION_TOKEN.to_string(),
+        };
+
+        // When
+        let refusal = generate(&a_gated_mint(), request)
+            .await
+            .expect_err("a daemon-eligible identity must never be minted");
+
+        // Then it is refused, and the caller is told which identities it may have
+        assert_eq!(refusal.code, Code::PermissionDenied);
+        assert!(
+            refusal.message.contains("evil-host") && refusal.message.contains("\"web-\""),
+            "the refusal must name the identity and the prefix a client uses, got: {}",
+            refusal.message
+        );
+    }
+
+    #[tokio::test]
+    async fn refuses_to_refresh_into_a_daemon_eligible_identity() {
+        // Given a refresh that swaps in a bare id
+        let request = RefreshTokenRequest {
+            identity: "evil-host".to_string(),
+            session_token: AN_ACCEPTED_SESSION_TOKEN.to_string(),
+            ..a_refresh_request()
+        };
+
+        // When
+        let refusal = refresh(&a_gated_mint(), request)
+            .await
+            .expect_err("a daemon-eligible identity must never be minted");
+
+        // Then
+        assert_eq!(refusal.code, Code::PermissionDenied);
+    }
+
+    #[tokio::test]
+    async fn refuses_a_browser_prefix_spelled_in_another_case() {
+        // Given `Web-` — which discovery, comparing as LiveKit routes, does not read as a browser
+        let request = GenerateTokenRequest {
+            identity: "Web-alice".to_string(),
+            ..a_generate_request()
+        };
+
+        // When
+        let refusal = generate(&an_open_mint(), request)
+            .await
+            .expect_err("an identity discovery may read as a daemon must never be minted");
+
+        // Then the open registration refuses it too
+        assert_eq!(refusal.code, Code::PermissionDenied);
+    }
+
+    #[tokio::test]
+    async fn mints_every_identity_peer_discovery_never_takes_for_a_daemon() {
+        // Given one identity under each prefix a client legitimately joins under
+        let identities = ["web-alice", "browser-presenter-x1", "server-7"];
+
+        // When each is minted
+        let mut minted = Vec::new();
+        for identity in identities {
+            let request = GenerateTokenRequest {
+                identity: identity.to_string(),
+                ..a_generate_request()
+            };
+            minted.push(
+                generate(&an_open_mint(), request)
+                    .await
+                    .map(|response| response.token)
+                    .map_err(|status| status.message),
+            );
+        }
+
+        // Then every one is admitted, under the identity asked for
+        assert_eq!(
+            minted,
+            vec![
+                Ok("jwt:tddy-lobby:web-alice".to_string()),
+                Ok("jwt:tddy-lobby:browser-presenter-x1".to_string()),
+                Ok("jwt:tddy-lobby:server-7".to_string()),
+            ]
+        );
     }
 
     // -------------------------------------------------------------------------

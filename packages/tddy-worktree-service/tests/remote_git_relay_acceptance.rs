@@ -315,8 +315,8 @@ fn gives_the_git_child_the_project_owners_home_rather_than_the_daemons() {
 
 #[tokio::test]
 async fn gives_a_child_only_the_environment_it_was_spawned_with() {
-    // Given a child spawned with one variable, by a daemon whose own environment holds the LiveKit
-    // API secret it signs session tokens with
+    // Given a child spawned with one variable, by a daemon whose own environment holds its LiveKit
+    // API secret
     let cwd = a_working_directory();
     let (relay, rx) = GitChildRelay::spawn_with_env(
         vec!["/usr/bin/env".to_string()],

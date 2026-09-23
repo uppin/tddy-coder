@@ -62,12 +62,12 @@ port a GitHub sign-in comes back on — `src-tauri/src/oauth_callback.rs` opens 
 `/auth/callback` listener on 127.0.0.1 for the duration of a sign-in and closes it again.
 `github.redirect_uri` is derived from that port rather than read from the config.
 
-**Sessions need an identity**, and it is three blocks at once: `github:` (without it
+**Sessions need an identity**, and it is two blocks at once: `github:` (without it
 `build_auth_entries` returns no session-user resolver, and every session service is assembled behind
-one), `livekit.api_secret` (the only source of the token signer, required even with no common room)
-and `users:` (which OS user a login runs as, with no fallback). What `./install --desktop` renders
-leaves all three unset, so a fresh install starts onto its settings and offers no sessions until they
-are filled in — see
+one) and `users:` (which OS user a login runs as, with no fallback). No `livekit:` block is needed to
+sign in: the daemon signs session tokens with an Ed25519 key it generates into `auth_storage` on first
+boot. What `./install --desktop` renders leaves both unset, so a fresh install starts onto its
+settings and offers no sessions until they are filled in — see
 [config-resolution-and-install.md](docs/config-resolution-and-install.md).
 
 ### UI ↔ daemon

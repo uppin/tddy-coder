@@ -5,6 +5,9 @@ use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 
 use crate::provider::{GitHubOAuthProvider, GitHubUser};
+use crate::session_token_v2::{
+    SessionClaims, SessionTokenAuthority, SessionTokenSigner, TokenKind,
+};
 
 use tddy_service::proto::auth::{
     AuthService as AuthServiceTrait, ExchangeCodeRequest, ExchangeCodeResponse,
@@ -22,7 +25,7 @@ fn to_proto_user(user: &GitHubUser) -> ProtoGitHubUser {
     }
 }
 
-fn proto_user_from_claims(claims: &crate::session_token::SessionClaims) -> ProtoGitHubUser {
+fn proto_user_from_claims(claims: &SessionClaims) -> ProtoGitHubUser {
     ProtoGitHubUser {
         id: claims.id,
         login: claims.login.clone(),
@@ -31,37 +34,53 @@ fn proto_user_from_claims(claims: &crate::session_token::SessionClaims) -> Proto
     }
 }
 
-/// Auth service implementation. Delegates OAuth to a GitHubOAuthProvider and issues stateless,
-/// HMAC-signed session tokens (see [`crate::session_token`]). No session state is kept
-/// server-side, so a token is verifiable by any daemon holding the same signing secret.
+/// Auth service implementation. Delegates OAuth to a GitHubOAuthProvider and issues stateless
+/// session tokens signed with this daemon's own key (see [`crate::session_token_v2`]). No session
+/// state is kept server-side: a token is verifiable by any daemon that can resolve the key it names.
 pub struct AuthServiceImpl<P: GitHubOAuthProvider> {
     provider: Arc<P>,
-    /// When set, session tokens are stateless HMAC-signed tokens (mint/verify). When `None`,
-    /// authentication is non-functional: minting fails and every token is rejected.
-    signer: Option<crate::session_token::SessionTokenSigner>,
+    /// When set, sign-in mints tokens and status/refresh verify them. When `None`, authentication
+    /// is non-functional: minting fails and every token is rejected.
+    signing: Option<Signing>,
     /// When set, a real provider's GitHub access token is retained here on login so the server can
-    /// later act on that operator's behalf (e.g. read their PRs). Separate from `signer` on purpose:
+    /// later act on that operator's behalf (e.g. read their PRs). Separate from `signing` on purpose:
     /// the GitHub token never enters the session token and is never returned to the client.
     token_store: Option<Arc<dyn crate::token_store::GitHubTokenStore>>,
 }
 
+/// What a signed service mints with and verifies through.
+struct Signing {
+    /// This daemon's own key: every token the service hands out is signed with it.
+    signer: SessionTokenSigner,
+    /// Decides whether a presented token is genuine, whichever daemon signed it — so a status
+    /// check or a refresh accepts a peer's token exactly as far as the fleet's key directory does.
+    authority: Arc<dyn SessionTokenAuthority>,
+}
+
 impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
     /// Create without a signer. Authentication is non-functional — minting fails and every token
-    /// is rejected — used when no shared signing secret is configured.
+    /// is rejected. A process that can hand out an authorize URL but holds no identity of its own
+    /// (a session coder's web surface) serves this.
     pub fn new(provider: P) -> Self {
         Self {
             provider: Arc::new(provider),
-            signer: None,
+            signing: None,
             token_store: None,
         }
     }
 
-    /// Create with a stateless HMAC session-token signer. Tokens are self-describing and
-    /// verifiable by any daemon holding the same secret — no shared/persisted session store.
-    pub fn new_signed(provider: P, signer: crate::session_token::SessionTokenSigner) -> Self {
+    /// Create a service that mints with `signer` and verifies through `authority`.
+    ///
+    /// Tokens are self-describing — no shared or persisted session store — and `authority` is
+    /// what lets a token minted by one daemon be recognised by another.
+    pub fn new_signed(
+        provider: P,
+        signer: SessionTokenSigner,
+        authority: Arc<dyn SessionTokenAuthority>,
+    ) -> Self {
         Self {
             provider: Arc::new(provider),
-            signer: Some(signer),
+            signing: Some(Signing { signer, authority }),
             token_store: None,
         }
     }
@@ -131,9 +150,9 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
 
         let proto_user = to_proto_user(&user);
 
-        // Signed mode: return a stateless token verifiable by any daemon holding the same secret.
-        // No server-side session state is kept.
-        let Some(ref signer) = self.signer else {
+        // Signed mode: return a stateless token any daemon that can resolve this daemon's key
+        // verifies. No server-side session state is kept.
+        let Some(Signing { ref signer, .. }) = self.signing else {
             return Err(Status::failed_precondition(
                 "session token signing is not configured",
             ));
@@ -157,11 +176,11 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
         let req = request.into_inner();
         // Only an access-kind token authenticates a session — a refresh token is a minting
         // credential, never proof of an authenticated session (matches the daemon RPC resolver).
-        let claims = self
-            .signer
-            .as_ref()
-            .and_then(|signer| signer.verify(&req.session_token).ok())
-            .filter(|claims| claims.kind == crate::session_token::TokenKind::Access);
+        let claims = match &self.signing {
+            Some(signing) => signing.authority.verify(&req.session_token).await.ok(),
+            None => None,
+        }
+        .filter(|claims| claims.kind == TokenKind::Access);
         Ok(Response::new(match claims {
             Some(claims) => GetAuthStatusResponse {
                 authenticated: true,
@@ -179,29 +198,30 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
         request: Request<RefreshSessionRequest>,
     ) -> Result<Response<RefreshSessionResponse>, Status> {
         let req = request.into_inner();
-        let Some(ref signer) = self.signer else {
+        let Some(Signing {
+            ref signer,
+            ref authority,
+        }) = self.signing
+        else {
             return Err(Status::failed_precondition(
                 "session token signing is not configured",
             ));
         };
         // Only a currently-valid refresh token can extend a session; an expired/forged one forces
         // re-login.
-        let claims = signer
+        let claims = authority
             .verify(&req.refresh_token)
+            .await
             .map_err(|e| Status::unauthenticated(e.to_string()))?;
         // A short-lived access token must not be usable to mint — only a refresh token can.
-        if claims.kind != crate::session_token::TokenKind::Refresh {
+        if claims.kind != TokenKind::Refresh {
             return Err(Status::unauthenticated(
                 "session token: not a refresh token",
             ));
         }
-        let user = GitHubUser {
-            id: claims.id,
-            login: claims.login,
-            avatar_url: claims.avatar_url,
-            name: claims.name,
-        };
-        // Mint a fresh access token plus a slid refresh token (fresh 7-day window).
+        let user = claims.user();
+        // Mint a fresh access token plus a slid refresh token (fresh 7-day window), signed with
+        // this daemon's own key whichever daemon signed the refresh token it was given.
         let session_token = signer.mint_access(&user);
         let refresh_token = signer.mint_refresh(&user);
         Ok(Response::new(RefreshSessionResponse {
@@ -242,7 +262,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_auth_status_with_invalid_session() {
-        // Given an auth service with no signing secret configured
+        // Given an auth service with no signing key configured
         let (stub, _) = setup();
         let service = AuthServiceImpl::new(stub);
         let server = AuthServiceServer::new(service);
@@ -327,19 +347,64 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // Cross-daemon session tokens — a token minted by one daemon is verifiable by another that
-    // shares the signing secret, with no shared or persisted session store.
+    // Cross-daemon session tokens — a token minted by one daemon is verifiable by another that has
+    // learned the first one's public key, with no shared secret and no shared session store.
     // -------------------------------------------------------------------------
+
+    /// A daemon's signing key. Fixed bytes, so a failure names a behaviour rather than a seed.
+    fn a_daemon_key(seed: u8) -> SigningKey {
+        SigningKey::from_bytes(&[seed; 32])
+    }
+
+    fn a_signer_for(key: &SigningKey) -> SessionTokenSigner {
+        SessionTokenSigner::new(key.clone())
+    }
+
+    /// A signed service minting with `key` and admitting the tokens of every key in `trusted`.
+    fn a_signed_service(
+        provider: StubGitHubProvider,
+        key: &SigningKey,
+        trusted: &[&SigningKey],
+    ) -> AuthServiceImpl<StubGitHubProvider> {
+        AuthServiceImpl::new_signed(
+            provider,
+            a_signer_for(key),
+            Arc::new(TrustsKeys(
+                trusted.iter().map(|key| key.verifying_key()).collect(),
+            )),
+        )
+    }
 
     fn signed_bridge(
         code: &str,
-        secret: &[u8],
+        key: &SigningKey,
+        trusted: &[&SigningKey],
     ) -> RpcBridge<AuthServiceServer<AuthServiceImpl<StubGitHubProvider>>> {
         let (stub, user) = setup();
         stub.register_code(code, user);
-        let signer = crate::session_token::SessionTokenSigner::new(secret);
-        let service = AuthServiceImpl::new_signed(stub, signer);
-        RpcBridge::new(AuthServiceServer::new(service))
+        RpcBridge::new(AuthServiceServer::new(a_signed_service(stub, key, trusted)))
+    }
+
+    /// A daemon's view of the fleet, as a fixed set of public keys it has learned.
+    struct TrustsKeys(Vec<VerifyingKey>);
+
+    #[async_trait]
+    impl SessionTokenAuthority for TrustsKeys {
+        async fn verify(&self, token: &str) -> Result<SessionClaims, SessionTokenError> {
+            let key_id = SessionTokenVerifier::key_id_of(token)?;
+            let key = self
+                .0
+                .iter()
+                .find(|key| KeyId::of(key) == key_id)
+                .ok_or(SessionTokenError::UnknownKeyId(key_id))?;
+            SessionTokenVerifier::verify(token, key, SystemTime::now())
+        }
+    }
+
+    /// The claims `token` carries, checked under `key`.
+    fn claims_under(key: &SigningKey, token: &str) -> SessionClaims {
+        SessionTokenVerifier::verify(token, &key.verifying_key(), SystemTime::now())
+            .expect("a token this daemon minted verifies under its key")
     }
 
     async fn do_get_auth_url_state(
@@ -363,41 +428,67 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_token_minted_by_one_daemon_is_authenticated_by_another_sharing_the_secret() {
+    async fn a_token_minted_by_one_daemon_is_authenticated_by_another_that_has_learned_its_key() {
         // Given one daemon that mints a session token through the GitHub login flow
-        let secret = b"shared-livekit-api-secret";
-        let serving = signed_bridge("login-code", secret);
+        let (daemon_a, daemon_b) = (a_daemon_key(7), a_daemon_key(9));
+        let serving = signed_bridge("login-code", &daemon_a, &[&daemon_a]);
         let state = do_get_auth_url_state(&serving).await;
         let token = do_exchange(&serving, "login-code", &state).await;
 
-        // When a *different* daemon — its own service, no shared session store, same secret —
-        // checks that token
+        // When a *different* daemon — its own key, its own service, no shared session store and no
+        // shared secret — checks that token, having learned the first daemon's public key
         let (peer_stub, _) = setup();
-        let peer = RpcBridge::new(AuthServiceServer::new(AuthServiceImpl::new_signed(
+        let peer = RpcBridge::new(AuthServiceServer::new(a_signed_service(
             peer_stub,
-            crate::session_token::SessionTokenSigner::new(secret),
+            &daemon_b,
+            &[&daemon_b, &daemon_a],
         )));
-        let (authenticated, login) = do_get_status(&peer, &token).await;
+        let status = do_get_status(&peer, &token).await;
 
-        // Then the peer authenticates it from the signature alone — no lookup, no shared state
-        assert!(
-            authenticated,
-            "peer daemon should accept a token minted by another daemon with the same secret"
+        // Then the peer authenticates it from the signature and the signer's public key alone
+        assert_eq!(
+            status,
+            (true, Some("testuser".to_string())),
+            "a peer daemon must accept a token minted by a daemon whose key it has learned"
         );
-        assert_eq!(login.as_deref(), Some("testuser"));
+    }
+
+    #[tokio::test]
+    async fn a_token_minted_by_one_daemon_is_refused_by_another_that_has_not_learned_its_key() {
+        // Given one daemon that mints a session token through the GitHub login flow
+        let (daemon_a, daemon_b) = (a_daemon_key(7), a_daemon_key(9));
+        let serving = signed_bridge("login-code", &daemon_a, &[&daemon_a]);
+        let state = do_get_auth_url_state(&serving).await;
+        let token = do_exchange(&serving, "login-code", &state).await;
+
+        // When a daemon that knows only its own key checks it
+        let (peer_stub, _) = setup();
+        let peer = RpcBridge::new(AuthServiceServer::new(a_signed_service(
+            peer_stub,
+            &daemon_b,
+            &[&daemon_b],
+        )));
+        let status = do_get_status(&peer, &token).await;
+
+        // Then it is not authenticated — there is no shared secret left to fall back on
+        assert_eq!(status, (false, None));
     }
 
     // -------------------------------------------------------------------------
     // Signed-token minting, refresh, and the "no signer configured" guard.
     // -------------------------------------------------------------------------
 
-    use crate::session_token::{SessionTokenSigner, TokenKind, REFRESH_TOKEN_TTL};
+    use crate::session_token_v2::{
+        KeyId, SessionTokenError, SessionTokenVerifier, REFRESH_TOKEN_TTL,
+    };
+    use ed25519_dalek::{SigningKey, VerifyingKey};
     use std::time::{Duration, SystemTime};
 
     #[tokio::test]
     async fn exchange_code_returns_a_signed_token_rather_than_an_opaque_uuid() {
         // Given a signed auth service
-        let bridge = signed_bridge("login-code", b"shared-secret");
+        let daemon = a_daemon_key(7);
+        let bridge = signed_bridge("login-code", &daemon, &[&daemon]);
         let state = do_get_auth_url_state(&bridge).await;
 
         // When a code is exchanged
@@ -405,14 +496,14 @@ mod tests {
 
         // Then the returned token is a signed, self-describing token, not a bare UUID
         assert!(
-            token.starts_with("v1."),
+            token.starts_with("v2."),
             "expected a signed token, got '{token}'"
         );
     }
 
     #[tokio::test]
     async fn exchange_code_fails_when_no_signer_is_configured() {
-        // Given an auth service with no signing secret
+        // Given an auth service with no signing key
         let (stub, user) = setup();
         stub.register_code("login-code", user);
         let bridge = RpcBridge::new(AuthServiceServer::new(AuthServiceImpl::new(stub)));
@@ -431,7 +522,7 @@ mod tests {
             .handle_messages("auth.AuthService", "ExchangeCode", &[msg])
             .await;
 
-        // Then it is rejected — there is no secret to mint a verifiable token with
+        // Then it is rejected — there is no key to mint a verifiable token with
         assert!(
             result.is_err(),
             "exchange must fail without a configured signer"
@@ -441,10 +532,10 @@ mod tests {
     #[tokio::test]
     async fn exchange_code_returns_both_an_access_token_and_a_refresh_token() {
         // Given a signed auth service that knows a login code
-        let secret = b"shared-secret";
+        let daemon = a_daemon_key(7);
         let (stub, user) = setup();
         stub.register_code("login-code", user);
-        let service = AuthServiceImpl::new_signed(stub, SessionTokenSigner::new(secret));
+        let service = a_signed_service(stub, &daemon, &[&daemon]);
         let state = service
             .get_auth_url(Request::new(GetAuthUrlRequest {}))
             .await
@@ -463,30 +554,22 @@ mod tests {
             .into_inner();
 
         // Then login returns an access token and a refresh token of the right kinds
-        let verifier = SessionTokenSigner::new(secret);
         assert_eq!(
-            verifier
-                .verify(&resp.session_token)
-                .expect("access verifies")
-                .kind,
-            TokenKind::Access
-        );
-        assert_eq!(
-            verifier
-                .verify(&resp.refresh_token)
-                .expect("refresh verifies")
-                .kind,
-            TokenKind::Refresh
+            (
+                claims_under(&daemon, &resp.session_token).kind,
+                claims_under(&daemon, &resp.refresh_token).kind
+            ),
+            (TokenKind::Access, TokenKind::Refresh)
         );
     }
 
     #[tokio::test]
     async fn refresh_session_mints_a_new_access_token_and_a_sliding_refresh_token() {
         // Given a signed service and a valid refresh token
-        let secret = b"shared-secret";
+        let daemon = a_daemon_key(7);
         let (stub, user) = setup();
-        let service = AuthServiceImpl::new_signed(stub, SessionTokenSigner::new(secret));
-        let refresh_token = SessionTokenSigner::new(secret).mint_refresh(&user);
+        let service = a_signed_service(stub, &daemon, &[&daemon]);
+        let refresh_token = a_signer_for(&daemon).mint_refresh(&user);
 
         // When the session is refreshed
         let resp = service
@@ -496,13 +579,8 @@ mod tests {
             .into_inner();
 
         // Then it returns a new access token plus a refresh token slid to a fresh 7-day window
-        let verifier = SessionTokenSigner::new(secret);
-        let access = verifier
-            .verify(&resp.session_token)
-            .expect("new access valid");
-        let refresh = verifier
-            .verify(&resp.refresh_token)
-            .expect("new refresh valid");
+        let access = claims_under(&daemon, &resp.session_token);
+        let refresh = claims_under(&daemon, &resp.refresh_token);
         assert_eq!(access.kind, TokenKind::Access);
         assert_eq!(refresh.kind, TokenKind::Refresh);
         assert_eq!(refresh.exp - refresh.iat, REFRESH_TOKEN_TTL.as_secs());
@@ -512,10 +590,10 @@ mod tests {
     #[tokio::test]
     async fn refresh_session_rejects_an_access_kind_token() {
         // Given a signed service and an *access*-kind token
-        let secret = b"shared-secret";
+        let daemon = a_daemon_key(7);
         let (stub, user) = setup();
-        let service = AuthServiceImpl::new_signed(stub, SessionTokenSigner::new(secret));
-        let access_token = SessionTokenSigner::new(secret).mint_access(&user);
+        let service = a_signed_service(stub, &daemon, &[&daemon]);
+        let access_token = a_signer_for(&daemon).mint_access(&user);
 
         // When it is presented to refresh
         let result = service
@@ -534,10 +612,10 @@ mod tests {
     #[tokio::test]
     async fn refresh_session_rejects_an_expired_refresh_token() {
         // Given a signed service and a refresh token whose 7-day window lapsed a day ago
-        let secret = b"shared-secret";
+        let daemon = a_daemon_key(7);
         let (stub, user) = setup();
-        let service = AuthServiceImpl::new_signed(stub, SessionTokenSigner::new(secret));
-        let expired = SessionTokenSigner::new(secret).mint_kind_with_issued_at(
+        let service = a_signed_service(stub, &daemon, &[&daemon]);
+        let expired = a_signer_for(&daemon).mint_kind_with_issued_at(
             &user,
             TokenKind::Refresh,
             SystemTime::now() - (REFRESH_TOKEN_TTL + Duration::from_secs(86_400)),

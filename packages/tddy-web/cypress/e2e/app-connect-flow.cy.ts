@@ -30,7 +30,7 @@ describe("App Connect Flow E2E", () => {
     // When — fill and submit the connection form
     appAuthPage.loginButton().should("exist").click();
     appAuthPage.livekitUrlInput({ timeout: 20000 }).should("exist").clear().type(wsUrl);
-    appAuthPage.livekitIdentityInput().clear().type("client");
+    appAuthPage.livekitIdentityInput().clear().type("web-client");
     appAuthPage.livekitRoomInput().clear().type("terminal-e2e");
     appAuthPage.submitButton().click();
 

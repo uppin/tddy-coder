@@ -19,9 +19,11 @@ use tddy_service::proto::livekit::StreamLiveKitRoomsRequest;
 /// A fully configured daemon: a `github` block, because the bootstrap only reaches the block that
 /// registers these services once `build_auth_entries` has given it a session resolver; a user
 /// mapping for that resolver to resolve; and a LiveKit block, so nothing below passes because a
-/// conditional registration was skipped. The stub provider, so no test ever reaches GitHub.
-fn a_daemon_config_with_a_livekit_block() -> DaemonConfig {
-    serde_yaml::from_str(
+/// conditional registration was skipped. The stub provider, so no test ever reaches GitHub. Its
+/// state — the signing key a `github` block makes it generate included — goes under `data_dir`,
+/// never under the checkout.
+fn a_daemon_config_with_a_livekit_block(data_dir: &std::path::Path) -> DaemonConfig {
+    let mut config: DaemonConfig = serde_yaml::from_str(
         r#"
 listen:
   web_port: 0
@@ -42,17 +44,23 @@ livekit:
   common_room: tddy-lobby
 "#,
     )
-    .expect("the config fixture did not parse")
+    .expect("the config fixture did not parse");
+    config.tddy_data_dir = Some(data_dir.to_path_buf());
+    config
 }
 
-async fn a_built_daemon() -> Vec<ServiceEntry> {
-    runtime::build(
-        a_daemon_config_with_a_livekit_block(),
+/// The built daemon's entries, and the data directory it keeps its state in for as long as they
+/// are used.
+async fn a_built_daemon() -> (Vec<ServiceEntry>, tempfile::TempDir) {
+    let data_dir = tempfile::tempdir().expect("a data directory");
+    let entries = runtime::build(
+        a_daemon_config_with_a_livekit_block(data_dir.path()),
         RuntimeOptions::for_embedded(),
     )
     .await
     .expect("the runtime did not build")
-    .entries
+    .entries;
+    (entries, data_dir)
 }
 
 fn entry_named<'a>(entries: &'a [ServiceEntry], name: &str) -> &'a ServiceEntry {
@@ -91,7 +99,7 @@ fn status_of(result: RpcResult) -> tddy_rpc::Status {
 #[tokio::test]
 async fn serves_the_rooms_stream_as_its_own_service() {
     // Given the runtime the daemon boots with
-    let entries = a_built_daemon().await;
+    let (entries, _data_dir) = a_built_daemon().await;
 
     // When the new coordinate is called
     let refusal = status_of(
@@ -117,7 +125,7 @@ async fn serves_the_rooms_stream_as_its_own_service() {
 #[tokio::test]
 async fn no_longer_answers_the_rooms_stream_on_the_connection_service() {
     // Given the same runtime
-    let entries = a_built_daemon().await;
+    let (entries, _data_dir) = a_built_daemon().await;
     let mux = MultiRpcService::new(entries);
 
     // When a client still calls the deleted coordinate (assembled at runtime so the workspace

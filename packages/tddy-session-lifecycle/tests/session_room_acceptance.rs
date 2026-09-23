@@ -28,6 +28,7 @@ use livekit::{Room, RoomEvent};
 use prost::Message;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_daemon_auth::{DaemonSigningKey, SessionTokens, StandaloneKeyDirectory, SIGNING_KEY_FILE};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
@@ -51,11 +52,21 @@ use tddy_testing_commons::wait::eventually_awaiting;
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-/// The lobby, so the daemon under test is configured exactly as in production: the session room is
-/// an addition to it, not a replacement.
-const COMMON_ROOM: &str = "session-room-lobby";
+/// The stem of each fixture's lobby name. Every daemon here has a lobby, so it is configured exactly
+/// as in production — the session room is an addition to it, not a replacement.
+const COMMON_ROOM_PREFIX: &str = "session-room-lobby";
+
+/// A lobby no other fixture shares. The LiveKit server is shared — with the other tests in this
+/// suite and with any other checkout running it against the same testkit container — and several
+/// tests here assert who is *in* the lobby, so a fixed name reads another run's leftover
+/// participants as this daemon's.
+fn a_lobby_of_its_own() -> String {
+    format!("{COMMON_ROOM_PREFIX}-{}", uuid::Uuid::new_v4())
+}
 const INSTANCE_ID: &str = "session-room-facilitating-host";
 const LK_API_KEY: &str = "devkey";
+/// The LiveKit credential the session room's join tokens are minted with — a room credential and
+/// nothing more; session tokens are signed with the daemon's own key.
 const LK_API_SECRET: &str = "secret";
 const TEST_PROJECT_ID: &str = "session-room-proj";
 
@@ -198,13 +209,14 @@ fn register_project(projects_dir: &Path, repo_path: &Path) {
     std::fs::write(projects_dir.join("projects.yaml"), yaml).unwrap();
 }
 
-/// The `livekit:` block a daemon needs to host session rooms. `None` writes no block at all, which
-/// is the unconfigured operator whose sessions must still start.
-fn livekit_yaml_block(ws_url: Option<&str>) -> String {
+/// The `livekit:` block a daemon needs to host session rooms, with `common_room` as its lobby.
+/// `None` writes no block at all, which is the unconfigured operator whose sessions must still
+/// start.
+fn livekit_yaml_block(ws_url: Option<&str>, common_room: &str) -> String {
     match ws_url {
         Some(url) => format!(
             "livekit:\n  enabled: true\n  url: {url}\n  api_key: {LK_API_KEY}\n  \
-             api_secret: {LK_API_SECRET}\n  common_room: {COMMON_ROOM}\n"
+             api_secret: {LK_API_SECRET}\n  common_room: {common_room}\n"
         ),
         None => String::new(),
     }
@@ -212,13 +224,14 @@ fn livekit_yaml_block(ws_url: Option<&str>) -> String {
 
 fn write_daemon_yaml(
     ws_url: Option<&str>,
+    common_room: &str,
     os_user: &str,
     claude_binary: &Path,
 ) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
     let true_path = true_bin();
-    let livekit = livekit_yaml_block(ws_url);
+    let livekit = livekit_yaml_block(ws_url, common_room);
     let claude_binary = claude_binary.display();
     let yaml = format!(
         r#"
@@ -250,20 +263,17 @@ fn an_agent_session_request() -> StartSessionRequest {
     }
 }
 
-/// The credential a signed-in browser would present, signed with the deployment secret this
-/// daemon's config carries — the same `livekit.api_secret` every daemon verifies session tokens
-/// with. [`TEST_TOKEN`] is a bare literal the stubbed user resolver recognises, which is enough to
-/// pass an RPC here but carries no signature: split wiring mints the agent a credential of its own
-/// from the caller's claims, so the caller's has to be one that verifies.
-fn a_caller_token_signed_with_the_deployment_secret() -> String {
-    tddy_github::SessionTokenSigner::new(LK_API_SECRET.as_bytes()).mint_access(
-        &tddy_github::GitHubUser {
-            id: 4242,
-            login: "testuser".to_string(),
-            avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
-            name: "Test User".to_string(),
-        },
-    )
+/// The credential a signed-in browser would present, signed with the daemon's own key.
+/// [`TEST_TOKEN`] is a bare literal the stubbed user resolver recognises, which is enough to pass
+/// an RPC here but carries no signature: split wiring mints the agent a credential of its own from
+/// the caller's claims, so the caller's has to be one that verifies.
+fn a_caller_token_signed_by(tokens: &SessionTokens) -> String {
+    tokens.signer().mint_access(&tddy_github::GitHubUser {
+        id: 4242,
+        login: "testuser".to_string(),
+        avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
+        name: "Test User".to_string(),
+    })
 }
 
 /// What the stub standing in for `claude` does once a session launches it.
@@ -297,6 +307,11 @@ struct FacilitatingDaemon {
     /// terminal at all.
     agents: Arc<tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager>,
     config: DaemonConfig,
+    /// This daemon's lobby — see [`a_lobby_of_its_own`].
+    common_room: String,
+    /// The daemon's signing identity — what the browser's token is signed with, and what it mints
+    /// a split agent's own credential with.
+    tokens: SessionTokens,
     sessions_base: PathBuf,
     staging_base: PathBuf,
     ws_url: String,
@@ -304,6 +319,7 @@ struct FacilitatingDaemon {
     _sessions: tempfile::TempDir,
     _staging: tempfile::TempDir,
     _config: tempfile::TempDir,
+    _identity: tempfile::TempDir,
     _repo: tempfile::TempDir,
     _stubs: tempfile::TempDir,
 }
@@ -337,8 +353,9 @@ impl FacilitatingDaemon {
         let stub_dir = tempfile::tempdir().unwrap();
         let claude_stub = agent.written_to(stub_dir.path());
 
+        let common_room = a_lobby_of_its_own();
         let (config_dir, config_path) =
-            write_daemon_yaml(ws_url.as_deref(), &os_user, &claude_stub);
+            write_daemon_yaml(ws_url.as_deref(), &common_room, &os_user, &claude_stub);
         let config = DaemonConfig::load(&config_path).expect("daemon.yaml must load");
 
         let sessions = tempfile::tempdir().unwrap();
@@ -353,6 +370,10 @@ impl FacilitatingDaemon {
         // "this session has no terminal to bridge" is a fact only it can be asked for.
         let agents =
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new());
+        let identity = tempfile::tempdir().unwrap();
+        let key = DaemonSigningKey::load_or_generate(&identity.path().join(SIGNING_KEY_FILE))
+            .expect("the daemon generates its keypair");
+        let tokens = SessionTokens::new(&key, Arc::new(StandaloneKeyDirectory));
         let service = DaemonSessionHost::new(
             config.clone(),
             resolver,
@@ -367,12 +388,15 @@ impl FacilitatingDaemon {
         // The rooms under test serve none of the families above the lifecycle crate: nothing here
         // calls one through a room. The exec tool read through a room is `tddy-daemon-rpc`'s
         // `session_room_exec_tool_acceptance.rs`.
-        .with_rpc_families(Arc::new(RpcFamiliesNotUnderTest));
+        .with_rpc_families(Arc::new(RpcFamiliesNotUnderTest))
+        .with_session_tokens(tokens.clone());
 
         Self {
             service,
             agents,
             config,
+            common_room,
+            tokens,
             sessions_base: sessions.path().to_path_buf(),
             staging_base: staging.path().to_path_buf(),
             ws_url: ws_url.unwrap_or_default(),
@@ -380,6 +404,7 @@ impl FacilitatingDaemon {
             _sessions: sessions,
             _staging: staging,
             _config: config_dir,
+            _identity: identity,
             _repo: repo_dir,
             _stubs: stub_dir,
         }
@@ -716,13 +741,14 @@ async fn a_split_agent_is_wired_to_the_session_room_rather_than_the_lobby() {
     // When its agent's remote-tool wiring is prepared, with the checkout placed on another daemon
     let wiring = tddy_session_lifecycle::split_session::prepare_split_agent_wiring(
         &daemon.config,
+        &daemon.tokens,
         &session_dir,
         &true_bin(),
         &tddy_session_lifecycle::split_session::SplitSpawnTarget {
             session_id: &started.session_id,
             codebase_instance_id: "some-other-codebase-host",
             codebase_session_id: "0199bbbb-0000-7000-8000-00000000000b",
-            session_token: &a_caller_token_signed_with_the_deployment_secret(),
+            session_token: &a_caller_token_signed_by(&daemon.tokens),
         },
         &[],
         CLAUDE_CONTEXT_GLOBS,
@@ -769,13 +795,14 @@ async fn a_split_agent_addresses_the_daemon_that_hosts_its_room() {
     // When its agent's remote-tool wiring is prepared, with the checkout placed on another daemon
     let wiring = tddy_session_lifecycle::split_session::prepare_split_agent_wiring(
         &daemon.config,
+        &daemon.tokens,
         &session_dir,
         &true_bin(),
         &tddy_session_lifecycle::split_session::SplitSpawnTarget {
             session_id: &started.session_id,
             codebase_instance_id: "some-other-codebase-host",
             codebase_session_id: "0199bbbb-0000-7000-8000-00000000000b",
-            session_token: &a_caller_token_signed_with_the_deployment_secret(),
+            session_token: &a_caller_token_signed_by(&daemon.tokens),
         },
         &[],
         CLAUDE_CONTEXT_GLOBS,
@@ -1374,7 +1401,7 @@ impl FacilitatingDaemon {
     /// [`Self::room_on_the_server`] is: joining a room that does not exist creates it, and the
     /// question here is whether anything created one at all.
     async fn lobby_participants(&self) -> Vec<String> {
-        let mut identities: Vec<String> = match self.room_on_the_server(COMMON_ROOM).await {
+        let mut identities: Vec<String> = match self.room_on_the_server(&self.common_room).await {
             Some(lobby) => lobby
                 .participants
                 .into_iter()
@@ -1391,7 +1418,7 @@ impl FacilitatingDaemon {
         &self,
         session_id: &str,
     ) -> Option<tddy_service::proto::livekit::LiveKitParticipantInfo> {
-        self.room_on_the_server(COMMON_ROOM)
+        self.room_on_the_server(&self.common_room)
             .await?
             .participants
             .into_iter()
@@ -1410,7 +1437,7 @@ impl FacilitatingDaemon {
             ._livekit
             .as_ref()
             .expect("driving a terminal needs the testkit")
-            .generate_token(COMMON_ROOM, "probe-remote-terminal")
+            .generate_token(&self.common_room, "probe-remote-terminal")
             .expect("LiveKit token for a remote terminal client");
         let connected = tddy_livekit::client_connect::connect_client(
             &self.ws_url,
@@ -1419,7 +1446,12 @@ impl FacilitatingDaemon {
             BRIDGE_ALREADY_THERE,
         )
         .await
-        .unwrap_or_else(|e| panic!("a remote client must reach {identity} in {COMMON_ROOM}: {e}"));
+        .unwrap_or_else(|e| {
+            panic!(
+                "a remote client must reach {identity} in {}: {e}",
+                self.common_room
+            )
+        });
 
         let (mut keys, mut output) = connected
             .client

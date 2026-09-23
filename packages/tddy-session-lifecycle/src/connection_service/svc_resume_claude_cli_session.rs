@@ -210,6 +210,7 @@ impl DaemonSessionHost {
 
         let wiring = crate::split_session::prepare_split_agent_wiring(
             &self.config,
+            self.session_tokens()?,
             session_dir,
             &self.resolve_tddy_tools_path()?.to_string_lossy(),
             &crate::split_session::SplitSpawnTarget {

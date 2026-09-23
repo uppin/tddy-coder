@@ -58,10 +58,11 @@ message LogoutResponse {}
 
 // Mint a LiveKit room JWT for an already-authenticated caller.
 //
-// The LiveKit API secret is also the HMAC key every daemon signs session tokens with, so a client
-// that held it could mint an access token for any GitHub user on the fleet. Clients therefore ask
-// the daemon for a room JWT instead of minting one. The room and the participant identity are
-// chosen by the daemon and are never read from the request.
+// A client that held the LiveKit API secret could mint itself a room JWT for any room under any
+// participant identity, including a daemon's. Clients therefore ask the daemon for a room JWT
+// instead of minting one. The room and the participant identity are chosen by the daemon and are
+// never read from the request. (The secret signs room JWTs only: session tokens are signed with
+// each daemon's own Ed25519 key.)
 service LiveKitTokenService {
   rpc MintLiveKitToken(MintLiveKitTokenRequest) returns (MintLiveKitTokenResponse);
 }

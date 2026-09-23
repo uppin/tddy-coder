@@ -1,7 +1,7 @@
 //! Retention of the GitHub access token a web login granted, keyed by GitHub login.
 //!
 //! The token is what lets the server act on the operator's own behalf against the GitHub API (read
-//! PRs on a private repo; later, repoint and merge). It is deliberately kept **outside** the HMAC
+//! PRs on a private repo; later, repoint and merge). It is deliberately kept **outside** the signed
 //! session token: that token is handed to the browser over a plain-http LAN origin, so a live
 //! `repo`-scoped credential must never travel in it or be returned to the client.
 

@@ -20,7 +20,10 @@ use base64::Engine;
 
 use tddy_github::provider::{GitHubOAuthProvider, GitHubUser};
 use tddy_github::token_store::GitHubTokenStore;
-use tddy_github::{AuthServiceImpl, RealGitHubProvider, SessionTokenSigner, StubGitHubProvider};
+use tddy_github::{
+    AuthServiceImpl, RealGitHubProvider, SessionClaims, SessionTokenAuthority, SessionTokenError,
+    SessionTokenSigner, StubGitHubProvider,
+};
 use tddy_rpc::Request;
 use tddy_service::proto::auth::{AuthService, ExchangeCodeRequest, ExchangeCodeResponse};
 
@@ -106,8 +109,30 @@ impl GitHubOAuthProvider for ProviderWithARealCredential {
     }
 }
 
-/// Everything a signed token is made of, decoded: `v1.<base64url(claims)>.<base64url(tag)>`. An
-/// embedded credential would otherwise hide inside the base64.
+/// A service that signs its tokens with a daemon key of its own.
+///
+/// These tests exercise the exchange, which only *mints*, so the authority it would verify
+/// presented tokens through admits none — nothing here presents one.
+fn a_signed_service<P: GitHubOAuthProvider>(provider: P) -> AuthServiceImpl<P> {
+    let key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+    AuthServiceImpl::new_signed(
+        provider,
+        SessionTokenSigner::new(key),
+        Arc::new(AdmitsNoToken),
+    )
+}
+
+struct AdmitsNoToken;
+
+#[async_trait]
+impl SessionTokenAuthority for AdmitsNoToken {
+    async fn verify(&self, _token: &str) -> Result<SessionClaims, SessionTokenError> {
+        Err(SessionTokenError::InvalidSignature)
+    }
+}
+
+/// Everything a signed token is made of, decoded: `v2.<base64url(claims)>.<base64url(signature)>`.
+/// An embedded credential would otherwise hide inside the base64.
 fn decoded_parts(token: &str) -> String {
     token
         .split('.')
@@ -140,11 +165,7 @@ async fn exchange(
 async fn retains_a_real_logins_access_token_under_its_github_login() {
     // Given — a login through a provider whose token is a usable GitHub credential
     let store = Arc::new(InMemoryTokenStore::default());
-    let service = AuthServiceImpl::new_signed(
-        ProviderWithARealCredential,
-        SessionTokenSigner::new(b"secret"),
-    )
-    .with_token_store(store.clone());
+    let service = a_signed_service(ProviderWithARealCredential).with_token_store(store.clone());
 
     // When
     exchange(&service, "login-code", "s").await;
@@ -156,11 +177,8 @@ async fn retains_a_real_logins_access_token_under_its_github_login() {
 #[tokio::test]
 async fn fails_the_login_when_the_access_token_cannot_be_retained() {
     // Given — a real login whose token store cannot be written
-    let service = AuthServiceImpl::new_signed(
-        ProviderWithARealCredential,
-        SessionTokenSigner::new(b"secret"),
-    )
-    .with_token_store(Arc::new(AnUnwritableTokenStore));
+    let service = a_signed_service(ProviderWithARealCredential)
+        .with_token_store(Arc::new(AnUnwritableTokenStore));
 
     // When
     let err = service
@@ -184,11 +202,8 @@ async fn fails_the_login_when_the_access_token_cannot_be_retained() {
 #[tokio::test]
 async fn keeps_the_servers_storage_path_out_of_the_failure_the_client_is_shown() {
     // Given — a real login whose token store fails with the path it could not write
-    let service = AuthServiceImpl::new_signed(
-        ProviderWithARealCredential,
-        SessionTokenSigner::new(b"secret"),
-    )
-    .with_token_store(Arc::new(AnUnwritableTokenStore));
+    let service = a_signed_service(ProviderWithARealCredential)
+        .with_token_store(Arc::new(AnUnwritableTokenStore));
 
     // When
     let err = service
@@ -223,8 +238,7 @@ async fn retains_nothing_for_a_stub_login() {
         },
     );
     let state = stub.authorize_url().1;
-    let service = AuthServiceImpl::new_signed(stub, SessionTokenSigner::new(b"secret"))
-        .with_token_store(store.clone());
+    let service = a_signed_service(stub).with_token_store(store.clone());
 
     // When
     exchange(&service, "demo-code", &state).await;
@@ -237,11 +251,8 @@ async fn retains_nothing_for_a_stub_login() {
 #[tokio::test]
 async fn keeps_the_github_token_out_of_everything_the_client_receives() {
     // Given
-    let service = AuthServiceImpl::new_signed(
-        ProviderWithARealCredential,
-        SessionTokenSigner::new(b"secret"),
-    )
-    .with_token_store(Arc::new(InMemoryTokenStore::default()));
+    let service = a_signed_service(ProviderWithARealCredential)
+        .with_token_store(Arc::new(InMemoryTokenStore::default()));
 
     // When
     let resp = exchange(&service, "login-code", "s").await;

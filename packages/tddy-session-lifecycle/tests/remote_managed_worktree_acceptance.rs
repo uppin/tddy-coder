@@ -697,10 +697,10 @@ async fn deleting_a_split_session_refuses_while_this_daemon_cannot_reach_the_com
 // A split session's tool calls are served on the *codebase* daemon, but every failure they return
 // is rendered in the agent's transcript on the *agent* daemon, where a bare "invalid or expired
 // session" reads as if the host the operator is looking at refused. The two likeliest split
-// misconfigurations both land in exactly these two refusals — daemons not sharing
-// `livekit.api_secret` (a session token is a stateless HMAC only its co-signers can verify), and a
-// GitHub user mapped on the agent host but not on the codebase host — so each names the daemon that
-// refused.
+// misconfigurations both land in exactly these two refusals — a codebase daemon that has not learned
+// the agent daemon's signing key (a session token verifies only against the key its signer
+// advertised in the common room), and a GitHub user mapped on the agent host but not on the codebase
+// host — so each names the daemon that refused.
 
 /// A stopped split session: paired to a codebase daemon, with no repository of its own.
 fn write_split_session_metadata(sessions_base: &std::path::Path, session_id: &str) {

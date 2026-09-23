@@ -316,10 +316,12 @@ pub struct DaemonConfig {
     pub livekit: Option<LiveKitConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github: Option<GitHubConfig>,
-    /// Directory holding server-side auth state: the GitHub access token each web login granted
-    /// (`github-tokens.json`, mode `0600`), which is the credential PR-status reads act with. Unset
-    /// means no token is retained, so PR status reports itself *unavailable* for a real login.
-    /// Session tokens are stateless and are never stored here.
+    /// Directory holding server-side auth state: this daemon's Ed25519 session-token signing key
+    /// (`signing_key.pem`, mode `0600`, generated on first boot) and the GitHub access token each
+    /// web login granted (`github-tokens.json`, mode `0600`), which is the credential PR-status
+    /// reads act with. Unset means no GitHub token is retained, so PR status reports itself
+    /// *unavailable* for a real login — and the signing key lives in the `auth` directory under
+    /// `tddy_data_dir` instead. Session tokens themselves are stateless and are never stored here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_storage: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1011,10 +1013,11 @@ pub struct LiveKitConfig {
     /// therefore a one-key edit rather than the deletion of a working block — every other field
     /// survives, and turning it back on restores exactly what was there.
     ///
-    /// It governs the **common room only**. `api_secret` still signs this daemon's session tokens
-    /// either way (see `auth.rs`), so a disabled daemon still authenticates its own gated RPCs —
-    /// including the one an operator re-enables it from. Per-session rooms, screen sharing and the
-    /// rooms panel read the same block for their own purposes and are not governed by it.
+    /// It governs the **common room only**. Session tokens are signed with the daemon's own key and
+    /// not with anything in this block, so a disabled daemon — or one with no `livekit:` block at
+    /// all — still authenticates its own gated RPCs, including the one an operator re-enables it
+    /// from. Per-session rooms, screen sharing and the rooms panel read the same block for their
+    /// own purposes and are not governed by it.
     #[serde(default)]
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

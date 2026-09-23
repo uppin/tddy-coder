@@ -214,6 +214,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         Arc::new(config_b),
         Arc::new(CommonRoomPeerRegistry::new()),
         Arc::new(tokio::sync::RwLock::new(None)),
+        Default::default(),
     );
 
     // B's RPC participant: `daemon-{instance_id}`, the identity A's forward addresses.
@@ -231,7 +232,12 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let config_arc = Arc::new(config_a.clone());
     let registry = Arc::new(CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-    spawn_common_room_discovery_task(config_arc.clone(), registry.clone(), room_slot.clone());
+    spawn_common_room_discovery_task(
+        config_arc.clone(),
+        registry.clone(),
+        room_slot.clone(),
+        Default::default(),
+    );
     let eligible: Arc<dyn EligibleDaemonSource> = Arc::new(LiveKitEligibleDaemonSource::new(
         config_arc,
         registry,

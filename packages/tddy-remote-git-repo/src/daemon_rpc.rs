@@ -5,9 +5,11 @@
 //! {method}` with a protobuf body — the Connect protocol's unary shape, and the same path
 //! `tddy-tools`' pty-relay uses.
 //!
-//! The mint is why this leg exists at all: the LiveKit API secret is also the HMAC key every
-//! daemon signs session tokens with, so a client that minted its own room JWT would be holding a
-//! credential that can impersonate any GitHub user on the fleet.
+//! The mint is why this leg exists at all: a client that minted its own room JWT would be holding
+//! the LiveKit API secret, which admits its holder to any room under any identity — a daemon's
+//! included, where it would be handed other participants' calls. The daemon's mint instead hands
+//! out an identity of its own choosing (`remote-git-<uuid>`) that peer discovery never takes for a
+//! daemon.
 
 use std::error::Error;
 use std::time::Duration;

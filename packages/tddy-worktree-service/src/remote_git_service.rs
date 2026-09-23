@@ -41,7 +41,8 @@ use tddy_daemon_kernel::privilege_drop::ResolvedPtyUser;
 const LOG_TARGET: &str = "tddy_daemon::remote_git_service";
 
 /// Resolves a `session_token` to a GitHub login. The daemon's own resolver
-/// ([`crate::auth`]) verifies the HMAC signature, the expiry, and that the token is access-kind.
+/// ([`crate::auth`]) verifies the signature under the key the token names, the expiry, and that
+/// the token is access-kind.
 pub type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// Resolves an OS user to that user's project registry directory
@@ -266,10 +267,11 @@ pub fn git_argv_as_user(
 ///
 /// `setpriv` preserves the environment across the uid boundary, so inheriting would hand a process
 /// running as somebody else every variable the daemon was started with — including
-/// `LIVEKIT_API_SECRET`, which is the session-token signing key. `git receive-pack` runs the
-/// repository's hooks and `git upload-pack` honours `uploadpack.packObjectsHook`, so that
-/// environment is reachable by repository-controlled code. Inheriting `HOME` is wrong for a second
-/// reason: git would read the daemon's `.gitconfig` instead of the project owner's.
+/// `LIVEKIT_API_SECRET`, with which anybody can mint themselves into any room as any identity.
+/// `git receive-pack` runs the repository's hooks and `git upload-pack` honours
+/// `uploadpack.packObjectsHook`, so that environment is reachable by repository-controlled code.
+/// Inheriting `HOME` is wrong for a second reason: git would read the daemon's `.gitconfig` instead
+/// of the project owner's.
 fn git_child_env(target: &ResolvedPtyUser) -> Vec<(String, String)> {
     let home = PathBuf::from(&target.home_dir);
     let path_extra = tddy_daemon_kernel::user_paths::spawn_path_extra_for_home(&home);

@@ -33,10 +33,13 @@ is down to 72. `packages/tddy-web`'s rooms panel addresses the new coordinate.
 
 **It never depends on `tddy-daemon`, and never on `tddy-daemon-auth`.**
 `tests/dependency_boundary_unit.rs` walks the transitive manifest closure and fails if it ever does.
-The second half matters as much as the first: room JWTs are minted by the auth crate from
-`config.livekit.api_secret`, the same secret that signs session tokens, and the only way this crate
-reaches minting is the `SessionTokenMinter` **port**. If that port stopped being one, this crate
-could grow a second signer.
+The second half matters as much as the first: session tokens are signed by the auth crate with the
+daemon's own key, and the only way this crate reaches minting is the `SessionTokenMinter` **port**.
+If that port stopped being one, this crate could grow a second signer. The same rule shapes key
+distribution: this daemon's public signing key rides its common-room advertisement as two opaque
+strings (`AdvertisedSigningKey`), and `peer_signing_public_keys` / `CommonRoomPeerRegistry::
+signing_public_keys_for` hand back every candidate advertised under an id, undecoded — `tddy-daemon`
+turns them into the auth crate's `KeyDirectory`.
 
 **The ports point the right way already.** `session_room` defines `SessionTerminalBridge`,
 `WorktreeSource`, `SessionTokenMinter` and `RemoteSnapshotSource`, and `ConnectionServiceImpl`
