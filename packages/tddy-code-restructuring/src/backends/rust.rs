@@ -6375,6 +6375,94 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         assert!(!already_bound(text, "xobject_pdf", "Object").unwrap());
     }
 
+    /// A module that received the parent's rebuilt `use … as …` for an alias.
+    fn a_module_importing(declaration: &str) -> String {
+        format!("mod readings {{\n    {declaration}\n\n    fn go() {{}}\n}}\n")
+    }
+
+    /// E1: `use a::B as C;` binds `C`. Read as binding `B`, the alias branch never sees the line it
+    /// has just written, and writes it again on every pass until the backstop.
+    #[test]
+    fn finds_an_alias_the_module_already_binds() {
+        // Given
+        let text = a_module_importing("use crate::proto::Event as StartSessionEventKind;");
+
+        // When
+        let bound = already_bound(&text, "readings", "StartSessionEventKind").unwrap();
+
+        // Then
+        assert!(
+            bound,
+            "the module's own `as` import was not seen binding its alias"
+        );
+    }
+
+    /// The other half of the same misreading: an aliased import does not bind the name it renames.
+    #[test]
+    fn does_not_count_the_renamed_name_as_bound_by_an_alias() {
+        // Given
+        let text = a_module_importing("use crate::proto::Event as StartSessionEventKind;");
+
+        // When
+        let bound = already_bound(&text, "readings", "Event").unwrap();
+
+        // Then
+        assert!(
+            !bound,
+            "`Event` was counted as bound, though only its alias is"
+        );
+    }
+
+    /// An alias inside a nested group binds its alias like any other.
+    #[test]
+    fn finds_an_alias_bound_inside_a_nested_group() {
+        // Given
+        let text = a_module_importing(
+            "use crate::proto::{session::Event as StartSessionEventKind, Signal};",
+        );
+
+        // When
+        let bound = already_bound(&text, "readings", "StartSessionEventKind").unwrap();
+
+        // Then
+        assert!(
+            bound,
+            "an alias inside a nested group was not seen as bound"
+        );
+    }
+
+    /// Guard: the plain member beside an aliased one in the same group is still bound.
+    #[test]
+    fn still_finds_a_plain_name_beside_an_alias_in_a_group() {
+        // Given
+        let text = a_module_importing(
+            "use crate::proto::{session::Event as StartSessionEventKind, Signal};",
+        );
+
+        // When
+        let bound = already_bound(&text, "readings", "Signal").unwrap();
+
+        // Then
+        assert!(
+            bound,
+            "the plain group member stopped being recognised as bound"
+        );
+    }
+
+    /// `as _` imports a trait for its methods and binds no name at all, so it cannot be the binding
+    /// that makes a later import of the trait's name `E0252`.
+    #[test]
+    fn does_not_count_an_underscore_import_as_binding_its_name() {
+        // Given
+        let text = a_module_importing("use std::fmt::Write as _;");
+
+        // When
+        let bound = already_bound(&text, "readings", "Write").unwrap();
+
+        // Then
+        assert!(!bound, "`use … as _;` was counted as binding `Write`");
+    }
+
     /// The file's own imports still pick first — that is `choose_import` — but the rest stay
     /// available, because the first choice is now verified rather than trusted.
     #[test]
@@ -6759,6 +6847,51 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     #[test]
     fn accepts_a_seam_no_impl_sibling_references() {
         assert!(refuse_impl_sibling_references(&[moved("doubled", "pub", true)]).is_ok());
+    }
+
+    /// A member of the `impl` the outline names `holder`, which a sibling left behind calls from
+    /// line 9.
+    fn a_member_called_from_behind(name: &str, holder: &str) -> MovedItem {
+        let mut item = moved(name, "pub", true);
+        item.within = vec![holder.to_string()];
+        item.referenced_in_impl_at = vec![9];
+        item
+    }
+
+    /// E3: the assist writes an inherent member as `mod … { use super::Gauge; impl Gauge { … } }`,
+    /// so it stays a method of `Gauge`, and `self.doubled()` from the half left behind still
+    /// resolves through the type.
+    #[test]
+    fn accepts_a_seam_whose_inherent_impl_sibling_calls_what_it_moves() {
+        // Given
+        let items = [a_member_called_from_behind("doubled", "impl Gauge")];
+
+        // When
+        let verdict = refuse_impl_sibling_references(&items);
+
+        // Then
+        assert!(
+            verdict.is_ok(),
+            "an inherent method called through `self` was refused: {:?}",
+            verdict.err().map(|refusal| refusal.to_string())
+        );
+    }
+
+    /// Guard: half of a trait `impl` really cannot move. The new module would hold a second
+    /// `impl Meter for Gauge` (E0119), and each half would lack the other's items (E0046).
+    #[test]
+    fn still_refuses_a_seam_that_splits_a_trait_impl() {
+        // Given
+        let items = [a_member_called_from_behind(
+            "doubled",
+            "impl Meter for Gauge",
+        )];
+
+        // When
+        let verdict = refuse_impl_sibling_references(&items);
+
+        // Then
+        assert!(verdict.is_err(), "half of a trait `impl` was accepted");
     }
 
     /// The widening the report has never mentioned, because `restore_visibility` iterates only what
