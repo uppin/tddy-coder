@@ -13,6 +13,7 @@
  * PRD: docs/ft/web/1-WIP/PRD-2026-09-19-keyring-accounts.md
  */
 
+import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AccountsAppPage } from "../../src/components/accounts/AccountsAppPage";
 import { AccountsService, type AccountSummary } from "../../src/gen/accounts_pb";
@@ -111,7 +112,7 @@ describe("Accounts screen", () => {
     mountAccounts(
       anInMemoryRpcBackend().implement(AccountsService, {
         listAccounts: () => {
-          throw new Error("the vault file is truncated");
+          throw new ConnectError("the vault file is truncated", Code.Internal);
         },
       }),
     );
