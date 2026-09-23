@@ -1503,7 +1503,7 @@ impl RustBackend {
         // Versions 1 and 2 belong to the open and to the rename above; both import phases send
         // more, so the counter runs across them rather than restarting.
         let pruned = self.prune_assist_imports(uri, &named, &name)?;
-        let imported = self.restore_imports(uri, &pruned, &name, &moved, reexport)?;
+        let imported = self.restore_imports(uri, original, &pruned, &name, &moved, reexport)?;
         let (preserved, mut report) = restore_visibility(&imported, &name, &moved)?;
 
         // The widenings the pass above cannot see, because the survey feeding it stops above an

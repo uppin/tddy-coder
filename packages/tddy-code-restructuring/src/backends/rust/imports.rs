@@ -32,9 +32,15 @@ impl RustBackend {
     /// too high — and the difference between a good and a useless offer is not readable from its
     /// title. Trusting the title wrote four `use` lines that did not compile across one real
     /// restructure, in a run that reported success.
+    ///
+    /// `original` is the file before the assist ran. It is evidence for choosing between offered
+    /// paths, and the produced text is not enough of it: the assist drops a name from the parent's
+    /// `use` group when the seam held its only use, so by the time a contested `mpsc` is asked about,
+    /// the declaration that said which `mpsc` the moved code meant is gone.
     pub(super) fn restore_imports(
         &mut self,
         uri: &str,
+        original: &str,
         extracted: &str,
         module: &str,
         moved: &[MovedItem],
@@ -44,11 +50,17 @@ impl RustBackend {
         // Names every offered path failed. Re-asking one would be offered the same useless import
         // again, and every pass would insert another copy of it.
         let mut unimportable: Vec<String> = Vec::new();
+        let seam = Seam {
+            original,
+            module,
+            moved,
+            reexport,
+        };
 
         for _ in 0..IMPORT_PASSES {
             self.did_change(uri, &text)?;
 
-            match self.next_import(uri, &text, module, moved, reexport, &mut unimportable)? {
+            match self.next_import(uri, &text, &seam, &mut unimportable)? {
                 Some(imported) => text = imported,
                 None => return Ok(text),
             }
@@ -69,16 +81,14 @@ impl RustBackend {
     /// not lost by this seam, and no `use` written into the module can resolve it there — asking
     /// about one is how a file whose alias the server could not see had the same line written into
     /// a module that named nothing, once a pass, until the backstop.
-    #[allow(clippy::too_many_arguments)]
     fn next_import(
         &mut self,
         uri: &str,
         text: &str,
-        module: &str,
-        moved: &[MovedItem],
-        reexport: Reexport,
+        seam: &Seam<'_>,
         unimportable: &mut Vec<String>,
     ) -> Result<Option<String>> {
+        let module = seam.module;
         let mut asked: Vec<String> = Vec::new();
         let unresolved = self.unresolved_in_module(uri, text, module)?;
 
@@ -111,7 +121,7 @@ impl RustBackend {
             // module — and the named import it writes is private, which then *shadows* the
             // `pub use module::*;` added moments later. The facade is left present and inert, and
             // an outside caller gets `E0603` on a symbol the facade was asked to keep reachable.
-            if facade_will_bind(&name.text, moved, reexport) {
+            if facade_will_bind(&name.text, seam.moved, seam.reexport) {
                 unimportable.push(name.text.clone());
                 continue;
             }
@@ -166,7 +176,7 @@ impl RustBackend {
                 continue;
             }
 
-            let ordered = import_order(text, &offered).ok_or_else(|| {
+            let ordered = import_order(&seam.evidence_with(text), &offered).ok_or_else(|| {
                 seam_refusal(format!(
                     "`{}` could be imported {} ways and neither rust-analyzer nor this file's own \
                      imports say which the moved code meant: {}",
@@ -263,6 +273,29 @@ impl RustBackend {
             .into_iter()
             .filter(inside)
             .collect())
+    }
+}
+
+/// What the import pass knows about the seam it is restoring names for.
+struct Seam<'a> {
+    /// The file before the assist ran.
+    original: &'a str,
+    /// The name of the module the assist wrote.
+    module: &'a str,
+    moved: &'a [MovedItem],
+    reexport: Reexport,
+}
+
+impl Seam<'_> {
+    /// The text whose `use` declarations settle a contested import: the file as it was, then as it
+    /// is now.
+    ///
+    /// Both, because each holds evidence the other lacks. The original still carries a binding the
+    /// assist removed with the last use of it, and the current text carries every import earlier
+    /// passes restored. Joined on a line break, which reads as two texts to `imported_paths`: the
+    /// original cannot end inside a `use` declaration, so no statement straddles the join.
+    fn evidence_with(&self, text: &str) -> String {
+        format!("{}\n{text}", self.original)
     }
 }
 
