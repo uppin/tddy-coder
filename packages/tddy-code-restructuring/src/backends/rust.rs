@@ -26,8 +26,10 @@ use std::time::{Duration, Instant};
 use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
 
+mod impl_seam;
 mod imports;
 
+use impl_seam::{refuse_impl_sibling_references, with_method_calls_restored};
 use imports::names_bound;
 
 /// LSP `SymbolKind::Object` — how rust-analyzer reports an `impl` block. Its members are reached
@@ -1486,6 +1488,7 @@ impl RustBackend {
         let placeholder = assist_for(op.op)
             .and_then(|assist| assist.placeholder)
             .ok_or_else(|| failure(format!("{:?} introduces nothing to name", op.op)))?;
+        let extracted = with_method_calls_restored(&extracted, placeholder.name, &impl_members);
 
         let named = self.rename_placeholder(uri, &extracted, placeholder, &name)?;
         refuse_residual_placeholder(original, &named, placeholder.name)?;
@@ -3474,9 +3477,8 @@ struct MovedItem {
     /// it after the seam moves.
     ///
     /// Distinct from `reached_from_outside`, which is true of any reference beyond the range and is
-    /// only a visibility signal. This one is the blocker: the new module is written outside the
-    /// `impl`, so from inside it `modname::Item` never named anything, and rust-analyzer does not
-    /// rename an unresolved path.
+    /// only a visibility signal. This one blocks a seam that cuts a trait `impl`, whose halves cannot
+    /// both be `impl`s of the trait; see [`refuse_impl_sibling_references`].
     referenced_in_impl_at: Vec<u32>,
 }
 
@@ -3506,78 +3508,6 @@ fn refuse_stranded(items: &[MovedItem]) -> Result<()> {
          and rust-analyzer rewrites no reference it did not move: {}. Ask for `reexport` to leave the \
          old path resolving through the parent, or cut the seam where these references do not reach.",
         stranded.join("; ")
-    )))
-}
-
-/// Refuse a seam that lifts an `impl` member away from a sibling in that same `impl`.
-///
-/// The one geometry that cannot be repaired, and it is narrower than it first looks. Three cases that
-/// look alike behave differently, and only the third blocks:
-///
-/// - A whole `impl` moves while the parent calls its methods: nothing to rewrite, because a method is
-///   reached through its type. Succeeds.
-/// - A path-reached item moves while the parent names it: the assist rewrites the reference and the
-///   import pass restores the binding, which is why [`refuse_stranded`] says an in-file reference
-///   costs nothing. Succeeds.
-/// - A member is lifted out of an `impl` while a sibling in that same `impl` calls it: the new module
-///   is written *outside* the impl, so from inside it `modname::Item` never named anything and the
-///   rename cannot reach the call. Refuses.
-///
-/// Refusing the first two would turn working restructures into refusals, which is the most expensive
-/// way a check can be wrong — so only `referenced_in_impl_at` is weighed here.
-///
-/// The prescription differs from [`refuse_residual_placeholder`]'s on purpose. Reordering is the fix
-/// when the stranded reference sits in an already-extracted *module*; it cannot help here, because an
-/// `impl` body cannot hold a `mod`, so the sibling can be moved neither out of the way first nor
-/// after. The seam has to grow to carry both.
-///
-/// Refuse a seam that cuts an `impl` in half while a member left behind still calls one that moves.
-///
-/// The one geometry of three that cannot be repaired, and it is narrower than it first looks:
-///
-/// - A whole `impl` moves while the parent calls its methods: nothing to rewrite, because a method is
-///   reached through its type. Succeeds, and the crate compiles.
-/// - A path-reached item moves while the parent names it: the assist rewrites the reference and the
-///   import pass restores the binding, which is why [`refuse_stranded`] says an in-file reference
-///   costs nothing. Succeeds.
-/// - A member is lifted out of an `impl` while a sibling in that same `impl` calls it: the new module
-///   is written *outside* the impl, so from in there the rewritten path never named anything and
-///   rust-analyzer will not rename what does not resolve. Refuses.
-///
-/// Refusing either of the first two would turn working restructures into refusals, which is why this
-/// weighs only members of an `impl` the seam cut through.
-///
-/// The prescription differs from [`refuse_residual_placeholder`]'s deliberately. Reordering is the fix
-/// when the stranded reference sits in an already-extracted *module*; it cannot help here, because an
-/// `impl` body cannot hold a `mod`, so the sibling can be moved neither out of the way first nor
-/// after. The seam has to grow.
-fn refuse_impl_sibling_references(items: &[MovedItem]) -> Result<()> {
-    let blocked: Vec<String> = items
-        .iter()
-        .filter(|item| !item.referenced_in_impl_at.is_empty())
-        .map(|item| {
-            format!(
-                "`{}` from line(s) {}",
-                item.name,
-                item.referenced_in_impl_at
-                    .iter()
-                    .map(u32::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })
-        .collect();
-
-    if blocked.is_empty() {
-        return Ok(());
-    }
-
-    Err(seam_refusal(format!(
-        "this seam cuts an `impl` in half, and a member left behind still calls one that would move: \
-         {}. The new module is written outside the `impl`, so that call would resolve nowhere and \
-         rust-analyzer will not rewrite it. An `impl` body cannot hold a `mod`, so no ordering helps — \
-         grow the seam to carry the whole `impl`, or cut it where nothing crosses.",
-        blocked.join("; ")
     )))
 }
 
