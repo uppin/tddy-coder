@@ -1448,18 +1448,24 @@ impl SessionRoomRegistry {
         hosting: &SessionRoomHosting<'_>,
         service: S,
     ) -> Result<Option<OpenedSessionRoom>, Status> {
+        self.open_measured_by(hosting, move || Ok(service), Self::local_checkout(hosting)?)
+            .await
+    }
+
+    /// The source that measures a checkout this daemon holds — what [`Self::open`] and
+    /// [`Self::ensure_open`] measure a room's worktree with.
+    fn local_checkout(hosting: &SessionRoomHosting<'_>) -> Result<Arc<dyn WorktreeSource>, Status> {
         let worktree_root = hosting.worktree_root.ok_or_else(|| {
             Status::internal(format!(
                 "session {} has no checkout on this host, so it cannot be measured locally; open its room with a remote source instead",
                 hosting.codebase_session_id
             ))
         })?;
-        let source = Arc::new(LocalCheckout {
+        Ok(Arc::new(LocalCheckout {
             worktree_root: worktree_root.to_path_buf(),
             session_dir: hosting.session_dir.to_path_buf(),
             git_timeout: hosting.config.session_room_git_timeout(),
-        });
-        self.open_measured_by(hosting, service, source).await
+        }))
     }
 
     /// [`Self::open`] for a checkout this daemon does not hold.
@@ -1467,10 +1473,16 @@ impl SessionRoomRegistry {
     /// Only the measurement differs: the room, its RPC surface and its identity are the same, so a
     /// participant cannot tell a split placement from a local one — which is the whole reason the
     /// room lives with the agent rather than with the files (PRD FR3).
+    ///
+    /// `service` builds what the room serves, and is called only once a room will actually open —
+    /// after the credentials check, before anything is created. A daemon with no LiveKit
+    /// credentials hosts no room, so it is never asked for a service it could not build; a failure
+    /// to build one where a room *would* open is this call's failure, reported before the room
+    /// exists.
     pub async fn open_measured_by<S: RpcService>(
         &self,
         hosting: &SessionRoomHosting<'_>,
-        service: S,
+        service: impl FnOnce() -> Result<S, Status>,
         source: Arc<dyn WorktreeSource>,
     ) -> Result<Option<OpenedSessionRoom>, Status> {
         let Some(credentials) = LiveKitCredentials::from_config(hosting.config) else {
@@ -1480,6 +1492,7 @@ impl SessionRoomRegistry {
             );
             return Ok(None);
         };
+        let service = service()?;
         let room_name = session_room_name(hosting.codebase_session_id);
         let identity = daemon_rpc_identity(hosting.instance_id);
 
@@ -1533,10 +1546,12 @@ impl SessionRoomRegistry {
     /// Failure here is still failure. A caller that asked to reach a session over LiveKit and
     /// cannot get a room gets the error — what has been removed is the *session's* dependence on
     /// one, not the room's dependence on a reachable server.
+    ///
+    /// `service` is built only when a room is actually opened here — see [`Self::open_measured_by`].
     pub async fn ensure_open<S: RpcService>(
         &self,
         hosting: &SessionRoomHosting<'_>,
-        service: S,
+        service: impl FnOnce() -> Result<S, Status>,
         terminal: &dyn SessionTerminalBridge,
     ) -> Result<Option<OpenedSessionRoom>, Status> {
         let opening = self.opening_lock(hosting.codebase_session_id);
@@ -1549,7 +1564,10 @@ impl SessionRoomRegistry {
                 );
                 Some(already)
             }
-            None => self.open(hosting, service).await?,
+            None => {
+                self.open_measured_by(hosting, service, Self::local_checkout(hosting)?)
+                    .await?
+            }
         };
         // The room says where the session is; the bridge is what makes its terminal usable once
         // something is there. Both under this one lock, so a session cannot end up with a room a

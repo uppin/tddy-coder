@@ -35,8 +35,11 @@ fn package(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// Every file read here must exist: an unreadable manifest or source read as empty would let an
+/// edge or impl check pass on nothing. Absence is asserted with `Path::exists`, never through this.
 fn source_of(path: &Path) -> String {
-    std::fs::read_to_string(path).unwrap_or_default()
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("{} must be readable: {e}", path.display()))
 }
 
 fn rust_files_under(dir: &Path) -> Vec<PathBuf> {
@@ -92,7 +95,7 @@ fn normal_dependencies_of(name: &str) -> String {
     manifest
         .split("\n[")
         .find(|table| table.starts_with("dependencies]"))
-        .unwrap_or_default()
+        .unwrap_or_else(|| panic!("`{name}/Cargo.toml` has no `[dependencies]` table"))
         .to_string()
 }
 

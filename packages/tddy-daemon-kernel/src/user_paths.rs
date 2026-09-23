@@ -3,9 +3,10 @@
 //!
 //! Lifted by `#unbundle` node 1 out of `user_sessions_path.rs` and `tddy_user_config.rs` — the
 //! four path resolvers and the one settings read that families E, F, G and H reach, and nothing
-//! else. `username_for_uid` (the SO_PEERCRED peer-trust path) and
-//! `project_path_under_home_from_user_relative` (project cloning) stayed in the daemon: no moving
-//! module names either.
+//! else. `username_for_uid` (the SO_PEERCRED peer-trust path) stayed behind, now in
+//! `tddy-session-lifecycle/src/user_sessions_path.rs`; `project_path_under_home_from_user_relative`
+//! (project cloning) moved with the Project family to
+//! `tddy-daemon-rpc/src/project/clone_destination.rs`. No moving module names either.
 //!
 //! Both origin modules re-export every name here, so no caller in `tddy-daemon` changed.
 

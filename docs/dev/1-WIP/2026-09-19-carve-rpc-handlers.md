@@ -187,6 +187,11 @@ tddy-daemon ──► tddy-daemon-rpc ──► tddy-session-lifecycle ──►
 | `tddy-pr-stack` | + `src/rpc.rs`; + `tddy-rpc`, `tddy-service`, `async-trait` dependencies |
 | `tddy-workflow-recipes` | `PR_STACK_SERVICE` → `pub use tddy_pr_stack::PR_STACK_SERVICE` |
 | `tddy-daemon` | `runtime.rs` rewiring; + `tddy-daemon-rpc` dependency; + `tests/local_socket_family_wiring_acceptance.rs`; `local_token_uds.rs` and `staging_forwarding_acceptance.rs` build their family services from `RpcHandlers` |
+| `tddy-daemon` (tests) | also rewired to `RpcHandlers` / `tddy_daemon_rpc::test_util`: `relay_e2e`, `relay_idle_wired`, `remote_managed_worktree_cross_host`, `session_agent_remote`, `session_attach_cross_host`, `session_room_cross_host`, `split_session_resume`; `test_placement.rs` registers the new wiring guard |
+| `tddy-daemon-livekit` | `SessionRoomRegistry::{open_measured_by, ensure_open}` take the room's service list as a builder, called only after the LiveKit-credentials check — so a host with no credentials is never asked for its RPC families (validation W1) |
+| `tddy-tool-engine` | `tests/tool_call_log_acceptance.rs` moves to `tddy-daemon-rpc` with the ExecTool family (validation C1) |
+| `tddy-daemon-kernel` | doc-only: `user_paths.rs` names the new home of `project_path_under_home_from_user_relative` |
+| `.config/nextest.toml` | the moved `session_room_exec_tool_acceptance` joins the LiveKit serial group |
 
 ## Implementation milestones
 
@@ -277,6 +282,33 @@ before and after, by design**:
   observable only through `MultiRpcService::service_names()` on `session_room_roster()`, which is
   `pub(crate)`. Green should decide whether widening it to test is worth it.
 
+## Validation results
+
+### `/validate-changes` — 2026-09-23 (on `56b64d26`, base `2b1dde70`)
+
+**Stack gate:** ✅ on the base's live tip; `origin/<base>..HEAD` is this PR's 8 commits only. **Diff:** 122 files,
+every path mapped to a changeset item; the two deletions (`svc_family_entries.rs`, `svc_project_ports.rs`) are planned.
+
+**Behaviour preservation — confirmed.** Across the four families' bodies the only changes are `self.x` → a
+handler field or component, and `crate::` → re-exported crate paths. Error codes, messages, timeouts and
+forwarding names are unchanged; `ExecuteTool` still routes to a peer before auth; `record_rpc_activity` counts
+per family are identical (Catalog 1, ExecTool 3, PrStack 2, Project 0); the host's delegating methods forward
+one-to-one; `DaemonConfig` is never mutated after construction, so cloning it into handlers is safe. Every moved
+or split test body compared old-vs-new by script: no assertion changed, none dropped.
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| C1 `tddy-tool-engine/tests/tool_call_log_acceptance.rs` no longer compiled (the ExecTool `TestDaemon` impl moved); also the cause of the red "Rust lint" CI check | CRITICAL | ✅ moved to `tddy-daemon-rpc/tests/` (imports only); no other crate that dev-depends on the lifecycle crate was affected (checked tool-engine, model-registry, telegram-control, worktree-service, host-service) |
+| W1 `session_room_roster()?` evaluated before the credentials check, so an unwired host with no LiveKit refused `ConnectSession` instead of opening no room | WARNING (behaviour change) | ✅ the service list is now a builder called only once a room will open; proved with a probe — `sandboxed_claude_cli_connect_session_returns_empty_livekit` was `FailedPrecondition` before, passes after |
+| W2 "install the port last" enforced only by comments | WARNING | ✅ `debug_assert_rpc_families_not_installed` in `with_model_registry`, `with_github_token_store`, `with_idle_tracker`, `set_eligible_daemon_source` |
+| W3 shape tests could pass vacuously on an unreadable manifest | WARNING | ✅ `source_of` / `normal_dependencies_of` fail loudly with the path |
+| Unused `with_rpc_families_not_under_test` / `set_rpc_families`; `tddy-task` a normal dep used only by tests; stale doc in `user_paths.rs`; Delta table gaps; stale "RED PHASE" header on the moved suite | INFO | ✅ removed / moved to dev-deps / doc corrected / rows added / header removed |
+| `pub mod test_util` is compiled unconditionally, so `RpcFamiliesNotUnderTest` is reachable from production code (only test code uses it) | INFO | ⏭️ pre-existing layout; not changed here |
+
+**Known pre-existing, unrelated:** `sandboxed_{claude,cursor}_cli_acceptance` fail at `StartSession` with
+"sandbox RPC bridge not installed" (the recorded `set_self_handle` debt), and one intermittent "tool ipc bind
+failed: File exists" in the claude suite.
+
 ## Decisions & trade-offs
 
 - **Crate above, not domain crates** — the developer's decision on 2026-09-22. The domain-crate plan
@@ -349,7 +381,7 @@ Constraints on those nodes, known now:
 - [x] TDD Red — unit tests: none added beyond the acceptance set; see Decisions
 - [x] TDD Green (`/green`)
 - [x] Move the four code-issue records
-- [ ] `/validate-changes`
+- [x] `/validate-changes`
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`)
 

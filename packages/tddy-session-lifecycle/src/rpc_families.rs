@@ -38,14 +38,19 @@ impl DaemonSessionHost {
     /// afterwards would leave them holding the value it replaced.
     #[must_use]
     pub fn with_rpc_families(mut self, families: Arc<dyn DaemonRpcFamilies>) -> Self {
-        self.set_rpc_families(families);
+        self.rpc_families = Some(families);
         self
     }
 
-    /// [`Self::with_rpc_families`] in place, for a host already behind a shared `Arc` (the
-    /// `TestDaemon` builders' shape).
-    pub(crate) fn set_rpc_families(&mut self, families: Arc<dyn DaemonRpcFamilies>) {
-        self.rpc_families = Some(families);
+    /// Guard for a `with_*`/`set_*` that feeds state the installed handlers were built from: once
+    /// the families are installed they hold the earlier value, so changing it here would split the
+    /// host and its handlers. A wiring-order bug, caught where it is made.
+    pub(crate) fn debug_assert_rpc_families_not_installed(&self, setter: &str) {
+        debug_assert!(
+            self.rpc_families.is_none(),
+            "`{setter}` applied after `with_rpc_families`: apply every `with_*` before the RPC \
+             families are installed; the handlers were built from the earlier state"
+        );
     }
 
     /// The installed families, or `FAILED_PRECONDITION` naming the missing wiring.

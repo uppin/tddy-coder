@@ -398,7 +398,7 @@ impl DaemonSessionHost {
         self.session_rooms
             .ensure_open(
                 &hosting,
-                std::sync::Arc::new(self.clone()).session_room_roster()?,
+                || std::sync::Arc::new(self.clone()).session_room_roster(),
                 self,
             )
             .await

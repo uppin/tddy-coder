@@ -178,6 +178,7 @@ impl DaemonSessionHost {
         mut self,
         registry: Arc<tddy_model_registry::ModelRegistryStore>,
     ) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_model_registry");
         self.model_registry = Some(registry);
         self
     }
@@ -286,6 +287,7 @@ impl DaemonSessionHost {
         mut self,
         store: Arc<dyn tddy_github::token_store::GitHubTokenStore>,
     ) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_github_token_store");
         self.github_token_store = Some(store);
         self
     }
@@ -322,6 +324,7 @@ impl DaemonSessionHost {
         mut self,
         tracker: Arc<crate::relay_idle::IdleTimeoutTracker>,
     ) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_idle_tracker");
         self.rpc_activity = crate::relay_idle::RpcActivity::on(tracker);
         self
     }
@@ -344,6 +347,7 @@ impl DaemonSessionHost {
         &mut self,
         eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     ) {
+        self.debug_assert_rpc_families_not_installed("with_eligible_daemon_source");
         self.peer_routing
             .set_eligible_daemon_source(eligible_daemon_source);
     }

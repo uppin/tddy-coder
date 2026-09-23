@@ -24,7 +24,6 @@ tddy-projects = { path = "../tddy-projects" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 tddy-spawn = { path = "../tddy-spawn" }
-tddy-task = { path = "../tddy-task" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }
 # The PR-stack family's bodies drive the stack recipe's plan mutations and its GitHub PR lookup.
@@ -60,3 +59,5 @@ tddy-livekit = { path = "../tddy-livekit" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 tddy-session-files = { path = "../tddy-session-files" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
+# `in_jail_conversation_acceptance` reads the jail's task registry; nothing in `src/` does.
+tddy-task = { path = "../tddy-task" }

@@ -131,17 +131,6 @@ impl TestDaemon {
         Arc::make_mut(&mut self.inner).set_roster_keepalive_interval(interval);
         self
     }
-
-    /// Install [`RpcFamiliesNotUnderTest`] as this daemon's [`DaemonRpcFamilies`], for a suite that
-    /// opens a session room but exercises none of the families served above this crate.
-    ///
-    /// Not a default: [`test_service`] leaves the port unwired, because a host that was never given
-    /// it must refuse — and that refusal is itself under test.
-    #[must_use]
-    pub fn with_rpc_families_not_under_test(mut self) -> Self {
-        Arc::make_mut(&mut self.inner).set_rpc_families(Arc::new(RpcFamiliesNotUnderTest));
-        self
-    }
 }
 
 /// **Test fixture, never production wiring:** the [`DaemonRpcFamilies`] of a suite that opens a
