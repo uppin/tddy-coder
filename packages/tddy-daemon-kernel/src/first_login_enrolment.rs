@@ -14,6 +14,11 @@
 //! *once*, on a deployment that has none, and the unchanged lookup then finds it — so a second,
 //! different login on an enrolled deployment is refused exactly as it is today. Deliberately adding
 //! a second account is `#keyring` 8/9's, through a path the operator asks for.
+//!
+//! [`enrol_first_login`] is the file half. The running daemon enrols through
+//! [`LiveUsers::enrol_first_login`](crate::live_users::LiveUsers::enrol_first_login), which
+//! serialises it against every other enrolment and applies the row to the shared in-memory map
+//! only once it is persisted — so a daemon never admits a login it failed to record.
 
 use std::path::Path;
 
@@ -48,11 +53,6 @@ impl std::fmt::Display for EnrolmentRefusal {
 
 impl std::error::Error for EnrolmentRefusal {}
 
-/// Whether this deployment has never enrolled anyone — the only state enrolment may act on.
-pub fn is_unenrolled(users: &[UserMapping]) -> bool {
-    users.is_empty()
-}
-
 /// Write the first `users:` row into the config file at `config_path`, mapping `github_user` to
 /// `os_user`, and return the row that was written.
 ///
@@ -68,9 +68,9 @@ pub fn enrol_first_login(
     // Re-read rather than trust the caller's snapshot: the file on disk is what decides whether
     // this deployment has already enrolled somebody, including through a concurrent login.
     let config = DaemonConfig::load(config_path).map_err(|e| not_writable(e.to_string()))?;
-    if let Some(enrolled) = config.users.first() {
+    if let Some(enrolled) = config.users.first_github_user() {
         return Err(EnrolmentRefusal::AlreadyEnrolled {
-            github_user: enrolled.github_user.clone(),
+            github_user: enrolled,
         });
     }
 
@@ -104,14 +104,4 @@ pub fn enrol_first_login(
         .map_err(|e| not_writable(format!("failed to serialise the config: {e}")))?;
     tddy_core::atomic_file::write_atomic_labelled(config_path, rewritten).map_err(not_writable)?;
     Ok(mapping)
-}
-
-/// Install an enrolled row into a config already in memory.
-///
-/// Persisting alone is not enough: the daemon resolved `users:` when it started and holds a
-/// snapshot, so a login enrolled at run time would be refused until the next restart. This is the
-/// in-memory half, kept separate from the file write so the order is explicit — persist first,
-/// then apply, so a daemon never admits a login it failed to record.
-pub fn apply_enrolment(config: &mut DaemonConfig, mapping: UserMapping) {
-    config.users.push(mapping);
 }

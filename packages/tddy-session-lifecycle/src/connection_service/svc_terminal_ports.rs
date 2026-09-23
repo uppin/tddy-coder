@@ -76,9 +76,7 @@ impl DaemonSessionHost {
         let config = self.config.clone();
         TerminalSessionPorts {
             github_users: self.user_resolver.clone(),
-            os_users: Arc::new(move |github_user: &str| {
-                config.os_user_for_github(github_user).map(str::to_owned)
-            }),
+            os_users: Arc::new(move |github_user: &str| config.os_user_for_github(github_user)),
             terminals: Arc::new(self.terminal_store()),
             control: Arc::new(CliManagerTerminalControl::new(Arc::clone(
                 &self.claude_cli_manager,

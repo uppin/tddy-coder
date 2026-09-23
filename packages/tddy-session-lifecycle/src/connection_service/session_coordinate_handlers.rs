@@ -46,7 +46,7 @@ impl DaemonSessionHost {
         let req = request.into_inner();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
+        let os_user = &self
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
@@ -190,7 +190,7 @@ impl DaemonSessionHost {
         let req = request.into_inner();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
+        let os_user = &self
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
@@ -275,7 +275,7 @@ impl DaemonSessionHost {
         let req = request.into_inner();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
+        let os_user = &self
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
@@ -524,7 +524,7 @@ impl DaemonSessionHost {
 
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
+        let os_user = &self
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
@@ -611,7 +611,7 @@ impl DaemonSessionHost {
         log::debug!("DeleteSession: requested session_id={}", session_id);
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
+        let os_user = &self
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;

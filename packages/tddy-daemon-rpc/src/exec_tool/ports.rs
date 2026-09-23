@@ -241,7 +241,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
         // Minimal auth — verify caller is a known user.
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let _os_user = self
+        let _os_user = &self
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
@@ -322,7 +322,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
         // Authenticate caller.
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
+        let os_user = &self
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;

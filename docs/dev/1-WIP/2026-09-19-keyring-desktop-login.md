@@ -278,7 +278,10 @@ open them, because its own `tddy-github` finding is the one in its path.
 - **Implementation**: the `:109` gate; two handlers; first-login enrolment and the refusal path.
 
 #### tddy-daemon-kernel
-- **Implementation**: persisting the enrolled `users:` row. `os_user_for_github` **unchanged**.
+- **Implementation**: persisting the enrolled `users:` row. `users:` becomes a shared live holder
+  (`LiveUsers`) carried by `DaemonConfig`, so an enrolled row is seen by every service without a
+  restart. `os_user_for_github`'s **behaviour is unchanged** (no default arm, unmapped → `None`); its
+  return type becomes `Option<String>`, since a borrow cannot escape the lock.
 
 #### tddy-desktop
 - **Configuration**: a public `client_id` rendered into `desktop.yaml.production`; no secret.

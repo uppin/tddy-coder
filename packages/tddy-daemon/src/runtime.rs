@@ -563,6 +563,48 @@ fn tddy_data_dir_for(config: &DaemonConfig) -> PathBuf {
         })
 }
 
+/// How this deployment admits its first login, when it may enrol one at all.
+///
+/// Only a desktop enrols: an application embedding the daemon, started from a config file it can
+/// write the row back into, mapping the login to the account the application runs as. A server or
+/// systemd daemon's `users:` is its installer's to write, so it gets no admission — an empty map
+/// there refuses every caller's RPCs exactly as it always has. An embedding host that configured the
+/// daemon in code has nowhere to persist a row, and so cannot enrol either.
+///
+/// `config.users` is the holder every service built from `config` authorizes through, so the row
+/// enrolled here is the row they all see.
+fn first_login_enrolment(
+    config: &DaemonConfig,
+    options: &RuntimeOptions,
+) -> anyhow::Result<Option<Arc<dyn tddy_github::LoginAdmission>>> {
+    let (RuntimeHost::Embedded, Some(config_path)) = (options.host, &options.config_path) else {
+        return Ok(None);
+    };
+    let os_user = this_process_os_user().ok_or_else(|| {
+        anyhow::anyhow!(
+            "cannot resolve the OS user this desktop runs as, which its first GitHub login is \
+             enrolled as"
+        )
+    })?;
+    Ok(Some(Arc::new(tddy_daemon_auth::FirstLoginEnrolment::new(
+        config.users.clone(),
+        config_path.clone(),
+        os_user,
+    ))))
+}
+
+/// The OS username this process runs as.
+#[cfg(unix)]
+fn this_process_os_user() -> Option<String> {
+    // SAFETY: `getuid` has no preconditions and cannot fail.
+    tddy_session_lifecycle::user_sessions_path::username_for_uid(unsafe { libc::getuid() })
+}
+
+#[cfg(not(unix))]
+fn this_process_os_user() -> Option<String> {
+    None
+}
+
 /// Assemble the daemon described by `config` for the host named in `options`.
 pub async fn build(
     mut config: DaemonConfig,
@@ -643,11 +685,12 @@ pub async fn build(
                 "signing session tokens as key {}",
                 key.key_id()
             );
-            tddy_session_lifecycle::auth::build_auth_entries_with(
+            tddy_daemon_auth::build_auth_entries_admitting(
                 &auth_config,
                 web_host.as_str(),
                 web_port,
                 &tddy_daemon_auth::SessionTokens::new(key, directory),
+                first_login_enrolment(&config, &options)?,
             )?
         }
         None => tddy_session_lifecycle::auth::build_auth_entries(

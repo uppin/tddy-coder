@@ -60,7 +60,8 @@ impl DaemonSessionHost {
         )?;
         // The repository the checkout was cut from, which is where its WIP ref is fetched from.
         let projects_dir = projects_path_for_user(
-            self.config
+            &self
+                .config
                 .os_user_for_github(
                     &(self.user_resolver)(session_token)
                         .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?,

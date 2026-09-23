@@ -140,7 +140,6 @@ impl WorktreeServiceImpl {
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         self.config
             .os_user_for_github(&github_user)
-            .map(str::to_string)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))
     }
 

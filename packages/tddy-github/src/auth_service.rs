@@ -35,6 +35,17 @@ fn proto_user_from_claims(claims: &SessionClaims) -> ProtoGitHubUser {
     }
 }
 
+/// Whether this daemon admits a login GitHub has just vouched for.
+///
+/// Asked once per completed sign-in, whichever flow completed it, after GitHub has confirmed who
+/// the user is and before anything is retained or minted. `AuthServiceImpl` knows nothing about
+/// the daemon's `users:` map; this is the narrow seam through which the daemon that does may act
+/// on a login — enrol it, admit it, or refuse it — before a session exists for it. A refusal fails
+/// the login with the returned status, and nothing is retained for it.
+pub trait LoginAdmission: Send + Sync {
+    fn admit(&self, github_login: &str) -> Result<(), Status>;
+}
+
 /// Auth service implementation. Delegates OAuth to a GitHubOAuthProvider and issues stateless
 /// session tokens signed with this daemon's own key (see [`crate::session_token_v2`]). No session
 /// state is kept server-side: a token is verifiable by any daemon that can resolve the key it names.
@@ -47,6 +58,10 @@ pub struct AuthServiceImpl<P: GitHubOAuthProvider> {
     /// later act on that operator's behalf (e.g. read their PRs). Separate from `signing` on purpose:
     /// the GitHub token never enters the session token and is never returned to the client.
     token_store: Option<Arc<dyn crate::token_store::GitHubTokenStore>>,
+    /// When set, asked whether each completed login is admitted before it is retained or minted.
+    /// Unset admits every login GitHub vouches for, and leaves authorization to the RPCs that
+    /// resolve the caller's OS user.
+    admission: Option<Arc<dyn LoginAdmission>>,
 }
 
 /// What a signed service mints with and verifies through.
@@ -67,6 +82,7 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
             provider: Arc::new(provider),
             signing: None,
             token_store: None,
+            admission: None,
         }
     }
 
@@ -83,6 +99,7 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
             provider: Arc::new(provider),
             signing: Some(Signing { signer, authority }),
             token_store: None,
+            admission: None,
         }
     }
 
@@ -93,6 +110,12 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         store: Arc<dyn crate::token_store::GitHubTokenStore>,
     ) -> Self {
         self.token_store = Some(store);
+        self
+    }
+
+    /// Ask `admission` about every completed login before it is retained or minted (builder).
+    pub fn with_login_admission(mut self, admission: Arc<dyn LoginAdmission>) -> Self {
+        self.admission = Some(admission);
         self
     }
 }
@@ -114,6 +137,12 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         access_token: &str,
         user: &GitHubUser,
     ) -> Result<MintedSession, Status> {
+        // Admission first: a login this daemon refuses must leave nothing behind — no retained
+        // GitHub credential, no session.
+        if let Some(ref admission) = self.admission {
+            admission.admit(&user.login)?;
+        }
+
         // Retain the operator's own credential for later server-side GitHub reads. A stub provider's
         // token is synthetic and is never stored (D12), so a demo login holds none by construction.
         //
@@ -709,6 +738,51 @@ mod tests {
         assert!(
             result.is_err(),
             "refresh must reject an expired refresh token"
+        );
+    }
+
+    /// A daemon that refuses every login, with the status it refuses with.
+    struct RefusesEveryLogin;
+
+    impl LoginAdmission for RefusesEveryLogin {
+        fn admit(&self, github_login: &str) -> Result<(), Status> {
+            Err(Status::permission_denied(format!(
+                "{github_login} is not admitted here"
+            )))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_login_the_daemon_does_not_admit_is_refused_with_the_daemons_reason() {
+        // Given a signed auth service whose daemon admits nobody
+        let daemon = a_daemon_key(7);
+        let (stub, user) = setup();
+        stub.register_code("login-code", user);
+        let service = a_signed_service(stub, &daemon, &[&daemon])
+            .with_login_admission(Arc::new(RefusesEveryLogin));
+        let bridge = RpcBridge::new(AuthServiceServer::new(service));
+        let state = do_get_auth_url_state(&bridge).await;
+
+        // When GitHub vouches for a login
+        let msg = tddy_rpc::RpcMessage {
+            payload: prost::Message::encode_to_vec(&ExchangeCodeRequest {
+                code: "login-code".to_string(),
+                state,
+            }),
+            metadata: Default::default(),
+        };
+        let refusal = bridge
+            .handle_messages("auth.AuthService", "ExchangeCode", &[msg])
+            .await
+            .err();
+
+        // Then no session is minted, and the client is told why
+        assert_eq!(
+            refusal.map(|status| (status.code, status.message)),
+            Some((
+                tddy_rpc::Code::PermissionDenied,
+                "testuser is not admitted here".to_string()
+            ))
         );
     }
 }

@@ -5,6 +5,8 @@ use std::time::Duration;
 
 use tddy_core::LogConfig;
 
+pub use crate::live_users::LiveUsers;
+
 fn default_spawn_mouse() -> bool {
     true
 }
@@ -332,8 +334,11 @@ pub struct DaemonConfig {
     /// daemon's cwd. When unset, the spawner synthesizes a minimal log config from the daemon `log:`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coder_config_path: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub users: Vec<UserMapping>,
+    /// The GitHub-login → OS-user map every token-gated RPC authorizes by. A shared holder rather
+    /// than a `Vec`: cloning this config shares these rows, so a row enrolled at run time is seen
+    /// by every service built from it — see [`LiveUsers`].
+    #[serde(default, skip_serializing_if = "LiveUsers::is_empty")]
+    pub users: LiveUsers,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_tools: Vec<AllowedTool>,
     /// Directory holding this deployment's tddy binaries (`tddy-tools`, `tddy-sandbox-runner`,
@@ -477,7 +482,7 @@ impl Default for DaemonConfig {
             auth_storage: None,
             log: None,
             coder_config_path: None,
-            users: Vec::new(),
+            users: LiveUsers::default(),
             allowed_tools: Vec::new(),
             allowed_agents: Vec::new(),
             repos_base_path: None,
@@ -1123,11 +1128,8 @@ impl DaemonConfig {
     }
 
     /// Resolve OS user for a GitHub user. Returns None if not mapped.
-    pub fn os_user_for_github(&self, github_user: &str) -> Option<&str> {
-        self.users
-            .iter()
-            .find(|u| u.github_user == github_user)
-            .map(|u| u.os_user.as_str())
+    pub fn os_user_for_github(&self, github_user: &str) -> Option<String> {
+        self.users.os_user_for_github(github_user)
     }
 
     /// Resolve the local caller's identity from its peer uid (SO_PEERCRED), for the local peer-trust
@@ -1139,9 +1141,9 @@ impl DaemonConfig {
         &self,
         uid: u32,
         uid_to_username: impl Fn(u32) -> Option<String>,
-    ) -> Option<&UserMapping> {
+    ) -> Option<UserMapping> {
         let username = uid_to_username(uid)?;
-        self.users.iter().find(|u| u.os_user == username)
+        self.users.mapping_for_os_user(&username)
     }
 
     /// The GitHub login for a local caller's peer uid (SO_PEERCRED), used to mint its access token
@@ -1152,7 +1154,7 @@ impl DaemonConfig {
         uid_to_username: impl Fn(u32) -> Option<String>,
     ) -> Option<String> {
         self.local_identity_for_uid(uid, uid_to_username)
-            .map(|m| m.github_user.clone())
+            .map(|m| m.github_user)
     }
 
     /// Resolve the path the local Unix-domain socket binds at. Uses the explicit `local.socket_path`

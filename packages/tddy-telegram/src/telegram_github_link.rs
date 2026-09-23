@@ -229,7 +229,7 @@ pub fn resolved_os_user_for_telegram_workflow(
         telegram_user_id
     );
     let login = store.get_github_login(telegram_user_id)?;
-    let os = config.os_user_for_github(&login).map(str::to_string);
+    let os = config.os_user_for_github(&login);
     log::debug!(
         target: "tddy_daemon::telegram_github_link",
         "resolved_os_user_for_telegram_workflow: github_login={} os_user={:?}",

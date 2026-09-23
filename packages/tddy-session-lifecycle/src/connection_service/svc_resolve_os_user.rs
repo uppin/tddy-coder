@@ -308,11 +308,11 @@ pub fn resolve_os_user(
 /// public key advertised in the common room), and a GitHub user mapped on the agent host but not
 /// on the codebase host. Each is also logged here, because the operator debugging it is reading
 /// *this* daemon's log.
-pub fn authorize_exec_tool_caller<'c>(
-    config: &'c DaemonConfig,
+pub fn authorize_exec_tool_caller(
+    config: &DaemonConfig,
     user_resolver: &SessionUserResolver,
     req: &ExecuteToolRequest,
-) -> Result<&'c str, Status> {
+) -> Result<String, Status> {
     let local_instance_id = local_instance_id_for_config(config);
     let Some(github_user) = (user_resolver)(&req.session_token) else {
         log::warn!(
@@ -345,7 +345,7 @@ pub fn resolve_exec_tool_worktree(
     tddy_data_dir: &Path,
     req: &ExecuteToolRequest,
 ) -> Result<(PathBuf, PathBuf), Status> {
-    let os_user = authorize_exec_tool_caller(config, user_resolver, req)?;
+    let os_user = &authorize_exec_tool_caller(config, user_resolver, req)?;
 
     validate_session_id_segment(&req.session_id)
         .map_err(|e| Status::invalid_argument(e.message()))?;

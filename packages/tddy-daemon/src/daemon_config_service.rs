@@ -160,7 +160,13 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
         let mut config = self.config.lock().await;
         // Validated before the file is touched, so a refused update leaves it untouched.
         let update = apply_update(&config, &settings)?;
-        write_config(path, &update.config)?;
+        // The file carries `users:` too, re-serialised from the live rows every service authorizes
+        // by — so a row a first login enrolled is written back rather than erased. Serialised
+        // against enrolment, which rewrites the same file, so neither write loses the other's.
+        update
+            .config
+            .users
+            .while_rewriting_config_file(|| write_config(path, &update.config))?;
         let livekit = update.config.livekit.clone();
         *config = update.config;
         drop(config);

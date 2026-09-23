@@ -63,6 +63,7 @@ pub mod agent_tool_socket;
 pub mod config;
 pub mod daemon_identity;
 pub mod first_login_enrolment;
+pub mod live_users;
 pub mod peer_forwarding;
 pub mod presenter_observer;
 pub mod privilege_drop;

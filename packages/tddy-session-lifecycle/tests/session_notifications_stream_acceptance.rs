@@ -124,7 +124,8 @@ fn a_config_for_two_operators() -> DaemonConfig {
                 github_user: OTHER_USERS_GITHUB_USER.to_string(),
                 os_user: OTHER_USERS_OS_USER.to_string(),
             },
-        ],
+        ]
+        .into(),
         ..DaemonConfig::default()
     }
 }

@@ -27,7 +27,10 @@ fn the_first_login_on_an_unenrolled_deployment_is_written_down() {
 
     // Then the daemon resolves them to the account it runs as, from that moment on
     let reloaded = DaemonConfig::load(&path).expect("the rewritten config loads");
-    assert_eq!(reloaded.os_user_for_github(THE_OPERATOR), Some(THE_OS_USER));
+    assert_eq!(
+        reloaded.os_user_for_github(THE_OPERATOR).as_deref(),
+        Some(THE_OS_USER)
+    );
 }
 
 #[test]

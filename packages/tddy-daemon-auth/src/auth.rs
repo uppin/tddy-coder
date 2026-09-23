@@ -6,7 +6,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tddy_github::token_store::GitHubTokenStore;
 use tddy_github::{
-    AuthServiceImpl, GitHubOAuthProvider, RealGitHubProvider, StubGitHubProvider, TokenKind,
+    AuthServiceImpl, GitHubOAuthProvider, LoginAdmission, RealGitHubProvider, StubGitHubProvider,
+    TokenKind,
 };
 use tddy_livekit::TokenGenerator;
 use tddy_rpc::{Request, Response, ServiceEntry, Status};
@@ -156,6 +157,20 @@ pub fn build_auth_entries_with(
     web_port: u16,
     tokens: &SessionTokens,
 ) -> anyhow::Result<AuthBuildResult> {
+    build_auth_entries_admitting(config, web_host, web_port, tokens, None)
+}
+
+/// [`build_auth_entries_with`], with `admission` asked about every completed login before a
+/// session is minted for it — how an embedded desktop enrols its first login (see
+/// [`crate::first_login_admission`]). `None` admits every login GitHub vouches for, exactly as
+/// [`build_auth_entries_with`] does.
+pub fn build_auth_entries_admitting(
+    config: &DaemonConfig,
+    web_host: &str,
+    web_port: u16,
+    tokens: &SessionTokens,
+    admission: Option<Arc<dyn LoginAdmission>>,
+) -> anyhow::Result<AuthBuildResult> {
     let github = match &config.github {
         Some(g) => g,
         None => return Ok(AuthBuildResult::unauthenticated()),
@@ -204,7 +219,7 @@ pub fn build_auth_entries_with(
             if let Some(ref codes) = github.stub_codes {
                 register_stub_codes(&stub, codes);
             }
-            auth_service_entry(stub, tokens, github_token_store.clone())
+            auth_service_entry(stub, tokens, github_token_store.clone(), admission)
         }
         // Two configurations, neither a fallback for the other. With a secret this is a
         // confidential client and serves the redirect flow exactly as it always has. Without one
@@ -215,11 +230,13 @@ pub fn build_auth_entries_with(
             RealGitHubProvider::new(client_id, secret, &redirect_uri()),
             tokens,
             github_token_store.clone(),
+            admission,
         ),
         Some(GitHubProviderKind::Public { client_id }) => auth_service_entry(
             RealGitHubProvider::new_public(client_id, &redirect_uri()),
             tokens,
             github_token_store.clone(),
+            admission,
         ),
         None => return Ok(AuthBuildResult::unauthenticated()),
     };
@@ -556,12 +573,17 @@ fn auth_service_entry<P: GitHubOAuthProvider>(
     provider: P,
     tokens: &SessionTokens,
     token_store: Option<Arc<dyn GitHubTokenStore>>,
+    admission: Option<Arc<dyn LoginAdmission>>,
 ) -> ServiceEntry {
     let service = AuthServiceImpl::new_signed(
         provider,
         tokens.signer().clone(),
         Arc::clone(tokens.verifier()) as Arc<dyn tddy_github::SessionTokenAuthority>,
     );
+    let service = match admission {
+        Some(admission) => service.with_login_admission(admission),
+        None => service,
+    };
     let server = AuthServiceServer::new(match token_store {
         Some(store) => service.with_token_store(store),
         None => service,
