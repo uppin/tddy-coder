@@ -231,13 +231,13 @@ open them, because its own `tddy-github` finding is the one in its path.
 
 - [x] **PRD**: [PRD-2026-09-19-keyring-desktop-login.md](../../ft/desktop/1-WIP/PRD-2026-09-19-keyring-desktop-login.md)
 - [x] **Changeset**: this document
-- [ ] **Draft PR contract**: owned surface + failing tests (wave 2, commit 2)
-- [ ] **Base-URL seam** in `RealGitHubProvider`, with the six error returns covered — **before** the device flow
-- [ ] **Implementation**: device flow, RPCs, the gate, enrolment, the web sign-in screen
-- [ ] **Decisions answered**: OAuth App vs GitHub App, verified against the live API; client-id placement
-- [~] **Testing**: acceptance + unit; the single `tddy-web` spec under change
+- [x] **Draft PR contract**: owned surface + failing tests (wave 2, commit 2) — `9279fb17`
+- [x] **Base-URL seam** in `RealGitHubProvider`, with the six error returns covered — **before** the device flow (`604c4994`; all **seven** covered, the user-leg one included)
+- [~] **Implementation**: device flow, RPCs, the gate, enrolment, the web sign-in screen — done (M1–M7); `desktop.yaml.production` (M8) pending
+- [~] **Decisions answered**: **OAuth App** (developer, during green) — ⚠ not yet verified against the live API; client id **rendered into `desktop.yaml.production`** — decided, the id itself is still owed by the developer (M8)
+- [~] **Testing**: acceptance + unit written for every item; the `tddy-web` spec passes 22/22 — ⚠ the scoped Rust run was blocked by a full disk at validation (see *Validation Results*)
 - [ ] **Package Documentation**: the six packages above
-- [ ] **Code Quality**: scoped clippy per package; CI green
+- [ ] **Code Quality**: scoped clippy per package; CI green — ⚠ clippy blocked by a full disk at validation; builds clean with no warnings
 
 ## Technical Changes
 
@@ -285,6 +285,8 @@ open them, because its own `tddy-github` finding is the one in its path.
 
 #### tddy-desktop
 - **Configuration**: a public `client_id` rendered into `desktop.yaml.production`; no secret.
+  - 🔲 **M8, pending** — the file is unchanged at `HEAD` and still documents `client_id` +
+    `client_secret` (`desktop.yaml.production:90-92`); waiting on the OAuth App's client id.
 
 #### tddy-web
 - **Integration**: the device-flow sign-in screen — user code, verification URI, poll, expiry,
@@ -292,21 +294,22 @@ open them, because its own `tddy-github` finding is the one in its path.
   - [x] Written (red): `packages/tddy-web/cypress/component/DeviceLoginAcceptance.cy.tsx` — 22
     tests. Pins `DeviceLoginPanel` (`src/components/DeviceLoginPanel.tsx`), `DaemonLoginScreen`
     extracted from `src/index.tsx` to `src/components/DaemonLoginScreen.tsx` with an `authFlow`
-    prop, and `ClientConfig.authFlow` read from `/api/config`'s `auth_flow`. **The flow signal is
-    an assumption awaiting confirmation**: no signal existed, so the daemon has to publish
-    `auth_flow` (`"device"` | `"redirect"`) in `/api/config` *and* in `GetClientConfigResponse`
-    (the Tauri page reads the RPC mirror, and the spec covers only the JSON path).
+    prop, and `ClientConfig.authFlow` read from `/api/config`'s `auth_flow`.
+  - [x] Implemented (green, `20ec471e`). **Decision (developer):** `auth_flow`
+    (`"device"` | `"redirect"`) is declared on **both** config paths — `/api/config`
+    (`server.rs`, `main.rs`) and `GetClientConfigResponse.auth_flow` (`daemon_config.proto` field
+    10, `daemon_config_service.rs`) — both from the one `github_auth_flow` decision in `auth.rs`.
 
 ## Implementation Milestones
 
-- [ ] **M1** — base-URL seam in `RealGitHubProvider`; six error returns covered
-- [ ] **M2** — trait methods + `StubGitHubProvider`
-- [ ] **M3** — `auth.proto` RPCs and messages, regenerated
-- [ ] **M4** — device flow and polling state machine in `real.rs`
-- [ ] **M5** — the `:109` gate
-- [ ] **M6** — first-login enrolment, persistence, and the refusal path
-- [ ] **M7** — `tddy-web` sign-in screen
-- [ ] **M8** — `desktop.yaml.production` and the `tddy-desktop` docs that state the barriers
+- [x] **M1** — base-URL seam in `RealGitHubProvider`; six error returns covered
+- [x] **M2** — trait methods + `StubGitHubProvider`
+- [x] **M3** — `auth.proto` RPCs and messages, regenerated
+- [x] **M4** — device flow and polling state machine in `real.rs`
+- [x] **M5** — the `:109` gate
+- [x] **M6** — first-login enrolment, persistence, and the refusal path
+- [x] **M7** — `tddy-web` sign-in screen
+- [ ] **M8** — `desktop.yaml.production` and the `tddy-desktop` docs that state the barriers — 🔲 pending the client id from the developer
 
 ## Testing Plan
 
@@ -360,28 +363,110 @@ package, and the single web spec. Whole-workspace green comes from CI.
   `cy.clock`-driven polling spec over the in-memory transport needs the same helper; it belongs in
   `cypress/support/` once a second spec wants it.
 
+### From @validate-changes (2026-09-23)
+
+- **Enrolment is reachable from the LiveKit common room.** Decide and fix before merge (V1 below).
+- Bound `RealGitHubProvider::device_poll_intervals`: an attempt abandoned before a terminal answer
+  never leaves the map (`real.rs:303`, `:202`).
+- Floor the client's poll interval: a `SLOW_DOWN` carrying `interval_seconds: 0` makes the poll loop
+  spin with no delay (`useAuth.ts:317`).
+- `admit` does synchronous file I/O under a `std::sync::Mutex` on an async RPC task
+  (`first_login_admission.rs:43`, `live_users.rs` `enrol_first_login`). It happens once per
+  deployment, so this is acceptable, but `spawn_blocking` would be the tidy shape.
+
+## Validation Results
+
+**Run:** `/validate-changes`, 2026-09-23, `pr-509-green` @ `bba454da` (= `origin/feature/keyring/desktop-login`).
+
+### Stack gate
+
+| Check | Result |
+|---|---|
+| Stack branch | Yes, planned (base `origin/feature/keyring/signing-key`, #508) |
+| `/pr-stack-rebase` | ✅ Already current: the base tip is an ancestor of `HEAD` |
+| Leak check (`origin/feature/keyring/signing-key..HEAD`) | ✅ Clean: exactly this PR's 7 commits (`f45d3bc3` … `bba454da`) |
+| Diff contains only this PR's files | ✅ 64 files, all claimed by an item here (the `os_user_for_github` return-type ripple included) |
+| Parent-owned files intact | ✅ No deletions; `signing_key.rs` and `session_token_v2.rs` untouched |
+
+### Stack boundary
+
+| Check | Result |
+|---|---|
+| Changeset items implemented or deferred | ⚠ 1 open: M8 (`desktop.yaml.production`), deferred for the developer's client id |
+| `## Responsibility` delivered | ✅ No stubs. The only new `TODO` is recorded (`first_login_enrolment.rs:84`, comments lost on rewrite) |
+| `## Dependencies` not implemented here | ✅ Clean. Consumes #508's `SessionTokens`, `load_signing_key`, `build_auth_entries_with` and the `v2` signer without editing them |
+| `## Boundaries` respected | ✅ No second-account path; `os_user_for_github` has no default arm; `auth.rs` and `config.rs` not split |
+| No dependent's behaviour | ✅ Clean. Nothing from 3/9 (token store) or 8/9 (link-github) |
+
+### Build and tests (scoped)
+
+| Package | Build | Tests |
+|---|---|---|
+| tddy-github | ✅ clean, no warnings | ⚠ not run: disk full (see below) |
+| tddy-service | ✅ clean | ⚠ not run |
+| tddy-daemon-kernel | ✅ clean | ⚠ not run |
+| tddy-daemon-auth | ✅ clean | ⚠ not run |
+| tddy-daemon | ✅ clean | ⚠ not run (targeted: `first_login_enrolment_acceptance`, `server_options_acceptance`, `daemon_config_service`, `test_placement`) |
+| tddy-coder, tddy-host-service, tddy-worktree-service, tddy-telegram, tddy-session-lifecycle | ✅ clean (the return-type ripple compiles) | not run. The known session-lifecycle sandbox red belongs to the parent, not this PR |
+| tddy-web `DeviceLoginAcceptance.cy.tsx` | n/a | ✅ **22/22** passing |
+
+⚠ **Blocked:** the machine's Data volume filled up during the scoped `cargo test` / `cargo clippy`
+run (407 MiB free, `ENOSPC` creating `target/debug/.fingerprint`). Build artifacts were not deleted
+without consent. Re-run after freeing space:
+`./test -p tddy-github -p tddy-daemon-auth -p tddy-daemon-kernel -p tddy-service`, the four targeted
+`tddy-daemon` suites, and `cargo clippy -p <pkg> --all-targets -- -D warnings` for each. Or read CI.
+
+### Risks
+
+| # | Severity | Where | Finding |
+|---|---|---|---|
+| V1 | 🔴 High (security) | `runtime.rs:1467-1470`, `runtime.rs:584`, `first_login_admission.rs:43` | An embedded daemon serves **every** entry, `auth.AuthService` included, on the LiveKit common room, and it attaches enrolment to that same service. On an **unenrolled** desktop that has a `livekit:` block, any room peer can run `StartDeviceLogin` / `PollDeviceLogin` with its own GitHub account. It then becomes the one enrolled operator, mapped to the desktop's OS user. A fresh install has no `livekit:`, but an install that got past barrier 2 and stalled at barrier 3 has exactly that shape. Proposal: enrol only for a login that arrives over the in-process (Tauri) bridge, or refuse enrolment while the common room is served. No test covers either transport. |
+| V2 | 🟠 Medium | `first_login_enrolment.rs:84` | The first login rewrites `~/.tddy/desktop.yaml` via `serde_yaml::Value` and **strips every comment**, including the whole explanatory header `desktop.yaml.production` renders. Recorded as a TODO, but it hits every desktop on its first run. |
+| V3 | 🟠 Medium | `desktop.yaml.production:90-92` | M8 is not done, so the last acceptance criterion (a fresh install signs in with no edit) is unmet, and the file still tells operators to add a `client_secret`. |
+| V4 | 🟡 Low | `real.rs:303`, `real.rs:202` | `device_poll_intervals` gains an entry for every started (or slowed-down) device code and loses it only on a terminal answer, so abandoned attempts accumulate. `StartDeviceLogin` is unauthenticated, though every entry costs a successful GitHub call. |
+| V5 | 🟡 Low | `useAuth.ts:317` | `SLOW_DOWN` with `interval_seconds: 0` sets `intervalMs = 0`, so polling spins. The real provider never sends 0; this is defence in depth. |
+| V6 | 🟡 Low | `DaemonConfig.users` (`config.rs:341`) | Cloning a `DaemonConfig` now **shares** `users:`. Every current clone site wants that, but it is a semantic change to `Clone` that a future caller could trip over (a config cloned for a scratch edit shares the live rows). |
+| V7 | ℹ Info | `DeviceLoginPanel.tsx:23` | The verification link uses `target="_blank"` inside the Tauri webview. It relies on `tauri-plugin-opener`'s link handling (`lib.rs:76`), as other dashboard links already do. Not exercised by any test, and still to confirm on the desktop. |
+| V8 | ℹ Info | PRD § Technical Impact | OAuth App was chosen, but the device-flow response has not been checked against the live API for the absence of an expiring `refresh_token`. |
+
+### Changeset sync
+
+| Item | Was | Now |
+|---|---|---|
+| Draft PR contract | 🔲 | ✅ `9279fb17` |
+| M1 seam + error returns | 🔲 | ✅ all 7 covered (`real_provider_over_http.rs`) |
+| M2–M7 | 🔲 | ✅ |
+| M8 | 🔲 | 🔲 pending the client id |
+| Web flow signal "awaiting confirmation" | assumption | ✅ decided: `auth_flow` on both config paths |
+| Decisions | 🔲 | ⚠ OAuth App plus rendered id decided; live-API check owed |
+| Package documentation | 🔲 | 🔲 still none (`tddy-github/docs/device-flow.md` absent), left for wrap |
+| Acceptance criteria | 0/10 | 9/10 (fresh-install criterion blocked on M8) |
+| — | — | 🆕 `LoginAdmission` seam (`auth_service.rs:45`), `LiveUsers` (`live_users.rs`), `GitHubAuthFlow` / `auth_flow` on `/api/config` and `GetClientConfig`, `RealGitHubProvider::new_public*` |
+
 ## Acceptance Criteria
 
-- [ ] A daemon configured with **`client_id` only** registers `auth.AuthService` and serves `StartDeviceLogin`
-- [ ] `StartDeviceLogin` returns a `user_code` and `verification_uri`, and no client secret is sent
-- [ ] `PollDeviceLogin` returns `pending` until approval, then the same triple `ExchangeCode` returns
-- [ ] `slow_down`, `expired_token` and `access_denied` are honoured as distinct states
-- [ ] The **first** login on an empty `users:` is enrolled against the running OS user and persisted
-- [ ] A **second, different** login on an enrolled deployment is refused — no fallback
-- [ ] `os_user_for_github` is unchanged and has no default arm
-- [ ] `client_id` + `client_secret` still serves the redirect flow unchanged
-- [ ] `RealGitHubProvider` takes a base URL; `exchange_code`'s six error returns are covered
-- [ ] A fresh `./install --desktop` reaches a signed-in dashboard with **no file edited by hand**
+- [x] A daemon configured with **`client_id` only** registers `auth.AuthService` and serves `StartDeviceLogin`
+- [x] `StartDeviceLogin` returns a `user_code` and `verification_uri`, and no client secret is sent
+- [x] `PollDeviceLogin` returns `pending` until approval, then the same triple `ExchangeCode` returns
+- [x] `slow_down`, `expired_token` and `access_denied` are honoured as distinct states
+- [x] The **first** login on an empty `users:` is enrolled against the running OS user and persisted
+- [x] A **second, different** login on an enrolled deployment is refused — no fallback
+      (**decision, developer:** the login itself is minted and is **not** enrolled; every
+      token-gated RPC it calls is refused `permission_denied`, as before — `first_login_admission.rs:63-70`)
+- [x] `os_user_for_github` is unchanged and has no default arm
+- [x] `client_id` + `client_secret` still serves the redirect flow unchanged
+- [x] `RealGitHubProvider` takes a base URL; `exchange_code`'s six error returns are covered
+- [ ] A fresh `./install --desktop` reaches a signed-in dashboard with **no file edited by hand** — 🔲 blocked on M8
 
 ## TODO
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Publish the draft-PR contract — wave 2
-- [ ] M1 — the seam (do this first)
-- [ ] M2–M8
-- [ ] Answer the OAuth App / GitHub App question against the live API
-- [ ] Decide and record the client-id placement
+- [x] Publish the draft-PR contract — wave 2
+- [x] M1 — the seam (do this first)
+- [~] M2–M8 — M2–M7 done; M8 pending the client id
+- [~] Answer the OAuth App / GitHub App question against the live API — **OAuth App** decided; live-API check still owed
+- [x] Decide and record the client-id placement — rendered into `desktop.yaml.production`
 - [ ] Package documentation for the six affected packages
 - [ ] `/wrap-context-docs` — deletes `2026-09-18-desktop-install-configures-no-identity.md` and the
       `missing-tests-real-exchange-code` record this node claims
