@@ -16,13 +16,14 @@ use pretty_assertions::assert_eq;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
+use tddy_daemon_rpc::test_util::{test_service, TestDaemon};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, AttachSessionAgentRequest, CancelAgentConversationRequest,
     OpenAgentConversationRequest, PromptAgentConversationRequest, SessionAgentService as _,
 };
-use tddy_session_lifecycle::test_util::{test_service, TestDaemon, TEST_TOKEN};
+use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
 // ---------------------------------------------------------------------------
 // Builders

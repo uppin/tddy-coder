@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_model_registry::{ModelRegistryStore, NewAssistant, NewProvider};
 use tddy_rpc::{Code, Request};
@@ -18,7 +19,6 @@ use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest, Subagen
 use tddy_service::proto::models::ProviderKind;
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TestDaemon;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -181,7 +181,7 @@ async fn a_daemon_with_a_registry() -> Harness {
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
-    let service = TestDaemon::from_arc(Arc::new(
+    let service = TestDaemon::from_host(
         DaemonSessionHost::new(
             config,
             sessions_base_resolver,
@@ -193,7 +193,7 @@ async fn a_daemon_with_a_registry() -> Harness {
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
         )
         .with_model_registry(Arc::clone(&store)),
-    ));
+    );
 
     Harness {
         _dir: dir,

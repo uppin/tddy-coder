@@ -8,12 +8,13 @@
 
 use std::sync::Arc;
 
+use tddy_discovery::CatalogServiceImpl;
 use tddy_projects::ProjectServiceImpl;
 use tddy_rpc::ServiceEntry;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::{DaemonRpcFamilies, PrStackHandler};
 
-use crate::ProjectRpcHandler;
+use crate::{CatalogRpcHandler, ProjectRpcHandler};
 
 /// Every family served from this crate, each built from the same host.
 ///
@@ -21,6 +22,7 @@ use crate::ProjectRpcHandler;
 #[derive(Clone)]
 pub struct RpcHandlers {
     project: Arc<ProjectRpcHandler>,
+    catalog: Arc<CatalogRpcHandler>,
 }
 
 impl RpcHandlers {
@@ -29,6 +31,7 @@ impl RpcHandlers {
     pub fn from_host(host: &DaemonSessionHost) -> Self {
         Self {
             project: Arc::new(ProjectRpcHandler::from_host(host)),
+            catalog: Arc::new(CatalogRpcHandler::from_host(host)),
         }
     }
 
@@ -48,10 +51,19 @@ impl RpcHandlers {
         ProjectServiceImpl::new(Arc::clone(&self.project))
     }
 
+    /// `catalog.CatalogService`, answered by the shared [`CatalogRpcHandler`].
+    #[must_use]
+    pub fn catalog_service(&self) -> CatalogServiceImpl<CatalogRpcHandler> {
+        CatalogServiceImpl::new(Arc::clone(&self.catalog))
+    }
+
     /// The transport entries of every family served from this crate.
     #[must_use]
     pub fn entries(&self) -> Vec<ServiceEntry> {
-        vec![tddy_projects::build_project_entry(self.project_service())]
+        vec![
+            tddy_discovery::build_catalog_entry(self.catalog_service()),
+            tddy_projects::build_project_entry(self.project_service()),
+        ]
     }
 }
 

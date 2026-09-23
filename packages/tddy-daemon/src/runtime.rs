@@ -286,9 +286,7 @@ type BinaryLocalSocketServices = crate::local_socket_server::LocalSocketServices
     tddy_terminal_rpc::TerminalSessionServiceImpl,
     tddy_session_lifecycle::connection_service::PeerRoutedSessionAgents,
     tddy_session_lifecycle::connection_service::PeerRoutedActivity,
-    tddy_discovery::CatalogServiceImpl<
-        tddy_session_lifecycle::connection_service::DaemonSessionHost,
-    >,
+    tddy_discovery::CatalogServiceImpl<tddy_daemon_rpc::CatalogRpcHandler>,
     tddy_tool_engine::ExecToolServiceImpl<
         tddy_session_lifecycle::connection_service::DaemonSessionHost,
     >,
@@ -1092,7 +1090,7 @@ pub async fn build(
                         Arc::new(connection_arc.activity_service()),
                     ),
                     catalog: tddy_service::proto::catalog::CatalogServiceTonicAdapter::new(
-                        Arc::new(connection_arc.catalog_rpc_service()),
+                        Arc::new(rpc_handlers.catalog_service()),
                     ),
                     exec_tools: tddy_service::proto::exec_tools::ExecToolServiceTonicAdapter::new(
                         Arc::new(connection_arc.exec_tool_rpc_service()),
@@ -1133,9 +1131,6 @@ pub async fn build(
         // above.
         rpc_entries.push(connection_arc.activity_entry());
 
-        // CatalogService — tools, agents, models and subagents (`tddy-discovery`).
-        rpc_entries.push(connection_arc.catalog_entry());
-
         // ExecToolService — execute, stream, list tools and session tool calls (`tddy-tool-engine`).
         rpc_entries.push(connection_arc.exec_tool_entry());
 
@@ -1145,8 +1140,9 @@ pub async fn build(
         // SessionService — family C (`tddy-session-lifecycle`).
         rpc_entries.push(connection_arc.session_lifecycle_entry());
 
-        // The families served from `tddy-daemon-rpc` — today ProjectService, family D
-        // (`tddy-projects`) — through the same handlers the host's session rooms serve.
+        // The families served from `tddy-daemon-rpc` — today CatalogService (tools, agents, models
+        // and subagents, `tddy-discovery`) and ProjectService, family D (`tddy-projects`) — through
+        // the same handlers the host's session rooms serve.
         rpc_entries.extend(rpc_handlers.entries());
 
         // DemoVmService — family O (`tddy-vm` coordinate, host logic on the session host).

@@ -11,11 +11,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
-use tddy_service::proto::catalog::{
-    CatalogService, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
-    ListAgentsResponse, ListSubagentsRequest, ListSubagentsResponse, ListToolsRequest,
-    ListToolsResponse,
-};
 use tddy_service::proto::exec_tools::{
     ExecToolService, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
     ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
@@ -62,6 +57,16 @@ pub fn test_config() -> DaemonConfig {
 }
 
 fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
+    let service = Arc::new(test_host(sessions_base));
+    service.install_sandbox_rpc_bridge();
+    service
+}
+
+/// The host [`test_service`] wraps, before it goes behind its `Arc` — for a suite above this crate
+/// that must install more on it first (`tddy-daemon-rpc`'s families), and then calls
+/// [`DaemonSessionHost::install_sandbox_rpc_bridge`] itself, as [`test_service`] does.
+#[must_use]
+pub fn test_host(sessions_base: PathBuf) -> DaemonSessionHost {
     let config = test_config();
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -73,7 +78,7 @@ fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
             None
         }
     });
-    let service = Arc::new(DaemonSessionHost::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -82,13 +87,12 @@ fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
         None,
         None,
         Arc::new(CliSessionManager::new()),
-    ));
-    service.install_sandbox_rpc_bridge();
-    service
+    )
 }
 
-/// Daemon under test: the connection service plus the catalogue, exec-tool and PR-stack families
-/// unbundled onto their own coordinates (`#unbundle` node 8).
+/// Daemon under test: the connection service plus the exec-tool and PR-stack families unbundled
+/// onto their own coordinates (`#unbundle` node 8). The catalogue and project families are served
+/// by `tddy-daemon-rpc`, whose own `test_util::TestDaemon` answers them.
 #[derive(Clone)]
 pub struct TestDaemon {
     inner: Arc<DaemonSessionHost>,
@@ -265,43 +269,6 @@ impl SessionService for TestDaemon {
         self.inner
             .session_lifecycle_service()
             .get_worktree_snapshot(request)
-            .await
-    }
-}
-
-#[async_trait]
-impl CatalogService for TestDaemon {
-    async fn list_tools(
-        &self,
-        request: Request<ListToolsRequest>,
-    ) -> Result<Response<ListToolsResponse>, Status> {
-        self.inner.catalog_rpc_service().list_tools(request).await
-    }
-
-    async fn list_agents(
-        &self,
-        request: Request<ListAgentsRequest>,
-    ) -> Result<Response<ListAgentsResponse>, Status> {
-        self.inner.catalog_rpc_service().list_agents(request).await
-    }
-
-    async fn list_agent_models(
-        &self,
-        request: Request<ListAgentModelsRequest>,
-    ) -> Result<Response<ListAgentModelsResponse>, Status> {
-        self.inner
-            .catalog_rpc_service()
-            .list_agent_models(request)
-            .await
-    }
-
-    async fn list_subagents(
-        &self,
-        request: Request<ListSubagentsRequest>,
-    ) -> Result<Response<ListSubagentsResponse>, Status> {
-        self.inner
-            .catalog_rpc_service()
-            .list_subagents(request)
             .await
     }
 }
@@ -526,7 +493,6 @@ pub async fn serve_daemon_rpc_participant(
             service.session_files_entry(),
             service.session_agents_entry(),
             service.activity_entry(),
-            service.catalog_entry(),
             service.exec_tool_entry(),
             service.pr_stack_entry(),
             service.session_lifecycle_entry(),

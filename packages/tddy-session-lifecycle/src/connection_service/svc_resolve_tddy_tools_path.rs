@@ -58,10 +58,7 @@ impl DaemonSessionHost {
     }
 
     pub(crate) fn resolve_tddy_tools_path(&self) -> Result<PathBuf, Status> {
-        self.config.toolchain().binary("tddy-tools").map_err(|e| {
-            log::error!("resolve_tddy_tools_path: {e}");
-            Status::failed_precondition(e.to_string())
-        })
+        resolve_tddy_tools_path(&self.config)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -116,7 +113,7 @@ impl DaemonSessionHost {
                 tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,
             ),
             task_registry,
-            idle_tracker: None,
+            rpc_activity: crate::relay_idle::RpcActivity::default(),
             room_roster,
             roster_keepalive_interval: ROSTER_KEEPALIVE_INTERVAL,
             demo_vm_state,
@@ -321,7 +318,7 @@ impl DaemonSessionHost {
         mut self,
         tracker: Arc<crate::relay_idle::IdleTimeoutTracker>,
     ) -> Self {
-        self.idle_tracker = Some(tracker);
+        self.rpc_activity = crate::relay_idle::RpcActivity::on(tracker);
         self
     }
 
@@ -412,9 +409,7 @@ impl DaemonSessionHost {
 
     /// Record RPC activity in the idle-timeout tracker, if one is attached.
     pub(crate) fn record_rpc_activity(&self) {
-        if let Some(ref tracker) = self.idle_tracker {
-            tracker.record_activity();
-        }
+        self.rpc_activity.record();
     }
 
     /// Start the presenter observer for a freshly spawned workflow session: the injected
@@ -458,4 +453,14 @@ impl DaemonSessionHost {
             grpc_port,
         );
     }
+}
+
+/// [`DaemonSessionHost::resolve_tddy_tools_path`] over the one field it reads, so a family handler
+/// above this crate (`tddy-daemon-rpc`'s catalogue, probing an agent's models) resolves the binary
+/// exactly the way session start does, without holding the host.
+pub fn resolve_tddy_tools_path(config: &DaemonConfig) -> Result<PathBuf, Status> {
+    config.toolchain().binary("tddy-tools").map_err(|e| {
+        log::error!("resolve_tddy_tools_path: {e}");
+        Status::failed_precondition(e.to_string())
+    })
 }

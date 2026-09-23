@@ -104,11 +104,10 @@ fn start_local_socket_server(
 
     let uid_to_username: UidToUsername = Arc::new(username_for_uid);
     let connection = test_service(sessions_base).as_arc();
+    let rpc_handlers = tddy_daemon_rpc::RpcHandlers::from_host(&connection);
     let session_adapter =
         SessionServiceTonicAdapter::new(Arc::new(connection.session_lifecycle_service()));
-    let project_adapter = ProjectServiceTonicAdapter::new(Arc::new(
-        tddy_daemon_rpc::RpcHandlers::from_host(&connection).project_service(),
-    ));
+    let project_adapter = ProjectServiceTonicAdapter::new(Arc::new(rpc_handlers.project_service()));
     let demo_vm_adapter = DemoVmServiceTonicAdapter::new(Arc::new(
         tddy_session_lifecycle::connection_service::DemoVmServiceImpl::new(Arc::clone(&connection)),
     ));
@@ -143,8 +142,7 @@ fn start_local_socket_server(
         SessionAgentServiceTonicAdapter::new(Arc::new(connection.session_agents_service()));
     let activity_adapter =
         ActivityServiceTonicAdapter::new(Arc::new(connection.activity_service()));
-    let catalog_adapter =
-        CatalogServiceTonicAdapter::new(Arc::new(connection.catalog_rpc_service()));
+    let catalog_adapter = CatalogServiceTonicAdapter::new(Arc::new(rpc_handlers.catalog_service()));
     let exec_tool_adapter =
         ExecToolServiceTonicAdapter::new(Arc::new(connection.exec_tool_rpc_service()));
     let pr_stack_adapter =

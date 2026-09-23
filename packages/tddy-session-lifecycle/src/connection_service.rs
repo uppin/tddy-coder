@@ -10,7 +10,6 @@ use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::validate_session_id_segment;
 use tddy_core::Changeset;
 use tddy_rpc::{Response, Status};
-use tddy_service::proto::catalog::{ListAgentModelsResponse, ModelInfo as CatalogModelInfo};
 use tddy_service::proto::session::{
     start_session_event::Event as StartSessionEventKind, AttachmentMaterializationProgress,
     SessionAttachment, StartSessionEvent,
@@ -156,8 +155,9 @@ pub struct DaemonSessionHost {
         Arc<dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner>,
     /// Registry for Tasks created by tool invocations (every ExecuteTool call).
     task_registry: TaskRegistry,
-    /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
-    idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
+    /// The relay's idle tracker, when it has one — bumped on every RPC call, here and by the
+    /// families served above this crate, which hold the same one.
+    rpc_activity: crate::relay_idle::RpcActivity,
     /// Reader for the LiveKit server's rooms and their participants. `StreamLiveKitRooms` left for
     /// `livekit.LiveKitService`; what still reads the roster here is agent-clone provisioning,
     /// which needs to know whether a session's room already exists.
@@ -248,6 +248,7 @@ mod seeded_clone_guard;
 pub use seeded_clone_guard::*;
 
 mod svc_resolve_tddy_tools_path;
+pub use svc_resolve_tddy_tools_path::resolve_tddy_tools_path;
 
 mod svc_pr_status_for_caller;
 
@@ -258,6 +259,8 @@ pub use hooks_and_urls::*;
 
 mod agent_roster;
 pub(crate) use agent_roster::*;
+/// Shared with `tddy-daemon-rpc`'s `ListSubagents`, whose rows name agents the way the roster does.
+pub use agent_roster::{def_tool_names, qualified_agent_id};
 
 #[allow(clippy::too_many_arguments)]
 async fn spawn_claude_cli_session_inner(
@@ -669,6 +672,7 @@ async fn spawn_claude_cli_session_inner(
 }
 
 mod svc_resolve_listed_worktree;
+pub use svc_resolve_listed_worktree::resolvable_agent_defs;
 
 mod terminal_bridge_impl;
 
@@ -1308,7 +1312,6 @@ pub use family_proto_bridge::wire_same;
 /// The host state `tddy-daemon-rpc`'s family handlers are built from.
 mod handler_state;
 mod session_coordinate_handlers;
-mod svc_catalog_ports;
 mod svc_exec_tool_ports;
 mod svc_family_entries;
 mod svc_pr_stack_ports;
@@ -1740,70 +1743,6 @@ fn pr_state_label(
     }
 }
 
-/// TTL for the per-(agent, daemon) model-probe cache. A probe spawns a subprocess and may hit the
-/// network, so results are cached briefly to avoid re-probing on every agent toggle in the UI.
-const AGENT_MODELS_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
-
-#[allow(clippy::type_complexity)]
-static AGENT_MODELS_CACHE: std::sync::OnceLock<
-    std::sync::Mutex<
-        std::collections::HashMap<String, (std::time::Instant, ListAgentModelsResponse)>,
-    >,
-> = std::sync::OnceLock::new();
-
-fn agent_models_cache() -> &'static std::sync::Mutex<
-    std::collections::HashMap<String, (std::time::Instant, ListAgentModelsResponse)>,
-> {
-    AGENT_MODELS_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-}
-
-/// Build the `tddy-tools list-models` argv for an agent probe. Always `["list-models", "--agent",
-/// <agent>]`; appends `["--cursor-cli-path", <path>]` only when probing `cursor` with a resolved
-/// path, so the impersonated child execs the fully-qualified binary instead of a PATH lookup.
-fn list_models_probe_args(agent: &str, cursor_cli_path: Option<&std::path::Path>) -> Vec<String> {
-    let mut args = vec![
-        "list-models".to_string(),
-        "--agent".to_string(),
-        agent.to_string(),
-    ];
-    if agent == "cursor" {
-        if let Some(path) = cursor_cli_path {
-            args.push("--cursor-cli-path".to_string());
-            args.push(path.to_string_lossy().into_owned());
-        }
-    }
-    args
-}
-
-/// Parse the JSON stdout of `tddy-tools list-models --agent <id>`
-/// (`{"models":[{"id":..,"label":..}],"default_model":".."}`) into a `ListAgentModelsResponse`.
-/// Malformed output is a hard error — a failed probe must not look like an empty catalog.
-fn parse_agent_models_json(stdout: &str) -> Result<ListAgentModelsResponse, Status> {
-    #[derive(serde::Deserialize)]
-    struct ModelJson {
-        id: String,
-        label: String,
-    }
-    #[derive(serde::Deserialize)]
-    struct ModelsJson {
-        models: Vec<ModelJson>,
-        default_model: String,
-    }
-    let parsed: ModelsJson = serde_json::from_str(stdout.trim())
-        .map_err(|e| Status::internal(format!("failed to parse list-models output: {e}")))?;
-    Ok(ListAgentModelsResponse {
-        models: parsed
-            .models
-            .into_iter()
-            .map(|m| CatalogModelInfo {
-                id: m.id,
-                label: m.label,
-            })
-            .collect(),
-        default_model: parsed.default_model,
-    })
-}
-
 #[cfg(test)]
 mod signal_session_unit_tests;
 
@@ -1842,9 +1781,6 @@ mod add_planned_pr_unit_tests;
 /// alongside it only as a fallback route back to the branch.
 #[cfg(test)]
 mod stack_child_link_tests;
-
-#[cfg(test)]
-mod list_agent_models_parse_tests;
 
 #[cfg(test)]
 mod start_session_binary_resolution_tests;
@@ -1901,9 +1837,6 @@ mod sandbox_claude_passthrough_args_tests;
 
 #[cfg(test)]
 mod conversation_spawn_wiring_tests;
-
-#[cfg(test)]
-mod list_agent_models_probe_tests;
 
 #[cfg(test)]
 mod remote_branch_push_gating_tests;

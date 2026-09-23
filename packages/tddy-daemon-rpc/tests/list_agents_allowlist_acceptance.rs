@@ -5,11 +5,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::catalog::{CatalogService, ListAgentsRequest, ListToolsRequest};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TestDaemon;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -33,7 +33,7 @@ fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> TestDaem
             None
         }
     });
-    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
+    TestDaemon::from_host(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -42,7 +42,7 @@ fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> TestDaem
         None,
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
-    )))
+    ))
 }
 
 /// **daemon_config_allowed_agents_deserializes**: YAML `allowed_agents` yields expected ids/labels;
