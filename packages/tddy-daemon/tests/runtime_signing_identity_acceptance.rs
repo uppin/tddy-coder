@@ -1,7 +1,7 @@
 //! Acceptance: the daemon `runtime::build` assembles advertises, on its common room, the key it signs
 //! session tokens with.
 //!
-//! Product contract: `docs/ft/daemon/1-WIP/PRD-2026-09-19-keyring-signing-key.md`.
+//! Product contract: `docs/ft/daemon/session-auth.md` § Token model.
 //!
 //! The cross-host suites wire a key directory and an advertised key by hand, the way `runtime.rs`
 //! does — so a regression in the runtime's own wiring (a daemon that advertises no key, or one other

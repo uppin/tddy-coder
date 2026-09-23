@@ -1,7 +1,7 @@
 //! Acceptance: a daemon believes a signing key only from another daemon.
 //!
-//! Product contract: `docs/ft/daemon/1-WIP/PRD-2026-09-19-keyring-signing-key.md` and
-//! `docs/ft/daemon/livekit-peer-discovery.md` § Trust and security.
+//! Product contract: `docs/ft/daemon/session-auth.md` and
+//! `docs/ft/daemon/livekit-peer-discovery.md` § Trust model.
 //!
 //! A daemon verifies a peer's session token against the key that peer advertises on the common
 //! room. The advertisement is self-declared metadata, so what makes it trustworthy is *who* may
