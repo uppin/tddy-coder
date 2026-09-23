@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tddy_rpc::{Request, Response, Status};
 
 use crate::participant_identity::{
-    may_be_daemon_discovery_identity, BROWSER_IDENTITY_PREFIXES, RESERVED_DAEMON_IDENTITY_PREFIX,
+    may_be_daemon_discovery_identity, NON_DAEMON_IDENTITY_PREFIXES, RESERVED_DAEMON_IDENTITY_PREFIX,
 };
 use crate::proto::token::{
     GenerateTokenRequest, GenerateTokenResponse, RefreshTokenRequest, RefreshTokenResponse,
@@ -112,11 +112,10 @@ fn refuse_reserved_identity(identity: &str) -> Result<(), Status> {
 /// the room. The rule is that function's, not a list kept here, so the two sides cannot drift.
 fn refuse_daemon_discovery_identity(identity: &str) -> Result<(), Status> {
     if may_be_daemon_discovery_identity(identity) {
-        let [web, browser] = BROWSER_IDENTITY_PREFIXES;
         return Err(Status::permission_denied(format!(
             "identity \"{identity}\" could be taken for a daemon's common-room participant, whose \
-             advertisement peers trust; a client identity must begin with \"{web}\" or \
-             \"{browser}\""
+             advertisement peers trust; a client identity must begin with one of {:?}",
+            NON_DAEMON_IDENTITY_PREFIXES
         )));
     }
     Ok(())

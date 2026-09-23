@@ -316,12 +316,12 @@ pub fn authorize_exec_tool_caller<'c>(
     let local_instance_id = local_instance_id_for_config(config);
     let Some(github_user) = (user_resolver)(&req.session_token) else {
         log::warn!(
-            "exec tool {tool:?} for session {session} refused on daemon {local_instance_id}: the session token could not be verified here (a split session's agent presents a token minted by its agent daemon, so both daemons must share livekit.api_secret)",
+            "exec tool {tool:?} for session {session} refused on daemon {local_instance_id}: the session token could not be verified here (a split session's agent presents a token its agent daemon signed with its own key, so this daemon must have seen that daemon's signing key advertised in the common room)",
             tool = req.tool_name,
             session = req.session_id
         );
         return Err(Status::unauthenticated(format!(
-            "daemon {local_instance_id} could not verify the session token (invalid or expired there); a split session's tools run on the daemon holding the codebase, which verifies the token with its own livekit.api_secret"
+            "daemon {local_instance_id} could not verify the session token (invalid or expired there); a split session's tools run on the daemon holding the codebase, which verifies the token against the agent daemon's signing key as advertised in the common room"
         )));
     };
     let Some(os_user) = config.os_user_for_github(&github_user) else {

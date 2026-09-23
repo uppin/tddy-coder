@@ -789,6 +789,108 @@ every auth path). No `todo!()` or `unimplemented!()` in the touched `src/`. No `
 plan: the plan's cross-daemon acceptance assertion ("B's key directory recorded a lookup for A's
 key id") is not asserted. No test covers the trust anchor, meaning who may advertise a key.
 
+#### Final validation (step 5)
+
+**Run:** 2026-09-23 · `21b11f78` (pushed; the remote tip matches) · base `master` (`77187dbe`) ·
+`origin/master..HEAD` is 12 own commits · leak check ✅ · `git diff 77187dbe..HEAD --
+'*dependency_boundary*'` empty ✅ · `packages/*/docs/` edits are `code-issues/` records plus
+`tddy-github/docs/session-token.md` (developer-confirmed exception, § Affected Packages) ✅.
+**Verdict: ❌ NOT READY — 1 blocker (CI red), 2 should-fix, 3 nit.** The security fix holds.
+
+Scoped local runs: `tddy-service --lib` 113/113; `tddy-daemon-livekit --lib` 77/77;
+`tddy-daemon-auth` lib 67 plus `auth_storage_posture_warning` 2, `per_daemon_signing_identity` 3,
+`auth_without_livekit` 2 and `dependency_boundary_unit` 3, all passing; `tddy-daemon --lib
+common_room_key_directory` 3/3; `common_room_key_trust_acceptance` 3/3 and
+`runtime_signing_identity_acceptance` 1/1 on a fresh testcontainer. **`tddy-daemon --test
+test_placement` 3/4 ❌** (see the blocker). CI on `21b11f78`: Rust tests 7148/7149, and the one
+failure is that same test. Generated code, build, lint, arm64, the VM jobs and Web (2690/2690)
+pass.
+
+**Earlier findings. Every one is resolved or deliberately left with a recorded reason**, except
+the stale operator message below. Verified in code: one predicate decides both sides, a test at
+each end pins it, `peer_signing_public_keys` returns every candidate, the key cache survives
+`clear()`, the stale-text sweep was done, `auth_pb.ts` is pushed, `publish` is gone, the
+`HOME`→`/root` rule is gone, the red-phase wording is gone, and the changeset header and package
+list are corrected. From validate-tests: the posture-warning test exists, B's lookup log is
+asserted, reuse checks bytes and mode, the refusal names `mode 644`, suites keep keys in tempdirs,
+and `runtime::build` has an advertising test. From clean-code and prod-ready: every item is done
+or left with a reason in § *`/pr-wrap` refactor pass*.
+
+**Adversarial check of `may_be_daemon_discovery_identity`: no bypass found.**
+- **Both sides call the same function on the same string.** The mint calls it on the requested
+  identity (`token_service.rs:114`), and discovery calls it on the raw LiveKit identity
+  (`livekit_peer_discovery.rs:618`).
+- **The mint allows exactly the complement of what discovery reads.** It refuses every identity
+  the predicate allows, so no string passes both sides, whatever its case, padding, zero-width or
+  full-width characters. `Web-x`, `ｗeb-x`, `\u{200B}web-x` and `""` all count as possibly a daemon,
+  so the mint refuses them. A padded `" web-x"` is trimmed by both sides the same way.
+- **Every registration of `token.TokenService` has this gate**, because the check is inside
+  `TokenServiceImpl::mint`. That covers the daemon's authenticated registration behind
+  `CommonRoomSwitch` and all three open registrations in `tddy-coder` (`run.rs:2000/3564/3692`).
+- **`MintLiveKitToken` is safe.** It generates `remote-git-<uuid>`, which is in the non-daemon set.
+- **The other mints stay out of discovery for other reasons:**
+  - Split agents use `split-agent-`, which is in the non-daemon set.
+  - Admission tokens use `daemon-<id>` and go into session rooms.
+  - Session-sync, PTY-relay, screen-capture and agent-clone mint with `api_secret`, whose holders
+    are already trusted.
+  - Telegram mints no LiveKit JWT.
+- **`common_room_key_trust_acceptance` really exercises the attack.** Allowing the bare id at the
+  mint fails the `refused` assertion. Dropping the `web-` check in discovery fails the `forged`
+  assertion.
+
+**Key cache (`common_room_key_directory.rs:39-104`).** No entry can be forged. `remember` runs
+only after `decode_advertised_key` has checked that `KeyId::of(key) == kid`, so a mismatched or
+malformed advertisement is never cached. Replacing a genuine key would need a second preimage of
+the truncated SHA-256 id. What the cache does add is a **revocation gap**. A learned key is
+trusted for the life of the verifying process. After a daemon leaves the room, after a host is
+removed, or after a key is compromised and the LiveKit credentials are rotated, every daemon that
+had verified one of its tokens keeps accepting new tokens from it until that daemon restarts.
+Before the cache, leaving the room ended trust. Under `v1`, only rotating `api_secret` across the
+whole fleet ended it. So the cache puts revocation back to roughly `v1` cost. It is acceptable for
+1/9, but it is recorded nowhere: neither the changeset, the PRD nor `docs/dev/todo/` contains
+"revoc".
+
+**Blocker**
+- ❌ **CI "Rust tests" is red: `tddy-daemon/tests/test_placement.rs:89`
+  `only_suites_that_exercise_this_crate_remain_here`.** It reports
+  `["common_room_key_trust_acceptance.rs", "runtime_signing_identity_acceptance.rs"]`. `BELONGS_HERE`
+  (`:47`) is a closed list, and the two suites this PR added are not in it. Both do exercise this
+  crate: the first uses `tddy_daemon::common_room_key_directory` and the second
+  `tddy_daemon::runtime::build`. **Fix:** add both to `BELONGS_HERE`, making it `[&str; 23]`, with a
+  comment saying they name modules this crate defines. The earlier scoped verification listed
+  `tddy-daemon` suites but not `test_placement`, so this was missed.
+
+**Should-fix**
+- **The operator-facing refusal still points at the old shared secret.** The log line at
+  `tddy-session-lifecycle/src/connection_service/svc_resolve_os_user.rs:135` says "both daemons
+  must share livekit.api_secret". The `Status` message at `:140` says the codebase host "verifies
+  the token with its own livekit.api_secret". The doc comment above them (`:122-124`) was updated,
+  but these strings were not. An operator following them would change the wrong setting. **Fix:**
+  say the codebase host has not learned the agent host's signing key, meaning the agent host is
+  not advertising on the same common room.
+- **The revocation gap described above is not recorded.** **Fix:** add a `docs/dev/todo/` record,
+  or a line under § *Decisions the plan left open*. Name the trade the cache makes, what revocation
+  costs now (restarting every verifier), and the options: expire learned entries a bounded time
+  after their advertiser was last seen, or add a revocation list to a later `#keyring` node.
+
+**Nit**
+- **The screen-share bridge joins the common room under an identity discovery reads.** It uses
+  `screenshare-host-<id>-<target>` (`tddy-screen-sharing/src/screen_sharing_service.rs:506`) and
+  holds only a metadata-capable JWT, not `api_secret`. The changeset's claim that every non-daemon
+  mint was swept misses it. The risk is low: the bridge runs as the daemon user and could already
+  read the key file. **Fix:** add `screenshare-host-` to `NON_DAEMON_IDENTITY_PREFIXES`. That only
+  narrows what discovery reads.
+- **The refusal text at `tddy-service/src/token_service.rs:117-121` is inaccurate.** It says a
+  client identity "must begin with `web-` or `browser-`", but the mint also allows `server…`,
+  `split-agent-…` and `remote-git-…`. The wider allowance was already there before this PR, and it
+  lets an authenticated caller take a session's `server` identity. Either narrow the mint to
+  `BROWSER_IDENTITY_PREFIXES`, or reword the message and record the pre-existing allowance.
+- **The `TODO(keyring)` at `tddy-vm-testkit/src/test_host_vm.rs:43` is this PR's own marker.** It
+  is acceptable to leave it: the crate is test-only and never shipped, the comment gives the
+  reason, and § *`/pr-wrap` refactor pass* records it. But nothing outside this changeset tracks
+  it, so it will be lost when the changeset is deleted at wrap. Move it to a `docs/dev/todo/`
+  record, or add it to the wrap-delta list.
+
 ### analyze-clean-code
 
 **Last run:** 2026-09-23 · **Score: 8/10 (B)** · scope: non-test source in `origin/master..HEAD`,

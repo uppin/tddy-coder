@@ -43,6 +43,11 @@ pub const SPLIT_AGENT_IDENTITY_PREFIX: &str = "split-agent-";
 /// read would be a client able to advertise a signing key.
 pub const REMOTE_GIT_IDENTITY_PREFIX: &str = "remote-git-";
 
+/// Prefix of the identity a daemon's screen-share bridge joins the common room under
+/// (`screenshare-host-<instance>-<target>`). Its room token may update its own metadata, so
+/// discovery must not read an advertisement from it.
+pub const SCREEN_SHARE_HOST_IDENTITY_PREFIX: &str = "screenshare-host-";
+
 /// Prefixes of the identities a browser joins a room under — dashboard presence (`web-…`) and the
 /// presenter's room (`browser-…`). The only identities a web client needs from `token.TokenService`.
 pub const BROWSER_IDENTITY_PREFIXES: [&str; 2] = ["web-", "browser-"];
@@ -55,13 +60,14 @@ pub const CODER_IDENTITY_PREFIX: &str = "server";
 /// Mirrors the web UI's `inferParticipantRole` (`tddy-web/src/lib/participantRole.ts`), which
 /// sorts the same prefixes into browser and coder rows; the remote-git and split-agent prefixes are
 /// not rows it draws, and it never trusts a key.
-pub const NON_DAEMON_IDENTITY_PREFIXES: [&str; 6] = [
+pub const NON_DAEMON_IDENTITY_PREFIXES: [&str; 7] = [
     BROWSER_IDENTITY_PREFIXES[0],
     BROWSER_IDENTITY_PREFIXES[1],
     CODER_IDENTITY_PREFIX,
     RESERVED_DAEMON_IDENTITY_PREFIX,
     SPLIT_AGENT_IDENTITY_PREFIX,
     REMOTE_GIT_IDENTITY_PREFIX,
+    SCREEN_SHARE_HOST_IDENTITY_PREFIX,
 ];
 
 /// Whether a participant under `identity` could be a daemon's discovery participant — the one
@@ -99,6 +105,7 @@ mod tests {
             "daemon-udoo",
             "split-agent-s1",
             "remote-git-0b6f",
+            "screenshare-host-udoo-display-1",
         ];
 
         // When each is classified

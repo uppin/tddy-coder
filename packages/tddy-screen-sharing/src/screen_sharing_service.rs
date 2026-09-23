@@ -504,7 +504,12 @@ fn host_bridge_key(daemon_instance_id: &str, target_id: &str) -> String {
 /// Carries the host id because every host's bridge publishes into the *same* common room; without
 /// it, two hosts streaming at once would collide on one identity.
 fn host_bridge_identity(daemon_instance_id: &str, target_id: &str) -> String {
-    format!("screenshare-host-{}-{}", daemon_instance_id, target_id)
+    format!(
+        "{}{}-{}",
+        tddy_service::SCREEN_SHARE_HOST_IDENTITY_PREFIX,
+        daemon_instance_id,
+        target_id
+    )
 }
 
 fn screenshare_track_name(target_id: &str) -> String {

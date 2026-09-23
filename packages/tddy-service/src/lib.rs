@@ -39,7 +39,8 @@ pub use echo_service::{create_echo_bridge, EchoServiceImpl};
 pub use loopback_tunnel_service::LoopbackTunnelServiceImpl;
 pub use observer_service::PresenterObserverService;
 pub use participant_identity::{
-    may_be_daemon_discovery_identity, RESERVED_DAEMON_IDENTITY_PREFIX, SPLIT_AGENT_IDENTITY_PREFIX,
+    may_be_daemon_discovery_identity, RESERVED_DAEMON_IDENTITY_PREFIX,
+    SCREEN_SHARE_HOST_IDENTITY_PREFIX, SPLIT_AGENT_IDENTITY_PREFIX,
 };
 pub use presenter_intent_service::PresenterIntentService;
 pub use proto::acp::{AcpService, AcpServiceServer};
