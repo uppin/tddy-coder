@@ -11,19 +11,19 @@
 //!   plain-http LAN origin, so it stays an identity assertion only.
 //!
 //! The token is retained in the operator's own credential vault (`tddy-credentials`), sealed under
-//! a key derived from the login credential itself — so these tests read it back the way the next
-//! login would, by opening the vault with the same credential.
+//! a key derived from the operator's passphrase. A first login has no vault yet, so its token waits
+//! in memory until a passphrase creates one — these tests read it back the way the operator would,
+//! by choosing that passphrase and then reading the vault.
 //!
 //! PRD: docs/ft/coder/pr-stack-live-status.md (C3, D7, D12);
 //! docs/ft/daemon/1-WIP/PRD-2026-09-19-keyring-store.md.
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use base64::Engine;
 
-use tddy_credentials::{AccountId, CredentialStore, ProviderId, SessionVaults};
+use tddy_credentials::{AccountId, ProviderId, SecretString, SessionVaults};
 use tddy_github::provider::{DeviceLoginPoll, DeviceLoginStart, GitHubOAuthProvider, GitHubUser};
 use tddy_github::{
     AuthServiceImpl, RealGitHubProvider, SessionClaims, SessionTokenAuthority, SessionTokenError,
@@ -34,28 +34,40 @@ use tddy_service::proto::auth::{AuthService, ExchangeCodeRequest, ExchangeCodeRe
 
 const GRANTED_TOKEN: &str = "gho_granted_by_the_operator";
 
-/// The operator's GitHub token as the next login would find it: their vault, opened with the
-/// credential this login granted.
-fn the_token_retained_for(storage: &Path, login: &str) -> Option<String> {
-    CredentialStore::open_existing(
-        &CredentialStore::path_in(storage, login),
-        GRANTED_TOKEN.as_bytes(),
-        login,
-    )
-    .expect("the operator's own credential opens their vault")?
-    .get(&ProviderId::new(GITHUB_PROVIDER), &AccountId::new(login))
-    .expect("the retained record authenticates")
-    .map(|record| record.secret)
+const THE_PASSPHRASE: &str = "correct horse battery staple";
+
+/// The operator's GitHub token as they would find it: their vault, created with a first
+/// passphrase (which seals the token their login left waiting), then read.
+fn the_token_retained_for(vaults: &SessionVaults, login: &str) -> Option<String> {
+    vaults
+        .create(login, &SecretString::new(THE_PASSPHRASE))
+        .expect("a first passphrase creates the vault");
+    vaults
+        .get(login)?
+        .get(&ProviderId::new(GITHUB_PROVIDER), &AccountId::new(login))
+        .expect("the retained record authenticates")
+        .map(|record| record.secret.expose().to_string())
 }
 
-/// An `auth_storage` the daemon cannot write: a path under an existing *file*, so no directory can
-/// be created there — the shape of an unwritable `/var/lib/tddy`.
-fn an_unwritable_storage() -> (tempfile::TempDir, PathBuf) {
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    let occupied = dir.path().join("not-a-directory");
-    std::fs::write(&occupied, "").expect("the occupying file is written");
-    let storage = occupied.join("auth");
-    (dir, storage)
+/// A service whose operator's vault is open, and whose vault file has then been made impossible
+/// to read or replace — a directory where the file was, standing in for a disk that fails under a
+/// running daemon.
+async fn a_service_whose_open_vault_can_no_longer_be_written() -> (
+    tempfile::TempDir,
+    AuthServiceImpl<ProviderWithARealCredential>,
+) {
+    let storage = tempfile::tempdir().expect("a temporary directory");
+    let vaults = Arc::new(SessionVaults::new(storage.path()));
+    let service =
+        a_signed_service(ProviderWithARealCredential).with_credential_vaults(Arc::clone(&vaults));
+    exchange(&service, "login-code", "s").await;
+    vaults
+        .create("operator", &SecretString::new(THE_PASSPHRASE))
+        .expect("a first passphrase creates the vault");
+    let vault_file = vaults.path_for("operator");
+    std::fs::remove_file(&vault_file).expect("the vault file is removed");
+    std::fs::create_dir(&vault_file).expect("a directory takes its place");
+    (storage, service)
 }
 
 /// A provider that completes the OAuth exchange offline while declaring — as the real GitHub
@@ -156,25 +168,24 @@ async fn exchange(
 async fn retains_a_real_logins_access_token_under_its_github_login() {
     // Given — a login through a provider whose token is a usable GitHub credential
     let storage = tempfile::tempdir().expect("a temporary directory");
-    let service = a_signed_service(ProviderWithARealCredential)
-        .with_credential_vaults(Arc::new(SessionVaults::new(storage.path())));
+    let vaults = Arc::new(SessionVaults::new(storage.path()));
+    let service =
+        a_signed_service(ProviderWithARealCredential).with_credential_vaults(Arc::clone(&vaults));
 
     // When
     exchange(&service, "login-code", "s").await;
 
     // Then — the operator's own credential is available for server-side GitHub reads
     assert_eq!(
-        the_token_retained_for(storage.path(), "operator").as_deref(),
+        the_token_retained_for(&vaults, "operator").as_deref(),
         Some(GRANTED_TOKEN)
     );
 }
 
 #[tokio::test]
 async fn fails_the_login_when_the_access_token_cannot_be_retained() {
-    // Given — a real login whose credential vault cannot be written
-    let (_dir, storage) = an_unwritable_storage();
-    let service = a_signed_service(ProviderWithARealCredential)
-        .with_credential_vaults(Arc::new(SessionVaults::new(&storage)));
+    // Given — a real login over an open vault whose file cannot be written
+    let (_storage, service) = a_service_whose_open_vault_can_no_longer_be_written().await;
 
     // When
     let err = service
@@ -198,9 +209,7 @@ async fn fails_the_login_when_the_access_token_cannot_be_retained() {
 #[tokio::test]
 async fn keeps_the_servers_storage_path_out_of_the_failure_the_client_is_shown() {
     // Given — a real login whose credential vault fails with the path it could not write
-    let (_dir, storage) = an_unwritable_storage();
-    let service = a_signed_service(ProviderWithARealCredential)
-        .with_credential_vaults(Arc::new(SessionVaults::new(&storage)));
+    let (storage, service) = a_service_whose_open_vault_can_no_longer_be_written().await;
 
     // When
     let err = service
@@ -214,7 +223,8 @@ async fn keeps_the_servers_storage_path_out_of_the_failure_the_client_is_shown()
     // Then — the browser learns *that* retention failed; where the server keeps its tokens is
     // operator-side detail that belongs in the daemon log only
     assert!(
-        !err.message().contains(&storage.display().to_string()),
+        !err.message()
+            .contains(&storage.path().display().to_string()),
         "the server's storage path must not reach the client, got: {}",
         err.message()
     );

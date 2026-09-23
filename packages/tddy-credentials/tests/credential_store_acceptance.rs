@@ -2,92 +2,93 @@
 //!
 //! These are the properties an operator is entitled to, stated against the store's own API rather
 //! than against a wired daemon, because none of them depends on how the daemon is configured: a
-//! backup of the data directory must not contain live credentials, a rotated login must not
-//! silently discard the vault, and altering a record must be detected rather than absorbed.
+//! backup of the data directory must not contain live credentials or the passphrase, a wrong
+//! passphrase must not silently discard the vault, a forgotten one must not destroy it, and
+//! altering a record must be detected rather than absorbed.
 //!
-//! The two rules this store *inherits* from the trait it replaces — a failed write fails the login,
-//! and a secret never reaches an RPC response path — are login-level, and live in
-//! `tddy-daemon-auth`'s `login_opens_the_credential_store_acceptance.rs`.
+//! The rules this store *inherits* from the trait it replaces — a login whose credential cannot be
+//! retained is reported, and a secret never reaches an RPC response path — are login-level, and
+//! live in `tddy-daemon-auth`'s acceptance tests.
 
-use tddy_credentials::{AccountId, CredentialRecord, CredentialStore, ProviderId, VaultError};
+use tddy_credentials::{
+    AccountId, CredentialRecord, CredentialStore, ProviderId, SecretString, VaultError,
+};
 
 const THE_OPERATOR: &str = "operator";
-const THE_LOGIN_CREDENTIAL: &[u8] = b"gho_the_token_this_login_granted";
-const ANOTHER_LOGIN_CREDENTIAL: &[u8] = b"gho_a_token_from_a_later_authorisation";
+const THE_PASSPHRASE: &str = "correct horse battery staple";
+const A_WRONG_PASSPHRASE: &str = "incorrect horse battery staple";
+const A_NEW_PASSPHRASE: &str = "a passphrase chosen after forgetting";
 const THE_SECRET: &str = "gho_a_live_repo_scoped_credential";
 const THE_LABEL: &str = "Work account";
 const THE_METADATA_VALUE: &str = "repo,read:user";
 
 #[test]
-fn a_credential_written_in_one_session_opens_in_the_next() {
+fn a_credential_written_in_one_session_opens_in_the_next_with_the_same_passphrase() {
     // Given an operator who stored a credential and then signed out
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
-    let first_session = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
-        .expect("a fresh vault opens");
+    let first_session = CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
+        .expect("a fresh vault is created");
     first_session
         .put(a_github_credential())
         .expect("a credential is retained");
     drop(first_session);
 
-    // When they sign in again, deriving the same key from the same login credential
-    let next_session = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
-        .expect("the same login credential opens the same vault");
+    // When they open it again with the passphrase they chose
+    let next_session =
+        CredentialStore::open_with_passphrase(&path, &the_passphrase(), THE_OPERATOR)
+            .expect("the same passphrase opens the same vault");
 
     // Then the credential is there, exactly as it was written
     assert_eq!(
         next_session.get(&github(), &the_account()),
         Ok(Some(a_github_credential())),
-        "a second login by the same user must open the same vault"
+        "the passphrase, not whatever token a login happened to receive, opens the vault"
     );
 }
 
 #[test]
-fn the_file_on_disk_holds_no_plaintext_secret_label_or_metadata() {
+fn the_file_on_disk_holds_no_plaintext_secret_label_metadata_or_passphrase() {
     // Given a vault holding one credential
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
-    let vault = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
-        .expect("a fresh vault opens");
-    vault
+    CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
+        .expect("a fresh vault is created")
         .put(a_github_credential())
         .expect("a credential is retained");
 
     // When whoever holds a backup of the data directory reads the bytes
-    let bytes = std::fs::read(&path).expect("the vault is on disk");
-    let on_disk = String::from_utf8_lossy(&bytes).to_string();
+    let on_disk =
+        String::from_utf8_lossy(&std::fs::read(&path).expect("the vault is on disk")).to_string();
 
-    // Then none of what the operator stored is legible in them
-    let leaked: Vec<&str> = [THE_SECRET, THE_LABEL, THE_METADATA_VALUE]
+    // Then none of what the operator stored, nor the passphrase that opens it, is legible in them
+    let leaked: Vec<&str> = [THE_SECRET, THE_LABEL, THE_METADATA_VALUE, THE_PASSPHRASE]
         .into_iter()
         .filter(|plaintext| on_disk.contains(plaintext))
         .collect();
     assert_eq!(
         leaked,
         Vec::<&str>::new(),
-        "a backup of the data directory must not contain live credentials"
+        "a backup of the data directory must not contain live credentials or the passphrase"
     );
 }
 
 #[test]
-fn altering_a_stored_records_label_is_detected_rather_than_absorbed() {
-    // Given a vault holding one credential, whose label someone edits on disk
+fn altering_a_sealed_record_is_detected_rather_than_absorbed() {
+    // Given a vault holding one credential, whose sealed record someone edits on disk
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
-    let vault = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
-        .expect("a fresh vault opens");
-    vault
+    CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
+        .expect("a fresh vault is created")
         .put(a_github_credential())
         .expect("a credential is retained");
-    drop(vault);
     flip_the_last_ciphertext_byte(&path);
 
-    // When the operator signs in and reads the account
-    let reopened = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
+    // When the operator opens the vault and reads the account
+    let reopened = CredentialStore::open_with_passphrase(&path, &the_passphrase(), THE_OPERATOR)
         .expect("the vault itself still opens; only the record was altered");
 
-    // Then the alteration is reported, never read past — the label and metadata are inside the
-    // seal, which is what a vault holding them in cleartext beside the secret cannot promise
+    // Then the alteration is reported, never read past
     assert_eq!(
         reopened.get(&github(), &the_account()),
         Err(VaultError::Crypto),
@@ -96,21 +97,47 @@ fn altering_a_stored_records_label_is_detected_rather_than_absorbed() {
 }
 
 #[test]
-fn a_different_login_credential_locks_the_vault_and_changes_nothing_in_it() {
-    // Given a vault sealed under one login credential
+fn a_sealed_record_moved_under_another_accounts_id_does_not_open() {
+    // Given a vault holding two accounts, and someone who swaps their sealed records' ids on disk
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
-    let vault = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
-        .expect("a fresh vault opens");
+    let vault = CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
+        .expect("a fresh vault is created");
+    vault.put(a_github_credential()).expect("the first account");
     vault
+        .put(a_second_github_credential())
+        .expect("the second account");
+    swap_the_two_record_ids(&path);
+
+    // When the first account is read
+    let read = vault.get(&github(), &the_account());
+
+    // Then the identity sealed inside the record no longer matches the slot it was found in
+    assert_eq!(
+        read,
+        Err(VaultError::Crypto),
+        "a record must not open under another account's id"
+    );
+}
+
+#[test]
+fn a_wrong_passphrase_locks_the_vault_and_changes_nothing_in_it() {
+    // Given a vault sealed under one passphrase
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
+    CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
+        .expect("a fresh vault is created")
         .put(a_github_credential())
         .expect("a credential is retained");
-    drop(vault);
     let before = std::fs::read(&path).expect("the vault is on disk");
 
-    // When the user's credential has rotated and the derived key no longer unwraps the data key
-    let refused =
-        CredentialStore::open_or_create(&path, ANOTHER_LOGIN_CREDENTIAL, THE_OPERATOR).err();
+    // When somebody presents a different one
+    let refused = CredentialStore::open_with_passphrase(
+        &path,
+        &SecretString::new(A_WRONG_PASSPHRASE),
+        THE_OPERATOR,
+    )
+    .err();
 
     // Then the vault is locked, and it is still all there — no re-initialisation, no second key
     assert_eq!(
@@ -121,49 +148,111 @@ fn a_different_login_credential_locks_the_vault_and_changes_nothing_in_it() {
 }
 
 #[test]
-fn a_vault_sealed_for_one_subject_does_not_open_for_another() {
+fn a_vault_sealed_for_one_subject_does_not_open_for_another_with_the_same_passphrase() {
     // Given a vault sealed for one operator
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
-    CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
-        .expect("a fresh vault opens");
+    CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
+        .expect("a fresh vault is created");
 
-    // When a second operator presents the same bytes as their own login credential
+    // When a second operator presents the same passphrase against that file
     let refused =
-        CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, "somebody-else").err();
+        CredentialStore::open_with_passphrase(&path, &the_passphrase(), "somebody-else").err();
 
-    // Then the subject is bound into the derivation, so identical input keying material is not
-    // enough — one user's credential never opens another's vault
+    // Then the subject is bound into the derivation
     assert_eq!(refused, Some(VaultError::Locked));
 }
 
 #[test]
-fn rewrapping_moves_the_vault_onto_the_new_key_and_off_the_old_one() {
-    // Given a vault holding a credential, re-wrapped as a successful login would re-wrap it
+fn opening_a_vault_that_was_never_created_reports_it_uninitialized_and_creates_nothing() {
+    // Given no vault
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
-    let vault = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
-        .expect("a fresh vault opens");
-    vault
+
+    // When it is opened
+    let refused =
+        CredentialStore::open_with_passphrase(&path, &the_passphrase(), THE_OPERATOR).err();
+
+    // Then the answer says a passphrase has to be chosen, and still no file exists
+    assert_eq!(
+        (refused, path.exists()),
+        (Some(VaultError::Uninitialized), false)
+    );
+}
+
+#[test]
+fn creating_over_an_existing_vault_is_refused_and_leaves_it_as_it_was() {
+    // Given a vault that already holds a credential
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
+    CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
+        .expect("a fresh vault is created")
         .put(a_github_credential())
         .expect("a credential is retained");
+    let before = std::fs::read(&path).expect("the vault is on disk");
 
-    // When the login credential rotates while a session is still open
-    vault
-        .rewrap(ANOTHER_LOGIN_CREDENTIAL)
-        .expect("a live session can move the vault onto a new key");
-    drop(vault);
+    // When a second create is attempted under another passphrase
+    let refused =
+        CredentialStore::create(&path, &SecretString::new(A_NEW_PASSPHRASE), THE_OPERATOR).err();
 
-    // Then the new credential opens it and the old one no longer does
-    let under_the_new =
-        CredentialStore::open_or_create(&path, ANOTHER_LOGIN_CREDENTIAL, THE_OPERATOR)
-            .and_then(|vault| vault.get(&github(), &the_account()));
-    let under_the_old =
-        CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR).err();
+    // Then it is refused by name, and nothing was overwritten
     assert_eq!(
-        (under_the_new, under_the_old),
-        (Ok(Some(a_github_credential())), Some(VaultError::Locked)),
-        "re-wrapping must carry the records over and leave the old key with nothing"
+        (refused, std::fs::read(&path).ok()),
+        (Some(VaultError::AlreadyInitialized), Some(before))
+    );
+}
+
+#[test]
+fn a_reset_sets_the_old_vault_aside_intact_and_opens_a_fresh_one_under_the_new_passphrase() {
+    // Given a vault whose passphrase has been forgotten
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
+    CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
+        .expect("a fresh vault is created")
+        .put(a_github_credential())
+        .expect("a credential is retained");
+    let old_bytes = std::fs::read(&path).expect("the vault is on disk");
+
+    // When the operator resets it under a new passphrase
+    let (fresh, set_aside) =
+        CredentialStore::reset(&path, &SecretString::new(A_NEW_PASSPHRASE), THE_OPERATOR)
+            .expect("a reset succeeds");
+    let set_aside = set_aside.expect("an existing vault is set aside");
+
+    // Then the old file sits beside the new one byte-for-byte, and the new one is empty
+    assert_eq!(
+        (
+            std::fs::read(&set_aside).ok(),
+            fresh.list(None),
+            set_aside
+                .file_name()
+                .map(|name| name.to_string_lossy().contains(".locked-"))
+        ),
+        (Some(old_bytes), Ok(Vec::new()), Some(true)),
+        "a reset renames the old vault aside — it never deletes it"
+    );
+}
+
+#[test]
+fn after_a_reset_only_the_new_passphrase_opens_the_vault() {
+    // Given a vault reset under a new passphrase
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
+    CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
+        .expect("a fresh vault is created");
+    CredentialStore::reset(&path, &SecretString::new(A_NEW_PASSPHRASE), THE_OPERATOR)
+        .expect("a reset succeeds");
+
+    // When each passphrase is tried
+    let opens = |passphrase: &str| {
+        CredentialStore::open_with_passphrase(&path, &SecretString::new(passphrase), THE_OPERATOR)
+            .is_ok()
+    };
+
+    // Then the forgotten one opens nothing
+    assert_eq!(
+        (opens(THE_PASSPHRASE), opens(A_NEW_PASSPHRASE)),
+        (false, true)
     );
 }
 
@@ -172,8 +261,8 @@ fn a_removed_credential_is_gone_and_the_others_are_not() {
     // Given a vault holding two accounts at the same provider
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
-    let vault = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
-        .expect("a fresh vault opens");
+    let vault = CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
+        .expect("a fresh vault is created");
     vault.put(a_github_credential()).expect("the first account");
     vault
         .put(a_second_github_credential())
@@ -200,8 +289,8 @@ fn listing_is_scoped_to_the_provider_it_names() {
     // Given a vault holding accounts at two providers
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
-    let vault = CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
-        .expect("a fresh vault opens");
+    let vault = CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
+        .expect("a fresh vault is created");
     vault.put(a_github_credential()).expect("a github account");
     vault
         .put(a_cloudflare_credential())
@@ -210,8 +299,27 @@ fn listing_is_scoped_to_the_provider_it_names() {
     // When the Accounts screen asks for one provider's accounts
     let github_accounts = vault.list(Some(&github()));
 
-    // Then it is handed that provider's and no other — the dimension a login-keyed map never had
+    // Then it is handed that provider's and no other
     assert_eq!(github_accounts, Ok(vec![a_github_credential()]));
+}
+
+#[test]
+fn a_record_prints_without_its_secret() {
+    // Given a record somebody formats into a log line
+    let record = a_github_credential();
+
+    // When it is formatted
+    let printed = format!("{record:?}");
+
+    // Then the secret is not in the line
+    assert!(
+        !printed.contains(THE_SECRET),
+        "a record's Debug must redact its secret, printed: {printed}"
+    );
+}
+
+fn the_passphrase() -> SecretString {
+    SecretString::new(THE_PASSPHRASE)
 }
 
 fn github() -> ProviderId {
@@ -227,7 +335,7 @@ fn a_github_credential() -> CredentialRecord {
         provider: github(),
         account: the_account(),
         label: THE_LABEL.to_string(),
-        secret: THE_SECRET.to_string(),
+        secret: SecretString::new(THE_SECRET),
         metadata: [("scopes".to_string(), THE_METADATA_VALUE.to_string())].into(),
         updated_at: 1_758_240_000,
     }
@@ -238,7 +346,7 @@ fn a_second_github_credential() -> CredentialRecord {
         provider: github(),
         account: AccountId::new("operator-personal"),
         label: "Personal account".to_string(),
-        secret: "gho_the_other_one".to_string(),
+        secret: SecretString::new("gho_the_other_one"),
         metadata: Default::default(),
         updated_at: 1_758_240_001,
     }
@@ -249,7 +357,7 @@ fn a_cloudflare_credential() -> CredentialRecord {
         provider: ProviderId::new("cloudflare"),
         account: AccountId::new("the-zone-account"),
         label: "Zone admin".to_string(),
-        secret: "cf_an_api_token".to_string(),
+        secret: SecretString::new("cf_an_api_token"),
         metadata: Default::default(),
         updated_at: 1_758_240_002,
     }
@@ -257,8 +365,9 @@ fn a_cloudflare_credential() -> CredentialRecord {
 
 /// Alter one byte of the sealed record, standing in for anyone who can write the file.
 ///
-/// The last hex digit of the file is inside the final record's ciphertext, because the records are
-/// the last thing the format writes. Flipping it is the smallest edit that must not pass.
+/// The last hex digit of the file is inside the final record's ciphertext (its Poly1305 tag),
+/// because the records are the last thing the format writes. Flipping it is the smallest edit that
+/// must not pass.
 fn flip_the_last_ciphertext_byte(path: &std::path::Path) {
     let contents = std::fs::read_to_string(path).expect("the vault is on disk");
     let altered_at = contents
@@ -275,4 +384,24 @@ fn flip_the_last_ciphertext_byte(path: &std::path::Path) {
         &contents[altered_at + 1..]
     );
     std::fs::write(path, altered).expect("the vault is writable");
+}
+
+/// Exchange the `id`s of the file's two sealed records, leaving each ciphertext where it was —
+/// someone moving one account's credential into another account's slot.
+fn swap_the_two_record_ids(path: &std::path::Path) {
+    let raw = std::fs::read_to_string(path).expect("the vault is on disk");
+    let mut document: serde_json::Value =
+        serde_json::from_str(&raw).expect("the vault is a json document");
+    let records = document
+        .get_mut("records")
+        .and_then(serde_json::Value::as_array_mut)
+        .expect("the vault holds records");
+    let first = records[0]["id"].clone();
+    records[0]["id"] = records[1]["id"].clone();
+    records[1]["id"] = first;
+    std::fs::write(
+        path,
+        serde_json::to_string_pretty(&document).expect("the document serialises"),
+    )
+    .expect("the vault is writable");
 }

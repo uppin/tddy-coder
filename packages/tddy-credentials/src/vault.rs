@@ -62,13 +62,15 @@ mod crypto;
 mod format;
 mod unlock;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 
 use crate::kdf::{hkdf_expand, keyed_name, to_hex};
 use crate::record::{AccountId, CredentialRecord, ProviderId};
-use crate::secret::{wipe, SecretBytes};
+use crate::secret::{wipe, SecretBytes, SecretString};
 use crypto::{
     check_verifier, derive_kek, open, random_32, record_aad, seal, unwrap_data_key, wrap_data_key,
     VERIFIER_AAD, VERIFIER_PLAINTEXT,
@@ -80,6 +82,12 @@ use format::{
 
 pub use unlock::{UnlockKey, MAX_UNLOCK_SLOTS};
 
+/// The shortest passphrase a vault is created or reset under, in characters.
+///
+/// The passphrase is the one secret that opens the vault after a restart with no browser key, and
+/// Argon2id only slows guessing down; it cannot make a four-letter word safe.
+pub const MIN_PASSPHRASE_CHARS: usize = 8;
+
 /// Why a vault operation did not happen.
 ///
 /// `Locked` is deliberately distinct from `Crypto`. A wrong key is the *expected* consequence of a
@@ -88,17 +96,22 @@ pub use unlock::{UnlockKey, MAX_UNLOCK_SLOTS};
 /// would tell the operator to do the wrong thing.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum VaultError {
-    /// The derived key does not unwrap the data key — the login credential is not the one this
-    /// vault was sealed under. **Nothing is re-initialised**, and there is no second key.
-    #[error(
-        "the credential store cannot be opened with this login's key; \
-         it was sealed under a different one and must be re-linked"
-    )]
+    /// The key presented does not unwrap the data key — a wrong passphrase, or an unlock key whose
+    /// slot has been rotated or removed. **Nothing is re-initialised**, and there is no second key.
+    #[error("the credential vault is locked: that key does not open it")]
     Locked,
 
     /// The file's header names a format or KDF this build does not produce.
     #[error("the credential store is in {found} format; this build writes {expected}")]
     FormatMismatch { expected: String, found: String },
+
+    /// There is no vault to open — the user has not chosen a passphrase yet.
+    #[error("the credential vault has not been created yet; choose a passphrase to create it")]
+    Uninitialized,
+
+    /// A vault already exists where one was to be created. Replacing it is a reset.
+    #[error("a credential vault already exists; unlock it with its passphrase, or reset it")]
+    AlreadyInitialized,
 
     /// Reading or replacing the file failed. Names server-side detail — for the log, not the client.
     #[error("{0}")]
@@ -133,43 +146,45 @@ impl CredentialStore {
             .join(format!("credentials-{}.vault", to_hex(subject.as_bytes())))
     }
 
-    /// Open the vault at `path` under a key derived from `ikm`, creating it if it does not exist.
+    /// Create `subject`'s vault at `path`, sealed under a key derived from `passphrase`.
     ///
-    /// `ikm` is the input keying material the login produced — the user's own credential, never a
-    /// daemon secret. `subject` identifies whose vault this is and is bound into the HKDF `info`,
-    /// so key material derived for one subject cannot open another's file even from the same `ikm`.
-    ///
-    /// Creating is not a fallback for failing to open: a vault that exists and does not open is
-    /// [`VaultError::Locked`], and the file is left exactly as it was. Only an **absent** file is
-    /// created.
-    pub fn open_or_create(
+    /// Only an **absent** file is created: one that exists is [`VaultError::AlreadyInitialized`],
+    /// and is left exactly as it was. Replacing a vault is [`Self::reset`], which never deletes.
+    pub fn create(
         path: &Path,
-        ikm: &[u8],
+        passphrase: &SecretString,
         subject: &str,
     ) -> Result<SessionVault, VaultError> {
-        // Held across the existence check and the first write, so two logins racing to create one
-        // vault cannot both mint a data key and leave the loser's session sealing records the file
-        // no longer opens.
-        let _serialised = serialised();
-        match read_vault_file(path)? {
-            Some(file) => open_file(path, &file, ikm, subject),
-            None => create(path, ikm, subject),
-        }
+        let _ = (path, passphrase, subject);
+        todo!("create a passphrase-sealed vault")
     }
 
-    /// Open the vault at `path` if one exists; `Ok(None)` when there is none. Never creates one.
+    /// Open `subject`'s vault at `path` with the passphrase it was created under.
     ///
-    /// For a login that must not leave a vault behind — a stub login, whose credential is
-    /// synthetic — but must still be refused when a vault it cannot open is already there.
-    pub fn open_existing(
+    /// A passphrase that does not open it is [`VaultError::Locked`], and nothing is changed. An
+    /// absent file is [`VaultError::Uninitialized`] — opening never creates.
+    pub fn open_with_passphrase(
         path: &Path,
-        ikm: &[u8],
+        passphrase: &SecretString,
         subject: &str,
-    ) -> Result<Option<SessionVault>, VaultError> {
-        match read_vault_file(path)? {
-            Some(file) => open_file(path, &file, ikm, subject).map(Some),
-            None => Ok(None),
-        }
+    ) -> Result<SessionVault, VaultError> {
+        let _ = (path, passphrase, subject);
+        todo!("open a passphrase-sealed vault")
+    }
+
+    /// Set the vault at `path` aside and create a fresh one under `new_passphrase` — the
+    /// forgotten-passphrase path.
+    ///
+    /// The old file is **renamed, never deleted**, to `credentials-<hex subject>.locked-<unix
+    /// seconds>.vault` beside it, and that path is returned; `None` when there was no file to set
+    /// aside. Its records are unreadable without the old passphrase, but they are not destroyed.
+    pub fn reset(
+        path: &Path,
+        new_passphrase: &SecretString,
+        subject: &str,
+    ) -> Result<(SessionVault, Option<PathBuf>), VaultError> {
+        let _ = (path, new_passphrase, subject);
+        todo!("set a vault aside and create a fresh one")
     }
 }
 
@@ -257,19 +272,6 @@ impl SessionVault {
         write_vault_file(&self.path, &file)
     }
 
-    /// Re-wrap the data key under a key derived from `ikm`, with a fresh salt.
-    ///
-    /// Called on **every** successful login. The records are untouched — only the 32-byte wrapped
-    /// key and the header's salt change — which is what makes a credential rotation survivable as
-    /// long as one login still succeeds under the old credential.
-    pub fn rewrap(&self, ikm: &[u8]) -> Result<(), VaultError> {
-        let _serialised = serialised();
-        let mut file = self.load()?;
-        file.header.salt = to_hex(&random_32());
-        file.wrapped_data_key = wrap_data_key(&file.header, ikm, &self.subject, &self.data_key)?;
-        write_vault_file(&self.path, &file)
-    }
-
     /// Re-read the file and prove this session's data key still opens it.
     ///
     /// A file replaced under a live session — by anything but this crate's own writes, which never
@@ -301,7 +303,8 @@ impl SessionVault {
 
     fn seal_record(&self, record: &CredentialRecord) -> Result<SealedRecord, VaultError> {
         let id = self.record_id(&record.provider, &record.account);
-        let mut plaintext = serde_json::to_vec(record).map_err(|_| VaultError::Crypto)?;
+        let mut plaintext =
+            serde_json::to_vec(&RecordToSeal::from(record)).map_err(|_| VaultError::Crypto)?;
         let sealed = seal(&self.data_key, &plaintext, &record_aad(&id));
         wipe(&mut plaintext);
         let sealed = sealed?;
@@ -319,15 +322,65 @@ impl SessionVault {
             &sealed.ciphertext,
             &record_aad(&sealed.id),
         )?;
-        let record = serde_json::from_slice::<CredentialRecord>(&plaintext);
+        let record = serde_json::from_slice::<OpenedRecord>(&plaintext);
         wipe(&mut plaintext);
-        let record = record.map_err(|_| VaultError::Crypto)?;
+        let record = CredentialRecord::from(record.map_err(|_| VaultError::Crypto)?);
         // The identity inside the seal must name the slot it was found in.
         let expected = self.record_id(&record.provider, &record.account);
         if bool::from(expected.as_bytes().ct_eq(sealed.id.as_bytes())) {
             Ok(record)
         } else {
             Err(VaultError::Crypto)
+        }
+    }
+}
+
+/// What is sealed for a record: [`CredentialRecord`]'s fields, borrowed, so serialising one makes no
+/// copy of the secret. The record type itself is not `Serialize` — this mirror is the only path from
+/// a record to bytes, and it ends inside the AEAD.
+#[derive(Serialize)]
+struct RecordToSeal<'a> {
+    provider: &'a ProviderId,
+    account: &'a AccountId,
+    label: &'a str,
+    secret: &'a str,
+    metadata: &'a BTreeMap<String, String>,
+    updated_at: u64,
+}
+
+impl<'a> From<&'a CredentialRecord> for RecordToSeal<'a> {
+    fn from(record: &'a CredentialRecord) -> Self {
+        Self {
+            provider: &record.provider,
+            account: &record.account,
+            label: &record.label,
+            secret: record.secret.expose(),
+            metadata: &record.metadata,
+            updated_at: record.updated_at,
+        }
+    }
+}
+
+/// What an opened seal parses into; its secret moves straight into a [`SecretString`].
+#[derive(Deserialize)]
+struct OpenedRecord {
+    provider: ProviderId,
+    account: AccountId,
+    label: String,
+    secret: String,
+    metadata: BTreeMap<String, String>,
+    updated_at: u64,
+}
+
+impl From<OpenedRecord> for CredentialRecord {
+    fn from(opened: OpenedRecord) -> Self {
+        Self {
+            provider: opened.provider,
+            account: opened.account,
+            label: opened.label,
+            secret: SecretString::new(opened.secret),
+            metadata: opened.metadata,
+            updated_at: opened.updated_at,
         }
     }
 }
@@ -388,14 +441,18 @@ mod tests {
     use super::*;
 
     const THE_OPERATOR: &str = "operator";
-    const THE_LOGIN_CREDENTIAL: &[u8] = b"gho_the_token_this_login_granted";
+    const THE_PASSPHRASE: &str = "correct horse battery staple";
+
+    fn the_passphrase() -> SecretString {
+        SecretString::new(THE_PASSPHRASE)
+    }
 
     fn a_record(account: &str) -> CredentialRecord {
         CredentialRecord {
             provider: ProviderId::new("github"),
             account: AccountId::new(account),
             label: account.to_string(),
-            secret: format!("gho_{account}"),
+            secret: SecretString::new(format!("gho_{account}")),
             metadata: Default::default(),
             updated_at: 1,
         }
@@ -406,18 +463,19 @@ mod tests {
         // Given four sessions of one user writing to one vault at the same moment
         let dir = tempfile::tempdir().unwrap();
         let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
-        CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR).unwrap();
+        let key = CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
+            .unwrap()
+            .add_unlock_slot()
+            .unwrap();
         let accounts = ["alice", "bob", "carol", "dave"];
         let at_once = std::sync::Barrier::new(accounts.len());
 
         // When
         std::thread::scope(|scope| {
             for account in accounts {
-                let (path, at_once) = (&path, &at_once);
+                let (path, at_once, key) = (&path, &at_once, &key);
                 scope.spawn(move || {
-                    let vault =
-                        CredentialStore::open_or_create(path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
-                            .unwrap();
+                    let vault = CredentialStore::open_with_unlock_key(path, key).unwrap();
                     at_once.wait();
                     vault.put(a_record(account)).unwrap();
                 });
@@ -425,8 +483,7 @@ mod tests {
         });
 
         // Then — a lock-free read-modify-write lets the last writer's file drop the others' records
-        let vault =
-            CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR).unwrap();
+        let vault = CredentialStore::open_with_unlock_key(&path, &key).unwrap();
         assert_eq!(
             vault.list(None),
             Ok(accounts.iter().map(|a| a_record(a)).collect::<Vec<_>>())
@@ -442,7 +499,7 @@ mod tests {
         let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
 
         // When
-        CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
+        CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR)
             .unwrap()
             .put(a_record("operator"))
             .unwrap();
@@ -452,25 +509,10 @@ mod tests {
         assert_eq!(mode, 0o600);
     }
 
-    #[test]
-    fn opening_an_absent_vault_without_creating_leaves_no_file() {
-        // Given
-        let dir = tempfile::tempdir().unwrap();
-        let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
-
-        // When
-        let opened = CredentialStore::open_existing(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
-            .map(|vault| vault.is_some());
-
-        // Then
-        assert_eq!((opened, path.exists()), (Ok(false), false));
-    }
-
     fn a_vault_with_unlock_slots(count: usize) -> (tempfile::TempDir, PathBuf, Vec<UnlockKey>) {
         let dir = tempfile::tempdir().unwrap();
         let path = CredentialStore::path_in(dir.path(), THE_OPERATOR);
-        let vault =
-            CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR).unwrap();
+        let vault = CredentialStore::create(&path, &the_passphrase(), THE_OPERATOR).unwrap();
         vault.put(a_record(THE_OPERATOR)).unwrap();
         let keys = (0..count)
             .map(|_| vault.add_unlock_slot().unwrap())
@@ -484,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn every_unlock_slot_opens_the_same_records_as_the_login() {
+    fn every_unlock_slot_opens_the_same_records_as_the_passphrase() {
         // Given two browser lineages holding a slot each
         let (_dir, path, keys) = a_vault_with_unlock_slots(2);
 
@@ -521,24 +563,6 @@ mod tests {
     }
 
     #[test]
-    fn a_login_rewrap_leaves_every_unlock_slot_working() {
-        // Given a lineage holding a slot
-        let (_dir, path, keys) = a_vault_with_unlock_slots(1);
-
-        // When the next login rewraps the login slot under a rotated credential
-        CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR)
-            .unwrap()
-            .rewrap(b"gho_a_rotated_credential")
-            .unwrap();
-
-        // Then the browser's slot still opens the vault
-        assert_eq!(
-            opens_with(&path, &keys[0]),
-            Ok(Some(a_record(THE_OPERATOR)))
-        );
-    }
-
-    #[test]
     fn an_unlock_key_for_one_slot_does_not_open_another() {
         // Given two slots, and a key whose slot id is swapped for the other's
         let (_dir, path, keys) = a_vault_with_unlock_slots(2);
@@ -554,24 +578,57 @@ mod tests {
     }
 
     #[test]
+    fn rotating_a_slot_proves_the_presented_key_rather_than_trusting_its_slot_id() {
+        // Given an open vault, and a key naming a real slot but carrying key bytes of its own
+        let (_dir, path, keys) = a_vault_with_unlock_slots(1);
+        let vault = CredentialStore::open_with_unlock_key(&path, &keys[0]).unwrap();
+        let forged = UnlockKey::from_wire(&format!(
+            "{}.{}.{}",
+            to_hex(THE_OPERATOR.as_bytes()),
+            keys[0].slot_id(),
+            "00".repeat(32)
+        ))
+        .expect("well-formed");
+
+        // When the forged key asks for a rotation
+        let rotated = vault.rotate_unlock_slot(&forged).map(|key| key.to_wire());
+
+        // Then it is refused, and the genuine key still opens its slot
+        assert_eq!(
+            (rotated, opens_with(&path, &keys[0]).is_ok()),
+            (Err(VaultError::Locked), true)
+        );
+    }
+
+    #[test]
     fn past_the_bound_the_least_recently_used_unlock_slot_is_evicted() {
         // Given a vault already holding the most slots it keeps
         let (_dir, path, keys) = a_vault_with_unlock_slots(MAX_UNLOCK_SLOTS);
 
         // When one more lineage signs in
-        let vault =
-            CredentialStore::open_or_create(&path, THE_LOGIN_CREDENTIAL, THE_OPERATOR).unwrap();
-        let newest = vault.add_unlock_slot().unwrap();
+        CredentialStore::open_with_passphrase(&path, &the_passphrase(), THE_OPERATOR)
+            .unwrap()
+            .add_unlock_slot()
+            .unwrap();
 
-        // Then the oldest is gone, and the count holds at the bound
-        let ids = vault.unlock_slot_ids().unwrap();
+        // Then the oldest slot is the one that no longer opens the vault
+        assert_eq!(opens_with(&path, &keys[0]), Err(VaultError::Locked));
+    }
+
+    #[test]
+    fn past_the_bound_the_slot_count_holds_at_the_bound() {
+        // Given a vault already holding the most slots it keeps
+        let (_dir, path, _keys) = a_vault_with_unlock_slots(MAX_UNLOCK_SLOTS);
+        let vault =
+            CredentialStore::open_with_passphrase(&path, &the_passphrase(), THE_OPERATOR).unwrap();
+
+        // When one more lineage signs in
+        vault.add_unlock_slot().unwrap();
+
+        // Then
         assert_eq!(
-            (
-                ids.len(),
-                ids.contains(&keys[0].slot_id().to_string()),
-                ids.last()
-            ),
-            (MAX_UNLOCK_SLOTS, false, Some(&newest.slot_id().to_string()))
+            vault.unlock_slot_ids().map(|ids| ids.len()),
+            Ok(MAX_UNLOCK_SLOTS)
         );
     }
 
@@ -589,17 +646,31 @@ mod tests {
     }
 
     #[test]
-    fn an_unlock_key_survives_its_wire_form_and_nothing_else_parses_as_one() {
+    fn an_unlock_key_survives_its_wire_form() {
+        // Given a key a login handed out
         let (_dir, _path, keys) = a_vault_with_unlock_slots(1);
         let wire = keys[0].to_wire();
-        assert_eq!(
-            (
-                UnlockKey::from_wire(&wire).map(|key| key.to_wire()),
-                UnlockKey::from_wire("").is_none(),
-                UnlockKey::from_wire("a.b").is_none()
-            ),
-            (Some(wire), true, true)
-        );
+
+        // When it is parsed back from what the browser stored
+        let parsed = UnlockKey::from_wire(&wire).map(|key| key.to_wire());
+
+        // Then
+        assert_eq!(parsed, Some(wire));
+    }
+
+    #[test]
+    fn nothing_but_an_unlock_keys_wire_form_parses_as_one() {
+        // Given what an empty or truncated `localStorage` entry would hold
+        let not_keys = ["", "a.b"];
+
+        // When each is parsed
+        let parsed: Vec<bool> = not_keys
+            .iter()
+            .map(|wire| UnlockKey::from_wire(wire).is_some())
+            .collect();
+
+        // Then none is taken for a key
+        assert_eq!(parsed, vec![false, false]);
     }
 
     #[test]

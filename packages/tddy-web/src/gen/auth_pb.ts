@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file auth.proto.
  */
 export const file_auth: GenFile = /*@__PURE__*/
-  fileDesc("CgphdXRoLnByb3RvEgRhdXRoIhMKEUdldEF1dGhVcmxSZXF1ZXN0IjoKEkdldEF1dGhVcmxSZXNwb25zZRIVCg1hdXRob3JpemVfdXJsGAEgASgJEg0KBXN0YXRlGAIgASgJIjIKE0V4Y2hhbmdlQ29kZVJlcXVlc3QSDAoEY29kZRgBIAEoCRINCgVzdGF0ZRgCIAEoCSJ+ChRFeGNoYW5nZUNvZGVSZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXISFQoNcmVmcmVzaF90b2tlbhgDIAEoCRIYChB2YXVsdF91bmxvY2tfa2V5GAQgASgJIi0KFEdldEF1dGhTdGF0dXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiTgoVR2V0QXV0aFN0YXR1c1Jlc3BvbnNlEhUKDWF1dGhlbnRpY2F0ZWQYASABKAgSHgoEdXNlchgCIAEoCzIQLmF1dGguR2l0SHViVXNlciJIChVSZWZyZXNoU2Vzc2lvblJlcXVlc3QSFQoNcmVmcmVzaF90b2tlbhgBIAEoCRIYChB2YXVsdF91bmxvY2tfa2V5GAIgASgJIoABChZSZWZyZXNoU2Vzc2lvblJlc3BvbnNlEhUKDXNlc3Npb25fdG9rZW4YASABKAkSHgoEdXNlchgCIAEoCzIQLmF1dGguR2l0SHViVXNlchIVCg1yZWZyZXNoX3Rva2VuGAMgASgJEhgKEHZhdWx0X3VubG9ja19rZXkYBCABKAkiQAoNTG9nb3V0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhgKEHZhdWx0X3VubG9ja19rZXkYAiABKAkiEAoOTG9nb3V0UmVzcG9uc2UiGQoXU3RhcnREZXZpY2VMb2dpblJlcXVlc3QikgEKGFN0YXJ0RGV2aWNlTG9naW5SZXNwb25zZRITCgtkZXZpY2VfY29kZRgBIAEoCRIRCgl1c2VyX2NvZGUYAiABKAkSGAoQdmVyaWZpY2F0aW9uX3VyaRgDIAEoCRIaChJleHBpcmVzX2luX3NlY29uZHMYBCABKAQSGAoQaW50ZXJ2YWxfc2Vjb25kcxgFIAEoBCItChZQb2xsRGV2aWNlTG9naW5SZXF1ZXN0EhMKC2RldmljZV9jb2RlGAEgASgJIsIBChdQb2xsRGV2aWNlTG9naW5SZXNwb25zZRIlCgVzdGF0ZRgBIAEoDjIWLmF1dGguRGV2aWNlTG9naW5TdGF0ZRIYChBpbnRlcnZhbF9zZWNvbmRzGAIgASgEEhUKDXNlc3Npb25fdG9rZW4YAyABKAkSHgoEdXNlchgEIAEoCzIQLmF1dGguR2l0SHViVXNlchIVCg1yZWZyZXNoX3Rva2VuGAUgASgJEhgKEHZhdWx0X3VubG9ja19rZXkYBiABKAkiMAoXTWludExpdmVLaXRUb2tlblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJZChhNaW50TGl2ZUtpdFRva2VuUmVzcG9uc2USDQoFdG9rZW4YASABKAkSCwoDdXJsGAIgASgJEgwKBHJvb20YAyABKAkSEwoLdHRsX3NlY29uZHMYBCABKAQiSQoKR2l0SHViVXNlchINCgVsb2dpbhgBIAEoCRISCgphdmF0YXJfdXJsGAIgASgJEgwKBG5hbWUYAyABKAkSCgoCaWQYBCABKAQq2AEKEERldmljZUxvZ2luU3RhdGUSIgoeREVWSUNFX0xPR0lOX1NUQVRFX1VOU1BFQ0lGSUVEEAASHgoaREVWSUNFX0xPR0lOX1NUQVRFX1BFTkRJTkcQARIgChxERVZJQ0VfTE9HSU5fU1RBVEVfU0xPV19ET1dOEAISHQoZREVWSUNFX0xPR0lOX1NUQVRFX0RFTklFRBADEh4KGkRFVklDRV9MT0dJTl9TVEFURV9FWFBJUkVEEAQSHwobREVWSUNFX0xPR0lOX1NUQVRFX0NPTVBMRVRFEAUyhAQKC0F1dGhTZXJ2aWNlEj8KCkdldEF1dGhVcmwSFy5hdXRoLkdldEF1dGhVcmxSZXF1ZXN0GhguYXV0aC5HZXRBdXRoVXJsUmVzcG9uc2USRQoMRXhjaGFuZ2VDb2RlEhkuYXV0aC5FeGNoYW5nZUNvZGVSZXF1ZXN0GhouYXV0aC5FeGNoYW5nZUNvZGVSZXNwb25zZRJICg1HZXRBdXRoU3RhdHVzEhouYXV0aC5HZXRBdXRoU3RhdHVzUmVxdWVzdBobLmF1dGguR2V0QXV0aFN0YXR1c1Jlc3BvbnNlEksKDlJlZnJlc2hTZXNzaW9uEhsuYXV0aC5SZWZyZXNoU2Vzc2lvblJlcXVlc3QaHC5hdXRoLlJlZnJlc2hTZXNzaW9uUmVzcG9uc2USMwoGTG9nb3V0EhMuYXV0aC5Mb2dvdXRSZXF1ZXN0GhQuYXV0aC5Mb2dvdXRSZXNwb25zZRJRChBTdGFydERldmljZUxvZ2luEh0uYXV0aC5TdGFydERldmljZUxvZ2luUmVxdWVzdBoeLmF1dGguU3RhcnREZXZpY2VMb2dpblJlc3BvbnNlEk4KD1BvbGxEZXZpY2VMb2dpbhIcLmF1dGguUG9sbERldmljZUxvZ2luUmVxdWVzdBodLmF1dGguUG9sbERldmljZUxvZ2luUmVzcG9uc2UyaAoTTGl2ZUtpdFRva2VuU2VydmljZRJRChBNaW50TGl2ZUtpdFRva2VuEh0uYXV0aC5NaW50TGl2ZUtpdFRva2VuUmVxdWVzdBoeLmF1dGguTWludExpdmVLaXRUb2tlblJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("CgphdXRoLnByb3RvEgRhdXRoIhMKEUdldEF1dGhVcmxSZXF1ZXN0IjoKEkdldEF1dGhVcmxSZXNwb25zZRIVCg1hdXRob3JpemVfdXJsGAEgASgJEg0KBXN0YXRlGAIgASgJIjIKE0V4Y2hhbmdlQ29kZVJlcXVlc3QSDAoEY29kZRgBIAEoCRINCgVzdGF0ZRgCIAEoCSKlAQoURXhjaGFuZ2VDb2RlUmVzcG9uc2USFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIeCgR1c2VyGAIgASgLMhAuYXV0aC5HaXRIdWJVc2VyEhUKDXJlZnJlc2hfdG9rZW4YAyABKAkSGAoQdmF1bHRfdW5sb2NrX2tleRgEIAEoCRIlCgt2YXVsdF9zdGF0ZRgFIAEoDjIQLmF1dGguVmF1bHRTdGF0ZSItChRHZXRBdXRoU3RhdHVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJInUKFUdldEF1dGhTdGF0dXNSZXNwb25zZRIVCg1hdXRoZW50aWNhdGVkGAEgASgIEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXISJQoLdmF1bHRfc3RhdGUYAyABKA4yEC5hdXRoLlZhdWx0U3RhdGUiSAoVUmVmcmVzaFNlc3Npb25SZXF1ZXN0EhUKDXJlZnJlc2hfdG9rZW4YASABKAkSGAoQdmF1bHRfdW5sb2NrX2tleRgCIAEoCSKnAQoWUmVmcmVzaFNlc3Npb25SZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXISFQoNcmVmcmVzaF90b2tlbhgDIAEoCRIYChB2YXVsdF91bmxvY2tfa2V5GAQgASgJEiUKC3ZhdWx0X3N0YXRlGAUgASgOMhAuYXV0aC5WYXVsdFN0YXRlIkAKDUxvZ291dFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIYChB2YXVsdF91bmxvY2tfa2V5GAIgASgJIhAKDkxvZ291dFJlc3BvbnNlIhkKF1N0YXJ0RGV2aWNlTG9naW5SZXF1ZXN0IpIBChhTdGFydERldmljZUxvZ2luUmVzcG9uc2USEwoLZGV2aWNlX2NvZGUYASABKAkSEQoJdXNlcl9jb2RlGAIgASgJEhgKEHZlcmlmaWNhdGlvbl91cmkYAyABKAkSGgoSZXhwaXJlc19pbl9zZWNvbmRzGAQgASgEEhgKEGludGVydmFsX3NlY29uZHMYBSABKAQiLQoWUG9sbERldmljZUxvZ2luUmVxdWVzdBITCgtkZXZpY2VfY29kZRgBIAEoCSLpAQoXUG9sbERldmljZUxvZ2luUmVzcG9uc2USJQoFc3RhdGUYASABKA4yFi5hdXRoLkRldmljZUxvZ2luU3RhdGUSGAoQaW50ZXJ2YWxfc2Vjb25kcxgCIAEoBBIVCg1zZXNzaW9uX3Rva2VuGAMgASgJEh4KBHVzZXIYBCABKAsyEC5hdXRoLkdpdEh1YlVzZXISFQoNcmVmcmVzaF90b2tlbhgFIAEoCRIYChB2YXVsdF91bmxvY2tfa2V5GAYgASgJEiUKC3ZhdWx0X3N0YXRlGAcgASgOMhAuYXV0aC5WYXVsdFN0YXRlIk8KElVubG9ja1ZhdWx0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnBhc3NwaHJhc2UYAiABKAkSDgoGY3JlYXRlGAMgASgIIlYKE1VubG9ja1ZhdWx0UmVzcG9uc2USJQoLdmF1bHRfc3RhdGUYASABKA4yEC5hdXRoLlZhdWx0U3RhdGUSGAoQdmF1bHRfdW5sb2NrX2tleRgCIAEoCSJCChFSZXNldFZhdWx0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhYKDm5ld19wYXNzcGhyYXNlGAIgASgJIlUKElJlc2V0VmF1bHRSZXNwb25zZRIlCgt2YXVsdF9zdGF0ZRgBIAEoDjIQLmF1dGguVmF1bHRTdGF0ZRIYChB2YXVsdF91bmxvY2tfa2V5GAIgASgJIjAKF01pbnRMaXZlS2l0VG9rZW5SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiWQoYTWludExpdmVLaXRUb2tlblJlc3BvbnNlEg0KBXRva2VuGAEgASgJEgsKA3VybBgCIAEoCRIMCgRyb29tGAMgASgJEhMKC3R0bF9zZWNvbmRzGAQgASgEIkkKCkdpdEh1YlVzZXISDQoFbG9naW4YASABKAkSEgoKYXZhdGFyX3VybBgCIAEoCRIMCgRuYW1lGAMgASgJEgoKAmlkGAQgASgEKowBCgpWYXVsdFN0YXRlEhsKF1ZBVUxUX1NUQVRFX1VOU1BFQ0lGSUVEEAASFAoQVkFVTFRfU1RBVEVfTk9ORRABEhQKEFZBVUxUX1NUQVRFX09QRU4QAhIWChJWQVVMVF9TVEFURV9MT0NLRUQQAxIdChlWQVVMVF9TVEFURV9VTklOSVRJQUxJWkVEEAQq2AEKEERldmljZUxvZ2luU3RhdGUSIgoeREVWSUNFX0xPR0lOX1NUQVRFX1VOU1BFQ0lGSUVEEAASHgoaREVWSUNFX0xPR0lOX1NUQVRFX1BFTkRJTkcQARIgChxERVZJQ0VfTE9HSU5fU1RBVEVfU0xPV19ET1dOEAISHQoZREVWSUNFX0xPR0lOX1NUQVRFX0RFTklFRBADEh4KGkRFVklDRV9MT0dJTl9TVEFURV9FWFBJUkVEEAQSHwobREVWSUNFX0xPR0lOX1NUQVRFX0NPTVBMRVRFEAUyiQUKC0F1dGhTZXJ2aWNlEj8KCkdldEF1dGhVcmwSFy5hdXRoLkdldEF1dGhVcmxSZXF1ZXN0GhguYXV0aC5HZXRBdXRoVXJsUmVzcG9uc2USRQoMRXhjaGFuZ2VDb2RlEhkuYXV0aC5FeGNoYW5nZUNvZGVSZXF1ZXN0GhouYXV0aC5FeGNoYW5nZUNvZGVSZXNwb25zZRJICg1HZXRBdXRoU3RhdHVzEhouYXV0aC5HZXRBdXRoU3RhdHVzUmVxdWVzdBobLmF1dGguR2V0QXV0aFN0YXR1c1Jlc3BvbnNlEksKDlJlZnJlc2hTZXNzaW9uEhsuYXV0aC5SZWZyZXNoU2Vzc2lvblJlcXVlc3QaHC5hdXRoLlJlZnJlc2hTZXNzaW9uUmVzcG9uc2USMwoGTG9nb3V0EhMuYXV0aC5Mb2dvdXRSZXF1ZXN0GhQuYXV0aC5Mb2dvdXRSZXNwb25zZRJRChBTdGFydERldmljZUxvZ2luEh0uYXV0aC5TdGFydERldmljZUxvZ2luUmVxdWVzdBoeLmF1dGguU3RhcnREZXZpY2VMb2dpblJlc3BvbnNlEk4KD1BvbGxEZXZpY2VMb2dpbhIcLmF1dGguUG9sbERldmljZUxvZ2luUmVxdWVzdBodLmF1dGguUG9sbERldmljZUxvZ2luUmVzcG9uc2USQgoLVW5sb2NrVmF1bHQSGC5hdXRoLlVubG9ja1ZhdWx0UmVxdWVzdBoZLmF1dGguVW5sb2NrVmF1bHRSZXNwb25zZRI/CgpSZXNldFZhdWx0EhcuYXV0aC5SZXNldFZhdWx0UmVxdWVzdBoYLmF1dGguUmVzZXRWYXVsdFJlc3BvbnNlMmgKE0xpdmVLaXRUb2tlblNlcnZpY2USUQoQTWludExpdmVLaXRUb2tlbhIdLmF1dGguTWludExpdmVLaXRUb2tlblJlcXVlc3QaHi5hdXRoLk1pbnRMaXZlS2l0VG9rZW5SZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message auth.GetAuthUrlRequest
@@ -102,6 +102,14 @@ export type ExchangeCodeResponse = Message<"auth.ExchangeCodeResponse"> & {
    * @generated from field: string vault_unlock_key = 4;
    */
   vaultUnlockKey: string;
+
+  /**
+   * Where this login's vault stands. LOCKED and UNINITIALIZED are signed in all the same — the
+   * client prompts for the passphrase rather than refusing the login.
+   *
+   * @generated from field: auth.VaultState vault_state = 5;
+   */
+  vaultState: VaultState;
 };
 
 /**
@@ -141,6 +149,14 @@ export type GetAuthStatusResponse = Message<"auth.GetAuthStatusResponse"> & {
    * @generated from field: auth.GitHubUser user = 2;
    */
   user?: GitHubUser;
+
+  /**
+   * Where the authenticated caller's vault stands, so a page that reloads while it is LOCKED or
+   * UNINITIALIZED prompts again. UNSPECIFIED when not authenticated.
+   *
+   * @generated from field: auth.VaultState vault_state = 3;
+   */
+  vaultState: VaultState;
 };
 
 /**
@@ -204,12 +220,19 @@ export type RefreshSessionResponse = Message<"auth.RefreshSessionResponse"> & {
   /**
    * The rotated vault unlock key that replaces the presented one; the presented one opens nothing
    * any more. Empty when none was presented, or when the presented one no longer opens its slot —
-   * the session is still refreshed, but credential-backed reads stay unavailable until the next
-   * login. A wrap key, not a stored credential: alone it opens nothing.
+   * the session is still refreshed, and `vault_state` says what opens the vault instead. A wrap
+   * key, not a stored credential: alone it opens nothing.
    *
    * @generated from field: string vault_unlock_key = 4;
    */
   vaultUnlockKey: string;
+
+  /**
+   * Where the caller's vault stands after this refresh.
+   *
+   * @generated from field: auth.VaultState vault_state = 5;
+   */
+  vaultState: VaultState;
 };
 
 /**
@@ -370,6 +393,13 @@ export type PollDeviceLoginResponse = Message<"auth.PollDeviceLoginResponse"> & 
    * @generated from field: string vault_unlock_key = 6;
    */
   vaultUnlockKey: string;
+
+  /**
+   * As `ExchangeCodeResponse.vault_state`. Set only on COMPLETE.
+   *
+   * @generated from field: auth.VaultState vault_state = 7;
+   */
+  vaultState: VaultState;
 };
 
 /**
@@ -378,6 +408,118 @@ export type PollDeviceLoginResponse = Message<"auth.PollDeviceLoginResponse"> & 
  */
 export const PollDeviceLoginResponseSchema: GenMessage<PollDeviceLoginResponse> = /*@__PURE__*/
   messageDesc(file_auth, 13);
+
+/**
+ * @generated from message auth.UnlockVaultRequest
+ */
+export type UnlockVaultRequest = Message<"auth.UnlockVaultRequest"> & {
+  /**
+   * The caller's access token: whose vault this is.
+   *
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * Never logged, never stored; Argon2id derives the vault's key-encryption key from it.
+   *
+   * @generated from field: string passphrase = 2;
+   */
+  passphrase: string;
+
+  /**
+   * Create the vault under `passphrase` rather than open it. Refused when a vault already exists.
+   *
+   * @generated from field: bool create = 3;
+   */
+  create: boolean;
+};
+
+/**
+ * Describes the message auth.UnlockVaultRequest.
+ * Use `create(UnlockVaultRequestSchema)` to create a new message.
+ */
+export const UnlockVaultRequestSchema: GenMessage<UnlockVaultRequest> = /*@__PURE__*/
+  messageDesc(file_auth, 14);
+
+/**
+ * @generated from message auth.UnlockVaultResponse
+ */
+export type UnlockVaultResponse = Message<"auth.UnlockVaultResponse"> & {
+  /**
+   * OPEN on success.
+   *
+   * @generated from field: auth.VaultState vault_state = 1;
+   */
+  vaultState: VaultState;
+
+  /**
+   * This lineage's unlock slot key, as `ExchangeCodeResponse.vault_unlock_key`. Replaces any the
+   * client holds.
+   *
+   * @generated from field: string vault_unlock_key = 2;
+   */
+  vaultUnlockKey: string;
+};
+
+/**
+ * Describes the message auth.UnlockVaultResponse.
+ * Use `create(UnlockVaultResponseSchema)` to create a new message.
+ */
+export const UnlockVaultResponseSchema: GenMessage<UnlockVaultResponse> = /*@__PURE__*/
+  messageDesc(file_auth, 15);
+
+/**
+ * @generated from message auth.ResetVaultRequest
+ */
+export type ResetVaultRequest = Message<"auth.ResetVaultRequest"> & {
+  /**
+   * The caller's access token: whose vault this is.
+   *
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * The fresh vault's passphrase. Never logged, never stored.
+   *
+   * @generated from field: string new_passphrase = 2;
+   */
+  newPassphrase: string;
+};
+
+/**
+ * Describes the message auth.ResetVaultRequest.
+ * Use `create(ResetVaultRequestSchema)` to create a new message.
+ */
+export const ResetVaultRequestSchema: GenMessage<ResetVaultRequest> = /*@__PURE__*/
+  messageDesc(file_auth, 16);
+
+/**
+ * @generated from message auth.ResetVaultResponse
+ */
+export type ResetVaultResponse = Message<"auth.ResetVaultResponse"> & {
+  /**
+   * OPEN on success.
+   *
+   * @generated from field: auth.VaultState vault_state = 1;
+   */
+  vaultState: VaultState;
+
+  /**
+   * This lineage's unlock slot key to the fresh vault. Every key to the old vault opens nothing.
+   *
+   * @generated from field: string vault_unlock_key = 2;
+   */
+  vaultUnlockKey: string;
+};
+
+/**
+ * Describes the message auth.ResetVaultResponse.
+ * Use `create(ResetVaultResponseSchema)` to create a new message.
+ */
+export const ResetVaultResponseSchema: GenMessage<ResetVaultResponse> = /*@__PURE__*/
+  messageDesc(file_auth, 17);
 
 /**
  * @generated from message auth.MintLiveKitTokenRequest
@@ -397,7 +539,7 @@ export type MintLiveKitTokenRequest = Message<"auth.MintLiveKitTokenRequest"> & 
  * Use `create(MintLiveKitTokenRequestSchema)` to create a new message.
  */
 export const MintLiveKitTokenRequestSchema: GenMessage<MintLiveKitTokenRequest> = /*@__PURE__*/
-  messageDesc(file_auth, 14);
+  messageDesc(file_auth, 18);
 
 /**
  * @generated from message auth.MintLiveKitTokenResponse
@@ -435,7 +577,7 @@ export type MintLiveKitTokenResponse = Message<"auth.MintLiveKitTokenResponse"> 
  * Use `create(MintLiveKitTokenResponseSchema)` to create a new message.
  */
 export const MintLiveKitTokenResponseSchema: GenMessage<MintLiveKitTokenResponse> = /*@__PURE__*/
-  messageDesc(file_auth, 15);
+  messageDesc(file_auth, 19);
 
 /**
  * @generated from message auth.GitHubUser
@@ -467,7 +609,56 @@ export type GitHubUser = Message<"auth.GitHubUser"> & {
  * Use `create(GitHubUserSchema)` to create a new message.
  */
 export const GitHubUserSchema: GenMessage<GitHubUser> = /*@__PURE__*/
-  messageDesc(file_auth, 16);
+  messageDesc(file_auth, 20);
+
+/**
+ * Where the caller's credential vault stands on the answering daemon.
+ *
+ * @generated from enum auth.VaultState
+ */
+export enum VaultState {
+  /**
+   * @generated from enum value: VAULT_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The daemon keeps no vault for this login: a stub/demo login, or no `auth_storage`. Nothing to
+   * unlock and nothing to prompt for.
+   *
+   * @generated from enum value: VAULT_STATE_NONE = 1;
+   */
+  NONE = 1,
+
+  /**
+   * Open: stored credentials are in use. No prompt.
+   *
+   * @generated from enum value: VAULT_STATE_OPEN = 2;
+   */
+  OPEN = 2,
+
+  /**
+   * A vault exists and is closed on this daemon. Its passphrase opens it (`UnlockVault`); until
+   * then the GitHub token this login received is held in memory, and GitHub-backed reads report
+   * themselves unavailable.
+   *
+   * @generated from enum value: VAULT_STATE_LOCKED = 3;
+   */
+  LOCKED = 3,
+
+  /**
+   * No vault exists yet. Choosing a passphrase creates it (`UnlockVault` with `create`).
+   *
+   * @generated from enum value: VAULT_STATE_UNINITIALIZED = 4;
+   */
+  UNINITIALIZED = 4,
+}
+
+/**
+ * Describes the enum auth.VaultState.
+ */
+export const VaultStateSchema: GenEnum<VaultState> = /*@__PURE__*/
+  enumDesc(file_auth, 0);
 
 /**
  * Where one poll left the attempt. The client's next move differs for every state, so they are
@@ -521,7 +712,7 @@ export enum DeviceLoginState {
  * Describes the enum auth.DeviceLoginState.
  */
 export const DeviceLoginStateSchema: GenEnum<DeviceLoginState> = /*@__PURE__*/
-  enumDesc(file_auth, 0);
+  enumDesc(file_auth, 1);
 
 /**
  * @generated from service auth.AuthService
@@ -593,6 +784,32 @@ export const AuthService: GenService<{
     methodKind: "unary";
     input: typeof PollDeviceLoginRequestSchema;
     output: typeof PollDeviceLoginResponseSchema;
+  },
+  /**
+   * Open the caller's credential vault with its passphrase — or, with `create`, create it under a
+   * first passphrase when none exists — seal the GitHub token their login is holding for it, and
+   * hand this lineage an unlock slot. A wrong passphrase is `failed_precondition` naming the lock,
+   * and changes nothing on disk.
+   *
+   * @generated from rpc auth.AuthService.UnlockVault
+   */
+  unlockVault: {
+    methodKind: "unary";
+    input: typeof UnlockVaultRequestSchema;
+    output: typeof UnlockVaultResponseSchema;
+  },
+  /**
+   * The forgotten-passphrase path: set the caller's vault aside (renamed on the daemon's disk,
+   * never deleted), create a fresh one under `new_passphrase`, and seal the GitHub token their login
+   * is holding for it. Every stored credential must be linked again; the old file stays recoverable
+   * by whoever still knows its passphrase.
+   *
+   * @generated from rpc auth.AuthService.ResetVault
+   */
+  resetVault: {
+    methodKind: "unary";
+    input: typeof ResetVaultRequestSchema;
+    output: typeof ResetVaultResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_auth, 0);

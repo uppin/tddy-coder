@@ -138,12 +138,14 @@ impl SessionVault {
         Ok(unlock)
     }
 
-    /// Replace the wrap in slot `slot_id` under a new key, and hand that key back; the previous one
-    /// opens nothing afterwards. The slot becomes the most recently used.
+    /// Replace the wrap in the slot `presented` opens under a new key, and hand that key back; the
+    /// presented one opens nothing afterwards. The slot becomes the most recently used.
     ///
-    /// A slot that is gone is [`VaultError::Locked`] — the lineage it belonged to has no way back
-    /// in until its next login.
-    pub fn rotate_unlock_slot(&self, slot_id: &str) -> Result<UnlockKey, VaultError> {
+    /// The presented key is proven against its slot **under the write lock**, in the same critical
+    /// section as the replacement, so two refreshes presenting one key cannot both rotate it. A slot
+    /// that is gone, or a key that no longer opens it, is [`VaultError::Locked`].
+    pub fn rotate_unlock_slot(&self, presented: &UnlockKey) -> Result<UnlockKey, VaultError> {
+        let slot_id = presented.slot_id();
         let _serialised = serialised();
         let mut file = self.load()?;
         let at = file

@@ -7,6 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::secret::SecretString;
+
 /// Which service a credential authenticates against — `github`, `cloudflare`, `screen-sharing`.
 ///
 /// A newtype rather than an enum: a provider is data, and adding one must not be a breaking change
@@ -69,14 +71,18 @@ impl std::fmt::Display for AccountId {
 /// `metadata` carries whatever a provider needs that is not the secret — a refresh token's expiry,
 /// the scopes granted, the avatar URL a UI shows. It is a map rather than typed fields so a new
 /// provider does not change this struct.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Not serialisable.** The record is sealed through a private mirror inside the vault, so there is
+/// no `Serialize` a response builder could reach for, and `secret` prints redacted — the rule that a
+/// secret never reaches an RPC response path is a property of the type, not a convention.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CredentialRecord {
     pub provider: ProviderId,
     pub account: AccountId,
     /// What a human calls this account in the Accounts screen.
     pub label: String,
     /// The credential itself. Never returned to an RPC response path.
-    pub secret: String,
+    pub secret: SecretString,
     /// Provider-specific detail that is not the secret.
     pub metadata: std::collections::BTreeMap<String, String>,
     /// When this record was last written, as seconds since the Unix epoch.

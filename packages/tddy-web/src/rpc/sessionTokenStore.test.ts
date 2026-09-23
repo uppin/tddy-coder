@@ -14,7 +14,7 @@
 import { describe, it, expect } from "bun:test";
 import { createClient, ConnectError, Code } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AuthService } from "../gen/auth_pb";
+import { AuthService, VaultState } from "../gen/auth_pb";
 
 import { createSessionTokenStore, type TokenStorage } from "./sessionTokenStore";
 
@@ -105,10 +105,61 @@ function aTransientlyFailingRefreshBackend() {
   });
 }
 
+/** Backend whose `RefreshSession` answers with the vault state it is given, and no key. */
+function aRefreshBackendReportingTheVault(vaultState: VaultState) {
+  return anInMemoryRpcBackend().implement(AuthService, {
+    refreshSession: async () => ({
+      sessionToken: REFRESHED_ACCESS,
+      refreshToken: SLID_REFRESH,
+      vaultUnlockKey: "",
+      vaultState,
+      user: undefined,
+    }),
+  });
+}
+
+const THE_PASSPHRASE = "correct horse battery staple";
+const UNLOCKED_UNLOCK_KEY = "6f70.slot.unlocked";
+
+/**
+ * Backend for a daemon whose vault opens under `THE_PASSPHRASE` only: `UnlockVault` and
+ * `ResetVault` hand back a fresh unlock key, and a wrong passphrase is `FailedPrecondition`, as the
+ * daemon refuses it. `Logout` is answered and recorded.
+ */
+function aVaultBackend() {
+  return anInMemoryRpcBackend().implement(AuthService, {
+    unlockVault: async (req: { passphrase?: string }) => {
+      if (req.passphrase !== THE_PASSPHRASE) {
+        throw new ConnectError("the credential vault is locked: that key does not open it", Code.FailedPrecondition);
+      }
+      return { vaultState: VaultState.OPEN, vaultUnlockKey: UNLOCKED_UNLOCK_KEY };
+    },
+    resetVault: async () => ({ vaultState: VaultState.OPEN, vaultUnlockKey: UNLOCKED_UNLOCK_KEY }),
+    logout: async () => ({}),
+    refreshSession: async () => ({
+      sessionToken: REFRESHED_ACCESS,
+      refreshToken: SLID_REFRESH,
+      vaultUnlockKey: ROTATED_UNLOCK_KEY,
+      vaultState: VaultState.OPEN,
+      user: undefined,
+    }),
+  });
+}
+
+/** Backend whose `Logout` cannot be reached. */
+function anUnreachableLogoutBackend() {
+  return anInMemoryRpcBackend().implement(AuthService, {
+    logout: async () => {
+      throw new ConnectError("connection refused", Code.Unavailable);
+    },
+  });
+}
+
 function aStore(deps: {
   storage: TokenStorage;
   backend?: ReturnType<typeof aRefreshBackend>;
   onLoggedOut?: () => void;
+  onVaultStateChange?: (state: VaultState) => void;
 }) {
   const backend = deps.backend ?? aRefreshBackend();
   const authClient = createClient(AuthService, backend.transport());
@@ -117,6 +168,7 @@ function aStore(deps: {
     storage: deps.storage,
     now: () => NOW_MS,
     onLoggedOut: deps.onLoggedOut,
+    onVaultStateChange: deps.onVaultStateChange,
   });
   return { store, backend };
 }
@@ -244,5 +296,183 @@ describe("createSessionTokenStore", () => {
     expect(storage.getAccess()).toBe(EXPIRED_ACCESS);
     expect(storage.getRefresh()).toBe(VALID_REFRESH);
     expect(loggedOut).toBe(0);
+  });
+});
+
+describe("the vault unlock key a session lineage holds", () => {
+  it("is handed to the daemon at logout, so the daemon can remove its slot", async () => {
+    // Given — a signed-in lineage holding an unlock key
+    const storage = anInMemoryStorage(FRESH_STORED_ACCESS, VALID_REFRESH, PRESENTED_UNLOCK_KEY);
+    const { store, backend } = aStore({ storage, backend: aVaultBackend() });
+
+    // When — the operator signs out
+    await store.logout();
+
+    // Then — the daemon was sent the key
+    expect(backend.callsTo(AuthService.method.logout).map((request) => request.vaultUnlockKey)).toEqual([
+      PRESENTED_UNLOCK_KEY,
+    ]);
+  });
+
+  it("is cleared at logout, together with both tokens", async () => {
+    // Given — a signed-in lineage holding an unlock key
+    const storage = anInMemoryStorage(FRESH_STORED_ACCESS, VALID_REFRESH, PRESENTED_UNLOCK_KEY);
+    const { store } = aStore({ storage, backend: aVaultBackend() });
+
+    // When — the operator signs out
+    await store.logout();
+
+    // Then
+    expect([storage.getAccess(), storage.getRefresh(), storage.getVaultUnlockKey()]).toEqual([null, null, null]);
+  });
+
+  it("is cleared at logout even when the daemon cannot be reached", async () => {
+    // Given — a lineage holding an unlock key, and a daemon that does not answer
+    const storage = anInMemoryStorage(FRESH_STORED_ACCESS, VALID_REFRESH, PRESENTED_UNLOCK_KEY);
+    const { store } = aStore({ storage, backend: anUnreachableLogoutBackend() });
+
+    // When — the operator signs out
+    await store.logout();
+
+    // Then — the browser keeps nothing; a slot left behind on the daemon opens nothing without it
+    expect(storage.getVaultUnlockKey()).toBe(null);
+  });
+
+  it("is cleared when the daemon refuses the refresh token as Unauthenticated", async () => {
+    // Given — a lineage holding an unlock key and a refresh token the daemon no longer accepts
+    const storage = anInMemoryStorage(EXPIRED_ACCESS, EXPIRED_REFRESH, PRESENTED_UNLOCK_KEY);
+    const { store } = aStore({ storage });
+
+    // When — a fresh access token is requested
+    const attempt = store.ensureFreshAccessToken();
+
+    // Then — the session is over, and the key goes with it
+    await expect(attempt).rejects.toThrow();
+    expect(storage.getVaultUnlockKey()).toBe(null);
+  });
+
+  it("is removed when a refresh returns an empty one", async () => {
+    // Given — a lineage holding a key the daemon can no longer open its slot with
+    const storage = anInMemoryStorage(EXPIRED_ACCESS, VALID_REFRESH, "6f70.slot.long-gone");
+    const { store } = aStore({ storage, backend: aRotatingRefreshBackend() });
+
+    // When — the token is refreshed, and the daemon hands back no key
+    await store.ensureFreshAccessToken();
+
+    // Then — a key that opens nothing is not kept
+    expect(storage.getVaultUnlockKey()).toBe(null);
+  });
+
+  it("makes a page load refresh at once, presenting it", async () => {
+    // Given — a page load holding a fresh access token and an unlock key
+    const storage = anInMemoryStorage(FRESH_STORED_ACCESS, VALID_REFRESH, PRESENTED_UNLOCK_KEY);
+    const { store, backend } = aStore({ storage, backend: aRotatingRefreshBackend() });
+
+    // When — the page reopens the operator's credentials
+    await store.reopenVaultOnLoad();
+
+    // Then — one refresh carried the key, so a daemon that restarted reopens the vault now
+    expect(backend.callsTo(AuthService.method.refreshSession).map((request) => request.vaultUnlockKey)).toEqual([
+      PRESENTED_UNLOCK_KEY,
+    ]);
+  });
+
+  it("is what a page load's refresh depends on: without one, the page does not refresh", async () => {
+    // Given — a page load holding a fresh access token and no unlock key
+    const storage = anInMemoryStorage(FRESH_STORED_ACCESS, VALID_REFRESH);
+    const { store, backend } = aStore({ storage, backend: aRotatingRefreshBackend() });
+
+    // When
+    await store.reopenVaultOnLoad();
+
+    // Then
+    expect(backend.callsTo(AuthService.method.refreshSession)).toHaveLength(0);
+  });
+});
+
+describe("the credential vault's state", () => {
+  it("is reported from every refresh", async () => {
+    // Given — a daemon that restarted, and whose vault this lineage cannot reopen
+    const storage = anInMemoryStorage(EXPIRED_ACCESS, VALID_REFRESH);
+    const reported: VaultState[] = [];
+    const { store } = aStore({
+      storage,
+      backend: aRefreshBackendReportingTheVault(VaultState.LOCKED),
+      onVaultStateChange: (state) => reported.push(state),
+    });
+
+    // When — the token is refreshed
+    await store.ensureFreshAccessToken();
+
+    // Then — the page learns the vault needs its passphrase
+    expect(reported).toEqual([VaultState.LOCKED]);
+  });
+
+  it("becomes open when the passphrase unlocks it, and the returned key is kept", async () => {
+    // Given — a signed-in lineage whose vault is locked
+    const storage = anInMemoryStorage(FRESH_STORED_ACCESS, VALID_REFRESH);
+    const reported: VaultState[] = [];
+    const { store } = aStore({
+      storage,
+      backend: aVaultBackend(),
+      onVaultStateChange: (state) => reported.push(state),
+    });
+
+    // When — the operator gives the passphrase
+    await store.unlockVault(THE_PASSPHRASE, false);
+
+    // Then
+    expect([reported, storage.getVaultUnlockKey()]).toEqual([[VaultState.OPEN], UNLOCKED_UNLOCK_KEY]);
+  });
+
+  it("is sent the passphrase with the lineage's access token", async () => {
+    // Given — a signed-in lineage whose vault has not been created
+    const storage = anInMemoryStorage(FRESH_STORED_ACCESS, VALID_REFRESH);
+    const { store, backend } = aStore({ storage, backend: aVaultBackend() });
+
+    // When — the operator chooses a first passphrase
+    await store.unlockVault(THE_PASSPHRASE, true);
+
+    // Then
+    expect(
+      backend
+        .callsTo(AuthService.method.unlockVault)
+        .map((request) => [request.sessionToken, request.passphrase, request.create]),
+    ).toEqual([[FRESH_STORED_ACCESS, THE_PASSPHRASE, true]]);
+  });
+
+  it("stays as it was when the passphrase is wrong, and the refusal reaches the caller", async () => {
+    // Given — a signed-in lineage whose vault is locked
+    const storage = anInMemoryStorage(FRESH_STORED_ACCESS, VALID_REFRESH);
+    const reported: VaultState[] = [];
+    const { store } = aStore({
+      storage,
+      backend: aVaultBackend(),
+      onVaultStateChange: (state) => reported.push(state),
+    });
+
+    // When — the wrong passphrase is given
+    const attempt = store.unlockVault("not the passphrase", false);
+
+    // Then — the prompt can say so, and nothing was stored or reported
+    await expect(attempt).rejects.toThrow("locked");
+    expect([reported, storage.getVaultUnlockKey(), storage.getAccess()]).toEqual([[], null, FRESH_STORED_ACCESS]);
+  });
+
+  it("becomes open under a reset, with the key to the fresh vault kept", async () => {
+    // Given — a signed-in lineage that forgot its passphrase
+    const storage = anInMemoryStorage(FRESH_STORED_ACCESS, VALID_REFRESH);
+    const reported: VaultState[] = [];
+    const { store } = aStore({
+      storage,
+      backend: aVaultBackend(),
+      onVaultStateChange: (state) => reported.push(state),
+    });
+
+    // When — the operator resets the vault under a new passphrase
+    await store.resetVault("a passphrase chosen after forgetting");
+
+    // Then
+    expect([reported, storage.getVaultUnlockKey()]).toEqual([[VaultState.OPEN], UNLOCKED_UNLOCK_KEY]);
   });
 });

@@ -39,6 +39,58 @@ impl Drop for SecretBytes {
     }
 }
 
+/// A secret that is text — a stored credential, a vault passphrase — zeroed when it is dropped.
+///
+/// It prints as `SecretString(<redacted>)` and implements neither `Serialize` nor `Deserialize`,
+/// so it cannot reach a log line or an RPC response by being formatted or serialised as part of a
+/// bigger value. The one way to the text is [`Self::expose`], which is a call a reviewer can find.
+///
+/// Equality is constant-time, so comparing two of them does not leak how long a shared prefix is.
+/// A `Clone` is a second owned copy, wiped on its own drop.
+#[derive(Clone)]
+pub struct SecretString(String);
+
+impl SecretString {
+    /// Take ownership of secret text.
+    #[must_use]
+    pub fn new(secret: impl Into<String>) -> Self {
+        Self(secret.into())
+    }
+
+    /// Borrow the text for the length of the operation that needs it. Never log it.
+    #[must_use]
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl PartialEq for SecretString {
+    fn eq(&self, other: &Self) -> bool {
+        use subtle::ConstantTimeEq;
+        bool::from(self.0.as_bytes().ct_eq(other.0.as_bytes()))
+    }
+}
+
+impl Eq for SecretString {}
+
+impl std::fmt::Debug for SecretString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SecretString(<redacted>)")
+    }
+}
+
+impl Drop for SecretString {
+    fn drop(&mut self) {
+        wipe_text(&mut self.0);
+    }
+}
+
+/// Zero `text` in place, leaving it the same length.
+fn wipe_text(text: &mut String) {
+    // SAFETY: zero bytes are valid UTF-8, so the string stays well-formed for its last moment.
+    wipe(unsafe { text.as_bytes_mut() });
+}
+
 /// Overwrite `bytes` with zeroes in a way the optimiser may not elide.
 ///
 /// A plain `fill(0)` on memory that is about to be freed is a dead store, and removing dead stores
@@ -53,4 +105,22 @@ pub(crate) fn wipe(bytes: &mut [u8]) {
         unsafe { std::ptr::write_volatile(byte, 0) };
     }
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_secret_strings_text_is_zeroed_in_place_before_its_buffer_is_released() {
+        // Given secret text
+        let mut text = String::from("correct horse battery staple");
+
+        // When the wipe a `SecretString` runs on drop is applied to it — to a live buffer, since
+        // reading one after it is freed would prove nothing an allocator did not decide
+        wipe_text(&mut text);
+
+        // Then every byte is zero
+        assert_eq!(text.into_bytes(), vec![0u8; 28]);
+    }
 }

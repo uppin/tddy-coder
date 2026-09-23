@@ -17,13 +17,56 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
+use crate::record::CredentialRecord;
+use crate::secret::SecretString;
 use crate::vault::{CredentialStore, SessionVault, UnlockKey, VaultError};
 
-/// Every user's open [`SessionVault`], keyed by subject, over one `auth_storage` directory.
+/// How long the key a refresh just rotated away from still answers, with the key it was rotated to.
+///
+/// Two tabs of one browser share one stored unlock key and refresh on load together, and a
+/// response can be lost on the way back. Either way a second refresh arrives presenting the key the
+/// first one retired; within this window it is handed the same successor instead of nothing, so
+/// both tabs end up holding the one key that opens the slot. A cross-tab lock in the page was the
+/// alternative, and was not taken: the Web Locks API exists only in secure contexts, and the
+/// dashboard is served over plain-http LAN origins.
+pub const ROTATION_GRACE: Duration = Duration::from_secs(30);
+
+/// Where one user's vault stands on this daemon, as a login or a refresh reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VaultState {
+    /// Open in memory: credentials are readable and a new lineage is handed an unlock slot.
+    Open,
+    /// A vault file exists and nothing has opened it since this daemon started. Its passphrase, or
+    /// a refresh presenting an unlock key, opens it.
+    Locked,
+    /// No vault file exists. Choosing a passphrase creates one.
+    Uninitialized,
+}
+
+/// What a login's credential met: the vault's state, and — when it was open — the unlock key
+/// handed to the signing-in lineage.
+#[derive(Debug)]
+pub struct Retained {
+    pub state: VaultState,
+    pub unlock_key: Option<UnlockKey>,
+}
+
+/// What a reset did: where the old vault was set aside (`None` when there was none), and the
+/// unlock key to the fresh one.
+#[derive(Debug)]
+pub struct Reset {
+    pub set_aside: Option<PathBuf>,
+    pub unlock_key: UnlockKey,
+}
+
+/// Every user's open [`SessionVault`], keyed by subject, over one `auth_storage` directory — and
+/// the credentials that arrived while a vault was closed, waiting for it to open.
 pub struct SessionVaults {
     auth_storage_dir: PathBuf,
+    rotation_grace: Duration,
     open: Mutex<HashMap<String, Arc<SessionVault>>>,
 }
 
@@ -34,8 +77,16 @@ impl SessionVaults {
     pub fn new(auth_storage_dir: impl Into<PathBuf>) -> Self {
         Self {
             auth_storage_dir: auth_storage_dir.into(),
+            rotation_grace: ROTATION_GRACE,
             open: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Answer a retired unlock key for `grace` after its rotation rather than [`ROTATION_GRACE`].
+    #[must_use]
+    pub fn with_rotation_grace(mut self, grace: Duration) -> Self {
+        self.rotation_grace = grace;
+        self
     }
 
     /// Where `subject`'s vault lives.
@@ -50,27 +101,58 @@ impl SessionVaults {
         &self.auth_storage_dir
     }
 
-    /// Open `subject`'s vault for a login that produced `ikm`, re-wrap it under that credential,
-    /// and keep the handle for the session's reads.
+    /// Where `subject`'s vault stands right now.
+    #[must_use]
+    pub fn state(&self, subject: &str) -> VaultState {
+        let _ = subject;
+        todo!("report a subject's vault state")
+    }
+
+    /// Whether a credential for `subject` is waiting in memory for their vault to open.
+    #[must_use]
+    pub fn holds_pending(&self, subject: &str) -> bool {
+        let _ = subject;
+        todo!("report a pending credential")
+    }
+
+    /// Retain a credential a login produced for `subject`.
     ///
-    /// When the subject already has a vault open — they are signed in elsewhere — that handle is
-    /// the one re-wrapped, which is what lets a **rotated** credential (a device login after a
-    /// callback login, a re-approval) carry the vault over instead of locking it. Otherwise the
-    /// file is opened from `ikm`, created only when absent; one sealed under anything else is
-    /// [`VaultError::Locked`] and is left exactly as it was.
-    pub fn unlock(&self, subject: &str, ikm: &[u8]) -> Result<Arc<SessionVault>, VaultError> {
-        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
-        let vault = match open.get(subject) {
-            Some(vault) => Arc::clone(vault),
-            None => Arc::new(CredentialStore::open_or_create(
-                &self.path_for(subject),
-                ikm,
-                subject,
-            )?),
-        };
-        vault.rewrap(ikm)?;
-        open.insert(subject.to_string(), Arc::clone(&vault));
-        Ok(vault)
+    /// With the vault open, `record` is sealed into it and the lineage is handed an unlock slot.
+    /// With it closed, `record` is kept **in memory only**, never written in plaintext, and sealed
+    /// when [`Self::unlock`], [`Self::create`] or [`Self::reset`] next opens the vault; the state
+    /// says which of those the user is asked for. A failed write is an `Err` — it fails the login.
+    pub fn retain(&self, subject: &str, record: CredentialRecord) -> Result<Retained, VaultError> {
+        let _ = (subject, record);
+        todo!("retain a login's credential")
+    }
+
+    /// Open `subject`'s vault with its passphrase, seal what was pending, and hand the lineage an
+    /// unlock slot. A wrong passphrase is [`VaultError::Locked`] and changes nothing.
+    pub fn unlock(
+        &self,
+        subject: &str,
+        passphrase: &SecretString,
+    ) -> Result<UnlockKey, VaultError> {
+        let _ = (subject, passphrase);
+        todo!("unlock a vault with its passphrase")
+    }
+
+    /// Create `subject`'s vault under a first passphrase, seal what was pending, and hand the
+    /// lineage an unlock slot. A vault that already exists is [`VaultError::AlreadyInitialized`].
+    pub fn create(
+        &self,
+        subject: &str,
+        passphrase: &SecretString,
+    ) -> Result<UnlockKey, VaultError> {
+        let _ = (subject, passphrase);
+        todo!("create a vault under a first passphrase")
+    }
+
+    /// Set `subject`'s vault aside (renamed, never deleted) and create a fresh one under
+    /// `new_passphrase`, sealing what was pending. Every unlock key to the old vault opens nothing.
+    pub fn reset(&self, subject: &str, new_passphrase: &SecretString) -> Result<Reset, VaultError> {
+        let _ = (subject, new_passphrase);
+        todo!("reset a vault")
     }
 
     /// Reopen a vault through the unlock slot `unlock` names — a session refresh, possibly the
@@ -78,32 +160,40 @@ impl SessionVaults {
     ///
     /// The presented key must open its slot even when the vault is already open here: holding a
     /// slot id is not possession of the key. A key that does not (a slot rotated since, logged out
-    /// or evicted) is [`VaultError::Locked`], and nothing is registered or changed.
+    /// or evicted) is [`VaultError::Locked`], and nothing is registered or changed — unless it is
+    /// the key this slot was rotated away from within the grace window, which is answered with the
+    /// same successor.
     pub fn reopen(&self, unlock: &UnlockKey) -> Result<UnlockKey, VaultError> {
         let subject = unlock.subject();
         let proven = CredentialStore::open_with_unlock_key(&self.path_for(subject), unlock)?;
-        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
-        let vault = Arc::clone(
-            open.entry(subject.to_string())
-                .or_insert_with(|| Arc::new(proven)),
-        );
-        vault.rotate_unlock_slot(unlock.slot_id())
+        let rotated = proven.rotate_unlock_slot(unlock)?;
+        self.open
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(subject.to_string())
+            .or_insert_with(|| Arc::new(proven));
+        Ok(rotated)
     }
 
     /// Remove the unlock slot `unlock` names — a logout. The key must still open its slot, so a
     /// slot id alone cannot remove somebody else's; a key that does not (the slot is already gone,
     /// or was rotated since) is [`VaultError::Locked`] and nothing is removed.
+    ///
+    /// When that was the vault's last slot, no signed-in lineage is left to use it, and the open
+    /// handle — the data key in memory — is dropped with it.
     pub fn forget(&self, unlock: &UnlockKey) -> Result<(), VaultError> {
         CredentialStore::open_with_unlock_key(&self.path_for(unlock.subject()), unlock)?
             .remove_unlock_slot(unlock.slot_id())
     }
 
     /// `subject`'s open vault, or `None` when nothing since this daemon started has opened it.
+    ///
+    /// A handle whose file was replaced or removed underneath it is dropped rather than returned.
     #[must_use]
     pub fn get(&self, subject: &str) -> Option<Arc<SessionVault>> {
         self.open
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(subject)
             .cloned()
     }
@@ -112,69 +202,217 @@ impl SessionVaults {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::record::{AccountId, CredentialRecord, ProviderId};
+    use crate::record::{AccountId, ProviderId};
 
     const THE_OPERATOR: &str = "operator";
+    const THE_PASSPHRASE: &str = "correct horse battery staple";
+    const A_WRONG_PASSPHRASE: &str = "incorrect horse battery staple";
+    const A_NEW_PASSPHRASE: &str = "a passphrase chosen after forgetting";
+    const THE_FIRST_TOKEN: &str = "gho_from_the_first_login";
+    const A_LATER_TOKEN: &str = "gho_from_a_later_login";
 
-    fn a_record() -> CredentialRecord {
+    fn the_passphrase() -> SecretString {
+        SecretString::new(THE_PASSPHRASE)
+    }
+
+    fn a_github_record(token: &str) -> CredentialRecord {
         CredentialRecord {
             provider: ProviderId::new("github"),
             account: AccountId::new(THE_OPERATOR),
             label: "Work".to_string(),
-            secret: "gho_live".to_string(),
+            secret: SecretString::new(token),
             metadata: Default::default(),
             updated_at: 1,
         }
     }
 
+    fn the_stored_token(vaults: &SessionVaults) -> Option<String> {
+        vaults
+            .get(THE_OPERATOR)?
+            .get(&ProviderId::new("github"), &AccountId::new(THE_OPERATOR))
+            .ok()?
+            .map(|record| record.secret.expose().to_string())
+    }
+
+    /// A daemon whose operator created their vault at a first login, holding its unlock key.
+    fn a_daemon_with_a_created_vault(dir: &Path) -> (SessionVaults, UnlockKey) {
+        let vaults = SessionVaults::new(dir);
+        vaults
+            .retain(THE_OPERATOR, a_github_record(THE_FIRST_TOKEN))
+            .unwrap();
+        let key = vaults.create(THE_OPERATOR, &the_passphrase()).unwrap();
+        (vaults, key)
+    }
+
     #[test]
-    fn a_rotated_credential_carries_an_open_vault_over_instead_of_locking_it() {
-        // Given a signed-in operator whose vault holds a credential
+    fn a_first_login_finds_no_vault_and_writes_nothing() {
+        // Given a daemon that has never held this operator's vault
+        let dir = tempfile::tempdir().unwrap();
+        let vaults = SessionVaults::new(dir.path());
+
+        // When their first login's token is retained
+        let retained = vaults
+            .retain(THE_OPERATOR, a_github_record(THE_FIRST_TOKEN))
+            .unwrap();
+
+        // Then the vault is reported uninitialized, no file exists, and the token waits in memory
+        assert_eq!(
+            (
+                retained.state,
+                retained.unlock_key.is_none(),
+                vaults.path_for(THE_OPERATOR).exists(),
+                vaults.holds_pending(THE_OPERATOR)
+            ),
+            (VaultState::Uninitialized, true, false, true)
+        );
+    }
+
+    #[test]
+    fn creating_the_vault_seals_the_credential_that_was_waiting() {
+        // Given a first login whose token is waiting for a vault
         let dir = tempfile::tempdir().unwrap();
         let vaults = SessionVaults::new(dir.path());
         vaults
-            .unlock(THE_OPERATOR, b"gho_from_the_callback_login")
-            .unwrap()
-            .put(a_record())
+            .retain(THE_OPERATOR, a_github_record(THE_FIRST_TOKEN))
             .unwrap();
 
-        // When they sign in again with a different credential while still signed in
-        vaults
-            .unlock(THE_OPERATOR, b"gho_from_a_device_login")
+        // When the operator chooses a passphrase
+        vaults.create(THE_OPERATOR, &the_passphrase()).unwrap();
+
+        // Then the token is sealed and readable, and nothing is left waiting
+        assert_eq!(
+            (
+                the_stored_token(&vaults),
+                vaults.holds_pending(THE_OPERATOR)
+            ),
+            (Some(THE_FIRST_TOKEN.to_string()), false)
+        );
+    }
+
+    #[test]
+    fn after_a_restart_a_login_with_a_new_token_finds_the_vault_locked_and_changes_nothing() {
+        // Given a created vault, and a daemon that has since restarted
+        let dir = tempfile::tempdir().unwrap();
+        a_daemon_with_a_created_vault(dir.path());
+        let before = std::fs::read(CredentialStore::path_in(dir.path(), THE_OPERATOR)).unwrap();
+        let after_restart = SessionVaults::new(dir.path());
+
+        // When a fresh login arrives with the different token GitHub minted for it
+        let retained = after_restart
+            .retain(THE_OPERATOR, a_github_record(A_LATER_TOKEN))
             .unwrap();
 
-        // Then the vault now opens under the new credential, records intact
-        let reopened = CredentialStore::open_or_create(
-            &vaults.path_for(THE_OPERATOR),
-            b"gho_from_a_device_login",
-            THE_OPERATOR,
-        )
-        .and_then(|vault| vault.get(&ProviderId::new("github"), &AccountId::new(THE_OPERATOR)));
-        assert_eq!(reopened, Ok(Some(a_record())));
+        // Then the vault is reported locked, and the file is exactly as it was
+        assert_eq!(
+            (
+                retained.state,
+                std::fs::read(after_restart.path_for(THE_OPERATOR)).ok()
+            ),
+            (VaultState::Locked, Some(before))
+        );
+    }
+
+    #[test]
+    fn after_a_restart_the_passphrase_opens_the_vault_a_new_token_found_locked() {
+        // Given a login with a new token that found the vault locked after a restart
+        let dir = tempfile::tempdir().unwrap();
+        a_daemon_with_a_created_vault(dir.path());
+        let after_restart = SessionVaults::new(dir.path());
+        after_restart
+            .retain(THE_OPERATOR, a_github_record(A_LATER_TOKEN))
+            .unwrap();
+
+        // When the operator gives their passphrase
+        after_restart
+            .unlock(THE_OPERATOR, &the_passphrase())
+            .unwrap();
+
+        // Then the same vault is open, holding the new token
+        assert_eq!(
+            the_stored_token(&after_restart),
+            Some(A_LATER_TOKEN.to_string())
+        );
+    }
+
+    #[test]
+    fn a_wrong_passphrase_leaves_the_vault_locked_the_file_unchanged_and_the_token_waiting() {
+        // Given a locked vault with a login's token waiting for it
+        let dir = tempfile::tempdir().unwrap();
+        a_daemon_with_a_created_vault(dir.path());
+        let before = std::fs::read(CredentialStore::path_in(dir.path(), THE_OPERATOR)).unwrap();
+        let after_restart = SessionVaults::new(dir.path());
+        after_restart
+            .retain(THE_OPERATOR, a_github_record(A_LATER_TOKEN))
+            .unwrap();
+
+        // When the wrong passphrase is given
+        let refused = after_restart
+            .unlock(THE_OPERATOR, &SecretString::new(A_WRONG_PASSPHRASE))
+            .err();
+
+        // Then
+        assert_eq!(
+            (
+                refused,
+                after_restart.state(THE_OPERATOR),
+                std::fs::read(after_restart.path_for(THE_OPERATOR)).ok(),
+                after_restart.holds_pending(THE_OPERATOR)
+            ),
+            (
+                Some(VaultError::Locked),
+                VaultState::Locked,
+                Some(before),
+                true
+            )
+        );
+    }
+
+    #[test]
+    fn a_login_while_the_vault_is_open_needs_no_passphrase_and_is_handed_an_unlock_slot() {
+        // Given an operator whose vault is open on this daemon
+        let dir = tempfile::tempdir().unwrap();
+        let (vaults, _first_lineage) = a_daemon_with_a_created_vault(dir.path());
+
+        // When they sign in from a second browser, with the new token GitHub minted for it
+        let retained = vaults
+            .retain(THE_OPERATOR, a_github_record(A_LATER_TOKEN))
+            .unwrap();
+
+        // Then the vault stays open, the new lineage has its own key, and the new token is sealed
+        assert_eq!(
+            (
+                retained.state,
+                retained
+                    .unlock_key
+                    .map(|key| CredentialStore::open_with_unlock_key(
+                        &vaults.path_for(THE_OPERATOR),
+                        &key
+                    )
+                    .is_ok()),
+                the_stored_token(&vaults)
+            ),
+            (
+                VaultState::Open,
+                Some(true),
+                Some(A_LATER_TOKEN.to_string())
+            )
+        );
     }
 
     #[test]
     fn a_refresh_after_a_restart_reopens_the_vault_through_its_unlock_slot() {
-        // Given a login that handed its browser an unlock key, and then a daemon restart
+        // Given a lineage holding an unlock key, and then a daemon restart
         let dir = tempfile::tempdir().unwrap();
-        let before_restart = SessionVaults::new(dir.path());
-        let vault = before_restart
-            .unlock(THE_OPERATOR, b"gho_the_login_credential")
-            .unwrap();
-        vault.put(a_record()).unwrap();
-        let unlock = vault.add_unlock_slot().unwrap();
-        drop((vault, before_restart));
+        let (_before_restart, key) = a_daemon_with_a_created_vault(dir.path());
         let after_restart = SessionVaults::new(dir.path());
 
         // When the browser refreshes its session, presenting the key
-        after_restart.reopen(&unlock).unwrap();
+        after_restart.reopen(&key).unwrap();
 
-        // Then the vault is open again, with no login
+        // Then the vault is open again, with no passphrase
         assert_eq!(
-            after_restart
-                .get(THE_OPERATOR)
-                .map(|vault| vault.get(&ProviderId::new("github"), &AccountId::new(THE_OPERATOR))),
-            Some(Ok(Some(a_record())))
+            the_stored_token(&after_restart),
+            Some(THE_FIRST_TOKEN.to_string())
         );
     }
 
@@ -182,15 +420,10 @@ mod tests {
     fn a_rotated_unlock_key_is_the_only_one_that_opens_the_slot() {
         // Given a lineage whose key was rotated at a refresh
         let dir = tempfile::tempdir().unwrap();
-        let vaults = SessionVaults::new(dir.path());
-        let presented = vaults
-            .unlock(THE_OPERATOR, b"gho_the_login_credential")
-            .unwrap()
-            .add_unlock_slot()
-            .unwrap();
+        let (vaults, presented) = a_daemon_with_a_created_vault(dir.path());
         let rotated = vaults.reopen(&presented).unwrap();
 
-        // When each is presented to a fresh daemon
+        // When each is presented to the vault
         let path = vaults.path_for(THE_OPERATOR);
         let opens = |key: &UnlockKey| CredentialStore::open_with_unlock_key(&path, key).is_ok();
 
@@ -199,8 +432,180 @@ mod tests {
     }
 
     #[test]
-    fn holds_nothing_for_a_subject_no_login_has_opened() {
+    fn a_retired_key_presented_within_the_grace_window_is_handed_the_same_successor() {
+        // Given a lineage that refreshed once, and a second tab still holding the retired key
         let dir = tempfile::tempdir().unwrap();
-        assert!(SessionVaults::new(dir.path()).get(THE_OPERATOR).is_none());
+        let (vaults, retired) = a_daemon_with_a_created_vault(dir.path());
+        let successor = vaults.reopen(&retired).unwrap();
+
+        // When the second tab's refresh presents the retired key moments later
+        let answered = vaults.reopen(&retired).map(|key| key.to_wire());
+
+        // Then both tabs end up holding the one key that opens the slot
+        assert_eq!(answered, Ok(successor.to_wire()));
+    }
+
+    #[test]
+    fn a_retired_key_presented_after_the_grace_window_opens_nothing() {
+        // Given a daemon with no grace window, and a lineage that refreshed once
+        let dir = tempfile::tempdir().unwrap();
+        let (vaults, retired) = a_daemon_with_a_created_vault(dir.path());
+        let vaults = SessionVaults {
+            rotation_grace: Duration::ZERO,
+            ..vaults
+        };
+        vaults.reopen(&retired).unwrap();
+
+        // When the retired key is presented again
+        let answered = vaults.reopen(&retired).err();
+
+        // Then
+        assert_eq!(answered, Some(VaultError::Locked));
+    }
+
+    #[test]
+    fn two_refreshes_racing_with_one_key_both_receive_the_same_working_successor() {
+        // Given one unlock key, shared by two tabs that refresh at the same moment
+        let dir = tempfile::tempdir().unwrap();
+        let (vaults, shared) = a_daemon_with_a_created_vault(dir.path());
+        let at_once = std::sync::Barrier::new(2);
+
+        // When both present it
+        let answers: Vec<String> = std::thread::scope(|scope| {
+            let racers: Vec<_> = (0..2)
+                .map(|_| {
+                    let (vaults, shared, at_once) = (&vaults, &shared, &at_once);
+                    scope.spawn(move || {
+                        at_once.wait();
+                        vaults.reopen(shared).unwrap().to_wire()
+                    })
+                })
+                .collect();
+            racers
+                .into_iter()
+                .map(|racer| racer.join().unwrap())
+                .collect()
+        });
+
+        // Then neither lost its lineage: they hold one key, and it opens the slot
+        let successor = UnlockKey::from_wire(&answers[0]).unwrap();
+        assert_eq!(
+            (
+                answers[0] == answers[1],
+                CredentialStore::open_with_unlock_key(&vaults.path_for(THE_OPERATOR), &successor)
+                    .is_ok()
+            ),
+            (true, true)
+        );
+    }
+
+    #[test]
+    fn a_reset_sets_the_old_vault_aside_and_seals_the_waiting_token_into_a_fresh_one() {
+        // Given a locked vault whose passphrase is forgotten, with a login's token waiting
+        let dir = tempfile::tempdir().unwrap();
+        a_daemon_with_a_created_vault(dir.path());
+        let old_bytes = std::fs::read(CredentialStore::path_in(dir.path(), THE_OPERATOR)).unwrap();
+        let after_restart = SessionVaults::new(dir.path());
+        after_restart
+            .retain(THE_OPERATOR, a_github_record(A_LATER_TOKEN))
+            .unwrap();
+
+        // When the operator resets it under a new passphrase
+        let reset = after_restart
+            .reset(THE_OPERATOR, &SecretString::new(A_NEW_PASSPHRASE))
+            .unwrap();
+
+        // Then the old file is kept aside intact, and the fresh vault holds the waiting token
+        assert_eq!(
+            (
+                reset.set_aside.and_then(|aside| std::fs::read(aside).ok()),
+                the_stored_token(&after_restart)
+            ),
+            (Some(old_bytes), Some(A_LATER_TOKEN.to_string()))
+        );
+    }
+
+    #[test]
+    fn after_a_reset_an_unlock_key_to_the_old_vault_opens_nothing() {
+        // Given a lineage holding a key to a vault that is then reset
+        let dir = tempfile::tempdir().unwrap();
+        let (vaults, old_key) = a_daemon_with_a_created_vault(dir.path());
+        vaults
+            .reset(THE_OPERATOR, &SecretString::new(A_NEW_PASSPHRASE))
+            .unwrap();
+
+        // When that lineage refreshes
+        let answered = vaults.reopen(&old_key).err();
+
+        // Then
+        assert_eq!(answered, Some(VaultError::Locked));
+    }
+
+    #[test]
+    fn a_handle_whose_file_was_replaced_underneath_it_is_dropped_and_the_vault_reads_as_locked() {
+        // Given an open vault whose file another process resets underneath this daemon
+        let dir = tempfile::tempdir().unwrap();
+        let (vaults, _key) = a_daemon_with_a_created_vault(dir.path());
+        CredentialStore::reset(
+            &vaults.path_for(THE_OPERATOR),
+            &SecretString::new(A_NEW_PASSPHRASE),
+            THE_OPERATOR,
+        )
+        .unwrap();
+
+        // When the next login's token arrives
+        let retained = vaults
+            .retain(THE_OPERATOR, a_github_record(A_LATER_TOKEN))
+            .map(|retained| retained.state);
+
+        // Then the stale handle is not trusted — the vault on disk is locked, not "failed"
+        assert_eq!(retained, Ok(VaultState::Locked));
+    }
+
+    #[test]
+    fn the_last_lineage_signing_out_drops_the_open_vault() {
+        // Given an operator signed in from one browser
+        let dir = tempfile::tempdir().unwrap();
+        let (vaults, only_lineage) = a_daemon_with_a_created_vault(dir.path());
+
+        // When that browser signs out
+        vaults.forget(&only_lineage).unwrap();
+
+        // Then the daemon no longer holds the key to their credentials
+        assert_eq!(
+            (
+                vaults.get(THE_OPERATOR).is_none(),
+                vaults.state(THE_OPERATOR)
+            ),
+            (true, VaultState::Locked)
+        );
+    }
+
+    #[test]
+    fn a_lineage_signing_out_while_another_is_signed_in_keeps_the_vault_open() {
+        // Given an operator signed in from two browsers
+        let dir = tempfile::tempdir().unwrap();
+        let (vaults, first_lineage) = a_daemon_with_a_created_vault(dir.path());
+        vaults
+            .retain(THE_OPERATOR, a_github_record(A_LATER_TOKEN))
+            .unwrap();
+
+        // When one of them signs out
+        vaults.forget(&first_lineage).unwrap();
+
+        // Then
+        assert_eq!(vaults.state(THE_OPERATOR), VaultState::Open);
+    }
+
+    #[test]
+    fn holds_nothing_for_a_subject_no_login_has_opened() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+
+        // When
+        let vaults = SessionVaults::new(dir.path());
+
+        // Then
+        assert_eq!(vaults.state(THE_OPERATOR), VaultState::Uninitialized);
     }
 }

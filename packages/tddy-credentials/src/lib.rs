@@ -38,6 +38,8 @@ pub mod sessions;
 pub mod vault;
 
 pub use record::{AccountId, CredentialRecord, ProviderId};
-pub use secret::SecretBytes;
-pub use sessions::SessionVaults;
-pub use vault::{CredentialStore, SessionVault, UnlockKey, VaultError, MAX_UNLOCK_SLOTS};
+pub use secret::{SecretBytes, SecretString};
+pub use sessions::{Reset, Retained, SessionVaults, VaultState, ROTATION_GRACE};
+pub use vault::{
+    CredentialStore, SessionVault, UnlockKey, VaultError, MAX_UNLOCK_SLOTS, MIN_PASSPHRASE_CHARS,
+};

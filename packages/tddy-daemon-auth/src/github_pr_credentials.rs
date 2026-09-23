@@ -47,45 +47,43 @@ pub fn pr_lookup_for_caller(stub_mode: bool, stored_token: Option<&str>) -> PrLo
 
 /// The GitHub access token retained for `login`, read from their open credential vault.
 ///
-/// `Ok(None)` is "nothing is retained" — no `auth_storage`, or no vault for this login — which
-/// [`pr_lookup_for_caller`] turns into its own *sign in again* reason. `Err(reason)` is a vault that
-/// exists but cannot be read right now, carrying an operator-facing reason that names the remedy:
+/// `Ok(None)` is "nothing is retained" — no `auth_storage`, or no vault and no token waiting for
+/// one — which [`pr_lookup_for_caller`] turns into its own *sign in again* reason. `Err(reason)` is
+/// a credential that exists but cannot be read right now, carrying an operator-facing reason that
+/// names the remedy:
 ///
-/// - **not open yet** — this daemon restarted since the login, and nothing has presented the
-///   browser's unlock key since. The remedy is the next session refresh, *not* a new login, so the
-///   reason says exactly that;
-/// - **open, but unreadable** — the vault was replaced or altered under the session. Logged with
-///   its server-side detail; the reason carries none of it.
+/// - **locked** — a vault exists and is closed on this daemon (it restarted since the login, or the
+///   login found it closed). Its passphrase opens it, and so does the next session refresh of a
+///   browser holding an unlock key;
+/// - **not created yet** — a login's token is waiting for the operator to choose a passphrase;
+/// - **open, but unreadable** — the vault was altered under the session. Logged with its
+///   server-side detail; the reason carries none of it.
 pub fn retained_github_token(
     vaults: Option<&tddy_credentials::SessionVaults>,
     login: &str,
 ) -> Result<Option<String>, String> {
-    use tddy_credentials::{AccountId, ProviderId, VaultError};
+    use tddy_credentials::{AccountId, ProviderId, VaultError, VaultState};
 
     let Some(vaults) = vaults else {
         return Ok(None);
     };
-    let Some(vault) = vaults.get(login) else {
-        if vaults.path_for(login).exists() {
-            log::info!(
-                target: "tddy_daemon::github_pr_credentials",
-                "the credential vault of '{login}' is not open on this daemon yet; it reopens at \
-                 that session's next refresh"
-            );
-            return Err(
-                "this daemon restarted since you signed in; your stored GitHub credential is \
-                 unlocked again on your next session refresh"
-                    .to_string(),
-            );
+    match vaults.state(login) {
+        VaultState::Open => {}
+        VaultState::Locked => return Err(not_open(login, VAULT_LOCKED_REASON)),
+        VaultState::Uninitialized if vaults.holds_pending(login) => {
+            return Err(not_open(login, VAULT_NOT_CREATED_REASON))
         }
-        return Ok(None);
+        VaultState::Uninitialized => return Ok(None),
+    }
+    let Some(vault) = vaults.get(login) else {
+        return Err(not_open(login, VAULT_LOCKED_REASON));
     };
     vault
         .get(
             &ProviderId::new(tddy_github::GITHUB_PROVIDER),
             &AccountId::new(login),
         )
-        .map(|record| record.map(|record| record.secret))
+        .map(|record| record.map(|record| record.secret.expose().to_string()))
         .map_err(|e| {
             log::warn!(
                 target: "tddy_daemon::github_pr_credentials",
@@ -96,7 +94,26 @@ pub fn retained_github_token(
                     "the stored GitHub credential could not be read — sign in to GitHub again"
                         .to_string()
                 }
-                refusal => format!("{refusal} — sign in to GitHub again"),
+                refusal => format!("{refusal} — unlock your credential vault again"),
             }
         })
+}
+
+/// Why PR status is unavailable while a vault is closed on this daemon.
+const VAULT_LOCKED_REASON: &str =
+    "your credential vault is locked on this daemon — unlock your credential vault with its \
+     passphrase, or it reopens at your next session refresh";
+
+/// Why PR status is unavailable while a login's token waits for a first passphrase.
+const VAULT_NOT_CREATED_REASON: &str =
+    "your GitHub credential is waiting for a credential vault — unlock your credential vault by \
+     choosing its passphrase";
+
+fn not_open(login: &str, reason: &str) -> String {
+    log::info!(
+        target: "tddy_daemon::github_pr_credentials",
+        "the credential vault of '{login}' is not open on this daemon; PR status is unavailable \
+         until it is"
+    );
+    reason.to_string()
 }

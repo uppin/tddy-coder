@@ -18,6 +18,32 @@ service AuthService {
   // Ask whether the device code has been approved. The client polls this no faster than the
   // interval it was given, widening it whenever the answer says to.
   rpc PollDeviceLogin(PollDeviceLoginRequest) returns (PollDeviceLoginResponse);
+  // Open the caller's credential vault with its passphrase — or, with `create`, create it under a
+  // first passphrase when none exists — seal the GitHub token their login is holding for it, and
+  // hand this lineage an unlock slot. A wrong passphrase is `failed_precondition` naming the lock,
+  // and changes nothing on disk.
+  rpc UnlockVault(UnlockVaultRequest) returns (UnlockVaultResponse);
+  // The forgotten-passphrase path: set the caller's vault aside (renamed on the daemon's disk,
+  // never deleted), create a fresh one under `new_passphrase`, and seal the GitHub token their login
+  // is holding for it. Every stored credential must be linked again; the old file stays recoverable
+  // by whoever still knows its passphrase.
+  rpc ResetVault(ResetVaultRequest) returns (ResetVaultResponse);
+}
+
+// Where the caller's credential vault stands on the answering daemon.
+enum VaultState {
+  VAULT_STATE_UNSPECIFIED = 0;
+  // The daemon keeps no vault for this login: a stub/demo login, or no `auth_storage`. Nothing to
+  // unlock and nothing to prompt for.
+  VAULT_STATE_NONE = 1;
+  // Open: stored credentials are in use. No prompt.
+  VAULT_STATE_OPEN = 2;
+  // A vault exists and is closed on this daemon. Its passphrase opens it (`UnlockVault`); until
+  // then the GitHub token this login received is held in memory, and GitHub-backed reads report
+  // themselves unavailable.
+  VAULT_STATE_LOCKED = 3;
+  // No vault exists yet. Choosing a passphrase creates it (`UnlockVault` with `create`).
+  VAULT_STATE_UNINITIALIZED = 4;
 }
 
 message GetAuthUrlRequest {}
@@ -42,6 +68,9 @@ message ExchangeCodeResponse {
   // no vault for this login (a stub/demo login, or no `auth_storage`). The GitHub token itself is
   // never carried on any response.
   string vault_unlock_key = 4;
+  // Where this login's vault stands. LOCKED and UNINITIALIZED are signed in all the same — the
+  // client prompts for the passphrase rather than refusing the login.
+  VaultState vault_state = 5;
 }
 
 message GetAuthStatusRequest {
@@ -50,6 +79,9 @@ message GetAuthStatusRequest {
 message GetAuthStatusResponse {
   bool authenticated = 1;
   GitHubUser user = 2;
+  // Where the authenticated caller's vault stands, so a page that reloads while it is LOCKED or
+  // UNINITIALIZED prompts again. UNSPECIFIED when not authenticated.
+  VaultState vault_state = 3;
 }
 
 message RefreshSessionRequest {
@@ -68,9 +100,11 @@ message RefreshSessionResponse {
   string refresh_token = 3;
   // The rotated vault unlock key that replaces the presented one; the presented one opens nothing
   // any more. Empty when none was presented, or when the presented one no longer opens its slot —
-  // the session is still refreshed, but credential-backed reads stay unavailable until the next
-  // login. A wrap key, not a stored credential: alone it opens nothing.
+  // the session is still refreshed, and `vault_state` says what opens the vault instead. A wrap
+  // key, not a stored credential: alone it opens nothing.
   string vault_unlock_key = 4;
+  // Where the caller's vault stands after this refresh.
+  VaultState vault_state = 5;
 }
 
 message LogoutRequest {
@@ -124,6 +158,37 @@ message PollDeviceLoginResponse {
   // As `ExchangeCodeResponse.vault_unlock_key`: a wrap key for this lineage's vault slot, not a
   // stored credential, and useless without the vault file.
   string vault_unlock_key = 6;
+  // As `ExchangeCodeResponse.vault_state`. Set only on COMPLETE.
+  VaultState vault_state = 7;
+}
+
+message UnlockVaultRequest {
+  // The caller's access token: whose vault this is.
+  string session_token = 1;
+  // Never logged, never stored; Argon2id derives the vault's key-encryption key from it.
+  string passphrase = 2;
+  // Create the vault under `passphrase` rather than open it. Refused when a vault already exists.
+  bool create = 3;
+}
+message UnlockVaultResponse {
+  // OPEN on success.
+  VaultState vault_state = 1;
+  // This lineage's unlock slot key, as `ExchangeCodeResponse.vault_unlock_key`. Replaces any the
+  // client holds.
+  string vault_unlock_key = 2;
+}
+
+message ResetVaultRequest {
+  // The caller's access token: whose vault this is.
+  string session_token = 1;
+  // The fresh vault's passphrase. Never logged, never stored.
+  string new_passphrase = 2;
+}
+message ResetVaultResponse {
+  // OPEN on success.
+  VaultState vault_state = 1;
+  // This lineage's unlock slot key to the fresh vault. Every key to the old vault opens nothing.
+  string vault_unlock_key = 2;
 }
 
 // Mint a LiveKit room JWT for an already-authenticated caller.
