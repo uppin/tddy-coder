@@ -1,0 +1,165 @@
+//! The import pass behind `extract_module`, against a live rust-analyzer.
+//!
+//! These cover four things: defect E1, the D8 alias restoration E1 sits in the path of, the
+//! grouped-`use` ambiguity, and what the pass does on a server that has only just started. Each
+//! seam is judged by what `cargo check` says of the tree afterwards. The engine can report success
+//! over a `use` line that resolves nothing, so the compiler is the only check it cannot fool.
+//!
+//! Most of these run against a **settled** server, the warm index the destructure plans were
+//! checked against. A server that has only just started reports no unresolved names for a few
+//! seconds, so on it the import pass has nothing to act on, and none of these defects appear. The
+//! last test here is about that window itself.
+//!
+//! Load-sensitive: one server at a time, enforced by the harness within this binary and by the
+//! `rust-analyzer` test group in `.config/nextest.toml` across processes.
+
+mod harness;
+
+use std::ops::RangeInclusive;
+
+use harness::{
+    a_crate_whose_alias_only_the_compiler_resolves, a_crate_whose_alias_the_server_resolves,
+    a_workspace_whose_parent_binds_a_module_in_a_group, an_extract_module_of, assert_compiles,
+    performing, performing_once_settled, refusal_once_settled_from, the_module_named, ORIGIN_LIB,
+};
+
+/// `fn constant() -> u32 { 7 }`: a seam that names nothing at all.
+const A_SEAM_NAMING_NOTHING: RangeInclusive<u32> = 17..=19;
+/// `fn second(kind: &StartSessionEventKind)`: a seam whose moved code names the parent's alias.
+const A_SEAM_NAMING_THE_ALIAS: RangeInclusive<u32> = 21..=23;
+/// `fn open_channel() -> mpsc::Sender`: the only use of the parent's grouped `mpsc`.
+const A_SEAM_HOLDING_THE_ONLY_USE_OF_MPSC: RangeInclusive<u32> = 11..=13;
+
+const THE_PARENT_S_ALIAS: &str = "use crate::proto::Event as StartSessionEventKind;";
+
+/// E1: a seam that names nothing needs no import, whatever the rest of the file cannot resolve.
+///
+/// The alias is unresolved everywhere the parent uses it, and none of those places moves. Today the
+/// pass collects unresolved names from the whole file, rebuilds the parent's `use … as …` for the
+/// alias and writes it into the new module. The name stays unresolved and the line is written again,
+/// until the 512-pass backstop fails the operation. That is every seam of `connection_service.rs`.
+#[tokio::test(flavor = "multi_thread")]
+async fn extracts_a_seam_naming_nothing_from_a_file_whose_alias_the_server_cannot_resolve() {
+    // Given
+    let workspace = a_crate_whose_alias_only_the_compiler_resolves();
+    let seam = an_extract_module_of(&workspace, ORIGIN_LIB, A_SEAM_NAMING_NOTHING, "constants");
+
+    // When
+    performing_once_settled(&workspace, seam).await;
+
+    // Then
+    let module = the_module_named(&workspace.read(ORIGIN_LIB), "constants");
+    assert!(
+        !module.contains("use "),
+        "a seam that names nothing was given imports:\n{module}"
+    );
+    assert_compiles(&workspace);
+}
+
+/// E1: an alias the rebuilt `use` cannot resolve is refused by name, in a bounded number of passes.
+///
+/// The moved code does name the alias here, and writing the parent's `use … as …` into the module
+/// leaves it exactly as unresolved as before. An import that makes no progress has to mark the name
+/// unimportable and end the pass. Today it is written again on every pass, and the operation fails
+/// only at the backstop, as a server defect that names nothing the plan's author can act on.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_seam_naming_an_alias_the_server_cannot_resolve_and_says_which() {
+    // Given
+    let workspace = a_crate_whose_alias_only_the_compiler_resolves();
+    let seam = an_extract_module_of(&workspace, ORIGIN_LIB, A_SEAM_NAMING_THE_ALIAS, "readings");
+
+    // When
+    let refusal = refusal_once_settled_from(&workspace, seam).await;
+
+    // Then
+    assert!(
+        refusal.starts_with("this seam cannot be cut here"),
+        "an import that could not make progress was not refused as a seam: {refusal}"
+    );
+    assert!(
+        refusal.contains("`StartSessionEventKind`"),
+        "the refusal did not name the alias it could not import: {refusal}"
+    );
+}
+
+/// The D8 guard: the moved code keeps the alias it was written against, and gets it once.
+///
+/// rust-analyzer offers only the *unaliased* path, which does not bind `StartSessionEventKind`, so
+/// the pass rebuilds the parent's own declaration. Whatever fixes E1 must not stop it doing that.
+#[tokio::test(flavor = "multi_thread")]
+async fn imports_the_alias_the_moved_code_names_exactly_once() {
+    // Given
+    let workspace = a_crate_whose_alias_the_server_resolves();
+    let seam = an_extract_module_of(&workspace, ORIGIN_LIB, A_SEAM_NAMING_THE_ALIAS, "readings");
+
+    // When
+    performing_once_settled(&workspace, seam).await;
+
+    // Then
+    let module = the_module_named(&workspace.read(ORIGIN_LIB), "readings");
+    assert_eq!(
+        module.matches(THE_PARENT_S_ALIAS).count(),
+        1,
+        "the module did not import the parent's alias exactly once:\n{module}"
+    );
+    assert_compiles(&workspace);
+}
+
+/// A name the parent bound in a grouped `use` is the file's own binding, even once the assist has
+/// taken it out of the group.
+///
+/// `mpsc` could come from `shared::sync` or from `std::sync`. The parent said which one, in
+/// `use shared::sync::{mpsc, RwLock};`. But the seam holds the only use, so the assist drops `mpsc`
+/// from that group before the import pass asks. The file's remaining imports then point at both
+/// candidate modules (`std::sync::Arc` and `shared::sync::RwLock`), and the seam is refused as
+/// "could be imported 2 ways". That is `cli_session_manager.rs` and `tokio::sync::{…, mpsc, …}`.
+#[tokio::test(flavor = "multi_thread")]
+async fn imports_the_module_the_parent_bound_in_a_group_the_seam_empties() {
+    // Given
+    let workspace = a_workspace_whose_parent_binds_a_module_in_a_group();
+    let seam = an_extract_module_of(
+        &workspace,
+        ORIGIN_LIB,
+        A_SEAM_HOLDING_THE_ONLY_USE_OF_MPSC,
+        "channels",
+    );
+
+    // When
+    performing_once_settled(&workspace, seam).await;
+
+    // Then
+    let module = the_module_named(&workspace.read(ORIGIN_LIB), "channels");
+    assert!(
+        module.contains("use shared::sync::mpsc;"),
+        "the module did not import the `mpsc` the parent had bound:\n{module}"
+    );
+    assert_compiles(&workspace);
+}
+
+/// The import pass runs against names the server can actually judge, even on a server that has
+/// only just started.
+///
+/// This is the same fixture and seam as the D8 guard, handed to the engine as `tddy-tools
+/// restructure` hands it over cold. The engine treats a non-null hover as "ready", and it gets one
+/// seconds before the server flags any name as unresolved. So the pass finds nothing to import, and
+/// the operation reports success over a module that does not compile. This has the same cause as
+/// E2's `req: _` (readiness declared before the server has settled), and it is the reason every
+/// other test in this file runs settled.
+#[tokio::test(flavor = "multi_thread")]
+async fn imports_the_alias_the_moved_code_names_on_a_server_that_has_only_just_started() {
+    // Given
+    let workspace = a_crate_whose_alias_the_server_resolves();
+    let seam = an_extract_module_of(&workspace, ORIGIN_LIB, A_SEAM_NAMING_THE_ALIAS, "readings");
+
+    // When
+    performing(&workspace, seam).await;
+
+    // Then
+    let module = the_module_named(&workspace.read(ORIGIN_LIB), "readings");
+    assert_eq!(
+        module.matches(THE_PARENT_S_ALIAS).count(),
+        1,
+        "the module did not import the parent's alias exactly once:\n{module}"
+    );
+    assert_compiles(&workspace);
+}

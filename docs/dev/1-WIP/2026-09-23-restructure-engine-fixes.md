@@ -122,7 +122,7 @@ it gets the fixed engine in its own tree.
 
 ## Scope
 
-- [ ] Failing tests: E1, E2, E3, grouped `use` (commit 2)
+- [~] Failing tests: E1, E2, E3, grouped `use` (commit 2) — written, not yet committed; see "Red-phase findings"
 - [ ] E1 fixed: progress check and unimportable marking in the alias and parent-binding branches; collection scoped to the produced module
 - [ ] E2 cause found; fixed or refused truthfully; never applies a `_` signature
 - [ ] E3 fixed: `self.method()` on the same type is not a refusal
@@ -148,6 +148,34 @@ Fixture-crate tests in the engine's existing style, one per defect:
 
 Scoped verification: `./test -p tddy-code-restructuring` (and `-p tddy-tools` if touched).
 
+## Red-phase findings
+
+Each finding was reproduced against the live server (rust-analyzer 2026-03-30) in fixture crates:
+
+- **A cold server is not ready when the engine says it is.** `ensure_indexed` and
+  `wait_until_resolved` accept the first non-null hover. For about three more seconds, a small
+  crate's semantic tokens carry no `unresolvedReference`, so the import pass has nothing to act on.
+  An alias seam then applies without its import and does not compile. Build-script output (`OUT_DIR`)
+  is also not loaded yet. The harness therefore gains `ServerState::Settled`, which waits for
+  `serverStatus quiescent: true` (the daemon's own definition of warm). The E1, E3 and grouped-`use`
+  tests run settled, because that is where they were observed.
+- **E1 reproduces deterministically** when the alias names a type the server cannot see, across the
+  whole file. The fixture uses `#[cfg(not(rust_analyzer))]` to stand in for unloaded `OUT_DIR`
+  code. Mechanism: `already_bound` reads `use a::B as C` as binding `B`, not `C`, so the alias branch
+  never sees its own insertion.
+- **E2's cause, in the fixture:** the build-script race above. RA answers hover before the build
+  script's output loads, and writes `fn resumed_session(req: _)`. The existing single-line post-condition
+  catches it: RA writes the signature on one line, so the multi-line escape does not arise. Its
+  advice to "retry against a warm server" does not help here. The real warm-index failures remain
+  unexplained. One unconfirmed candidate is `tddy-service`'s `prost-build` script failing inside
+  RA's environment.
+- **E3's premise holds.** For inherent-`impl` members, RA writes `mod m { use super::T; impl T { … } }`.
+  A trait `impl` cut stays refusable (E0119/E0046). No inherent-`impl` case where a reference really
+  stops resolving was found.
+- **Grouped `use`:** the assist removes `mpsc` from the parent's group when the seam holds its only
+  use. `choose_import` then sees `std::sync` and `shared::sync` as equal evidence. The binding has to
+  be read from the pre-assist text.
+
 ## Decisions & trade-offs
 
 - **Fix the engine rather than hand-split.** The developer's decision (2026-09-23).
@@ -156,13 +184,21 @@ Scoped verification: `./test -p tddy-code-restructuring` (and `-p tddy-tools` if
 
 ## Refactoring needed
 
+### From @red (TDD Red Phase)
+
+- `tests/harness/mod.rs` now has fixture builders for single-crate seams and a lexical
+  `the_module_named`. If more extraction suites follow, the builders could move to a
+  `harness/fixtures.rs` sibling, since the harness file is past 1,000 lines.
+- `.config/nextest.toml`'s `rust-analyzer` group still omits older live binaries
+  (`nested_module_move_acceptance`, `cluster_move_acceptance`, `facade_cycle_acceptance`, …).
+
 ## Validation results
 
 ## TODO
 
 - [x] Discovery (from the destructure node's `check --deep` runs)
 - [x] Changeset: this document
-- [ ] Failing tests (red)
+- [~] Failing tests (red)
 - [ ] Green
 - [ ] Re-run the destructure plans
 - [ ] `/validate-changes`, `/pr-wrap`, `/wrap-context-docs`

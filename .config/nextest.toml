@@ -84,6 +84,9 @@ filter = """
 package(tddy-code-restructuring) and (
     binary(move_module_to_crate_acceptance)
     or binary(rename_cross_file_acceptance)
+    or binary(import_pass_acceptance)
+    or binary(extract_method_signature_acceptance)
+    or binary(impl_seam_acceptance)
 )
 """
 test-group = "rust-analyzer"
