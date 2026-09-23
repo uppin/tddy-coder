@@ -35,6 +35,8 @@ tddy-session-worktree = { path = "../tddy-session-worktree" }
 tddy-session-actions = { path = "../tddy-session-actions" }
 tddy-toolcall = { path = "../tddy-toolcall" }
 tddy-agent-backend = { path = "../tddy-agent-backend" }
+tddy-workflow-engine = { path = "../tddy-workflow-engine" }
+tddy-presenter = { path = "../tddy-presenter" }
 # The storage layer: `atomic_file`, `error`, `output` and `session_actions`, re-exported at their
 # old paths. It depends on no crate that depends on `tddy-core`.
 tddy-session-store = { path = "../tddy-session-store" }
@@ -47,23 +49,6 @@ tddy-task = { path = "../tddy-task" }
 # newline-delimited-JSON protocol.
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-stdio = { path = "../tddy-stdio" }
-
-[dev-dependencies]
-async-trait = "0.1"
-# The context-glob table is compiled in and matched by `tddy-sandbox`, which parses every pattern
-# with `glob::Pattern` and treats an unparsable one as matching nothing. Both are dev-only here so
-# `context_globs_acceptance` can prove the table (and the exclusion list beside the matcher) parses
-# at all — the one failure mode that otherwise disables a whole tree with nothing logged.
-# `tddy-sandbox` depends on no workspace crate, so this direction adds no cycle.
-glob = "0.3"
-tddy-sandbox = { path = "../tddy-sandbox" }
-pretty_assertions = { workspace = true }
-rstest = { workspace = true }
-serial_test = "3"
-tempfile = "3"
-tddy-testing-commons = { path = "../tddy-testing-commons" }
-tddy-graph = { path = "../tddy-graph" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

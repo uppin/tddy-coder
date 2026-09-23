@@ -1,0 +1,23 @@
+[package]
+name = "tddy-workflow-engine"
+version = "0.1.0"
+edition = "2021"
+description = "The workflow engine: runs a recipe's goal graph against a coding backend and resumes sessions"
+
+[dependencies]
+async-trait = "0.1"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "v7"] }
+tddy-workflow = { path = "../tddy-workflow" }
+tddy-graph = { path = "../tddy-graph" }
+tddy-session-store = { path = "../tddy-session-store" }
+tddy-changeset = { path = "../tddy-changeset" }
+tddy-toolcall = { path = "../tddy-toolcall" }
+tddy-agent-backend = { path = "../tddy-agent-backend" }
+
+[dev-dependencies]
+serde_yaml = "0.9"
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+tempfile = "3"

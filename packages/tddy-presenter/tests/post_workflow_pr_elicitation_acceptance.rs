@@ -2,7 +2,7 @@
 //!
 //! Post-workflow ordering, worktree-prompt gating, resume policy, and PR status copy.
 
-use tddy_core::{
+use tddy_presenter::{
     post_workflow_elicitation_step_order, post_workflow_pr_status_display_line,
     should_prompt_session_worktree_removal, should_reprompt_github_pr_on_resume,
 };

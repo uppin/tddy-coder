@@ -1,12 +1,12 @@
 //! Integration: `merge_persisted_workflow_into_context` mirrors post-workflow fields into [`Context`] (no CLI).
 
 use serde_json::json;
-use tddy_core::changeset::{
+use tddy_changeset::changeset::{
     merge_persisted_workflow_into_context, write_changeset, Changeset, ChangesetWorkflow,
     GithubPrStatus,
 };
-use tddy_core::workflow::context::Context;
 use tddy_testing_commons::fs::temp_session_dir;
+use tddy_workflow_engine::workflow::context::Context;
 
 #[test]
 fn merge_persisted_workflow_writes_post_github_pr_fields_to_context() {

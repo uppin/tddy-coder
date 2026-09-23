@@ -4,12 +4,12 @@
 use std::fs;
 use std::path::PathBuf;
 
-use tddy_core::changeset::{
+use tddy_changeset::changeset::{
     read_changeset, sync_stack_node_from_child, update_stack_atomic, write_changeset, Changeset,
     ChangesetState, ChangesetWorkflow, GithubPrStatus, Stack, StackNode,
 };
-use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::workflow::ids::WorkflowState;
+use tddy_changeset::session_lifecycle::unified_session_dir_path;
+use tddy_workflow_engine::workflow::ids::WorkflowState;
 
 fn scratch(label: &str) -> PathBuf {
     let p = std::env::temp_dir().join(format!(

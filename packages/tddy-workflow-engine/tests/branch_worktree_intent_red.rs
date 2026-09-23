@@ -1,11 +1,11 @@
 //! Granular tests: workflow context merge and routing keys for branch/worktree intent (PRD).
 
-use tddy_core::changeset::{
+use tddy_changeset::changeset::{
     merge_persisted_workflow_into_context, write_changeset, BranchWorktreeIntent, Changeset,
     ChangesetWorkflow,
 };
-use tddy_core::workflow::context::Context;
 use tddy_testing_commons::fs::temp_session_dir;
+use tddy_workflow_engine::workflow::context::Context;
 
 /// `merge_persisted_workflow_into_context` must call `Context::set_sync` for persisted intent so hooks read a single source of truth.
 #[test]

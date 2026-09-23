@@ -12072,29 +12072,25 @@ dependencies = [
  "libc",
  "log",
  "once_cell",
- "pretty_assertions",
- "rstest 0.24.0",
  "serde",
  "serde_json",
  "serde_yaml",
- "serial_test",
  "tddy-agent-backend",
  "tddy-agent-skills",
  "tddy-changeset",
  "tddy-git",
  "tddy-graph",
  "tddy-log",
+ "tddy-presenter",
  "tddy-rpc",
- "tddy-sandbox",
  "tddy-session-actions",
  "tddy-session-store",
  "tddy-session-worktree",
  "tddy-stdio",
  "tddy-task",
- "tddy-testing-commons",
  "tddy-toolcall",
  "tddy-workflow",
- "tempfile",
+ "tddy-workflow-engine",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -12761,6 +12757,28 @@ dependencies = [
  "tddy-service",
  "tddy-workflow",
  "tempfile",
+]
+
+[[package]]
+name = "tddy-presenter"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pretty_assertions",
+ "serde_json",
+ "tddy-agent-backend",
+ "tddy-agent-skills",
+ "tddy-changeset",
+ "tddy-graph",
+ "tddy-log",
+ "tddy-session-store",
+ "tddy-session-worktree",
+ "tddy-toolcall",
+ "tddy-workflow",
+ "tddy-workflow-engine",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -13782,6 +13800,26 @@ dependencies = [
  "pretty_assertions",
  "rstest 0.24.0",
  "serde",
+]
+
+[[package]]
+name = "tddy-workflow-engine"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "log",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tddy-agent-backend",
+ "tddy-changeset",
+ "tddy-graph",
+ "tddy-session-store",
+ "tddy-testing-commons",
+ "tddy-toolcall",
+ "tddy-workflow",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]

@@ -11,9 +11,9 @@
 use std::path::Path;
 use std::time::Duration;
 
-use tddy_core::token_accounting::ConversationRecord;
-use tddy_core::usage_watcher::{spawn_session_usage_watcher, SessionUsageWatchConfig};
-use tddy_core::PresenterEvent;
+use tddy_agent_backend::token_accounting::ConversationRecord;
+use tddy_presenter::usage_watcher::{spawn_session_usage_watcher, SessionUsageWatchConfig};
+use tddy_presenter::PresenterEvent;
 use tokio::sync::broadcast;
 
 /// One `type:"assistant"` transcript line: in=120, out=30, model claude-opus-4-8.

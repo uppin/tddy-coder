@@ -4,11 +4,11 @@
 use std::fs;
 
 use serde_yaml::Value;
-use tddy_core::changeset::{
+use tddy_changeset::changeset::{
     merge_persisted_workflow_into_context, read_changeset, write_changeset, Changeset,
 };
-use tddy_core::workflow::context::Context;
 use tddy_testing_commons::fs::temp_session_dir;
+use tddy_workflow_engine::workflow::context::Context;
 
 /// PRD: round-trip — `workflow` block in YAML must survive load/save once serde schema exists.
 #[test]

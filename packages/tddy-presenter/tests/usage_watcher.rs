@@ -1,7 +1,7 @@
 //! Integration tests: the per-session usage emitter that the file-watcher drives.
 //!
 //! The watcher re-reads the on-disk token sources on start and on every change, gathers them
-//! (`tddy_core::backend::gather_session_usage`), and hands the snapshot to a `SessionUsageEmitter`.
+//! (`tddy_agent_backend::backend::gather_session_usage`), and hands the snapshot to a `SessionUsageEmitter`.
 //! The emitter broadcasts a `PresenterEvent::TokenUsageUpdated` carrying the full cumulative
 //! snapshot — always on the first gather (so a newly-connected Inspector sees current totals), and
 //! again whenever the snapshot changes, but never for an unchanged snapshot.
@@ -9,9 +9,9 @@
 //! Gathering-from-disk (including "an appended transcript yields larger totals") is covered by the
 //! `tddy-core` `gather_session_usage` tests; these pin the emitter's broadcast/dedup contract.
 
-use tddy_core::token_accounting::ConversationRecord;
-use tddy_core::usage_watcher::SessionUsageEmitter;
-use tddy_core::PresenterEvent;
+use tddy_agent_backend::token_accounting::ConversationRecord;
+use tddy_presenter::usage_watcher::SessionUsageEmitter;
+use tddy_presenter::PresenterEvent;
 use tokio::sync::broadcast;
 
 fn a_record(id: &str, input: u64, output: u64) -> ConversationRecord {
