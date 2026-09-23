@@ -2,19 +2,18 @@
 //!
 //! # On-disk format
 //!
-//! One JSON file **per subject** (the user whose vault it is), mode `0600`, replaced through
-//! [`tddy_core::atomic_file::write_atomic_with_mode`] so a crash or a full disk can never leave a
+//! One JSON file **per subject** (the user whose vault it is), mode `0600` from its first byte,
+//! replaced by swap-then-rename (`crate::atomic`) so a crash or a full disk can never leave a
 //! truncated vault behind — which would parse as an empty one and read to the operator as an
 //! ordinary "please sign in again".
 //!
 //! ```json
 //! {
 //!   "header": {
-//!     "format_version": 1,
-//!     "kdf": "hkdf-sha256",
-//!     "kdf_version": 1,
-//!     "salt": "<hex, 32 bytes>",
-//!     "info": "tddy-credentials/v1/<subject>"
+//!     "format_version": 2,
+//!     "kdf": "argon2id", "kdf_version": 19,
+//!     "m_cost_kib": 19456, "t_cost": 2, "p_cost": 1,
+//!     "salt": "<hex, 16 bytes>"
 //!   },
 //!   "wrapped_data_key": { "nonce": "<hex>", "ciphertext": "<hex>" },
 //!   "unlock_slots": [ { "id": "<hex>", "nonce": "<hex>", "ciphertext": "<hex>" } ],
@@ -23,29 +22,28 @@
 //! }
 //! ```
 //!
-//! **Two keys, and the reason there are two.** The KEK is derived from the user's login credential
-//! (`HKDF-SHA256(salt, ikm, info)`); it wraps a random data key, and the data key is what seals the
-//! records. A credential rotation then re-wraps 32 bytes instead of re-encrypting every record,
-//! which is what makes [`SessionVault::rewrap`] cheap enough to run on *every* successful login.
+//! **Two keys, and the reason there are two.** A random data key seals the records; key-encryption
+//! keys only wrap it. Changing how the vault is opened — a new passphrase, another browser slot —
+//! then re-wraps 32 bytes instead of re-encrypting every record.
 //!
-//! **Wrap slots.** The data key is wrapped more than once. `wrapped_data_key` is the **login
-//! slot**, under the KEK the login credential derives; it is re-wrapped on every login. Each entry
-//! of `unlock_slots` wraps the same data key under a key derived from a random 32-byte
-//! [`UnlockKey`] that was handed to one browser session lineage and is **not stored here** — so
-//! after a daemon restart, that browser's next session refresh can reopen the vault without a new
-//! login. The file holds only the wrap; the key that opens it is in the browser; neither alone
-//! opens anything. At most [`MAX_UNLOCK_SLOTS`] are kept: adding one past the bound evicts the
+//! **Wrap slots.** `wrapped_data_key` is the **passphrase slot**: the data key under a KEK that
+//! Argon2id derives from the user's passphrase with the header's salt and costs, bound to the
+//! subject by HKDF-Expand. It is the one way in that needs nobody's browser. Each entry of
+//! `unlock_slots` wraps the same data key under a key derived from a random 32-byte [`UnlockKey`]
+//! handed to one browser session lineage and **not stored here** — so after a daemon restart,
+//! that browser's next session refresh reopens the vault without the passphrase. The file holds
+//! only the wraps. At most [`MAX_UNLOCK_SLOTS`] are kept: adding one past the bound evicts the
 //! least recently used (a rotation counts as a use).
 //!
-//! The unlock slots sit beside the header rather than inside it, because the header is the login
-//! slot's associated data: a slot added at a refresh, when no login credential is present, must
-//! not invalidate the one wrap only a login can rewrite.
+//! The unlock slots sit beside the header rather than inside it, because the header is the
+//! passphrase slot's associated data: a slot added at a refresh, when no passphrase is present,
+//! must not invalidate the one wrap only the passphrase can rewrite.
 //!
-//! **The header is authenticated as associated data** of the wrapped data key, so its KDF name,
-//! version and parameters cannot be edited into a weaker derivation without the open failing. A
-//! header that names parameters this build does not produce is a [`VaultError::FormatMismatch`] —
-//! a distinct answer from a failed decrypt, because the remedies differ: one is an upgrade, the
-//! other is a wrong key.
+//! **The header is authenticated as associated data** of the passphrase slot, and every parameter
+//! in it is checked by name against this build's before anything is derived: a header naming
+//! another format, KDF, version or cost is a [`VaultError::FormatMismatch`] — a distinct answer
+//! from a failed decrypt, because the remedies differ: one is an upgrade, the other is a wrong
+//! passphrase. An edited salt is a key that does not open the vault, [`VaultError::Locked`].
 //!
 //! **The verifier** is a known plaintext sealed under the data key. The wrapped key already proves
 //! the KEK; the verifier proves that the data key a session holds is still the one the file on disk
@@ -72,12 +70,12 @@ use crate::kdf::{hkdf_expand, keyed_name, to_hex};
 use crate::record::{AccountId, CredentialRecord, ProviderId};
 use crate::secret::{wipe, SecretBytes, SecretString};
 use crypto::{
-    check_verifier, derive_kek, open, random_32, record_aad, seal, unwrap_data_key, wrap_data_key,
-    VERIFIER_AAD, VERIFIER_PLAINTEXT,
+    check_verifier, open, passphrase_kek, random_bytes, random_key, record_aad, seal,
+    unwrap_data_key, wrap_under_passphrase, VERIFIER_AAD, VERIFIER_PLAINTEXT,
 };
 use format::{
-    header_aad, info_for, read_vault_file, serialised, write_vault_file, Header, SealedRecord,
-    VaultFile, FORMAT_VERSION, KDF, KDF_VERSION,
+    header_aad, read_vault_file, serialised, set_aside, write_vault_file, Header, SealedRecord,
+    VaultFile, SALT_BYTES,
 };
 
 pub use unlock::{UnlockKey, MAX_UNLOCK_SLOTS};
@@ -90,10 +88,10 @@ pub const MIN_PASSPHRASE_CHARS: usize = 8;
 
 /// Why a vault operation did not happen.
 ///
-/// `Locked` is deliberately distinct from `Crypto`. A wrong key is the *expected* consequence of a
-/// credential rotation and the operator's remedy is to re-link their accounts; a crypto failure on
-/// a key that does open the vault is corruption, and the remedy is not the same. Collapsing them
-/// would tell the operator to do the wrong thing.
+/// `Locked` is deliberately distinct from `Crypto`. A wrong key is an ordinary event — a mistyped
+/// passphrase, an unlock key rotated since — and the remedy is to try again or reset; a crypto
+/// failure on a key that does open the vault is corruption, and the remedy is not the same.
+/// Collapsing them would tell the operator to do the wrong thing.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum VaultError {
     /// The key presented does not unwrap the data key — a wrong passphrase, or an unlock key whose
@@ -126,17 +124,17 @@ pub enum VaultError {
 /// The sealed file itself — a path, and the ability to open it into a session.
 ///
 /// Holds no key material. Everything that can read a credential is behind [`SessionVault`], which
-/// only exists once a login has produced one.
+/// only exists once a passphrase or an unlock key has opened the file.
 pub struct CredentialStore;
 
 /// Domain separation for the subkey that names records.
-const RECORD_ID_INFO: &[u8] = b"tddy-credentials/v1/record-id";
+const RECORD_ID_INFO: &[u8] = b"tddy-credentials/v2/record-id";
 
 impl CredentialStore {
     /// Where `subject`'s vault lives inside an `auth_storage` directory.
     ///
-    /// One file per subject: a vault is sealed under one user's login credential and opens for
-    /// nobody else, so a shared file would lock out every user after the first. The subject is
+    /// One file per subject: a vault is bound to one user and opens for nobody else, so a shared
+    /// file would lock out every user after the first. The subject is
     /// hex-encoded into the basename, which keeps any login safe as a filename — including on a
     /// case-insensitive filesystem, where two logins differing only in case must not collide.
     #[must_use]
@@ -155,8 +153,13 @@ impl CredentialStore {
         passphrase: &SecretString,
         subject: &str,
     ) -> Result<SessionVault, VaultError> {
-        let _ = (path, passphrase, subject);
-        todo!("create a passphrase-sealed vault")
+        // Held across the existence check and the write, so two creates racing for one path
+        // cannot both mint a data key and leave the loser sealing records the file never opens.
+        let _serialised = serialised();
+        if read_vault_file(path)?.is_some() {
+            return Err(VaultError::AlreadyInitialized);
+        }
+        create_file(path, passphrase, subject)
     }
 
     /// Open `subject`'s vault at `path` with the passphrase it was created under.
@@ -168,8 +171,18 @@ impl CredentialStore {
         passphrase: &SecretString,
         subject: &str,
     ) -> Result<SessionVault, VaultError> {
-        let _ = (path, passphrase, subject);
-        todo!("open a passphrase-sealed vault")
+        let file = read_vault_file(path)?.ok_or(VaultError::Uninitialized)?;
+        let kek = passphrase_kek(&file.header, passphrase, subject)?;
+        let data_key = unwrap_data_key(
+            &kek,
+            &file.wrapped_data_key.nonce,
+            &file.wrapped_data_key.ciphertext,
+            &header_aad(&file.header)?,
+        )?;
+        // The data key authenticated under the KEK, so a verifier that fails under it is
+        // corruption.
+        check_verifier(&file.verifier, &data_key)?;
+        Ok(session(path, subject, data_key))
     }
 
     /// Set the vault at `path` aside and create a fresh one under `new_passphrase` — the
@@ -183,16 +196,21 @@ impl CredentialStore {
         new_passphrase: &SecretString,
         subject: &str,
     ) -> Result<(SessionVault, Option<PathBuf>), VaultError> {
-        let _ = (path, new_passphrase, subject);
-        todo!("set a vault aside and create a fresh one")
+        // One critical section for the rename and the create: nothing of this process can write
+        // into the old file after it is set aside, or into the gap before the fresh one exists.
+        // The old file is not parsed first — a reset is also the way out of a vault this build
+        // cannot read.
+        let _serialised = serialised();
+        let aside = path.exists().then(|| set_aside(path)).transpose()?;
+        let fresh = create_file(path, new_passphrase, subject)?;
+        Ok((fresh, aside))
     }
 }
 
 /// An opened vault, scoped to one user session.
 ///
-/// Lives for the life of the session and zeroizes its key material on drop. There is no way to
-/// obtain one without the input keying material a login produced, which is what "only decrypted by
-/// a valid user session" means in practice.
+/// Zeroizes its key material on drop. There is no way to obtain one without the user's passphrase
+/// or an unlock key a lineage of theirs holds — the daemon holds neither at rest.
 ///
 /// Every operation re-reads the file rather than caching its records, so two handles over one
 /// vault — two sessions of the same user — never act on each other's stale view.
@@ -285,6 +303,14 @@ impl SessionVault {
         })?;
         check_verifier(&file.verifier, &self.data_key).map_err(|_| VaultError::Locked)?;
         Ok(file)
+    }
+
+    /// Whether this handle no longer describes the file at its path: the file is gone, or was
+    /// replaced by one its data key does not open (a reset, from here or from another process).
+    ///
+    /// Any other failure to read is a real one, not staleness — it is reported where it happens.
+    pub(crate) fn is_stale(&self) -> bool {
+        !self.path.exists() || matches!(self.load(), Err(VaultError::Locked))
     }
 
     fn record_id(&self, provider: &ProviderId, account: &AccountId) -> String {
@@ -396,43 +422,23 @@ fn session(path: &Path, subject: &str, data_key: SecretBytes) -> SessionVault {
     }
 }
 
-fn create(path: &Path, ikm: &[u8], subject: &str) -> Result<SessionVault, VaultError> {
-    let mut fresh = random_32();
-    let data_key = SecretBytes::new(fresh);
-    wipe(&mut fresh);
-    let header = Header {
-        format_version: FORMAT_VERSION,
-        kdf: KDF.to_string(),
-        kdf_version: KDF_VERSION,
-        salt: to_hex(&random_32()),
-        info: info_for(subject),
-    };
+/// Write a fresh vault at `path` under `passphrase`. The caller holds [`serialised`] and has
+/// established that nothing is there.
+fn create_file(
+    path: &Path,
+    passphrase: &SecretString,
+    subject: &str,
+) -> Result<SessionVault, VaultError> {
+    let data_key = random_key();
+    let header = Header::fresh(&random_bytes::<SALT_BYTES>());
     let file = VaultFile {
-        wrapped_data_key: wrap_data_key(&header, ikm, subject, &data_key)?,
+        wrapped_data_key: wrap_under_passphrase(&header, passphrase, subject, &data_key)?,
         unlock_slots: Vec::new(),
         verifier: seal(&data_key, VERIFIER_PLAINTEXT, VERIFIER_AAD)?,
         header,
         records: Vec::new(),
     };
     write_vault_file(path, &file)?;
-    Ok(session(path, subject, data_key))
-}
-
-fn open_file(
-    path: &Path,
-    file: &VaultFile,
-    ikm: &[u8],
-    subject: &str,
-) -> Result<SessionVault, VaultError> {
-    let kek = derive_kek(&file.header, ikm, subject)?;
-    let data_key = unwrap_data_key(
-        &kek,
-        &file.wrapped_data_key.nonce,
-        &file.wrapped_data_key.ciphertext,
-        &header_aad(&file.header)?,
-    )?;
-    // The data key authenticated under the KEK, so a verifier that fails under it is corruption.
-    check_verifier(&file.verifier, &data_key)?;
     Ok(session(path, subject, data_key))
 }
 

@@ -44,6 +44,7 @@ function HmrOverlay() {
 
 import { applyDebugMaskFromConfig, applyDebugMaskFromUrl } from "./lib/debugMask";
 import { DaemonLoginScreen } from "./components/DaemonLoginScreen";
+import { CredentialVaultPrompt } from "./components/CredentialVaultPrompt";
 import { AuthCallback } from "./components/AuthCallback";
 import { LiveKitAppPage } from "./components/livekit/LiveKitAppPage";
 import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
@@ -220,6 +221,9 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
       ) : (
         <ConnectionForm />
       )}
+      {/* Over whichever screen is showing: a signed-in operator whose vault is locked or not created
+          is asked for its passphrase. It renders nothing otherwise. */}
+      {daemonMode === true ? <CredentialVaultPrompt /> : null}
       <HmrOverlay />
     </>
   );

@@ -1,22 +1,33 @@
 //! The file itself: its serialised shape, the header check that runs before any decrypt, and the
 //! one way it is read and replaced.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
 use super::VaultError;
 
-/// The one format version this build reads and writes.
-pub(super) const FORMAT_VERSION: u32 = 1;
-/// The one key derivation this build uses.
-pub(super) const KDF: &str = "hkdf-sha256";
-pub(super) const KDF_VERSION: u32 = 1;
-/// Prefix of the HKDF `info`; the subject follows it.
-const INFO_PREFIX: &str = "tddy-credentials/v1/";
-/// Owner-only: the file is ciphertext, but a readable one is a copy for an offline attempt.
-const OWNER_ONLY_FILE: u32 = 0o600;
+/// The one format version this build reads and writes. Version 1 derived its key from a login
+/// token and was never deployed outside tests, so it is not migrated — it is refused by name.
+pub(super) const FORMAT_VERSION: u32 = 2;
+/// The one passphrase derivation this build uses.
+pub(super) const KDF: &str = "argon2id";
+/// Argon2 v1.3 (`0x13`), the version RFC 9106 specifies.
+pub(super) const KDF_VERSION: u32 = 0x13;
+/// Argon2id's memory cost, in KiB: 19 MiB.
+///
+/// With [`T_COST`] and [`P_COST`], the first of OWASP's recommended Argon2id configurations
+/// (Password Storage Cheat Sheet) and `argon2`'s own default. It is paid once per passphrase
+/// unlock, create or reset — never per request — so tens of milliseconds on the daemon's host is
+/// the right order of cost; the same guess offline costs the attacker the same memory.
+pub(super) const M_COST_KIB: u32 = 19_456;
+/// Argon2id's time cost: passes over the memory.
+pub(super) const T_COST: u32 = 2;
+/// Argon2id's parallelism: lanes.
+pub(super) const P_COST: u32 = 1;
+/// Bytes of random salt per vault — RFC 9106 recommends 16.
+pub(super) const SALT_BYTES: usize = 16;
 
 /// Serialises every read-modify-write of a vault file in this process.
 ///
@@ -31,13 +42,33 @@ pub(super) fn serialised() -> std::sync::MutexGuard<'static, ()> {
     WRITE_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Everything a later build needs to reproduce the passphrase derivation, and nothing it could be
+/// weakened through: every parameter is checked against this build's before anything is derived,
+/// and the whole header is the passphrase slot's associated data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct Header {
     pub(super) format_version: u32,
     pub(super) kdf: String,
     pub(super) kdf_version: u32,
+    pub(super) m_cost_kib: u32,
+    pub(super) t_cost: u32,
+    pub(super) p_cost: u32,
     pub(super) salt: String,
-    pub(super) info: String,
+}
+
+impl Header {
+    /// A header for a new vault: this build's derivation, under a fresh salt.
+    pub(super) fn fresh(salt: &[u8]) -> Self {
+        Self {
+            format_version: FORMAT_VERSION,
+            kdf: KDF.to_string(),
+            kdf_version: KDF_VERSION,
+            m_cost_kib: M_COST_KIB,
+            t_cost: T_COST,
+            p_cost: P_COST,
+            salt: crate::kdf::to_hex(salt),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,10 +101,6 @@ pub(super) struct VaultFile {
     pub(super) unlock_slots: Vec<UnlockSlot>,
     pub(super) verifier: Sealed,
     pub(super) records: Vec<SealedRecord>,
-}
-
-pub(super) fn info_for(subject: &str) -> String {
-    format!("{INFO_PREFIX}{subject}")
 }
 
 pub(super) fn header_aad(header: &Header) -> Result<Vec<u8>, VaultError> {
@@ -118,6 +145,21 @@ fn check_format(document: &serde_json::Value) -> Result<(), VaultError> {
             format!("{KDF} v{}", describe(kdf_version)),
         ));
     }
+    // Checked by name rather than handed to Argon2: a lowered cost is a weakened derivation this
+    // build must not run, and a raised one is a file that could exhaust the daemon's memory.
+    let costs = [field("m_cost_kib"), field("t_cost"), field("p_cost")];
+    let expected = [M_COST_KIB, T_COST, P_COST];
+    if costs
+        .iter()
+        .zip(expected)
+        .any(|(found, expected)| *found != Some(&serde_json::Value::from(expected)))
+    {
+        let [m, t, p] = costs.map(describe);
+        return Err(mismatch(
+            format!("{KDF} m={M_COST_KIB},t={T_COST},p={P_COST}"),
+            format!("{KDF} m={m},t={t},p={p}"),
+        ));
+    }
     Ok(())
 }
 
@@ -129,9 +171,45 @@ fn describe(value: Option<&serde_json::Value>) -> String {
     }
 }
 
+/// Rename the vault at `path` aside, beside it, as `<stem>.locked-<unix seconds>.vault` — with a
+/// `-<n>` suffix when that name is taken — and return where it went. **Never deletes**: whoever
+/// still knows the old passphrase can open the file there.
+///
+/// Called under [`serialised`], so no write of this process lands between the rename and the fresh
+/// vault that replaces it.
+pub(super) fn set_aside(path: &Path) -> Result<PathBuf, VaultError> {
+    let stem = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .ok_or_else(|| VaultError::Io(format!("{} names no vault file", path.display())))?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| VaultError::Io(format!("the clock reads before the Unix epoch: {e}")))?
+        .as_secs();
+    let aside = (1..)
+        .map(|n| {
+            let suffix = if n == 1 {
+                String::new()
+            } else {
+                format!("-{n}")
+            };
+            path.with_file_name(format!("{stem}.locked-{now}{suffix}.vault"))
+        })
+        .find(|candidate| !candidate.exists())
+        .expect("some suffix is free");
+    std::fs::rename(path, &aside).map_err(|e| {
+        VaultError::Io(format!(
+            "setting {} aside as {}: {e}",
+            path.display(),
+            aside.display()
+        ))
+    })?;
+    Ok(aside)
+}
+
 pub(super) fn write_vault_file(path: &Path, file: &VaultFile) -> Result<(), VaultError> {
     let bytes = serde_json::to_vec_pretty(file)
         .map_err(|e| VaultError::Io(format!("serialising {}: {e}", path.display())))?;
-    tddy_core::atomic_file::write_atomic_with_mode(path, bytes, OWNER_ONLY_FILE)
+    crate::atomic::write_owner_only(path, &bytes)
         .map_err(|e| VaultError::Io(format!("writing {}: {e}", path.display())))
 }

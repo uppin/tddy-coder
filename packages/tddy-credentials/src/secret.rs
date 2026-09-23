@@ -86,7 +86,7 @@ impl Drop for SecretString {
 }
 
 /// Zero `text` in place, leaving it the same length.
-fn wipe_text(text: &mut String) {
+fn wipe_text(text: &mut str) {
     // SAFETY: zero bytes are valid UTF-8, so the string stays well-formed for its last moment.
     wipe(unsafe { text.as_bytes_mut() });
 }

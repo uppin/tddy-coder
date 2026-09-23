@@ -1,24 +1,29 @@
-//! The vaults open right now, one per signed-in user.
+//! The vaults open right now, one per signed-in user — and the credentials waiting for one to open.
 //!
-//! A login is the only moment the daemon holds the credential a vault's login slot is derived
-//! from, and the reads that need a stored secret (PR status, today) arrive later, carrying nothing
-//! but a session token. So the handle a login opens is kept here, by subject, for the reads to find.
+//! A vault opens from its owner's passphrase (`UnlockVault` in the auth service) or, after a
+//! daemon restart, from the unlock key a browser lineage presents at its session refresh. The reads
+//! that need a stored secret (PR status, today) arrive later with nothing but a session token, so
+//! the handle an unlock opens is kept here, by subject, for them to find.
 //!
-//! **After a daemon restart** this registry is empty, and there is still no daemon-held key. What
-//! refills it is the browser: a login hands each session lineage an [`UnlockKey`] to its own
-//! unlock slot, and that lineage's next session refresh presents it — [`SessionVaults::reopen`]
-//! opens the vault through the slot, registers it, and rotates the slot so the presented key opens
-//! nothing afterwards. Between the restart and that refresh, a credential-backed read finds no
-//! handle and reports itself unavailable until the refresh, not until a new login.
+//! **A login does not open a vault.** GitHub mints a new access token at every exchange, so nothing
+//! a login carries is stable enough to derive a key from. A login's token is sealed at once when
+//! the vault is already open here; otherwise it is held **in memory** — never written in plaintext —
+//! and sealed by whichever of [`SessionVaults::unlock`], [`SessionVaults::create`] or
+//! [`SessionVaults::reset`] opens the vault next. Pending credentials are held per user, not per
+//! session lineage: session tokens are stateless, so a daemon cannot tell two lineages of one user
+//! apart, and the latest token for a provider and account replaces an earlier one.
 //!
-//! TODO(keyring): an entry is not evicted when a session ends. Session tokens are stateless, so the
-//! daemon learns of no ending; an entry lives until the daemon exits. A logout removes its
-//! lineage's unlock slot, not the entry — other browsers of the same user may still be using it.
+//! **When the handle is dropped.** When the last unlock slot is removed — the last lineage signed
+//! out — no signed-in lineage can use the vault, and its data key leaves memory with the handle. A
+//! handle whose file was replaced or removed underneath it is dropped the next time it is looked up.
+//! TODO(keyring): a lineage that simply stops refreshing (its refresh token lapses after seven
+//! days) never signs out, so its vault stays open until the daemon exits — see
+//! docs/dev/todo/2026-09-23-credential-vault-open-past-its-last-session.md.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use crate::record::CredentialRecord;
 use crate::secret::SecretString;
@@ -68,6 +73,24 @@ pub struct SessionVaults {
     auth_storage_dir: PathBuf,
     rotation_grace: Duration,
     open: Mutex<HashMap<String, Arc<SessionVault>>>,
+    /// Credentials logins produced while their vault was closed, by subject.
+    pending: Mutex<HashMap<String, Vec<CredentialRecord>>>,
+    /// The latest rotation of each `(subject, slot id)`, for the grace window. Also what serialises
+    /// refreshes: a rotation and the answer to a refresh racing it happen under this lock.
+    rotations: Mutex<HashMap<(String, String), Rotation>>,
+}
+
+/// One rotation of one slot: the key it retired, the key it handed out, and when.
+struct Rotation {
+    retired: UnlockKey,
+    successor: UnlockKey,
+    at: Instant,
+}
+
+/// A poisoned lock means a panic mid-update of an in-memory map; every entry is either whole or
+/// absent, and a missing one only means a vault reads as closed, so the map is used as it stands.
+fn held<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
+    lock.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl SessionVaults {
@@ -79,6 +102,8 @@ impl SessionVaults {
             auth_storage_dir: auth_storage_dir.into(),
             rotation_grace: ROTATION_GRACE,
             open: Mutex::new(HashMap::new()),
+            pending: Mutex::new(HashMap::new()),
+            rotations: Mutex::new(HashMap::new()),
         }
     }
 
@@ -104,15 +129,21 @@ impl SessionVaults {
     /// Where `subject`'s vault stands right now.
     #[must_use]
     pub fn state(&self, subject: &str) -> VaultState {
-        let _ = subject;
-        todo!("report a subject's vault state")
+        if self.get(subject).is_some() {
+            VaultState::Open
+        } else if self.path_for(subject).exists() {
+            VaultState::Locked
+        } else {
+            VaultState::Uninitialized
+        }
     }
 
     /// Whether a credential for `subject` is waiting in memory for their vault to open.
     #[must_use]
     pub fn holds_pending(&self, subject: &str) -> bool {
-        let _ = subject;
-        todo!("report a pending credential")
+        held(&self.pending)
+            .get(subject)
+            .is_some_and(|records| !records.is_empty())
     }
 
     /// Retain a credential a login produced for `subject`.
@@ -122,8 +153,27 @@ impl SessionVaults {
     /// when [`Self::unlock`], [`Self::create`] or [`Self::reset`] next opens the vault; the state
     /// says which of those the user is asked for. A failed write is an `Err` — it fails the login.
     pub fn retain(&self, subject: &str, record: CredentialRecord) -> Result<Retained, VaultError> {
-        let _ = (subject, record);
-        todo!("retain a login's credential")
+        if let Some(vault) = self.get(subject) {
+            match vault
+                .put(record.clone())
+                .and_then(|()| vault.add_unlock_slot())
+            {
+                Ok(unlock_key) => {
+                    return Ok(Retained {
+                        state: VaultState::Open,
+                        unlock_key: Some(unlock_key),
+                    })
+                }
+                // Replaced underneath the handle between the lookup and the write.
+                Err(VaultError::Locked) => self.close(subject, &vault),
+                Err(failed) => return Err(failed),
+            }
+        }
+        self.hold_pending(subject, record);
+        Ok(Retained {
+            state: self.state(subject),
+            unlock_key: None,
+        })
     }
 
     /// Open `subject`'s vault with its passphrase, seal what was pending, and hand the lineage an
@@ -133,8 +183,9 @@ impl SessionVaults {
         subject: &str,
         passphrase: &SecretString,
     ) -> Result<UnlockKey, VaultError> {
-        let _ = (subject, passphrase);
-        todo!("unlock a vault with its passphrase")
+        let vault =
+            CredentialStore::open_with_passphrase(&self.path_for(subject), passphrase, subject)?;
+        self.admit(subject, vault)
     }
 
     /// Create `subject`'s vault under a first passphrase, seal what was pending, and hand the
@@ -144,15 +195,21 @@ impl SessionVaults {
         subject: &str,
         passphrase: &SecretString,
     ) -> Result<UnlockKey, VaultError> {
-        let _ = (subject, passphrase);
-        todo!("create a vault under a first passphrase")
+        let vault = CredentialStore::create(&self.path_for(subject), passphrase, subject)?;
+        self.admit(subject, vault)
     }
 
     /// Set `subject`'s vault aside (renamed, never deleted) and create a fresh one under
     /// `new_passphrase`, sealing what was pending. Every unlock key to the old vault opens nothing.
     pub fn reset(&self, subject: &str, new_passphrase: &SecretString) -> Result<Reset, VaultError> {
-        let _ = (subject, new_passphrase);
-        todo!("reset a vault")
+        let (vault, set_aside) =
+            CredentialStore::reset(&self.path_for(subject), new_passphrase, subject)?;
+        held(&self.rotations).retain(|(rotated, _), _| rotated != subject);
+        let unlock_key = self.admit(subject, vault)?;
+        Ok(Reset {
+            set_aside,
+            unlock_key,
+        })
     }
 
     /// Reopen a vault through the unlock slot `unlock` names — a session refresh, possibly the
@@ -164,15 +221,42 @@ impl SessionVaults {
     /// the key this slot was rotated away from within the grace window, which is answered with the
     /// same successor.
     pub fn reopen(&self, unlock: &UnlockKey) -> Result<UnlockKey, VaultError> {
+        let mut rotations = held(&self.rotations);
         let subject = unlock.subject();
-        let proven = CredentialStore::open_with_unlock_key(&self.path_for(subject), unlock)?;
-        let rotated = proven.rotate_unlock_slot(unlock)?;
-        self.open
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .entry(subject.to_string())
-            .or_insert_with(|| Arc::new(proven));
-        Ok(rotated)
+        let path = self.path_for(subject);
+        let slot = (subject.to_string(), unlock.slot_id().to_string());
+        match CredentialStore::open_with_unlock_key(&path, unlock) {
+            Ok(proven) => {
+                let successor = proven.rotate_unlock_slot(unlock)?;
+                let grace = self.rotation_grace;
+                rotations.retain(|_, rotation| rotation.at.elapsed() <= grace);
+                rotations.insert(
+                    slot,
+                    Rotation {
+                        retired: unlock.duplicate(),
+                        successor: successor.duplicate(),
+                        at: Instant::now(),
+                    },
+                );
+                self.register(subject, proven);
+                Ok(successor)
+            }
+            Err(VaultError::Locked) => {
+                let rotation = rotations
+                    .get(&slot)
+                    .filter(|rotation| rotation.at.elapsed() <= self.rotation_grace)
+                    .filter(|rotation| rotation.retired.is_the_same_key_as(unlock))
+                    .ok_or(VaultError::Locked)?;
+                if self.get(subject).is_none() {
+                    self.register(
+                        subject,
+                        CredentialStore::open_with_unlock_key(&path, &rotation.successor)?,
+                    );
+                }
+                Ok(rotation.successor.duplicate())
+            }
+            Err(failed) => Err(failed),
+        }
     }
 
     /// Remove the unlock slot `unlock` names — a logout. The key must still open its slot, so a
@@ -182,8 +266,14 @@ impl SessionVaults {
     /// When that was the vault's last slot, no signed-in lineage is left to use it, and the open
     /// handle — the data key in memory — is dropped with it.
     pub fn forget(&self, unlock: &UnlockKey) -> Result<(), VaultError> {
-        CredentialStore::open_with_unlock_key(&self.path_for(unlock.subject()), unlock)?
-            .remove_unlock_slot(unlock.slot_id())
+        let subject = unlock.subject();
+        let vault = CredentialStore::open_with_unlock_key(&self.path_for(subject), unlock)?;
+        vault.remove_unlock_slot(unlock.slot_id())?;
+        held(&self.rotations).remove(&(subject.to_string(), unlock.slot_id().to_string()));
+        if vault.unlock_slot_ids()?.is_empty() {
+            held(&self.open).remove(subject);
+        }
+        Ok(())
     }
 
     /// `subject`'s open vault, or `None` when nothing since this daemon started has opened it.
@@ -191,11 +281,62 @@ impl SessionVaults {
     /// A handle whose file was replaced or removed underneath it is dropped rather than returned.
     #[must_use]
     pub fn get(&self, subject: &str) -> Option<Arc<SessionVault>> {
-        self.open
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        let vault = held(&self.open).get(subject).cloned()?;
+        if vault.is_stale() {
+            self.close(subject, &vault);
+            return None;
+        }
+        Some(vault)
+    }
+
+    /// Seal what was waiting for `subject`'s newly opened `vault`, hand the lineage that opened it
+    /// an unlock slot, and keep the handle.
+    fn admit(&self, subject: &str, vault: SessionVault) -> Result<UnlockKey, VaultError> {
+        self.seal_pending(subject, &vault)?;
+        let unlock_key = vault.add_unlock_slot()?;
+        self.register(subject, vault);
+        Ok(unlock_key)
+    }
+
+    fn register(&self, subject: &str, vault: SessionVault) {
+        held(&self.open).insert(subject.to_string(), Arc::new(vault));
+    }
+
+    /// Drop `subject`'s handle if it is still `vault` — not one a concurrent unlock put there since.
+    fn close(&self, subject: &str, vault: &Arc<SessionVault>) {
+        let mut open = held(&self.open);
+        if open
             .get(subject)
-            .cloned()
+            .is_some_and(|held| Arc::ptr_eq(held, vault))
+        {
+            open.remove(subject);
+        }
+    }
+
+    /// Keep `record` until `subject`'s vault opens, replacing one held for the same account.
+    fn hold_pending(&self, subject: &str, record: CredentialRecord) {
+        let mut pending = held(&self.pending);
+        let records = pending.entry(subject.to_string()).or_default();
+        records
+            .retain(|held| (&held.provider, &held.account) != (&record.provider, &record.account));
+        records.push(record);
+    }
+
+    /// Seal every credential waiting for `subject` into `vault`. What fails to seal is kept
+    /// waiting, and the failure reported — nothing held in memory is dropped by a failed write.
+    fn seal_pending(&self, subject: &str, vault: &SessionVault) -> Result<(), VaultError> {
+        let mut waiting = held(&self.pending).remove(subject).unwrap_or_default();
+        while let Some(record) = waiting.first() {
+            if let Err(failed) = vault.put(record.clone()) {
+                held(&self.pending)
+                    .entry(subject.to_string())
+                    .or_default()
+                    .append(&mut waiting);
+                return Err(failed);
+            }
+            waiting.remove(0);
+        }
+        Ok(())
     }
 }
 

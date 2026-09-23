@@ -402,12 +402,26 @@ async fn a_stub_login_leaves_no_credential_store_behind_and_reports_no_vault() {
             signed_in.session_token.is_empty(),
             state(signed_in.vault_state),
             signed_in.vault_unlock_key,
-            std::fs::read_dir(&storage)
-                .map(|entries| entries.count())
-                .ok()
+            vault_files_in(&storage)
         ),
-        (false, VaultState::None, String::new(), Some(0))
+        (false, VaultState::None, String::new(), Vec::<String>::new())
     );
+}
+
+/// The credential vaults in `storage` — and nothing else that lives there, such as the daemon's
+/// own signing key.
+fn vault_files_in(storage: &std::path::Path) -> Vec<String> {
+    std::fs::read_dir(storage)
+        .expect("the storage directory is readable")
+        .map(|entry| {
+            entry
+                .expect("an entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|name| name.starts_with("credentials-"))
+        .collect()
 }
 
 #[tokio::test]

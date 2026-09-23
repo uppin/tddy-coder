@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
-import { AuthService, DeviceLoginState } from "../gen/auth_pb";
+import { AuthService, DeviceLoginState, VaultState } from "../gen/auth_pb";
 import type { GitHubUser, PollDeviceLoginResponse } from "../gen/auth_pb";
 import { useHttpClient, useAuthTokenGate } from "../rpc/transportProvider";
 import { createSessionTokenStore, type TokenStorage } from "../rpc/sessionTokenStore";
@@ -31,6 +31,11 @@ export interface AuthState {
   sessionToken: string | null;
   /** True while the session store is minting a fresh access token from the refresh token. */
   isRefreshing: boolean;
+  /**
+   * Where the operator's credential vault stands on the daemon. `LOCKED` and `UNINITIALIZED` are
+   * signed in all the same; the page asks for the passphrase (`CredentialVaultPrompt`).
+   */
+  vaultState: VaultState;
 }
 
 /**
@@ -56,6 +61,7 @@ interface MintedSession {
   sessionToken: string;
   refreshToken: string;
   vaultUnlockKey: string;
+  vaultState: VaultState;
   user?: GitHubUser;
 }
 
@@ -65,6 +71,8 @@ interface WholeSession {
   refreshToken: string;
   /** The unlock key for this lineage's credential-vault slot — `""` when the daemon keeps none. */
   vaultUnlockKey: string;
+  /** Where the operator's credential vault stands after this sign-in. */
+  vaultState: VaultState;
   user: GitHubUser;
 }
 
@@ -75,7 +83,13 @@ type SessionCheck = { whole: WholeSession } | { missing: string[] };
  * field the daemon never set as an absent message or an empty string; either is a missing part,
  * never one to fill in with a default.
  */
-function checkWholeSession({ sessionToken, refreshToken, vaultUnlockKey, user }: MintedSession): SessionCheck {
+function checkWholeSession({
+  sessionToken,
+  refreshToken,
+  vaultUnlockKey,
+  vaultState,
+  user,
+}: MintedSession): SessionCheck {
   const missing = [
     ...(user === undefined ? ["user"] : []),
     ...(sessionToken === "" ? ["session token"] : []),
@@ -83,7 +97,7 @@ function checkWholeSession({ sessionToken, refreshToken, vaultUnlockKey, user }:
   ];
   if (user === undefined || missing.length > 0) return { missing };
   // An empty unlock key is not a missing part: a stub login, or a daemon with no vault, keeps none.
-  return { whole: { sessionToken, refreshToken, vaultUnlockKey, user } };
+  return { whole: { sessionToken, refreshToken, vaultUnlockKey, vaultState, user } };
 }
 
 /** The error for a flow that `completed` without the session parts named in `missing`. */
@@ -209,6 +223,7 @@ const LOGGED_OUT: AuthState = {
   error: null,
   sessionToken: null,
   isRefreshing: false,
+  vaultState: VaultState.UNSPECIFIED,
 };
 
 /** `localStorage`-backed persistence for the access + refresh token pair. */
@@ -235,7 +250,7 @@ function localStorageTokenStorage(): TokenStorage {
 }
 
 /** Signed in as `user`, authenticating RPCs with `sessionToken`. */
-function signedInState(user: GitHubUser, sessionToken: string): AuthState {
+function signedInState(user: GitHubUser, sessionToken: string, vaultState: VaultState): AuthState {
   return {
     user,
     isAuthenticated: true,
@@ -243,6 +258,7 @@ function signedInState(user: GitHubUser, sessionToken: string): AuthState {
     error: null,
     sessionToken,
     isRefreshing: false,
+    vaultState,
   };
 }
 
@@ -266,6 +282,7 @@ export function useAuth() {
         onLoggedOut: () => setState(LOGGED_OUT),
         onRefreshingChange: (refreshing) => setState((s) => ({ ...s, isRefreshing: refreshing })),
         onAccessTokenChange: (accessToken) => setState((s) => ({ ...s, sessionToken: accessToken })),
+        onVaultStateChange: (vaultState) => setState((s) => ({ ...s, vaultState })),
       }),
     [client, storage],
   );
@@ -289,14 +306,14 @@ export function useAuth() {
     }
     let cancelled = false;
 
-    const establishSession = async (): Promise<{ token: string; user: GitHubUser }> => {
+    const establishSession = async (): Promise<{ token: string; user: GitHubUser; vaultState: VaultState }> => {
       const access = storage.getAccess();
       if (access) {
         const status = await client.getAuthStatus({ sessionToken: access });
         if (status.authenticated && status.user) {
           // The transport's auth gate may have refreshed the token mid-call (an expired token is
           // re-minted on the way out), so report the authoritative stored token, not the local one.
-          return { token: storage.getAccess() ?? access, user: status.user };
+          return { token: storage.getAccess() ?? access, user: status.user, vaultState: status.vaultState };
         }
       }
       if (storage.getRefresh()) {
@@ -304,7 +321,7 @@ export function useAuth() {
         if (token) {
           const status = await client.getAuthStatus({ sessionToken: token });
           if (status.authenticated && status.user) {
-            return { token, user: status.user };
+            return { token, user: status.user, vaultState: status.vaultState };
           }
         }
       }
@@ -330,15 +347,13 @@ export function useAuth() {
       const backoffsMs = [500, 1000, 2000, 4000];
       for (let attempt = 0; ; attempt++) {
         try {
-          const { token, user } = await establishSession();
+          const { token, user, vaultState } = await establishSession();
           if (cancelled) return;
+          setState(signedInState(user, token, vaultState));
           // A daemon that restarted since this lineage last refreshed holds none of the operator's
           // credentials open until a refresh presents the unlock key — do that now rather than
-          // when the access token next lapses. A failure is the store's to report, not a logout.
-          if (storage.getVaultUnlockKey() && storage.getRefresh()) {
-            void store.refreshNow().catch(() => {});
-          }
-          setState(signedInState(user, token));
+          // when the access token next lapses. The refresh reports the reopened vault's state.
+          void store.reopenVaultOnLoad();
           return;
         } catch (err) {
           if (cancelled) return;
@@ -384,9 +399,9 @@ export function useAuth() {
   // Take up a session the daemon minted — by `ExchangeCode` or by an approved device login, which
   // return the same fields. Both flows store it here, so both leave the operator signed in alike.
   const adoptSession = useCallback(
-    ({ sessionToken, refreshToken, vaultUnlockKey, user }: WholeSession) => {
+    ({ sessionToken, refreshToken, vaultUnlockKey, vaultState, user }: WholeSession) => {
       storage.set(sessionToken, refreshToken, vaultUnlockKey);
-      setState(signedInState(user, sessionToken));
+      setState(signedInState(user, sessionToken, vaultState));
     },
     [storage],
   );
@@ -489,20 +504,17 @@ export function useAuth() {
   }, [client, adoptSession, endDeviceAttempt]);
 
   const logout = useCallback(async () => {
-    const token = storage.getAccess();
-    // Handed back so the daemon removes this lineage's vault unlock slot — even when the access
-    // token has lapsed, since the key itself identifies the slot.
-    const vaultUnlockKey = storage.getVaultUnlockKey() ?? "";
-    if (token || vaultUnlockKey) {
-      try {
-        await client.logout({ sessionToken: token ?? "", vaultUnlockKey });
-      } catch {
-        // Ignore logout errors — the client discards its tokens regardless.
-      }
-    }
-    storage.clear();
+    await store.logout();
     setState(LOGGED_OUT);
-  }, [client, storage]);
+  }, [store]);
 
-  return { ...state, login, handleCallback, logout, deviceLogin, startDeviceLogin };
+  // The credential vault prompt's two actions. A refusal (a wrong passphrase, one too short)
+  // rejects, for the prompt to show; success reports the vault open through `onVaultStateChange`.
+  const unlockVault = useCallback(
+    (passphrase: string, create: boolean) => store.unlockVault(passphrase, create),
+    [store],
+  );
+  const resetVault = useCallback((newPassphrase: string) => store.resetVault(newPassphrase), [store]);
+
+  return { ...state, login, handleCallback, logout, deviceLogin, startDeviceLogin, unlockVault, resetVault };
 }

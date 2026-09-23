@@ -3,8 +3,10 @@
 
 use std::path::Path;
 
+use subtle::ConstantTimeEq;
+
 use super::crypto::{
-    check_verifier, random_16, random_32, seal, unlock_aad, unlock_kek, unwrap_data_key,
+    check_verifier, random_bytes, random_key, seal, unlock_aad, unlock_kek, unwrap_data_key,
 };
 use super::format::{read_vault_file, serialised, write_vault_file, UnlockSlot};
 use super::{session, CredentialStore, SessionVault, VaultError};
@@ -30,18 +32,7 @@ impl CredentialStore {
         unlock: &UnlockKey,
     ) -> Result<SessionVault, VaultError> {
         let file = read_vault_file(path)?.ok_or(VaultError::Locked)?;
-        let slot = file
-            .unlock_slots
-            .iter()
-            .find(|slot| slot.id == unlock.slot_id)
-            .ok_or(VaultError::Locked)?;
-        let kek = unlock_kek(&unlock.key, &slot.id, &unlock.subject);
-        let data_key = unwrap_data_key(
-            &kek,
-            &slot.nonce,
-            &slot.ciphertext,
-            &unlock_aad(&slot.id, &unlock.subject),
-        )?;
+        let data_key = unlock.open_slot_in(&file.unlock_slots)?;
         check_verifier(&file.verifier, &data_key)?;
         Ok(session(path, &unlock.subject, data_key))
     }
@@ -111,6 +102,44 @@ impl UnlockKey {
     }
 }
 
+impl UnlockKey {
+    /// Unwrap the data key from the slot among `slots` this key names — [`VaultError::Locked`] when
+    /// the slot is gone or this key does not open it.
+    fn open_slot_in(&self, slots: &[UnlockSlot]) -> Result<SecretBytes, VaultError> {
+        let slot = slots
+            .iter()
+            .find(|slot| slot.id == self.slot_id)
+            .ok_or(VaultError::Locked)?;
+        let kek = unlock_kek(&self.key, &slot.id, &self.subject);
+        unwrap_data_key(
+            &kek,
+            &slot.nonce,
+            &slot.ciphertext,
+            &unlock_aad(&slot.id, &self.subject),
+        )
+    }
+
+    /// A second owned copy, for the registry to hand a racing refresh the same successor.
+    pub(crate) fn duplicate(&self) -> Self {
+        let mut bytes = *self.key.expose();
+        let key = SecretBytes::new(bytes);
+        wipe(&mut bytes);
+        Self {
+            subject: self.subject.clone(),
+            slot_id: self.slot_id.clone(),
+            key,
+        }
+    }
+
+    /// Whether `other` is this very key — same vault, same slot, same key bytes, compared in
+    /// constant time.
+    pub(crate) fn is_the_same_key_as(&self, other: &Self) -> bool {
+        self.subject == other.subject
+            && self.slot_id == other.slot_id
+            && bool::from(self.key.expose().ct_eq(other.key.expose()))
+    }
+}
+
 impl std::fmt::Debug for UnlockKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UnlockKey")
@@ -130,7 +159,7 @@ impl SessionVault {
     pub fn add_unlock_slot(&self) -> Result<UnlockKey, VaultError> {
         let _serialised = serialised();
         let mut file = self.load()?;
-        let (slot, unlock) = self.new_unlock_slot(to_hex(&random_16()))?;
+        let (slot, unlock) = self.new_unlock_slot(to_hex(&random_bytes::<16>()))?;
         file.unlock_slots.push(slot);
         let excess = file.unlock_slots.len().saturating_sub(MAX_UNLOCK_SLOTS);
         file.unlock_slots.drain(..excess);
@@ -145,15 +174,12 @@ impl SessionVault {
     /// section as the replacement, so two refreshes presenting one key cannot both rotate it. A slot
     /// that is gone, or a key that no longer opens it, is [`VaultError::Locked`].
     pub fn rotate_unlock_slot(&self, presented: &UnlockKey) -> Result<UnlockKey, VaultError> {
-        let slot_id = presented.slot_id();
         let _serialised = serialised();
         let mut file = self.load()?;
-        let at = file
-            .unlock_slots
-            .iter()
-            .position(|slot| slot.id == slot_id)
-            .ok_or(VaultError::Locked)?;
-        file.unlock_slots.remove(at);
+        // Proven here, against the file as it is under the lock — not trusted from an earlier open.
+        presented.open_slot_in(&file.unlock_slots)?;
+        let slot_id = presented.slot_id();
+        file.unlock_slots.retain(|slot| slot.id != slot_id);
         let (slot, unlock) = self.new_unlock_slot(slot_id.to_string())?;
         file.unlock_slots.push(slot);
         write_vault_file(&self.path, &file)?;
@@ -183,9 +209,7 @@ impl SessionVault {
     }
 
     fn new_unlock_slot(&self, id: String) -> Result<(UnlockSlot, UnlockKey), VaultError> {
-        let mut fresh = random_32();
-        let key = SecretBytes::new(fresh);
-        wipe(&mut fresh);
+        let key = random_key();
         let kek = unlock_kek(&key, &id, &self.subject);
         let sealed = seal(
             &kek,

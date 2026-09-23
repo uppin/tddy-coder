@@ -64,9 +64,10 @@ message ExchangeCodeResponse {
   string refresh_token = 3;
   // A wrap key for this session lineage's slot in the daemon's credential vault — not a stored
   // credential. Alone it opens nothing: it is useful only together with the vault file, which never
-  // leaves the daemon's disk. Opaque; hold it beside the refresh token. Empty when the daemon keeps
-  // no vault for this login (a stub/demo login, or no `auth_storage`). The GitHub token itself is
-  // never carried on any response.
+  // leaves the daemon's disk. Opaque; hold it beside the refresh token. Empty unless `vault_state`
+  // is OPEN: a LOCKED or UNINITIALIZED vault hands one out at `UnlockVault`, and a stub/demo login
+  // or a daemon without `auth_storage` keeps no vault. The GitHub token itself is never carried on
+  // any response.
   string vault_unlock_key = 4;
   // Where this login's vault stands. LOCKED and UNINITIALIZED are signed in all the same — the
   // client prompts for the passphrase rather than refusing the login.

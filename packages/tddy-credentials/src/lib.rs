@@ -2,9 +2,14 @@
 //!
 //! This crate holds `(provider, account)`-keyed records — a GitHub account's access token today, a
 //! Cloudflare API key or a screen-sharing password later — in a single file whose label, metadata
-//! **and** secret are one sealed AEAD unit. At rest the file holds ciphertext and a wrapped data
-//! key; nothing in it opens it. The key that does is derived at login from the user's own
-//! credential, so a daemon with nobody signed in can read nothing.
+//! **and** secret are one sealed AEAD unit. At rest the file holds ciphertext and wrapped keys;
+//! nothing in it opens it. What does is the user's **vault passphrase** (Argon2id), or an unlock
+//! key one of their browser session lineages holds — so a daemon with nobody present can read
+//! nothing.
+//!
+//! The key is not derived from a login. A GitHub OAuth App mints a new access token at every code
+//! or device exchange, so a key derived from one would lock the vault at the first fresh login
+//! after a restart. A login's token is a *record* here, not key material.
 //!
 //! # Two rules this crate inherits, and why they are written down here
 //!
@@ -13,24 +18,22 @@
 //!
 //! 1. **A secret never reaches an RPC response path.** The session token a daemon hands a browser
 //!    travels over a plain-http LAN origin, so a live `repo`-scoped GitHub credential must never be
-//!    carried in it or returned to the client. [`SessionVault`]'s reads exist to be *used* by the
-//!    daemon, not forwarded.
-//! 2. **A failed write fails the login.** A session minted without its credential is a half-login:
-//!    the operator appears signed in while every credential-backed read reports itself unavailable,
-//!    and re-authenticating — the one remedy — is the one action they have no reason to attempt. So
-//!    [`SessionVault::put`] returns `Ok` only once the record is durably retained, and every
-//!    failure is reported rather than absorbed. [`VaultError::Locked`] extends the same rule: a
-//!    vault that cannot be opened fails the login too, distinctly, rather than as a generic refusal.
+//!    carried in it or returned to the client. [`CredentialRecord`] is not serialisable and its
+//!    secret is a [`SecretString`] that prints redacted, so this is a property of the types.
+//! 2. **A login whose credential cannot be retained is reported, never silent.** A session minted
+//!    without its credential is a half-login: the operator appears signed in while every
+//!    credential-backed read reports itself unavailable. So a login over a closed vault says so
+//!    ([`VaultState`]) and holds the credential until the vault opens, and a failed write —
+//!    [`SessionVault::put`] returns `Ok` only once the record is durably on disk — fails the login.
 //!
 //! # No second way in
 //!
-//! There is no daemon-held master key. A second key that does not need a user would make the daemon
-//! able to read credentials with nobody present — exactly the property this crate exists to remove.
-//! The cost is accepted explicitly: when the user's credential rotates with no live session,
-//! [`VaultError::Locked`] is reported and the accounts are re-linked into a fresh vault. Nothing is
-//! re-initialised silently. Every successful login calls [`SessionVault::rewrap`], so a rotation
-//! observed while a session can still be established costs nothing.
+//! There is no daemon-held master key. A key that needed no user would let the daemon read
+//! credentials with nobody present — exactly the property this crate exists to remove. The cost is
+//! accepted explicitly: a forgotten passphrase is a reset, which sets the old vault aside (never
+//! deletes it) and starts an empty one whose credentials must be linked again.
 
+mod atomic;
 mod kdf;
 pub mod record;
 pub mod secret;

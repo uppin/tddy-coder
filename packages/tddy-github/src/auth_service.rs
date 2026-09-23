@@ -63,11 +63,12 @@ pub struct AuthServiceImpl<P: GitHubOAuthProvider> {
     /// When set, sign-in mints tokens and status/refresh verify them. When `None`, authentication
     /// is non-functional: minting fails and every token is rejected.
     signing: Option<Signing>,
-    /// When set, a real provider's GitHub access token is sealed into the operator's credential
-    /// vault on login so the server can later act on their behalf (e.g. read their PRs), and each
-    /// session lineage is handed an unlock key its refreshes reopen the vault with after a
-    /// restart. Separate from `signing` on purpose: the GitHub token never enters the session
-    /// token and is never returned to the client.
+    /// When set, a real provider's GitHub access token is retained in the operator's credential
+    /// vault so the server can later act on their behalf (e.g. read their PRs): sealed at once when
+    /// the vault is open, held in memory until its passphrase is given when it is not. Each lineage
+    /// that opens the vault is handed an unlock key its refreshes reopen it with after a restart.
+    /// Separate from `signing` on purpose: the GitHub token never enters the session token and is
+    /// never returned to the client.
     credential_vaults: Option<Arc<SessionVaults>>,
     /// When set, asked whether each completed login is admitted before it is retained or minted.
     /// Unset admits every login GitHub vouches for, and leaves authorization to the RPCs that
@@ -117,9 +118,9 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         }
     }
 
-    /// Seal each real login's GitHub access token into that operator's vault in `vaults`
-    /// (builder). Without vaults the token is dropped at the end of the exchange, and GitHub-backed
-    /// reads report themselves unavailable.
+    /// Retain each real login's GitHub access token in that operator's vault in `vaults`
+    /// (builder), and serve `UnlockVault` / `ResetVault` over them. Without vaults the token is
+    /// dropped at the end of the exchange, and GitHub-backed reads report themselves unavailable.
     pub fn with_credential_vaults(mut self, vaults: Arc<SessionVaults>) -> Self {
         self.credential_vaults = Some(vaults);
         self

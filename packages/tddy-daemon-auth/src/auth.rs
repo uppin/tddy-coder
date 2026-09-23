@@ -178,7 +178,8 @@ pub fn build_auth_entries_admitting(
     };
 
     // Where each operator's credential vault lives — the GitHub access token a real login granted,
-    // sealed under a key that login derives, so the daemon can later read that operator's PRs. No
+    // sealed under a key the operator's vault passphrase derives, so the daemon can later read that
+    // operator's PRs. No
     // `auth_storage` means no retention — PR status then reads as *unavailable* rather than as "no
     // PR" (PR-stack UX recovery, D7/D8).
     //

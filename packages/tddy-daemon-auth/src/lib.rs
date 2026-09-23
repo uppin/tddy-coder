@@ -62,7 +62,8 @@ pub use signing_key::{
     KeyDirectory, SessionTokens, StandaloneKeyDirectory, SIGNING_KEY_FILE,
 };
 
-/// Where the daemon keeps each user's credentials at rest: their own vault, opened by a login.
+/// Where the daemon keeps each user's credentials at rest: their own vault, opened by their passphrase
+/// or by an unlock key one of their browser lineages holds.
 ///
 /// The type is `tddy-credentials`', not this crate's — `AuthServiceImpl` writes through it at the
 /// end of an OAuth exchange and `DaemonSessionHost` reads through it when it looks up an
