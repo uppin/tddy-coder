@@ -3,7 +3,7 @@
 **Date**: 2026-09-23
 **Status**: 🚧 In Progress — planned
 **Type**: Bug Fix
-**PR**: #527, standalone on `master` and **outside the `#carve` stack** (developer, 2026-09-23). Consumed by #524, the destructure node
+**PR**: #527. **Stack**: `#carve` 13/15, between `core-split` (#522) and `lifecycle-wiring` (#524, the destructure node)
 
 ## Initial Discovery
 
@@ -93,7 +93,9 @@ keeps the destructure node engine-driven, and the fix outlives it.
 
 ## Dependencies
 
-None. This PR is based on `master` and is not part of a stack.
+| Parent node | What it delivers | How this PR consumes it | This PR does NOT |
+|---|---|---|---|
+| `12` core-split (#522) | `tddy-core` as facades | nothing directly; it is the parent only because the stack is a line | touch `tddy-core` or the nine crates |
 
 ## Draft PR contract
 
@@ -103,11 +105,11 @@ surface here.
 
 ## Green wave
 
-**Standalone.** It can be greened and merged on its own; its tests use the engine's fixture crates.
-
-**Consumed by:** #524 (`#carve` 13/14), whose refused plans (`01`, `02`, `05`, `08`, `10`) need the fixed
-engine in their own tree. So this merges to `master` first, and the stack picks it up on its next
-rebase onto `master`.
+**Wave:** after #522, and before #524.
+**Greenable independently:** **yes.** Its tests use the engine's own fixture crates.
+**Concurrent with:** nothing.
+**Blocks:** #524's refused plans (`01`, `02`, `05`, `08`, `10`). #524 sits directly on this branch, so
+it gets the fixed engine in its own tree.
 
 ## Prerequisites
 
@@ -149,8 +151,8 @@ Scoped verification: `./test -p tddy-code-restructuring` (and `-p tddy-tools` if
 ## Decisions & trade-offs
 
 - **Fix the engine rather than hand-split.** The developer's decision (2026-09-23).
-- **A standalone PR outside the stack** (developer, 2026-09-23). The engine is not `#carve` work.
-  Keeping it off the stack avoids restacking three PRs, and lets it merge on its own schedule.
+- **Inside the stack, directly below #524** (developer, 2026-09-23, after first trying it standalone).
+  #524 then runs its plans against the fixed engine without waiting for a merge to `master`.
 
 ## Refactoring needed
 
