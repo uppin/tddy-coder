@@ -12,7 +12,9 @@ description = "The daemon's RPC-family handlers, above the session lifecycle the
 
 [dependencies]
 tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
+tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-github = { path = "../tddy-github" }
@@ -25,9 +27,12 @@ tddy-spawn = { path = "../tddy-spawn" }
 tddy-task = { path = "../tddy-task" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }
+anyhow = "1"
 async-trait = "0.1"
 livekit = "0.7"
+log = "0.4"
 tokio = { version = "1", features = ["sync"] }
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync"] }

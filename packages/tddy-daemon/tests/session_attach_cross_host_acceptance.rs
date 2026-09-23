@@ -184,7 +184,7 @@ async fn a_daemon(
     .with_staging_base_dir(staging.path().to_path_buf());
 
     Daemon {
-        service: Arc::new(service),
+        service: Arc::new(tddy_daemon_rpc::RpcHandlers::install(service).0),
         sessions_base: sessions.path().to_path_buf(),
         staging_base: staging.path().to_path_buf(),
         _sessions: sessions,

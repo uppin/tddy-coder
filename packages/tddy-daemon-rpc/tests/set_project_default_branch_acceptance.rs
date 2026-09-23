@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_host_service::multi_host::{EligibleDaemonSource, LocalOnlyEligibleDaemonSource};
 use tddy_projects::project_storage;
 use tddy_rpc::{Code, Request};
@@ -37,7 +38,7 @@ fn test_config(os_user: &str) -> DaemonConfig {
     DaemonConfig::load(&path).unwrap()
 }
 
-fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> DaemonSessionHost {
+fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> TestDaemon {
     let sessions_base = tddy_data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -45,7 +46,7 @@ fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> DaemonSessionHo
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
     let eligible: Arc<dyn EligibleDaemonSource> =
         Arc::new(LocalOnlyEligibleDaemonSource::for_config(&config));
-    DaemonSessionHost::new(
+    TestDaemon::from_host(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -57,7 +58,7 @@ fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> DaemonSessionHo
         }),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
+    ))
 }
 
 /// Register a legacy project (no stored default branch) directly in the registry.

@@ -42,6 +42,7 @@ use tddy_service::proto::session::{
     ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::test_util::RpcFamiliesNotUnderTest;
 use tddy_session_sync::{Credentials, DaemonToken, LiveKitCredentials};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 use tddy_testing_commons::wait::eventually;
@@ -199,22 +200,26 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
     let sessions_base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
-    let connections = Arc::new(DaemonSessionHost::new(
-        config.clone(),
-        sessions_base_resolver,
-        data_dir.clone(),
-        user_resolver.clone(),
-        None,
-        None,
-        None,
-        Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
-    ));
+    // The session's room is opened by the attach below; this suite exercises none of the families
+    // served above the lifecycle crate, so the room is given none of them.
+    let connections = Arc::new(
+        DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver,
+            data_dir.clone(),
+            user_resolver.clone(),
+            None,
+            None,
+            None,
+            Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        )
+        .with_rpc_families(Arc::new(RpcFamiliesNotUnderTest)),
+    );
 
     // The daemon's Connect-HTTP surface: `attach` lists sessions on it, and the git transport
     // exchanges its token and mints its room JWT on it.
     let mut entries = auth.entries;
     entries.push(connections.session_lifecycle_entry());
-    entries.push(connections.project_entry());
     let router = tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
         tddy_rpc::MultiRpcService::new(entries),
     ));

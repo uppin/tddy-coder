@@ -45,7 +45,7 @@ use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
 use tddy_service::proto::types::HostDocumentScope;
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TEST_TOKEN;
+use tddy_session_lifecycle::test_util::{RpcFamiliesNotUnderTest, TEST_TOKEN};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 use tddy_testing_commons::wait::eventually_awaiting;
 
@@ -364,7 +364,10 @@ impl FacilitatingDaemon {
             None,
             Arc::clone(&agents),
         )
-        .with_staging_base_dir(staging.path().to_path_buf());
+        .with_staging_base_dir(staging.path().to_path_buf())
+        // The rooms under test serve none of the families above the lifecycle crate: nothing here
+        // calls Project through a room.
+        .with_rpc_families(Arc::new(RpcFamiliesNotUnderTest));
 
         Self {
             service,

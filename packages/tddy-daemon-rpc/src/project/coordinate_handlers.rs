@@ -4,14 +4,12 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 
-use super::family_proto_bridge::wire_same;
-use super::hooks_and_urls;
-use super::{merge_listed_projects_with_peers, service_util, DaemonSessionHost};
-use crate::livekit_peer_discovery::local_instance_id_for_config;
-use crate::project_storage::{self, ProjectData};
-use crate::user_sessions_path::{
-    project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
-};
+use super::clone_destination::project_path_under_home_from_user_relative;
+use super::entries::{self, merge_listed_projects_with_peers};
+use super::ProjectRpcHandler;
+use tddy_daemon_kernel::user_paths::{projects_path_for_user, repos_base_for_user};
+use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
+use tddy_projects::project_storage::{self, ProjectData};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::project::ProjectEntry as ConnProjectEntry;
 use tddy_service::proto::project::{
@@ -20,9 +18,12 @@ use tddy_service::proto::project::{
     ListProjectsResponse, ProjectEntry, SetProjectDefaultBranchRequest,
     SetProjectDefaultBranchResponse,
 };
+use tddy_session_lifecycle::connection_service::{
+    await_supervised_with_timeout, spawn_blocking_with_timeout, wire_same,
+};
 use tddy_spawn::{spawn_worker, spawner};
 
-impl DaemonSessionHost {
+impl ProjectRpcHandler {
     pub(crate) async fn list_projects_at_project_coordinate(
         &self,
         request: Request<ListProjectsRequest>,
@@ -43,12 +44,12 @@ impl DaemonSessionHost {
             .into_iter()
             .map(|p| {
                 let repo_root = PathBuf::from(&p.main_repo_path);
-                let default_remote = hooks_and_urls::resolve_default_remote_or_empty(
+                let default_remote = entries::resolve_default_remote_or_empty(
                     &projects_dir,
                     &p.project_id,
                     &repo_root,
                 );
-                hooks_and_urls::project_entry_from(&p, local_daemon_id.clone(), default_remote)
+                entries::project_entry_from(&p, local_daemon_id.clone(), default_remote)
             })
             .collect();
         log::debug!(
@@ -120,7 +121,7 @@ impl DaemonSessionHost {
 
         match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
             tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
-                service_util::await_supervised_with_timeout(
+                await_supervised_with_timeout(
                     timeout,
                     "create_project: clone via tddy-supervisor",
                     tddy_spawn::supervisor_spawn::clone_repo_via_supervisor(
@@ -133,21 +134,17 @@ impl DaemonSessionHost {
                 .await?
             }
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                service_util::spawn_blocking_with_timeout(
-                    timeout,
-                    "create_project: clone_repo",
-                    move || {
-                        if let Some(ref client) = spawn_client {
-                            client.clone_repo(spawn_worker::CloneRequest {
-                                os_user: os_user_owned,
-                                git_url: git_url_owned,
-                                destination: dest_path.display().to_string(),
-                            })
-                        } else {
-                            spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
-                        }
-                    },
-                )
+                spawn_blocking_with_timeout(timeout, "create_project: clone_repo", move || {
+                    if let Some(ref client) = spawn_client {
+                        client.clone_repo(spawn_worker::CloneRequest {
+                            os_user: os_user_owned,
+                            git_url: git_url_owned,
+                            destination: dest_path.display().to_string(),
+                        })
+                    } else {
+                        spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
+                    }
+                })
                 .await?
             }
         }
@@ -168,12 +165,12 @@ impl DaemonSessionHost {
             host_repo_paths: std::collections::HashMap::new(),
         };
         let repo_root = PathBuf::from(&project.main_repo_path);
-        let default_remote = hooks_and_urls::resolve_default_remote_or_empty(
+        let default_remote = entries::resolve_default_remote_or_empty(
             &projects_dir,
             &project.project_id,
             &repo_root,
         );
-        let entry = hooks_and_urls::project_entry_from(
+        let entry = entries::project_entry_from(
             &project,
             local_instance_id_for_config(&self.config),
             default_remote,
@@ -223,7 +220,7 @@ impl DaemonSessionHost {
             .iter()
             .map(|e| e.instance_id.0.clone())
             .collect();
-        let route = crate::livekit_peer_discovery::classify_peer_route(
+        let route = tddy_daemon_livekit::livekit_peer_discovery::classify_peer_route(
             &local_id,
             requested_daemon,
             &eligible_ids,
@@ -233,7 +230,10 @@ impl DaemonSessionHost {
             Status::failed_precondition(msg)
         })?;
 
-        if let crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id } = route {
+        if let tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Forward {
+            peer_instance_id,
+        } = route
+        {
             log::info!(
                 "AddProjectToHost: forwarding RPC to remote daemon_instance_id={}",
                 peer_instance_id
@@ -265,13 +265,13 @@ impl DaemonSessionHost {
                 project_id
             );
             let repo_root = PathBuf::from(&existing.main_repo_path);
-            let default_remote = hooks_and_urls::resolve_default_remote_or_empty(
+            let default_remote = entries::resolve_default_remote_or_empty(
                 &projects_dir,
                 &existing.project_id,
                 &repo_root,
             );
             return Ok(Response::new(AddProjectToHostResponse {
-                project: Some(wire_same(&hooks_and_urls::project_entry_from(
+                project: Some(wire_same(&entries::project_entry_from(
                     &existing,
                     local_id,
                     default_remote,
@@ -296,7 +296,7 @@ impl DaemonSessionHost {
 
         match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
             tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
-                service_util::await_supervised_with_timeout(
+                await_supervised_with_timeout(
                     timeout,
                     "add_project_to_host: clone via tddy-supervisor",
                     tddy_spawn::supervisor_spawn::clone_repo_via_supervisor(
@@ -309,21 +309,17 @@ impl DaemonSessionHost {
                 .await?
             }
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                service_util::spawn_blocking_with_timeout(
-                    timeout,
-                    "add_project_to_host: clone_repo",
-                    move || {
-                        if let Some(ref client) = spawn_client {
-                            client.clone_repo(spawn_worker::CloneRequest {
-                                os_user: os_user_owned,
-                                git_url: git_url_owned,
-                                destination: dest_path.display().to_string(),
-                            })
-                        } else {
-                            spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
-                        }
-                    },
-                )
+                spawn_blocking_with_timeout(timeout, "add_project_to_host: clone_repo", move || {
+                    if let Some(ref client) = spawn_client {
+                        client.clone_repo(spawn_worker::CloneRequest {
+                            os_user: os_user_owned,
+                            git_url: git_url_owned,
+                            destination: dest_path.display().to_string(),
+                        })
+                    } else {
+                        spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
+                    }
+                })
                 .await?
             }
         }
@@ -351,13 +347,10 @@ impl DaemonSessionHost {
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let repo_root = PathBuf::from(&stored.main_repo_path);
-        let default_remote = hooks_and_urls::resolve_default_remote_or_empty(
-            &projects_dir,
-            &stored.project_id,
-            &repo_root,
-        );
+        let default_remote =
+            entries::resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
         Ok(Response::new(AddProjectToHostResponse {
-            project: Some(wire_same(&hooks_and_urls::project_entry_from(
+            project: Some(wire_same(&entries::project_entry_from(
                 &stored,
                 local_id,
                 default_remote,
@@ -391,7 +384,7 @@ impl DaemonSessionHost {
             .iter()
             .map(|e| e.instance_id.0.clone())
             .collect();
-        let route = crate::livekit_peer_discovery::classify_peer_route(
+        let route = tddy_daemon_livekit::livekit_peer_discovery::classify_peer_route(
             &local_id,
             requested_daemon,
             &eligible_ids,
@@ -401,7 +394,10 @@ impl DaemonSessionHost {
             Status::failed_precondition(msg)
         })?;
 
-        if let crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id } = route {
+        if let tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Forward {
+            peer_instance_id,
+        } = route
+        {
             log::info!(
                 "SetProjectDefaultBranch: forwarding RPC to remote daemon_instance_id={}",
                 peer_instance_id
@@ -453,13 +449,10 @@ impl DaemonSessionHost {
             stored.main_branch_ref.as_deref().unwrap_or_default()
         );
         let repo_root = PathBuf::from(&stored.main_repo_path);
-        let default_remote = hooks_and_urls::resolve_default_remote_or_empty(
-            &projects_dir,
-            &stored.project_id,
-            &repo_root,
-        );
+        let default_remote =
+            entries::resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
         Ok(Response::new(SetProjectDefaultBranchResponse {
-            project: Some(wire_same(&hooks_and_urls::project_entry_from(
+            project: Some(wire_same(&entries::project_entry_from(
                 &stored,
                 local_id,
                 default_remote,
@@ -506,7 +499,7 @@ impl DaemonSessionHost {
         )
         .map_err(|e| Status::internal(e.to_string()))?;
         let remote_for_closure = remote.clone();
-        let branches = service_util::spawn_blocking_with_timeout(
+        let branches = spawn_blocking_with_timeout(
             timeout,
             "ListProjectBranches: git remote refs",
             move || {

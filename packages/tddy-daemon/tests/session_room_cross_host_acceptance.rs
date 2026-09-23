@@ -272,7 +272,7 @@ async fn a_daemon(
     );
 
     Daemon {
-        service: Arc::new(service),
+        service: Arc::new(tddy_daemon_rpc::RpcHandlers::install(service).0),
         sessions_base: sessions.path().to_path_buf(),
         _sessions: sessions,
         _config: config_dir,

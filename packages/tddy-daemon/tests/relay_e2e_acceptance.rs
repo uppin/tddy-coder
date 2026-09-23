@@ -195,16 +195,19 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let (_tmp_b, path_b) = write_daemon_yaml(&ws_url, Some(RELAY_PEER_ID));
     let config_b = DaemonConfig::load(&path_b).unwrap();
     let sessions_b = tempfile::tempdir().unwrap();
-    let service_b = Arc::new(DaemonSessionHost::new(
-        config_b.clone(),
-        sessions_resolver(sessions_b.path().to_path_buf()),
-        sessions_b.path().to_path_buf(),
-        valid_user_resolver(),
-        None,
-        None, // B has no discovery of its own — it only serves its local tools
-        None,
-        Arc::new(ClaudeCliSessionManager::new()),
-    ));
+    let service_b = Arc::new(
+        tddy_daemon_rpc::RpcHandlers::install(DaemonSessionHost::new(
+            config_b.clone(),
+            sessions_resolver(sessions_b.path().to_path_buf()),
+            sessions_b.path().to_path_buf(),
+            valid_user_resolver(),
+            None,
+            None, // B has no discovery of its own — it only serves its local tools
+            None,
+            Arc::new(ClaudeCliSessionManager::new()),
+        ))
+        .0,
+    );
 
     // B's discovery participant: bare instance id, publishes the advertisement A discovers.
     spawn_common_room_discovery_task(

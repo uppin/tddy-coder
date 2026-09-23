@@ -37,15 +37,25 @@ impl DaemonSessionHost {
     /// the handlers were built from this host's state and share it, and a `with_*` applied
     /// afterwards would leave them holding the value it replaced.
     #[must_use]
-    pub fn with_rpc_families(self, families: Arc<dyn DaemonRpcFamilies>) -> Self {
-        // TODO(#carve 11): store the port on the host.
-        let _ = families;
-        todo!("DaemonSessionHost::with_rpc_families")
+    pub fn with_rpc_families(mut self, families: Arc<dyn DaemonRpcFamilies>) -> Self {
+        self.set_rpc_families(families);
+        self
+    }
+
+    /// [`Self::with_rpc_families`] in place, for a host already behind a shared `Arc` (the
+    /// `TestDaemon` builders' shape).
+    pub(crate) fn set_rpc_families(&mut self, families: Arc<dyn DaemonRpcFamilies>) {
+        self.rpc_families = Some(families);
     }
 
     /// The installed families, or `FAILED_PRECONDITION` naming the missing wiring.
     pub fn rpc_families(&self) -> Result<&Arc<dyn DaemonRpcFamilies>, Status> {
-        // TODO(#carve 11): read the port the host was given.
-        todo!("DaemonSessionHost::rpc_families")
+        self.rpc_families.as_ref().ok_or_else(|| {
+            Status::failed_precondition(
+                "this daemon's RPC families were never wired: the composition root did not install \
+                 `DaemonRpcFamilies` on its session host (`with_rpc_families`), so a session room \
+                 or a stack link that needs them cannot be served",
+            )
+        })
     }
 }

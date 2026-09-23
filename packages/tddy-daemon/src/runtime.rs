@@ -278,9 +278,7 @@ type BinaryLocalSocketServices = crate::local_socket_server::LocalSocketServices
     tddy_session_lifecycle::SessionServiceImpl<
         tddy_session_lifecycle::connection_service::DaemonSessionHost,
     >,
-    tddy_projects::ProjectServiceImpl<
-        tddy_session_lifecycle::connection_service::DaemonSessionHost,
-    >,
+    tddy_projects::ProjectServiceImpl<tddy_daemon_rpc::ProjectRpcHandler>,
     tddy_session_lifecycle::connection_service::DemoVmServiceImpl,
     tddy_daemon_livekit::LiveKitServiceImpl,
     tddy_host_service::HostServiceImpl,
@@ -968,6 +966,11 @@ pub async fn build(
         if let Some(store) = auth_result.github_token_store.clone() {
             connection_impl = connection_impl.with_github_token_store(store);
         }
+        // The families served above the host are built from it and installed on it **last**:
+        // they share its `Arc`s, so a `with_*` after this line would leave them holding the value
+        // it replaced (`tddy_daemon_rpc::families`).
+        let (connection_impl, rpc_handlers) =
+            tddy_daemon_rpc::RpcHandlers::install(connection_impl);
         // Share one instance across transports: the LiveKit/HTTP RpcService server and the
         // local Unix-domain-socket tonic server both reference the same Arc, so a session
         // started over the socket is visible over every other transport.
@@ -1042,7 +1045,7 @@ pub async fn build(
                         Arc::new(connection_arc.session_lifecycle_service()),
                     ),
                     project: tddy_service::proto::project::ProjectServiceTonicAdapter::new(
-                        Arc::new(connection_arc.project_service()),
+                        Arc::new(rpc_handlers.project_service()),
                     ),
                     demo_vm: tddy_service::proto::demo_vm::DemoVmServiceTonicAdapter::new(
                         Arc::new(
@@ -1142,8 +1145,9 @@ pub async fn build(
         // SessionService — family C (`tddy-session-lifecycle`).
         rpc_entries.push(connection_arc.session_lifecycle_entry());
 
-        // ProjectService — family D (`tddy-projects`).
-        rpc_entries.push(connection_arc.project_entry());
+        // The families served from `tddy-daemon-rpc` — today ProjectService, family D
+        // (`tddy-projects`) — through the same handlers the host's session rooms serve.
+        rpc_entries.extend(rpc_handlers.entries());
 
         // DemoVmService — family O (`tddy-vm` coordinate, host logic on the session host).
         rpc_entries.push(connection_arc.demo_vm_entry());

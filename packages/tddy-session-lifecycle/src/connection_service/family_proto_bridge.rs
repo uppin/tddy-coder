@@ -8,7 +8,7 @@ use prost::Message;
 use tddy_rpc::Status;
 
 /// Decode `src` as `Dst` when both messages share the same field layout on the wire.
-pub(crate) fn wire_same<Src: Message, Dst: Message + Default>(src: &Src) -> Result<Dst, Status> {
+pub fn wire_same<Src: Message, Dst: Message + Default>(src: &Src) -> Result<Dst, Status> {
     Dst::decode(src.encode_to_vec().as_slice())
         .map_err(|e| Status::internal(format!("family proto bridge decode: {e}")))
 }

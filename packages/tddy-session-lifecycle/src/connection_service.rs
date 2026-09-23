@@ -11,7 +11,6 @@ use tddy_core::session_lifecycle::validate_session_id_segment;
 use tddy_core::Changeset;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::catalog::{ListAgentModelsResponse, ModelInfo as CatalogModelInfo};
-use tddy_service::proto::project::ProjectEntry as ProtoProjectEntry;
 use tddy_service::proto::session::{
     start_session_event::Event as StartSessionEventKind, AttachmentMaterializationProgress,
     SessionAttachment, StartSessionEvent,
@@ -60,6 +59,9 @@ use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 
 mod service_util;
 pub(crate) use service_util::*;
+/// The deadlines every clone and supervised spawn runs under — shared with the project handlers in
+/// `tddy-daemon-rpc`, which clone repositories the way session starts do.
+pub use service_util::{await_supervised_with_timeout, spawn_blocking_with_timeout};
 
 /// Stream adapter backed by an unbounded mpsc channel carrying `Result<T, Status>` items — used for
 /// server-streaming RPCs (e.g. `StreamExecuteTool`) whose frames may carry a mid-stream status.
@@ -229,6 +231,11 @@ pub struct DaemonSessionHost {
     session_notification_bus: Option<Arc<crate::session_notifications::SessionNotificationBus>>,
     /// Sandbox-IPC bridge installed once the top-level `Arc` exists (`runtime::build`).
     sandbox_rpc_bridge: Arc<std::sync::OnceLock<Arc<dyn tddy_sandbox_runner::HostRpcHandler>>>,
+    /// The RPC families served above this crate, installed last by the composition root with
+    /// [`Self::with_rpc_families`]. `None` until then, and [`Self::rpc_families`] refuses rather
+    /// than serving a room without them — see [`crate::rpc_families`], which owns it (hence
+    /// `pub(crate)`).
+    pub(crate) rpc_families: Option<Arc<dyn crate::rpc_families::DaemonRpcFamilies>>,
 }
 
 mod seed_codebase;
@@ -1295,15 +1302,16 @@ mod svc_session_files_ports;
 mod svc_activity_ports;
 
 mod family_proto_bridge;
+/// Shared with the families served in `tddy-daemon-rpc`, whose bodies bridge the same
+/// wire-identical messages.
+pub use family_proto_bridge::wire_same;
 /// The host state `tddy-daemon-rpc`'s family handlers are built from.
 mod handler_state;
-mod project_coordinate_handlers;
 mod session_coordinate_handlers;
 mod svc_catalog_ports;
 mod svc_exec_tool_ports;
 mod svc_family_entries;
 mod svc_pr_stack_ports;
-mod svc_project_ports;
 /// The daemon's half of `session_agents.SessionAgentService` — the host capabilities family B
 /// reads, and the routing the daemon keeps. `#unbundle` node 7.
 mod svc_session_agent_ports;
@@ -1316,32 +1324,6 @@ pub use svc_session_files_ports::PeerRoutedSessionFiles;
 /// the host that assembles it has to be able to write these two types down.
 pub use svc_activity_ports::PeerRoutedActivity;
 pub use svc_session_agent_ports::PeerRoutedSessionAgents;
-
-/// Merge local `ListProjects` rows with [`EligibleDaemonSource::peer_project_entries`].
-async fn merge_listed_projects_with_peers(
-    eligible: &dyn EligibleDaemonSource,
-    session_token: &str,
-    local: Vec<ProtoProjectEntry>,
-) -> Vec<ProtoProjectEntry> {
-    let peer_rows = eligible.peer_project_entries(session_token).await;
-    log::debug!(
-        target: "tddy_daemon::connection_service",
-        "merge_listed_projects_with_peers: local_rows={} peer_rows={} (session_token len={})",
-        local.len(),
-        peer_rows.len(),
-        session_token.len()
-    );
-    let mut merged = local;
-    let n_append = peer_rows.len();
-    merged.extend(peer_rows);
-    log::info!(
-        target: "tddy_daemon::connection_service",
-        "merge_listed_projects_with_peers: merged_total={} appended_from_peers={}",
-        merged.len(),
-        n_append
-    );
-    merged
-}
 
 /// The host-side RPC dispatch for a sandboxed session's `SessionChannel`: routes the roster and
 /// conversation RPCs the in-jail `tddy-tools` issues (forwarded by the runner as `RpcRequest`s)
@@ -1860,9 +1842,6 @@ mod add_planned_pr_unit_tests;
 /// alongside it only as a fallback route back to the branch.
 #[cfg(test)]
 mod stack_child_link_tests;
-
-#[cfg(test)]
-mod cross_daemon_session_token_acceptance_tests;
 
 #[cfg(test)]
 mod list_agent_models_parse_tests;

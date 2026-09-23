@@ -12,10 +12,13 @@
 
 pub mod catalog;
 pub mod exec_tool;
+pub mod families;
 pub mod pr_stack;
 pub mod project;
+pub mod test_util;
 
 pub use catalog::CatalogRpcHandler;
 pub use exec_tool::ExecToolRpcHandler;
+pub use families::RpcHandlers;
 pub use pr_stack::PrStackRpcHandler;
 pub use project::ProjectRpcHandler;

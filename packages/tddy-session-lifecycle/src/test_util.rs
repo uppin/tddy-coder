@@ -28,12 +28,6 @@ use tddy_service::proto::pr_stack::{
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
     ResolveStackBaseRequest, ResolveStackBaseResponse,
 };
-use tddy_service::proto::project::{
-    AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
-    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ProjectService, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse,
-};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListSessionsRequest,
@@ -45,6 +39,7 @@ use tddy_worktree_service::stream::MpscResultStream;
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
 use crate::connection_service::DaemonSessionHost;
+use crate::{DaemonRpcFamilies, PrStackHandler};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
 /// Token accepted by [`test_service`] as a valid session token.
@@ -145,6 +140,40 @@ impl TestDaemon {
         Arc::make_mut(&mut self.inner).set_roster_keepalive_interval(interval);
         self
     }
+
+    /// Install [`RpcFamiliesNotUnderTest`] as this daemon's [`DaemonRpcFamilies`], for a suite that
+    /// opens a session room but exercises none of the families served above this crate.
+    ///
+    /// Not a default: [`test_service`] leaves the port unwired, because a host that was never given
+    /// it must refuse — and that refusal is itself under test.
+    #[must_use]
+    pub fn with_rpc_families_not_under_test(mut self) -> Self {
+        Arc::make_mut(&mut self.inner).set_rpc_families(Arc::new(RpcFamiliesNotUnderTest));
+        self
+    }
+}
+
+/// **Test fixture, never production wiring:** the [`DaemonRpcFamilies`] of a suite that opens a
+/// session room without exercising any family served above this crate (`tddy-daemon-rpc`).
+///
+/// The room it opens serves **none** of those families — an empty set, named for what it is, rather
+/// than a production host quietly missing them. A suite that asserts a moved family, through a room
+/// or a stack link, belongs in `tddy-daemon-rpc` with the real `RpcHandlers` installed; the panic
+/// below is what tells a suite it has strayed there.
+pub struct RpcFamiliesNotUnderTest;
+
+impl DaemonRpcFamilies for RpcFamiliesNotUnderTest {
+    fn pr_stack_handler(&self) -> Arc<dyn PrStackHandler> {
+        panic!(
+            "this suite routed into the PR-stack family through `DaemonRpcFamilies`, which it does \
+             not exercise (`RpcFamiliesNotUnderTest`); a suite that does belongs in \
+             `tddy-daemon-rpc`, with `RpcHandlers` installed"
+        )
+    }
+
+    fn service_entries(&self) -> Vec<tddy_rpc::ServiceEntry> {
+        Vec::new()
+    }
 }
 
 impl Deref for TestDaemon {
@@ -236,53 +265,6 @@ impl SessionService for TestDaemon {
         self.inner
             .session_lifecycle_service()
             .get_worktree_snapshot(request)
-            .await
-    }
-}
-
-#[async_trait]
-impl ProjectService for TestDaemon {
-    async fn list_projects(
-        &self,
-        request: Request<ListProjectsRequest>,
-    ) -> Result<Response<ListProjectsResponse>, Status> {
-        self.inner.project_service().list_projects(request).await
-    }
-
-    async fn create_project(
-        &self,
-        request: Request<CreateProjectRequest>,
-    ) -> Result<Response<CreateProjectResponse>, Status> {
-        self.inner.project_service().create_project(request).await
-    }
-
-    async fn add_project_to_host(
-        &self,
-        request: Request<AddProjectToHostRequest>,
-    ) -> Result<Response<AddProjectToHostResponse>, Status> {
-        self.inner
-            .project_service()
-            .add_project_to_host(request)
-            .await
-    }
-
-    async fn list_project_branches(
-        &self,
-        request: Request<ListProjectBranchesRequest>,
-    ) -> Result<Response<ListProjectBranchesResponse>, Status> {
-        self.inner
-            .project_service()
-            .list_project_branches(request)
-            .await
-    }
-
-    async fn set_project_default_branch(
-        &self,
-        request: Request<SetProjectDefaultBranchRequest>,
-    ) -> Result<Response<SetProjectDefaultBranchResponse>, Status> {
-        self.inner
-            .project_service()
-            .set_project_default_branch(request)
             .await
     }
 }
@@ -531,21 +513,33 @@ pub async fn wait_until_peer_discovered(
 /// The production roster is `runtime::build`'s, which mounts these two among several more; the
 /// extras are the ones no forward in these suites addresses, and each needs wiring a test daemon
 /// does not have.
+///
+/// The families served above this crate are whatever `service` was given as its
+/// [`DaemonRpcFamilies`]; a host never given any panics here, as its room would refuse.
 pub async fn serve_daemon_rpc_participant(
     ws_url: &str,
     token: &str,
     service: &Arc<DaemonSessionHost>,
 ) -> tokio::task::JoinHandle<()> {
-    let roster = tddy_rpc::MultiRpcService::new(vec![
-        service.session_files_entry(),
-        service.session_agents_entry(),
-        service.activity_entry(),
-        service.catalog_entry(),
-        service.exec_tool_entry(),
-        service.pr_stack_entry(),
-        service.session_lifecycle_entry(),
-        service.project_entry(),
-    ]);
+    let roster = tddy_rpc::MultiRpcService::new(
+        vec![
+            service.session_files_entry(),
+            service.session_agents_entry(),
+            service.activity_entry(),
+            service.catalog_entry(),
+            service.exec_tool_entry(),
+            service.pr_stack_entry(),
+            service.session_lifecycle_entry(),
+        ]
+        .into_iter()
+        .chain(
+            service
+                .rpc_families()
+                .expect("a daemon serving forwarded calls needs its RPC families installed")
+                .service_entries(),
+        )
+        .collect(),
+    );
     let participant = tddy_livekit::LiveKitParticipant::connect(
         ws_url,
         token,

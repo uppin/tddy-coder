@@ -1,6 +1,7 @@
 # complexity: add_project_to_host_at_project_coordinate
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/project_coordinate_handlers.rs:189` — `add_project_to_host_at_project_coordinate`
+**Location:** `packages/tddy-daemon-rpc/src/project/coordinate_handlers.rs:190` — `add_project_to_host_at_project_coordinate` (now on `ProjectRpcHandler`)
+**Moved:** 2026-09-23 by #520 (#carve 11) — from `packages/tddy-session-lifecycle/src/connection_service/project_coordinate_handlers.rs:189`, body unchanged
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **178 lines** · **nesting depth 6** · 1 parameters · 9 branch/match lines · 15 early exits

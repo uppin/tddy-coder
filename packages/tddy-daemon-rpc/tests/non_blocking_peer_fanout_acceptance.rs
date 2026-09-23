@@ -20,6 +20,7 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::livekit_peer_discovery::{
     aggregate_peer_project_entries, LiveKitDiscoveryHandles,
 };
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::Request;
 use tddy_service::proto::project::{
@@ -51,7 +52,7 @@ fn test_service(
     sessions_base: PathBuf,
     os_user: &str,
     eligible: Arc<dyn EligibleDaemonSource>,
-) -> DaemonSessionHost {
+) -> TestDaemon {
     let config = test_config_for_os_user(os_user);
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -63,7 +64,7 @@ fn test_service(
             None
         }
     });
-    DaemonSessionHost::new(
+    TestDaemon::from_host(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -75,7 +76,7 @@ fn test_service(
         }),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
+    ))
 }
 
 /// A peer source whose `peer_project_entries` is genuinely asynchronous: it yields to the

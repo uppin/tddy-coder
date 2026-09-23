@@ -12080,6 +12080,7 @@ dependencies = [
  "tddy-daemon-auth",
  "tddy-daemon-kernel",
  "tddy-daemon-livekit",
+ "tddy-daemon-rpc",
  "tddy-daemon-sandbox",
  "tddy-discovery",
  "tddy-github",
@@ -12202,9 +12203,13 @@ dependencies = [
 name = "tddy-daemon-rpc"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "livekit",
+ "log",
+ "tddy-core",
  "tddy-daemon-kernel",
+ "tddy-daemon-livekit",
  "tddy-daemon-sandbox",
  "tddy-discovery",
  "tddy-github",
@@ -12220,6 +12225,7 @@ dependencies = [
  "tddy-worktree-service",
  "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

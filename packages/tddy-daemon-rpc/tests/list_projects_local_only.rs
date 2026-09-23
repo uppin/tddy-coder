@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::Request;
 use tddy_service::proto::project::{
@@ -63,14 +64,14 @@ users:
     DaemonConfig::load(&path).unwrap()
 }
 
-fn test_service(os_user: &str) -> DaemonSessionHost {
+fn test_service(os_user: &str) -> TestDaemon {
     let data_dir = tempfile::tempdir().unwrap().path().to_path_buf();
     let sessions_base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver =
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
-    DaemonSessionHost::new(
+    TestDaemon::from_host(DaemonSessionHost::new(
         test_config_for_os_user(os_user),
         sessions_base_resolver,
         data_dir,
@@ -82,7 +83,7 @@ fn test_service(os_user: &str) -> DaemonSessionHost {
         }),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
+    ))
 }
 
 fn count_marker_rows(projects: Vec<ProtoProjectEntry>) -> usize {

@@ -1,10 +1,24 @@
-use super::*;
+//! A peer daemon verifies the session tokens other daemons mint, asked through `ListProjects`.
+//!
+//! Moved from `tddy-session-lifecycle`'s in-crate tests with the project handlers it calls.
+
+use std::sync::Arc;
+
 use tddy_daemon_kernel::SessionsBaseResolver;
+use tddy_daemon_rpc::test_util::TestDaemon;
+use tddy_rpc::Request;
 use tddy_service::proto::project::{ListProjectsRequest, ProjectService};
+use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 /// A daemon config with GitHub auth enabled and, when `api_secret` is `Some`, a LiveKit
 /// secret that signs/verifies session tokens. Maps GitHub login "u" to OS user "u".
-fn a_daemon_config(api_secret: Option<&str>) -> (crate::config::DaemonConfig, tempfile::TempDir) {
+fn a_daemon_config(
+    api_secret: Option<&str>,
+) -> (
+    tddy_session_lifecycle::config::DaemonConfig,
+    tempfile::TempDir,
+) {
     let dir = tempfile::tempdir().unwrap();
     let livekit = match api_secret {
         Some(s) => format!("livekit:\n  api_secret: \"{s}\"\n"),
@@ -15,7 +29,7 @@ fn a_daemon_config(api_secret: Option<&str>) -> (crate::config::DaemonConfig, te
     );
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
-    let config = crate::config::DaemonConfig::load(&path).unwrap();
+    let config = tddy_session_lifecycle::config::DaemonConfig::load(&path).unwrap();
     (config, dir)
 }
 
@@ -31,16 +45,16 @@ fn a_github_user(login: &str) -> tddy_github::GitHubUser {
 /// A ConnectionService whose `user_resolver` is exactly the one the daemon's auth wiring
 /// produces for `config` — i.e. what a *peer* daemon verifies incoming tokens with.
 fn a_peer_daemon(
-    config: crate::config::DaemonConfig,
+    config: tddy_session_lifecycle::config::DaemonConfig,
     data_dir: std::path::PathBuf,
-) -> DaemonSessionHost {
-    let resolver = crate::auth::build_auth_entries(&config, "127.0.0.1", 0)
+) -> TestDaemon {
+    let resolver = tddy_session_lifecycle::auth::build_auth_entries(&config, "127.0.0.1", 0)
         .expect("auth wiring should build")
         .user_resolver
         .expect("auth wiring should produce a session resolver");
     let base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
-    DaemonSessionHost::new(
+    TestDaemon::from_host(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         data_dir,
@@ -49,7 +63,7 @@ fn a_peer_daemon(
         None,
         None,
         Arc::new(CliSessionManager::new()),
-    )
+    ))
 }
 
 #[tokio::test]

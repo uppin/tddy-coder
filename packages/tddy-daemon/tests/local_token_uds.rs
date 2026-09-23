@@ -106,7 +106,9 @@ fn start_local_socket_server(
     let connection = test_service(sessions_base).as_arc();
     let session_adapter =
         SessionServiceTonicAdapter::new(Arc::new(connection.session_lifecycle_service()));
-    let project_adapter = ProjectServiceTonicAdapter::new(Arc::new(connection.project_service()));
+    let project_adapter = ProjectServiceTonicAdapter::new(Arc::new(
+        tddy_daemon_rpc::RpcHandlers::from_host(&connection).project_service(),
+    ));
     let demo_vm_adapter = DemoVmServiceTonicAdapter::new(Arc::new(
         tddy_session_lifecycle::connection_service::DemoVmServiceImpl::new(Arc::clone(&connection)),
     ));

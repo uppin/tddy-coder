@@ -1,8 +1,4 @@
-use crate::{
-    connection_service::stack_parent,
-    project_storage::{self},
-};
-use tddy_service::proto::project::ProjectEntry as ProtoProjectEntry;
+use crate::connection_service::stack_parent;
 
 use crate::config::DaemonConfig;
 
@@ -220,38 +216,6 @@ pub fn spawned_branch_of_session(session_dir: &Path, requested_branch: &str) -> 
             );
             requested_branch.trim().to_string()
         }
-    }
-}
-
-/// Resolves the default remote name for a registered project, degrading to an empty string when the
-/// resolver itself errors (e.g. unreadable `projects.yaml`) so a list RPC never fails on a single
-/// bad row. The resolver already falls back to `origin` as the last resort, so the empty case is the
-/// rare "registry unreadable" path — clients apply their own `origin` fallback then.
-pub(crate) fn resolve_default_remote_or_empty(
-    projects_dir: &Path,
-    project_id: &str,
-    repo_root: &Path,
-) -> String {
-    project_storage::effective_remote_name_for_project(projects_dir, project_id, repo_root)
-        .unwrap_or_default()
-}
-
-/// Builds a proto [`ProjectEntry`] from a stored [`project_storage::ProjectData`] plus the resolved
-/// `default_remote`. Centralizing the mapping keeps every response (ListProjects, CreateProject,
-/// AddProjectToHost, SetProjectDefaultBranch) consistent as fields are added.
-pub(crate) fn project_entry_from(
-    p: &project_storage::ProjectData,
-    daemon_instance_id: String,
-    default_remote: String,
-) -> ProtoProjectEntry {
-    ProtoProjectEntry {
-        project_id: p.project_id.clone(),
-        name: p.name.clone(),
-        git_url: p.git_url.clone(),
-        main_repo_path: p.main_repo_path.clone(),
-        daemon_instance_id,
-        main_branch_ref: p.main_branch_ref.clone().unwrap_or_default(),
-        default_remote,
     }
 }
 

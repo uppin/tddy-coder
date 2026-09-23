@@ -284,7 +284,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         // a forward to the new one with `Unknown service`. Served through
         // `test_util::serve_daemon_rpc_participant` so this list lives in one place — which is the
         // whole reason that helper exists.
-        let service_arc = Arc::new(service);
+        let service_arc = Arc::new(tddy_daemon_rpc::RpcHandlers::install(service).0);
         service_arc.install_sandbox_rpc_bridge();
         let run = tddy_session_lifecycle::test_util::serve_daemon_rpc_participant(
             &ws_url,
@@ -453,7 +453,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     )
     .expect("write session metadata");
 
-    let service_a = Arc::new(service_a);
+    let service_a = Arc::new(tddy_daemon_rpc::RpcHandlers::install(service_a).0);
     service_a.install_sandbox_rpc_bridge();
     let fleet = Fleet {
         a: TestDaemon::from_arc(service_a),
