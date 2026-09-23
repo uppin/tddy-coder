@@ -101,14 +101,15 @@ const PEER_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(45);
 // Fixtures
 // ---------------------------------------------------------------------------
 
-/// A daemon's signing identity, by instance id. Kept in the test target's scratch directory, so
+/// A daemon's signing identity, by instance id. Kept in a directory this test process owns, so
 /// each daemon in this suite keeps one identity across its tests — as a real one keeps it across
-/// restarts — and the caller token below, minted once, stays verifiable.
+/// restarts — and the caller token below, minted once, stays verifiable; and so no run signs with
+/// a key another run, or another checkout sharing the target directory, left behind.
 fn the_signing_key_of(instance_id: &str) -> DaemonSigningKey {
-    DaemonSigningKey::load_or_generate(
-        &Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{instance_id}-signing_key.pem")),
-    )
-    .expect("a daemon generates its keypair")
+    static KEYS: OnceLock<tempfile::TempDir> = OnceLock::new();
+    let keys = KEYS.get_or_init(|| tempfile::tempdir().expect("a directory for this run's keys"));
+    DaemonSigningKey::load_or_generate(&keys.path().join(format!("{instance_id}-signing_key.pem")))
+        .expect("a daemon generates its keypair")
 }
 
 /// The credential the browser presents on `ResumeSession`, signed by this daemon — the one the

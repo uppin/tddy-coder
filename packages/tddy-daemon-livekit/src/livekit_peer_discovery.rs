@@ -198,8 +198,10 @@ pub fn sandboxed_codebase_support() -> Option<SandboxedCodebaseSupport> {
 /// (`tddy_daemon_auth::DaemonSigningKey`) builds this and hands it in, so the key material and the
 /// crypto types stay off this crate's dependency path while the fleet still learns the key.
 ///
-/// [`Default`] is a daemon that advertises no key — a desktop install, or one whose identity is
-/// not wired yet. It advertises nothing rather than something unverifiable.
+/// [`Default`] advertises no key: the advertisement then omits the pair, and peers refuse the
+/// daemon's tokens rather than guess. No production daemon runs discovery without a key —
+/// `runtime::build` starts the loop only for a daemon that signs — so it serves the suites that
+/// exercise discovery without a signing identity.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AdvertisedSigningKey {
     /// The key id, as `tddy_github::session_token_v2::KeyId` renders it.

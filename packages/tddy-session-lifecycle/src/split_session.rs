@@ -361,36 +361,30 @@ pub(crate) fn mint_agent_session_token(
 /// fallback to forwarding the caller's token: an expired, forged or malformed credential must not
 /// buy a minted one.
 fn verified_caller(tokens: &SessionTokens, caller_token: &str) -> Result<GitHubUser, Status> {
-    let claims = tokens
-        .verifier()
-        .verify_now(caller_token)
-        .map_err(|e| match e {
-            SessionTokenError::Expired => Status::unauthenticated(
-                "cannot wire a split session: the caller's session token has expired",
+    let refused =
+        |why: String| Status::unauthenticated(format!("cannot wire a split session: {why}"));
+    let claims = tokens.verifier().verify_now(caller_token).map_err(|e| {
+        refused(match e {
+            SessionTokenError::Expired => "the caller's session token has expired".to_string(),
+            SessionTokenError::InvalidSignature => {
+                "the caller's session token does not verify under the key it names".to_string()
+            }
+            SessionTokenError::Malformed => "the caller's session token is malformed".to_string(),
+            SessionTokenError::UnsupportedVersion => "the caller's session token is in a \
+                     format this daemon no longer accepts — sign in again"
+                .to_string(),
+            SessionTokenError::UnknownKeyId(key_id) => format!(
+                "the caller's session token is signed by key {key_id}, which no daemon this \
+                     one knows has published"
             ),
-            SessionTokenError::InvalidSignature => Status::unauthenticated(
-                "cannot wire a split session: the caller's session token does not verify under \
-                 the key it names",
-            ),
-            SessionTokenError::Malformed => Status::unauthenticated(
-                "cannot wire a split session: the caller's session token is malformed",
-            ),
-            SessionTokenError::UnsupportedVersion => Status::unauthenticated(
-                "cannot wire a split session: the caller's session token is in a format this \
-                 daemon no longer accepts — sign in again",
-            ),
-            SessionTokenError::UnknownKeyId(key_id) => Status::unauthenticated(format!(
-                "cannot wire a split session: the caller's session token is signed by key \
-                 {key_id}, which no daemon this one knows has published"
-            )),
-        })?;
+        })
+    })?;
     // A refresh token mints access tokens and never authenticates an RPC (see [`TokenKind`]), so
     // accepting one here would let the credential a browser keeps at rest authorize a whole
     // session's toolchain on the codebase host.
     if claims.kind == TokenKind::Refresh {
-        return Err(Status::unauthenticated(
-            "cannot wire a split session: the caller presented a refresh token, which never \
-             authenticates an RPC",
+        return Err(refused(
+            "the caller presented a refresh token, which never authenticates an RPC".to_string(),
         ));
     }
     Ok(claims.user())
@@ -449,17 +443,20 @@ impl tddy_daemon_livekit::session_room::SessionTokenMinter for RoomPollTokenMint
 /// travel together. `codebase_instance_id` is not that identity — it hosts no room and joins none —
 /// it is the forwarding hint the room's host routes on to reach the checkout.
 ///
-/// `session_token` is the *caller's* credential and is never forwarded: it is proof of who asked,
-/// and the agent gets one of its own minted from it with `tokens` (see
+/// `target.session_token` is the *caller's* credential and is never forwarded: it is proof of who
+/// asked, and the agent gets one of its own minted from it with `tokens` (see
 /// [`mint_agent_session_token`]).
 pub fn split_remote_tool_env(
     livekit: &SplitLiveKitRoom,
     tokens: &SessionTokens,
-    session_id: &str,
-    codebase_instance_id: &str,
-    codebase_session_id: &str,
-    session_token: &str,
+    target: &SplitSpawnTarget<'_>,
 ) -> Result<RemoteToolEnv, Status> {
+    let SplitSpawnTarget {
+        session_id,
+        codebase_instance_id,
+        codebase_session_id,
+        session_token,
+    } = *target;
     let agent_session_token = mint_agent_session_token(tokens, session_token)?;
     let identity = split_agent_participant_identity(session_id);
     let token = tddy_livekit::TokenGenerator::new(
@@ -617,28 +614,15 @@ pub fn prepare_split_agent_wiring(
     globs: &[&str],
     source: &dyn crate::context_sync::ContextSource,
 ) -> Result<SplitAgentWiring, Status> {
-    let SplitSpawnTarget {
-        session_id,
-        codebase_instance_id,
-        codebase_session_id,
-        session_token,
-    } = *target;
     // This session's own room, hosted by this daemon — the one running the agent, and therefore the
     // session's facilitating daemon. Named from `session_id`, never from `codebase_session_id`: the
     // codebase daemon hosts no room, so a room named after its session would be one nobody is in.
     // Start and resume derive it the same way, so a resumed agent rejoins the room it left.
     let livekit = SplitLiveKitRoom::from_config(
         config,
-        tddy_daemon_livekit::session_room::session_room_name(session_id),
+        tddy_daemon_livekit::session_room::session_room_name(target.session_id),
     )?;
-    let remote = split_remote_tool_env(
-        &livekit,
-        tokens,
-        session_id,
-        codebase_instance_id,
-        codebase_session_id,
-        session_token,
-    )?;
+    let remote = split_remote_tool_env(&livekit, tokens, target)?;
     Ok(SplitAgentWiring {
         context_dir: build_split_context_dir(session_dir, withdrawals, globs, source)?,
         extra_args: split_claude_extra_args(session_dir, tddy_tools_path, withdrawals)?,
@@ -798,10 +782,12 @@ mod tests {
             split_remote_tool_env(
                 &a_room(),
                 &self.tokens,
-                "agent-side-session",
-                "workstation-b",
-                "codebase-side-session",
-                caller_token,
+                &SplitSpawnTarget {
+                    session_id: "agent-side-session",
+                    codebase_instance_id: "workstation-b",
+                    codebase_session_id: "codebase-side-session",
+                    session_token: caller_token,
+                },
             )
         }
 
@@ -931,10 +917,12 @@ mod tests {
         let env = split_remote_tool_env(
             &a_room(),
             &host.tokens,
-            "agent-side-session",
-            "workstation-b",
-            "codebase-side-session",
-            &host.a_caller_token(),
+            &SplitSpawnTarget {
+                session_id: "agent-side-session",
+                codebase_instance_id: "workstation-b",
+                codebase_session_id: "codebase-side-session",
+                session_token: &host.a_caller_token(),
+            },
         )
         .expect("mint split env");
 
@@ -956,10 +944,12 @@ mod tests {
         let env = split_remote_tool_env(
             &room,
             &host.tokens,
-            "agent-side-session",
-            "workstation-b",
-            "codebase-side-session",
-            &host.a_caller_token(),
+            &SplitSpawnTarget {
+                session_id: "agent-side-session",
+                codebase_instance_id: "workstation-b",
+                codebase_session_id: "codebase-side-session",
+                session_token: &host.a_caller_token(),
+            },
         )
         .expect("mint split env");
 
@@ -982,10 +972,12 @@ mod tests {
         let env = split_remote_tool_env(
             &room,
             &host.tokens,
-            "agent-side-session",
-            "workstation-b",
-            "codebase-side-session",
-            &host.a_caller_token(),
+            &SplitSpawnTarget {
+                session_id: "agent-side-session",
+                codebase_instance_id: "workstation-b",
+                codebase_session_id: "codebase-side-session",
+                session_token: &host.a_caller_token(),
+            },
         )
         .expect("mint split env");
 
@@ -1005,10 +997,12 @@ mod tests {
         let env = split_remote_tool_env(
             &a_room(),
             &host.tokens,
-            "sid",
-            "workstation-b",
-            "codebase-sid",
-            &host.a_caller_token(),
+            &SplitSpawnTarget {
+                session_id: "sid",
+                codebase_instance_id: "workstation-b",
+                codebase_session_id: "codebase-sid",
+                session_token: &host.a_caller_token(),
+            },
         )
         .expect("mint split env");
 

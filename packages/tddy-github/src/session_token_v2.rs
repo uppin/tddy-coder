@@ -30,9 +30,9 @@ use sha2::{Digest, Sha256};
 
 use crate::provider::GitHubUser;
 
-/// The key types this module's signatures are written in, so a dependent can name them without
+/// The public-key type this module's verifier is written in, so a dependent can name it without
 /// depending on `ed25519-dalek` itself.
-pub use ed25519_dalek::{SigningKey as Ed25519SigningKey, VerifyingKey as Ed25519VerifyingKey};
+pub use ed25519_dalek::VerifyingKey as Ed25519VerifyingKey;
 
 /// Version prefix / first token segment. A `v1` token presented to a `v2` verifier is
 /// [`SessionTokenError::UnsupportedVersion`], never a signature failure — the distinction is what
@@ -57,19 +57,17 @@ const KEY_ID_BYTES: usize = 16;
 /// RPCs, or a long-lived [`TokenKind::Refresh`] token that only mints access tokens. Enforcing
 /// the kind keeps the two roles strictly separate — an access token cannot mint, and a refresh
 /// token cannot authenticate an RPC.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TokenKind {
-    /// Short-lived credential presented on every RPC. The default for a payload with no `kind`
-    /// field.
-    #[default]
+    /// Short-lived credential presented on every RPC.
     Access,
     /// Long-lived credential presented only to `RefreshSession` to mint access tokens.
     Refresh,
 }
 
-/// Names the key that signed a token: the SHA-256 digest of the key's SPKI DER encoding, base64url
-/// without padding, truncated to 16 bytes.
+/// Names the key that signed a token: the SHA-256 digest of the key's SPKI DER encoding, truncated
+/// to 16 bytes, then base64url without padding.
 ///
 /// Derived from the public key rather than assigned, so two daemons cannot collide on one and a
 /// daemon cannot change its own id without changing its key. The same derivation is also why a
@@ -147,7 +145,8 @@ pub struct SessionClaims {
     pub name: String,
     pub iat: u64,
     pub exp: u64,
-    #[serde(default)]
+    /// Required: every `v2` signer writes it, so a payload without one is not a token this format
+    /// ever produced and is refused as malformed rather than read as an access token.
     pub kind: TokenKind,
 }
 
@@ -218,19 +217,11 @@ pub struct SessionTokenSigner {
 }
 
 impl SessionTokenSigner {
-    /// Take ownership of a daemon's signing key. `key_id` must be [`KeyId::of`] the key's public
-    /// half; passing any other id mints tokens no one can verify.
-    ///
-    /// # Panics
-    ///
-    /// When `key_id` is not the key's own id. That is a wiring fault, and a signer built from it
-    /// would mint tokens every verifier refuses — failing here names the fault where it was made.
-    pub fn new(signing_key: SigningKey, key_id: KeyId) -> Self {
-        assert_eq!(
-            key_id,
-            KeyId::of(&signing_key.verifying_key()),
-            "a session-token signer's key id must be the id of its own public key"
-        );
+    /// Take ownership of a daemon's signing key. The id it stamps is derived from the key's
+    /// public half ([`KeyId::of`]) rather than taken from the caller, so a signer cannot be built
+    /// that mints tokens no verifier could resolve.
+    pub fn new(signing_key: SigningKey) -> Self {
+        let key_id = KeyId::of(&signing_key.verifying_key());
         Self {
             signing_key,
             key_id,
@@ -242,7 +233,7 @@ impl SessionTokenSigner {
         &self.key_id
     }
 
-    /// The public half, for publishing to a key directory.
+    /// The public half — what peers verify this signer's tokens with.
     pub fn verifying_key(&self) -> VerifyingKey {
         self.signing_key.verifying_key()
     }
@@ -534,9 +525,80 @@ mod tests {
         let first = the_first_key().verifying_key();
         let second = the_second_key().verifying_key();
 
-        // Then each key has one id, and no two keys share one
-        assert_eq!(KeyId::of(&first), KeyId::of(&first));
-        assert_ne!(KeyId::of(&first), KeyId::of(&second));
+        // Then each key's id is stable across derivations, and no two keys share one
+        let (first_again, first_id, second_id) =
+            (KeyId::of(&first), KeyId::of(&first), KeyId::of(&second));
+        assert_eq!(
+            (first_again == first_id, first_id == second_id),
+            (true, false)
+        );
+    }
+
+    #[test]
+    fn a_payload_without_a_kind_is_refused_as_malformed() {
+        // Given a correctly signed `v2` token whose payload carries no `kind` — which no `v2`
+        // signer ever writes
+        let key = the_first_key();
+        let payload = serde_json::json!({
+            "kid": KeyId::of(&key.verifying_key()),
+            "id": 1,
+            "login": "operator",
+            "avatar_url": "",
+            "name": "operator",
+            "iat": 0,
+            "exp": u64::MAX,
+        });
+        let signing_input = format!("v2.{}", URL_SAFE_NO_PAD.encode(payload.to_string()));
+        let signature = key.sign(signing_input.as_bytes());
+        let token = format!(
+            "{signing_input}.{}",
+            URL_SAFE_NO_PAD.encode(signature.to_bytes())
+        );
+
+        // When it is verified under the key that signed it
+        let refusal = SessionTokenVerifier::verify(&token, &key.verifying_key(), now());
+
+        // Then it is refused for its shape rather than read as an access token
+        assert_eq!(refusal.map(|_| ()), Err(SessionTokenError::Malformed));
+    }
+
+    #[test]
+    fn a_well_formed_token_of_an_unknown_version_is_an_unsupported_version() {
+        // Given a genuine token relabelled as a future format
+        let token = a_signer_for(the_first_key()).mint_access(&an_operator());
+        let relabelled = token.replacen("v2.", "v3.", 1);
+
+        // When it is verified
+        let refusal =
+            SessionTokenVerifier::verify(&relabelled, &the_first_key().verifying_key(), now());
+
+        // Then the version, not the signature, is what refuses it
+        assert_eq!(
+            refusal.map(|_| ()),
+            Err(SessionTokenError::UnsupportedVersion)
+        );
+    }
+
+    #[test]
+    fn a_token_is_valid_through_its_expiry_second_and_expired_the_second_after() {
+        // Given a token issued at a fixed instant for five minutes
+        let issued_at = UNIX_EPOCH + Duration::from_secs(1_000);
+        let token = a_signer_for(the_first_key()).mint_kind_with_issued_at(
+            &an_operator(),
+            TokenKind::Access,
+            issued_at,
+            SESSION_TOKEN_TTL,
+        );
+        let key = the_first_key().verifying_key();
+        let exp = issued_at + SESSION_TOKEN_TTL;
+
+        // When it is verified at its expiry second, and one second later
+        let at_exp = SessionTokenVerifier::verify(&token, &key, exp).map(|_| ());
+        let after =
+            SessionTokenVerifier::verify(&token, &key, exp + Duration::from_secs(1)).map(|_| ());
+
+        // Then `exp` is the last second it is accepted
+        assert_eq!((at_exp, after), (Ok(()), Err(SessionTokenError::Expired)));
     }
 
     #[test]
@@ -701,8 +763,7 @@ mod tests {
     }
 
     fn a_signer_for(key: SigningKey) -> SessionTokenSigner {
-        let key_id = KeyId::of(&key.verifying_key());
-        SessionTokenSigner::new(key, key_id)
+        SessionTokenSigner::new(key)
     }
 
     /// Fixed key material, so a failure names a behaviour rather than a seed.

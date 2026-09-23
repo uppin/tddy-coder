@@ -91,10 +91,12 @@ impl DaemonSessionHost {
             Some(livekit) => crate::split_session::split_remote_tool_env(
                 livekit,
                 self.session_tokens()?,
-                session_id,
-                codebase_instance_id,
-                codebase_session_id,
-                &req.session_token,
+                &crate::split_session::SplitSpawnTarget {
+                    session_id,
+                    codebase_instance_id,
+                    codebase_session_id,
+                    session_token: &req.session_token,
+                },
             )?,
             // The checkout is a jailed `workspace` session on this daemon, so this daemon's own
             // URL is the route to it and no LiveKit field is set at all — see

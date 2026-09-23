@@ -78,16 +78,15 @@ impl EligibleDaemonSource for MockEligibleDaemonSource {
 /// This daemon's signing identity: the key the browser's credential below is signed with, and the
 /// one the daemon mints the agent a credential of its own with for the tool calls it makes back
 /// here. A daemon given none refuses the start rather than forwarding the caller's token, so every
-/// test below would exercise that refusal. Kept in the test target's scratch directory, so the
-/// suite has one identity across its tests.
+/// test below would exercise that refusal. Generated once per test process, so the suite has one
+/// identity across its tests and no run inherits another's key; the key file's directory is
+/// dropped as soon as the key is in memory.
 fn this_daemons_session_tokens() -> &'static SessionTokens {
     static TOKENS: OnceLock<SessionTokens> = OnceLock::new();
     TOKENS.get_or_init(|| {
-        let key = DaemonSigningKey::load_or_generate(
-            &Path::new(env!("CARGO_TARGET_TMPDIR"))
-                .join("sandboxed-codebase-placement-signing_key.pem"),
-        )
-        .expect("the daemon generates its keypair");
+        let home = tempfile::tempdir().expect("a directory for the daemon's key");
+        let key = DaemonSigningKey::load_or_generate(&home.path().join("signing_key.pem"))
+            .expect("the daemon generates its keypair");
         SessionTokens::new(&key, Arc::new(StandaloneKeyDirectory))
     })
 }

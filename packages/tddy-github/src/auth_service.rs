@@ -357,7 +357,7 @@ mod tests {
     }
 
     fn a_signer_for(key: &SigningKey) -> SessionTokenSigner {
-        SessionTokenSigner::new(key.clone(), KeyId::of(&key.verifying_key()))
+        SessionTokenSigner::new(key.clone())
     }
 
     /// A signed service minting with `key` and admitting the tokens of every key in `trusted`.

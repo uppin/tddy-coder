@@ -1,11 +1,11 @@
 //! A daemon with no `livekit:` block authenticates its users.
 //!
-//! Today it cannot, and it fails later than it looks. `build_auth_entries` registers
-//! `auth.AuthService` and hands back an identity function whether or not LiveKit is configured — so
-//! the daemon appears to serve sign-in. But the signing secret is `config.livekit.api_secret`, so
-//! with no LiveKit block there is no signer, and the sign-in breaks at its last step:
-//! **`ExchangeCode` answers `FailedPrecondition: "session token signing is not configured"`.** The
-//! user gets all the way through GitHub and is refused on the way back.
+//! Before the per-daemon signing identity it could not, and it failed later than it looked.
+//! `build_auth_entries` registered `auth.AuthService` and handed back an identity function whether
+//! or not LiveKit was configured — so the daemon appeared to serve sign-in. But the signing secret
+//! was `config.livekit.api_secret`, so with no LiveKit block there was no signer, and the sign-in
+//! broke at its last step: **`ExchangeCode` answered `FailedPrecondition: "session token signing is
+//! not configured"`.** The user got all the way through GitHub and was refused on the way back.
 //!
 //! That shape is exactly Tddy Desktop, which serves no media, joins no fleet, and still has a user
 //! who must sign in. Media configuration and user authentication are two concerns wearing one
@@ -99,12 +99,18 @@ async fn sign_in(config: &DaemonConfig) -> String {
     signed_in.session_token
 }
 
-/// Tddy Desktop's shape: a user, GitHub, and not one line of LiveKit configuration.
+/// Tddy Desktop's shape: a user, GitHub, an `auth_storage` — and not one line of LiveKit
+/// configuration.
+///
+/// `auth_storage` is a directory of this test's own, so the key a sign-in generates lives and dies
+/// with the test rather than in the checkout, where a later run would sign with it.
 fn a_desktop_daemon_with_no_livekit() -> (DaemonConfig, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let yaml = format!(
         "users:\n  - github_user: \"{THE_LOGIN}\"\n    os_user: \"{THE_LOGIN}-os\"\n\
-         github:\n  stub: true\n  stub_codes: \"{THE_CALLBACK_CODE}:{THE_LOGIN}\"\n"
+         github:\n  stub: true\n  stub_codes: \"{THE_CALLBACK_CODE}:{THE_LOGIN}\"\n\
+         auth_storage: \"{}\"\n",
+        dir.path().join("auth").display()
     );
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).expect("the config is written");

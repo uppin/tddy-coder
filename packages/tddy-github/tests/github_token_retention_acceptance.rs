@@ -21,8 +21,8 @@ use base64::Engine;
 use tddy_github::provider::{GitHubOAuthProvider, GitHubUser};
 use tddy_github::token_store::GitHubTokenStore;
 use tddy_github::{
-    AuthServiceImpl, KeyId, RealGitHubProvider, SessionClaims, SessionTokenAuthority,
-    SessionTokenError, SessionTokenSigner, StubGitHubProvider,
+    AuthServiceImpl, RealGitHubProvider, SessionClaims, SessionTokenAuthority, SessionTokenError,
+    SessionTokenSigner, StubGitHubProvider,
 };
 use tddy_rpc::Request;
 use tddy_service::proto::auth::{AuthService, ExchangeCodeRequest, ExchangeCodeResponse};
@@ -115,10 +115,9 @@ impl GitHubOAuthProvider for ProviderWithARealCredential {
 /// presented tokens through admits none — nothing here presents one.
 fn a_signed_service<P: GitHubOAuthProvider>(provider: P) -> AuthServiceImpl<P> {
     let key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
-    let key_id = KeyId::of(&key.verifying_key());
     AuthServiceImpl::new_signed(
         provider,
-        SessionTokenSigner::new(key, key_id),
+        SessionTokenSigner::new(key),
         Arc::new(AdmitsNoToken),
     )
 }

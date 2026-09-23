@@ -45,56 +45,58 @@ const OWNER_ONLY_FILE: u32 = 0o600;
 /// A directory the daemon creates to hold the key is listable by its owner alone.
 const OWNER_ONLY_DIR: u32 = 0o700;
 
+/// The permission bits of a file mode — everything but the file type.
+const PERMISSION_BITS: u32 = 0o777;
+
+/// The group and other permission bits: any of them set means another account can reach the file.
+const GROUP_OR_OTHER_BITS: u32 = 0o077;
+
 /// Where the daemon described by `config` keeps its signing key.
 ///
 /// `auth_storage` when it is configured — it is the directory an operator named for auth state,
-/// and a signing key is auth state. Otherwise the `auth` directory under the daemon's data
-/// directory (`tddy_data_dir`, else the build profile's default), which is exactly where
-/// `./install` points `auth_storage` anyway. The key has to live *somewhere* a restart finds it:
-/// a daemon whose identity changed on every boot would invalidate every live session and be a
-/// stranger to every peer that had learned it.
+/// and a signing key is auth state. Otherwise the `auth` directory under `tddy_data_dir`, which is
+/// exactly where `./install` points `auth_storage` anyway. The key has to live *somewhere* a
+/// restart finds it: a daemon whose identity changed on every boot would invalidate every live
+/// session and be a stranger to every peer that had learned it.
+///
+/// **Refuses** a config naming neither. Resolving the data directory (`TDDY_DATA_DIR`, the build
+/// profile's default, `$HOME/.tddy`) is the runtime's rule, and `runtime::build` pins its answer
+/// into `tddy_data_dir` before it asks; a second copy of that rule here would be a second place a
+/// private key could land, and one that guessed `/root` with `HOME` unset.
 ///
 /// Changing either setting moves the key, and a daemon that finds no key where it looks
 /// generates a new identity — so moving `auth_storage` means moving `signing_key.pem` with it.
-pub fn signing_key_path(config: &DaemonConfig) -> PathBuf {
-    let auth_dir = match &config.auth_storage {
-        Some(dir) => dir.clone(),
-        None => data_dir(config).join(DEFAULT_AUTH_SUBDIR),
-    };
-    auth_dir.join(SIGNING_KEY_FILE)
+pub fn signing_key_path(config: &DaemonConfig) -> anyhow::Result<PathBuf> {
+    signing_key_dir(config).map(|(_, dir)| dir.join(SIGNING_KEY_FILE))
+}
+
+/// The directory that holds the signing key, and the setting that chose it.
+fn signing_key_dir(config: &DaemonConfig) -> anyhow::Result<(&'static str, PathBuf)> {
+    match (&config.auth_storage, &config.tddy_data_dir) {
+        (Some(auth_storage), _) => Ok(("config.auth_storage", auth_storage.clone())),
+        (None, Some(data_dir)) => Ok(("config.tddy_data_dir", data_dir.join(DEFAULT_AUTH_SUBDIR))),
+        (None, None) => anyhow::bail!(
+            "neither config.auth_storage nor config.tddy_data_dir names a directory for this \
+             daemon's session-token signing key"
+        ),
+    }
 }
 
 /// Load the signing key of the daemon described by `config`, generating it on first boot.
 ///
 /// A failure names the setting that chose the path, because that is what an operator changes:
-/// `config.auth_storage` when it is set, the data directory otherwise.
+/// `config.auth_storage` when it is set, `config.tddy_data_dir` otherwise.
 pub fn load_signing_key(config: &DaemonConfig) -> anyhow::Result<DaemonSigningKey> {
-    let path = signing_key_path(config);
+    let (setting, dir) = signing_key_dir(config)?;
+    let path = dir.join(SIGNING_KEY_FILE);
     DaemonSigningKey::load_or_generate(&path).with_context(|| {
-        let setting = match &config.auth_storage {
-            Some(dir) => format!("config.auth_storage ({})", dir.display()),
-            None => format!("the data directory ({})", data_dir(config).display()),
-        };
         format!(
-            "{setting} cannot hold this daemon's session-token signing key {}; no session can \
-             be signed or verified until it can",
+            "{setting} ({}) cannot hold this daemon's session-token signing key {}; no session \
+             can be signed or verified until it can",
+            dir.display(),
             path.display()
         )
     })
-}
-
-/// The daemon's data directory by the same rule the runtime applies to its own state: the
-/// configured `tddy_data_dir`, else the build profile's default (`tmp/.tddy` in a debug build),
-/// else `$HOME/.tddy`.
-fn data_dir(config: &DaemonConfig) -> PathBuf {
-    config
-        .tddy_data_dir
-        .clone()
-        .or_else(tddy_core::output::default_tddy_data_dir)
-        .unwrap_or_else(|| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-            PathBuf::from(home).join(".tddy")
-        })
 }
 
 /// This daemon's Ed25519 identity: generated once, persisted, and never leaving the host.
@@ -135,7 +137,7 @@ impl DaemonSigningKey {
 
     /// A signer over this key. Cheap; the key is copied, not shared.
     pub fn signer(&self) -> SessionTokenSigner {
-        SessionTokenSigner::new(self.signing_key.clone(), self.key_id.clone())
+        SessionTokenSigner::new(self.signing_key.clone())
     }
 
     fn from_signing_key(signing_key: SigningKey) -> Self {
@@ -199,19 +201,23 @@ impl DaemonSigningKey {
                 );
                 Ok(key)
             }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                let pem = std::fs::read(path).with_context(|| {
-                    format!(
-                        "reading the signing key {} another process wrote",
-                        path.display()
-                    )
-                })?;
-                Self::from_stored(path, &pem)
-            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Self::adopt_concurrent_key(path),
             Err(e) => {
                 Err(e).with_context(|| format!("publishing the signing key {}", path.display()))
             }
         }
+    }
+
+    /// Load the key another process published at `path` while this one was generating its own —
+    /// the loser of a first-boot race keeps the winner's identity, never a second one.
+    fn adopt_concurrent_key(path: &Path) -> anyhow::Result<Self> {
+        let pem = std::fs::read(path).with_context(|| {
+            format!(
+                "reading the signing key {} another process wrote",
+                path.display()
+            )
+        })?;
+        Self::from_stored(path, &pem)
     }
 }
 
@@ -249,8 +255,8 @@ fn refuse_if_readable_by_others(path: &Path) -> anyhow::Result<()> {
         .with_context(|| format!("inspecting the signing key {}", path.display()))?
         .permissions()
         .mode()
-        & 0o777;
-    if mode & 0o077 != 0 {
+        & PERMISSION_BITS;
+    if mode & GROUP_OR_OTHER_BITS != 0 {
         anyhow::bail!(
             "the signing key {} has mode {mode:03o}, so accounts other than its owner can reach \
              it. A key that has been readable may already have been read: if that is acceptable, \
@@ -276,8 +282,8 @@ fn refuse_if_readable_by_others(_path: &Path) -> anyhow::Result<()> {
 #[cfg(unix)]
 pub fn auth_storage_looser_than_owner_only(dir: &Path) -> Option<String> {
     use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(dir).ok()?.permissions().mode() & 0o777;
-    (mode & 0o077 != 0).then(|| {
+    let mode = std::fs::metadata(dir).ok()?.permissions().mode() & PERMISSION_BITS;
+    (mode & GROUP_OR_OTHER_BITS != 0).then(|| {
         format!(
             "auth_storage {} has mode {mode:03o}: other accounts can list the directory that \
              holds this daemon's signing key and retained GitHub tokens. The files themselves are \
@@ -461,13 +467,24 @@ mod tests {
         let first_boot = DaemonSigningKey::load_or_generate(&the_key_path(&home))
             .expect("a daemon generates a keypair on first use");
 
+        let on_disk_before = std::fs::read(the_key_path(&home)).expect("the key file exists");
+
         // When it restarts and loads from the same data directory
         let after_restart = DaemonSigningKey::load_or_generate(&the_key_path(&home))
             .expect("a daemon reuses the keypair it already generated");
 
-        // Then it is the same identity — a fresh key on every restart would invalidate every live
-        // session and make the daemon a stranger to every peer that had learned it
-        assert_eq!(after_restart.key_id(), first_boot.key_id());
+        // Then it is the same identity, read from a file left exactly as it was and still owner-only
+        // — a fresh key on every restart would invalidate every live session and make the daemon a
+        // stranger to every peer that had learned it
+        let on_disk_after = std::fs::read(the_key_path(&home)).expect("the key file exists");
+        assert_eq!(
+            (
+                after_restart.key_id() == first_boot.key_id(),
+                on_disk_after == on_disk_before,
+                mode_of(&the_key_path(&home)),
+            ),
+            (true, true, 0o600)
+        );
     }
 
     #[test]
@@ -493,11 +510,7 @@ mod tests {
         DaemonSigningKey::load_or_generate(&path).expect("a daemon generates a keypair");
 
         // When the file it wrote is inspected
-        let mode = std::fs::metadata(&path)
-            .expect("the key file exists")
-            .permissions()
-            .mode()
-            & 0o777;
+        let mode = mode_of(&path);
 
         // Then no other account can read it — a signing key a second account can read is a signing
         // key the fleet cannot attribute to one daemon
@@ -514,14 +527,22 @@ mod tests {
             .expect("the permissions are loosened");
 
         // When the daemon restarts and loads it
-        let refusal = DaemonSigningKey::load_or_generate(&path);
+        let refusal = DaemonSigningKey::load_or_generate(&path)
+            .err()
+            .map(|e| format!("{e:#}"));
 
-        // Then it refuses rather than signing with a key anybody on the host could have taken.
-        // There is deliberately no repair-and-continue: a key that has been readable may already
-        // have been read, and tightening the mode would hide that.
+        // Then it refuses rather than signing with a key anybody on the host could have taken —
+        // for its mode, not for some other fault — and leaves the file as it found it. There is
+        // deliberately no repair-and-continue: a key that has been readable may already have been
+        // read, and tightening the mode would hide that.
         assert!(
-            refusal.is_err(),
-            "a signing key readable by other accounts must be refused, not silently re-secured"
+            refusal.as_deref().is_some_and(|e| e.contains("mode 644")),
+            "a signing key readable by other accounts must be refused for its mode, got {refusal:?}"
+        );
+        assert_eq!(
+            mode_of(&path),
+            0o644,
+            "the refusal must not re-secure the file"
         );
     }
 
@@ -533,9 +554,11 @@ mod tests {
             .expect("a daemon generates a keypair");
 
         // When its signer stamps a token
+        let token = daemon.signer().mint_access(&an_operator());
+
         // Then the id the token names is the id the daemon publishes — otherwise a peer resolves
         // a key that cannot verify what it was fetched for
-        assert_eq!(*daemon.signer().key_id(), daemon.key_id());
+        assert_eq!(SessionTokenVerifier::key_id_of(&token), Ok(daemon.key_id()));
     }
 
     #[test]
@@ -592,8 +615,8 @@ mod tests {
 
         // Then the key lives beside the rest of its auth state, not in the data directory
         assert_eq!(
-            signing_key_path(&config),
-            PathBuf::from("/var/lib/tddy/auth").join(SIGNING_KEY_FILE)
+            signing_key_path(&config).ok(),
+            Some(PathBuf::from("/var/lib/tddy/auth").join(SIGNING_KEY_FILE))
         );
     }
 
@@ -607,8 +630,24 @@ mod tests {
 
         // Then the key lives where `./install` would have pointed auth_storage
         assert_eq!(
-            signing_key_path(&config),
-            PathBuf::from("/home/operator/.tddy/auth").join(SIGNING_KEY_FILE)
+            signing_key_path(&config).ok(),
+            Some(PathBuf::from("/home/operator/.tddy/auth").join(SIGNING_KEY_FILE))
+        );
+    }
+
+    #[test]
+    fn refuses_to_place_a_signing_key_when_no_directory_is_configured() {
+        // Given a config naming neither auth_storage nor a data directory
+        let config = DaemonConfig::default();
+
+        // When the key's path is asked for
+        let refusal = signing_key_path(&config).expect_err("there is nowhere to put the key");
+
+        // Then it is refused, naming both settings — never guessed from `$HOME` or `/root`
+        let message = refusal.to_string();
+        assert!(
+            message.contains("config.auth_storage") && message.contains("config.tddy_data_dir"),
+            "the refusal must name the settings that would place the key, got: {message}"
         );
     }
 
@@ -651,6 +690,14 @@ mod tests {
             avatar_url: String::new(),
             name: "operator".to_string(),
         }
+    }
+
+    fn mode_of(path: &Path) -> u32 {
+        std::fs::metadata(path)
+            .expect("the key file exists")
+            .permissions()
+            .mode()
+            & PERMISSION_BITS
     }
 
     fn a_data_directory() -> tempfile::TempDir {

@@ -520,8 +520,10 @@ mod tests {
     /// The key the daemon described by `config` signs with — the very file `build_auth_entries`
     /// loads, so a token minted with it is one that daemon issued.
     fn the_daemons_key(config: &DaemonConfig) -> DaemonSigningKey {
-        DaemonSigningKey::load_or_generate(&signing_key_path(config))
-            .expect("a daemon's signing key loads")
+        DaemonSigningKey::load_or_generate(
+            &signing_key_path(config).expect("the test config names an auth_storage"),
+        )
+        .expect("a daemon's signing key loads")
     }
 
     /// Another daemon, with an identity this one has never been told about.
