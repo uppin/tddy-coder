@@ -1,6 +1,7 @@
 # complexity: process_ndjson_stream
 
-**Location:** `packages/tddy-core/src/stream/claude.rs:163` — `process_ndjson_stream`
+**Location:** `packages/tddy-agent-backend/src/stream/claude.rs:163` — `process_ndjson_stream`
+**Moved:** 2026-09-23 — from `packages/tddy-core/src/stream/claude.rs:163` by `#carve` 12/12 (PR #522), which carved `tddy-core` into a wiring point; the body moved unchanged, so the metrics below still hold
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **174 lines** · **nesting depth 11** · 4 parameters · 35 branch/match lines · 1 early exits

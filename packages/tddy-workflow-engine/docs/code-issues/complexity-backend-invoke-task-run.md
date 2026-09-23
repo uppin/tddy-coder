@@ -1,10 +1,11 @@
-# complexity: run_acp_worker
+# complexity: run
 
-**Location:** `packages/tddy-core/src/backend/acp.rs:139` — `run_acp_worker`
+**Location:** `packages/tddy-workflow-engine/src/workflow/backend_invoke_task.rs:99` — `run`
+**Moved:** 2026-09-23 — from `packages/tddy-core/src/workflow/backend_invoke_task.rs:99` by `#carve` 12/12 (PR #522), which carved `tddy-core` into a wiring point; the body moved unchanged, so the metrics below still hold
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
-**Metrics:** **184 lines** · **nesting depth 10** · 3 parameters · 18 branch/match lines · 1 early exits
-**Thresholds breached:** length 184 > 60; nesting 10 > 4 (`/analyze-clean-code`)
+**Metrics:** **272 lines** · **nesting depth 6** · 1 parameters · 23 branch/match lines · 7 early exits
+**Thresholds breached:** length 272 > 60; nesting 6 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
 **Status:** Open — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
@@ -13,16 +14,16 @@
 
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
-| 2026-09-18 | 184 | 10 | 18 | 1 | first detection |
+| 2026-09-18 | 272 | 6 | 23 | 7 | first detection |
 
 ## What the tool found
 
-The body is **184 lines**, 3.1x the 60-line ceiling at which `/analyze-clean-code` says a function must be refactored.
+The body is **272 lines**, 4.5x the 60-line ceiling at which `/analyze-clean-code` says a function must be refactored.
 
-The function carries **18 branch or match lines** and **1 early exits**
-(`return` / `?`). Its file is 429 lines total, 429 of them production, with **no `#[cfg(test)]` block**, across 10 functions.
+The function carries **23 branch or match lines** and **7 early exits**
+(`return` / `?`). Its file is 371 lines total, 371 of them production, with **no `#[cfg(test)]` block**, across 5 functions.
 
-**How this was found.** `/jev-restructuring` ranked it 32 of 3,503 production units by
+**How this was found.** `/jev-restructuring` ranked it 47 of 3,503 production units by
 semantic shape (Jev classified it `tangled_dispatch`). That ranking is **targeting only** and appears
 in no metric above — every number in this record comes from a structural scan and can be re-derived
 without an API call.
@@ -34,7 +35,7 @@ With no unit test in the file, nothing catches a behaviour change made while res
 
 ## What would close it
 
-Bring it under the `/analyze-clean-code` thresholds — length 184 > 60; nesting 10 > 4 — by `extract_method`
+Bring it under the `/analyze-clean-code` thresholds — length 272 > 60; nesting 6 > 4 — by `extract_method`
 along the branch structure. Anchor with `tddy-tools restructure anchors`, never by hand, then prove
 the seam with `restructure check --deep` against a warm index (`./run-index-daemon`).
 

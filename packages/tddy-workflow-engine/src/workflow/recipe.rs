@@ -199,7 +199,7 @@ subagent's work and then make the go/no-go decision: to accept, commit the trans
     }
 
     /// Whether to ignore this history transition when choosing a resume goal after `Failed`
-    /// ([`crate::changeset::start_goal_for_session_continue`]). Default: skip when the computed
+    /// ([`crate::changeset::start_goal_for_session_continue`](crate::workflow::start_goal_for_session_continue)). Default: skip when the computed
     /// next goal equals [`start_goal`](WorkflowRecipe::start_goal). Recipes with a pre-plan step may
     /// override (e.g. TDD skips `Planning` → `plan` as restart noise even when `start_goal` is `interview`).
     fn skip_failed_resume_transition(

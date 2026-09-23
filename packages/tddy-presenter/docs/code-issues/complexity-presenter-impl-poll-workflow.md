@@ -1,6 +1,7 @@
 # complexity: poll_workflow
 
-**Location:** `packages/tddy-core/src/presenter/presenter_impl.rs:166` — `poll_workflow`
+**Location:** `packages/tddy-presenter/src/presenter/presenter_impl.rs:166` — `poll_workflow`
+**Moved:** 2026-09-23 — from `packages/tddy-core/src/presenter/presenter_impl.rs:166` by `#carve` 12/12 (PR #522), which carved `tddy-core` into a wiring point; the body moved unchanged, so the metrics below still hold
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **235 lines** · **nesting depth 8** · 0 parameters · 20 branch/match lines · 1 early exits

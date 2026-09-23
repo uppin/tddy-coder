@@ -113,7 +113,7 @@ measured in its new home.
 - [x] `tddy-toolcall`, `tddy-agent-backend`
 - [x] `tddy-workflow-engine`, `tddy-presenter`
 - [x] `tddy-core` facades only
-- [ ] Tests and code-issue records moved
+- [x] Tests and code-issue records moved
 
 ## Technical changes
 
@@ -165,7 +165,8 @@ tddy-core   (pub use facades only, ~140 lines)
 - [x] `tddy-toolcall`, `tddy-agent-backend` extracted
 - [x] `tddy-workflow-engine`, `tddy-presenter` extracted
 - [x] `tddy-core` facades only — AC1; path guard still green
-- [ ] Test files and code-issue records moved; AC2 and AC5–AC8 green
+- [x] Test files and code-issue records moved; AC2, AC5, AC6 and AC8 green
+- [ ] ⚠ AC7 — two consumer tests read tddy-core source files by path (see Validation results); needs a developer decision
 
 ## Testing plan
 
@@ -229,6 +230,55 @@ and one **compile-level guard** pins that the public paths consumers use still r
 
 ## Validation results
 
+### Implementation, 2026-09-23
+
+- **Shape:** all 11 `core_facade_shape` tests pass; the `core_facade_paths` guard passes.
+- **Production lines** (the shape test's count): `tddy-core` 54 · `tddy-workflow` 449 ·
+  `tddy-log` 941 · `tddy-agent-skills` 549 · `tddy-changeset` 2,486 · `tddy-session-worktree`
+  1,294 · `tddy-session-actions` 1,110 · `tddy-toolcall` 1,462 · `tddy-agent-backend` 5,845 ·
+  `tddy-workflow-engine` 1,867 · `tddy-presenter` 4,591.
+- **Suites:** 578 tests across the eleven packages, the same count as before the move
+  (`tddy-core` 569 + `tddy-workflow` 9); 307 unit tests and 49 test files, redistributed.
+  577 pass. The one failure is below.
+- **How the moves were made:** `git mv` per file; each crate's root re-export block moved with its
+  modules, and `tddy-core` re-exports every new crate whole (`pub use tddy_<crate>::*;`). Inside a
+  new crate, the modules it no longer owns are named at their old `crate::` paths by private root
+  imports, so moved bodies stay byte-identical apart from `use` lines. The only other edits:
+  `backend::write_codex_thread_id_file` widens `pub(crate)` → `pub` (the engine calls it); the
+  presenter's one call of `start_goal_for_session_continue` names it at `crate::workflow`; three
+  doc-link paths in the moved function; two retargeted doc links.
+- **`test_support` left `tddy-core`.** Its only user is a presenter unit test, so it moved to
+  `tddy-presenter`. `tddy-core` keeps `lib.rs`, the facades and `ssh_exec`.
+
+### ⚠ Premises that did not hold
+
+1. **AC7 cannot hold as written.** Two consumer tests read tddy-core source files **by path**, which no
+   facade can preserve:
+   - `packages/tddy-integration-tests/tests/workflow_goal_conditions_acceptance.rs:34`
+     `include_str!("../../tddy-core/src/presenter/workflow_runner.rs")` — that target **no longer
+     compiles** (the only new error in `cargo check --workspace --all-targets`).
+   - `packages/tddy-github/tests/git_plumbing_shape.rs:115-148` reads `tddy-core/src/worktree.rs` and
+     asserts the session-aware layer **stays in `tddy-core`** — 2 of its 6 tests fail at runtime.
+   Both were left unedited. Retargeting each path is a one-line consumer edit.
+2. **`session_store_shape::the_god_crate_keeps_the_dependency_that_does_not_leave`** (#carve 7) pins
+   `jsonschema` in `tddy-core` because `session_action_pipeline.rs` stayed. AC6 requires the opposite,
+   and the pipeline now lives in `tddy-session-actions`. Left unedited and failing; retire or retarget
+   it.
+3. **Two complexity records measured never-compiled code.** `complexity-runner-run.md`
+   (`workflow/runner.rs:41`) and `complexity-task-run.md` (`workflow/task.rs:224`) point at dead files
+   the first milestone deleted, so they have no new home. They stay in `packages/tddy-core/docs/code-issues/`
+   unedited. The live `FlowRunner::run` is `tddy-graph/src/runner.rs:39`; the live
+   `BackendInvokeTask::run` has its own record, now in `tddy-workflow-engine`.
+4. **Four intra-doc links now point up the dependency order** and cannot resolve (rustdoc warnings,
+   not gated): `tddy-toolcall/src/toolcall/mod.rs:7` (presenter), `toolcall/transition.rs:10`
+   (controller), `tddy-agent-backend/src/backend/mod.rs:857` (`BackendInvokeTask`),
+   `tddy-changeset/src/changeset/model.rs:233` (`crate::worktree`).
+5. **A dev-dependency edge back to `tddy-core`.** `tddy-changeset`, `tddy-session-actions` and
+   `tddy-workflow-engine` dev-depend on `tddy-testing-commons` (their moved suites call its
+   `temp_session_dir`), and `tddy-testing-commons` depends on `tddy-core`. Cargo permits it and the
+   shape test reads normal dependencies only, but those three crates' test builds still compile all
+   of `tddy-core`.
+
 ## TODO
 
 - [x] Record initial discovery
@@ -239,7 +289,7 @@ and one **compile-level guard** pins that the public paths consumers use still r
 - [ ] USER REVIEW — acceptance tests
 - [ ] ⛔ Stack cascaded onto master (developer)
 - [ ] TDD Green (`/green`)
-- [ ] Move code-issue records
+- [x] Move code-issue records
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`) — deletes the ✅ entries above

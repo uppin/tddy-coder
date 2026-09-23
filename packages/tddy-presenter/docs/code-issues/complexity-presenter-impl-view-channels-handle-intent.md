@@ -1,6 +1,7 @@
 # complexity: handle_intent
 
-**Location:** `packages/tddy-core/src/presenter/presenter_impl/view_channels.rs:31` — `handle_intent`
+**Location:** `packages/tddy-presenter/src/presenter/presenter_impl/view_channels.rs:31` — `handle_intent`
+**Moved:** 2026-09-23 — from `packages/tddy-core/src/presenter/presenter_impl/view_channels.rs:31` by `#carve` 12/12 (PR #522), which carved `tddy-core` into a wiring point; the body moved unchanged, so the metrics below still hold
 **Moved:** 2026-09-22 from `presenter_impl.rs:520` — #495 (`#carve` 8/9) split the body into per-group handlers across the partition modules; `handle_intent` is now the dispatcher.
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan

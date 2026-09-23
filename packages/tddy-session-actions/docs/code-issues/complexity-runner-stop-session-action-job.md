@@ -1,6 +1,7 @@
 # complexity: stop_session_action_job
 
-**Location:** `packages/tddy-core/src/session_action_jobs/runner.rs:343` — `stop_session_action_job`
+**Location:** `packages/tddy-session-actions/src/session_action_jobs/runner.rs:343` — `stop_session_action_job`
+**Moved:** 2026-09-23 — from `packages/tddy-core/src/session_action_jobs/runner.rs:343` by `#carve` 12/12 (PR #522), which carved `tddy-core` into a wiring point; the body moved unchanged, so the metrics below still hold
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **40 lines** · **nesting depth 5** · 1 parameters · 5 branch/match lines · 5 early exits
