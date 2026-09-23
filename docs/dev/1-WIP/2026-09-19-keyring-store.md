@@ -8,7 +8,10 @@
 ## Affected Packages
 
 - **tddy-credentials** (**new crate**): `docs/credential-store.md` — the record model, the sealed
-  file format, key derivation, the session-scoped handle
+  file format, the passphrase key derivation, the registry of open vaults and its states
+  - `src/vault.rs` split into `vault/{format,crypto,unlock}.rs` (replan step A, behaviour-preserving)
+  - `src/atomic.rs` — the owner-only swap-then-rename writer, inlined so the crate no longer depends
+    on `tddy-core` (V7; duplication recorded in `docs/dev/todo/2026-09-23-atomic-file-leaf-crate.md`)
 - **tddy-github**: `src/token_store.rs` — **deleted**; `src/auth_service.rs` writes through the new
   store
 - **tddy-daemon-auth**: [auth-service.md](../../../packages/tddy-daemon-auth/docs/auth-service.md)
@@ -20,14 +23,20 @@
   - `src/connection_service/svc_pr_status_for_caller.rs:93` — the one external read, migrated
 - **tddy-service** (added at green): `proto/auth.proto` — additive `vault_unlock_key` fields on
   `ExchangeCodeResponse`, `PollDeviceLoginResponse`, `RefreshSessionRequest`,
-  `RefreshSessionResponse` and `LogoutRequest`. No new RPC
+  `RefreshSessionResponse` and `LogoutRequest`; at the replan, a `VaultState` enum on
+  `ExchangeCodeResponse`, `PollDeviceLoginResponse`, `RefreshSessionResponse` and
+  `GetAuthStatusResponse`, and **two new RPCs**, `UnlockVault` and `ResetVault`
 - **tddy-web** (added at green): `src/rpc/sessionTokenStore.ts`, `src/hooks/useAuth.ts` — the unlock
   key is stored beside the refresh token, presented on refresh, replaced with the rotated one, sent
-  on logout, cleared with the tokens; a page load holding one refreshes at once
+  on logout, cleared with the tokens; a page load holding one refreshes at once. At the replan:
+  `src/components/CredentialVaultPrompt.tsx` (mounted in `src/index.tsx`) — the passphrase prompt
+  for a `LOCKED` or `UNINITIALIZED` vault, with a forgot-passphrase reset
 - Incidental, one line each: `tddy-remote-git-repo` and `tddy-session-sync` (a tool's
   `RefreshSessionRequest` presents no unlock key), `tddy-host-service` (a doc link to the deleted
   store), `tddy-daemon-kernel` (the `auth_storage` doc comment), `tddy-rust-typescript-tests`
   (regenerated `auth_pb.ts`), `daemon.yaml.production`, `desktop.yaml.production`, `install`
+- Backlog entries added at the replan: `docs/dev/todo/2026-09-23-atomic-file-leaf-crate.md`,
+  `docs/dev/todo/2026-09-23-credential-vault-open-past-its-last-session.md`
 
 ## Related Feature Documentation
 
@@ -39,7 +48,15 @@
 
 Replaces `GitHubTokenStore` — a two-method trait over a `0600` **plaintext** JSON file — with a
 generic, provider-extensible credential store in a new crate, `tddy-credentials`, encrypted at rest
-and openable only while a valid user session exists.
+and openable only by its owner: with their **vault passphrase**, or with an unlock key one of their
+browser session lineages holds.
+
+**Replanned 2026-09-23.** The first design derived the key from the GitHub access token a login
+returned. A GitHub OAuth App mints a new token at every code or device exchange, so after a daemon
+restart every fresh login was `Locked` and refused (validation finding V1). The developer chose a
+user passphrase as the stable secret: Argon2id over it is now the one key-encryption key a user
+holds, and the GitHub token is a sealed record only. Signing in always completes and reports the
+vault's state; a closed vault holds the login's token in memory until the passphrase opens it.
 
 Records are `(provider, account, secret)` rather than `login → token`, which is what lets
 `cloudflare`, a second GitHub account and screen-sharing secrets live in one place later.
@@ -77,10 +94,14 @@ with a fresh nonce per item, a `VERIFIER_PLAINTEXT` ciphertext that proves a key
 
 - the `tddy-credentials` crate: `ProviderId`, `AccountId`, `CredentialRecord`, the sealed file
   format with a versioned KDF header, seal/open, and the session-scoped handle;
-- key derivation — the login-derived KEK, the random data key it wraps, the verifier, re-wrapping
-  on every login, and zeroization;
+- key derivation — the passphrase KEK (Argon2id), the random data key it wraps, the browser unlock
+  slots, the verifier, and zeroization;
+- the vault's states (`OPEN` / `LOCKED` / `UNINITIALIZED` / `NONE`) on the login, refresh and
+  status responses, and the two RPCs that act on them, `UnlockVault` and `ResetVault`, with the
+  minimal web prompt that calls them;
 - the deletion of `GitHubTokenStore`, `FileGitHubTokenStore` and `github-tokens.json`;
-- the extension of the half-login rule to cover a vault that cannot be opened.
+- the half-login rule restated: a login whose token cannot be retained is **reported**, never
+  silent; a failed write still fails the login.
 
 ## Boundaries
 
@@ -92,11 +113,16 @@ with a fresh nonce per item, a `VERIFIER_PLAINTEXT` ciphertext that proves a key
 | `CredentialStore` (open / put / get / list / remove) | `tddy-credentials` |
 | `SessionVault` — the opened, session-scoped handle | `tddy-credentials` |
 | the on-disk format and its versioned header | `tddy-credentials` |
+| `SessionVaults`, `VaultState`, `Retained`, `Reset`, `ROTATION_GRACE` — the registry of open vaults | `tddy-credentials` |
+| `SecretString`, `MIN_PASSPHRASE_CHARS` | `tddy-credentials` |
+| `auth.VaultState`, `UnlockVault`, `ResetVault` | `tddy-service` (`auth.proto`) |
+| `CredentialVaultPrompt` | `tddy-web` |
 
 **Explicitly not this node's:**
 
-- **The Accounts RPC service and screen** — `#keyring` 4/9. This node ships storage, not a UI, and
-  exposes no new RPC.
+- **The Accounts RPC service and screen** — `#keyring` 4/9. This node ships storage plus the one
+  prompt and the two RPCs a passphrase-keyed vault cannot work without (`UnlockVault`,
+  `ResetVault`); listing, linking and unlinking accounts stay 4/9's.
 - **Propagating the file between daemons** — `#keyring` 6/9.
 - **Screen-sharing as a provider** — `#keyring` 7/9. `screen_sharing_vault.rs` is untouched here.
 - **A second GitHub account** — `#keyring` 8/9. The record model has room for one; nothing mints it.
@@ -123,19 +149,20 @@ is the measured example of what one misplaced dependency costs a crate's depende
 **Parent in the line**: `#keyring` 2/9 `desktop-login` — [#509](https://github.com/uppin/tddy-coder/pull/509).
 
 **Real dependency edge**: `#keyring` 1/9 `signing-key` — [#508](https://github.com/uppin/tddy-coder/pull/508).
-This node needs a session that exists without a LiveKit secret, because the vault key is derived at
-login. It does **not** depend on 2/9; both are wave 2, and 2/9 sits ahead of it in the line by the
+This node needs a session that exists without a LiveKit secret, because unlocking the vault is an
+authenticated RPC of a signed-in session. It does **not** depend on 2/9; both are wave 2, and 2/9 sits ahead of it in the line by the
 developer's explicit instruction rather than by the sort (see `## Green wave`).
 
-**A soft but real coupling to 2/9, stated so it is not lost**: 2/9 chooses an **OAuth App**, whose
-user access token does not expire. That is what makes this node's derivation deterministic *across
-logins* instead of a per-session accident. If that decision is reversed to a GitHub App — whose user
-token expires in 8 hours — this node's key derivation must move to a credential that is stable, and
-the choice is a re-plan, not an adjustment.
+~~**A soft but real coupling to 2/9**: 2/9 chooses an **OAuth App**, whose user access token does
+not expire, which was to make a token-derived key deterministic across logins.~~ **This premise was
+wrong** (V1): "does not expire" is not "stable" — an OAuth App issues a *new* token at every
+exchange. The replan removes the coupling: the key comes from the user's passphrase, so nothing in
+this node depends on how long, or how many, GitHub tokens live.
 
 **Dependents**: 4/9 `accounts`, 6/9 `sync`, 7/9 `screen-share`, 8/9 `link-github` — six transitive.
 
-**New external dependencies: none required.** `chacha20poly1305 0.10`, `argon2 0.5`, `sha2 0.10`,
+**New external dependencies: none taken.** `argon2 0.5` is added to `tddy-credentials` at the
+replan; it was already in the workspace (`tddy-screen-sharing`, lockfile 0.5.3). `chacha20poly1305 0.10`, `sha2 0.10`,
 `hmac 0.12`, `subtle 2.6` and `rand` are already in the workspace, and HKDF-Extract/Expand is a
 dozen lines over `hmac` + `sha2`. ⚠ **Two would be tidier and both need CLAUDE.md § ASK approval
 before use**: `hkdf 0.12` and `zeroize`. Neither is assumed; the design works without them. The
@@ -215,11 +242,9 @@ pub enum VaultError { Locked, FormatMismatch { expected, found }, Io(String), Cr
 > rather than left to be discovered during `/green`, because the alternative — opening a vault
 > unconditionally at login — reads entirely reasonable until the second demo login fails.
 >
-> **Also owed to `#keyring` 2/9's device flow**: a device login's access token is a *different*
-> credential from a callback login's. Both are stable for an OAuth App, so either derives a working
-> key, but a user who signs in one way and then the other rotates their own vault key. `rewrap` on
-> every successful login is what absorbs that, and it is the reason it runs unconditionally rather
-> than only when the credential is seen to have changed.
+> ~~**Also owed to `#keyring` 2/9's device flow**: a device login's token rotates the vault key, and
+> `rewrap` on every login absorbs it.~~ Superseded at the replan: no login token is key material,
+> so there is nothing for a second flow to rotate, and `rewrap` is gone.
 
 ⚠ **Not mergeable in that state** — implementation follows in this same PR.
 
@@ -254,6 +279,52 @@ pub enum VaultError { Locked, FormatMismatch { expected, found }, Io(String), Cr
 >   login re-issues a key.
 > - **`LogoutRequest.vault_unlock_key`** is a fifth field beyond the four the brief listed:
 >   without it a logout cannot name the lineage whose slot it removes.
+
+> **Changed at the replan (2026-09-23), by the developer's decision** — a passphrase replaces the
+> login-derived key (V1). Published in `73e07aa3`, implemented in `b4715d2a`:
+>
+> ```rust
+> impl CredentialStore {
+>     pub fn path_in(auth_storage_dir: impl AsRef<Path>, subject: &str) -> PathBuf;
+>     pub fn create(path: &Path, passphrase: &SecretString, subject: &str) -> Result<SessionVault, VaultError>;
+>     pub fn open_with_passphrase(path: &Path, passphrase: &SecretString, subject: &str) -> Result<SessionVault, VaultError>;
+>     pub fn open_with_unlock_key(path: &Path, unlock: &UnlockKey) -> Result<SessionVault, VaultError>;
+>     pub fn reset(path: &Path, new_passphrase: &SecretString, subject: &str) -> Result<(SessionVault, Option<PathBuf>), VaultError>;
+> }
+> impl SessionVault { /* put, get, list, remove, add_unlock_slot, remove_unlock_slot, unlock_slot_ids */
+>     pub fn rotate_unlock_slot(&self, presented: &UnlockKey) -> Result<UnlockKey, VaultError>; // was (&str)
+> }
+> pub enum VaultState { Open, Locked, Uninitialized }
+> impl SessionVaults {
+>     pub fn state(&self, subject: &str) -> VaultState;
+>     pub fn holds_pending(&self, subject: &str) -> bool;
+>     pub fn retain(&self, subject: &str, record: CredentialRecord) -> Result<Retained, VaultError>;
+>     pub fn unlock(&self, subject: &str, passphrase: &SecretString) -> Result<UnlockKey, VaultError>;
+>     pub fn create(&self, subject: &str, passphrase: &SecretString) -> Result<UnlockKey, VaultError>;
+>     pub fn reset(&self, subject: &str, new_passphrase: &SecretString) -> Result<Reset, VaultError>;
+>     pub fn with_rotation_grace(self, grace: Duration) -> Self;   // + reopen, forget, get, path_for
+> }
+> pub struct SecretString;          // CredentialRecord.secret's type; redacted, wiped, no serde
+> pub const MIN_PASSPHRASE_CHARS: usize = 8;
+> pub const ROTATION_GRACE: Duration = Duration::from_secs(30);
+> pub enum VaultError { Locked, Uninitialized, AlreadyInitialized, FormatMismatch { .. }, Io(String), Crypto }
+> ```
+>
+> - **Gone**: `open_or_create`, `open_existing`, `rewrap`, `SessionVaults::unlock(subject, ikm)`.
+>   Format version 2; version 1 files (test-only) are refused by name, not migrated.
+> - **`auth.proto`**: `VaultState { UNSPECIFIED, NONE, OPEN, LOCKED, UNINITIALIZED }` on the three
+>   login/refresh responses the brief named **and on `GetAuthStatusResponse`** — a deviation: without
+>   it a page reloaded while `LOCKED` (no unlock key, so no page-load refresh) could not know to prompt
+>   again. `UnlockVault(session_token, passphrase, create) → { vault_state, vault_unlock_key }` and
+>   `ResetVault(session_token, new_passphrase) → { vault_state, vault_unlock_key }`.
+> - **`unbundle_service_split` needed no registration.** Its residual-methods closed-world list
+>   covers the four protos `connection.ConnectionService` was split into (session, project,
+>   demo_vm, local_token), not `auth.proto`; the suite passes unchanged (28/28).
+> - **Pending tokens are bound to the user, not the lineage**: session tokens are stateless and
+>   carry no lineage id, so a daemon cannot tell two lineages of one user apart. A later token for
+>   the same account replaces an earlier one.
+> - **A stub login reports `NONE`** and no longer opens an existing vault: its token is synthetic and
+>   no longer key material, so there is nothing for it to open or be refused by.
 
 ## Green wave
 
@@ -316,15 +387,20 @@ analyzed.
 
 - [x] **PRD**: [PRD-2026-09-19-keyring-store.md](../../ft/daemon/1-WIP/PRD-2026-09-19-keyring-store.md)
 - [x] **Changeset**: this document
-- [ ] **Draft PR contract**: owned surface + failing tests (wave 2, commit 2)
-- [ ] **New crate**: `tddy-credentials` — record model, sealed format, session handle
-- [ ] **Key derivation**: KEK from the login credential, wrapped data key, verifier, re-wrap, zeroize
-- [ ] **Deletions**: `token_store.rs`, `github_token_store.rs`, every `github-tokens.json` reference
-- [ ] **Migration**: `svc_pr_status_for_caller.rs:93`
-- [ ] **Dependency approvals** (if taken): `hkdf`, `zeroize`
-- [ ] **Testing**: unit + acceptance, scoped to the five packages
-- [ ] **Package Documentation**: the five packages above
-- [ ] **Code Quality**: scoped clippy; CI green
+- [x] **Draft PR contract**: owned surface + failing tests (wave 2, commit 2; replan `73e07aa3`)
+- [x] **New crate**: `tddy-credentials` — record model, sealed format, session handle, split into
+      modules under the 500-line budget (replan step A, `91a8b10d`)
+- [x] **Key derivation**: passphrase KEK (Argon2id), wrapped data key, unlock slots, verifier,
+      zeroize (replan `b4715d2a`)
+- [x] **Vault states and RPCs**: `VaultState`, `UnlockVault`, `ResetVault`, the web prompt
+- [ ] **Deletions**: ✅ `token_store.rs`, `github_token_store.rs` and every code/config
+      `github-tokens.json` reference; ⚠ the `packages/*/docs` and `docs/ft` references are owed at wrap
+- [x] **Migration**: `svc_pr_status_for_caller.rs:93`
+- [x] **Dependency approvals**: neither `hkdf` nor `zeroize` taken
+- [x] **Testing**: unit + acceptance, scoped (see *Measured state (replan)*)
+- [ ] **Package Documentation**: ✅ `tddy-credentials/docs/credential-store.md`; ⚠ the other
+      packages' docs are owed at wrap
+- [ ] **Code Quality**: ✅ scoped clippy clean on all ten touched packages; ⚠ CI not yet read
 
 ## Technical Changes
 
@@ -340,47 +416,62 @@ analyzed.
 
 - `tddy-credentials` holds `(provider, account)`-keyed records whose label, metadata **and** secret
   are one sealed AEAD unit, in a file with a versioned KDF header.
-- The data key is random and wrapped under a KEK derived at login from the user's own credential.
-  At rest the file holds ciphertext and a wrapped key; nothing in it opens it.
-- `SessionVault` lives for the life of a session and zeroizes on drop.
+- The data key is random and wrapped under a KEK that Argon2id derives from the user's **vault
+  passphrase**, and once more per browser lineage under an unlock key that lineage holds. At rest
+  the file holds ciphertext and wrapped keys; nothing in it opens it.
+- A login's GitHub token is a record, never key material. Signing in always completes and reports
+  the vault's state; a closed vault holds the token in memory until the passphrase opens it.
+- `SessionVault` zeroizes on drop, and the registry drops it when its last lineage signs out.
 - `github-tokens.json` does not exist and is never read.
 
 ### Delta (What's Changing)
 
 #### tddy-credentials (new)
 - **Architecture**: depends on neither the auth crate nor LiveKit — deliberately, so 6/9 and 7/9 can
-  use it directly.
-- **API**: `CredentialStore::open_or_create`, `SessionVault::{put,get,list,remove,rewrap}`,
-  `VaultError::{Locked, FormatMismatch, Io, Crypto}`.
+  use it directly — and, after the replan, not on `tddy-core` either (V7).
+- **API**: `CredentialStore::{create, open_with_passphrase, open_with_unlock_key, reset}`,
+  `SessionVault::{put, get, list, remove, add_unlock_slot, rotate_unlock_slot, remove_unlock_slot}`,
+  `SessionVaults::{state, retain, unlock, create, reset, reopen, forget, get}`, `VaultState`,
+  `SecretString`, `VaultError::{Locked, Uninitialized, AlreadyInitialized, FormatMismatch, Io, Crypto}`.
 - **Implementation**: ChaCha20-Poly1305 per record with the record's identity as associated data;
-  HKDF-SHA256 over the login credential; a verifier ciphertext; `write_atomic_with_mode(…, 0o600)`.
+  Argon2id (m=19456 KiB, t=2, p=1, 16-byte salt) + HKDF-Expand for the passphrase slot, HKDF-SHA256
+  for the unlock slots, every `info` labelled; a verifier ciphertext; an owner-only
+  swap-then-rename writer (`atomic.rs`).
 
 #### the locked case
-`VaultError::Locked` is returned when the derived KEK does not unwrap the data key — the user
-revoked authorisation and re-approved, so GitHub issued a different token. The daemon reports it
-**distinctly** and the user re-links their accounts into a fresh vault. It does **not** re-initialise
-silently and there is **no second key**. Mitigation: every successful login calls `rewrap`, so a
-rotation observed while a session can still be established costs nothing; only a rotation with no
-live session and no old credential costs the vault. `SessionVaults::unlock` rewraps the handle
-already open for a user signed in elsewhere, which is what makes that mitigation real for a rotated
-credential rather than only for a fresh salt.
+`LOCKED` is where a vault file exists and nothing has opened it since this daemon started — after
+every restart, for any browser that holds no unlock key. It is **no longer a refused login**: the
+operator is signed in, the response says `LOCKED`, the login's GitHub token is held in memory
+(never written in plaintext), and the page asks for the passphrase. `UnlockVault` opens the vault,
+seals the waiting token, hands the lineage an unlock slot and returns its key. A wrong passphrase is
+`failed_precondition` naming `Locked`, and changes nothing on disk. There is still **no second key**
+and still **no silent re-initialisation**: a forgotten passphrase is an explicit `ResetVault`, which
+renames the old file to `credentials-<hex>.locked-<unix>.vault` — never deletes it — and seals the
+waiting token into a fresh vault under the new passphrase.
 
-**A restart is not a lock.** The daemon still holds no key of its own; the browser does. Each login
-adds an unlock slot and returns its key `U` (`vault_unlock_key`); the daemon keeps only the wrap.
-A refresh presents `U`, and the daemon opens the vault through the slot, registers it, rotates the
-slot and returns `U'`. A logout removes the slot. Between a restart and the first refresh, PR status
-is *unavailable* with a reason naming the next session refresh — not a re-login — and the web client
-refreshes on load when it holds a key. Accepted trade-off: `U` crosses the plain-http LAN origin
-beside the refresh token, but it is a wrap key, not a stored credential, and opens nothing without
-the vault file on the daemon's disk. The slot count is bounded at 16; the least recently used is
-evicted.
+`UNINITIALIZED` is the same, before the first passphrase: `UnlockVault` with `create` makes the
+vault (at least `MIN_PASSPHRASE_CHARS`, 8, characters). While either holds, PR status is
+*unavailable* with a reason that says to unlock the credential vault.
+
+**A restart need not ask for the passphrase.** Each lineage that opens the vault holds an unlock
+key `U` to a slot of its own; its next refresh presents `U`, the daemon opens the vault through the
+slot, rotates it and returns `U'`. The rotation proves `U` under the write lock, and the key a
+refresh just retired is answered with the same `U'` for 30 s, so two tabs sharing one stored key
+both keep a working one (`navigator.locks` was rejected: it needs a secure context, and the
+dashboard is plain http). A logout removes the slot; the last one out drops the open vault. The
+trade-off — `U` or the passphrase plus the disk is the plaintext, both cross plain http, and an old
+backup keeps its old slots — is stated in `tddy-credentials/docs/credential-store.md`.
 
 #### tddy-github
-- **API**: `token_store.rs` deleted. `auth_service.rs` writes a `CredentialRecord`.
+- **API**: `token_store.rs` deleted. `auth_service.rs` retains a `CredentialRecord` through
+  `SessionVaults::retain`, reports `vault_state` on every login, refresh and status response, and
+  serves `UnlockVault` / `ResetVault`. `GITHUB_ID_METADATA` / `AVATAR_URL_METADATA` name the record's
+  metadata keys for 4/9. A clock before the epoch is an explicit error, not `updated_at = 0` (V13).
 
 #### tddy-daemon-auth
-- **Implementation**: `github_token_store.rs` deleted; `auth.rs:83-152` opens the vault at login and
-  re-wraps; the half-login rule now also fires on `Locked`.
+- **Implementation**: `github_token_store.rs` deleted; `auth.rs` constructs the registry over
+  `auth_storage`; `github_pr_credentials::retained_github_token` reads by vault state and names the
+  remedy ("unlock your credential vault") while it is closed.
 
 #### tddy-daemon
 - **Implementation**: `runtime.rs:882` constructs and injects the store. **Not split.**
@@ -393,7 +484,9 @@ evicted.
 
 - [x] **M1** — `tddy-credentials`: record model, versioned header, seal/open, `write_atomic_with_mode`
 - [x] **M2** — key derivation, wrapped data key, verifier, `rewrap`, zeroization — plus unlock slots
-- [x] **M3** — wire construction in `auth.rs` and `runtime.rs`; derive on login, re-wrap on login;
+      (the login-derived KEK and `rewrap` superseded by M11)
+- [x] **M3** — wire construction in `auth.rs` and `runtime.rs`; derive on login, re-wrap on login
+      (superseded by M11: a login retains its token by vault state);
       unlock key on login, reopen + rotate on refresh, remove on logout
 - [x] **M4** — migrate `svc_pr_status_for_caller.rs:93` (through `retained_github_token`)
 - [x] **M5** — delete `token_store.rs`, `github_token_store.rs`, every code/config `github-tokens.json`
@@ -402,17 +495,26 @@ evicted.
 - [x] **M7** — `tddy-credentials` documentation, carrying the two retention rules forward
 - [x] **M8** (added) — the unlock key over the wire: `auth.proto` fields, `tddy-web` storage/refresh/logout
 
-**Implementation status (green).** All milestones done; see the PR description for the scoped
-counts. Still owed at wrap, because `packages/*/docs/` moves only through this changeset:
+**Replan (2026-09-23)** — V1 and the should-fix findings:
+
+- [x] **M9** — split `vault.rs` (835 production lines) into `vault.rs` 386, `vault/format.rs` 137,
+      `vault/crypto.rs` 160, `vault/unlock.rs` 206; behaviour-preserving (`91a8b10d`)
+- [x] **M10** — tests first for the passphrase design, V1–V5 and T1–T6 (`73e07aa3`)
+- [x] **M11** — the passphrase KEK, vault states, `UnlockVault` / `ResetVault`, pending tokens, the
+      web prompt; V2, V3, V4, V5, V7, V9, V13, V14 (`b4715d2a`)
+- [x] **M12** — `credential-store.md` (V6's trade-off restated), this changeset, the PRD
+
+**Implementation status (green).** All milestones done, including the replan's; see
+*Measured state (replan)* for the scoped counts. Still owed at wrap, because `packages/*/docs/` moves only through this changeset:
 `tddy-daemon-auth/docs/auth-service.md` (lines 15, 96, 114 name `github_token_store`),
 `tddy-host-service/docs/host-registry.md:41`, `tddy-model-registry/docs/model-registry.md:41`,
 `tddy-session-store/docs/architecture.md:68`, `tddy-github/docs/code-issues/missing-tests-real-exchange-code.md:53`,
 and `docs/ft/daemon/session-auth.md` § GitHub access-token retention /
 `docs/ft/coder/pr-stack-live-status.md:224,446` — all still describe the deleted plaintext store.
-`#keyring` 2/9's `poll_device_login` must set `vault_unlock_key` exactly as `exchange_code` does
-(its `TODO(desktop-login)` says so). ⚠ TODOs left: the cipher/HMAC key-schedule copies are not
-wiped without `zeroize` (`vault.rs`); `SessionVaults` entries are not evicted when a session ends
-(`sessions.rs`).
+⚠ TODOs left: the cipher/HMAC key-schedule copies are not wiped without `zeroize`
+(`vault/crypto.rs`); a vault whose last lineage lapses without a logout stays open
+(`sessions.rs` → `docs/dev/todo/2026-09-23-credential-vault-open-past-its-last-session.md`); the
+inlined atomic writer (`atomic.rs` → `docs/dev/todo/2026-09-23-atomic-file-leaf-crate.md`).
 
 ## Testing Plan
 
@@ -425,21 +527,37 @@ the login, PR status behaves identically — are properties of the wired daemon,
 
 ### Unit tests (`tddy-credentials`)
 
-- A record written and re-opened from the same derived key round-trips exactly.
+- A record written and re-opened with the same passphrase round-trips exactly; a wrong passphrase
+  is `Locked` and changes nothing; the same passphrase for another subject is `Locked`.
+- A reset sets the old file aside byte-for-byte and only the new passphrase opens the fresh one.
+- The registry: a first login is `Uninitialized` and writes nothing; after a restart a login with a
+  **new token** is `Locked`, and the passphrase opens the same vault holding the new token (V1); a
+  login while open needs no passphrase and gets a slot; a stale handle is dropped (V2); the last
+  logout drops the open vault (V3); rotation proves the key under the lock, a retired key within the
+  grace window gets the same successor, and two racing refreshes both end with one working key (V4).
 - **The file's bytes contain no plaintext secret, label or metadata.** Asserted against the file
   contents, not inferred from the API.
 - Flipping a byte in a record's sealed label or metadata fails the open — the AEAD covers the whole
   record, which is the limit being fixed relative to `screen_sharing_vault.rs`.
-- A changed KDF parameter in the header surfaces as `FormatMismatch`, not as a failed decrypt.
-- Different input keying material yields `Locked`, **and the file is unchanged afterwards**.
-- `rewrap` succeeds; the vault then opens under the new key and **not** under the old one.
-- Key material is zeroized on drop.
+- A changed KDF name, format version, Argon2 version or cost surfaces as `FormatMismatch`, not as a
+  failed decrypt; an edited salt is `Locked`.
+- A record moved under another account's id does not open.
+- Key material and secret text are zeroized and print redacted.
 
 ### Acceptance tests
 
-- **A failed credential write fails the login** — the existing half-login rule, now over the vault.
-- **A `Locked` vault fails the login**, with the lock reported distinctly rather than as a generic
-  auth failure.
+- **A failed credential write fails the login** — over an open vault whose file can no longer be
+  written (`tddy-github`).
+- **A fake GitHub mints a new token per exchange** (T1), in `tddy-daemon-auth/tests/support/mod.rs`,
+  shared by both vault suites (T8 within the crate).
+- **V1**: restart, then a fresh login with a different token → signed in, `LOCKED`; the passphrase
+  opens the same vault; PR status performs with the new token.
+- First login → `UNINITIALIZED`, create → `OPEN`; wrong passphrase → `failed_precondition` naming
+  `Locked`, file unchanged, still signed in and `LOCKED`; reset keeps the old file aside; no
+  passphrase in any log line, file or response; a stub login creates nothing and reports `NONE`.
+- T2–T6: a real (non-stub) login over a closed vault; a refresh presenting another user's key; a
+  refresh whose key no longer opens (still refreshes, `""`, `LOCKED`); refresh and device-login
+  responses carry no GitHub token; two tabs refreshing with one key at once.
 - **PR-stack live status is behaviour-identical** — Given a stored token, a stub-mode daemon, and a
   daemon with no stored token, Then `Perform(token)`, `Empty` and `Unavailable(reason)` resolve
   exactly as before.
@@ -448,6 +566,22 @@ the login, PR status behaves identically — are properties of the wired daemon,
 
 `./test -p tddy-credentials -p tddy-github -p tddy-daemon-auth -p tddy-daemon -p tddy-session-lifecycle`
 and scoped clippy per package. Whole-workspace green comes from CI via `scripts/ci-status.sh`.
+
+### Measured state (replan)
+
+| Run | Command | Result |
+|---|---|---|
+| Step A baseline and after | `./test -p tddy-credentials` | 30 passed / 0 failed, both |
+| Step B (tests first) | `cargo test -p tddy-credentials -p tddy-daemon-auth -p tddy-github --no-fail-fast` | 170 passed / **75 failed**, every failure a stubbed entry point |
+| Step B, web | `bun test src/rpc/sessionTokenStore.test.ts` | 10 passed / **10 failed** (store methods not yet written) |
+| Step C | `./test -p tddy-credentials -p tddy-daemon-auth -p tddy-github --no-fail-fast` | **245 passed / 0 failed** |
+| Step C | `cargo test -p tddy-service --test unbundle_service_split` | 28 / 0 |
+| Step C | `cargo test -p tddy-session-lifecycle --test query_branch_resolution_acceptance --test orchestrator_repo_root_resolution_acceptance` | 18 / 0 (the rest of the package not run: `action_sandbox_acceptance` hang) |
+| Step C, web | `bun test src/hooks src/lib src/rpc` | 585 / 0 |
+| Step C, web | `cypress run --component --spec cypress/component/CredentialVaultPromptAcceptance.cy.tsx` | 10 / 0 |
+
+`cargo check --all-targets` and `cargo clippy --all-targets -- -D warnings` are clean on all ten
+touched Rust packages. Whole-workspace health is CI's.
 
 ### Measured red state (wave 2)
 
@@ -485,25 +619,223 @@ for no signal.
 
 ## Acceptance Criteria
 
-- [ ] A credential is readable in-session and **unreadable from the file alone**
-- [ ] `label` and `metadata` are inside the AEAD — tampering with either fails the open
-- [ ] The header carries KDF name, version and parameters; a change is a detected `FormatMismatch`
-- [ ] A second login by the same user opens the same vault
-- [ ] A changed credential yields `Locked`, reported distinctly, with **no re-initialisation and no
-      second key**
-- [ ] Every successful login re-wraps the data key
-- [ ] A failed write fails the login; a `Locked` vault fails the login
-- [ ] No store API returns a secret to an RPC response path
-- [ ] Key material is zeroized on drop and not cached beyond a session
-- [ ] `GitHubTokenStore`, `FileGitHubTokenStore` and all `github-tokens.json` references are gone
-- [ ] PR-stack live status behaves identically
+- [x] A credential is readable in-session and **unreadable from the file alone** — nor is the
+      passphrase; the file plus an unlock key or the passphrase is the plaintext (stated trade-off)
+- [x] `label` and `metadata` are inside the AEAD — tampering with either fails the open
+- [x] The header carries KDF name, version and parameters; a change is a detected `FormatMismatch`
+- [x] **After a restart, a fresh login with a different GitHub token opens the same vault once the
+      passphrase is given** (V1)
+- [x] A login over a closed vault is signed in and reports `LOCKED` / `UNINITIALIZED`; the token is
+      held in memory and sealed on unlock, never written in plaintext
+- [x] A wrong passphrase is `failed_precondition` naming `Locked`, the file unchanged, the session
+      still signed in — **no re-initialisation and no second key**
+- [x] A reset renames the old vault aside (never deletes it) and seals the waiting token into a
+      fresh one under the new passphrase
+- [x] A login while the vault is open needs no passphrase; the lineage just gets an unlock slot
+- [x] A restart plus a refresh with the unlock key needs no passphrase
+- [x] A failed write fails the login
+- [x] No store API returns a secret to an RPC response path — `CredentialRecord` is not serialisable
+      and its secret prints redacted; no passphrase reaches a log, the file or a response
+- [ ] Key material is zeroized on drop and not cached beyond a session — ✅ dropped at the last
+      logout; ⚠ a lineage that lapses without a logout keeps it until exit (`docs/dev/todo/`)
+- [x] A stub login creates nothing and reports `NONE`
+- [ ] `GitHubTokenStore`, `FileGitHubTokenStore` and all `github-tokens.json` references are gone —
+      ✅ code and config; ⚠ docs owed at wrap
+- [x] PR-stack live status behaves identically, and says to unlock the credential vault while it is
+      closed
+
+## Validation Results
+
+**Last run**: 2026-09-23, `/pr-wrap` analysis steps (validate-changes → validate-tests →
+validate-prod-ready → analyze-clean-code). Diff range `origin/feature/keyring/desktop-login..HEAD`
+(5 commits, 47 files). **Overall: ❌ one blocker, not ready to merge.**
+
+### Stack gate
+
+| Check | Result |
+|---|---|
+| Stack branch | Yes, planned (base `feature/keyring/desktop-login`, PR #510) |
+| `/pr-stack-rebase` | ✅ Already current (merge-base = base tip `2aeeff08`) |
+| Leak check | ✅ Clean: only this PR's 5 commits |
+| Diff contains only this PR's files | ✅ Every file is claimed by an Affected Packages entry |
+| Parent-owned files intact | ✅ Only `token_store.rs` and `github_token_store.rs` deleted, both planned (M5) |
+| `## Dependencies` not implemented here | ✅ `poll_device_login` sets this PR's own `vault_unlock_key` field. No 1/9 or 2/9 symbol re-implemented |
+| `## Boundaries` respected | ✅ No new RPC, `screen_sharing_vault.rs` untouched, `runtime.rs` not split, no `hkdf`/`zeroize` |
+| `## Responsibility` delivered | ⚠️ Delivered in code, but the key-derivation premise does not hold against real GitHub (V1) |
+
+### Build (scoped)
+
+| Package | Result |
+|---|---|
+| tddy-credentials | ✅ `cargo clippy -p tddy-credentials --all-targets -- -D warnings` clean |
+| tddy-credentials, tddy-daemon-auth, tddy-github | ✅ 201 passed / 0 failed (scoped run before this validation) |
+| tddy-web | ✅ `bun test src/hooks src/lib`: 349 pass |
+| tddy-session-lifecycle, tddy-daemon | ✅ `cargo check -p tddy-session-lifecycle -p tddy-daemon` clean, 0 warnings. Suites not run locally (the `action_sandbox_acceptance` hang, see Prerequisites); CI owns them |
+
+Whole-workspace health comes from CI; nothing workspace-wide was run locally.
+
+### Changeset sync
+
+| Item | Recorded | Actual | Updated to |
+|---|---|---|---|
+| Scope: Draft PR contract, New crate, Key derivation, Migration | 🔲 | Code present (`3e8e6331`, `f8d2d62e`, `f8661739`) | ✅ (V1 caveat on key derivation) |
+| Scope: Deletions | 🔲 | Code/config references gone. `packages/*/docs` and `docs/ft` references still owed at wrap (listed under Implementation status) | ⚠️ |
+| Scope: Dependency approvals | 🔲 | Neither `hkdf` nor `zeroize` taken | ✅ N/A |
+| Scope: Testing | 🔲 | Unit + acceptance exist. `tddy-daemon`/`tddy-session-lifecycle` suites not run locally | ⚠️ gaps T1–T6 |
+| Scope: Package docs | 🔲 | `tddy-credentials/docs/credential-store.md` done. `auth-service.md` and others owed | ⚠️ |
+| Scope: Code Quality | 🔲 | Score B (new code) → would tick. CI not yet read | ⚠️ pending CI |
+| "2/9's `poll_device_login` must set `vault_unlock_key`" | owed by 2/9 | Already done in `auth_service.rs` `poll_device_login` | ✅ (note is stale) |
+
+These scope ticks are recommendations. This run edited only this section.
+
+### Acceptance criteria (PRD list)
+
+| Criterion | Status |
+|---|---|
+| Unreadable from the file alone | ✅ (V6: not true once `U` leaks) |
+| `label`/`metadata` inside the AEAD | ✅ |
+| Header carries KDF name/version/params; change is `FormatMismatch` | ✅ (`kdf_version` branch untested) |
+| A second login by the same user opens the same vault | ❌ **Only with the same token**. Real GitHub mints a new token on every exchange (V1) |
+| Changed credential → `Locked`, no re-init, no second key | ✅ in the store. ❌ as UX: the login is refused with no remedy (V1) |
+| Every successful login re-wraps | ✅ |
+| Failed write fails the login; `Locked` fails the login | ✅ (the `Locked` acceptance test goes through the stub path only, T2) |
+| No store API returns a secret to an RPC response path | ⚠️ By convention only: `CredentialRecord.secret` is a `pub String` with derived `Debug`/`Serialize` (V5) |
+| Key material zeroized on drop, not cached beyond the session | ❌ Cached until process exit (V3). Secret strings and cipher/HMAC state are not wiped |
+| Subject bound into the derivation | ✅ |
+| A stub login seals nothing | ✅ |
+| `GitHubTokenStore`/`FileGitHubTokenStore`/`github-tokens.json` gone | ✅ code/config. ⚠️ docs owed |
+| PR-stack live status behaves identically | ✅ `pr_lookup_for_caller` unchanged (lifecycle suite not run locally) |
+| Restart + refresh reopens the vault with no new login | ✅ (single tab; V4 for multi-tab) |
+| Unlock key rotates on every refresh | ✅ (TOCTOU, V4) |
+| Logout removes the lineage's slot | ✅ |
+| Vault file never holds an unlock key; stub gets none | ✅ |
+
+### Security review — verified correct
+
+- **HKDF.** Matches RFC 5869: PRK = HMAC(salt, IKM), T(1) = HMAC(PRK, info‖0x01). An empty salt is equivalent to HashLen zero bytes. The test checks it against vector A.1.
+- **Nonces.** A fresh 96-bit OsRng nonce per seal, which is ample at this volume.
+- **Records.** Record AAD binds the keyed id, and the inner identity is re-hashed and compared (`ct_eq`).
+- **Header.** The header is AAD of the login slot, so a salt edit gives `Locked` (tested).
+- **`Locked` leaves the file alone.** `open_or_create`, `open_existing` and `open_with_unlock_key` never write on a failed open (tested).
+- **Writes.** Every write goes through `write_atomic_with_mode(…, 0o600)`, with fsync and rename, under the process `WRITE_LOCK`. Slot eviction and rotation are single atomic rewrites.
+- **Filenames.** The subject is hex-encoded into the filename, so there is no traversal and no case-fold collision.
+- **Refresh subject check.** `reopen_the_vault` requires `unlock.subject() == login`.
+- **Logging.** The unlock key is never logged. `UnlockKey`/`SecretBytes` `Debug` redact the key.
+- **Responses.** No response carries the GitHub token.
+- **Web client.** It clears the key on logout, on an `Unauthenticated` refresh and on a failed exchange, and keeps it on a transient failure.
+
+### Findings
+
+**Blocker**
+
+- **V1** `tddy-github/src/auth_service.rs` `retain_the_login_credential` → `tddy-credentials/src/sessions.rs:61-74` → `vault.rs:171`.
+  - **Problem.** The login KEK is derived from the GitHub access token, and a GitHub OAuth App issues a **new** token on every code or device exchange (up to 10 live per user, app and scope). "Does not expire" is not "stable".
+  - **Failure scenario.** The daemon restarts, and then a user signs in fresh: a new browser, a lapsed 7-day refresh token, after a logout, with cleared storage, or with an evicted slot. The vault is `Locked` and `failed_precondition` refuses the login. The only remedy is deleting `credentials-<hex>.vault` by hand, and no in-product re-link exists before 4/9.
+  - **Why the tests miss it.** Every fake returns a constant token.
+  - **Options (developer's decision).** (a) Sign in anyway, report the vault locked, and add an explicit "reset vault". (b) Derive the KEK from something actually stable, such as a passphrase or a WebAuthn PRF. (c) Make the browser-held slots the only reopen path.
+  - **Test to add.** A restart followed by a second real login with a different token.
+
+**Should-fix**
+
+- **V2** `sessions.rs:63-71`. A cached handle is reused even after its file was deleted or replaced. `rewrap` then fails with `Io("gone")` or `Locked`, and *every* login for that user fails until the daemon restarts. `github_pr_credentials.rs:97` meanwhile tells the user to "sign in again", which cannot help. Fix: on `Locked`/`Io` from a cached handle, drop the entry and reopen from disk.
+- **V3** `sessions.rs:14`. `TODO(keyring)`, no issue reference. The data key stays in memory after every lineage has logged out, so PR status still performs with the token and the daemon reads credentials with nobody present. This fails the zeroize/cache criterion. Fix: evict on the last `forget`, or on a TTL tied to the refresh-token window.
+- **V4** `sessions.rs:82-91` and `vault.rs:421`. The slot key is checked outside `WRITE_LOCK`, and `rotate_unlock_slot` takes only the slot id.
+  - **Failure scenario.** Two tabs share `localStorage` and both refresh on load (`useAuth.ts:175`). Both pass the check and both rotate. `localStorage` can end holding the losing key, or `""` from a tab whose key was already rotated, which erases the good one. A lost response has the same effect.
+  - **Fix.** Rotate by `&UnlockKey`, re-verified under the lock. Add cross-tab coordination (`navigator.locks` or BroadcastChannel), or give the previous key a short grace period.
+- **V5** `record.rs:74-84`. `secret: String` is public, with derived `Debug`/`Serialize`, and is never zeroized. Boundary line 1 was meant to be a type property. Fix: a `SecretString` newtype with redacted `Debug`, no wire `Serialize`, wipe on drop and `expose()`.
+- **V6** `packages/tddy-credentials/docs/credential-store.md` ("they already hold the disk"). The justification is wrong: disk plus `U` gives plaintext. `U` crosses plain-http at every refresh, and old backups keep old slots, which rotation cannot reach. Restate the trade-off honestly.
+- **V7** `tddy-credentials/Cargo.toml:27`. The crate depends on `tddy-core` only for `write_atomic_with_mode`, which pulls tokio, jsonschema, ACP, workflow, git, task, rpc and sandbox into 6/9 and 7/9. This contradicts the stated crate-boundary choice, and `tddy-core/src/atomic_file.rs` itself says to name `tddy_session_store::atomic_file`. Depend on that crate or extract a leaf crate.
+
+**Nits**
+
+- **V8** `vault.rs:140`. The lock is process-local, so two processes on one `auth_storage` lose updates. The old store had the same limit. Add `flock`, or record it for 6/9.
+- **V9** `vault.rs:115,125`. The login `info` for subject `unlock/<slot>/x` equals the unlock `info`. It is not exploitable (different salt and ikm) but is weak domain separation. Add a `login/` label.
+- **V10** No rollback protection. Someone with write access can restore a removed or evicted slot or an older record. Record this as a stated limit.
+- **V11** `sessions.rs:62`. Blocking fs work and fsync run under a `std::sync::Mutex` inside async handlers, and this lock blocks every user's PR-status `get`.
+- **V12** `header.info` is written but never read (`derive_kek` uses `info_for(subject)`).
+- **V13** `auth_service.rs` `github_record`. `updated_at` uses `.unwrap_or_default()`, a silent 0.
+- **V14** `vault.rs:701`. The nonce length is a literal `12`.
+
+### From /validate-tests
+
+52 tests analyzed across 10 files. No `#[ignore]`, `.only` or `.skip`, no sleeps, and all use tempdirs. Tests are deterministic.
+
+- **T1 (should-fix).** Every fake login returns the same token (`THE_GRANTED_TOKEN`, `THE_LOGIN_CREDENTIAL`), so the suite encodes V1's false premise and cannot catch it.
+- **T2 (should-fix).** `tddy-daemon-auth/tests/login_opens_the_credential_store_acceptance.rs:33` `a_credential_store_sealed_under_another_key_refuses_the_login` runs `stub: true`, so it exercises `open_existing`. Its *Given* describes the real-login path (`unlock` → `open_or_create`), which has no acceptance test for `Locked`.
+- **T3 (should-fix).** Security branches have no tests:
+  - a refresh presenting another user's key (the subject filter);
+  - a sealed record moved to another id (the `ct_eq` branch, `vault.rs:536`);
+  - a refresh whose key does not open still succeeding with `""`;
+  - `RefreshSessionResponse` and `PollDeviceLoginResponse` checked for a GitHub-token leak (only `ExchangeCode` is);
+  - a rotate race.
+- **T4 (nit).** `tddy-credentials/tests/credential_store_acceptance.rs:73` "altering…label" flips the last hex digit, which is in the Poly1305 tag, not the label. Rename it or target the label.
+- **T5 (nit).** The `kdf_version` `FormatMismatch` branch is untested.
+- **T6 (should-fix, web).** Untested:
+  - logout sending the key and clearing it;
+  - an `Unauthenticated` refresh clearing the key;
+  - an empty returned key removing the stored one;
+  - the page-load `refreshNow`.
+- **T7 (nit, fluent-tests).** These have no Given/When/Then and bundle several behaviours into one tuple assert: `vault.rs:1042` `an_unlock_key_survives_its_wire_form…`, `kdf.rs` `hex_round_trips…` and `sessions.rs:202`. `past_the_bound…` asserts three facts.
+- **T8 (nit).** `call`, `a_daemon_retaining_credentials_in` and `a_demo_daemon_retaining_credentials_in` are duplicated across two `tddy-daemon-auth` test files. `ProviderWithARealCredential` is duplicated between `tddy-github` and `tddy-daemon-auth`.
+
+### From /validate-prod-ready
+
+Status ⚠️ Gaps. No mock code in production, no debug output, and no `println!` in TUI paths.
+
+- **TODO/FIXME.** Two markers without an issue reference: `sessions.rs:14` (AC-relevant, V3) and `vault.rs:669` (`zeroize`).
+- **Fallbacks.** `unwrap_or_default` on `updated_at` (V13). The empty unlock key on a failed reopen is a recorded developer decision.
+- **Unused.** `header.info` (V12). `list`, `remove` and `unlock_slot_ids` are published surface for 4/9, so acceptable.
+
+### From /analyze-clean-code
+
+**Score: B for new code.** The two functions over 60 lines, `build_auth_entries_with` (103) and `pr_status_for_caller` (75), are pre-existing and only touched.
+
+- **Needs attention.** `github_pr_credentials.rs` `retained_github_token` is 44 lines; extract the "not open yet" branch.
+- **Oversized: `vault.rs`, 1071 lines, new.**
+  - Split: `format.rs` ← Header/VaultFile/read/write/`check_format`; `crypto.rs` ← seal/open/wrap/unwrap/KEKs/random; `unlock.rs` ← `UnlockKey` and the slot methods; `vault.rs` ← `CredentialStore`/`SessionVault`.
+  - Cost: `pub(crate)` helpers only, and no consumers to repoint.
+  - Recommend splitting now or before 4/9.
+- **Oversized: `auth_service.rs`, 847 lines, grown by about 130.** Extract the vault glue into a submodule. Split later.
+- **Magic values.** `vault.rs:701` `12`. The metadata keys `"github_id"`/`"avatar_url"` should be constants, since 4/9 will read them.
+- **Duplication.**
+  - The random → `SecretBytes::new` → `wipe` sequence repeats about 3 times; use `SecretBytes::random()`.
+  - `random_16`/`random_32` are near-duplicates.
+  - `ProviderId` and `AccountId` are identical newtypes.
+  - The test helpers are duplicated (T8).
+
+### Resolution (replan, 2026-09-23)
+
+| Finding | Resolution |
+|---|---|
+| **V1** blocker | ✅ Passphrase KEK (Argon2id); the token is a record. Pinned by `after_a_restart_a_login_with_a_new_token_opens_the_vault_once_the_passphrase_is_given` |
+| V2 stale handle | ✅ `SessionVault::is_stale` (file gone, or replaced so the data key is `Locked`); `SessionVaults::get` drops it, `retain` drops one replaced between lookup and write. Other I/O failures stay real failures |
+| V3 cached until exit | ✅ for logout: the last slot's removal drops the handle. ⚠ lapsed-without-logout → `docs/dev/todo/2026-09-23-credential-vault-open-past-its-last-session.md` (the `sessions.rs` TODO points there) |
+| V4 rotation race | ✅ `rotate_unlock_slot(&UnlockKey)` proves the key under the write lock; a 30 s grace answers the retired key with the same successor. Server grace chosen over `navigator.locks`, which needs a secure context |
+| V5 secret type | ✅ `SecretString` (redacted `Debug`, wiped on drop, no serde, `expose()`); `CredentialRecord` sealed through a private mirror; the passphrase is one too |
+| V6 trade-off prose | ✅ `credential-store.md` § *What the unlock key and the passphrase buy, and what they do not* |
+| V7 `tddy-core` | ✅ Dropped. `tddy-session-store` is not light (tokio, jsonschema, workflow/task/actions), so the ~45-line writer is inlined (`atomic.rs`); duplication → `docs/dev/todo/2026-09-23-atomic-file-leaf-crate.md` |
+| V8 process-local lock | ℹ Stated limit in `credential-store.md`; for 6/9 |
+| V9 HKDF labels | ✅ `passphrase/`, `unlock/`, `record-id`, all `v2` |
+| V10 rollback | ℹ Stated limit in `credential-store.md` |
+| V11 blocking fs under a mutex | ℹ Unchanged; refreshes are now also serialised by the rotation lock |
+| V12 `header.info` unused | ✅ Removed from the v2 header; the subject is bound by the KEK's `info` |
+| V13 `unwrap_or_default` | ✅ An explicit `internal` error, logged |
+| V14 literal `12` | ✅ `NONCE_BYTES` |
+| T1 constant tokens | ✅ `GitHubMintingATokenPerExchange` (daemon-auth `tests/support`) |
+| T2 stub-only `Locked` | ✅ `a_real_login_over_a_vault_this_daemon_has_not_opened_signs_in_and_leaves_the_file_alone` |
+| T3 security branches | ✅ another user's key, record moved to another id, key that no longer opens, refresh/device-login leak checks, the race. The id-swap is caught by the AEAD's associated data before the inner `ct_eq`; the `ct_eq` stays as defence in depth |
+| T4 label test name | ✅ Renamed `altering_a_sealed_record_is_detected_rather_than_absorbed`, its comment says the Poly1305 tag |
+| T5 `kdf_version` | ✅ `a_header_from_another_argon2_version_is_reported_as_a_format_mismatch` |
+| T6 web | ✅ Logout sends then clears, `Unauthenticated` clears, empty key removes, page-load refresh — `sessionTokenStore.test.ts`; logout and the page-load refresh moved into the store to be testable |
+| T7 bundled asserts | ✅ in `vault.rs` (wire form, bound); ℹ `kdf.rs` `hex_round_trips…` left as is |
+| T8 duplicated helpers | ✅ within `tddy-daemon-auth`; ℹ `ProviderWithARealCredential` across crates stays (no shared testkit) |
 
 ## TODO
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
 - [x] Publish the draft-PR contract — wave 2
-- [ ] M1–M7
-- [ ] Ask before taking `hkdf` / `zeroize`
+- [x] M1–M12
+- [x] Ask before taking `hkdf` / `zeroize` — neither taken
 - [ ] Package documentation for the five affected packages
 - [ ] `/wrap-context-docs` — this node claims **no** backlog entry and **no** code-issue record
