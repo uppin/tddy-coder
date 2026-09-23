@@ -15,14 +15,18 @@ Family **P** — planned-PR stack mutations and branch resolution for `pr-stack`
 
 ## Where logic lives
 
-- **Handlers and peer routing** — `packages/tddy-daemon/src/pr_stack_rpc.rs` and port wiring beside
-  it on the daemon endpoint.
+- **Trait, adapter and transport entry** — `tddy_pr_stack::rpc`: `PrStackHandler`,
+  `PrStackServiceImpl`, `build_pr_stack_entry`, `PR_STACK_SERVICE`
+  ([tddy-pr-stack](../../tddy-pr-stack/docs/architecture.md#rpcrs--the-pr-stack-rpc-family)).
+- **Handler and peer routing** — `tddy_daemon_rpc::PrStackRpcHandler`
+  ([tddy-daemon-rpc](../../tddy-daemon-rpc/docs/architecture.md)): the eight RPC bodies, the
+  orchestrator and repoint guards, and the PR and base-sync legs of a branch resolution.
+- **Session start's stack paths** — `tddy-session-lifecycle` reaches the same handler through its
+  `DaemonRpcFamilies` port to resolve a peer-owned stack base and to link a named stack node.
 - **Orchestration and MCP tools** — `tddy-workflow-recipes` (`pr_stack`, `github_pr`, recipes).
 
 `PrStackService` is served on the daemon's transports (HTTP `/rpc`, LiveKit common room, session
-rooms, local socket). A separate `tddy-pr-stack-service` crate was not added: putting
-`tddy-service` inside `tddy-workflow-recipes` would create a dependency cycle, so the coordinate is
-hosted on the daemon while recipes stay in the workflow crate.
+rooms, local socket); `runtime.rs` takes the service and its entry from `RpcHandlers`.
 
 Product docs: [pr-stacking.md](../../../docs/ft/coder/pr-stacking.md),
 [pr-stack-live-status.md](../../../docs/ft/web/pr-stack-live-status.md).

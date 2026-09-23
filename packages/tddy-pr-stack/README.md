@@ -1,10 +1,11 @@
 # tddy-pr-stack
 
 The PR-stack data model and its git/GitHub operations: everything that reads or writes a session's
-`Changeset.stack`, and the syncs that keep a node's branch and pull request in line with it.
+`Changeset.stack`, and the syncs that keep a node's branch and pull request in line with it. It also
+defines the `pr_stack.PrStackService` handler trait, adapter and transport entry.
 
-**`tddy-pr-stack` depends on `tddy-core`, `tddy-git`, `tddy-github` and `tddy-workflow`, and must
-never depend on `tddy-workflow-recipes`.** The `pr-stack` recipe, its hooks and the plan→stack
+**`tddy-pr-stack` depends on `tddy-core`, `tddy-git`, `tddy-github`, `tddy-workflow`, `tddy-rpc` and
+`tddy-service`, and must never depend on `tddy-workflow-recipes` or `tddy-session-lifecycle`.** The `pr-stack` recipe, its hooks and the plan→stack
 bridges stay there and re-export everything below from their historical paths, so a dependency back
 would be a cycle. `packages/tddy-workflow-recipes/tests/pr_stack_crate_shape.rs` asserts the seam: no
 source file here, at any depth, may name `plan_pr_stack`, `::writer` or `::parser`.
@@ -24,6 +25,7 @@ source file here, at any depth, may name `plan_pr_stack`, `::writer` or `::parse
 | `assess.rs` | `AssessTask`, node views, `decide_next_action`, `effective_base_ref` | `orchestrate_pr_stack::assess` |
 | `git_ops.rs` | rebase / merge-base / force-push / commit / push helpers | `orchestrate_pr_stack::git_ops` |
 | `pr_insight.rs` | read-side shaping for the PR-inspection tools; `pr_number_from_status_url` | `orchestrate_pr_stack::pr_insight` |
+| `rpc.rs` | `PrStackHandler`, `PrStackServiceImpl`, `build_pr_stack_entry`, `PR_STACK_SERVICE` (also at the crate root) | `tddy_session_lifecycle::pr_stack_rpc`; `PR_STACK_SERVICE` also `tddy_workflow_recipes::PR_STACK_SERVICE` |
 
 Dependencies, the seam tests, each module's surface and what stays recipe-side:
 [docs/architecture.md](docs/architecture.md).

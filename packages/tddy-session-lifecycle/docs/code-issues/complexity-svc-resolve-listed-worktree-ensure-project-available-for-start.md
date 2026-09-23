@@ -6,7 +6,7 @@
 **Metrics:** **157 lines** · **nesting depth 8** · 1 parameters · 9 branch/match lines · 2 early exits
 **Thresholds breached:** length 157 > 60; nesting 8 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-09-23 (157 → 158 in #520, one re-wrapped field read) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 157 | 8 | 9 | 2 | first detection |
+| 2026-09-23 | 158 | 8 | — | — | +1 from #520 (`#carve` 11/12): the peer-project read goes through `self.peer_routing.eligible_daemon_source()`, which rustfmt splits over one more line. No control flow added: nesting and `return`/`?` count identical to master; branches not re-derived |
 
 ## What the tool found
 

@@ -14,6 +14,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-19 | 502 | first detection — **this PR pushed it over**, 398 → 502 |
+| 2026-09-23 | 520 | touched by #520 (`#carve` 11/12) and **unchanged by it** (one-line change: the room roster passed as a builder). 520 on master before #520 — the 502 → 520 growth predates it and is unattributed. The file has no `#[cfg(test)]`, so the count is its whole length |
 
 ## What the tool found
 

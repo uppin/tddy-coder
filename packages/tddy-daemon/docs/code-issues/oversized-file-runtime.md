@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-daemon/src/runtime.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate, independently on #498 and #518
-**Metrics:** **1521 production lines** · budget 500 · **~3× over** · residue function `build` is **833 lines**
-**Thresholds breached:** length 1521 > 500; `build` 833 > 60
+**Metrics:** **1513 production lines** · budget 500 · **~3× over** · residue function `build` is **833 lines**
+**Thresholds breached:** length 1513 > 500; `build` 833 > 60
 **Restructure:** required — three `extract_module --to_file` seams **plus** function splitting
 **Status:** Open — pre-existing; #498, #518 and #494 grew it and deferred with explicit developer consent
 
@@ -18,6 +18,7 @@
 | 2026-09-19 | 1482 | both merged |
 | 2026-09-22 | 1,519 | master before #494 |
 | 2026-09-22 | 1,521 | after #494 (`#carve` 8/11) — two lines |
+| 2026-09-23 | 1,513 | after #520 (`#carve` 11/12) — −8: `BinaryLocalSocketServices` names the four handler types in fewer lines, and the families' construction moved to `tddy-daemon-rpc`'s `RpcHandlers`; `build` itself unchanged at 833 |
 
 ## What the gate found
 

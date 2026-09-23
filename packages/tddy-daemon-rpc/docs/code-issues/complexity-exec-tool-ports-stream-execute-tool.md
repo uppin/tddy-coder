@@ -16,6 +16,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 73 | 5 | 6 | 8 | first detection |
 | 2026-09-23 | 82 | 5 | 6 | 8 | moved to `tddy-daemon-rpc`; length from re-wrapped field paths, not new logic |
+| 2026-09-23 | 82 | 5 | 6 | 8 | re-measured at the #520 wrap: unchanged since the move; still at `exec_tool/ports.rs:99`, nesting and early exits identical to the lifecycle original |
 
 ## What the tool found
 

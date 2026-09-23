@@ -46,6 +46,23 @@ version is a syntax-aware count — `tddy-tools analyze` already parses these fi
 Until then, a file with early `#[cfg(test)] use` lines needs its record's number taken by hand, and
 the record should say so.
 
+## Answered in part — 2026-09-23 (#520, `#carve` 11/12)
+
+The cheap approximation above — stop only at a `#[cfg(test)]` whose next line opens a `mod` — is
+what `packages/tddy-daemon-rpc/tests/rpc_handlers_shape.rs` uses to measure crate production lines
+(AC11/AC12 of #520), with `*_tests.rs`, `tests.rs` and `test_util.rs` excluded. **The `/pr-wrap`
+step 3.5 gate itself is unchanged** and still exits at the first `#[cfg(test)]` of any kind.
+
+The approximation is **not enough for this file**, which settles that it is not a fix for the gate:
+`connection_service.rs` interleaves out-of-line `#[cfg(test)] mod x_tests;` declarations with its
+production items, so the mod-aware cut stops at `#[cfg(test)] mod stack_child_spawn_tests;` at
+`:817` and reports **816** production lines, where excluding each `#[cfg(test)]` item individually
+gives **1,569** (1,647 total; production items continue to `:1618`). What would close this entry is
+therefore the robust version only: exclude `#[cfg(test)]` items one by one (syntax-aware, or at least
+attribute-plus-item), rather than cutting the file at any single line. The crate-level measurements
+of #520 used the mod-aware cut on both sides of the change, so its deltas compare like with like even
+where the absolute numbers undercount.
+
 ## Verified by hand
 
 2026-09-19: `count_prod` returns 43; `grep -n` shows production items at `:62`, `:67`, `:130`, `:233`,

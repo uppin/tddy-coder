@@ -3,8 +3,9 @@
 ## Overview
 
 The PR-stack data model and its git/GitHub operations: every writer of a session's
-`Changeset.stack`, the read-side views the orchestrator decides from, the per-PR documents, and the
-syncs that keep a node's branch and pull request in line with its place in the stack. Product
+`Changeset.stack`, the read-side views the orchestrator decides from, the per-PR documents, the
+syncs that keep a node's branch and pull request in line with its place in the stack, and the
+`pr_stack.PrStackService` handler trait the daemon implements. Product
 behaviour is specified in [pr-stacking.md](../../../docs/ft/coder/pr-stacking.md) and
 [pr-stack-docs.md](../../../docs/ft/coder/pr-stack-docs.md).
 
@@ -20,6 +21,8 @@ depends on this crate and re-exports every item from its historical path.
 | `tddy-git` | `detect_default_remote_name`, `worktree_path_for_branch`, `local_branch_name_for_remote`, `checked_out_branch_name` |
 | `tddy-github` | the PR REST client, `tddy_github::pr_api` (`GithubPrApi`, `GithubPrInsightApi`, `RealGithubPrApi`, `PrState`, `owner_repo_from_remote_url`) |
 | `tddy-workflow` | `session_artifacts_root`, which `docs::node_doc_paths` resolves the per-node document root from |
+| `tddy-rpc` | `Request`, `Response`, `Status`, `ServiceEntry` — the `rpc` module's handler signatures and transport entry |
+| `tddy-service` | the generated `pr_stack` proto types and the `PrStackService` server trait `PrStackServiceImpl` implements. Already reachable through `tddy-github`, so the edge adds no cycle |
 
 External: `log`, `async-trait`, `serde`. Dev-only: `tempfile`, `rstest`.
 
@@ -39,9 +42,21 @@ The last two guard the cuts that make the seam acyclic: moving `PrStackRecipe` w
 depend on the workflow machinery, and moving `reseed_stack_from_plan_if_unspawned` would drag
 `plan_pr_stack`, which is mutually referenced with the recipe-side `pr_stack` module.
 
+**It must never depend on `tddy-session-lifecycle` either.** The lifecycle crate names
+`PrStackHandler` from here so that it can reach the PR-stack family without depending on the crate
+that implements it (`tddy-daemon-rpc`); a dependency back would be a cycle.
+`packages/tddy-daemon-rpc/tests/rpc_handlers_shape.rs` asserts it:
+
+| Test | Asserts |
+|---|---|
+| `the_pr_stack_handler_trait_is_defined_by_the_pr_stack_crate` | `pub trait PrStackHandler` is declared in this crate's sources and not in `tddy-session-lifecycle`'s, whose `pr_stack_rpc.rs` is a re-export facade |
+| `the_pr_stack_crate_serves_its_own_rpc_family` | the `[dependencies]` table names `tddy-rpc` and `tddy-service`, which `PrStackServiceImpl` is built from |
+| `the_pr_stack_crate_depends_on_neither_the_lifecycle_crate_nor_the_recipes` | the `[dependencies]` table names neither `tddy-session-lifecycle` nor `tddy-workflow-recipes` |
+
 ## Modules
 
-All five top-level modules are `pub`; `lib.rs` declares them and nothing else.
+All six top-level modules are `pub`; `lib.rs` declares them and re-exports `rpc::PR_STACK_SERVICE`
+at the crate root.
 
 ### `stack_ops/` — the stack operations
 
@@ -95,6 +110,24 @@ Read-side shaping behind the `pr_read`, `pr_comments` and `pr_search` tools: `re
 in `tddy-tools` only resolve environment and serialize. `pr_number_from_status_url` parses a pull
 number out of a node's `pr_status.url` — the one identity a node's PR has — and
 `pull_number_for_node` applies it to a stack node.
+
+### `rpc.rs` — the PR-stack RPC family
+
+The one transport-facing module: family P's handler trait, its service adapter and its transport
+entry, defined beside the data model they serve.
+
+| Item | What it is |
+|---|---|
+| `PR_STACK_SERVICE` | the coordinate, `"pr_stack.PrStackService"` |
+| `PrStackHandler` | the eight RPCs the host process answers — `add_planned_pr`, `get_pr_status`, `query_branch`, `resolve_stack_base`, `link_stack_node`, `repoint_planned_pr`, `reorder_planned_pr`, `pull_base_into_branch` |
+| `PrStackServiceImpl<H>` | the thin `PrStackService` adapter over an `Arc<H: PrStackHandler>` (`new(host)`) |
+| `build_pr_stack_entry(service)` | registers `pr_stack.PrStackService` on the RPC transport |
+
+The daemon's implementation is `tddy_daemon_rpc::PrStackRpcHandler`
+([tddy-daemon-rpc](../../tddy-daemon-rpc/docs/architecture.md)). `tddy-session-lifecycle` names the
+trait for session start's stack-base and stack-link paths, and re-exports the trait, adapter and
+entry builder from `pr_stack_rpc` and its crate root; `tddy-workflow-recipes` re-exports
+`PR_STACK_SERVICE`.
 
 ## What stays in `tddy-workflow-recipes`
 

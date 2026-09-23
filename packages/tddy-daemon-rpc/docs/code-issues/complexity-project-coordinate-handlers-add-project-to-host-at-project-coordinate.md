@@ -1,7 +1,7 @@
 # complexity: add_project_to_host_at_project_coordinate
 
-**Location:** `packages/tddy-daemon-rpc/src/project/coordinate_handlers.rs:190` — `add_project_to_host_at_project_coordinate` (now on `ProjectRpcHandler`)
-**Moved:** 2026-09-23 by #520 (#carve 11) — from `packages/tddy-session-lifecycle/src/connection_service/project_coordinate_handlers.rs:189`, body unchanged
+**Location:** `packages/tddy-daemon-rpc/src/project/coordinate_handlers.rs:186` — `add_project_to_host_at_project_coordinate` (now on `ProjectRpcHandler`)
+**Moved:** 2026-09-23 by #520 (#carve 11) — from `packages/tddy-session-lifecycle/src/connection_service/project_coordinate_handlers.rs:189`; body unchanged except crate paths (`crate::livekit_peer_discovery` → `tddy_daemon_livekit::…`, `hooks_and_urls::` → `entries::`), which rustfmt re-wraps (178 → 174 lines)
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **178 lines** · **nesting depth 6** · 1 parameters · 9 branch/match lines · 15 early exits
@@ -16,6 +16,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 178 | 6 | 9 | 15 | first detection |
+| 2026-09-23 | 174 | 6 | 9 | 15 | moved to `tddy-daemon-rpc` by #520, at `project/coordinate_handlers.rs:186`; −4 lines is rustfmt re-wrapping the shortened paths (`hooks_and_urls::` → `entries::`, `service_util::` dropped), no logic change. Nesting and early exits identical to the lifecycle original |
 
 ## What the tool found
 
