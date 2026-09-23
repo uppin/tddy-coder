@@ -81,8 +81,11 @@ issues are both resolved before the final split.
     - The three `strip_resize` copies become one in `tddy-terminal-rpc`.
   - Close or narrow each of the 16 `docs/code-issues/` records by re-measuring it.
 - **Phase 2 — final split:**
-  - Introduce a per-topic state or port struct wherever a topic's code reaches `DaemonSessionHost`'s
-    private fields, following #520's `handler_state` pattern.
+  - Introduce a per-topic state struct plus a callback trait wherever a topic's code reaches
+    `DaemonSessionHost`'s private fields or calls another topic. The **receiver** defines both,
+    lifecycle builds the state from host fields, and lifecycle implements the trait. This is the
+    inverse of #520's `from_host`, which only works for a crate *above* lifecycle. See
+    "Phase 2 design".
   - Move each topic to its receiver (State B).
   - Leave a facade for every public `tddy_session_lifecycle::…` path.
   - Move the tests with their code.
@@ -110,7 +113,7 @@ issues are both resolved before the final split.
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
 | `12` core-split (#522) | `tddy-core` as facades over nine crates | lifecycle keeps naming `tddy_core::…`, and those paths resolve through #522's facades | touch `tddy-core` or the nine crates, or repoint lifecycle's `tddy_core::` imports |
-| `11` rpc-handlers (#520, **merged**) | the four RPC families in `tddy-daemon-rpc`; `handler_state.rs`; `PrStackHandler` in `tddy-pr-stack` | phase 2 follows the `handler_state` pattern for every topic | move anything more into `tddy-daemon-rpc` without checking its 10k budget |
+| `11` rpc-handlers (#520, **merged**) | the four RPC families in `tddy-daemon-rpc`; `handler_state.rs`; `PrStackHandler` in `tddy-pr-stack` | phase 2 inverts that pattern: receivers sit below lifecycle, so each defines its own state struct and callback trait | move anything into `tddy-daemon-rpc`, because it depends on lifecycle and a facade over it is impossible |
 
 ## Draft PR contract
 
@@ -151,6 +154,7 @@ node.
 - [ ] ⛔ Characterisation tests for `start_sandboxed_cursor_cli_session`
 - [ ] Warm index started (`./run-index-daemon`); every plan passes `restructure check --deep` before `apply`
 - [ ] `MpscResultStream` deduplicated; `activity_delta_frames` removed
+- [ ] Misplaced code moved to its topic's file, so phase 2 moves carry no stowaways (see "Phase 2 design")
 - [ ] `connection_service.rs` split (placement, split_start, attachment_progress, managed_launch, stack_parent, spawn handlers, agent_roster)
 - [ ] `spawn_claude_cli_session_inner` → `cli_spawn/claude.rs`; `cursor_cli_spawn` → `cli_spawn/cursor.rs` + `chat.rs` + `resume.rs`
 - [ ] `cli_spawn/common.rs` + `CliSpawnRequest` (the only behaviour-sensitive step in the CLI group)
@@ -165,8 +169,9 @@ node.
 - [ ] All 16 code-issue records re-measured and deleted or narrowed
 
 **Phase 2 — final split** (starts only when every phase 1 box is ticked)
-- [ ] Per-topic state/port structs (the `handler_state` pattern)
-- [ ] Each topic moved to its receiver (State B); receivers ≤ 10k, none depends on lifecycle
+- [ ] The three cross-topic cycles cut: agent-def resolution moves down into `tddy-session-agents` (T1↔T3); a `SplitHost` port (T1↔T4); callback ports for T3→T2 and T4→T2
+- [ ] Per-topic state structs + callback traits, defined in each receiver (the inverted pattern)
+- [ ] Topics moved leaves-first, in the order under "Phase 2 design"; receivers ≤ 10k, none depends on lifecycle
 - [ ] `tddy-session-lifecycle` is wiring only; facades cover every public path; consumers unedited
 - [ ] Tests moved with their code; baseline back to the recorded numbers
 
@@ -194,29 +199,99 @@ and 7 functions of 243–857 lines. Topic sizes and per-file seams are in the di
 | `svc_spawn_split_agent.rs` 520 | + `svc_paired_codebase_teardown.rs` | ~375 |
 | `svc_resolve_tddy_tools_path.rs` 475 | + `svc_host_builders.rs` | ~120 |
 
-### State B — phase 2 (proposed receivers; confirmed after phase 1)
+### State B — phase 2 (receivers, checked 2026-09-23)
 
-| Topic | Production today | Proposed receiver | Receiver after |
-|---|---:|---|---:|
-| 1 Agent CLI start/resume (with `cli_spawn`, `cli_session_manager`, sandboxed starts) | 6,398 (less after dedup) | new `tddy-agent-launch` | ≤ ~6k |
-| 4 Split and sandboxed-codebase | 1,981 | new `tddy-session-split` (the working name from memory) | ~2k |
-| 3 Agent clones and roster | 2,746 | `tddy-session-agents` (3,592) | ~6.3k |
-| 8 Attachments | 919 | `tddy-session-files` (3,639) | ~4.6k |
-| 10 Activity ports | 625 | `tddy-session-activity` (1,573) | ~2.2k |
-| 5 Session catalog | 1,397 | `tddy-session-catalog` (747) | ~2.1k |
-| 6 Terminals / PTY runtime / tasks / actions | 1,314 | `tddy-terminal-rpc` (2,348), plus the tasks/actions RPCs to be decided | ~3.6k |
-| 7 Routing / peers / admission | 930 | `tddy-daemon-kernel` (2,880) | ~3.8k |
-| 9 Stack spawns | 814 | to be decided: `tddy-session-split` or its own crate, since `tddy-pr-stack` risks a cycle | — |
-| 11 Demo VM | 302 | `tddy-daemon-rpc` (3,447) | ~3.7k |
-| 2 RPC host core | 3,472 | **stays**, as the wiring: host struct, construction, port impls, facades | target ≤ ~1.5k |
+Checked read-only against every `Cargo.toml`, with host coupling measured at function level. The first
+draft of this table placed four topics in blocked receivers. This version replaces it.
 
-**Wiring crate, defined:**
-- no file ≥ 500 production lines;
-- no function beyond construction, delegation and port impls;
-- target ≤ ~1.5k production lines.
+| Topic | Production | Receiver | Verdict | Receiver after |
+|---|---:|---|---|---:|
+| 1 Agent CLI start/resume, **plus 9 stack spawns, `session_toolcall`, and the start/resume/connect parts of `session_coordinate_handlers`** | ~7.5k (~7k after phase 1 dedup) | new `tddy-agent-launch` | viable. It sits above every other receiver and reaches the host through `LaunchHost` | ~7k |
+| 3 Agent clones and roster, **plus agent-def resolution** (`svc_resolve_listed_worktree.rs`, 445) | ~3.2k | `tddy-session-agents` (3,601) | needs a port (`AgentHostCallbacks`). New edges: `tddy-daemon-sandbox`, `tddy-projects`, `tddy-semantic-index`, `tddy-stdio`. No cycle | ~6.1k |
+| 4 Split and sandboxed-codebase | ~2.2k | new `tddy-session-split` | needs `SplitHost`. It must sit **below** lifecycle, because the facades need lifecycle → receiver. Fallback: merge into agent-launch (~8.9k, no headroom) | ~2.2k |
+| 8 Attachments | 919 | `tddy-session-files` (4,606) | viable once the attachment fns leave `svc_resolve_os_user.rs:117-188`. New edge: `tddy-daemon-livekit` | ~5.1k |
+| 10 Presenter observation (`presenter_observer_task`, `presenter_intent_client`) | ~220 | `tddy-session-activity` | viable. `PeerRoutedActivity` stays as wiring | — |
+| 5a Session catalog, CLI-safe half (`user_sessions_path`, `session_reader`) | ~200 | `tddy-session-catalog` | viable. It adds nothing new to `tddy-coder`'s dependency graph | ~0.95k |
+| 5b Session catalog, daemon half (`session_deletion`, `workspace_session`, `session_list_enrichment`, `session_notifications`) | ~1.2k | `tddy-session-activity` | viable. It would pull `tddy-daemon-sandbox`, `-livekit`, `tddy-telegram` and friends into `tddy-coder`, so it **cannot** go to catalog | ~3.0k |
+| 6a `pty_runtime`, `tddy_user_config` | ~180 | `tddy-terminal-rpc` | viable, with one new edge to kernel | ~2.6k |
+| 6b `task_service`, `action_service` | ~700 | `tddy-daemon-sandbox` (2,531) | viable with **zero new edges**. `tddy-task` and `tddy-actions` both cycle, and `tddy-daemon-rpc` sits above lifecycle | ~3.2k |
+| 6c `terminal_session_adapter`, `terminal_bridge_impl` | ~270 | **stay** as wiring | they need `CliSessionManager` and the sandbox stack | — |
+| 7 Routing, peers, OS user, admission | ~800 | `tddy-daemon-livekit` (5,333) | viable. **Not `tddy-daemon-kernel`**, which cycles via livekit, host-service, worktree-service and session-files → kernel | ~6.1k |
+| 7' `relay_idle`, `local_token_tonic_adapter` | ~120 | `tddy-daemon-kernel` | viable | — |
+| 11 Demo VM | 302 | `tddy-demo-runner` (158), or `tddy-vm`, which already has `build_demo_vm_entry` | viable. **Not `tddy-daemon-rpc`**: it depends on lifecycle, so the facade for `DemoVmServiceImpl`/`demo_vm_entry()` (used by `tddy-daemon/src/runtime.rs:282,1046,1141`) is impossible | ~0.5k |
+| 2 Host struct, builders, ports, `PeerRouted*`, adapters, `SessionHandler`/`SessionService` impls, `daemon_rpc_handler`, facades | — | **stays** | wiring | see below |
 
-The exact number is the developer's to confirm.
+### Phase 2 design
 
+**Cross-topic cycles.** These must be cut before anything moves:
+
+| Cycle | Cut |
+|---|---|
+| T1 ↔ T3 | T3 calls `resolvable_agent_defs` and `agent_def_for_spawn` (`svc_start_hosted_agent_clone.rs:245,288`, `svc_turn_end_reporter.rs:72`). Move agent-def resolution down into `tddy-session-agents`, so that T1 → T3 only |
+| T1 ↔ T4 | `svc_start_session_core.rs:193,198` dispatches into split, and split re-enters `start_session_core`. Add a `SplitHost::start_workspace_session` port |
+| T3 → T4 | a single constant getter, `split_forward_deadline` (`svc_provision_agent_clone.rs:99`). Move it to kernel |
+| T3 → T2 and T4 → T2 | `worktree_snapshot` (`agent_roster.rs:40`) and `delete_session` (`svc_spawn_split_agent.rs:449`) re-enter the host's handlers. Callback traits |
+
+T5, T6, T7 and T10 are **leaves**: they call no other topic.
+
+**The port pattern is inverted.** #520's `from_host(&DaemonSessionHost)` works because `tddy-daemon-rpc`
+sits above lifecycle. Every phase 2 receiver sits **below** it. So each receiver defines a state
+struct and a callback trait, and lifecycle builds the struct from its fields and implements the
+trait. This is the `SessionFilesPorts`/`SessionAgentPorts` shape `#unbundle` already uses.
+
+| State struct | Fields | Callback trait |
+|---|---|---|
+| `AgentLaunchState` | T1's 13 fields plus handles to the roster, split and attachment states | `LaunchHost { sandbox_rpc_handler(); pr_stack() }` |
+| `AgentRosterState` | `config`, `tddy_data_dir`, `user_resolver`, `peer_routing`, `room_roster`, `session_rooms`, `session_agent_rosters`, `session_agent_clones`, `hosted_agent_clones`, `roster_keepalive_interval` | `AgentHostCallbacks { worktree_snapshot; run_exec_tool_locally; local_exec_tools }` |
+| `SplitState` | `config`, `tddy_data_dir`, `session_rooms`, `workspace_sandboxes` | `SplitHost { start_workspace_session; delete_session; session_room_services; agent_tool_socket }` |
+| `AttachmentState` | `config`, `tddy_data_dir`, `staging_base_dir`, `peer_routing` | — (calls T7 directly) |
+| `AdmissionState`, `OsUserResolver` | `session_admissions`, `session_rooms`, `user_resolver`, `config`, `tddy_data_dir` | — |
+| `PresenterObserverDeps` | `tddy_data_dir`, `presenter_event_sink`, `session_notification_bus` | — |
+| `DemoVmState` | `vms`, `tddy_data_dir`, `user_resolver`, `rpc_activity` (`DemoVmHandle` leaves `activity_hub.rs`) | — |
+
+**Misplaced code, relocated in phase 1** so the phase 2 moves carry nothing from another topic:
+
+- `start_split_claude_cli_session` (T4) is in `svc_materialize_staged_attachment.rs:270`.
+- The attachment fns (T8) and `run_exec_tool_locally` are in `svc_resolve_os_user.rs:117-188`.
+- `session_dir_for` and `ensure_session_room` are in `svc_resolve_listed_worktree.rs:365,385`.
+- The jail and subagent env builders are in `svc_turn_end_reporter.rs:176,211`.
+- `svc_resolve_tddy_tools_path.rs` holds host builders, plus `record_rpc_activity`:420,
+  `mint_first_admission_token`:218 and `maybe_spawn_presenter_observer`:432.
+
+**Move order (leaves first):**
+1. `relay_idle` and `local_token` → kernel; demo VM → demo-runner
+2. T6 (6a, 6b)
+3. T10
+4. T7 → daemon-livekit
+5. T8
+6. T5a and T5b
+7. T3 plus agent-defs
+8. T4 behind `SplitHost`
+9. T1 + T9 + the coordinate handlers → agent-launch
+
+### What "wiring only" can reach
+
+The **wiring floor is ~3.9k**, not ≤1.5k:
+
+| Part | Lines |
+|---|---:|
+| Ports | ~1.5k (`PeerRouted*` ~0.77k, adapters ~0.45k) |
+| Builders | ~0.48k |
+| Struct and `mod` decls | ~0.3k |
+| `lib.rs`, `handler`, `service`, lifecycle ports, `daemon_rpc_handler` | ~0.66k |
+| `test_util` | 0.37k |
+| `service_util` | 0.13k |
+| Terminal adapter and bridge | 0.27k |
+
+| If also… | Lifecycle ends at |
+|---|---:|
+| nothing more | ~3.9k |
+| `test_util` gated or moved to a testkit, `service_util` moved down | ~3.4k |
+| + the `PeerRouted*` wrappers moved down behind a forwarding port (developer's call, see Boundaries) | ~2.6k |
+| + adapters as receiver-side impls, builders collapsed | ≤ ~1.5k |
+
+**Wiring crate, defined:** no file ≥ 500 production lines, and no function beyond construction,
+delegation and port impls. The size target is **the developer's to choose** from the table above.
 ### Callers
 
 - `tddy-daemon-rpc/tests/*` use the placement types: keep `pub use`.
@@ -243,7 +318,16 @@ After every seam the same numbers come back.
   are resolved before the final split.
 - **Dedupe by extract-method with explicit parameters, not by a new abstraction.** Lowest behaviour
   risk.
-- **`PeerRouted*` stays** unless the developer approves the forwarding port.
+- **`PeerRouted*` stays** unless the developer approves the forwarding port. That decision is worth
+  ~0.8k lines of the wiring floor (see "What wiring only can reach").
+- **Receivers were chosen by the dependency graph, not by topic name** (checked 2026-09-23). Four
+  first-draft placements were cycles or layering breaks:
+  - routing → kernel is a cycle;
+  - demo VM → `tddy-daemon-rpc` makes the facade impossible;
+  - the whole catalog topic → `tddy-session-catalog` drags daemon crates into `tddy-coder`;
+  - the whole terminals topic → `tddy-terminal-rpc` drags the sandbox stack into `tddy-coder`.
+- **`tddy-session-split` sits below lifecycle**, not above it as memory `carve-size-target-10k` first
+  proposed. A crate above lifecycle cannot be re-exported by it.
 
 ## Refactoring needed
 
