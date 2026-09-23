@@ -45,8 +45,9 @@
   a split session must **say** it is committed-only rather than mirror silently stale content.
 - **`MintLiveKitToken` cannot grant a session room.** It grants the daemon's `common_room` and only
   that (`packages/tddy-daemon/src/auth.rs`), so a client that must join `session-{id}` has to hold
-  `LIVEKIT_API_SECRET` and mint for itself — which is the fleet's session-token signing key, and
-  therefore a real widening of the client trust surface versus `tddy-remote-git-repo`. Closing it
+  `LIVEKIT_API_SECRET` and mint for itself — a credential that admits it to any room under any
+  identity, a daemon's included, and therefore a real widening of the client trust surface versus
+  `tddy-remote-git-repo`. (It stopped being the session-token signing key at `#keyring` 1/9.) Closing it
   means a mint that takes a session id and grants that room to a caller authorized for that session,
   which needs the room-ownership model recorded under *Remote git repo over LiveKit* below.
 - **`StreamReadWorktreeFile` duplicates `StreamReadHostDocument`'s `SESSION_WORKTREE` scope.** Two

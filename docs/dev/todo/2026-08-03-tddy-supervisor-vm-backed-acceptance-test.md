@@ -61,11 +61,10 @@ Design settled during reconnaissance, so this is implementation rather than open
 
 Two traps found while surveying, worth carrying:
 
-- **`livekit.api_secret` *is* the session-token HMAC secret.** Setting `livekit: None` is not the clean
-  escape it looks like: with no secret the guest daemon returns `Unauthenticated` for every RPC with no
-  fallback. A secret must be configured even if LiveKit is never used — and since the harness chooses
-  it, the host can mint its own access tokens with `SessionTokenSigner`, or use the `github: { stub:
-  true }` provider.
+- ~~**`livekit.api_secret` *is* the session-token HMAC secret.**~~ No longer true since `#keyring` 1/9:
+  the guest daemon signs session tokens with an Ed25519 key it generates for itself, so `livekit:
+  None` no longer leaves it unable to authenticate — but the host can no longer mint the guest's
+  tokens either. Sign in through the `github: { stub: true }` provider instead.
 - **`daemon_config_yaml` in `tddy_host.rs` emits no `github:`, `users:` or `supervisor:` block**, so
   guest config emission has to be extended or written directly.
 

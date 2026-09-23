@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-session-lifecycle/src/split_session.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 — `/pr-wrap` step 3.5 file-length gate
-**Metrics:** **645 production lines** (1,549 total) · budget 500
-**Thresholds breached:** length 645 > 500
+**Metrics:** **647 production lines** (2026-09-23; 645 at detection) · budget 500
+**Thresholds breached:** length 647 > 500
 **Restructure:** `extract_module --to_file` — single seam, designed, not applied
 **Status:** Open — **unclaimed** · **the cheapest of the eight**
 
@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-19 | 645 | 605 → 645 in this PR (`colocated_jail_tool_env` + its tests) |
+| 2026-09-23 | 647 | master 651 → 663 in #508's first cut (`#keyring` 1/9: the agent credential minted from `SessionTokens`), back to 647 after its `/pr-wrap` refactor (`verified_caller` formats its refusal once; `split_remote_tool_env` takes the spawn target) — split deferred to a follow-up after #keyring lands because dependents #509–#513 touch it |
 
 ## What would close it — designed seam
 

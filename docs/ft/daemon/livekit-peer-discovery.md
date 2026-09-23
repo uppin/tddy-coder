@@ -22,10 +22,14 @@ Spawned sessions continue to use **`livekit.common_room`** for collaboration whe
 
 Membership in the configured LiveKit room (same project credentials and **`common_room` name) defines the peer group. Any participant that can join may appear in **ListEligibleDaemons** and receive a forwarded **StartSession** carrying the full RPC body, including **`session_token`**. Operators rely on a private LiveKit project, restricted network access, and trusted hosts—there is no separate cryptographic attestation that a participant runs **`tddy-daemon`**.
 
+**Who may be taken for a daemon.** A peer's advertisement is self-declared metadata, and since `#keyring` 1/9 it carries the public key that peer signs session tokens with — every daemon verifies the peer's tokens against it. So discovery reads an advertisement only from an identity **no client-facing mint hands out**: browser (`web-…`, `browser-…`), coder/session (`server…`, `daemon-…`), split-agent (`split-agent-…`) and remote-git (`remote-git-…`) participants are never daemons, whatever they publish, and `token.TokenService` refuses to mint any identity outside those prefixes. Both sides read one rule (`tddy_service::may_be_daemon_discovery_identity`), so an advertised key is only ever believed from an identity a daemon minted for itself — a signed-in web user cannot join the common room under a bare id, advertise a keypair of its own and forge tokens for another login. A participant holding the LiveKit API secret can still join under any identity; that credential stays with operators and the processes a daemon spawns.
+
+**Key ids are content-addressed.** When several participants advertise one key id, the verifier keeps the one whose key hashes to it, so a re-advertised id cannot shadow the genuine key; and a key once learned is remembered across a reconnect (an id names exactly one key, forever), so peers' tokens keep verifying while the roster is momentarily empty.
+
 ## Eligible daemon rows
 
 - **Local row:** **`instance_id`** from config/default, **`label`** identifies this daemon, **`is_local: true`**.
-- **Remote rows:** Parsed from peer metadata JSON when present; otherwise **`instance_id`** falls back to the LiveKit participant identity string.
+- **Remote rows:** Parsed from peer metadata JSON; a participant with no valid advertisement is not a peer (there is no identity fallback), and one under a non-daemon identity prefix is not a peer even with one.
 - **Duplicates:** The list contains at most one row per **`instance_id`**; the local id is never duplicated as a remote row.
 - **Disconnects:** The registry refreshes on participant events and on a short periodic resync so disconnected peers drop out within a bounded window after LiveKit signals leave.
 

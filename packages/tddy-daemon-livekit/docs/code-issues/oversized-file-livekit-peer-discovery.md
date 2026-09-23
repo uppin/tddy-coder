@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-daemon-livekit/src/livekit_peer_discovery.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 — `/pr-wrap` step 3.5 file-length gate
-**Metrics:** **1,565 production lines** (2,119 total) · budget 500 · **3.1× over**
-**Thresholds breached:** length 1565 > 500
+**Metrics:** **1,638 production lines** (2026-09-23; 1,565 at detection) · budget 500 · **3.3× over**
+**Thresholds breached:** length 1638 > 500
 **Restructure:** three `extract_module --to_file` seams, one per plan — designed, not applied
 **Status:** Open — **unclaimed**
 
@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-19 | 1565 | 1520 → 1565 in this PR (`SandboxedCodebaseSupport` + the advertisement) |
+| 2026-09-23 | 1,638 | master 1,565 → 1,638 after #508 (`#keyring` 1/9: the signing-key advertisement fields, `AdvertisedSigningKey`, `peer_signing_public_keys`, the shared identity rule) — grown by #508; split deferred to a follow-up after #keyring lands because dependents #509–#513 touch it |
 
 ## What would close it — designed seams
 

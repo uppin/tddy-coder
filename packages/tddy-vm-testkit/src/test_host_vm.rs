@@ -33,12 +33,16 @@ const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
 /// keeps it if it already exists.
 const GUEST_DAEMON_CONFIG: &str = "/etc/tddy/daemon.yaml";
 
-/// The HMAC secret the guest daemon signs session tokens with.
+/// The LiveKit API secret written into the guest daemon's `livekit:` block.
 ///
-/// `livekit.api_secret` doubles as that secret, so leaving the block absent is not the
-/// clean escape it looks like: with no secret the daemon answers `Unauthenticated` to
-/// every RPC and has no fallback. It is configured here even though LiveKit is never used,
-/// and exposed so the host can mint its own tokens against it.
+/// Named for what it used to be: until `#keyring` 1/9 `livekit.api_secret` was also the key the
+/// daemon signed session tokens with, and this block existed so the daemon could authenticate at
+/// all. That is no longer true — the guest daemon signs session tokens with an Ed25519 key it
+/// generates for itself, and the host cannot mint them against this value.
+///
+/// TODO(keyring): the block is now a LiveKit room credential for a guest that never uses LiveKit.
+/// Rename this, or drop the block, once a VM-backed run (`./vm-tests`) confirms the guest's
+/// suites do not depend on it — they are not runnable in the change that made it stale.
 pub const SESSION_TOKEN_SECRET: &str = "tddy-testkit-session-secret";
 
 /// A provisioned test host, ready to be asserted against.
@@ -218,14 +222,15 @@ impl TestHostVm {
         self.configure_session_token_secret(progress).await
     }
 
-    /// Give the daemon a session-token secret and restart it.
+    /// Give the daemon a `livekit:` block (see [`SESSION_TOKEN_SECRET`] for why it is still here)
+    /// and restart it.
     ///
     /// Appended after the install rather than written before it: the rendered config
     /// carries the `__INSTALL_*__` substitutions this testkit has no business
     /// reproducing, and the `livekit:` block is commented out in the template, so there is
     /// no key to collide with.
     async fn configure_session_token_secret(&self, progress: &(dyn Fn(&str) + Sync)) -> Result<()> {
-        progress("configuring the session-token secret and restarting the supervisor");
+        progress("configuring the livekit block and restarting the supervisor");
         self.guest
             .run_over_ssh(&format!(
                 "set -e; printf '\\nlivekit:\\n  url: \"ws://127.0.0.1:7880\"\\n  api_key: \

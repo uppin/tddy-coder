@@ -524,9 +524,10 @@ is recorded in `docs/dev/TODO.md` instead.
 
 ### Preconditions
 
-Both daemons must already share `livekit.api_secret` and the same `livekit.common_room` — the
-former because session tokens are stateless HMACs verifiable only by daemons holding the same
-secret, the latter because peer routing and the tool RPC both ride that room. The authenticated
+Both daemons must already share the same `livekit.common_room` (and the LiveKit credentials to
+join it): peer routing and the tool RPC both ride that room, and it is where each daemon advertises
+the public key it signs session tokens with, so B verifies A's tokens against A's advertised key —
+no secret is shared for authentication. The authenticated
 GitHub user must map to an OS user on **both** daemons; B runs the tools as its own mapped user.
 
 ### Trust model

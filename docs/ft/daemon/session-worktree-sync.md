@@ -413,11 +413,12 @@ Why raw LiveKit credentials here when `tddy-remote-git-repo` deliberately has no
 room to an authorized caller, a client that must be in that room has to mint for itself.
 
 > ⚠️ **This is a real widening of the client trust surface, recorded rather than hidden.**
-> `LIVEKIT_API_SECRET` is the same value a daemon signs session tokens with, so a host running
-> `tddy-session-sync` holds a credential that could mint an access token for any GitHub user on the
-> fleet. The syncer never does this — it takes a daemon token like every other client — but holding
-> the secret makes it *possible*, which is precisely what `remote-git-repo.md` § Trust model
-> refused for the git shim. Closing it means extending `MintLiveKitToken` to grant a session room
+> `LIVEKIT_API_SECRET` mints a room JWT for any room under any identity, so a host running
+> `tddy-session-sync` holds a credential that could join the common room as a daemon — and be
+> handed other participants' calls, or advertise a signing key peers would believe. (It no longer
+> signs session tokens; each daemon signs those with a key of its own.) The syncer never does this —
+> it takes a daemon token like every other client — but holding the secret makes it *possible*,
+> which is precisely what `remote-git-repo.md` § Trust model refused for the git shim. Closing it means extending `MintLiveKitToken` to grant a session room
 > to a caller authorized for that session; see `docs/dev/TODO.md`.
 
 ## Non-goals

@@ -10,9 +10,9 @@
 //! byte.
 //!
 //! The client holds a daemon token and a daemon URL and nothing else. It cannot mint a LiveKit
-//! token, because `livekit.api_secret` is also the HMAC key session tokens are signed with — the
-//! fixture uses exactly that secret for both, so a client that could reach it here could forge an
-//! access token for any GitHub user.
+//! token, because `livekit.api_secret` admits its holder to any room under any identity — a
+//! daemon's included — so the daemon mints the client's room JWT itself, under an identity of its
+//! choosing. (Session tokens are signed with the daemon's own key, not with that secret.)
 //!
 //! Requires a LiveKit server (`LIVEKIT_TESTKIT_WS_URL`, or Docker for the testcontainers path) and
 //! a built `tddy-remote-git-repo`. Each test gets its own room and daemon identity; the suite still

@@ -3,9 +3,9 @@
 //!
 //! There are only two of them — the daemon's address and one daemon token. The LiveKit room, URL
 //! and JWT all come back from `auth.LiveKitTokenService/MintLiveKitToken`, which is what keeps
-//! `LIVEKIT_API_SECRET` off this side of the wire: that secret is also the HMAC key every daemon
-//! signs session tokens with, so a client holding it could mint an access token for any GitHub
-//! user on the fleet.
+//! `LIVEKIT_API_SECRET` off this side of the wire: that secret mints a room JWT for any room under
+//! any identity, so a client holding it could join the common room as a daemon and be handed other
+//! participants' calls. (Session tokens are signed with each daemon's own key, not with it.)
 //!
 //! See docs/ft/daemon/remote-git-repo.md § Credentials.
 
