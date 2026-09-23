@@ -114,6 +114,64 @@ The developer also decided:
 | host builders, plus `record_rpc_activity`:420, `mint_first_admission_token`:218, `maybe_spawn_presenter_observer`:432 | `svc_resolve_tddy_tools_path.rs` | `svc_host_builders.rs`, routing, admission, activity |
 | `ManagedWorkflow` (`session_toolcall`) | host core | agent launch |
 
+## Restructure plans (proven 2026-09-23)
+
+The plans are in [`2026-09-23-carve-lifecycle-wiring-plans/`](./2026-09-23-carve-lifecycle-wiring-plans/),
+one JSONL per seam group, and nothing has been applied yet. Each was run through
+`tddy-tools restructure check --deep` against a warm index. The cold index took 7m10s; after that,
+clean checks took 2–14 s.
+
+| Plan | Target | `--deep` |
+|---|---|---|
+| `01-connection-service-clusters` (10 × `extract_module`) | `connection_service.rs` | ⛔ all refused: import loop (defect E1) |
+| `02-cli-session-manager-dir` (9 seams) | `cli_session_manager.rs` | ⛔ 5 of 9 refused (E3, and a grouped `use`) |
+| `02a` clean subset (pty_handle, relaunch, control_lease, livekit_terminals) | same | ✅, leaving ~1,045 |
+| `03-cursor-cli-spawn` (chat, resume) | `cursor_cli_spawn.rs` | ✅ → ~366 |
+| `04-split-session` / `04a` (credentials only) | `split_session.rs` | ⛔ `agent_argv` (placeholder in a test module) / ✅, leaving ~551 |
+| `05` / `05a` (teardown only) | `svc_spawn_split_agent.rs` | ⛔ extract-methods (E2) / ✅ → ~366 |
+| `06-ports-files` | the two ports files | ✅ → ~118 and ~209 |
+| `07-host-builders` | `svc_resolve_tddy_tools_path.rs` | ✅ → ~74 (new file ~401) |
+| `08-session-coordinate-handlers` | `session_coordinate_handlers.rs` | ⛔ import loop (E1) |
+| `09-sandboxed-claude-extract-methods` (8 ops) | `svc_start_sandboxed_claude_cli_session.rs` | ✅. The file stays long until the helpers are moved out |
+| `10` / `10a` (`spawn_tddy_coder` only) | `svc_start_session_core.rs` | ⛔ 5 of 6 (E2) / ✅ |
+
+**Engine defects that block the largest seams:**
+
+- **E1 — the import pass loops forever** (`tddy-code-restructuring` `backends/rust.rs`, `next_import`).
+  - It collects unresolved names from the whole file, not just the new module. Its alias and
+    parent-binding branches return an import without checking it, and never mark the name as
+    unimportable, so it writes the same `use` 512 times.
+  - Likely trigger: `use start_session_event::Event as StartSessionEventKind`.
+  - Blocks all of `01` and `08`, which is every seam in `connection_service.rs` and
+    `session_coordinate_handlers.rs`.
+- **E2 — extract-method signatures come out `req: _`.** rust-analyzer leaves the session proto types
+  untyped (`StartSessionRequest` becomes `_` or `&_`). This happened 3 times against a warm index, so
+  the engine's "retry" advice is wrong. The suspected cause, unconfirmed, is the generated `session.rs`
+  included from `OUT_DIR`. It blocks every extract-method that reads `req` in `start_session_core` and
+  `spawn_split_agent`, and probably `resume_session_at_session_coordinate`.
+- **E3 — a seam cutting an `impl` is refused too eagerly.** Calls like `self.method()` in the same file
+  count as "would resolve nowhere", although method calls resolve from anywhere. Workaround: split
+  the `impl` by hand at the seam, adding only `}` / `impl X {` lines, then move whole `impl` blocks.
+
+**What the engine cannot express**, so it is done by hand and recorded:
+
+- **Folding code into an existing sibling file.** The name-collision check refuses it. Plan `01` writes
+  new files instead (`stack_seed_validation`, `stack_child_spawn`, `conversation_spawn`,
+  `roster_replacement`).
+- **Moving code to a module under a different parent.** `cli_spawn/{claude,cursor}.rs` needs a
+  `git mv` after `01` and `03`.
+- **Seams that are not contiguous.** `WorktreeSource` becomes its own file; `split_session`'s
+  constants and `ControlLeaseInfo` stay where they are.
+- **All the DRY rows.** Every one is a hand edit.
+- **Order.** Extract-methods compose only when a plan runs them **bottom-up**; top-down is refused.
+  `09` and `10` are ordered that way.
+
+**Plans that can only be finished after earlier applies:**
+- resume and list, after `08`;
+- moving the `09`/`10` helpers out, after the `impl` hand-split;
+- the CLI spawn extract-methods;
+- the relocations of misplaced code.
+
 ## Boundaries
 
 - **No behaviour change.** The recorded baseline is re-run with zero regressions after every seam.
@@ -154,6 +212,7 @@ call (2026-09-23), and records them by name if they are still red.
 | Item | Verdict | What this change does about it |
 |---|---|---|
 | #522 not yet green (3 known failures) | ⛔ **BLOCKING the baseline** | The baseline is taken later; it records the 3 by name if still red |
+| Engine defects E1 (import loop), E2 (`req: _`), E3 (`impl`-seam refusal), in "Restructure plans" | ⛔ **BLOCKING** the seams they refuse | **The developer decides**: fix `tddy-code-restructuring` first (its own node below this one), or hand-split the refused seams (`git mv` plus `use` fixes, each recorded with its refusal) |
 | `docs/code-issues/crap-svc-start-sandboxed-cursor-cli-session.md`: "**Restructure: no — tests first**" | ⛔ **BLOCKING** for that function | Characterisation tests land before its seams are cut |
 | The 10 `complexity-*.md` records (`start_session_core`, `start_sandboxed_claude_cli_session`, `spawn_cursor_cli_session_inner`, `resume_session_at_session_coordinate`, `spawn_split_agent`, `delete_paired_codebase_session`, `start_split_claude_cli_session`, `ensure_project_available_for_start`, `resume_claude_cli_session`, `handle_rpc`) | ✅ **RESOLVED HERE** | Extract-method, then re-measure. Delete the record, or narrow it if the fix is partial |
 | The 5 `oversized-file-*.md` records (`connection_service`, `session_coordinate_handlers`, `split_session`, `svc_spawn_split_agent`, `svc_start_session_core`) | ✅ **RESOLVED HERE** | Split below 500, then re-measure and delete. Their designed seams are the starting point |
@@ -250,7 +309,7 @@ After every seam, the same numbers come back.
 - [x] Record initial discovery
 - [x] Cross-check `docs/code-issues/` and `docs/dev/todo/` (Step 2b)
 - [x] Create changeset — this document
-- [ ] Restructure plans proven with `check --deep`
+- [x] Restructure plans proven with `check --deep`: 8 of 14 clean, 3 engine defects
 - [ ] USER REVIEW — layout and DRY inventory
 - [ ] Baseline + characterisation tests
 - [ ] Implementation

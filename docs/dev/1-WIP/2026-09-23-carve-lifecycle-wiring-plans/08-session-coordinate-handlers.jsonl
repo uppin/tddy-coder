@@ -1,0 +1,3 @@
+{"v": 1, "snapshot": {"packages/tddy-session-lifecycle/src/connection_service/session_coordinate_handlers.rs": "sha256:6fc354638feef5fcbf1ec98f14839894796c4aae05358e6ebd87a457af23aa7e"}}
+{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/session_coordinate_handlers.rs","start":{"line":514,"col":5},"end":{"line":673,"col":6}},"name":"svc_signal_delete_session","reexport":"glob","to_file":true}
+{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/session_coordinate_handlers.rs","start":{"line":271,"col":5},"end":{"line":512,"col":6}},"name":"svc_resume_session","reexport":"glob","to_file":true}

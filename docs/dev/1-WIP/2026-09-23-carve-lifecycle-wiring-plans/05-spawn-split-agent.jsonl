@@ -1,0 +1,6 @@
+{"v": 1, "snapshot": {"packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs": "sha256:f554583c990519a159e03fef0cdc33fe2908b1ac235b13f0cf9316ac14b5f3b1"}}
+{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs","start":{"line":366,"col":5},"end":{"line":519,"col":6}},"name":"svc_paired_codebase_teardown","reexport":"glob","to_file":true}
+{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs","start":{"line":256,"col":9},"end":{"line":288,"col":95}},"name":"write_split_agent_metadata"}
+{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs","start":{"line":200,"col":9},"end":{"line":220,"col":12}},"name":"split_agent_context_and_args"}
+{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs","start":{"line":185,"col":9},"end":{"line":195,"col":11}},"name":"split_agent_withdrawals"}
+{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs","start":{"line":126,"col":9},"end":{"line":173,"col":10}},"name":"join_split_livekit_room"}
