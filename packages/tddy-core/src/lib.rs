@@ -1,4 +1,8 @@
-//! Core library for tddy-coder.
+//! Core library for tddy-coder — a wiring point.
+//!
+//! Every group of code lives in a crate of its own; this crate re-exports each of them whole, so
+//! every `tddy_core::<module>::…` path and every root-level item consumers name resolves exactly as
+//! it did when the code lived here. New code should name the owning crate directly.
 
 pub use tddy_agent_backend::*;
 pub use tddy_agent_skills::*;

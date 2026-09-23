@@ -2,32 +2,18 @@
 name = "tddy-core"
 version = "0.1.0"
 edition = "2021"
-description = "Core library for tddy-coder"
+description = "Core library for tddy-coder: re-exports the crates its code was carved into"
 
 [dependencies]
-# Added at #unbundle node 5 / M5b with explicit developer authorisation: the CLI-facing modules
-# moving in from `tddy-tools` (`session_context`, the local session-action path, the model
-# catalogue) carry `anyhow::Result` and `with_context` messages that are part of what the CLI
-# prints. Rewriting them into `thiserror` would break the verbatim-move property this node's
-# behaviour-preserving claim rests on. New `tddy-core` APIs still prefer `thiserror`.
-anyhow = "1"
-agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }
-async-trait = "0.1"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
-dashmap = "6"
-glob = "0.3"
-log = { version = "0.4", features = ["serde"] }
-once_cell = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yaml = "0.9"
-jsonschema = { version = "0.44", default-features = false }
-thiserror = "2"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "process", "sync", "net", "io-util", "time"] }
-tokio-util = { version = "0.7", features = ["compat"] }
-uuid = { version = "1", features = ["v4", "v7"] }
+# The vocabulary crate: the session artifact layout is re-exported at this crate's root.
 tddy-workflow = { path = "../tddy-workflow" }
-# The groups carved out of this crate, each re-exported at its old paths.
+# The storage layer: `atomic_file`, `error` and `output`, re-exported at their old paths. It
+# depends on no crate that depends on `tddy-core`.
+tddy-session-store = { path = "../tddy-session-store" }
+# `ssh_exec`, re-exported at its old path. Depends on no workspace crate.
+tddy-git = { path = "../tddy-git" }
+# The groups carved out of this crate, each re-exported whole at its old paths. None depends on
+# `tddy-core`.
 tddy-log = { path = "../tddy-log" }
 tddy-agent-skills = { path = "../tddy-agent-skills" }
 tddy-changeset = { path = "../tddy-changeset" }
@@ -37,19 +23,3 @@ tddy-toolcall = { path = "../tddy-toolcall" }
 tddy-agent-backend = { path = "../tddy-agent-backend" }
 tddy-workflow-engine = { path = "../tddy-workflow-engine" }
 tddy-presenter = { path = "../tddy-presenter" }
-# The storage layer: `atomic_file`, `error`, `output` and `session_actions`, re-exported at their
-# old paths. It depends on no crate that depends on `tddy-core`.
-tddy-session-store = { path = "../tddy-session-store" }
-tddy-graph = { path = "../tddy-graph" }
-# The `git` plumbing `worktree` is built on. Depends on no workspace crate, so this adds no cycle.
-tddy-git = { path = "../tddy-git" }
-tddy-task = { path = "../tddy-task" }
-# Toolcall relay transport (see docs/dev/1-WIP/finish-stdio-ipc-migration.md, Item C):
-# `toolcall/listener.rs` serves `ToolcallRpcService` over `tddy-stdio` instead of a bespoke
-# newline-delimited-JSON protocol.
-tddy-rpc = { path = "../tddy-rpc" }
-tddy-stdio = { path = "../tddy-stdio" }
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-

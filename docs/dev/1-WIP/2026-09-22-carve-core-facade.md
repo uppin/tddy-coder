@@ -112,7 +112,7 @@ measured in its new home.
 - [x] `tddy-changeset`, `tddy-session-worktree`, `tddy-session-actions`
 - [x] `tddy-toolcall`, `tddy-agent-backend`
 - [x] `tddy-workflow-engine`, `tddy-presenter`
-- [ ] `tddy-core` facades only
+- [x] `tddy-core` facades only
 - [ ] Tests and code-issue records moved
 
 ## Technical changes
@@ -164,7 +164,7 @@ tddy-core   (pub use facades only, ~140 lines)
 - [x] `tddy-session-worktree`, `tddy-session-actions` extracted
 - [x] `tddy-toolcall`, `tddy-agent-backend` extracted
 - [x] `tddy-workflow-engine`, `tddy-presenter` extracted
-- [ ] `tddy-core` facades only — AC1; path guard still green
+- [x] `tddy-core` facades only — AC1; path guard still green
 - [ ] Test files and code-issue records moved; AC2 and AC5–AC8 green
 
 ## Testing plan
