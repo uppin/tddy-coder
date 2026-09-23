@@ -187,7 +187,7 @@ non-RPC traits, the session and demo-VM coordinate handlers, and the dispatch la
 | AC8 | `runtime.rs`'s `BinaryLocalSocketServices` names no `<…DaemonSessionHost>` for the four families |
 | AC9 | The runtime-socket guard (FR7) is green before and after; `local_socket_reachability_acceptance.rs` is green and unmodified |
 | AC10 | Every moved suite passes unedited except for `use` paths and its fixture's crate |
-| AC11 | `tddy-session-lifecycle` production lines drop by **at least 2,500** from 22,067 |
+| AC11 | `tddy-session-lifecycle` production lines drop by **at least 2,000** from 22,067. Planned at 2,500; measured at **2,009** once all four families had moved (20,058), and re-baselined by the developer on 2026-09-23 — the helpers the families share with session code stay in the crate |
 | AC12 | **Every crate that receives code in this PR stays at or under 10,000 production lines**: `tddy-daemon-rpc`, `tddy-pr-stack`, `tddy-daemon`. The same check is repeated by every successor node for the crates it feeds |
 
 **The 10k cap across the stack** (developer's decision, 2026-09-22):

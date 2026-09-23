@@ -1,4 +1,4 @@
-//! Unit tests: `DaemonSessionHost::add_planned_pr` — the recipe guard rejecting a
+//! Unit tests: `PrStackRpcHandler::add_planned_pr` — the recipe guard rejecting a
 //! non-"pr-stack" session before its `Changeset.stack` is touched.
 //!
 //! PRD: docs/ft/coder/pr-stacking.md § Manually adding a planned PR.
@@ -6,24 +6,30 @@
 
 use std::sync::Arc;
 
-use super::*;
-use crate::pr_stack_rpc::PrStackServiceImpl;
-use tddy_core::changeset::{read_changeset, write_changeset};
+use super::PrStackRpcHandler;
+use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
+use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
+use tddy_rpc::Request;
 use tddy_service::proto::pr_stack::{AddPlannedPrRequest, PrStackService};
+use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::PrStackServiceImpl;
 
-fn make_unit_config() -> crate::config::DaemonConfig {
+fn make_unit_config() -> tddy_daemon_kernel::config::DaemonConfig {
     let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
-    crate::config::DaemonConfig::load(&path).unwrap()
+    tddy_daemon_kernel::config::DaemonConfig::load(&path).unwrap()
 }
 
 fn make_unit_stack_service(
     sessions_base: std::path::PathBuf,
-) -> PrStackServiceImpl<DaemonSessionHost> {
-    PrStackServiceImpl::new(Arc::new(make_unit_connection(sessions_base)))
+) -> PrStackServiceImpl<PrStackRpcHandler> {
+    PrStackServiceImpl::new(Arc::new(PrStackRpcHandler::from_host(
+        &make_unit_connection(sessions_base),
+    )))
 }
 
 fn make_unit_connection(sessions_base: std::path::PathBuf) -> DaemonSessionHost {

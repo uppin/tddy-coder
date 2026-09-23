@@ -28,11 +28,11 @@ use std::sync::Arc;
 use tddy_core::changeset::{Changeset, Stack, StackNode};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::pr_stack::{LinkStackNodeRequest, PrStackService};
 use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TestDaemon;
 
 const ORCHESTRATOR: &str = "orchestrator-1";
 const CHILD: &str = "dddddddd-0000-4000-8000-000000000004";
@@ -52,7 +52,7 @@ fn a_service(sessions_base: PathBuf) -> TestDaemon {
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     let user_resolver: SessionUserResolver =
         Arc::new(|token| (token == TOKEN).then(|| "u".to_string()));
-    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
+    TestDaemon::from_host(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         sessions_base,
@@ -61,7 +61,7 @@ fn a_service(sessions_base: PathBuf) -> TestDaemon {
         None,
         None,
         Arc::new(CliSessionManager::new()),
-    )))
+    ))
 }
 
 fn write_changeset(sessions_base: &Path, session_id: &str, changeset: &Changeset) {

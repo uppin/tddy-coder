@@ -12,10 +12,3 @@ pub fn wire_same<Src: Message, Dst: Message + Default>(src: &Src) -> Result<Dst,
     Dst::decode(src.encode_to_vec().as_slice())
         .map_err(|e| Status::internal(format!("family proto bridge decode: {e}")))
 }
-
-/// Same as [`wire_same`] for blocking closures that return `anyhow::Result`.
-pub(crate) fn wire_same_anyhow<Src: Message, Dst: Message + Default>(
-    src: &Src,
-) -> anyhow::Result<Dst> {
-    wire_same(src).map_err(|s| anyhow::anyhow!(s.to_string()))
-}

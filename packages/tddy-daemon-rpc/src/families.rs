@@ -12,10 +12,10 @@ use tddy_discovery::CatalogServiceImpl;
 use tddy_projects::ProjectServiceImpl;
 use tddy_rpc::ServiceEntry;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::{DaemonRpcFamilies, PrStackHandler};
+use tddy_session_lifecycle::{DaemonRpcFamilies, PrStackHandler, PrStackServiceImpl};
 use tddy_tool_engine::ExecToolServiceImpl;
 
-use crate::{CatalogRpcHandler, ExecToolRpcHandler, ProjectRpcHandler};
+use crate::{CatalogRpcHandler, ExecToolRpcHandler, PrStackRpcHandler, ProjectRpcHandler};
 
 /// Every family served from this crate, each built from the same host.
 ///
@@ -25,6 +25,7 @@ pub struct RpcHandlers {
     project: Arc<ProjectRpcHandler>,
     catalog: Arc<CatalogRpcHandler>,
     exec_tool: Arc<ExecToolRpcHandler>,
+    pr_stack: Arc<PrStackRpcHandler>,
 }
 
 impl RpcHandlers {
@@ -35,6 +36,7 @@ impl RpcHandlers {
             project: Arc::new(ProjectRpcHandler::from_host(host)),
             catalog: Arc::new(CatalogRpcHandler::from_host(host)),
             exec_tool: Arc::new(ExecToolRpcHandler::from_host(host)),
+            pr_stack: Arc::new(PrStackRpcHandler::from_host(host)),
         }
     }
 
@@ -66,6 +68,12 @@ impl RpcHandlers {
         ExecToolServiceImpl::new(Arc::clone(&self.exec_tool))
     }
 
+    /// `pr_stack.PrStackService`, answered by the shared [`PrStackRpcHandler`].
+    #[must_use]
+    pub fn pr_stack_service(&self) -> PrStackServiceImpl<PrStackRpcHandler> {
+        PrStackServiceImpl::new(Arc::clone(&self.pr_stack))
+    }
+
     /// The transport entries of every family served from this crate.
     #[must_use]
     pub fn entries(&self) -> Vec<ServiceEntry> {
@@ -73,16 +81,14 @@ impl RpcHandlers {
             tddy_discovery::build_catalog_entry(self.catalog_service()),
             tddy_tool_engine::build_exec_tool_entry(self.exec_tool_service()),
             tddy_projects::build_project_entry(self.project_service()),
+            tddy_session_lifecycle::build_pr_stack_entry(self.pr_stack_service()),
         ]
     }
 }
 
 impl DaemonRpcFamilies for RpcHandlers {
     fn pr_stack_handler(&self) -> Arc<dyn PrStackHandler> {
-        // TODO(#carve 11): return the `PrStackRpcHandler` once the PR-stack family moves here. Until
-        // then session start's stack paths still call the host's own `PrStackHandler`, so nothing
-        // routes through this.
-        todo!("RpcHandlers::pr_stack_handler: the PR-stack family has not moved to tddy-daemon-rpc")
+        Arc::clone(&self.pr_stack) as Arc<dyn PrStackHandler>
     }
 
     fn service_entries(&self) -> Vec<ServiceEntry> {

@@ -1318,8 +1318,6 @@ pub use family_proto_bridge::wire_same;
 /// The host state `tddy-daemon-rpc`'s family handlers are built from.
 mod handler_state;
 mod session_coordinate_handlers;
-mod svc_family_entries;
-mod svc_pr_stack_ports;
 /// The daemon's half of `session_agents.SessionAgentService` — the host capabilities family B
 /// reads, and the routing the daemon keeps. `#unbundle` node 7.
 mod svc_session_agent_ports;
@@ -1433,26 +1431,6 @@ pub fn activity_delta_frames(delta: &ActivityDelta) -> Vec<AgentActivityDeltaChu
     frames
 }
 
-/// Guard for any RPC that mutates a `"pr-stack"` orchestrator's `Changeset.stack`: rejects a
-/// session whose recipe (or legacy alias) doesn't resolve to `"pr-stack"`, before the caller
-/// touches that session's changeset. Shared by `add_planned_pr` today; future planned-PR
-/// mutation RPCs (edit/delete) should call this too rather than re-checking inline.
-fn require_pr_stack_orchestrator(session_dir: &std::path::Path) -> Result<(), Status> {
-    let changeset = tddy_core::read_changeset(session_dir)
-        .map_err(|e| Status::invalid_argument(e.to_string()))?;
-    let recipe_name = changeset.recipe.as_deref().unwrap_or("");
-    let is_pr_stack =
-        tddy_workflow_recipes::recipe_resolve::resolve_workflow_recipe_from_cli_name(recipe_name)
-            .map(|r| r.name() == "pr-stack")
-            .unwrap_or(false);
-    if !is_pr_stack {
-        return Err(Status::failed_precondition(
-            "session is not a pr-stack orchestrator",
-        ));
-    }
-    Ok(())
-}
-
 /// Refuse a `StartSessionRequest.pr_stack_base_session_id` that cannot seed a stack, *before*
 /// anything spawns.
 ///
@@ -1556,140 +1534,6 @@ fn session_repo_is_in_project(
     Ok(canonical(session_repo)?.starts_with(canonical(project_repo_root)?))
 }
 
-/// Derive `owner/repo` from a repo's `origin` remote URL, for GitHub API namespacing.
-/// Returns `None` when the remote can't be read or isn't a recognizable GitHub URL.
-fn owner_repo_from_repo_root(repo_root: &std::path::Path) -> Option<String> {
-    let out = std::process::Command::new("git")
-        .current_dir(repo_root)
-        .args(["remote", "get-url", "origin"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let remote_url = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    tddy_workflow_recipes::orchestrate_pr_stack::github::owner_repo_from_remote_url(&remote_url)
-}
-
-/// A PR status the daemon could not look up: *unavailable* with an operator-facing `reason`, never
-/// `exists = false` (D8). Logged, because a lookup that never happened is otherwise invisible — the
-/// daemon log carried no PR line at all for an orchestrator polled hundreds of times.
-fn pr_status_unavailable(
-    branch: &str,
-    reason: String,
-) -> tddy_service::proto::pr_stack::PrStatusView {
-    log::warn!("PR status unavailable for branch {branch}: {reason}");
-    tddy_service::proto::pr_stack::PrStatusView {
-        unavailable: true,
-        unavailable_reason: reason,
-        ..Default::default()
-    }
-}
-
-/// Compare `branch` against `base_branch`, reading through the process-wide cache.
-///
-/// Resolving the two refs is a pair of `rev-parse`s and runs every time — it is what produces the
-/// cache key, and it is also how a moved ref is noticed. Only the comparison itself, which runs
-/// `git merge-tree`, is cached.
-fn base_sync_through_cache(
-    repo_root: &std::path::Path,
-    branch: &str,
-    base_branch: &str,
-) -> Result<tddy_core::base_sync::BranchBaseSync, String> {
-    let refs = tddy_core::base_sync::resolve_base_sync_refs(repo_root, branch, base_branch)?;
-    let key = crate::base_sync_cache::BaseSyncKey::new(repo_root, &refs);
-    crate::base_sync_cache::shared().get_or_probe(key, || {
-        tddy_core::base_sync::compare_base_sync_refs(repo_root, &refs)
-    })
-}
-
-/// A completed comparison on the wire. `base_branch` carries the ref that was actually compared —
-/// not the one the caller asked for — because the counts are meaningless beside a ref they did not
-/// come from (D28).
-fn base_sync_view(
-    sync: tddy_core::base_sync::BranchBaseSync,
-) -> tddy_service::proto::pr_stack::BranchBaseSync {
-    tddy_service::proto::pr_stack::BranchBaseSync {
-        base_branch: sync.base_ref.clone(),
-        behind_count: sync.behind_count,
-        ahead_count: sync.ahead_count,
-        has_conflicts: sync.has_conflicts,
-        conflicted_paths: sync.conflicted_paths,
-        unavailable: false,
-        unavailable_reason: String::new(),
-        base_ref: sync.base_ref,
-        head_ref: sync.head_ref,
-    }
-}
-
-/// A comparison the daemon could not make: *unavailable* with an operator-facing reason, never a
-/// zeroed success. A failed comparison reads identically to a healthy one on every other field, so
-/// this discriminator is the only thing standing between "could not tell" and "clean" (D27).
-fn base_sync_unavailable(
-    base_branch: &str,
-    reason: &str,
-) -> tddy_service::proto::pr_stack::BranchBaseSync {
-    tddy_service::proto::pr_stack::BranchBaseSync {
-        base_branch: base_branch.to_string(),
-        unavailable: true,
-        unavailable_reason: reason.to_string(),
-        ..Default::default()
-    }
-}
-
-/// The `worktree` leg of a `BranchResolution`: the on-disk worktree checked out for `branch`, and
-/// whether it holds outstanding work.
-///
-/// Two git subprocesses — a `git worktree list` walk and a `git status --porcelain` — so every caller
-/// runs this on the blocking pool, never on a runtime thread.
-fn worktree_leg(
-    repo_root: Option<&std::path::Path>,
-    branch: &str,
-) -> tddy_service::proto::pr_stack::BranchWorktree {
-    use tddy_service::proto::pr_stack::BranchWorktree;
-
-    let Some(path) =
-        repo_root.and_then(|root| tddy_core::worktree::worktree_path_for_branch(root, branch))
-    else {
-        return BranchWorktree::default();
-    };
-    let dirty_paths = worktree_dirty_paths(&path);
-    BranchWorktree {
-        exists: true,
-        path: path.to_string_lossy().into_owned(),
-        dirty: !dirty_paths.is_empty(),
-        dirty_paths,
-    }
-}
-
-/// The tracked paths with outstanding changes in a worktree — empty for a clean one, and empty for
-/// a path git cannot read at all, which is the same thing as far as offering a pull goes.
-///
-/// Untracked files are deliberately excluded: git refuses loudly rather than clobbering one, and
-/// counting them would leave the pull control permanently blocked in any worktree an agent works in.
-fn worktree_dirty_paths(worktree: &std::path::Path) -> Vec<String> {
-    tddy_workflow_recipes::orchestrate_pr_stack::worktree_is_clean(worktree).unwrap_or_else(|e| {
-        log::warn!(
-            "QueryBranch: could not read the state of the worktree at {}: {e}",
-            worktree.display()
-        );
-        Vec::new()
-    })
-}
-
-/// GitHub PR state → the lowercase label carried on the `PrStatusView.state` wire field.
-fn pr_state_label(
-    state: tddy_workflow_recipes::orchestrate_pr_stack::github::PrState,
-) -> &'static str {
-    use tddy_workflow_recipes::orchestrate_pr_stack::github::PrState;
-    match state {
-        PrState::Open => "open",
-        PrState::Merged => "merged",
-        PrState::Closed => "closed",
-        PrState::Draft => "draft",
-    }
-}
-
 #[cfg(test)]
 mod signal_session_unit_tests;
 
@@ -1718,9 +1562,6 @@ mod specialized_subagent_env_unit_tests;
 
 #[cfg(test)]
 mod seeded_roster_records_unit_tests;
-
-#[cfg(test)]
-mod add_planned_pr_unit_tests;
 
 /// A spawned child must record its **branch** on the planned node it materializes. Without that
 /// forward link the orchestrator's stack still reads "no branch anywhere", so `base_ref_for_spawn`

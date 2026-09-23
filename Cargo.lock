@@ -12237,6 +12237,7 @@ dependencies = [
  "tddy-task",
  "tddy-testing-commons",
  "tddy-tool-engine",
+ "tddy-workflow-recipes",
  "tddy-worktree-service",
  "tempfile",
  "tokio",

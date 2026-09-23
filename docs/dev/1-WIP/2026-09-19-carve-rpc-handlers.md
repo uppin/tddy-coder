@@ -1,7 +1,7 @@
 # Changeset: carve-rpc-handlers
 
 **Date**: 2026-09-19 (replanned 2026-09-22)
-**Status**: 🚧 In Progress — planned and red
+**Status**: 🚧 In Progress — green; validation pending
 **Type**: Refactor (handler decomposition and crate move, no wire change)
 **Stack**: `#carve` 11/12 — the first node of the size-reduction extension; `#carve` 12/12 (#522, tddy-core) sits above it
 
@@ -190,21 +190,21 @@ tddy-daemon ──► tddy-daemon-rpc ──► tddy-session-lifecycle ──►
 
 ## Implementation milestones
 
-- [ ] Draft surface: `tddy-daemon-rpc` crate, four structs, `from_host` and trait impls as `todo!()`
-- [ ] Runtime-socket guard green on the unchanged wiring
-- [ ] `tddy_pr_stack::rpc` holds the trait, `PrStackServiceImpl`, `build_pr_stack_entry` and
+- [x] Draft surface: `tddy-daemon-rpc` crate, four structs, `from_host` and trait impls as `todo!()`
+- [x] Runtime-socket guard green on the unchanged wiring
+- [x] `tddy_pr_stack::rpc` holds the trait, `PrStackServiceImpl`, `build_pr_stack_entry` and
   `PR_STACK_SERVICE`; facades in session-lifecycle and recipes
-- [ ] Shared components extracted in `tddy-session-lifecycle`, and the host delegating to them
-- [ ] `ProjectRpcHandler` real, its suites moved and green (no reverse edge: prove the pattern first)
-- [ ] `CatalogRpcHandler` real, its suites moved and green
-- [ ] `ExecToolRpcHandler` real, its suites moved and green
-- [ ] `DaemonRpcFamilies` port with `FAILED_PRECONDITION` when unwired; `session_room_roster()` and
+- [x] Shared components extracted in `tddy-session-lifecycle`, and the host delegating to them
+- [x] `ProjectRpcHandler` real, its suites moved and green — landed after the port, not before: the room roster bundles all four families, so the port had to come first
+- [x] `CatalogRpcHandler` real, its suites moved and green
+- [x] `ExecToolRpcHandler` real, its suites moved and green
+- [x] `DaemonRpcFamilies` port with `FAILED_PRECONDITION` when unwired; `session_room_roster()` and
   the two stack paths read it
-- [ ] `PrStackRpcHandler` real, its suites moved and green
-- [ ] `runtime.rs` rewired; the guard still green; `local_socket_reachability_acceptance.rs` unmodified
+- [x] `PrStackRpcHandler` real, its suites moved and green
+- [x] `runtime.rs` rewired; the guard still green; `local_socket_reachability_acceptance.rs` unmodified
   and green
-- [ ] Four code-issue records moved to `packages/tddy-daemon-rpc/docs/code-issues/`
-- [ ] AC11: production lines re-measured and recorded
+- [x] Four code-issue records moved to `packages/tddy-daemon-rpc/docs/code-issues/`
+- [x] AC11: production lines re-measured and recorded — 22,067 → 20,058 (−2,009); criterion re-baselined to ≥ 2,000
 
 ## Testing plan
 
@@ -248,7 +248,7 @@ moved and unedited except for `use` paths. The new tests cover what the move its
 - `the_pr_stack_crate_depends_on_neither_the_lifecycle_crate_nor_the_recipes`
 - `the_lifecycle_crate_has_no_edge_to_the_crate_above_it`
 - `the_binary_runtime_serves_the_four_families_through_their_own_handlers`
-- `the_lifecycle_crate_sheds_at_least_2500_production_lines`
+- `the_lifecycle_crate_sheds_at_least_2000_production_lines`
 - `every_crate_receiving_code_stays_within_10k_production_lines` (AC12). **Green by design** at
   red time, because the receivers are small today. It is a cap that must hold after green, not a
   specification of missing behaviour
@@ -290,6 +290,11 @@ before and after, by design**:
   `set_self_handle` entry.
 - **The runtime-socket guard is green by design.** It is a regression guard for a refactor, not a
   specification of new behaviour.
+- **AC11 re-baselined from 2,500 to 2,000 lines shed** — the developer's decision (2026-09-23),
+  after all four families had moved. They measured **2,009** (22,067 → 20,058): the 2,500 estimate
+  counted helpers the families share with session code (peer routing, caller identity, local exec
+  tools, agent definitions), which became `pub` components and stay in the crate. The stack-level
+  target of about 10k is unchanged; the successor nodes carry the rest.
 - **No unit tests beyond the acceptance set.** The node's new code is either moved code, which the
   moved family suites (16 suites, ~5k lines) already pin, or shared components whose names and shape
   this plan deliberately leaves to `/green`. Pinning those now would specify a design nobody has
@@ -342,8 +347,8 @@ Constraints on those nodes, known now:
 - [x] Run acceptance tests (verify they fail for the right reason; the guard passes)
 - [x] USER REVIEW — acceptance tests (approved 2026-09-22)
 - [x] TDD Red — unit tests: none added beyond the acceptance set; see Decisions
-- [ ] TDD Green (`/green`)
-- [ ] Move the four code-issue records
+- [x] TDD Green (`/green`)
+- [x] Move the four code-issue records
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`)

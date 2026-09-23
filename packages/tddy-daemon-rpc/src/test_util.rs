@@ -22,6 +22,13 @@ use tddy_service::proto::exec_tools::{
     ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
     ListSessionToolCallsResponse,
 };
+use tddy_service::proto::pr_stack::{
+    AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
+    LinkStackNodeRequest, LinkStackNodeResponse, PrStackService, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
+    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
+    ResolveStackBaseRequest, ResolveStackBaseResponse,
+};
 use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
@@ -242,6 +249,86 @@ impl ExecToolService for TestDaemon {
         self.handlers
             .exec_tool_service()
             .list_session_tool_calls(request)
+            .await
+    }
+}
+
+#[async_trait]
+impl PrStackService for TestDaemon {
+    async fn add_planned_pr(
+        &self,
+        request: Request<AddPlannedPrRequest>,
+    ) -> Result<Response<AddPlannedPrResponse>, Status> {
+        self.handlers
+            .pr_stack_service()
+            .add_planned_pr(request)
+            .await
+    }
+
+    async fn get_pr_status(
+        &self,
+        request: Request<GetPrStatusRequest>,
+    ) -> Result<Response<GetPrStatusResponse>, Status> {
+        self.handlers
+            .pr_stack_service()
+            .get_pr_status(request)
+            .await
+    }
+
+    async fn query_branch(
+        &self,
+        request: Request<QueryBranchRequest>,
+    ) -> Result<Response<QueryBranchResponse>, Status> {
+        self.handlers.pr_stack_service().query_branch(request).await
+    }
+
+    async fn resolve_stack_base(
+        &self,
+        request: Request<ResolveStackBaseRequest>,
+    ) -> Result<Response<ResolveStackBaseResponse>, Status> {
+        self.handlers
+            .pr_stack_service()
+            .resolve_stack_base(request)
+            .await
+    }
+
+    async fn link_stack_node(
+        &self,
+        request: Request<LinkStackNodeRequest>,
+    ) -> Result<Response<LinkStackNodeResponse>, Status> {
+        self.handlers
+            .pr_stack_service()
+            .link_stack_node(request)
+            .await
+    }
+
+    async fn repoint_planned_pr(
+        &self,
+        request: Request<RepointPlannedPrRequest>,
+    ) -> Result<Response<RepointPlannedPrResponse>, Status> {
+        self.handlers
+            .pr_stack_service()
+            .repoint_planned_pr(request)
+            .await
+    }
+
+    async fn reorder_planned_pr(
+        &self,
+        request: Request<ReorderPlannedPrRequest>,
+    ) -> Result<Response<ReorderPlannedPrResponse>, Status> {
+        self.handlers
+            .pr_stack_service()
+            .reorder_planned_pr(request)
+            .await
+    }
+
+    async fn pull_base_into_branch(
+        &self,
+        request: Request<PullBaseIntoBranchRequest>,
+    ) -> Result<Response<PullBaseIntoBranchResponse>, Status> {
+        self.handlers
+            .pr_stack_service()
+            .pull_base_into_branch(request)
             .await
     }
 }

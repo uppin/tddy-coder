@@ -20,13 +20,13 @@ use std::sync::Arc;
 
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_rpc::Request;
 use tddy_service::proto::pr_stack::{
     BranchResolution, GetPrStatusRequest, PrStackService, PrStatusView, QueryBranchRequest,
 };
 use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TestDaemon;
 use tddy_testing_commons::{a_changeset, a_session_metadata, fs::write_session_yaml};
 
 const ORCHESTRATOR: &str = "orchestrator-1";
@@ -127,7 +127,7 @@ fn a_service(sessions_base: PathBuf) -> TestDaemon {
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     let user_resolver: SessionUserResolver =
         Arc::new(|token| (token == TOKEN).then(|| "u".to_string()));
-    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
+    TestDaemon::from_host(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         sessions_base,
@@ -136,7 +136,7 @@ fn a_service(sessions_base: PathBuf) -> TestDaemon {
         None,
         None,
         Arc::new(CliSessionManager::new()),
-    )))
+    ))
 }
 
 /// A pr-stack orchestrator exactly as the daemon writes one: a recipe in `changeset.yaml` with no

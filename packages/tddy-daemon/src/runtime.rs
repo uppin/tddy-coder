@@ -288,9 +288,7 @@ type BinaryLocalSocketServices = crate::local_socket_server::LocalSocketServices
     tddy_session_lifecycle::connection_service::PeerRoutedActivity,
     tddy_discovery::CatalogServiceImpl<tddy_daemon_rpc::CatalogRpcHandler>,
     tddy_tool_engine::ExecToolServiceImpl<tddy_daemon_rpc::ExecToolRpcHandler>,
-    tddy_session_lifecycle::pr_stack_rpc::PrStackServiceImpl<
-        tddy_session_lifecycle::connection_service::DaemonSessionHost,
-    >,
+    tddy_session_lifecycle::pr_stack_rpc::PrStackServiceImpl<tddy_daemon_rpc::PrStackRpcHandler>,
 >;
 
 /// The local Unix-domain-socket `ConnectionService` transport (SO_PEERCRED peer-trust plus
@@ -1094,7 +1092,7 @@ pub async fn build(
                         Arc::new(rpc_handlers.exec_tool_service()),
                     ),
                     pr_stack: tddy_service::proto::pr_stack::PrStackServiceTonicAdapter::new(
-                        Arc::new(connection_arc.pr_stack_rpc_service()),
+                        Arc::new(rpc_handlers.pr_stack_service()),
                     ),
                 },
             });
@@ -1129,16 +1127,14 @@ pub async fn build(
         // above.
         rpc_entries.push(connection_arc.activity_entry());
 
-        // PrStackService — stack planning and branch resolution (`tddy-workflow-recipes` coordinate).
-        rpc_entries.push(connection_arc.pr_stack_entry());
-
         // SessionService — family C (`tddy-session-lifecycle`).
         rpc_entries.push(connection_arc.session_lifecycle_entry());
 
-        // The families served from `tddy-daemon-rpc` — today CatalogService (tools, agents, models
-        // and subagents, `tddy-discovery`), ExecToolService (execute, stream, list tools and
-        // session tool calls, `tddy-tool-engine`) and ProjectService, family D (`tddy-projects`) —
-        // through the same handlers the host's session rooms serve.
+        // The families served from `tddy-daemon-rpc` — CatalogService (tools, agents, models and
+        // subagents, `tddy-discovery`), ExecToolService (execute, stream, list tools and session
+        // tool calls, `tddy-tool-engine`), ProjectService, family D (`tddy-projects`) and
+        // PrStackService (stack planning and branch resolution, `tddy-pr-stack`) — through the same
+        // handlers the host's session rooms serve.
         rpc_entries.extend(rpc_handlers.entries());
 
         // DemoVmService — family O (`tddy-vm` coordinate, host logic on the session host).

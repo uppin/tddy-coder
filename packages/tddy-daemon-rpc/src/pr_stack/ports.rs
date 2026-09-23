@@ -1,18 +1,13 @@
-//! Family P PR-stack RPCs — host side of [`crate::pr_stack_rpc::PrStackHandler`].
+//! Family P — [`tddy_session_lifecycle::PrStackHandler`], answered by [`PrStackRpcHandler`].
 
-use super::family_proto_bridge::{wire_same, wire_same_anyhow};
-use super::{
-    base_sync_unavailable, base_sync_view, owner_repo_from_repo_root,
-    require_pr_stack_orchestrator, worktree_leg, DaemonSessionHost,
-};
-use crate::connection_service::hooks_and_urls;
-use crate::connection_service::service_util;
-use crate::project_storage;
-use crate::session_list_enrichment;
-use crate::user_sessions_path::projects_path_for_user;
+use super::branch_legs::{base_sync_unavailable, base_sync_view, worktree_leg};
+use super::guards::{require_pr_stack_orchestrator, validate_repoint_target};
+use super::pr_status::owner_repo_from_repo_root;
+use super::{wire_same_anyhow, PrStackRpcHandler};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+use tddy_projects::project_storage;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::pr_stack::{
     AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
@@ -22,9 +17,17 @@ use tddy_service::proto::pr_stack::{
     ResolveStackBaseRequest, ResolveStackBaseResponse,
 };
 use tddy_service::proto::types::BranchSession;
+use tddy_session_lifecycle::connection_service::{
+    resolve_os_user, spawn_blocking_with_timeout, wire_same,
+};
+use tddy_session_lifecycle::session_list_enrichment;
+use tddy_session_lifecycle::session_reader::DaemonSessionListing;
+use tddy_session_lifecycle::user_sessions_path::{projects_path_for_user, sessions_base_for_user};
+use tddy_session_lifecycle::PrStackHandler;
+use tddy_worktree_service::branch_owner::find_session_owning_branch;
 
 #[async_trait]
-impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
+impl PrStackHandler for PrStackRpcHandler {
     async fn add_planned_pr(
         &self,
         request: Request<AddPlannedPrRequest>,
@@ -44,9 +47,8 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
         if req.title.trim().is_empty() {
             return Err(Status::invalid_argument("title is required"));
         }
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -104,9 +106,8 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
         if req.branch.trim().is_empty() {
             return Err(Status::invalid_argument("branch is required"));
         }
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -142,9 +143,8 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
         if req.branch.trim().is_empty() {
             return Err(Status::invalid_argument("branch is required"));
         }
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -159,12 +159,12 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
         // surface that asks (prefer active, then most-recently-updated).
         let branch_for_scan = branch.clone();
         let sessions_base_for_scan = sessions_base.clone();
-        let session = service_util::spawn_blocking_with_timeout(
+        let session = spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "QueryBranch: scan sessions by branch",
             move || {
-                crate::branch_owner::find_session_owning_branch(
-                    &crate::session_reader::DaemonSessionListing,
+                find_session_owning_branch(
+                    &DaemonSessionListing,
                     &sessions_base_for_scan,
                     &branch_for_scan,
                 )
@@ -191,7 +191,7 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
         // worktree" rather than failing the call, which is the same contract the other four keep.
         let worktree_repo_root = repo_root.clone();
         let branch_for_worktree = branch.clone();
-        let worktree = service_util::spawn_blocking_with_timeout(
+        let worktree = spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "QueryBranch: read the branch's worktree",
             move || {
@@ -219,7 +219,7 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
         // inline would occupy a runtime worker thread for its whole duration.
         let remote_repo_root = repo_root.clone();
         let remote_branch = branch.clone();
-        let remote = service_util::spawn_blocking_with_timeout(
+        let remote = spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "QueryBranch: remote ref",
             move || {
@@ -288,10 +288,11 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
         &self,
         request: Request<ResolveStackBaseRequest>,
     ) -> Result<Response<ResolveStackBaseResponse>, Status> {
-        self.record_rpc_activity();
+        self.rpc_activity.record();
         let req = request.into_inner();
 
         if let Some(answered) = self
+            .peer_routing
             .rpc_served_by_peer(
                 tddy_workflow_recipes::PR_STACK_SERVICE,
                 "ResolveStackBase",
@@ -309,10 +310,9 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
                 "stack_parent is required: ResolveStackBase resolves the base of a named parent session",
             ));
         }
-        let os_user = self.resolve_os_user(&req.session_token)?;
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(&os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let os_user = resolve_os_user(&self.config, &self.user_resolver, &req.session_token)?;
+        let sessions_base = sessions_base_for_user(&os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let projects_dir = projects_path_for_user(&os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
         // This daemon's own checkout of the same logical project. The answer is a remote-tracking
@@ -367,10 +367,11 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
         &self,
         request: Request<LinkStackNodeRequest>,
     ) -> Result<Response<LinkStackNodeResponse>, Status> {
-        self.record_rpc_activity();
+        self.rpc_activity.record();
         let req = request.into_inner();
 
         if let Some(answered) = self
+            .peer_routing
             .rpc_served_by_peer(
                 tddy_workflow_recipes::PR_STACK_SERVICE,
                 "LinkStackNode",
@@ -406,10 +407,9 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
             ));
         }
 
-        let os_user = self.resolve_os_user(&req.session_token)?;
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(&os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let os_user = resolve_os_user(&self.config, &self.user_resolver, &req.session_token)?;
+        let sessions_base = sessions_base_for_user(&os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.orchestrator_session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.orchestrator_session_id);
@@ -471,9 +471,8 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
         if req.node_id.trim().is_empty() {
             return Err(Status::invalid_argument("node_id is required"));
         }
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -525,7 +524,7 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
                     .collect()
             })
             .unwrap_or_default();
-        let target_base_branch = hooks_and_urls::validate_repoint_target(
+        let target_base_branch = validate_repoint_target(
             requested_target,
             &default_branch,
             &parent_branches
@@ -581,9 +580,8 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
         if req.node_id.trim().is_empty() {
             return Err(Status::invalid_argument("node_id is required"));
         }
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -630,9 +628,8 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
         if req.base_branch.trim().is_empty() {
             return Err(Status::invalid_argument("base_branch is required"));
         }
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -680,12 +677,12 @@ impl crate::pr_stack_rpc::PrStackHandler for DaemonSessionHost {
         let resolution_repo_root = repo_root.clone();
         let resolution_sessions_base = sessions_base.clone();
         let resolution_base_branch = req.base_branch.trim().to_string();
-        let (session, worktree, remote, base_sync) = service_util::spawn_blocking_with_timeout(
+        let (session, worktree, remote, base_sync) = spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "PullBaseIntoBranch: re-read the branch",
             move || {
-                let session = match crate::branch_owner::find_session_owning_branch(
-                    &crate::session_reader::DaemonSessionListing,
+                let session = match find_session_owning_branch(
+                    &DaemonSessionListing,
                     &resolution_sessions_base,
                     &resolution_branch,
                 )

@@ -27,6 +27,8 @@ tddy-spawn = { path = "../tddy-spawn" }
 tddy-task = { path = "../tddy-task" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }
+# The PR-stack family's bodies drive the stack recipe's plan mutations and its GitHub PR lookup.
+tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 anyhow = "1"
 async-trait = "0.1"
 livekit = "0.7"

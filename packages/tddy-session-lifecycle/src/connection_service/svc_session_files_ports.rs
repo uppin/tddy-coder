@@ -87,9 +87,10 @@ impl DaemonSessionHost {
     /// rather than with the document, and an in-jail `StreamSessionAgents` addressed at the new
     /// coordinate would find no roster at all.
     ///
-    /// The families served above this crate (`tddy-daemon-rpc`) come through the
-    /// [`DaemonRpcFamilies`](crate::DaemonRpcFamilies) port, for the same reason: a host never given
-    /// them refuses with `FAILED_PRECONDITION` rather than open a room that has quietly lost them.
+    /// The four families served above this crate (`tddy-daemon-rpc`) — Project, Catalog, ExecTool
+    /// and PR-stack — come through the [`DaemonRpcFamilies`](crate::DaemonRpcFamilies) port, for
+    /// the same reason: a host never given them refuses with `FAILED_PRECONDITION` rather than open
+    /// a room that has quietly lost them.
     pub(crate) fn session_room_roster(
         self: &Arc<Self>,
     ) -> Result<tddy_rpc::MultiRpcService, tddy_rpc::Status> {
@@ -98,9 +99,6 @@ impl DaemonSessionHost {
             self.session_agents_entry(),
             self.activity_entry(),
             self.terminal_session_entry(),
-            // TODO(#carve 11): this one comes through the port once its handler moves to
-            // `tddy-daemon-rpc`; until then the host still serves it itself.
-            self.pr_stack_entry(),
             self.session_lifecycle_entry(),
             self.demo_vm_entry(),
         ];

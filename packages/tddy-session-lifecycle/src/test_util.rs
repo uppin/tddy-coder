@@ -11,13 +11,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
-use tddy_service::proto::pr_stack::{
-    AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
-    LinkStackNodeRequest, LinkStackNodeResponse, PrStackService, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
-    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ResolveStackBaseRequest, ResolveStackBaseResponse,
-};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListSessionsRequest,
@@ -84,9 +77,9 @@ pub fn test_host(sessions_base: PathBuf) -> DaemonSessionHost {
     )
 }
 
-/// Daemon under test: the connection service plus the PR-stack family unbundled onto its own
-/// coordinate (`#unbundle` node 8). The catalogue, exec-tool and project families are served by
-/// `tddy-daemon-rpc`, whose own `test_util::TestDaemon` answers them.
+/// Daemon under test: the connection service and its session family. The catalogue, exec-tool,
+/// project and PR-stack families are served by `tddy-daemon-rpc`, whose own `test_util::TestDaemon`
+/// answers them.
 #[derive(Clone)]
 pub struct TestDaemon {
     inner: Arc<DaemonSessionHost>,
@@ -267,89 +260,6 @@ impl SessionService for TestDaemon {
     }
 }
 
-#[async_trait]
-impl PrStackService for TestDaemon {
-    async fn add_planned_pr(
-        &self,
-        request: Request<AddPlannedPrRequest>,
-    ) -> Result<Response<AddPlannedPrResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .add_planned_pr(request)
-            .await
-    }
-
-    async fn get_pr_status(
-        &self,
-        request: Request<GetPrStatusRequest>,
-    ) -> Result<Response<GetPrStatusResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .get_pr_status(request)
-            .await
-    }
-
-    async fn query_branch(
-        &self,
-        request: Request<QueryBranchRequest>,
-    ) -> Result<Response<QueryBranchResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .query_branch(request)
-            .await
-    }
-
-    async fn resolve_stack_base(
-        &self,
-        request: Request<ResolveStackBaseRequest>,
-    ) -> Result<Response<ResolveStackBaseResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .resolve_stack_base(request)
-            .await
-    }
-
-    async fn link_stack_node(
-        &self,
-        request: Request<LinkStackNodeRequest>,
-    ) -> Result<Response<LinkStackNodeResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .link_stack_node(request)
-            .await
-    }
-
-    async fn repoint_planned_pr(
-        &self,
-        request: Request<RepointPlannedPrRequest>,
-    ) -> Result<Response<RepointPlannedPrResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .repoint_planned_pr(request)
-            .await
-    }
-
-    async fn reorder_planned_pr(
-        &self,
-        request: Request<ReorderPlannedPrRequest>,
-    ) -> Result<Response<ReorderPlannedPrResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .reorder_planned_pr(request)
-            .await
-    }
-
-    async fn pull_base_into_branch(
-        &self,
-        request: Request<PullBaseIntoBranchRequest>,
-    ) -> Result<Response<PullBaseIntoBranchResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .pull_base_into_branch(request)
-            .await
-    }
-}
-
 /// Build a [`TestDaemon`] wired to `sessions_base` with the standard test resolvers.
 ///
 /// [`TEST_TOKEN`] resolves to [`TEST_USER`]; any other token returns `None`.
@@ -442,7 +352,6 @@ pub async fn serve_daemon_rpc_participant(
             service.session_files_entry(),
             service.session_agents_entry(),
             service.activity_entry(),
-            service.pr_stack_entry(),
             service.session_lifecycle_entry(),
         ]
         .into_iter()

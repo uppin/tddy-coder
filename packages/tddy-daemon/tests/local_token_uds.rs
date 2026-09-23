@@ -146,7 +146,7 @@ fn start_local_socket_server(
     let exec_tool_adapter =
         ExecToolServiceTonicAdapter::new(Arc::new(rpc_handlers.exec_tool_service()));
     let pr_stack_adapter =
-        PrStackServiceTonicAdapter::new(Arc::new(connection.pr_stack_rpc_service()));
+        PrStackServiceTonicAdapter::new(Arc::new(rpc_handlers.pr_stack_service()));
 
     struct NoLiveKitRooms;
     #[async_trait::async_trait]

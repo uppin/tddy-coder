@@ -3,8 +3,8 @@
 //! `tddy-daemon-rpc` builds each family's handler with `from_host(&DaemonSessionHost)`, holding
 //! only the fields that family reads. These hand those fields out: the shared ones (`Arc`s, and
 //! components built on them) as clones of the same handle, so a handler talks to the peers, spawn
-//! client, common room, registry, idle tracker, task registry and jails the host does rather than
-//! to copies of them.
+//! client, common room, registry, token store, idle tracker, task registry and jails the host does
+//! rather than to copies of them.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -60,6 +60,15 @@ impl DaemonSessionHost {
     #[must_use]
     pub fn model_registry(&self) -> Option<Arc<ModelRegistryStore>> {
         self.model_registry.clone()
+    }
+
+    /// The store an operator's GitHub token is read from when a PR status is looked up on their
+    /// behalf, when one is wired.
+    #[must_use]
+    pub fn github_token_store(
+        &self,
+    ) -> Option<Arc<dyn tddy_github::token_store::GitHubTokenStore>> {
+        self.github_token_store.clone()
     }
 
     /// The idle tracker this host bumps on every RPC, shared rather than copied, so a handler's

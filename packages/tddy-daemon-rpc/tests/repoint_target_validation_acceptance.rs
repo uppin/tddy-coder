@@ -17,7 +17,7 @@
 //! PRD: docs/ft/coder/pr-stack-live-status.md § Repointing a dead-end planned PR (D18).
 //! Changeset: docs/dev/changesets/2026-07-26-pr-stack-repoint-dead-end.md.
 
-use tddy_session_lifecycle::connection_service::validate_repoint_target;
+use tddy_daemon_rpc::pr_stack::validate_repoint_target;
 
 const DEFAULT_BRANCH: &str = "origin/master";
 const PARENT_BRANCH: &str = "feature/attach-docs/attach-proto";
