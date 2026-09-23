@@ -5,8 +5,8 @@
 Pure `git` plumbing. Every function shells out to the `git` command line (or to `ssh` for the
 remote-host variant) and returns `Result<_, String>` carrying the command's own stderr. Nothing here
 knows what a session, changeset or workflow is — the session-aware layer built on top of it is
-[`tddy_core::worktree`](../../tddy-core/docs/architecture.md), which re-exports this crate with
-`pub use tddy_git::*;`.
+[`tddy_session_worktree::worktree`](../../tddy-session-worktree/docs/architecture.md) (also
+`tddy_core::worktree`), which re-exports this crate with `pub use tddy_git::*;`.
 
 The crate depends on no workspace crate, only `log`. All modules are private and glob re-exported
 at the root, so every item is `tddy_git::<item>` regardless of which module holds it.

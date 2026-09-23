@@ -57,4 +57,4 @@ Same as Claude's AskUserQuestion `input`:
 
 ## Implementation
 
-`packages/tddy-core/src/stream/cursor.rs` extracts questions from both `askUserQuestionToolCall` and `askQuestionToolCall`, reusing `parse_ask_user_question()` from the Claude stream parser.
+`packages/tddy-agent-backend/src/stream/cursor.rs` extracts questions from both `askUserQuestionToolCall` and `askQuestionToolCall`, reusing `parse_ask_user_question()` from the Claude stream parser.

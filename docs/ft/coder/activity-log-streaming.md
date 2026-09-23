@@ -42,5 +42,5 @@ In **`tddy-tui`** `render::draw`, entries with **`ActivityKind::UserPrompt`** re
 ## Related documentation
 
 - [Coder overview](1-OVERVIEW.md) — product surface  
-- [`packages/tddy-core/docs/architecture.md`](../../../packages/tddy-core/docs/architecture.md) — presenter module layout  
+- [`packages/tddy-presenter/docs/architecture.md`](../../../packages/tddy-presenter/docs/architecture.md) — presenter module layout  
 - [`packages/tddy-tui/docs/architecture.md`](../../../packages/tddy-tui/docs/architecture.md) — TUI activity log rendering  

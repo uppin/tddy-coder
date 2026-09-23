@@ -15,6 +15,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 134 | 8 | 9 | 7 | first detection |
+| 2026-09-23 | 134 | 8 | 9 | 7 | **unchanged** — measured in the new home at wrap: the body is line-for-line identical to its `tddy-core` origin on `master` (`#carve` 12/14, #522 moved it with `git mv`) |
 
 ## What the tool found
 

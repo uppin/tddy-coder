@@ -68,4 +68,4 @@ explicitly.
 - [`tddy-service`](../tddy-service/) — every proto this crate sends
 - [`tddy-livekit`](../tddy-livekit/) — the optional LiveKit transport
 - [`tddy-sandbox`](../tddy-sandbox/) — `session_id_from_env`, the jail's own name for its session
-- [`tddy-core`](../tddy-core/README.md) — `spawn_env::env_non_empty`, one spelling of "unset or blank"
+- [`tddy-agent-backend`](../tddy-agent-backend/README.md) — `spawn_env::env_non_empty`, one spelling of "unset or blank"

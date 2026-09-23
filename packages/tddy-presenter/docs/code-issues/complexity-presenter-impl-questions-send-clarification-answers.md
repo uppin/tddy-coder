@@ -18,6 +18,7 @@
 | 2026-09-18 | 56 | 7 | 9 | 0 | first detection |
 | 2026-09-19 | 57 | 7 | 9 | 0 | #491 rewrote every field access in this body (`self.<field>` → `self.<group>.<field>`). Nesting and branch structure **unchanged**; lines +1 (rustfmt rewrap). The finding stands untouched. |
 | 2026-09-22 | 57 | 7 | 9 | 0 | Moved to `presenter_impl/questions.rs` by #495, body unchanged. **Unchanged** — the finding moved with it. |
+| 2026-09-23 | 57 | 7 | 9 | 0 | **unchanged** — measured in the new home at wrap: the body is line-for-line identical to its `tddy-core` origin on `master` (`#carve` 12/14, #522 moved it with `git mv`) |
 
 ## What the tool found
 

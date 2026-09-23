@@ -16,6 +16,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 197 | 6 | 8 | 27 | first detection |
 | 2026-09-22 | 197 | 6 | 8 | 27 | **unchanged** — #492 (`#carve` 6/11) moved the git plumbing around it to `tddy-git`; the body is byte-identical. Its file is now 428 production lines across these 4 functions, not 1,607 |
+| 2026-09-23 | 197 | 6 | 8 | 27 | **unchanged** — measured in the new home at wrap: the body is line-for-line identical to its `tddy-core` origin on `master` (`#carve` 12/14, #522 moved it with `git mv`) |
 
 ## What the tool found
 
@@ -48,5 +49,5 @@ finding is a lead, not an issue.
 
 `packages/tddy-core/src/worktree.rs` was covered by `squatting-git-plumbing-worktree` until #492
 closed it on 2026-09-22 by moving the file's git plumbing to `tddy-git` (see
-[the change entry](../changesets/2026-09-22-carve-git-plumbing.md)). This unit was not part of that
+[the change entry](../../../tddy-core/docs/changesets/2026-09-22-carve-git-plumbing.md)). This unit was not part of that
 fix: it stayed in `tddy-core`, byte-identical, and this record is still open.

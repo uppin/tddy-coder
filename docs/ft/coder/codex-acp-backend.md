@@ -32,6 +32,6 @@
 - [Session layout](session-layout.md) — session directory; **`codex_thread_id`**
 - [Codex OAuth web relay](../web/codex-oauth-web-relay.md) — dashboard and **`codex_oauth_authorize.url`**
 - [Codex OAuth relay (daemon)](../daemon/codex-oauth-relay.md) — validation helpers
-- Implementation: **`packages/tddy-core/src/backend/codex_acp.rs`**
+- Implementation: **`packages/tddy-agent-backend/src/backend/codex_acp.rs`**
 - [Agent Client Protocol](https://agentclientprotocol.com)
 - [codex-acp](https://github.com/zed-industries/codex-acp) (stdio agent distribution)

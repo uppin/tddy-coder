@@ -78,7 +78,7 @@ message ModelInfo {
 `StartSessionRequest.model` (field 8) is reused unchanged — previously claude-cli-only, now also
 populated for tool sessions. `AgentInfo` / `ListAgents` are **not** changed.
 
-### tddy-core (`packages/tddy-core/src/backend/`)
+### tddy-agent-backend (`packages/tddy-agent-backend/src/backend/`)
 
 ```rust
 pub struct BackendModel { pub id: String, pub label: String }

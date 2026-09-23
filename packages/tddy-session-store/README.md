@@ -27,14 +27,16 @@ None of the three depends on `tddy-core`, so none can close a cycle.
 Details per module, including why `session_actions::runtime` is `#[doc(hidden)] pub`:
 [docs/architecture.md](docs/architecture.md).
 
-## What stayed in `tddy-core`
+## Who re-exports it
 
-`tddy_core::{atomic_file, error, output, session_actions}` re-export this crate with `pub use …::*;`,
-so **no public path changed**. `tddy_core::session_actions` also keeps `list_actions_in_session_dir`
-and `invoke_action_in_session_dir`, which find the repo root through the session's `changeset.yaml`
-(`read_changeset`). The changeset belongs to the workflow layer, which this crate must not depend on.
+`tddy_core::{atomic_file, error, output}` are glob facades over this crate, and
+`tddy_session_actions::session_actions` re-exports this crate's `session_actions` and adds
+`list_actions_in_session_dir` and `invoke_action_in_session_dir`, which find the repo root through
+the session's `changeset.yaml` (`read_changeset`). `tddy_core::session_actions` resolves to that
+module. **No public path changed.** The changeset lives in `tddy-changeset`, which depends on this
+crate, so the code that reads it sits above both.
 
 Log targets still read `tddy_core::session_actions::…`. They are part of the observable logging
-configuration, so the move left them unchanged.
+configuration, so the moves left them unchanged.
 
 Write new code against `tddy_session_store` directly.

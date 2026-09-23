@@ -18,6 +18,7 @@
 | 2026-09-18 | 379 | 8 | 46 | 9 | first detection |
 | 2026-09-19 | 379 | 8 | 46 | 9 | #491 rewrote every field access in this body (`self.<field>` → `self.<group>.<field>`). Nesting and branch structure **unchanged**; lines unchanged. The finding stands untouched. |
 | 2026-09-22 | 42 | 2 | — | 1 | #495 split the body: each match arm moved verbatim into a handler in the partition owning its state; `handle_intent` is now a flat dispatcher. **The unit is clean.** Two handlers extracted from it still breach: `continue_with_agent` (`workflow_run.rs:278`, 60 lines, nesting 6) and `resume_from_error` (`workflow_run.rs:340`, 61 lines, nesting 4). Brace-depth scan. |
+| 2026-09-23 | 42 | 2 | — | 1 | **unchanged** — measured in the new home at wrap: the body is line-for-line identical to its `tddy-core` origin on `master` (`#carve` 12/14, #522 moved it with `git mv`) |
 
 ## What the tool found
 

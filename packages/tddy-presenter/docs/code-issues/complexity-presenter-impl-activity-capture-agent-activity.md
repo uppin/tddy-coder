@@ -18,6 +18,7 @@
 | 2026-09-18 | 101 | 4 | 5 | 2 | first detection |
 | 2026-09-19 | 101 | 4 | 5 | 2 | #491 rewrote every field access in this body (`self.<field>` → `self.<group>.<field>`). Nesting and branch structure **unchanged**; lines unchanged. The finding stands untouched. |
 | 2026-09-22 | 101 | 3¹ | 5 | 2 | Moved to `presenter_impl/activity.rs` by #495, body unchanged. **Unchanged** — the finding moved with it. ¹ brace-depth scan, reads one lower than the first-detection scan on this body; structure identical. |
+| 2026-09-23 | 101 | 3¹ | 5 | 2 | **unchanged** — measured in the new home at wrap: the body is line-for-line identical to its `tddy-core` origin on `master` (`#carve` 12/14, #522 moved it with `git mv`) |
 
 ## What the tool found
 

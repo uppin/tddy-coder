@@ -17,6 +17,7 @@
 | 2026-09-18 | 235 | 8 | 20 | 1 | first detection |
 | 2026-09-19 | 236 | 8 | 20 | 1 | #491 rewrote every field access in this body (`self.<field>` → `self.<group>.<field>`). Nesting and branch structure **unchanged**; lines +1 (rustfmt rewrap). The finding stands untouched. |
 | 2026-09-22 | 32 | 3 | — | 1 | #495 split the body: each event arm moved verbatim into an `on_*` handler in the partition owning its state; `poll_workflow` is now a dispatcher (still in the parent). **The unit is clean.** One extracted handler still breaches: `on_workflow_complete` (`workflow_run.rs:403`, 66 lines, nesting 4). Brace-depth scan (reads 7 on the pre-split body where the first scan read 8). |
+| 2026-09-23 | 32 | 3 | — | 1 | **unchanged** — measured in the new home at wrap: the body is line-for-line identical to its `tddy-core` origin on `master` (`#carve` 12/14, #522 moved it with `git mv`) |
 
 ## What the tool found
 

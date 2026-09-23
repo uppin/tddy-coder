@@ -15,6 +15,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 382 | 6 | 29 | 17 | first detection |
+| 2026-09-23 | 382 | 6 | 29 | 17 | **unchanged** — measured in the new home at wrap: identical to its `tddy-core` origin on `master` except one call path, `crate::changeset::start_goal_for_session_continue` → `crate::workflow::…` (Cut 2 of `#carve` 12/14, #522); same length and structure |
 
 ## What the tool found
 

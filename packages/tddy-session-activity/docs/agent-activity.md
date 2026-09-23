@@ -9,9 +9,9 @@ five RPCs it describes left `connection.ConnectionService` for `activity.Activit
 A per-session log — `~/.tddy/sessions/{session_id}/agent-activity.jsonl` — records the **agent's
 own** tool loop (Read, Shell/Bash, Edit, `tddy-tools` verbs), as opposed to the human-triggered
 `ExecuteTool` invocations captured in `tool-calls.jsonl`. The record shape (`AgentActivityRecord`)
-and the append/coalesce/500-cap read logic live in `tddy-core::agent_activity` so every host writes
-the same format; see
-[tddy-core architecture § Agent activity](../../tddy-core/docs/architecture.md#agent-activity-agent_activity).
+and the append/coalesce/500-cap read logic live in `tddy_changeset::agent_activity` (also `tddy_core::agent_activity`) so every host
+writes the same format; see
+[tddy-changeset architecture § Agent activity](../../tddy-changeset/docs/architecture.md#agent-activity-agent_activity).
 
 ### Capture — one seam per session type
 
