@@ -42,6 +42,7 @@ Where the end state is documented:
 | `tddy-service` | `participant_identity.rs` (new) — `may_be_daemon_discovery_identity` and `NON_DAEMON_IDENTITY_PREFIXES`, read by both discovery and `token.TokenService`, which now refuses every identity it allows |
 | `tddy-daemon-kernel` | two `config.rs` doc comments; `daemon_identity` re-exports `SPLIT_AGENT_IDENTITY_PREFIX` from `tddy-service` |
 | `tddy-session-lifecycle` | `split_session.rs` and the connection service verify callers and mint agents' credentials through `SessionTokens`; the exec-tool refusal names the unlearned signing key |
+| `tddy-daemon-rpc` | tests only: the suites `#carve` 11/12 (#520) moved or split out of `tddy-session-lifecycle` — cross-daemon tokens, the sandboxed-codebase lifecycle, placement and seatbelt exec-tool suites — give each daemon a signing identity of its own instead of `livekit.api_secret`; `tddy-daemon-auth` becomes a dev-dependency |
 | `tddy-screen-sharing` | the bridge's `screenshare-host-` prefix is one constant shared with the identity rule |
 | `tddy-worktree-service`, `tddy-remote-git-repo`, `tddy-vm-testkit`, `tddy-desktop`, `tddy-web`, `tddy-connectrpc`, `tddy-e2e`, `tddy-rust-typescript-tests` | stale comments, `desktop.yaml.production`, regenerated `auth_pb.ts`, and fixtures asking the mint for `web-` identities |
 
