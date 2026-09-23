@@ -6,8 +6,10 @@ use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use tddy_core::toolcall::dispatch_toolcall;
-use tddy_core::toolcall::{start_toolcall_listener, BuildExecutor, BuildListQuery, BuildOptions};
+use tddy_toolcall::toolcall::dispatch_toolcall;
+use tddy_toolcall::toolcall::{
+    start_toolcall_listener, BuildExecutor, BuildListQuery, BuildOptions,
+};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -41,7 +43,7 @@ impl BuildExecutor for FakeBuildExecutor {
 #[tokio::test]
 async fn build_round_trips_over_the_stdio_rpc_transport() {
     // Given a real toolcall listener with a fake build executor registered
-    tddy_core::toolcall::register_build_executor(Arc::new(FakeBuildExecutor));
+    tddy_toolcall::toolcall::register_build_executor(Arc::new(FakeBuildExecutor));
     let tddy_data_dir =
         std::env::temp_dir().join(format!("tddy-toolcall-stdio-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&tddy_data_dir).unwrap();

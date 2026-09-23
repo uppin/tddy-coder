@@ -4,8 +4,8 @@
 
 use serde_json::json;
 use std::time::Duration;
-use tddy_core::toolcall::dispatch_toolcall;
-use tddy_core::toolcall::{start_toolcall_listener, ToolCallRequest, ToolCallResponse};
+use tddy_toolcall::toolcall::dispatch_toolcall;
+use tddy_toolcall::toolcall::{start_toolcall_listener, ToolCallRequest, ToolCallResponse};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(3);
 

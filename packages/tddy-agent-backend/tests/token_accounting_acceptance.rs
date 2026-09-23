@@ -6,7 +6,7 @@
 //! (The Claude-specific transcript reader is covered by `claude_transcript_usage_acceptance.rs`,
 //! since that knowledge lives with the Claude backend, not the generic accounting module.)
 
-use tddy_core::token_accounting::{format_token_summary, ConversationRecord};
+use tddy_agent_backend::token_accounting::{format_token_summary, ConversationRecord};
 
 /// The end-of-session summary renders one line per conversation (main agent + each subagent) and
 /// a TOTAL row that sums the columns — the exact text `tddy-sandbox-app` prints to stderr.

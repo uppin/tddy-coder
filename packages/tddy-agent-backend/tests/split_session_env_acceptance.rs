@@ -9,7 +9,7 @@
 //! one field the transport cannot work without: a scoped join token. The daemon must never hand the
 //! agent `livekit.api_secret` instead, which would let it join any room as any identity.
 
-use tddy_core::backend::RemoteToolEnv;
+use tddy_agent_backend::backend::RemoteToolEnv;
 
 /// The env a split session's agent receives: a scoped join token plus the identity of the daemon
 /// that holds the worktree.

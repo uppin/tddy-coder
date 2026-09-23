@@ -1,0 +1,25 @@
+[package]
+name = "tddy-toolcall"
+version = "0.1.0"
+edition = "2021"
+description = "The tool-call relay between an agent's tddy-tools process and its session host"
+
+[dependencies]
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "process", "sync", "net", "io-util", "time"] }
+tddy-workflow = { path = "../tddy-workflow" }
+# `list-actions` / `invoke-action` answered from the session directory.
+tddy-session-actions = { path = "../tddy-session-actions" }
+# Toolcall relay transport (see docs/dev/1-WIP/finish-stdio-ipc-migration.md, Item C):
+# `toolcall/listener.rs` serves `ToolcallRpcService` over `tddy-stdio` instead of a bespoke
+# newline-delimited-JSON protocol.
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-stdio = { path = "../tddy-stdio" }
+
+[dev-dependencies]
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }

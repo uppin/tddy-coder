@@ -11755,6 +11755,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-agent-backend"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "async-trait",
+ "glob",
+ "libc",
+ "log",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tddy-sandbox",
+ "tddy-session-store",
+ "tddy-toolcall",
+ "tddy-workflow",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "tddy-agent-skills"
 version = "0.1.0"
 dependencies = [
@@ -12055,6 +12078,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
+ "tddy-agent-backend",
  "tddy-agent-skills",
  "tddy-changeset",
  "tddy-git",
@@ -12068,6 +12092,7 @@ dependencies = [
  "tddy-stdio",
  "tddy-task",
  "tddy-testing-commons",
+ "tddy-toolcall",
  "tddy-workflow",
  "tempfile",
  "thiserror 2.0.18",
@@ -13564,6 +13589,24 @@ dependencies = [
  "tddy-worktree-service",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "tddy-toolcall"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "tddy-rpc",
+ "tddy-session-actions",
+ "tddy-stdio",
+ "tddy-workflow",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

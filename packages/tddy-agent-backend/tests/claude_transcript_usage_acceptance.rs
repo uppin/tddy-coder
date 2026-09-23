@@ -5,15 +5,15 @@
 //! Changeset: docs/dev/1-WIP/2026-07-11-changeset-session-token-accounting.md
 //!
 //! This transcript layout is Claude-Code specific, so the readers live with the Claude backend
-//! (`tddy_core::backend`), not the generic `token_accounting` module. Claude writes the main
+//! (`tddy_agent_backend::backend`), not the generic `token_accounting` module. Claude writes the main
 //! thread to `.claude/projects/<encoded-cwd>/<session_id>.jsonl` and each nested Task subagent to
 //! `.claude/projects/<encoded-cwd>/<session_id>/subagents/agent-<id>.jsonl` (+ `.meta.json`).
 
 use std::fs;
 use std::path::Path;
 
-use tddy_core::backend::{read_claude_subagent_usages, read_claude_transcript_usage};
-use tddy_core::token_accounting::ConversationRecord;
+use tddy_agent_backend::backend::{read_claude_subagent_usages, read_claude_transcript_usage};
+use tddy_agent_backend::token_accounting::ConversationRecord;
 
 /// Write the main-thread transcript JSONL for `session_id` under the persistent home's
 /// `.claude/projects/<encoded-cwd>/` dir, with the given assistant lines already serialized.

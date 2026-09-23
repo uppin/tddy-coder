@@ -12,7 +12,12 @@ use std::path::{Path, PathBuf};
 
 /// The crate each module group read here moved into when `tddy-core` became a wiring point, keyed
 /// by the group's top-level path under `src/`.
-const HOMES: [(&str, &str); 1] = [("changeset", "tddy-changeset")];
+const HOMES: [(&str, &str); 4] = [
+    ("backend", "tddy-agent-backend"),
+    ("changeset", "tddy-changeset"),
+    ("stream", "tddy-agent-backend"),
+    ("toolcall", "tddy-toolcall"),
+];
 
 fn src(relative: &str) -> PathBuf {
     let group = relative.split(['/', '.']).next().unwrap_or_default();

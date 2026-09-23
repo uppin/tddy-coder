@@ -1,44 +1,26 @@
 //! Core library for tddy-coder.
 
+pub use tddy_agent_backend::*;
 pub use tddy_agent_skills::*;
 pub use tddy_changeset::*;
 pub use tddy_log::*;
 pub use tddy_session_actions::*;
 pub use tddy_session_worktree::*;
+pub use tddy_toolcall::*;
 
 pub mod atomic_file;
-pub mod backend;
 pub mod changeset;
-pub mod claude_argv;
-pub mod claude_hooks;
-pub mod cursor_hooks;
 pub mod error;
 pub mod output;
 pub mod post_workflow;
 pub mod presenter;
-pub mod spawn_env;
 pub mod ssh_exec;
-pub mod stream;
 #[cfg(test)]
 pub(crate) mod test_support;
-pub mod token_accounting;
-pub mod toolcall;
 pub mod usage_watcher;
 pub mod workflow;
 
 pub use atomic_file::{write_atomic, write_atomic_labelled};
-pub use backend::{
-    backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,
-    default_model_for_agent, get_child_pid, kill_child_process, preselected_index_for_agent,
-    recipe_cli_name_from_selection_label, set_child_pid, workflow_recipe_selection_question,
-    AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend, ClaudeCodeBackend,
-    ClaudeInvokeConfig, CodexAcpBackend, CodexBackend, CodingBackend, CursorBackend,
-    InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionMode,
-    ProcessToolExecutor, QuestionOption, RemoteToolEnv, SessionMode, SharedBackend, StubBackend,
-    ToolExecutor, CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_ID_FILENAME,
-};
-pub use claude_hooks::{build_claude_hooks_settings, HookCommandParams};
-pub use cursor_hooks::build_cursor_hooks_settings;
 pub use error::{BackendError, ParseError, WorkflowError};
 pub use post_workflow::{
     github_pr_operator_question, post_workflow_elicitation_step_order,
@@ -56,7 +38,6 @@ pub use presenter::{
 pub use ssh_exec::{
     contain_remote_path, default_remote_repo_root, run_ssh_batch, shell_single_quote,
 };
-pub use stream::ProgressEvent;
 pub use tddy_workflow::{
     canonical_artifact_write_path, canonical_attachment_write_path, read_session_artifact_utf8,
     read_session_artifact_utf8_or_placeholder, resolve_existing_session_artifact,

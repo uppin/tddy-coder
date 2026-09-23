@@ -60,7 +60,7 @@ fn codex_openai_auth_remediation(detail: &str) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn write_codex_thread_id_file(session_dir: &Path, thread_id: &str) {
+pub fn write_codex_thread_id_file(session_dir: &Path, thread_id: &str) {
     let path = session_dir.join(CODEX_THREAD_ID_FILENAME);
     match crate::atomic_file::write_atomic(&path, thread_id.trim()) {
         Ok(()) => log::debug!("[tddy-codex] persisted thread id to {}", path.display()),

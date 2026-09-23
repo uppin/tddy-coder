@@ -1,0 +1,36 @@
+[package]
+name = "tddy-agent-backend"
+version = "0.1.0"
+edition = "2021"
+description = "The coding-agent backends (Claude, Codex, Cursor, ACP, mock, stub) and the stream parsers for their output"
+
+[dependencies]
+# `backend/{acp,codex_acp}` carry `anyhow::Result` from the ACP client they drive.
+anyhow = "1"
+agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }
+async-trait = "0.1"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "process", "sync", "net", "io-util", "time"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+tddy-workflow = { path = "../tddy-workflow" }
+# `atomic_file` and `error`.
+tddy-session-store = { path = "../tddy-session-store" }
+# The submit-result and transition channels a backend's tool calls arrive on.
+tddy-toolcall = { path = "../tddy-toolcall" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+# The context-glob table is compiled in and matched by `tddy-sandbox`, which parses every pattern
+# with `glob::Pattern` and treats an unparsable one as matching nothing. Both are dev-only here so
+# `context_globs_acceptance` can prove the table (and the exclusion list beside the matcher) parses
+# at all — the one failure mode that otherwise disables a whole tree with nothing logged.
+# `tddy-sandbox` depends on no workspace crate, so this direction adds no cycle.
+glob = "0.3"
+tddy-sandbox = { path = "../tddy-sandbox" }
+rstest = { workspace = true }
+serial_test = "3"
+tempfile = "3"

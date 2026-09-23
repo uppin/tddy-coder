@@ -15,7 +15,7 @@ pub use claude::{
     build_claude_args, read_claude_subagent_usages, read_claude_transcript_usage,
     ClaudeCodeBackend, ClaudeInvokeConfig, PermissionMode,
 };
-pub(crate) use codex::write_codex_thread_id_file;
+pub use codex::write_codex_thread_id_file;
 pub use codex::{CodexBackend, CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_ID_FILENAME};
 pub use codex_acp::CodexAcpBackend;
 pub use cursor::CursorBackend;

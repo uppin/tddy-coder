@@ -11,7 +11,7 @@
 //!
 //! PRD: docs/ft/daemon/agent-context-sync.md § Acceptance Criteria.
 
-use tddy_core::backend::{context_globs_for_agent, CodingBackend, StubBackend};
+use tddy_agent_backend::backend::{context_globs_for_agent, CodingBackend, StubBackend};
 
 // ---------------------------------------------------------------------------
 // Fixtures

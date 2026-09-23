@@ -4,7 +4,7 @@
 //! all TDDY_REMOTE_* env vars before spawning the subprocess — so that the inherited
 //! `tddy-tools --mcp` can route calls to the relay.
 
-use tddy_core::backend::{InvokeRequest, RemoteToolEnv};
+use tddy_agent_backend::backend::{InvokeRequest, RemoteToolEnv};
 
 /// Phase 5 AC: `RemoteToolEnv` struct exists with the expected fields.
 #[test]

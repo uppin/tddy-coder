@@ -110,7 +110,7 @@ measured in its new home.
 - [x] Cut 1, Cut 2, the two retargets
 - [x] `tddy-log`, `tddy-agent-skills`
 - [x] `tddy-changeset`, `tddy-session-worktree`, `tddy-session-actions`
-- [ ] `tddy-toolcall`, `tddy-agent-backend`
+- [x] `tddy-toolcall`, `tddy-agent-backend`
 - [ ] `tddy-workflow-engine`, `tddy-presenter`
 - [ ] `tddy-core` facades only
 - [ ] Tests and code-issue records moved
@@ -162,7 +162,7 @@ tddy-core   (pub use facades only, ~140 lines)
 - [x] `tddy-log`, `tddy-agent-skills` extracted
 - [x] Cut 2; `tddy-changeset` extracted — AC4 other half
 - [x] `tddy-session-worktree`, `tddy-session-actions` extracted
-- [ ] `tddy-toolcall`, `tddy-agent-backend` extracted
+- [x] `tddy-toolcall`, `tddy-agent-backend` extracted
 - [ ] `tddy-workflow-engine`, `tddy-presenter` extracted
 - [ ] `tddy-core` facades only — AC1; path guard still green
 - [ ] Test files and code-issue records moved; AC2 and AC5–AC8 green

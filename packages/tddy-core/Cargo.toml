@@ -33,6 +33,8 @@ tddy-agent-skills = { path = "../tddy-agent-skills" }
 tddy-changeset = { path = "../tddy-changeset" }
 tddy-session-worktree = { path = "../tddy-session-worktree" }
 tddy-session-actions = { path = "../tddy-session-actions" }
+tddy-toolcall = { path = "../tddy-toolcall" }
+tddy-agent-backend = { path = "../tddy-agent-backend" }
 # The storage layer: `atomic_file`, `error`, `output` and `session_actions`, re-exported at their
 # old paths. It depends on no crate that depends on `tddy-core`.
 tddy-session-store = { path = "../tddy-session-store" }

@@ -3,7 +3,7 @@
 //! Feature: docs/ft/coder/session-token-accounting.md (requirement 5)
 //! Changeset: docs/dev/1-WIP/2026-07-11-changeset-session-token-accounting.md
 
-use tddy_core::token_accounting::TokenUsage;
+use tddy_agent_backend::token_accounting::TokenUsage;
 
 /// Total is simply input plus output — the single derived figure shown per conversation.
 #[test]
