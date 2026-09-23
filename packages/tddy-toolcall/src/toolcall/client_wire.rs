@@ -44,7 +44,7 @@ pub struct AskRequest {
 
 /// One question in an [`AskRequest`].
 ///
-/// Deliberately not [`crate::ClarificationQuestion`](tddy_workflow::ClarificationQuestion), which the listener deserializes these into:
+/// Deliberately not [`tddy_workflow::ClarificationQuestion`](tddy_workflow::ClarificationQuestion), which the listener deserializes these into:
 /// that type serializes `multi_select` under its own name and carries an `allow_other` field, so
 /// substituting it would change the bytes on the wire. What the two *do* share is
 /// [`QuestionOption`], re-exported above rather than declared a second time here.

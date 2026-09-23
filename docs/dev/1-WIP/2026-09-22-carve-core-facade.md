@@ -279,6 +279,69 @@ and one **compile-level guard** pins that the public paths consumers use still r
    shape test reads normal dependencies only, but those three crates' test builds still compile all
    of `tddy-core`.
 
+### /validate-changes, 2026-09-23
+
+- **Stack gate:** base `master`; `origin/master..HEAD` = this PR's 11 commits (rebase already done, not re-run).
+- **Diff (`-M`):** 191 files — 152 renames (≥74% similar), 26 added, 7 modified, 6 deleted. No consumer
+  crate file changed (AC7's diff half holds). Cut 1 (`hints.rs`) and Cut 2 (`session_continue.rs`) are
+  byte-identical to their master bodies; the other moved-file edits are `use` lines, doc links and the
+  one `pub(crate)` → `pub` widening.
+- **Build/lint (scoped, 11 packages):** `cargo clippy --all-targets -- -D warnings` clean — no unused
+  shim imports, no `ambiguous_glob_reexports` from tddy-core's nine `pub use …::*`.
+- **CI:** "Rust lint" fails on `tddy-integration-tests/tests/workflow_goal_conditions_acceptance.rs:34`
+  (the known `include_str!` target); nothing new.
+- **Findings (none blocking):** `write_codex_thread_id_file` is now on the public surface of
+  `tddy_core::backend` too (consider `#[doc(hidden)]`); `packages/tddy-core/BUILD.yaml` still lists only
+  `tddy-core/src/**` and one dep, so tddy-build does not see the new crates (it was already incomplete);
+  the `workflow_decouple_acceptance` guard reads only `lib.rs` text, so it cannot see glob re-exports
+  (the symbol no longer exists anywhere, so it was already vacuous).
+
+### /validate-tests, 2026-09-23
+
+- **Scoped run:** `cargo test` over the 11 packages: **577 passed, 1 failed** (the known
+  `session_store_shape::the_god_crate_keeps_the_dependency_that_does_not_leave`). Moved suites: only
+  path edits (`tddy_core::` → owning crate, rustfmt re-wraps).
+- **Findings:** `core_facade_shape::the_never_compiled_workflow_files_are_gone` now passes trivially
+  (`tddy-core/src/workflow/` is gone), so also check `tddy-workflow-engine/src/workflow/`;
+  `source_of` → `unwrap_or_default` makes the negative `defined_in_crate("tddy-core", …)` checks pass on
+  a bad path; `core_facade_paths`' runtime assertion always holds (the compile is the test — fine, but
+  say so or drop it); `workflow_reexport_shim.rs` moved to the engine, so it no longer pins the
+  `tddy_core::workflow::*` paths consumers use, and its sed-rewritten docs are stale ("stays in
+  tddy-core", `…_and_tddy_core` fn name, `lib.rs:110-117`, lines >100 cols).
+
+### /validate-prod-ready, 2026-09-23
+
+- ✅ Ready. The added lines have no new mocks, fallbacks, TODO/FIXME, `println!` or `dbg!`. The only
+  `#[allow(deprecated)]` is carried over (`DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF` re-export).
+  `MockBackend`/`StubBackend` stay public production types, as they were on master.
+
+### /analyze-clean-code, 2026-09-23
+
+- **Score: A** for the new code (lib.rs files, facades, `hints.rs`, `session_continue.rs`, the two
+  tests): all functions ≤40 lines, nesting ≤3, ≤3 params, budgets named as constants. Oversized
+  moved files: the 8 already recorded, none grown.
+- **Minor:** each crate root has private `use` shims so moved bodies can keep naming `crate::…`.
+  This hides the real dependency, so repoint them when consumers are repointed. Tokio feature lists
+  and crate versions are copied into each new manifest (candidates for `[workspace.dependencies]`).
+  Two doc links show a stale path as their text (`recipe.rs:202`, `client_wire.rs:47`).
+
+### Refactor, 2026-09-23
+
+- `core_facade_shape.rs`: `the_never_compiled_workflow_files_are_gone` now checks
+  `tddy-workflow-engine/src/workflow/` as well as `tddy-core/src/workflow/`, so it no longer passes
+  just because tddy-core's directory is gone. New helper `sources_of_crate` fails loudly when a
+  crate's `src` is missing. `source_of` now panics on an unreadable path instead of returning `""`.
+  `normal_dependencies_of` goes through `manifest_of`. Together these stop a mistyped crate name
+  from letting the negative assertions pass.
+- `core_facade_paths.rs`: covers the workflow facade through paths consumers use
+  (`workflow::{context, graph, hooks, runner, session, task}`). The always-true runtime `assert!`
+  is replaced by a note that the compile is the test.
+- `workflow_reexport_shim.rs`: stale "stays in tddy-core" text, the `tddy_core` root comment and
+  the `lib.rs:110-117` reference corrected. Test renamed to
+  `graph_type_identity_is_shared_across_tddy_graph_and_tddy_workflow_engine`. Lines wrapped to 100
+  columns. Behaviour unchanged.
+- Doc-link text at `recipe.rs:202` and `client_wire.rs:47` now shows the new paths.
+
 ## TODO
 
 - [x] Record initial discovery

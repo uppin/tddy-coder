@@ -43,8 +43,22 @@ fn package(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// A crate's `src` directory, failing loudly when it is missing — a mistyped crate name must not
+/// read as an empty crate, or every "does not define" / "does not depend" assertion passes
+/// vacuously.
+fn sources_of_crate(name: &str) -> PathBuf {
+    let src = package(name).join("src");
+    assert!(
+        src.is_dir(),
+        "`{}` does not exist — is `{name}` the name of a crate in packages/?",
+        src.display()
+    );
+    src
+}
+
 fn source_of(path: &Path) -> String {
-    std::fs::read_to_string(path).unwrap_or_default()
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("cannot read `{}`: {error}", path.display()))
 }
 
 fn rust_files_under(dir: &Path) -> Vec<PathBuf> {
@@ -91,7 +105,7 @@ fn production_part(source: &str) -> Vec<&str> {
 }
 
 fn production_lines_of_crate(name: &str) -> usize {
-    rust_files_under(&package(name).join("src"))
+    rust_files_under(&sources_of_crate(name))
         .into_iter()
         .filter(|path| !is_test_file(path))
         .map(|path| production_part(&source_of(&path)).len())
@@ -100,7 +114,7 @@ fn production_lines_of_crate(name: &str) -> usize {
 
 /// The `[dependencies]` table of a crate's manifest, without its dev- or build-dependencies.
 fn normal_dependencies_of(name: &str) -> String {
-    source_of(&package(name).join("Cargo.toml"))
+    manifest_of(name)
         .split("\n[")
         .find(|table| table.starts_with("dependencies]"))
         .unwrap_or_default()
@@ -145,18 +159,18 @@ fn defines_something(line: &str) -> bool {
 }
 
 fn defined_in_crate(crate_name: &str, definition: &str) -> bool {
-    rust_files_under(&package(crate_name).join("src"))
+    rust_files_under(&sources_of_crate(crate_name))
         .into_iter()
         .any(|path| source_of(&path).contains(definition))
 }
 
 fn manifest_of(crate_name: &str) -> String {
-    let manifest = source_of(&package(crate_name).join("Cargo.toml"));
+    let manifest = package(crate_name).join("Cargo.toml");
     assert!(
-        !manifest.is_empty(),
+        manifest.is_file(),
         "`packages/{crate_name}` has no manifest — the crate does not exist yet"
     );
-    manifest
+    source_of(&manifest)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -167,7 +181,7 @@ fn manifest_of(crate_name: &str) -> String {
 fn tddy_core_is_only_a_wiring_point() {
     // Given tddy-core's production sources, less the two files allowed to hold code
     let allowed_to_define = ["ssh_exec.rs", "test_support.rs"];
-    let definitions: Vec<String> = rust_files_under(&package("tddy-core").join("src"))
+    let definitions: Vec<String> = rust_files_under(&sources_of_crate("tddy-core"))
         .into_iter()
         .filter(|path| !is_test_file(path))
         .filter(|path| {
@@ -237,28 +251,41 @@ fn every_crate_receiving_code_stays_within_10k_production_lines() {
 // AC3 — dead code goes
 // ---------------------------------------------------------------------------------------------
 
-/// `workflow/mod.rs` declares these as inline modules re-exporting `tddy_graph`, so the files were
-/// never compiled — 1,090 lines nobody could have been running.
-#[test]
-fn the_never_compiled_workflow_files_are_gone() {
-    // Given the six files the inline shims shadowed
-    let workflow = package("tddy-core").join("src/workflow");
-    let dead = [
-        "context.rs",
-        "graph.rs",
-        "hooks.rs",
-        "runner.rs",
-        "session.rs",
-        "task.rs",
-    ];
+/// The six files the inline `tddy_graph` shims shadowed in `workflow/mod.rs`.
+const NEVER_COMPILED_WORKFLOW_FILES: [&str; 6] = [
+    "context.rs",
+    "graph.rs",
+    "hooks.rs",
+    "runner.rs",
+    "session.rs",
+    "task.rs",
+];
 
-    // When each is looked for
-    let still_there: Vec<&str> = dead
+/// Which of the never-compiled files are still present under `crate_name`'s `src/workflow/`.
+fn never_compiled_workflow_files_left_in(crate_name: &str) -> Vec<String> {
+    let workflow = sources_of_crate(crate_name).join("workflow");
+    NEVER_COMPILED_WORKFLOW_FILES
         .into_iter()
         .filter(|file| workflow.join(file).exists())
+        .map(|file| format!("{crate_name}/src/workflow/{file}"))
+        .collect()
+}
+
+/// `workflow/mod.rs` declares these as inline modules re-exporting `tddy_graph`, so the files were
+/// never compiled — 1,090 lines nobody could have been running. The module moved to
+/// `tddy-workflow-engine`, so both its old home and its new one must be free of them.
+#[test]
+fn the_never_compiled_workflow_files_are_gone() {
+    // Given the crate the workflow module lived in and the crate it moved to
+    let homes = ["tddy-core", "tddy-workflow-engine"];
+
+    // When each is searched for the six files the inline shims shadowed
+    let still_there: Vec<String> = homes
+        .into_iter()
+        .flat_map(never_compiled_workflow_files_left_in)
         .collect();
 
-    // Then none is left
+    // Then none is left in either
     assert!(
         still_there.is_empty(),
         "never-compiled files remain: {still_there:?}"
