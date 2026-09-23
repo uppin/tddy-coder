@@ -221,7 +221,9 @@ async fn a_code_exchange_returns_the_granted_token_and_the_user_it_belongs_to() 
 
     // When a code is exchanged
     let provider = the_provider(&github);
-    let (_, state) = provider.authorize_url();
+    let (_, state) = provider
+        .authorize_url()
+        .expect("a confidential client issues an authorize URL");
     let exchanged = provider.exchange_code("the-code", &state).await;
 
     // Then both halves come back
@@ -241,7 +243,9 @@ async fn a_code_exchange_whose_token_was_granted_but_whose_user_is_unreachable_n
 
     // When a code is exchanged
     let provider = a_provider_split_across(&oauth, &api);
-    let (_, state) = provider.authorize_url();
+    let (_, state) = provider
+        .authorize_url()
+        .expect("a confidential client issues an authorize URL");
     let exchanged = provider.exchange_code("the-code", &state).await;
 
     // Then the failure names the user leg, not the token leg that succeeded
@@ -295,14 +299,122 @@ async fn a_public_client_refuses_a_code_exchange_before_asking_github() {
     let github = a_github_answering(vec![]).await;
     let provider = a_public_client(&github);
 
-    // When a redirect-flow callback is exchanged through a state it did issue
-    let (_, state) = provider.authorize_url();
-    let exchanged = provider.exchange_code("the-code", &state).await;
+    // When a redirect-flow callback is exchanged
+    let exchanged = provider.exchange_code("the-code", "a-state").await;
 
-    // Then it is refused without a request — that exchange cannot be made without a secret
+    // Then it is refused for want of a secret, naming the flow that works, without a request
     assert_eq!(
-        (exchanged.is_err(), github.received.lock().unwrap().len()),
+        (
+            exchanged
+                .map(|_| ())
+                .is_err_and(|e| e.contains("device flow")),
+            github.received.lock().unwrap().len()
+        ),
         (true, 0)
+    );
+}
+
+#[tokio::test]
+async fn a_public_client_hands_out_no_authorize_url_it_could_never_complete() {
+    // Given a provider holding a client id and no secret
+    let github = a_github_answering(vec![]).await;
+    let provider = a_public_client(&github);
+
+    // When the redirect flow is begun
+    let authorize = provider.authorize_url();
+
+    // Then it is refused, naming the flow that works, rather than sending the operator to GitHub
+    // for a code this provider cannot exchange
+    assert!(
+        authorize.as_ref().is_err_and(|e| e.contains("device flow")),
+        "a public client must not begin the redirect flow; got {authorize:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_slow_down_naming_no_interval_for_a_device_code_never_started_is_an_error() {
+    // Given a GitHub asking to slow down without saying by how much
+    let github = a_github_answering(vec![Answer::PollError {
+        error: "slow_down".to_string(),
+        interval: None,
+    }])
+    .await;
+
+    // When a device code this provider never started is polled
+    let polled = the_provider(&github)
+        .poll_device_login("a-code-from-nowhere")
+        .await;
+
+    // Then there is no interval to widen, and no invented one is widened instead
+    assert!(
+        polled.is_err(),
+        "a slow_down with no base interval must fail; got {polled:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_device_code_is_forgotten_once_its_window_has_passed() {
+    // Given a device login GitHub started with a window that has already closed, which is later
+    // asked to slow down without an interval
+    let github = a_github_answering(vec![
+        Answer::DeviceCodeExpiringIn {
+            expires_in: 0,
+            interval: 5,
+        },
+        Answer::PollError {
+            error: "slow_down".to_string(),
+            interval: None,
+        },
+    ])
+    .await;
+    let provider = the_provider(&github);
+    let started = provider
+        .start_device_login()
+        .await
+        .expect("GitHub issued a device code");
+
+    // When the abandoned code is polled after its window
+    let polled = provider.poll_device_login(&started.device_code).await;
+
+    // Then its interval was dropped with it, so nothing remains to widen from
+    assert!(
+        polled.is_err(),
+        "an expired device code's entry must be pruned; got {polled:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_device_code_is_forgotten_once_github_answers_it_expired() {
+    // Given a started device login that GitHub reports expired, and is then asked to slow down
+    let github = a_github_answering(vec![
+        Answer::DeviceCode {
+            user_code: "WDJB-MJHT".to_string(),
+            interval: 5,
+        },
+        Answer::PollError {
+            error: "expired_token".to_string(),
+            interval: None,
+        },
+        Answer::PollError {
+            error: "slow_down".to_string(),
+            interval: None,
+        },
+    ])
+    .await;
+    let provider = the_provider(&github);
+    let started = provider
+        .start_device_login()
+        .await
+        .expect("GitHub issued a device code");
+    let expired = provider.poll_device_login(&started.device_code).await;
+
+    // When the same code is polled again
+    let polled = provider.poll_device_login(&started.device_code).await;
+
+    // Then the expiry ended the entry, so a later slow_down finds nothing to widen
+    assert_eq!(
+        (expired, polled.is_err()),
+        (Ok(DeviceLoginPoll::Expired), true)
     );
 }
 
@@ -345,7 +457,9 @@ async fn a_public_client_signs_in_by_the_device_flow() {
 /// Run one exchange against a GitHub, through a state that provider actually issued.
 async fn exchange_against(github: &AGitHub) -> Result<(), String> {
     let provider = the_provider(github);
-    let (_, state) = provider.authorize_url();
+    let (_, state) = provider
+        .authorize_url()
+        .expect("a confidential client issues an authorize URL");
     provider.exchange_code("the-code", &state).await.map(|_| ())
 }
 
@@ -398,6 +512,11 @@ fn a_public_client(github: &AGitHub) -> RealGitHubProvider {
 enum Answer {
     DeviceCode {
         user_code: String,
+        interval: u64,
+    },
+    /// A device code whose window is `expires_in` seconds, not the usual fifteen minutes.
+    DeviceCodeExpiringIn {
+        expires_in: u64,
         interval: u64,
     },
     PollError {
@@ -456,14 +575,11 @@ async fn answer(State(desk): State<TheDesk>, body: String) -> axum::response::Re
         Some(Answer::DeviceCode {
             user_code,
             interval,
-        }) => Json(serde_json::json!({
-            "device_code": "the-device-code",
-            "user_code": user_code,
-            "verification_uri": "https://github.com/login/device",
-            "expires_in": 900,
-            "interval": interval,
-        }))
-        .into_response(),
+        }) => a_device_code_answer(&user_code, 900, interval),
+        Some(Answer::DeviceCodeExpiringIn {
+            expires_in,
+            interval,
+        }) => a_device_code_answer("WDJB-MJHT", expires_in, interval),
         Some(Answer::PollError { error, interval }) => Json(serde_json::json!({
             "error": error,
             "interval": interval,
@@ -487,6 +603,21 @@ async fn answer(State(desk): State<TheDesk>, body: String) -> axum::response::Re
         Some(Answer::Garbage) => "this is not json".into_response(),
         None => Json(serde_json::json!({})).into_response(),
     }
+}
+
+fn a_device_code_answer(
+    user_code: &str,
+    expires_in: u64,
+    interval: u64,
+) -> axum::response::Response {
+    Json(serde_json::json!({
+        "device_code": "the-device-code",
+        "user_code": user_code,
+        "verification_uri": "https://github.com/login/device",
+        "expires_in": expires_in,
+        "interval": interval,
+    }))
+    .into_response()
 }
 
 use axum::response::IntoResponse;

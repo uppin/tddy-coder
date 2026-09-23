@@ -61,9 +61,12 @@ async fn the_services_an_assembled_daemon_registers() -> Vec<String> {
     let tddy_data_dir = tempfile::tempdir().expect("a temp tddy home");
     let port = a_free_tcp_port().await;
 
+    // An embedded daemon serving sign-in to a `users:` mapping nobody must name the file its first
+    // login is enrolled into; nothing here signs in, so the file is never written.
     let runtime = runtime::build(
         a_daemon_config_with_github_auth(port, &tddy_data_dir),
-        RuntimeOptions::for_embedded(),
+        RuntimeOptions::for_embedded()
+            .with_config_path(Some(tddy_data_dir.path().join("daemon.yaml"))),
     )
     .await
     .expect("the daemon runtime did not build");

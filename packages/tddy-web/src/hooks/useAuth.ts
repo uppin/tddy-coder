@@ -209,10 +209,10 @@ export function useAuth() {
   // Take up a session the daemon minted — by `ExchangeCode` or by an approved device login, which
   // return the same triple. Both flows store it here, so both leave the operator signed in alike.
   const adoptSession = useCallback(
-    (sessionToken: string, refreshToken: string, user: GitHubUser | undefined) => {
+    (sessionToken: string, refreshToken: string, user: GitHubUser | null) => {
       storage.set(sessionToken, refreshToken);
       setState({
-        user: user ?? null,
+        user,
         isAuthenticated: true,
         isLoading: false,
         error: null,
@@ -254,7 +254,7 @@ export function useAuth() {
       sessionStorage.removeItem(OAUTH_STATE_KEY);
       try {
         const res = await client.exchangeCode({ code, state });
-        adoptSession(res.sessionToken, res.refreshToken, res.user);
+        adoptSession(res.sessionToken, res.refreshToken, res.user ?? null);
       } catch (e) {
         storage.clear();
         setState({
@@ -305,19 +305,44 @@ export function useAuth() {
     if (!isCurrent()) return;
 
     const { deviceCode } = grant;
-    // GitHub's floor between polls. A slow-down answer raises it for every later poll.
-    let intervalMs = Number(grant.intervalSeconds) * 1000;
+    // GitHub's floor between polls. A slow-down answer raises it for every later poll. An interval
+    // that is not positive is a protocol error, never a reason to poll with no delay.
+    const grantedIntervalSeconds = Number(grant.intervalSeconds);
+    if (!(grantedIntervalSeconds > 0)) {
+      setDeviceLogin({
+        phase: "failed",
+        error: "The daemon issued a device sign-in code with no interval between polls",
+      });
+      return;
+    }
+    let intervalMs = grantedIntervalSeconds * 1000;
 
     const answered = (res: PollDeviceLoginResponse) => {
       switch (res.state) {
         case DeviceLoginState.PENDING:
           scheduleNextPoll();
           return;
-        case DeviceLoginState.SLOW_DOWN:
-          intervalMs = Number(res.intervalSeconds) * 1000;
+        case DeviceLoginState.SLOW_DOWN: {
+          const widenedSeconds = Number(res.intervalSeconds);
+          if (!(widenedSeconds > 0)) {
+            setDeviceLogin({
+              phase: "failed",
+              error: "The daemon asked to slow down device sign-in without naming an interval",
+            });
+            return;
+          }
+          intervalMs = widenedSeconds * 1000;
           scheduleNextPoll();
           return;
+        }
         case DeviceLoginState.COMPLETE:
+          if (res.user === undefined || res.sessionToken === "" || res.refreshToken === "") {
+            setDeviceLogin({
+              phase: "failed",
+              error: "The daemon completed device sign-in without a whole session",
+            });
+            return;
+          }
           setDeviceLogin(DEVICE_LOGIN_IDLE);
           adoptSession(res.sessionToken, res.refreshToken, res.user);
           return;

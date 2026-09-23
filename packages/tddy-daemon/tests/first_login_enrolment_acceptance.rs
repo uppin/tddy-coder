@@ -104,6 +104,25 @@ async fn a_server_mapping_nobody_enrols_no_one_and_refuses_as_it_always_has() {
     );
 }
 
+#[tokio::test]
+async fn a_desktop_given_no_config_file_to_enrol_into_refuses_to_assemble() {
+    // Given a desktop configuration that maps nobody, handed over with no file it was loaded from
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let config = a_config_mapping_nobody(&dir).await;
+
+    // When the embedded daemon is assembled
+    let built = runtime::build(config, RuntimeOptions::for_embedded()).await;
+
+    // Then it refuses, naming what is missing, rather than starting a desktop no login can enrol
+    let refusal = built.err().map(|e| e.to_string());
+    assert!(
+        refusal
+            .as_deref()
+            .is_some_and(|message| message.contains("config file")),
+        "an embedded desktop that could never enrol its operator must not start; got {refusal:?}"
+    );
+}
+
 /// A daemon assembled from a config file that maps nobody, and the file it was started from.
 struct Deployment {
     rpc: RpcBridge<MultiRpcService>,
@@ -115,17 +134,8 @@ struct Deployment {
 /// its state in a temporary directory, built for the host `options` names.
 async fn a_deployment_mapping_nobody(options: RuntimeOptions) -> Deployment {
     let dir = tempfile::tempdir().expect("a temporary directory");
-    let config_path = dir.path().join("desktop.yaml");
-    let yaml = format!(
-        "listen:\n  web_port: {port}\n  web_host: 127.0.0.1\n\
-         tddy_data_dir: \"{data_dir}\"\n\
-         github:\n  stub: true\n  \
-         stub_codes: \"{THE_OPERATORS_CODE}:{THE_OPERATOR},{SOMEBODY_ELSES_CODE}:{SOMEBODY_ELSE}\"\n",
-        port = a_free_tcp_port().await,
-        data_dir = dir.path().join("tddy").display(),
-    );
-    std::fs::write(&config_path, yaml).expect("the config is written");
-    let config = DaemonConfig::load(&config_path).expect("the config loads");
+    let config = a_config_mapping_nobody(&dir).await;
+    let config_path = the_config_file_in(&dir);
 
     let runtime = runtime::build(config, options.with_config_path(Some(config_path.clone())))
         .await
@@ -230,6 +240,26 @@ impl Deployment {
             _ => panic!("{service}/{method} is unary"),
         }
     }
+}
+
+/// A config that maps nobody and signs in through a stub GitHub that knows the operator and
+/// somebody else, written to [`the_config_file_in`] `dir` and loaded back from it.
+async fn a_config_mapping_nobody(dir: &TempDir) -> DaemonConfig {
+    let config_path = the_config_file_in(dir);
+    let yaml = format!(
+        "listen:\n  web_port: {port}\n  web_host: 127.0.0.1\n\
+         tddy_data_dir: \"{data_dir}\"\n\
+         github:\n  stub: true\n  \
+         stub_codes: \"{THE_OPERATORS_CODE}:{THE_OPERATOR},{SOMEBODY_ELSES_CODE}:{SOMEBODY_ELSE}\"\n",
+        port = a_free_tcp_port().await,
+        data_dir = dir.path().join("tddy").display(),
+    );
+    std::fs::write(&config_path, yaml).expect("the config is written");
+    DaemonConfig::load(&config_path).expect("the config loads")
+}
+
+fn the_config_file_in(dir: &TempDir) -> PathBuf {
+    dir.path().join("desktop.yaml")
 }
 
 /// The `users:` rows the config file at `path` holds now.

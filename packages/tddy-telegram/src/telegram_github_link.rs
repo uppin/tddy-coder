@@ -252,7 +252,9 @@ pub fn complete_telegram_link_via_stub_exchange(
         telegram_user_id,
         code.len()
     );
-    let (_url, state) = provider.authorize_url();
+    let (_url, state) = provider
+        .authorize_url()
+        .map_err(|e| anyhow::anyhow!("stub GitHub authorize: {e}"))?;
     log::debug!(
         target: "tddy_daemon::telegram_github_link",
         "stub OAuth: authorize state registered (state_len={})",

@@ -16,7 +16,11 @@ pub struct GitHubUser {
 pub trait GitHubOAuthProvider: Send + Sync + 'static {
     /// Generate the OAuth authorize URL and a CSRF state token.
     /// Returns (authorize_url, state).
-    fn authorize_url(&self) -> (String, String);
+    ///
+    /// `Err` is a provider that cannot complete the redirect flow at all — a public client, which
+    /// holds no secret to exchange the resulting code with. Handing out a URL the operator could
+    /// follow to GitHub and back, only for the exchange to fail, is the thing this refuses.
+    fn authorize_url(&self) -> Result<(String, String), String>;
 
     /// Exchange an authorization code for an access token and fetch user info.
     /// The state parameter must match one previously issued by authorize_url.

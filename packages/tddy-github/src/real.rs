@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -20,10 +21,22 @@ pub struct RealGitHubProvider {
     /// Where the REST API lives — `https://api.github.com` in production.
     api_base_url: String,
     pending_states: Mutex<HashSet<String>>,
-    /// The poll interval GitHub last set for each device code this provider started, so a
-    /// `slow_down` that names no interval of its own can still be widened from the right base.
-    device_poll_intervals: Mutex<HashMap<String, u64>>,
+    /// Each device code this provider started and whose attempt has not ended, so a `slow_down`
+    /// that names no interval of its own is widened from the one GitHub set for that code.
+    ///
+    /// Bounded: an entry leaves on a terminal answer, and every start and poll prunes the ones
+    /// whose `expires_in` window has closed, so an attempt the operator abandoned does not stay.
+    device_attempts: Mutex<HashMap<String, DeviceAttempt>>,
     http_client: reqwest::Client,
+}
+
+/// What this provider remembers about a device code it started, for as long as GitHub could still
+/// answer it with anything but `expired_token`.
+struct DeviceAttempt {
+    /// The minimum seconds between polls GitHub last set for this code.
+    interval_seconds: u64,
+    /// When the code's `expires_in` window closes.
+    expires_at: Instant,
 }
 
 /// GitHub's own OAuth host. The default for [`RealGitHubProvider::new`].
@@ -40,11 +53,9 @@ const SCOPES: &str = "read:user repo";
 /// The `grant_type` that turns a device-flow poll into a token request (RFC 8628 §3.4).
 const DEVICE_CODE_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
-/// GitHub's documented default for the device flow's minimum poll interval, used as the base to
-/// widen from only when a `slow_down` arrives for a device code this provider did not start.
-const DEFAULT_DEVICE_POLL_INTERVAL_SECONDS: u64 = 5;
-
-/// How far GitHub's documentation says to widen the interval on a `slow_down` that names none.
+/// How far to widen the interval on a `slow_down` that names none. This is protocol, not a
+/// default: RFC 8628 §3.5 says a client told `slow_down` MUST increase its interval by 5 seconds
+/// for this and all later requests, and GitHub's device-flow documentation says the same.
 const SLOW_DOWN_WIDENING_SECONDS: u64 = 5;
 
 #[derive(Deserialize)]
@@ -150,7 +161,7 @@ impl RealGitHubProvider {
             oauth_base_url: oauth_base_url.trim_end_matches('/').to_string(),
             api_base_url: api_base_url.trim_end_matches('/').to_string(),
             pending_states: Mutex::new(HashSet::new()),
-            device_poll_intervals: Mutex::new(HashMap::new()),
+            device_attempts: Mutex::new(HashMap::new()),
             http_client: reqwest::Client::new(),
         }
     }
@@ -187,34 +198,61 @@ impl RealGitHubProvider {
         })
     }
 
-    /// The interval to obey after a `slow_down`: GitHub's own when it names one, otherwise the
-    /// last one set for this device code widened by the documented step. Remembered either way, so
-    /// a second `slow_down` widens from the first.
-    fn widened_interval(&self, device_code: &str, from_github: Option<u64>) -> u64 {
-        let mut intervals = self.device_poll_intervals.lock().unwrap();
-        let widened = from_github.unwrap_or_else(|| {
-            intervals
-                .get(device_code)
-                .copied()
-                .unwrap_or(DEFAULT_DEVICE_POLL_INTERVAL_SECONDS)
-                + SLOW_DOWN_WIDENING_SECONDS
-        });
-        intervals.insert(device_code.to_string(), widened);
-        widened
+    /// The device attempts still open, with every one whose window has closed dropped first.
+    fn open_device_attempts(&self) -> std::sync::MutexGuard<'_, HashMap<String, DeviceAttempt>> {
+        let mut attempts = self.device_attempts.lock().unwrap();
+        let now = Instant::now();
+        attempts.retain(|_, attempt| attempt.expires_at > now);
+        attempts
+    }
+
+    /// The interval to obey after a `slow_down`: GitHub's own when it names one, otherwise the one
+    /// GitHub last set for this device code widened by the RFC 8628 §3.5 step. Remembered for an
+    /// open attempt, so a second `slow_down` widens from the first.
+    ///
+    /// A `slow_down` naming no interval, for a code this provider has no open attempt for — never
+    /// started here, or past its window — is an error: there is no interval to widen, and
+    /// inventing one would tell the client a number GitHub never said.
+    fn widened_interval(&self, device_code: &str, from_github: Option<u64>) -> Result<u64, String> {
+        let mut attempts = self.open_device_attempts();
+        let attempt = attempts.get_mut(device_code);
+        let widened = match (from_github, attempt) {
+            (Some(interval), attempt) => {
+                if let Some(attempt) = attempt {
+                    attempt.interval_seconds = interval;
+                }
+                interval
+            }
+            (None, Some(attempt)) => {
+                attempt.interval_seconds += SLOW_DOWN_WIDENING_SECONDS;
+                attempt.interval_seconds
+            }
+            (None, None) => {
+                return Err(format!(
+                    "GitHub asked to slow down polling for a device code with no open attempt \
+                     on this daemon ({device_code}), and named no interval to adopt"
+                ))
+            }
+        };
+        Ok(widened)
     }
 
     /// Forget a device code whose attempt has ended, whichever way it ended.
     fn forget_device_code(&self, device_code: &str) {
-        self.device_poll_intervals
-            .lock()
-            .unwrap()
-            .remove(device_code);
+        self.open_device_attempts().remove(device_code);
     }
 }
 
 #[async_trait]
 impl GitHubOAuthProvider for RealGitHubProvider {
-    fn authorize_url(&self) -> (String, String) {
+    fn authorize_url(&self) -> Result<(String, String), String> {
+        if self.client_secret.is_none() {
+            return Err(
+                "this daemon holds a public client id and no client secret, so it cannot complete \
+                 the redirect flow; sign in with the device flow"
+                    .to_string(),
+            );
+        }
         let state = Uuid::new_v4().to_string();
         self.pending_states.lock().unwrap().insert(state.clone());
         // `read:user` identifies the operator; `repo` is what lets the granted token read (and later
@@ -224,14 +262,12 @@ impl GitHubOAuthProvider for RealGitHubProvider {
             "{}/login/oauth/authorize?client_id={}&redirect_uri={}&state={}&scope=read:user%20repo",
             self.oauth_base_url, self.client_id, self.redirect_uri, state
         );
-        (url, state)
+        Ok((url, state))
     }
 
     async fn exchange_code(&self, code: &str, state: &str) -> Result<(String, GitHubUser), String> {
-        let state_valid = self.pending_states.lock().unwrap().remove(state);
-        if !state_valid {
-            return Err("invalid or expired state parameter".to_string());
-        }
+        // Before the state check: a public client issues no state, so every exchange it is asked
+        // for would otherwise fail as a forged state rather than for the reason it really fails.
         let Some(client_secret) = self.client_secret.as_deref() else {
             return Err(
                 "this daemon holds a public client id and no client secret, so it cannot exchange \
@@ -239,6 +275,10 @@ impl GitHubOAuthProvider for RealGitHubProvider {
                     .to_string(),
             );
         };
+        let state_valid = self.pending_states.lock().unwrap().remove(state);
+        if !state_valid {
+            return Err("invalid or expired state parameter".to_string());
+        }
 
         // Exchange code for access token
         let token_resp = self
@@ -297,10 +337,13 @@ impl GitHubOAuthProvider for RealGitHubProvider {
             .await
             .map_err(|e| format!("failed to parse device code response: {}", e))?;
 
-        self.device_poll_intervals
-            .lock()
-            .unwrap()
-            .insert(started.device_code.clone(), started.interval);
+        self.open_device_attempts().insert(
+            started.device_code.clone(),
+            DeviceAttempt {
+                interval_seconds: started.interval,
+                expires_at: Instant::now() + Duration::from_secs(started.expires_in),
+            },
+        );
         Ok(DeviceLoginStart {
             device_code: started.device_code,
             user_code: started.user_code,
@@ -311,6 +354,8 @@ impl GitHubOAuthProvider for RealGitHubProvider {
     }
 
     async fn poll_device_login(&self, device_code: &str) -> Result<DeviceLoginPoll, String> {
+        // Every poll prunes, so abandoned attempts leave even when nothing is ever started again.
+        drop(self.open_device_attempts());
         let resp = self
             .http_client
             .post(format!("{}/login/oauth/access_token", self.oauth_base_url))
@@ -344,7 +389,7 @@ impl GitHubOAuthProvider for RealGitHubProvider {
             }
             (None, Some("authorization_pending")) => Ok(DeviceLoginPoll::Pending),
             (None, Some("slow_down")) => Ok(DeviceLoginPoll::SlowDown {
-                interval_seconds: self.widened_interval(device_code, polled.interval),
+                interval_seconds: self.widened_interval(device_code, polled.interval)?,
             }),
             (None, Some("expired_token")) => {
                 self.forget_device_code(device_code);

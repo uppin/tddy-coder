@@ -188,7 +188,9 @@ export type GetClientConfigResponse = Message<"daemon_config.GetClientConfigResp
    * Which GitHub sign-in flow this daemon's `auth.AuthService` serves: `"redirect"`
    * (`GetAuthUrl` / `ExchangeCode`, a deployment holding a client secret) or `"device"`
    * (`StartDeviceLogin` / `PollDeviceLogin`, a public `client_id` and no secret — Tddy Desktop).
-   * Absent is a daemon that predates the device flow, and so serves only the redirect flow.
+   * Absent is a daemon that serves no GitHub sign-in at all: no `github:` block, or one naming
+   * neither a stub nor a `client_id`. It is never read as either flow, and a value outside these
+   * two is an error the dashboard shows rather than a flow it guesses at.
    * A string rather than an enum so it carries the same values as `auth_flow` at `GET /api/config`.
    *
    * @generated from field: optional string auth_flow = 10;

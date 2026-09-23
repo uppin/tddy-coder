@@ -194,7 +194,12 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
         &self,
         _request: Request<GetAuthUrlRequest>,
     ) -> Result<Response<GetAuthUrlResponse>, Status> {
-        let (authorize_url, state) = self.provider.authorize_url();
+        // The only refusal is a provider that cannot complete the redirect flow at all, which is a
+        // property of how this daemon is configured rather than of the request.
+        let (authorize_url, state) = self
+            .provider
+            .authorize_url()
+            .map_err(Status::failed_precondition)?;
         Ok(Response::new(GetAuthUrlResponse {
             authorize_url,
             state,

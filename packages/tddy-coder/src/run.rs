@@ -1214,7 +1214,11 @@ fn build_client_config(args: &Args) -> crate::web_server::ClientConfig {
         // The standalone web server provisions no `--workspace-tools` jail, so it advertises no
         // sandboxed-codebase placement: the key is left off the wire entirely.
         sandboxed_codebase: None,
-        // …and registers no GitHub auth service, so it declares no sign-in flow.
+        // TODO(#keyring 2/9): this server *does* register the redirect flow when `--github-stub` or
+        // a client id and secret are given (`build_auth_service_entry`), so declaring none here
+        // misstates it. Unread today — `daemon_mode` is unset, so its page shows the standalone
+        // form and never the daemon sign-in screen that reads `auth_flow` — but it should declare
+        // `"redirect"` exactly when that entry is registered.
         auth_flow: None,
     }
 }

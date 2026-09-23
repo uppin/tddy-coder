@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Room } from "livekit-client";
 import { RpcTransportProvider, useHttpTransport } from "./rpc/transportProvider";
-import { loadClientConfig, type ClientConfig } from "./rpc/clientConfig";
+import { loadClientConfig, type AuthFlowDeclaration } from "./rpc/clientConfig";
 import { AuthProvider, useAuthContext } from "./hooks/authProvider";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
 import { ConnectionProviders } from "./rpc/connections/registry";
@@ -71,6 +71,24 @@ import {
 import { useAppLocation } from "./routing/useAppLocation";
 import { ConnectionForm } from "./components/connection/StandaloneConnectionScreen";
 
+/** What the page read about the daemon serving it. */
+interface ServingDaemonConfig {
+  livekitEnabled?: boolean;
+  livekitUrl?: string;
+  commonRoom?: string;
+  daemonInstanceId?: string;
+  allowedAgents?: { id: string; label: string }[];
+  sandboxedCodebase?: { confinesFilesystem: boolean };
+}
+
+/**
+ * `daemonMode: null` is still loading. A daemon-mode page always carries the sign-in its daemon
+ * declared, so the sign-in screen is never rendered from a guessed flow.
+ */
+type AppConfigState =
+  | ({ daemonMode: null | false } & ServingDaemonConfig)
+  | ({ daemonMode: true; authFlow: AuthFlowDeclaration } & ServingDaemonConfig);
+
 /**
  * Test-injection seam for `SelectedDaemonProvider`'s `room`/`daemons` overrides (mirrors
  * `RpcTransportProvider`'s `httpTransport`/`liveKitFactory` props) — `App` is the sole production
@@ -89,23 +107,13 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
   const path = location.path;
   const { isAuthenticated, isLoading: authLoading, login, error: authError } = useAuthContext();
   const transport = useHttpTransport();
-  const [appConfig, setAppConfig] = useState<{
-    daemonMode: boolean | null;
-    livekitEnabled?: boolean;
-    livekitUrl?: string;
-    commonRoom?: string;
-    daemonInstanceId?: string;
-    allowedAgents?: { id: string; label: string }[];
-    sandboxedCodebase?: { confinesFilesystem: boolean };
-    authFlow?: ClientConfig["authFlow"];
-  }>({ daemonMode: null });
+  const [appConfig, setAppConfig] = useState<AppConfigState>({ daemonMode: null });
 
   useEffect(() => {
     loadClientConfig(transport)
       .then((config) => {
         applyDebugMaskFromConfig(config?.debug);
-        setAppConfig({
-          daemonMode: config?.daemonMode ?? false,
+        const read = {
           livekitEnabled: config?.livekitEnabled,
           livekitUrl: config?.livekitUrl,
           commonRoom: config?.commonRoom,
@@ -115,8 +123,12 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
           // descriptor, and the sandboxed-codebase control would stay disabled on every daemon
           // that does not join a common room.
           sandboxedCodebase: config?.sandboxedCodebase,
-          authFlow: config?.authFlow,
-        });
+        };
+        setAppConfig(
+          config?.daemonMode === true
+            ? { ...read, daemonMode: true, authFlow: config.authFlow }
+            : { ...read, daemonMode: false },
+        );
       })
       .catch(() => setAppConfig({ daemonMode: false }));
   }, [transport]);
@@ -161,7 +173,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
         <AuthCallback />
       ) : daemonMode === null || (daemonMode === true && authLoading) ? (
         <div className="p-6">Loading…</div>
-      ) : daemonMode === true ? (
+      ) : appConfig.daemonMode === true ? (
         !isAuthenticated ? (
           <DaemonLoginScreen path={path} login={login} authError={authError} authFlow={appConfig.authFlow} />
         ) : (

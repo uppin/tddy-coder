@@ -10,8 +10,9 @@
  * up signed in exactly as the redirect flow would leave them.
  *
  * Which of the two flows a sign-in screen offers is the daemon's to declare: `/api/config` carries
- * `auth_flow` (`"device"` or `"redirect"`), and a daemon that does not name one predates the device
- * flow and serves only the redirect flow.
+ * `auth_flow` (`"device"` or `"redirect"`). A daemon that names none serves no GitHub sign-in, and
+ * the screen says so instead of offering either flow; a value the page does not know is an error it
+ * names, never a flow it guesses at.
  *
  * Every poll-timing test runs under `cy.clock()`, so "waits the interval" is proven by the clock,
  * not by a real-time sleep.
@@ -26,7 +27,7 @@ import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
 import { AuthService } from "../../src/gen/auth_pb";
 import { DeviceLoginPanel } from "../../src/components/DeviceLoginPanel";
 import { DaemonLoginScreen } from "../../src/components/DaemonLoginScreen";
-import { loadClientConfig } from "../../src/rpc/clientConfig";
+import { loadClientConfig, type AuthFlowDeclaration } from "../../src/rpc/clientConfig";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { TEST_IDS } from "../support/testIds";
 import { deviceLoginPage } from "../support/pages/deviceLoginPage";
@@ -165,7 +166,7 @@ function expectStoredSession(accessToken: string, refreshToken: string) {
 }
 
 /** The sign-in screen as `App` renders it for a daemon that declared `authFlow`. */
-function givenTheSignInScreenFor(authFlow: "device" | "redirect" | undefined) {
+function givenTheSignInScreenFor(authFlow: AuthFlowDeclaration) {
   cy.clearLocalStorage();
   mountWithRpc(
     <AuthProvider>
@@ -325,6 +326,40 @@ describe("Device-flow GitHub sign-in", () => {
     expectPollCount(backend, 2);
     afterSeconds(FIVE_SECOND_INTERVAL);
     expectPollCount(backend, 3);
+  });
+
+  it("ends the attempt as failed when a slow-down names no interval to wait", () => {
+    // Given — the first poll is told to slow down, with no interval
+    const backend = aDeviceLoginBackend({ grants: [FIRST_GRANT], polls: [aSlowDownPoll(0), aPendingPoll()] });
+    givenTheDeviceSignInPanel(backend);
+    deviceLoginPage.startSignIn();
+    deviceLoginPage.expectUserCode("WDJB-MJHT");
+
+    // When
+    afterSeconds(FIVE_SECOND_INTERVAL);
+
+    // Then — a protocol error, not a poll loop with no delay
+    deviceLoginPage.expectFailedMessage();
+    deviceLoginPage.expectNoUserCode();
+    afterSeconds(FIVE_SECOND_INTERVAL * 4);
+    expectPollCount(backend, 1);
+  });
+
+  it("ends the attempt as failed when the device code comes with no interval to wait", () => {
+    // Given — a grant naming no interval between polls
+    const backend = aDeviceLoginBackend({
+      grants: [aDeviceCodeGrant({ intervalSeconds: 0 })],
+      polls: [aPendingPoll()],
+    });
+    givenTheDeviceSignInPanel(backend);
+
+    // When
+    deviceLoginPage.startSignIn();
+
+    // Then — nothing is polled, and the operator is told the attempt failed
+    deviceLoginPage.expectFailedMessage();
+    afterSeconds(FIVE_SECOND_INTERVAL * 4);
+    expectPollCount(backend, 0);
   });
 
   // -------------------------------------------------------------------------
@@ -558,12 +593,23 @@ describe("Choosing the GitHub sign-in flow", () => {
     deviceLoginPage.expectNoDeviceFlow();
   });
 
-  it("offers the redirect button on a daemon that predates the device flow and declares no flow", () => {
+  it("says the daemon has no GitHub sign-in configured, and offers neither flow, when it declares none", () => {
     // Given / When
-    givenTheSignInScreenFor(undefined);
+    givenTheSignInScreenFor("none");
 
     // Then
-    deviceLoginPage.expectRedirectButtonOffered();
+    deviceLoginPage.expectNoSignInConfigured();
+    deviceLoginPage.expectNoRedirectButton();
+    deviceLoginPage.expectNoDeviceFlow();
+  });
+
+  it("names a sign-in flow it does not recognise as an error, and offers neither flow", () => {
+    // Given / When
+    givenTheSignInScreenFor({ unrecognised: "carrier-pigeon" });
+
+    // Then
+    deviceLoginPage.expectUnrecognisedFlowNamed("carrier-pigeon");
+    deviceLoginPage.expectNoRedirectButton();
     deviceLoginPage.expectNoDeviceFlow();
   });
 });

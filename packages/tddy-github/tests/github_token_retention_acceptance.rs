@@ -81,11 +81,11 @@ struct ProviderWithARealCredential;
 
 #[async_trait]
 impl GitHubOAuthProvider for ProviderWithARealCredential {
-    fn authorize_url(&self) -> (String, String) {
-        (
+    fn authorize_url(&self) -> Result<(String, String), String> {
+        Ok((
             "https://github.com/login/oauth/authorize".to_string(),
             "s".to_string(),
-        )
+        ))
     }
 
     async fn exchange_code(
@@ -245,7 +245,9 @@ async fn retains_nothing_for_a_stub_login() {
             name: "Demo".to_string(),
         },
     );
-    let state = stub.authorize_url().1;
+    let (_, state) = stub
+        .authorize_url()
+        .expect("the stub issues an authorize URL");
     let service = a_signed_service(stub).with_token_store(store.clone());
 
     // When
@@ -286,7 +288,9 @@ fn asks_github_for_the_repo_scope_as_well_as_the_users_identity() {
         RealGitHubProvider::new("client-id", "client-secret", "http://host/auth/callback");
 
     // When
-    let (authorize_url, _state) = provider.authorize_url();
+    let (authorize_url, _state) = provider
+        .authorize_url()
+        .expect("a confidential client issues an authorize URL");
 
     // Then — `read:user` alone cannot read pull requests on a private repository
     assert!(

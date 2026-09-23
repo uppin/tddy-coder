@@ -14,10 +14,12 @@
 
 use tddy_daemon_auth::auth::{build_auth_entries, github_auth_flow, GitHubAuthFlow};
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_rpc::{MultiRpcService, RequestMetadata, RpcBridge, RpcMessage, ServiceEntry, Status};
+use tddy_rpc::{
+    Code, MultiRpcService, RequestMetadata, RpcBridge, RpcMessage, ServiceEntry, Status,
+};
 use tddy_service::proto::auth::{
-    DeviceLoginState, PollDeviceLoginRequest, PollDeviceLoginResponse, StartDeviceLoginRequest,
-    StartDeviceLoginResponse,
+    DeviceLoginState, GetAuthUrlRequest, GetAuthUrlResponse, PollDeviceLoginRequest,
+    PollDeviceLoginResponse, StartDeviceLoginRequest, StartDeviceLoginResponse,
 };
 
 /// A GitHub OAuth App's client id is public by design — it appears in every authorize URL.
@@ -42,6 +44,26 @@ async fn a_daemon_holding_only_a_public_client_id_registers_its_auth_service() {
     assert!(
         registered.contains(&"auth.AuthService"),
         "a public client id is enough to sign in; it registered {registered:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_daemon_holding_only_a_public_client_id_refuses_to_begin_the_redirect_flow() {
+    // Given a desktop deployment configured with a client id and no secret
+    let (config, _dir) = a_daemon_with_a_client_id_and_no_secret();
+    let auth = the_auth_service(&config);
+
+    // When a dashboard asks it for an authorize URL
+    let refused: Result<GetAuthUrlResponse, Status> =
+        call(&auth, "GetAuthUrl", GetAuthUrlRequest {}).await;
+
+    // Then it is refused as a precondition, naming the flow that does work, rather than handing
+    // out a URL whose code it could never exchange
+    assert_eq!(
+        refused
+            .map(|_| ())
+            .map_err(|status| (status.code, status.message.contains("device flow"))),
+        Err((Code::FailedPrecondition, true))
     );
 }
 

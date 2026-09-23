@@ -48,22 +48,30 @@ export interface ClientConfig {
    */
   sandboxedCodebase?: { confinesFilesystem: boolean };
   /**
-   * Which GitHub sign-in flow the serving daemon's `auth.AuthService` serves: `"redirect"`
-   * (`GetAuthUrl` / `ExchangeCode`) or `"device"` (`StartDeviceLogin` / `PollDeviceLogin`).
-   *
-   * Absent is a daemon that predates the device flow, which serves only the redirect flow — so the
-   * sign-in screen reads absence as the redirect flow, and never probes one flow to discover the
-   * other. A value this page does not recognise is read as absent.
+   * What the serving daemon declared about its GitHub sign-in (`auth_flow`). Always stated, so the
+   * sign-in screen never has to guess — see {@link AuthFlowDeclaration}.
    */
-  authFlow?: AuthFlow;
+  authFlow: AuthFlowDeclaration;
 }
 
-/** The GitHub sign-in flows a daemon can declare. */
+/** The GitHub sign-in flows a daemon can serve. */
 export type AuthFlow = "redirect" | "device";
 
-/** The flow a payload declared, or `undefined` when it declared none this page recognises. */
-function authFlowOf(declared: string | undefined): AuthFlow | undefined {
-  return declared === "redirect" || declared === "device" ? declared : undefined;
+/**
+ * What a daemon declared about its GitHub sign-in.
+ *
+ * - `"redirect"` — `GetAuthUrl` / `ExchangeCode`, a deployment holding a client secret.
+ * - `"device"` — `StartDeviceLogin` / `PollDeviceLogin`, a public client id and no secret.
+ * - `"none"` — no `auth_flow` at all: the daemon serves no GitHub sign-in. Never read as a flow.
+ * - `{ unrecognised }` — a value this page does not know, kept so the screen can name it rather
+ *   than guess a flow the daemon may not serve.
+ */
+export type AuthFlowDeclaration = AuthFlow | "none" | { unrecognised: string };
+
+/** What a payload's `auth_flow` declares, with absence and unknown values each stated as such. */
+function authFlowOf(declared: string | undefined): AuthFlowDeclaration {
+  if (declared === undefined) return "none";
+  return declared === "redirect" || declared === "device" ? declared : { unrecognised: declared };
 }
 
 /** The JSON `GET /api/config` serves — snake_case, as `tddy_coder::web_server::ClientConfig`. */

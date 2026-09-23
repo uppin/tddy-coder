@@ -299,6 +299,25 @@ open them, because its own `tddy-github` finding is the one in its path.
     (`"device"` | `"redirect"`) is declared on **both** config paths — `/api/config`
     (`server.rs`, `main.rs`) and `GetClientConfigResponse.auth_flow` (`daemon_config.proto` field
     10, `daemon_config_service.rs`) — both from the one `github_auth_flow` decision in `auth.rs`.
+  - [x] **Absent `auth_flow` is "no sign-in configured"**, never the redirect flow: the screen says
+    so and offers neither flow. An unrecognised value is an error the screen names. Both readers
+    (`clientConfig.ts` `authFlowOf`) always state the declaration (`AuthFlowDeclaration`).
+
+## Decisions during green
+
+- **No fallbacks, no backward compatibility (developer, 2026-09-23):** "don't leave any
+  fallbacks. I'll rollout all the desktop instances." Every desktop is rolled out together, so
+  nothing here keeps a compatibility path for an older daemon or dashboard. Applied as:
+  - the dashboard reads a missing `auth_flow` as "this daemon has no GitHub sign-in configured"
+    and an unknown one as an error — absence no longer offers the redirect button;
+  - a public client refuses `GetAuthUrl` (`failed_precondition`, naming the device flow), as it
+    already refused `ExchangeCode`; `GitHubOAuthProvider::authorize_url` returns `Result`;
+  - `poll_device_login` errors on a `slow_down` with no interval for a code it has no open attempt
+    for, instead of widening GitHub's documented 5 s default;
+  - the client ends a device attempt `failed` on a grant or `SLOW_DOWN` without a positive
+    interval, and on a `COMPLETE` missing its user or tokens;
+  - `runtime::build` refuses an embedded host that serves sign-in to an empty `users:` but names
+    no config file, instead of silently assembling a desktop that can never enrol.
 
 ## Implementation Milestones
 
@@ -366,10 +385,9 @@ package, and the single web spec. Whole-workspace green comes from CI.
 ### From @validate-changes (2026-09-23)
 
 - **Enrolment is reachable from the LiveKit common room.** Decide and fix before merge (V1 below).
-- Bound `RealGitHubProvider::device_poll_intervals`: an attempt abandoned before a terminal answer
-  never leaves the map (`real.rs:303`, `:202`).
-- Floor the client's poll interval: a `SLOW_DOWN` carrying `interval_seconds: 0` makes the poll loop
-  spin with no delay (`useAuth.ts:317`).
+  ⚠ Still open: no unspoofable transport signal exists; options recorded under *V1 options*.
+- ~~Bound `RealGitHubProvider::device_poll_intervals`~~ — done (V4).
+- ~~Floor the client's poll interval~~ — done as a protocol error rather than a floor (V5).
 - `admit` does synchronous file I/O under a `std::sync::Mutex` on an async RPC task
   (`first_login_admission.rs:43`, `live_users.rs` `enrol_first_login`). It happens once per
   deployment, so this is acceptable, but `spawn_blocking` would be the tidy shape.
@@ -420,14 +438,39 @@ without consent. Re-run after freeing space:
 
 | # | Severity | Where | Finding |
 |---|---|---|---|
-| V1 | 🔴 High (security) | `runtime.rs:1467-1470`, `runtime.rs:584`, `first_login_admission.rs:43` | An embedded daemon serves **every** entry, `auth.AuthService` included, on the LiveKit common room, and it attaches enrolment to that same service. On an **unenrolled** desktop that has a `livekit:` block, any room peer can run `StartDeviceLogin` / `PollDeviceLogin` with its own GitHub account. It then becomes the one enrolled operator, mapped to the desktop's OS user. A fresh install has no `livekit:`, but an install that got past barrier 2 and stalled at barrier 3 has exactly that shape. Proposal: enrol only for a login that arrives over the in-process (Tauri) bridge, or refuse enrolment while the common room is served. No test covers either transport. |
+| V1 | 🔴 High (security) — ⚠ **OPEN, blocked on a decision** (see *V1 options* below) | `runtime.rs:1467-1470`, `runtime.rs:584`, `first_login_admission.rs:43` | An embedded daemon serves **every** entry, `auth.AuthService` included, on the LiveKit common room, and it attaches enrolment to that same service. On an **unenrolled** desktop that has a `livekit:` block, any room peer can run `StartDeviceLogin` / `PollDeviceLogin` with its own GitHub account. It then becomes the one enrolled operator, mapped to the desktop's OS user. A fresh install has no `livekit:`, but an install that got past barrier 2 and stalled at barrier 3 has exactly that shape. Proposal: enrol only for a login that arrives over the in-process (Tauri) bridge, or refuse enrolment while the common room is served. No test covers either transport. |
 | V2 | 🟠 Medium | `first_login_enrolment.rs:84` | The first login rewrites `~/.tddy/desktop.yaml` via `serde_yaml::Value` and **strips every comment**, including the whole explanatory header `desktop.yaml.production` renders. Recorded as a TODO, but it hits every desktop on its first run. |
 | V3 | 🟠 Medium | `desktop.yaml.production:90-92` | M8 is not done, so the last acceptance criterion (a fresh install signs in with no edit) is unmet, and the file still tells operators to add a `client_secret`. |
-| V4 | 🟡 Low | `real.rs:303`, `real.rs:202` | `device_poll_intervals` gains an entry for every started (or slowed-down) device code and loses it only on a terminal answer, so abandoned attempts accumulate. `StartDeviceLogin` is unauthenticated, though every entry costs a successful GitHub call. |
-| V5 | 🟡 Low | `useAuth.ts:317` | `SLOW_DOWN` with `interval_seconds: 0` sets `intervalMs = 0`, so polling spins. The real provider never sends 0; this is defence in depth. |
+| V4 | ✅ Resolved | `real.rs` `device_attempts` | `device_poll_intervals` gains an entry for every started (or slowed-down) device code and loses it only on a terminal answer, so abandoned attempts accumulate. `StartDeviceLogin` is unauthenticated, though every entry costs a successful GitHub call. **Resolved (green):** each entry records its code's `expires_in` deadline (`DeviceAttempt`); every start and poll prunes closed windows (`open_device_attempts`), and Complete / Denied / Expired / any other error remove the entry. Pinned by `a_device_code_is_forgotten_once_its_window_has_passed` and `…_once_github_answers_it_expired`. |
+| V5 | ✅ Resolved | `useAuth.ts` `startDeviceLogin` | `SLOW_DOWN` with `interval_seconds: 0` sets `intervalMs = 0`, so polling spins. The real provider never sends 0; this is defence in depth. **Resolved (green):** a grant or `SLOW_DOWN` without a positive interval ends the attempt in `failed` — a protocol error, not a spin. Pinned by two `DeviceLoginAcceptance.cy.tsx` tests. |
 | V6 | 🟡 Low | `DaemonConfig.users` (`config.rs:341`) | Cloning a `DaemonConfig` now **shares** `users:`. Every current clone site wants that, but it is a semantic change to `Clone` that a future caller could trip over (a config cloned for a scratch edit shares the live rows). |
 | V7 | ℹ Info | `DeviceLoginPanel.tsx:23` | The verification link uses `target="_blank"` inside the Tauri webview. It relies on `tauri-plugin-opener`'s link handling (`lib.rs:76`), as other dashboard links already do. Not exercised by any test, and still to confirm on the desktop. |
 | V8 | ℹ Info | PRD § Technical Impact | OAuth App was chosen, but the device-flow response has not been checked against the live API for the absence of an expiring `refresh_token`. |
+
+### V1 options (green, 2026-09-23)
+
+The fix needs a signal that says which transport a login arrived on, set by the transport and not
+by the caller. **None exists today.** `tddy_rpc::RequestMetadata` carries only `sender_identity`,
+which `ServerEngine::to_rpc_message` (`tddy-rpc/src/server_engine.rs:100`) copies from the request
+envelope the sender writes itself. The Tauri IPC host, the LiveKit common room and the agent tool
+socket all reach the same `Arc`'d `auth.AuthService` (`cloned_entries`). The open TODO at
+`tddy-session-agents/src/service.rs:711-715` records the same gap. So V1 is not fixed here. The
+options, for the developer:
+
+1. **Per-transport rosters (recommended).** `runtime::build` registers `auth.AuthService` twice on
+   an embedded host: once with `FirstLoginEnrolment` in `DaemonRuntime.entries`, which only the
+   in-process IPC host serves, and once with no admission in the roster handed to the common room
+   and the agent tool socket. It cannot be spoofed, because the choice is made at assembly and no
+   request byte can affect it. Cost: the common-room roster is no longer `cloned_entries` of the
+   in-process one, and a test must pin that the two differ only in that entry.
+2. **Transport-stamped metadata.** Add `RequestMetadata.transport` (`InProcess` / `LiveKit` /
+   `UnixSocket` / `Http`), set by each host where it builds the engine, overwriting anything from
+   the envelope, and pass it to `LoginAdmission::admit`. It touches every transport in `tddy-rpc`,
+   and `RequestMetadata::default()` would have to go, because any default value is exactly the
+   hole this closes.
+3. **Refuse enrolment while a common room is configured.** This is the smallest change, but it
+   leaves the agent tool socket, a separate co-located process, able to enrol. It only works
+   combined with (1) or (2) for that socket.
 
 ### Changeset sync
 

@@ -80,7 +80,7 @@ impl StubGitHubProvider {
 
 #[async_trait]
 impl GitHubOAuthProvider for StubGitHubProvider {
-    fn authorize_url(&self) -> (String, String) {
+    fn authorize_url(&self) -> Result<(String, String), String> {
         let state = Uuid::new_v4().to_string();
         self.pending_states.lock().unwrap().insert(state.clone());
 
@@ -102,7 +102,7 @@ impl GitHubOAuthProvider for StubGitHubProvider {
                 self.authorize_base_url, self.client_id, state
             )
         };
-        (url, state)
+        Ok((url, state))
     }
 
     async fn exchange_code(&self, code: &str, state: &str) -> Result<(String, GitHubUser), String> {
@@ -199,7 +199,9 @@ mod tests {
         let stub = StubGitHubProvider::new("https://github.com", "my-client-id");
 
         // When generating an authorize URL
-        let (url, state) = stub.authorize_url();
+        let (url, state) = stub
+            .authorize_url()
+            .expect("the stub issues an authorize URL");
 
         // Then the URL contains the expected OAuth parameters and the state is non-empty
         assert!(url.contains("https://github.com/login/oauth/authorize"));
@@ -214,8 +216,12 @@ mod tests {
         let stub = StubGitHubProvider::new("https://github.com", "id");
 
         // When generating two authorize URLs
-        let (_, s1) = stub.authorize_url();
-        let (_, s2) = stub.authorize_url();
+        let (_, s1) = stub
+            .authorize_url()
+            .expect("the stub issues an authorize URL");
+        let (_, s2) = stub
+            .authorize_url()
+            .expect("the stub issues an authorize URL");
 
         // Then each has a distinct state token (CSRF protection)
         assert_ne!(s1, s2);
@@ -226,7 +232,9 @@ mod tests {
         // Given a stub with a pre-registered code→user mapping
         let stub = StubGitHubProvider::new("https://github.com", "id");
         stub.register_code("test-code", test_user());
-        let (_, state) = stub.authorize_url();
+        let (_, state) = stub
+            .authorize_url()
+            .expect("the stub issues an authorize URL");
 
         // When exchanging the registered code with the valid state
         let result = stub.exchange_code("test-code", &state).await;
@@ -243,7 +251,9 @@ mod tests {
     async fn exchange_code_with_unknown_code_returns_error() {
         // Given a stub with no registered codes
         let stub = StubGitHubProvider::new("https://github.com", "id");
-        let (_, state) = stub.authorize_url();
+        let (_, state) = stub
+            .authorize_url()
+            .expect("the stub issues an authorize URL");
 
         // When exchanging an unregistered code
         let result = stub.exchange_code("unknown-code", &state).await;
@@ -272,7 +282,9 @@ mod tests {
         // Given a stub and a valid authorize flow
         let stub = StubGitHubProvider::new("https://github.com", "id");
         stub.register_code("test-code", test_user());
-        let (_, state) = stub.authorize_url();
+        let (_, state) = stub
+            .authorize_url()
+            .expect("the stub issues an authorize URL");
 
         // When exchanging once — succeeds
         let first = stub.exchange_code("test-code", &state).await;
