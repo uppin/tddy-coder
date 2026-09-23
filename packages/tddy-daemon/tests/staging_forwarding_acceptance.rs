@@ -194,12 +194,17 @@ async fn two_daemons() -> TwoDaemons {
     // Both coordinates, because a forward is addressed at the service that *declares* the method:
     // `StartSession` is still `the pre-unbundle monolithic RPC coordinate`'s, while the staging and host-document
     // RPCs became `session_files.SessionFilesService`'s with `#unbundle` node 6.
+    let (service_b, families_b) = tddy_daemon_rpc::RpcHandlers::install(service_b);
     let service_b = Arc::new(service_b);
-    let server = tddy_rpc::MultiRpcService::new(vec![
-        service_b.session_files_entry(),
-        service_b.session_lifecycle_entry(),
-        service_b.project_entry(),
-    ]);
+    let server = tddy_rpc::MultiRpcService::new(
+        [
+            service_b.session_files_entry(),
+            service_b.session_lifecycle_entry(),
+        ]
+        .into_iter()
+        .chain(families_b.entries())
+        .collect(),
+    );
     let participant = LiveKitParticipant::connect(
         &ws_url,
         &token_b,

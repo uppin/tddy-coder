@@ -192,7 +192,7 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
         LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
     );
 
-    DaemonSessionHost::new(
+    tddy_daemon_rpc::RpcHandlers::install(DaemonSessionHost::new(
         config,
         resolver,
         tddy_data_dir,
@@ -204,7 +204,8 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
         }),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
-    )
+    ))
+    .0
 }
 
 /// Serve a daemon on the common room under its production identity — the one `forward_to_peer`

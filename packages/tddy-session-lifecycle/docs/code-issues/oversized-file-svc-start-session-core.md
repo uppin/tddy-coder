@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 — `/pr-wrap` step 3.5 file-length gate
-**Metrics:** **908 production lines** · budget 500 · the file is **one function**
-**Thresholds breached:** length 908 > 500
+**Metrics:** **911 production lines** · budget 500 · the file is **one function**
+**Thresholds breached:** length 911 > 500
 **Restructure:** two-plan `extract_method --variant module` → `extract_module_to_file` — designed, not applied
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-09-23 (908 → 911 in #520, re-wrapped field reads) — **unclaimed**
 **Related:** `complexity-svc-start-session-core-start-session-core.md` — the same code measured as a function
 
 ## Measurement history
@@ -14,6 +14,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-19 | 908 | 896 → 908 in this PR (the new `SandboxedCodebase` placement arm) |
+| 2026-09-23 | 911 | 908 → 911 in #520 (`#carve` 11/12): rustfmt re-wraps the two field reads that moved behind `self.peer_routing` in `start_session_core`; no logic added |
 
 ## What the tool found
 

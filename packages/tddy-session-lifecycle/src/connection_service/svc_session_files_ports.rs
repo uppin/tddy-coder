@@ -86,20 +86,24 @@ impl DaemonSessionHost {
     /// always answered — an in-room agent's `ReadHostDocument` would come back "unknown service"
     /// rather than with the document, and an in-jail `StreamSessionAgents` addressed at the new
     /// coordinate would find no roster at all.
-    #[must_use]
-    pub(crate) fn session_room_roster(self: &Arc<Self>) -> tddy_rpc::MultiRpcService {
-        tddy_rpc::MultiRpcService::new(vec![
+    ///
+    /// The four families served above this crate (`tddy-daemon-rpc`) — Project, Catalog, ExecTool
+    /// and PR-stack — come through the [`DaemonRpcFamilies`](crate::DaemonRpcFamilies) port, for
+    /// the same reason: a host never given them refuses with `FAILED_PRECONDITION` rather than open
+    /// a room that has quietly lost them.
+    pub(crate) fn session_room_roster(
+        self: &Arc<Self>,
+    ) -> Result<tddy_rpc::MultiRpcService, tddy_rpc::Status> {
+        let mut entries = vec![
             self.session_files_entry(),
             self.session_agents_entry(),
             self.activity_entry(),
             self.terminal_session_entry(),
-            self.catalog_entry(),
-            self.exec_tool_entry(),
-            self.pr_stack_entry(),
             self.session_lifecycle_entry(),
-            self.project_entry(),
             self.demo_vm_entry(),
-        ])
+        ];
+        entries.extend(self.rpc_families()?.service_entries());
+        Ok(tddy_rpc::MultiRpcService::new(entries))
     }
 
     /// This daemon's session-file surface: the crate's thirteen handlers, with the eight routed

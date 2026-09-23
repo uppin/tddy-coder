@@ -58,10 +58,7 @@ impl DaemonSessionHost {
     }
 
     pub(crate) fn resolve_tddy_tools_path(&self) -> Result<PathBuf, Status> {
-        self.config.toolchain().binary("tddy-tools").map_err(|e| {
-            log::error!("resolve_tddy_tools_path: {e}");
-            Status::failed_precondition(e.to_string())
-        })
+        resolve_tddy_tools_path(&self.config)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -96,14 +93,18 @@ impl DaemonSessionHost {
         // report READY for a clone nobody built.
         let session_agent_clones =
             Arc::new(crate::session_agent_clone::SessionAgentCloneStore::new());
+        let peer_routing = crate::peer_routing::PeerRouting::new(
+            config.clone(),
+            eligible_daemon_source,
+            common_room_livekit_room,
+        );
         Self {
             config,
             sessions_base_for_user,
             tddy_data_dir,
             user_resolver,
             spawn_client,
-            eligible_daemon_source,
-            common_room_livekit_room,
+            peer_routing,
             presenter_event_sink,
             claude_cli_manager,
             sandbox_manager: Arc::new(
@@ -116,7 +117,7 @@ impl DaemonSessionHost {
                 tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,
             ),
             task_registry,
-            idle_tracker: None,
+            rpc_activity: crate::relay_idle::RpcActivity::default(),
             room_roster,
             roster_keepalive_interval: ROSTER_KEEPALIVE_INTERVAL,
             demo_vm_state,
@@ -145,6 +146,9 @@ impl DaemonSessionHost {
             // are the daemon's to choose, and this service names none of them.
             session_notification_bus: None,
             sandbox_rpc_bridge: Arc::new(std::sync::OnceLock::new()),
+            // Installed by the composition root once the handlers above this crate are built
+            // from this host (`with_rpc_families`).
+            rpc_families: None,
         }
     }
 
@@ -174,6 +178,7 @@ impl DaemonSessionHost {
         mut self,
         registry: Arc<tddy_model_registry::ModelRegistryStore>,
     ) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_model_registry");
         self.model_registry = Some(registry);
         self
     }
@@ -282,6 +287,7 @@ impl DaemonSessionHost {
         mut self,
         store: Arc<dyn tddy_github::token_store::GitHubTokenStore>,
     ) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_github_token_store");
         self.github_token_store = Some(store);
         self
     }
@@ -318,7 +324,8 @@ impl DaemonSessionHost {
         mut self,
         tracker: Arc<crate::relay_idle::IdleTimeoutTracker>,
     ) -> Self {
-        self.idle_tracker = Some(tracker);
+        self.debug_assert_rpc_families_not_installed("with_idle_tracker");
+        self.rpc_activity = crate::relay_idle::RpcActivity::on(tracker);
         self
     }
 
@@ -340,7 +347,9 @@ impl DaemonSessionHost {
         &mut self,
         eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     ) {
-        self.eligible_daemon_source = eligible_daemon_source;
+        self.debug_assert_rpc_families_not_installed("with_eligible_daemon_source");
+        self.peer_routing
+            .set_eligible_daemon_source(eligible_daemon_source);
     }
 
     /// Substitute what builds a sandboxed workspace session's jail (builder pattern) — lets a test
@@ -402,16 +411,14 @@ impl DaemonSessionHost {
     ) {
         (
             self.config.clone(),
-            Arc::clone(&self.eligible_daemon_source),
+            Arc::clone(self.peer_routing.eligible_daemon_source()),
             Arc::clone(&self.user_resolver),
         )
     }
 
     /// Record RPC activity in the idle-timeout tracker, if one is attached.
     pub(crate) fn record_rpc_activity(&self) {
-        if let Some(ref tracker) = self.idle_tracker {
-            tracker.record_activity();
-        }
+        self.rpc_activity.record();
     }
 
     /// Start the presenter observer for a freshly spawned workflow session: the injected
@@ -455,4 +462,14 @@ impl DaemonSessionHost {
             grpc_port,
         );
     }
+}
+
+/// [`DaemonSessionHost::resolve_tddy_tools_path`] over the one field it reads, so a family handler
+/// above this crate (`tddy-daemon-rpc`'s catalogue, probing an agent's models) resolves the binary
+/// exactly the way session start does, without holding the host.
+pub fn resolve_tddy_tools_path(config: &DaemonConfig) -> Result<PathBuf, Status> {
+    config.toolchain().binary("tddy-tools").map_err(|e| {
+        log::error!("resolve_tddy_tools_path: {e}");
+        Status::failed_precondition(e.to_string())
+    })
 }

@@ -4,8 +4,6 @@ use tddy_service::proto::session::SplitAgentPlacement;
 
 use tddy_service::proto::session::StartSessionRequest;
 
-use tddy_service::proto::catalog::SubagentInfo;
-
 use tddy_service::proto::session::GetWorktreeSnapshotRequest;
 
 use tddy_rpc::Request;
@@ -82,31 +80,14 @@ impl SeededAgentClones for DaemonSeedCloneClaimant {
 
 /// The exec-catalog names of the tools a def's own loop may call — the spelling the wire, the
 /// roster and `execute_tool`'s dispatch all use, rather than the `UPPERCASE` YAML spelling.
-fn def_tool_names(def: &tddy_discovery::agent_def::SpecializedAgentDef) -> Vec<String> {
+///
+/// `pub` because the `ListSubagents` row (`tddy-daemon-rpc`) and the roster entry must spell a
+/// def's tools the same way.
+pub fn def_tool_names(def: &tddy_discovery::agent_def::SpecializedAgentDef) -> Vec<String> {
     def.tools
         .iter()
         .map(|t| t.catalog_name().to_string())
         .collect()
-}
-
-/// One resolved def as the `ListSubagents` row a picker attaches from.
-pub(crate) fn subagent_info(
-    def: &tddy_discovery::agent_def::SpecializedAgentDef,
-    daemon_instance_id: &str,
-) -> Result<SubagentInfo, tddy_core::AgentIdError> {
-    Ok(SubagentInfo {
-        agent_id: qualified_agent_id(&def.name, daemon_instance_id)?,
-        name: def.name.clone(),
-        label: def
-            .label
-            .clone()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| def.name.clone()),
-        model: def.model.clone(),
-        daemon_instance_id: daemon_instance_id.to_string(),
-        replaces: tddy_discovery::subagent::normalize_replaced_tools(&def.replaces),
-        tools: def_tool_names(def),
-    })
 }
 
 /// One resolved def as the roster entry attaching it produces.
@@ -137,7 +118,7 @@ pub(crate) fn roster_record(
 /// Refused at the point the id is minted when the def's own name contains `@`: such an id parses
 /// back as a different pair, so letting it through would put an entry in the roster that routes
 /// somewhere the operator never picked.
-pub(crate) fn qualified_agent_id(
+pub fn qualified_agent_id(
     name: &str,
     daemon_instance_id: &str,
 ) -> Result<String, tddy_core::AgentIdError> {

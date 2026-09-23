@@ -39,7 +39,6 @@ use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_github::{GitHubUser, SessionTokenSigner};
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::Request;
-use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::{
@@ -291,16 +290,6 @@ fn a_jailed_codebase_placement_request() -> PlacementRequest {
     PlacementRequest {
         sandboxed_codebase: true,
         ..a_placement_request()
-    }
-}
-
-fn a_read_of(session_id: &str) -> ExecuteToolRequest {
-    ExecuteToolRequest {
-        session_token: a_caller_token().to_string(),
-        session_id: session_id.to_string(),
-        tool_name: "Read".to_string(),
-        args_json: r#"{"path":"README.md"}"#.to_string(),
-        ..Default::default()
     }
 }
 
@@ -673,104 +662,6 @@ async fn a_sandboxed_codebase_session_starts_with_no_common_room_configured() {
 // ---------------------------------------------------------------------------
 // ExecuteTool — the code is reached through the jail, or not at all
 // ---------------------------------------------------------------------------
-
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
-              provisioned without them, and GitHub's ubuntu runners set \
-              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
-              FailedPrecondition rather than starting an unconfined session, which is correct — see \
-              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
-)]
-#[tokio::test]
-async fn a_sandboxed_codebase_sessions_tool_call_is_served_by_its_jail() {
-    // Given a started jailed-codebase session
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
-    let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
-        .await
-        .expect("a jailed-codebase session must start")
-        .into_inner();
-    let checkout = checkout_session_of(sessions_tmp.path(), &started.session_id);
-
-    // When the agent reads a file through the session its MCP addresses
-    let response = service
-        .execute_tool(Request::new(a_read_of(&checkout)))
-        .await
-        .expect("a jailed checkout must serve its own tool calls")
-        .into_inner();
-
-    // Then the call was answered by the jail, not refused for want of one
-    assert!(
-        !response.is_error,
-        "a registered jail must serve the call; got '{}'",
-        response.error_message
-    );
-
-    // Teardown. A jail is a real `tddy-sandbox-runner` child in its own process group, reparented
-    // to the init process when this test binary exits, so a test that merely stops naming it
-    // leaves it on the host for as long as the machine is up. `shut_down_children` is the
-    // production shutdown path (the daemon's SIGTERM handler calls it), driven here so the test
-    // says where its jail dies; `WorkspaceSandboxRegistry`'s own `Drop` is what covers the
-    // panicking exit above, where this line is never reached.
-    service.shut_down_children().await;
-}
-
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
-              provisioned without them, and GitHub's ubuntu runners set \
-              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
-              FailedPrecondition rather than starting an unconfined session, which is correct — see \
-              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
-)]
-#[tokio::test]
-async fn a_sandboxed_codebase_sessions_tool_call_is_refused_when_its_jail_is_gone() {
-    // Given a jailed-codebase session whose daemon was restarted, losing the jail registration —
-    // the workspace metadata still says sandboxed, and nothing holds a jail for it
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    let started = {
-        let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
-        let started = service
-            .start_session(Request::new(a_sandboxed_codebase_request()))
-            .await
-            .expect("a jailed-codebase session must start")
-            .into_inner();
-        // The restart this test simulates is a daemon *stopping*, so the jail it held stops with
-        // it. Letting the daemon merely fall out of scope here would orphan a live
-        // `tddy-sandbox-runner` onto the host — and would make the test's own premise wrong, since
-        // a restarted daemon does not leave its predecessor's runner behind.
-        service.shut_down_children().await;
-        started
-    };
-    let checkout = checkout_session_of(sessions_tmp.path(), &started.session_id);
-    let restarted = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
-
-    // When the agent reads a file
-    let response = restarted
-        .execute_tool(Request::new(a_read_of(&checkout)))
-        .await
-        .expect("the refusal is the tool's answer, not a transport failure")
-        .into_inner();
-
-    // Then it is refused. A tool that ran unconfined on a session that asked to be confined is the
-    // one failure nobody can see afterwards.
-    assert!(
-        response.is_error,
-        "a sandboxed session with no jail must be refused, never served from the bare host"
-    );
-    assert!(
-        response.error_message.contains("sandboxed"),
-        "the refusal must say the session asked to be confined; got '{}'",
-        response.error_message
-    );
-
-    // Teardown. The restarted daemon provisioned no jail — that refusal is the point — but it is
-    // shut down for the same reason as every other daemon here, so no suite reads "nothing to
-    // stop" as "no teardown needed".
-    restarted.shut_down_children().await;
-}
 
 // ---------------------------------------------------------------------------
 // StartSession — the refusals, at the request level

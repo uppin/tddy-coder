@@ -1,0 +1,46 @@
+# complexity: add_project_to_host_at_project_coordinate
+
+**Location:** `packages/tddy-daemon-rpc/src/project/coordinate_handlers.rs:186` — `add_project_to_host_at_project_coordinate` (now on `ProjectRpcHandler`)
+**Moved:** 2026-09-23 by #520 (#carve 11) — from `packages/tddy-session-lifecycle/src/connection_service/project_coordinate_handlers.rs:189`; body unchanged except crate paths (`crate::livekit_peer_discovery` → `tddy_daemon_livekit::…`, `hooks_and_urls::` → `entries::`), which rustfmt re-wraps (178 → 174 lines)
+**Category:** complexity
+**Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
+**Metrics:** **178 lines** · **nesting depth 6** · 1 parameters · 9 branch/match lines · 15 early exits
+**CRAP:** **CRAP 702** · complexity 26 · rank 7/50 in this crate · **never executed by any test**
+**Thresholds breached:** length 178 > 60; nesting 6 > 4 (`/analyze-clean-code`)
+**Restructure:** `extract_method` — `/code-restructuring` territory
+**Status:** Open — **unclaimed**
+**Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
+
+## Measurement history
+
+| Run | Lines | Nesting | Branches | Early exits | Note |
+|---|---|---|---|---|---|
+| 2026-09-18 | 178 | 6 | 9 | 15 | first detection |
+| 2026-09-23 | 174 | 6 | 9 | 15 | moved to `tddy-daemon-rpc` by #520, at `project/coordinate_handlers.rs:186`; −4 lines is rustfmt re-wrapping the shortened paths (`hooks_and_urls::` → `entries::`, `service_util::` dropped), no logic change. Nesting and early exits identical to the lifecycle original |
+
+## What the tool found
+
+The body is **178 lines**, 3.0x the 60-line ceiling at which `/analyze-clean-code` says a function must be refactored.
+
+The function carries **9 branch or match lines** and **15 early exits**
+(`return` / `?`). Its file is 535 lines total, 535 of them production, with **no `#[cfg(test)]` block**, across 5 functions.
+
+**How this was found.** `/jev-restructuring` ranked it 62 of 3,503 production units by
+semantic shape (Jev classified it `tangled_dispatch`). That ranking is **targeting only** and appears
+in no metric above — every number in this record comes from a structural scan and can be re-derived
+without an API call.
+
+## Why it matters here
+
+Within its file this is the body a change to this area has to be read in full to modify safely.
+With no unit test in the file, nothing catches a behaviour change made while restructuring it.
+
+## What would close it
+
+Bring it under the `/analyze-clean-code` thresholds — length 178 > 60; nesting 6 > 4 — by `extract_method`
+along the branch structure. Anchor with `tddy-tools restructure anchors`, never by hand, then prove
+the seam with `restructure check --deep` against a warm index (`./run-index-daemon`).
+
+⚠ **Re-measure before acting.** This record was generated in a batch of 100 from one sweep. Confirm
+the numbers still hold and that the finding is real before spending a PR on it — an unverified
+finding is a lead, not an issue.

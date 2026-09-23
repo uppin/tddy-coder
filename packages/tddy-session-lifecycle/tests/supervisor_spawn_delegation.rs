@@ -12,6 +12,9 @@
 //!
 //! Not covered here, because it needs root and a second OS account: that a supervisor-spawned
 //! session actually runs as another user. That stays operator smoke.
+//!
+//! The same fail-closed rule for a project *clone* is pinned beside the project handlers, in
+//! `tddy-daemon-rpc/tests/supervisor_clone_delegation.rs`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,9 +23,6 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_host_service::multi_host::{EligibleDaemonSource, LocalOnlyEligibleDaemonSource};
 use tddy_rpc::Request;
-use tddy_service::proto::project::{
-    AddProjectToHostRequest, ProjectService as ProjectServiceTrait,
-};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
@@ -447,46 +447,5 @@ async fn refuses_to_start_a_session_when_the_declared_supervisor_is_unreachable(
     assert!(
         !marker.exists(),
         "no session may be spawned by the daemon itself when a supervisor is configured"
-    );
-}
-
-#[tokio::test]
-async fn refuses_to_clone_a_project_when_the_declared_supervisor_is_unreachable() {
-    // Given a host configured for a supervisor that is not running
-    let os_user = current_username();
-    let data_dir = tempfile::tempdir().unwrap();
-    let repos_base = tempfile::tempdir().unwrap();
-    let sockets = tempfile::tempdir().unwrap();
-    let missing_socket = sockets.path().join("tddy-supervisor.sock");
-    let service = a_service(
-        a_supervised_config(&os_user, repos_base.path(), &missing_socket),
-        data_dir.path().to_path_buf(),
-    );
-
-    // When
-    let error = service
-        .add_project_to_host(Request::new(AddProjectToHostRequest {
-            session_token: TEST_TOKEN.to_string(),
-            project_id: PROJECT_ID.to_string(),
-            name: "alpha".to_string(),
-            git_url: "https://example.invalid/owner/repo.git".to_string(),
-            main_branch_ref: String::new(),
-            daemon_instance_id: String::new(),
-            user_relative_path: String::new(),
-        }))
-        .await
-        .expect_err("an unreachable supervisor must fail the clone");
-
-    // Then the outage is reported, and no working copy was cloned by the daemon itself
-    assert!(
-        error
-            .message()
-            .contains(&missing_socket.display().to_string()),
-        "the error should name the unreachable supervisor socket, got: {}",
-        error.message()
-    );
-    assert!(
-        !repos_base.path().join("alpha").exists(),
-        "no repository may be cloned by the daemon itself when a supervisor is configured"
     );
 }

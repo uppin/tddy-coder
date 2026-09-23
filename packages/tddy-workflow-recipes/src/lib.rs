@@ -83,16 +83,9 @@ pub use writer::{
     SESSIONS_SUBDIR,
 };
 
-/// The `pr_stack.PrStackService` entry — `#unbundle` node 8, family P.
-///
-/// Served from this crate because it already owns `orchestrate_pr_stack`, `pr_stack`,
-/// `plan_pr_stack` and — since node 5 — the 14 PR-stack MCP tools. A `tddy-pr-stack-service` crate
-/// would have split one domain across two, which is the shape this stack exists to remove.
-///
-/// After this node the whole PR-stack domain is in one crate, which is the first point at which
-/// several of the seven open backlog items against it are fixable in one place.
-/// The coordinate family P moves to — published here because this crate owns the PR-stack domain.
-pub const PR_STACK_SERVICE: &str = "pr_stack.PrStackService";
+/// The coordinate family P is served on, re-exported from `tddy-pr-stack`, which now defines it
+/// beside the `PrStackHandler` trait and the entry builder that registers it.
+pub use tddy_pr_stack::PR_STACK_SERVICE;
 
 #[cfg(test)]
 mod unbundle_pr_stack_entry_tests {

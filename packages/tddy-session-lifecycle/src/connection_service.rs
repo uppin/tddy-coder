@@ -5,13 +5,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::stream::Stream;
-use livekit::prelude::Room;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::validate_session_id_segment;
 use tddy_core::Changeset;
 use tddy_rpc::{Response, Status};
-use tddy_service::proto::catalog::{ListAgentModelsResponse, ModelInfo as CatalogModelInfo};
-use tddy_service::proto::project::ProjectEntry as ProtoProjectEntry;
 use tddy_service::proto::session::{
     start_session_event::Event as StartSessionEventKind, AttachmentMaterializationProgress,
     SessionAttachment, StartSessionEvent,
@@ -24,14 +21,12 @@ use crate::branch_intent::{
 };
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
-use crate::multi_host::EligibleDaemonSource;
 use crate::project_storage::{self};
 use crate::user_sessions_path::projects_path_for_user;
 use crate::workspace_session;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
 use tddy_daemon_livekit::session_room::ActivityDelta;
 use tddy_service::proto::activity::AgentActivityDeltaChunk;
-use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolResponse};
 use tddy_spawn::spawn_worker;
 use tddy_spawn::spawner::{self};
 use tddy_task::TaskRegistry;
@@ -60,6 +55,9 @@ use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 
 mod service_util;
 pub(crate) use service_util::*;
+/// The deadlines every clone and supervised spawn runs under — shared with the project handlers in
+/// `tddy-daemon-rpc`, which clone repositories the way session starts do.
+pub use service_util::{await_supervised_with_timeout, spawn_blocking_with_timeout};
 
 /// Stream adapter backed by an unbounded mpsc channel carrying `Result<T, Status>` items — used for
 /// server-streaming RPCs (e.g. `StreamExecuteTool`) whose frames may carry a mid-stream status.
@@ -134,9 +132,9 @@ pub struct DaemonSessionHost {
     tddy_data_dir: PathBuf,
     user_resolver: tddy_daemon_kernel::SessionUserResolver,
     spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
-    eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
-    /// When set, LiveKit **Room** handle for forwarding **StartSession** to peer daemons in `common_room`.
-    common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
+    /// The peers this daemon may route a request to and the common-room slot it forwards through —
+    /// shared with the families served above this crate, which route against the same roster.
+    peer_routing: crate::peer_routing::PeerRouting,
     /// Where each presenter event of a workflow session goes besides the notification bus — the
     /// Telegram chat surface, on a daemon that has one. `None` when no chat surface is configured.
     presenter_event_sink: Option<tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink>,
@@ -154,8 +152,9 @@ pub struct DaemonSessionHost {
         Arc<dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner>,
     /// Registry for Tasks created by tool invocations (every ExecuteTool call).
     task_registry: TaskRegistry,
-    /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
-    idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
+    /// The relay's idle tracker, when it has one — bumped on every RPC call, here and by the
+    /// families served above this crate, which hold the same one.
+    rpc_activity: crate::relay_idle::RpcActivity,
     /// Reader for the LiveKit server's rooms and their participants. `StreamLiveKitRooms` left for
     /// `livekit.LiveKitService`; what still reads the roster here is agent-clone provisioning,
     /// which needs to know whether a session's room already exists.
@@ -229,6 +228,11 @@ pub struct DaemonSessionHost {
     session_notification_bus: Option<Arc<crate::session_notifications::SessionNotificationBus>>,
     /// Sandbox-IPC bridge installed once the top-level `Arc` exists (`runtime::build`).
     sandbox_rpc_bridge: Arc<std::sync::OnceLock<Arc<dyn tddy_sandbox_runner::HostRpcHandler>>>,
+    /// The RPC families served above this crate, installed last by the composition root with
+    /// [`Self::with_rpc_families`]. `None` until then, and [`Self::rpc_families`] refuses rather
+    /// than serving a room without them — see [`crate::rpc_families`], which owns it (hence
+    /// `pub(crate)`).
+    pub(crate) rpc_families: Option<Arc<dyn crate::rpc_families::DaemonRpcFamilies>>,
 }
 
 mod seed_codebase;
@@ -241,6 +245,7 @@ mod seeded_clone_guard;
 pub use seeded_clone_guard::*;
 
 mod svc_resolve_tddy_tools_path;
+pub use svc_resolve_tddy_tools_path::resolve_tddy_tools_path;
 
 mod svc_pr_status_for_caller;
 
@@ -251,6 +256,8 @@ pub use hooks_and_urls::*;
 
 mod agent_roster;
 pub(crate) use agent_roster::*;
+/// Shared with `tddy-daemon-rpc`'s `ListSubagents`, whose rows name agents the way the roster does.
+pub use agent_roster::{def_tool_names, qualified_agent_id};
 
 #[allow(clippy::too_many_arguments)]
 async fn spawn_claude_cli_session_inner(
@@ -662,6 +669,7 @@ async fn spawn_claude_cli_session_inner(
 }
 
 mod svc_resolve_listed_worktree;
+pub use svc_resolve_listed_worktree::resolvable_agent_defs;
 
 mod terminal_bridge_impl;
 
@@ -1275,6 +1283,15 @@ pub fn resolve_caller_chosen_session_id(
 }
 
 mod svc_resolve_os_user;
+/// Caller identity, shared with `tddy-daemon-rpc`'s exec-tool and PR-stack families, which must
+/// authenticate a caller exactly as the host does.
+pub use svc_resolve_os_user::{
+    authorize_exec_tool_caller, resolve_exec_tool_worktree, resolve_os_user,
+};
+
+/// Where an exec tool runs on this daemon, shared with `tddy-daemon-rpc`'s exec-tool family.
+mod local_exec_tools;
+pub use local_exec_tools::LocalExecTools;
 
 mod svc_materialize_staged_attachment;
 
@@ -1295,13 +1312,12 @@ mod svc_session_files_ports;
 mod svc_activity_ports;
 
 mod family_proto_bridge;
-mod project_coordinate_handlers;
+/// Shared with the families served in `tddy-daemon-rpc`, whose bodies bridge the same
+/// wire-identical messages.
+pub use family_proto_bridge::wire_same;
+/// The host state `tddy-daemon-rpc`'s family handlers are built from.
+mod handler_state;
 mod session_coordinate_handlers;
-mod svc_catalog_ports;
-mod svc_exec_tool_ports;
-mod svc_family_entries;
-mod svc_pr_stack_ports;
-mod svc_project_ports;
 /// The daemon's half of `session_agents.SessionAgentService` — the host capabilities family B
 /// reads, and the routing the daemon keeps. `#unbundle` node 7.
 mod svc_session_agent_ports;
@@ -1314,32 +1330,6 @@ pub use svc_session_files_ports::PeerRoutedSessionFiles;
 /// the host that assembles it has to be able to write these two types down.
 pub use svc_activity_ports::PeerRoutedActivity;
 pub use svc_session_agent_ports::PeerRoutedSessionAgents;
-
-/// Merge local `ListProjects` rows with [`EligibleDaemonSource::peer_project_entries`].
-async fn merge_listed_projects_with_peers(
-    eligible: &dyn EligibleDaemonSource,
-    session_token: &str,
-    local: Vec<ProtoProjectEntry>,
-) -> Vec<ProtoProjectEntry> {
-    let peer_rows = eligible.peer_project_entries(session_token).await;
-    log::debug!(
-        target: "tddy_daemon::connection_service",
-        "merge_listed_projects_with_peers: local_rows={} peer_rows={} (session_token len={})",
-        local.len(),
-        peer_rows.len(),
-        session_token.len()
-    );
-    let mut merged = local;
-    let n_append = peer_rows.len();
-    merged.extend(peer_rows);
-    log::info!(
-        target: "tddy_daemon::connection_service",
-        "merge_listed_projects_with_peers: merged_total={} appended_from_peers={}",
-        merged.len(),
-        n_append
-    );
-    merged
-}
 
 /// The host-side RPC dispatch for a sandboxed session's `SessionChannel`: routes the roster and
 /// conversation RPCs the in-jail `tddy-tools` issues (forwarded by the runner as `RpcRequest`s)
@@ -1384,65 +1374,6 @@ mod demo_vm_coordinate_handlers;
 mod svc_demo_vm_ports;
 pub use svc_demo_vm_ports::DemoVmServiceImpl;
 
-/// Reject an obvious path traversal in a path-bearing exec tool's arguments, before any I/O.
-///
-/// The worktree root is the boundary an exec tool call is confined to; a `..` component asks to
-/// leave it, which is refused rather than normalized away.
-fn reject_exec_tool_path_traversal(tool_name: &str, args_json: &str) -> Result<(), Status> {
-    if !matches!(tool_name, "Read" | "Write" | "StrReplace" | "Delete") {
-        return Ok(());
-    }
-    let args: serde_json::Value =
-        serde_json::from_str(args_json).unwrap_or(serde_json::Value::Null);
-    let Some(path) = args.get("path").and_then(|v| v.as_str()) else {
-        return Ok(());
-    };
-    if Path::new(path)
-        .components()
-        .any(|c| c == std::path::Component::ParentDir)
-    {
-        return Err(Status::permission_denied(
-            "path contains '..' components (traversal rejected)",
-        ));
-    }
-    Ok(())
-}
-
-/// Bytes of tool result carried per `StreamExecuteTool` frame.
-///
-/// Defined *as* [`HOST_DOCUMENT_FRAME_BYTES`] rather than as the same number, because the budget is
-/// a property of the transport rather than of what rides on it: both are what every transport in the
-/// stack carries per message without applying its own chunk framing. Two constants free to drift
-/// would be two answers to one question, and only one of them could be right.
-pub const EXEC_TOOL_FRAME_BYTES: usize = HOST_DOCUMENT_FRAME_BYTES;
-
-/// Split a completed tool result into ordered [`EXEC_TOOL_FRAME_BYTES`] frames.
-///
-/// The outcome rides the **final** frame — a tool error is a result, not an RPC failure, matching
-/// unary `ExecuteTool`'s contract. An empty result still yields exactly one frame, so a consumer
-/// never has to tell "empty result" from "stream produced nothing", and a stream ending without a
-/// `last` frame is unambiguously a truncation.
-fn exec_tool_result_frames(response: ExecuteToolResponse) -> Vec<ExecuteToolChunk> {
-    let bytes = response.result_json.into_bytes();
-    let mut frames: Vec<ExecuteToolChunk> = bytes
-        .chunks(EXEC_TOOL_FRAME_BYTES)
-        .map(|chunk| ExecuteToolChunk {
-            result_chunk: chunk.to_vec(),
-            ..Default::default()
-        })
-        .collect();
-    if frames.is_empty() {
-        frames.push(ExecuteToolChunk::default());
-    }
-    let last = frames.last_mut().expect("at least one frame");
-    last.is_error = response.is_error;
-    last.error_message = response.error_message;
-    last.job_id = response.job_id;
-    last.job_running = response.job_running;
-    last.last = true;
-    frames
-}
-
 /// Bytes to leave free in a LiveKit data packet for everything in a frame that is not payload: the
 /// RPC envelope (request id, service/method metadata, sender identity) plus the frame's own fields —
 /// `total_byte_size` for a document chunk, `error_message` / `job_id` / the flags for a tool-result
@@ -1455,7 +1386,8 @@ const FRAME_ENVELOPE_HEADROOM: usize = 8 * 1024;
 /// permanently incomplete — the call is then never answered and never fails
 /// (`docs/ft/coder/rpc-multi-transport.md`). A build failure here is the point: the doc comment above
 /// asserts "without its own chunk framing", and raising the frame size to 64 KiB would silently make
-/// that false. One assert covers [`EXEC_TOOL_FRAME_BYTES`] too, which is this same constant.
+/// that false. One assert covers `tddy-daemon-rpc`'s `EXEC_TOOL_FRAME_BYTES` too, which is defined as
+/// this same constant.
 ///
 /// [`FRAME_ENVELOPE_HEADROOM`] is a *shared* budget, not a per-field one, and one frame type spends
 /// more of it than the rest: `ContextFileBatchChunk` repeats `rel_path` on every frame, so a deeply
@@ -1497,26 +1429,6 @@ pub fn activity_delta_frames(delta: &ActivityDelta) -> Vec<AgentActivityDeltaChu
         frames.push(describe(Vec::new()));
     }
     frames
-}
-
-/// Guard for any RPC that mutates a `"pr-stack"` orchestrator's `Changeset.stack`: rejects a
-/// session whose recipe (or legacy alias) doesn't resolve to `"pr-stack"`, before the caller
-/// touches that session's changeset. Shared by `add_planned_pr` today; future planned-PR
-/// mutation RPCs (edit/delete) should call this too rather than re-checking inline.
-fn require_pr_stack_orchestrator(session_dir: &std::path::Path) -> Result<(), Status> {
-    let changeset = tddy_core::read_changeset(session_dir)
-        .map_err(|e| Status::invalid_argument(e.to_string()))?;
-    let recipe_name = changeset.recipe.as_deref().unwrap_or("");
-    let is_pr_stack =
-        tddy_workflow_recipes::recipe_resolve::resolve_workflow_recipe_from_cli_name(recipe_name)
-            .map(|r| r.name() == "pr-stack")
-            .unwrap_or(false);
-    if !is_pr_stack {
-        return Err(Status::failed_precondition(
-            "session is not a pr-stack orchestrator",
-        ));
-    }
-    Ok(())
 }
 
 /// Refuse a `StartSessionRequest.pr_stack_base_session_id` that cannot seed a stack, *before*
@@ -1622,204 +1534,6 @@ fn session_repo_is_in_project(
     Ok(canonical(session_repo)?.starts_with(canonical(project_repo_root)?))
 }
 
-/// Derive `owner/repo` from a repo's `origin` remote URL, for GitHub API namespacing.
-/// Returns `None` when the remote can't be read or isn't a recognizable GitHub URL.
-fn owner_repo_from_repo_root(repo_root: &std::path::Path) -> Option<String> {
-    let out = std::process::Command::new("git")
-        .current_dir(repo_root)
-        .args(["remote", "get-url", "origin"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let remote_url = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    tddy_workflow_recipes::orchestrate_pr_stack::github::owner_repo_from_remote_url(&remote_url)
-}
-
-/// A PR status the daemon could not look up: *unavailable* with an operator-facing `reason`, never
-/// `exists = false` (D8). Logged, because a lookup that never happened is otherwise invisible — the
-/// daemon log carried no PR line at all for an orchestrator polled hundreds of times.
-fn pr_status_unavailable(
-    branch: &str,
-    reason: String,
-) -> tddy_service::proto::pr_stack::PrStatusView {
-    log::warn!("PR status unavailable for branch {branch}: {reason}");
-    tddy_service::proto::pr_stack::PrStatusView {
-        unavailable: true,
-        unavailable_reason: reason,
-        ..Default::default()
-    }
-}
-
-/// Compare `branch` against `base_branch`, reading through the process-wide cache.
-///
-/// Resolving the two refs is a pair of `rev-parse`s and runs every time — it is what produces the
-/// cache key, and it is also how a moved ref is noticed. Only the comparison itself, which runs
-/// `git merge-tree`, is cached.
-fn base_sync_through_cache(
-    repo_root: &std::path::Path,
-    branch: &str,
-    base_branch: &str,
-) -> Result<tddy_core::base_sync::BranchBaseSync, String> {
-    let refs = tddy_core::base_sync::resolve_base_sync_refs(repo_root, branch, base_branch)?;
-    let key = crate::base_sync_cache::BaseSyncKey::new(repo_root, &refs);
-    crate::base_sync_cache::shared().get_or_probe(key, || {
-        tddy_core::base_sync::compare_base_sync_refs(repo_root, &refs)
-    })
-}
-
-/// A completed comparison on the wire. `base_branch` carries the ref that was actually compared —
-/// not the one the caller asked for — because the counts are meaningless beside a ref they did not
-/// come from (D28).
-fn base_sync_view(
-    sync: tddy_core::base_sync::BranchBaseSync,
-) -> tddy_service::proto::pr_stack::BranchBaseSync {
-    tddy_service::proto::pr_stack::BranchBaseSync {
-        base_branch: sync.base_ref.clone(),
-        behind_count: sync.behind_count,
-        ahead_count: sync.ahead_count,
-        has_conflicts: sync.has_conflicts,
-        conflicted_paths: sync.conflicted_paths,
-        unavailable: false,
-        unavailable_reason: String::new(),
-        base_ref: sync.base_ref,
-        head_ref: sync.head_ref,
-    }
-}
-
-/// A comparison the daemon could not make: *unavailable* with an operator-facing reason, never a
-/// zeroed success. A failed comparison reads identically to a healthy one on every other field, so
-/// this discriminator is the only thing standing between "could not tell" and "clean" (D27).
-fn base_sync_unavailable(
-    base_branch: &str,
-    reason: &str,
-) -> tddy_service::proto::pr_stack::BranchBaseSync {
-    tddy_service::proto::pr_stack::BranchBaseSync {
-        base_branch: base_branch.to_string(),
-        unavailable: true,
-        unavailable_reason: reason.to_string(),
-        ..Default::default()
-    }
-}
-
-/// The `worktree` leg of a `BranchResolution`: the on-disk worktree checked out for `branch`, and
-/// whether it holds outstanding work.
-///
-/// Two git subprocesses — a `git worktree list` walk and a `git status --porcelain` — so every caller
-/// runs this on the blocking pool, never on a runtime thread.
-fn worktree_leg(
-    repo_root: Option<&std::path::Path>,
-    branch: &str,
-) -> tddy_service::proto::pr_stack::BranchWorktree {
-    use tddy_service::proto::pr_stack::BranchWorktree;
-
-    let Some(path) =
-        repo_root.and_then(|root| tddy_core::worktree::worktree_path_for_branch(root, branch))
-    else {
-        return BranchWorktree::default();
-    };
-    let dirty_paths = worktree_dirty_paths(&path);
-    BranchWorktree {
-        exists: true,
-        path: path.to_string_lossy().into_owned(),
-        dirty: !dirty_paths.is_empty(),
-        dirty_paths,
-    }
-}
-
-/// The tracked paths with outstanding changes in a worktree — empty for a clean one, and empty for
-/// a path git cannot read at all, which is the same thing as far as offering a pull goes.
-///
-/// Untracked files are deliberately excluded: git refuses loudly rather than clobbering one, and
-/// counting them would leave the pull control permanently blocked in any worktree an agent works in.
-fn worktree_dirty_paths(worktree: &std::path::Path) -> Vec<String> {
-    tddy_workflow_recipes::orchestrate_pr_stack::worktree_is_clean(worktree).unwrap_or_else(|e| {
-        log::warn!(
-            "QueryBranch: could not read the state of the worktree at {}: {e}",
-            worktree.display()
-        );
-        Vec::new()
-    })
-}
-
-/// GitHub PR state → the lowercase label carried on the `PrStatusView.state` wire field.
-fn pr_state_label(
-    state: tddy_workflow_recipes::orchestrate_pr_stack::github::PrState,
-) -> &'static str {
-    use tddy_workflow_recipes::orchestrate_pr_stack::github::PrState;
-    match state {
-        PrState::Open => "open",
-        PrState::Merged => "merged",
-        PrState::Closed => "closed",
-        PrState::Draft => "draft",
-    }
-}
-
-/// TTL for the per-(agent, daemon) model-probe cache. A probe spawns a subprocess and may hit the
-/// network, so results are cached briefly to avoid re-probing on every agent toggle in the UI.
-const AGENT_MODELS_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
-
-#[allow(clippy::type_complexity)]
-static AGENT_MODELS_CACHE: std::sync::OnceLock<
-    std::sync::Mutex<
-        std::collections::HashMap<String, (std::time::Instant, ListAgentModelsResponse)>,
-    >,
-> = std::sync::OnceLock::new();
-
-fn agent_models_cache() -> &'static std::sync::Mutex<
-    std::collections::HashMap<String, (std::time::Instant, ListAgentModelsResponse)>,
-> {
-    AGENT_MODELS_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-}
-
-/// Build the `tddy-tools list-models` argv for an agent probe. Always `["list-models", "--agent",
-/// <agent>]`; appends `["--cursor-cli-path", <path>]` only when probing `cursor` with a resolved
-/// path, so the impersonated child execs the fully-qualified binary instead of a PATH lookup.
-fn list_models_probe_args(agent: &str, cursor_cli_path: Option<&std::path::Path>) -> Vec<String> {
-    let mut args = vec![
-        "list-models".to_string(),
-        "--agent".to_string(),
-        agent.to_string(),
-    ];
-    if agent == "cursor" {
-        if let Some(path) = cursor_cli_path {
-            args.push("--cursor-cli-path".to_string());
-            args.push(path.to_string_lossy().into_owned());
-        }
-    }
-    args
-}
-
-/// Parse the JSON stdout of `tddy-tools list-models --agent <id>`
-/// (`{"models":[{"id":..,"label":..}],"default_model":".."}`) into a `ListAgentModelsResponse`.
-/// Malformed output is a hard error — a failed probe must not look like an empty catalog.
-fn parse_agent_models_json(stdout: &str) -> Result<ListAgentModelsResponse, Status> {
-    #[derive(serde::Deserialize)]
-    struct ModelJson {
-        id: String,
-        label: String,
-    }
-    #[derive(serde::Deserialize)]
-    struct ModelsJson {
-        models: Vec<ModelJson>,
-        default_model: String,
-    }
-    let parsed: ModelsJson = serde_json::from_str(stdout.trim())
-        .map_err(|e| Status::internal(format!("failed to parse list-models output: {e}")))?;
-    Ok(ListAgentModelsResponse {
-        models: parsed
-            .models
-            .into_iter()
-            .map(|m| CatalogModelInfo {
-                id: m.id,
-                label: m.label,
-            })
-            .collect(),
-        default_model: parsed.default_model,
-    })
-}
-
 #[cfg(test)]
 mod signal_session_unit_tests;
 
@@ -1849,21 +1563,12 @@ mod specialized_subagent_env_unit_tests;
 #[cfg(test)]
 mod seeded_roster_records_unit_tests;
 
-#[cfg(test)]
-mod add_planned_pr_unit_tests;
-
 /// A spawned child must record its **branch** on the planned node it materializes. Without that
 /// forward link the orchestrator's stack still reads "no branch anywhere", so `base_ref_for_spawn`
 /// refuses every descendant — a stack wedged at its bottom node. The child session id is recorded
 /// alongside it only as a fallback route back to the branch.
 #[cfg(test)]
 mod stack_child_link_tests;
-
-#[cfg(test)]
-mod cross_daemon_session_token_acceptance_tests;
-
-#[cfg(test)]
-mod list_agent_models_parse_tests;
 
 #[cfg(test)]
 mod start_session_binary_resolution_tests;
@@ -1920,9 +1625,6 @@ mod sandbox_claude_passthrough_args_tests;
 
 #[cfg(test)]
 mod conversation_spawn_wiring_tests;
-
-#[cfg(test)]
-mod list_agent_models_probe_tests;
 
 #[cfg(test)]
 mod remote_branch_push_gating_tests;

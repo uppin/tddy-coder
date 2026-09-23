@@ -11,3 +11,15 @@ consistent with its five siblings rather than fixed in isolation.
 Related, in the same file: `validate_stack_seed_base_session` and `require_pr_stack_orchestrator` are
 pure free functions with no `&self`, and belong in a `connection_service/pr_stack.rs` whenever that
 13k-line file is finally split.
+
+## Answered in part — 2026-09-23 (#520, `#carve` 11/12)
+
+- **`require_pr_stack_orchestrator` is done.** It left `connection_service.rs` with the PR-stack RPC
+  family and lives in `packages/tddy-daemon-rpc/src/pr_stack/guards.rs`, beside
+  `validate_repoint_target`.
+- **`validate_stack_seed_base_session` is still in
+  `packages/tddy-session-lifecycle/src/connection_service.rs`** — session start calls it, so it
+  stayed with the lifecycle crate. Moving it into a PR-stack module there is still open.
+- **The trim-to-`Option<String>` duplication is untouched** — the main item of this entry, still
+  open. `connection_service.rs` is 1,647 lines (the "13k-line" figure above predates the
+  `#unbundle` and `#carve` splits).

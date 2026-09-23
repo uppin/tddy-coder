@@ -11,40 +11,17 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
-use tddy_service::proto::catalog::{
-    CatalogService, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
-    ListAgentsResponse, ListSubagentsRequest, ListSubagentsResponse, ListToolsRequest,
-    ListToolsResponse,
-};
-use tddy_service::proto::exec_tools::{
-    ExecToolService, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
-    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse,
-};
-use tddy_service::proto::pr_stack::{
-    AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
-    LinkStackNodeRequest, LinkStackNodeResponse, PrStackService, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
-    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ResolveStackBaseRequest, ResolveStackBaseResponse,
-};
-use tddy_service::proto::project::{
-    AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
-    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ProjectService, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse,
-};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListSessionsRequest,
     ListSessionsResponse, ResumeSessionRequest, ResumeSessionResponse, SessionService,
     SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
 };
-use tddy_worktree_service::stream::MpscResultStream;
 
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
 use crate::connection_service::DaemonSessionHost;
+use crate::{DaemonRpcFamilies, PrStackHandler};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
 /// Token accepted by [`test_service`] as a valid session token.
@@ -67,6 +44,16 @@ pub fn test_config() -> DaemonConfig {
 }
 
 fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
+    let service = Arc::new(test_host(sessions_base));
+    service.install_sandbox_rpc_bridge();
+    service
+}
+
+/// The host [`test_service`] wraps, before it goes behind its `Arc` — for a suite above this crate
+/// that must install more on it first (`tddy-daemon-rpc`'s families), and then calls
+/// [`DaemonSessionHost::install_sandbox_rpc_bridge`] itself, as [`test_service`] does.
+#[must_use]
+pub fn test_host(sessions_base: PathBuf) -> DaemonSessionHost {
     let config = test_config();
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -78,7 +65,7 @@ fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
             None
         }
     });
-    let service = Arc::new(DaemonSessionHost::new(
+    DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -87,13 +74,12 @@ fn new_connection_service(sessions_base: PathBuf) -> Arc<DaemonSessionHost> {
         None,
         None,
         Arc::new(CliSessionManager::new()),
-    ));
-    service.install_sandbox_rpc_bridge();
-    service
+    )
 }
 
-/// Daemon under test: the connection service plus the catalogue, exec-tool and PR-stack families
-/// unbundled onto their own coordinates (`#unbundle` node 8).
+/// Daemon under test: the connection service and its session family. The catalogue, exec-tool,
+/// project and PR-stack families are served by `tddy-daemon-rpc`, whose own `test_util::TestDaemon`
+/// answers them.
 #[derive(Clone)]
 pub struct TestDaemon {
     inner: Arc<DaemonSessionHost>,
@@ -144,6 +130,29 @@ impl TestDaemon {
     pub fn with_roster_keepalive_interval(mut self, interval: std::time::Duration) -> Self {
         Arc::make_mut(&mut self.inner).set_roster_keepalive_interval(interval);
         self
+    }
+}
+
+/// **Test fixture, never production wiring:** the [`DaemonRpcFamilies`] of a suite that opens a
+/// session room without exercising any family served above this crate (`tddy-daemon-rpc`).
+///
+/// The room it opens serves **none** of those families — an empty set, named for what it is, rather
+/// than a production host quietly missing them. A suite that asserts a moved family, through a room
+/// or a stack link, belongs in `tddy-daemon-rpc` with the real `RpcHandlers` installed; the panic
+/// below is what tells a suite it has strayed there.
+pub struct RpcFamiliesNotUnderTest;
+
+impl DaemonRpcFamilies for RpcFamiliesNotUnderTest {
+    fn pr_stack_handler(&self) -> Arc<dyn PrStackHandler> {
+        panic!(
+            "this suite routed into the PR-stack family through `DaemonRpcFamilies`, which it does \
+             not exercise (`RpcFamiliesNotUnderTest`); a suite that does belongs in \
+             `tddy-daemon-rpc`, with `RpcHandlers` installed"
+        )
+    }
+
+    fn service_entries(&self) -> Vec<tddy_rpc::ServiceEntry> {
+        Vec::new()
     }
 }
 
@@ -240,218 +249,6 @@ impl SessionService for TestDaemon {
     }
 }
 
-#[async_trait]
-impl ProjectService for TestDaemon {
-    async fn list_projects(
-        &self,
-        request: Request<ListProjectsRequest>,
-    ) -> Result<Response<ListProjectsResponse>, Status> {
-        self.inner.project_service().list_projects(request).await
-    }
-
-    async fn create_project(
-        &self,
-        request: Request<CreateProjectRequest>,
-    ) -> Result<Response<CreateProjectResponse>, Status> {
-        self.inner.project_service().create_project(request).await
-    }
-
-    async fn add_project_to_host(
-        &self,
-        request: Request<AddProjectToHostRequest>,
-    ) -> Result<Response<AddProjectToHostResponse>, Status> {
-        self.inner
-            .project_service()
-            .add_project_to_host(request)
-            .await
-    }
-
-    async fn list_project_branches(
-        &self,
-        request: Request<ListProjectBranchesRequest>,
-    ) -> Result<Response<ListProjectBranchesResponse>, Status> {
-        self.inner
-            .project_service()
-            .list_project_branches(request)
-            .await
-    }
-
-    async fn set_project_default_branch(
-        &self,
-        request: Request<SetProjectDefaultBranchRequest>,
-    ) -> Result<Response<SetProjectDefaultBranchResponse>, Status> {
-        self.inner
-            .project_service()
-            .set_project_default_branch(request)
-            .await
-    }
-}
-
-#[async_trait]
-impl CatalogService for TestDaemon {
-    async fn list_tools(
-        &self,
-        request: Request<ListToolsRequest>,
-    ) -> Result<Response<ListToolsResponse>, Status> {
-        self.inner.catalog_rpc_service().list_tools(request).await
-    }
-
-    async fn list_agents(
-        &self,
-        request: Request<ListAgentsRequest>,
-    ) -> Result<Response<ListAgentsResponse>, Status> {
-        self.inner.catalog_rpc_service().list_agents(request).await
-    }
-
-    async fn list_agent_models(
-        &self,
-        request: Request<ListAgentModelsRequest>,
-    ) -> Result<Response<ListAgentModelsResponse>, Status> {
-        self.inner
-            .catalog_rpc_service()
-            .list_agent_models(request)
-            .await
-    }
-
-    async fn list_subagents(
-        &self,
-        request: Request<ListSubagentsRequest>,
-    ) -> Result<Response<ListSubagentsResponse>, Status> {
-        self.inner
-            .catalog_rpc_service()
-            .list_subagents(request)
-            .await
-    }
-}
-
-#[async_trait]
-impl ExecToolService for TestDaemon {
-    type StreamExecuteToolStream = MpscResultStream<ExecuteToolChunk>;
-
-    async fn execute_tool(
-        &self,
-        request: Request<ExecuteToolRequest>,
-    ) -> Result<Response<ExecuteToolResponse>, Status> {
-        self.inner
-            .exec_tool_rpc_service()
-            .execute_tool(request)
-            .await
-    }
-
-    async fn stream_execute_tool(
-        &self,
-        request: Request<ExecuteToolRequest>,
-    ) -> Result<Response<Self::StreamExecuteToolStream>, Status> {
-        self.inner
-            .exec_tool_rpc_service()
-            .stream_execute_tool(request)
-            .await
-    }
-
-    async fn list_exec_tools(
-        &self,
-        request: Request<ListExecToolsRequest>,
-    ) -> Result<Response<ListExecToolsResponse>, Status> {
-        self.inner
-            .exec_tool_rpc_service()
-            .list_exec_tools(request)
-            .await
-    }
-
-    async fn list_session_tool_calls(
-        &self,
-        request: Request<ListSessionToolCallsRequest>,
-    ) -> Result<Response<ListSessionToolCallsResponse>, Status> {
-        self.inner
-            .exec_tool_rpc_service()
-            .list_session_tool_calls(request)
-            .await
-    }
-}
-
-#[async_trait]
-impl PrStackService for TestDaemon {
-    async fn add_planned_pr(
-        &self,
-        request: Request<AddPlannedPrRequest>,
-    ) -> Result<Response<AddPlannedPrResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .add_planned_pr(request)
-            .await
-    }
-
-    async fn get_pr_status(
-        &self,
-        request: Request<GetPrStatusRequest>,
-    ) -> Result<Response<GetPrStatusResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .get_pr_status(request)
-            .await
-    }
-
-    async fn query_branch(
-        &self,
-        request: Request<QueryBranchRequest>,
-    ) -> Result<Response<QueryBranchResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .query_branch(request)
-            .await
-    }
-
-    async fn resolve_stack_base(
-        &self,
-        request: Request<ResolveStackBaseRequest>,
-    ) -> Result<Response<ResolveStackBaseResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .resolve_stack_base(request)
-            .await
-    }
-
-    async fn link_stack_node(
-        &self,
-        request: Request<LinkStackNodeRequest>,
-    ) -> Result<Response<LinkStackNodeResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .link_stack_node(request)
-            .await
-    }
-
-    async fn repoint_planned_pr(
-        &self,
-        request: Request<RepointPlannedPrRequest>,
-    ) -> Result<Response<RepointPlannedPrResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .repoint_planned_pr(request)
-            .await
-    }
-
-    async fn reorder_planned_pr(
-        &self,
-        request: Request<ReorderPlannedPrRequest>,
-    ) -> Result<Response<ReorderPlannedPrResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .reorder_planned_pr(request)
-            .await
-    }
-
-    async fn pull_base_into_branch(
-        &self,
-        request: Request<PullBaseIntoBranchRequest>,
-    ) -> Result<Response<PullBaseIntoBranchResponse>, Status> {
-        self.inner
-            .pr_stack_rpc_service()
-            .pull_base_into_branch(request)
-            .await
-    }
-}
-
 /// Build a [`TestDaemon`] wired to `sessions_base` with the standard test resolvers.
 ///
 /// [`TEST_TOKEN`] resolves to [`TEST_USER`]; any other token returns `None`.
@@ -531,21 +328,30 @@ pub async fn wait_until_peer_discovered(
 /// The production roster is `runtime::build`'s, which mounts these two among several more; the
 /// extras are the ones no forward in these suites addresses, and each needs wiring a test daemon
 /// does not have.
+///
+/// The families served above this crate are whatever `service` was given as its
+/// [`DaemonRpcFamilies`]; a host never given any panics here, as its room would refuse.
 pub async fn serve_daemon_rpc_participant(
     ws_url: &str,
     token: &str,
     service: &Arc<DaemonSessionHost>,
 ) -> tokio::task::JoinHandle<()> {
-    let roster = tddy_rpc::MultiRpcService::new(vec![
-        service.session_files_entry(),
-        service.session_agents_entry(),
-        service.activity_entry(),
-        service.catalog_entry(),
-        service.exec_tool_entry(),
-        service.pr_stack_entry(),
-        service.session_lifecycle_entry(),
-        service.project_entry(),
-    ]);
+    let roster = tddy_rpc::MultiRpcService::new(
+        vec![
+            service.session_files_entry(),
+            service.session_agents_entry(),
+            service.activity_entry(),
+            service.session_lifecycle_entry(),
+        ]
+        .into_iter()
+        .chain(
+            service
+                .rpc_families()
+                .expect("a daemon serving forwarded calls needs its RPC families installed")
+                .service_entries(),
+        )
+        .collect(),
+    );
     let participant = tddy_livekit::LiveKitParticipant::connect(
         ws_url,
         token,

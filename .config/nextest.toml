@@ -116,6 +116,7 @@ filter = """
         or binary(split_session_resume_acceptance)
         or binary(staging_forwarding_acceptance)
     ))
+    or (package(tddy-daemon-rpc) and binary(session_room_exec_tool_acceptance))
     or (package(tddy-coder) and (
         binary(coder_publishes_session_metadata_to_participant)
         or binary(coder_serves_connection_service_from_participant)

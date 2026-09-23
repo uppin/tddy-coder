@@ -7,7 +7,7 @@
 **CRAP:** **CRAP 80** · complexity 80 · rank 46/50 in this crate · **fully covered** (CRAP == complexity means coverage 1.0)
 **Thresholds breached:** length 842 > 60; nesting 6 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**, **low priority**: fully covered, so this is a readability cost, not a risk
+**Status:** Open — regressed 2026-09-23 (842 → 857 since detection; +3 of it from #520, re-wrapped field reads) — **unclaimed**, **low priority**: fully covered, so this is a readability cost, not a risk
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -15,6 +15,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 842 | 6 | 40 | 54 | first detection |
+| 2026-09-23 | 857 | 6 | — | — | 854 on master before #520 (+12 since detection, unrecorded); +3 from #520 (`#carve` 11/12) — rustfmt re-wraps the peer-roster and common-room reads that moved behind `self.peer_routing`. No control flow added: nesting, and `return`/`?` count, identical to master; branches not re-derived |
 
 ## What the tool found
 

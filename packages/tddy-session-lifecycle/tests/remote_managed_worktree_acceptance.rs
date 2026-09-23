@@ -24,7 +24,6 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::livekit_peer_discovery::{LiveKitDiscoveryHandles, PEER_FORWARD_TIMEOUT};
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::Request;
-use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_service::proto::session::{
     DeleteSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
@@ -131,36 +130,6 @@ fn service_with_known_codebase_peer_and_config(
         None,
         Arc::new(ClaudeCliSessionManager::new()),
     )))
-}
-
-/// The same service, but every token resolves to a GitHub user this daemon has no OS mapping for —
-/// the shape a split session takes when the codebase host was never told about the caller.
-fn service_with_a_user_this_daemon_does_not_map(sessions_base: PathBuf) -> TestDaemon {
-    let resolver: SessionsBaseResolver = {
-        let base = sessions_base.clone();
-        Arc::new(move |_| Some(base.clone()))
-    };
-    let unmapped_user: UserResolver = Arc::new(|_| Some("someone-else".to_string()));
-    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
-        test_config(),
-        resolver,
-        sessions_base,
-        unmapped_user,
-        None,
-        None,
-        None,
-        Arc::new(ClaudeCliSessionManager::new()),
-    )))
-}
-
-fn an_exec_tool_request(session_token: &str) -> ExecuteToolRequest {
-    ExecuteToolRequest {
-        session_token: session_token.to_string(),
-        session_id: "019d105b-ac0f-78d3-9a89-40973114cc03".to_string(),
-        tool_name: "Read".to_string(),
-        args_json: r#"{"path":"README.md"}"#.to_string(),
-        ..Default::default()
-    }
 }
 
 /// A managed claude-cli start request placing the codebase on `codebase_daemon_instance_id`.
@@ -732,65 +701,6 @@ async fn deleting_a_split_session_refuses_while_this_daemon_cannot_reach_the_com
 // `livekit.api_secret` (a session token is a stateless HMAC only its co-signers can verify), and a
 // GitHub user mapped on the agent host but not on the codebase host — so each names the daemon that
 // refused.
-
-#[tokio::test]
-async fn an_exec_tool_refused_over_an_unverifiable_token_names_the_daemon_that_refused_it() {
-    // Given a daemon that cannot verify the caller's token
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
-
-    // When
-    let status = service
-        .execute_tool(Request::new(an_exec_tool_request("minted-elsewhere")))
-        .await
-        .expect_err("an unverifiable session token must be refused");
-
-    // Then
-    assert_eq!(
-        status.code(),
-        tddy_rpc::Code::Unauthenticated,
-        "expected Unauthenticated; got {:?}: {}",
-        status.code(),
-        status.message()
-    );
-    assert!(
-        status.message().contains(LOCAL_INSTANCE_ID),
-        "the refusal must name the daemon that refused, or a split session's operator reads it as the agent host's answer; got '{}'",
-        status.message()
-    );
-}
-
-#[tokio::test]
-async fn an_exec_tool_refused_for_an_unmapped_user_names_the_daemon_that_refused_it() {
-    // Given a daemon that verifies the token but has no OS user for the GitHub user behind it
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = service_with_a_user_this_daemon_does_not_map(sessions_tmp.path().to_path_buf());
-
-    // When
-    let status = service
-        .execute_tool(Request::new(an_exec_tool_request(TEST_TOKEN)))
-        .await
-        .expect_err("a user with no OS mapping must be refused");
-
-    // Then
-    assert_eq!(
-        status.code(),
-        tddy_rpc::Code::PermissionDenied,
-        "expected PermissionDenied; got {:?}: {}",
-        status.code(),
-        status.message()
-    );
-    assert!(
-        status.message().contains(LOCAL_INSTANCE_ID),
-        "the refusal must name the daemon whose users[] mapping is missing; got '{}'",
-        status.message()
-    );
-    assert!(
-        status.message().contains("someone-else"),
-        "the refusal must name the unmapped user so the operator knows what to add; got '{}'",
-        status.message()
-    );
-}
 
 /// A stopped split session: paired to a codebase daemon, with no repository of its own.
 fn write_split_session_metadata(sessions_base: &std::path::Path, session_id: &str) {

@@ -84,7 +84,10 @@ impl DaemonSessionHost {
 
         let requested_daemon = req.daemon_instance_id.trim();
         let local_id = local_instance_id_for_config(&self.config);
-        let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
+        let eligible_rows = self
+            .peer_routing
+            .eligible_daemon_source()
+            .list_eligible_daemons();
         let eligible_ids: Vec<String> = eligible_rows
             .iter()
             .map(|e| e.instance_id.0.clone())
@@ -110,7 +113,7 @@ impl DaemonSessionHost {
                     "StartSession: forwarding RPC to remote daemon_instance_id={}",
                     peer_instance_id
                 );
-                let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                let slot = self.peer_routing.common_room_livekit_room().ok_or_else(|| {
                     Status::failed_precondition(
                         "cannot forward StartSession: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
                     )

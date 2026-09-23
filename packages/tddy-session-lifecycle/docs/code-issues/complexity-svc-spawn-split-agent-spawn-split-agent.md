@@ -13,6 +13,7 @@
 | Run | Lines | Nesting | Params | Note |
 |---|---|---|---|---|
 | 2026-09-19 | 233 | 5 | 9 | 213 → 233 in PR #518; **nesting crossed 4 → 5** |
+| 2026-09-23 | 251 | — | 9 | touched by #520 (`#carve` 11/12) and **unchanged by it**: the room roster argument became a builder closure (`|| Arc::new(self.clone()).session_room_roster()`), same line count. 251 on master before #520 — the 233 → 251 growth predates it and is unattributed; nesting not re-derived |
 
 ## What grew it
 

@@ -33,7 +33,6 @@ use tddy_daemon_livekit::session_room::{session_room_name, WORKTREE_ACTIVITY_TOP
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
-use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::livekit::LiveKitRoomInfo;
 use tddy_service::proto::session::{
     session_attachment::Source as AttachmentSource, ConnectSessionRequest, SessionAttachment,
@@ -45,7 +44,7 @@ use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
 use tddy_service::proto::types::HostDocumentScope;
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TEST_TOKEN;
+use tddy_session_lifecycle::test_util::{RpcFamiliesNotUnderTest, TEST_TOKEN};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 use tddy_testing_commons::wait::eventually_awaiting;
 
@@ -364,7 +363,11 @@ impl FacilitatingDaemon {
             None,
             Arc::clone(&agents),
         )
-        .with_staging_base_dir(staging.path().to_path_buf());
+        .with_staging_base_dir(staging.path().to_path_buf())
+        // The rooms under test serve none of the families above the lifecycle crate: nothing here
+        // calls one through a room. The exec tool read through a room is `tddy-daemon-rpc`'s
+        // `session_room_exec_tool_acceptance.rs`.
+        .with_rpc_families(Arc::new(RpcFamiliesNotUnderTest));
 
         Self {
             service,
@@ -611,33 +614,6 @@ fn spawn_activity_subscription(
     rx
 }
 
-async fn execute_tool_in_room(
-    client: &RpcClient,
-    session_id: &str,
-    tool_name: &str,
-    args: serde_json::Value,
-) -> ExecuteToolResponse {
-    let bytes = tokio::time::timeout(
-        CALL_TIMEOUT,
-        client.call_unary(
-            "exec_tools.ExecToolService",
-            "ExecuteTool",
-            ExecuteToolRequest {
-                session_token: TEST_TOKEN.to_string(),
-                session_id: session_id.to_string(),
-                tool_name: tool_name.to_string(),
-                args_json: args.to_string(),
-                daemon_instance_id: INSTANCE_ID.to_string(),
-            }
-            .encode_to_vec(),
-        ),
-    )
-    .await
-    .expect("ExecuteTool in the session room must return within the timeout")
-    .expect("ExecuteTool in the session room must succeed");
-    ExecuteToolResponse::decode(&bytes[..]).expect("ExecuteToolResponse must decode")
-}
-
 async fn read_host_document_in_room(
     client: &RpcClient,
     session_id: &str,
@@ -821,43 +797,6 @@ async fn a_split_agent_addresses_the_daemon_that_hosts_its_room() {
 // ---------------------------------------------------------------------------
 // AC3 — file access is served in the room
 // ---------------------------------------------------------------------------
-
-#[tokio::test]
-#[serial]
-async fn a_participant_reads_a_worktree_file_through_execute_tool_in_the_session_room() {
-    // Given a worktree holding a committed file, and an agent that joined only the session room
-    let daemon = FacilitatingDaemon::with_livekit().await;
-    let started = daemon.a_session_being_connected_to().await;
-    let worktree = daemon.worktree_of(&started.session_id);
-    commit_a_file(&worktree, "greeting.txt", "hello from the worktree");
-
-    let probe = AgentProbe::join(
-        &daemon,
-        &session_room_name(&started.session_id),
-        "probe-file-reader",
-    )
-    .await;
-
-    // When it reads that file through the daemon's RPC surface in this room
-    let response = execute_tool_in_room(
-        &probe.rpc_to_daemon(),
-        &started.session_id,
-        "Read",
-        serde_json::json!({ "path": "greeting.txt" }),
-    )
-    .await;
-
-    // Then it gets the checkout's contents — file access is served where the worktree lives, by the
-    // daemon that owns it, without the caller ever joining the lobby
-    assert!(
-        !response.is_error,
-        "the tool call must succeed; error was '{}'",
-        response.error_message
-    );
-    let result: serde_json::Value =
-        serde_json::from_str(&response.result_json).expect("result_json must be JSON");
-    assert_eq!(result["content"], "hello from the worktree");
-}
 
 // ---------------------------------------------------------------------------
 // AC4 — one publish reaches every participant

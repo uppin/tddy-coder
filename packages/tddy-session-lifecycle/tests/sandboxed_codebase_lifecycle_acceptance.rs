@@ -26,10 +26,8 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_sandbox::workspace_tool_sandbox::RUNNER_PID_FILE;
 use tddy_github::{GitHubUser, SessionTokenSigner};
 use tddy_rpc::Request;
-use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_service::proto::session::{
-    DeleteSessionRequest, ResumeSessionRequest, SessionService as SessionServiceTrait,
-    StartSessionRequest,
+    DeleteSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
@@ -224,16 +222,6 @@ fn a_deletion_of(session_id: &str) -> DeleteSessionRequest {
     }
 }
 
-fn a_read_of(session_id: &str) -> ExecuteToolRequest {
-    ExecuteToolRequest {
-        session_token: a_caller_token().to_string(),
-        session_id: session_id.to_string(),
-        tool_name: "Read".to_string(),
-        args_json: r#"{"path":"README.md"}"#.to_string(),
-        ..Default::default()
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Delete
 // ---------------------------------------------------------------------------
@@ -361,74 +349,6 @@ async fn deleting_a_sandboxed_codebase_session_whose_checkout_is_already_gone_su
 // ---------------------------------------------------------------------------
 // Resume
 // ---------------------------------------------------------------------------
-
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
-              provisioned without them, and GitHub's ubuntu runners set \
-              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
-              FailedPrecondition rather than starting an unconfined session, which is correct — see \
-              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
-)]
-#[tokio::test]
-async fn resuming_a_sandboxed_codebase_session_re_provisions_its_jail() {
-    // Given a jailed-codebase session whose daemon restarted, losing every jail registration
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    let started = {
-        let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
-        let started = service
-            .start_session(Request::new(a_sandboxed_codebase_request()))
-            .await
-            .expect("a jailed-codebase session must start")
-            .into_inner();
-        // The restart this test simulates is a daemon *stopping*: its jail stops with it. Letting
-        // the daemon merely fall out of scope here would orphan a live `tddy-sandbox-runner`, and
-        // would leave the resumed daemon re-provisioning a jail beside a still-running one — which
-        // is not the state the resume path is supposed to be resuming from.
-        let first_runner = recorded_runner_pid(
-            sessions_tmp.path(),
-            &checkout_session_of(sessions_tmp.path(), &started.session_id),
-        );
-        service.shut_down_children().await;
-        assert!(
-            !process_is_alive(first_runner),
-            "the pre-restart jail must be gone before the resume, or this test resumes onto a \
-             host that never lost it"
-        );
-        started
-    };
-    let checkout = checkout_session_of(sessions_tmp.path(), &started.session_id);
-    let restarted = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
-
-    // When the session is resumed
-    restarted
-        .resume_session(Request::new(ResumeSessionRequest {
-            session_token: a_caller_token().to_string(),
-            session_id: started.session_id.clone(),
-        }))
-        .await
-        .expect("a jailed-codebase session must be resumable");
-
-    // Then its tool calls are served again — the jail was re-provisioned from persisted metadata,
-    // not silently redirected to the bare host worktree
-    let response = restarted
-        .execute_tool(Request::new(a_read_of(&checkout)))
-        .await
-        .expect("a resumed jailed checkout must serve its tool calls")
-        .into_inner();
-    assert!(
-        !response.is_error,
-        "resume must re-provision the jail; got '{}'",
-        response.error_message
-    );
-
-    // Teardown. The resume provisioned a *second* jail, which is a real `tddy-sandbox-runner`
-    // child in its own process group: left alone it is reparented to the init process when this
-    // binary exits and stays on the host for as long as the machine is up.
-    // `WorkspaceSandboxRegistry`'s own `Drop` covers the panicking exit above, where this line is
-    // never reached.
-    restarted.shut_down_children().await;
-}
 
 // ---------------------------------------------------------------------------
 // Shutdown — docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md

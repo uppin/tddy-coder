@@ -10,6 +10,9 @@ tddy-git = { path = "../tddy-git" }
 tddy-github = { path = "../tddy-github" }
 # `docs::node_doc_paths` resolves the session artifacts root from it.
 tddy-workflow = { path = "../tddy-workflow" }
+# `rpc` holds the `pr_stack.PrStackService` handler trait, adapter and transport entry.
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-service = { path = "../tddy-service" }
 log = "0.4"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }

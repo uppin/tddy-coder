@@ -50,9 +50,12 @@ This crate also **serves** the ten tools it defines, at `exec_tools.ExecToolServ
 `tddy-session-tool-client` and in-jail relays call `ExecuteTool` / `StreamExecuteTool` on that
 coordinate.
 
-Handlers live in `exec_tool_service.rs` and `tool_call_log.rs` (moved from the daemon in `#unbundle`
-node 8). `ListExecTools` maps `tool_catalog()` to proto `ToolDef` at the wire boundary;
-`ListSessionToolCalls` reads the session JSONL log.
+The `ExecToolHandler` trait and its `ExecToolServiceImpl` adapter live in `exec_tool_service.rs`,
+and the session tool-call log in `tool_call_log.rs`. `ListExecTools` maps `tool_catalog()` to proto
+`ToolDef` at the wire boundary; `ListSessionToolCalls` reads the session JSONL log. The daemon's
+handler is `tddy_daemon_rpc::ExecToolRpcHandler`
+([tddy-daemon-rpc](../tddy-daemon-rpc/docs/architecture.md)), and the suites that drive the service
+through it — `tool_call_log_acceptance.rs` among them — live in that crate.
 
 ## Tools
 

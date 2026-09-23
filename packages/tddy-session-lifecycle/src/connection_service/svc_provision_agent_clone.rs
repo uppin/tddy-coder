@@ -1,6 +1,5 @@
 // `encode_to_vec` is a `prost::Message` method; the trait is imported anonymously because
 // only its methods are used.
-use crate::tool_engine;
 use prost::Message as _;
 use tddy_service::proto::exec_tools::ExecuteToolResponse;
 
@@ -17,7 +16,7 @@ use super::peer_has_no_such_session;
 use tddy_service::proto::session::DeleteSessionRequest;
 
 use crate::{
-    connection_service::{agent_roster, hooks_and_urls, seed_codebase},
+    connection_service::{hooks_and_urls, seed_codebase},
     livekit_peer_discovery::local_instance_id_for_config,
 };
 
@@ -392,80 +391,24 @@ impl DaemonSessionHost {
             })
     }
 
-    /// The clone this daemon hosts for `session_id`, when it holds one.
-    ///
-    /// What makes an exec tool addressed at this daemon for another daemon's session resolvable at
-    /// all: the session lives elsewhere, so the ordinary "resolve the worktree from my own sessions
-    /// base" would find nothing.
+    /// [`LocalExecTools::hosted_clone_for`](super::LocalExecTools::hosted_clone_for) over this
+    /// host's hosted clones.
     pub(crate) fn hosted_clone_for(
         &self,
         session_id: &str,
     ) -> Option<Arc<crate::session_agent_clone::HostedClone>> {
-        self.hosted_agent_clones.get(session_id)
+        self.local_exec_tools().hosted_clone_for(session_id)
     }
 
-    /// Serve one exec tool for a session whose checkout this daemon holds as an agent clone.
-    ///
-    /// This is where the read/write split actually happens, so the agent's own turn loop and an
-    /// exec-tool RPC addressed here take exactly one path. A read is answered from the clone with no
-    /// round trip — which is the entire reason for placing an agent on this host — and a mutation is
-    /// proxied to the facilitating daemon's authoritative worktree.
-    ///
-    /// Which tree is worked is settled by the clone link rather than by the caller: a hosted clone is
-    /// a checkout this daemon built for exactly one session on exactly one peer, at the request of a
-    /// `StartSession` it already authenticated, so the request cannot select any other tree and the
-    /// OS user the tools run as was settled then. *Who may drive them* is settled by the caller's
-    /// session token, which every path into here — the RPC handlers and this daemon's own agent turn
-    /// loop — establishes before this is reached: the mutating half proxies to the facilitating
-    /// daemon under the clone's stored credential, so an unauthenticated caller reaching here would
-    /// be writing into another host's authoritative worktree under a credential it never held.
-    ///
-    /// TODO(session-agent-roster): narrow that to a session-scoped tool token — audience = this
-    /// clone's session, exec-tool methods only — which is the same credential the split placement's
-    /// trust model already wants and `docs/dev/TODO.md` already records.
+    /// [`LocalExecTools::run_hosted_clone_tool`](super::LocalExecTools::run_hosted_clone_tool) —
+    /// the read/write split — over this host's task registry.
     pub(crate) async fn run_hosted_clone_tool(
         &self,
         req: &ExecuteToolRequest,
         clone: &crate::session_agent_clone::HostedClone,
     ) -> ExecuteToolResponse {
-        if !agent_roster::agent_tool_reads_the_clone(&req.tool_name) {
-            return match clone
-                .execute_tool_on_facilitator(&req.tool_name, &req.args_json)
-                .await
-            {
-                Ok(result_json) => ExecuteToolResponse {
-                    result_json,
-                    is_error: false,
-                    error_message: String::new(),
-                    job_id: String::new(),
-                    job_running: false,
-                },
-                // Carried in the response rather than raised, exactly as a locally-run tool failure
-                // is: the agent asked for a tool and the tool did not happen, which is a tool result
-                // and not a transport failure.
-                Err(status) => ExecuteToolResponse {
-                    result_json: serde_json::json!({ "error": status.message() }).to_string(),
-                    is_error: true,
-                    error_message: status.message().to_string(),
-                    job_id: String::new(),
-                    job_running: false,
-                },
-            };
-        }
-        let outcome = tool_engine::execute_tool(
-            &clone.worktree_path,
-            &req.tool_name,
-            &req.args_json,
-            &self.task_registry,
-            &req.session_id,
-        )
-        .await;
-        ExecuteToolResponse {
-            result_json: outcome.result_json,
-            is_error: outcome.is_error,
-            error_message: outcome.error_message,
-            job_id: outcome.job_id,
-            job_running: outcome.job_running,
-        }
+        self.local_exec_tools()
+            .run_hosted_clone_tool(req, clone)
+            .await
     }
 }

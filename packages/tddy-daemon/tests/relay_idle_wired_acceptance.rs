@@ -8,12 +8,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_daemon::config::DaemonConfig;
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_rpc::Request;
 use tddy_service::proto::catalog::{CatalogService, ListToolsRequest};
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
-use tddy_session_lifecycle::test_util::TestDaemon;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -23,7 +23,7 @@ fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> TestDaemon 
         Arc::new(|_| Some(std::env::temp_dir().join("test-sessions")));
     let user_resolver: UserResolver = Arc::new(|_| None);
 
-    TestDaemon::from_arc(Arc::new(
+    TestDaemon::from_host(
         DaemonSessionHost::new(
             DaemonConfig::default(),
             sessions_base,
@@ -35,7 +35,7 @@ fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> TestDaemon 
             Arc::new(ClaudeCliSessionManager::new()),
         )
         .with_idle_tracker(tracker),
-    ))
+    )
 }
 
 /// Phase 3 AC: after calling any RPC on a service with an injected idle tracker,

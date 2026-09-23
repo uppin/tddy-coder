@@ -17,6 +17,7 @@ use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_host_service::multi_host::EligibleDaemonSource;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
@@ -24,7 +25,6 @@ use tddy_service::proto::exec_tools::{ExecToolService, ListExecToolsRequest};
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
-use tddy_session_lifecycle::test_util::TestDaemon;
 
 const RELAY_ROOM: &str = "relay-e2e-common-room";
 const RELAY_PEER_ID: &str = "relay-e2e-remote-peer";
@@ -195,16 +195,19 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let (_tmp_b, path_b) = write_daemon_yaml(&ws_url, Some(RELAY_PEER_ID));
     let config_b = DaemonConfig::load(&path_b).unwrap();
     let sessions_b = tempfile::tempdir().unwrap();
-    let service_b = Arc::new(DaemonSessionHost::new(
-        config_b.clone(),
-        sessions_resolver(sessions_b.path().to_path_buf()),
-        sessions_b.path().to_path_buf(),
-        valid_user_resolver(),
-        None,
-        None, // B has no discovery of its own — it only serves its local tools
-        None,
-        Arc::new(ClaudeCliSessionManager::new()),
-    ));
+    let service_b = Arc::new(
+        tddy_daemon_rpc::RpcHandlers::install(DaemonSessionHost::new(
+            config_b.clone(),
+            sessions_resolver(sessions_b.path().to_path_buf()),
+            sessions_b.path().to_path_buf(),
+            valid_user_resolver(),
+            None,
+            None, // B has no discovery of its own — it only serves its local tools
+            None,
+            Arc::new(ClaudeCliSessionManager::new()),
+        ))
+        .0,
+    );
 
     // B's discovery participant: bare instance id, publishes the advertisement A discovers.
     spawn_common_room_discovery_task(
@@ -243,7 +246,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         valid_user_resolver(),
     )
     .with_eligible_daemon_source(Arc::clone(&eligible));
-    let service_a = TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
+    let service_a = TestDaemon::from_host(DaemonSessionHost::new(
         config_a,
         sessions_resolver(sessions_a.path().to_path_buf()),
         sessions_a.path().to_path_buf(),
@@ -255,7 +258,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         }),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
-    )));
+    ));
 
     // When
     // Wait until A's discovery sees B in the common room.

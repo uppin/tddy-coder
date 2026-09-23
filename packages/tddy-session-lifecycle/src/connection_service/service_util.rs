@@ -9,7 +9,7 @@ use tddy_rpc::Status;
 use std::time::Duration;
 
 /// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
-pub(crate) async fn spawn_blocking_with_timeout<T: Send + 'static>(
+pub async fn spawn_blocking_with_timeout<T: Send + 'static>(
     timeout: Duration,
     op_label: &'static str,
     f: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
@@ -42,7 +42,7 @@ pub(crate) async fn spawn_blocking_with_timeout<T: Send + 'static>(
 /// An unreachable or refusing supervisor fails the RPC. There is deliberately no local spawn to fall
 /// back to: doing the work here would run a session as the daemon's own user, which is the isolation
 /// the supervisor exists to provide.
-pub(crate) async fn await_supervised_with_timeout<T>(
+pub async fn await_supervised_with_timeout<T>(
     timeout: Duration,
     op_label: &'static str,
     operation: impl std::future::Future<Output = anyhow::Result<T>>,

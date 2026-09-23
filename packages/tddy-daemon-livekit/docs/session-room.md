@@ -90,6 +90,14 @@ created the room: "already open" is a fact about the room alone, so a connect wh
 after its room succeeded leaves the next connect to finish the job. Nothing loops, waits or retries
 on its own — it is the same *ensure*, done when the work is next wanted.
 
+`ensure_open` and `open_measured_by` take the room's RPC surface as a **builder**,
+`impl FnOnce() -> Result<S, Status>`, and call it only after the LiveKit-credentials check has
+passed. A daemon with no LiveKit credentials returns `Ok(None)` — it keeps its worktree and hosts no
+room — without ever building the surface, so a surface that would refuse (the session host's roster
+refuses with `FAILED_PRECONDITION` when its RPC families were never wired) cannot turn "no room" into
+an error. A builder that fails once a room will open fails the open. `open` takes a built service and
+wraps it.
+
 `open` (local) and `open_measured_by` (any source) take the first measurement *before* the room
 exists, so its opening metadata already describes the checkout, then create the room, join it as
 `daemon-{instance_id}`, and register two tasks under the session's id:

@@ -83,7 +83,8 @@ impl DaemonSessionHost {
         let peer_entries = if registered_locally || facilitating.is_some() {
             Vec::new()
         } else {
-            self.eligible_daemon_source
+            self.peer_routing
+                .eligible_daemon_source()
                 .peer_project_entries(session_token)
                 .await
         };
@@ -231,18 +232,7 @@ impl DaemonSessionHost {
     pub async fn resolvable_agent_defs(
         &self,
     ) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
-        let agents_dir = self.tddy_data_dir.join("agents");
-        let mut defs = tddy_discovery::agent_def::resolve_agent_defs(&agents_dir);
-        for def in self.registry_agent_defs().await? {
-            match defs.iter_mut().find(|d| d.name == def.name) {
-                Some(existing) => {
-                    Self::report_shadowed_agent_def(&agents_dir, &def.name);
-                    *existing = def;
-                }
-                None => defs.push(def),
-            }
-        }
-        Ok(defs)
+        resolvable_agent_defs(&self.tddy_data_dir, self.model_registry.as_deref()).await
     }
 
     /// The def a session started as `agent` must actually be built from, for `caller`.
@@ -271,20 +261,6 @@ impl DaemonSessionHost {
         Ok(tddy_discovery::agent_def::resolve_agent_defs(&agents_dir)
             .into_iter()
             .find(|d| d.name == agent))
-    }
-
-    /// This daemon's registry assistants as agent defs. Empty when no registry is wired (a test
-    /// fixture); a registry that is wired but unreadable is an error, never "no assistants" — a
-    /// session started against a name that silently stopped resolving runs as something else.
-    pub(crate) async fn registry_agent_defs(
-        &self,
-    ) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
-        match &self.model_registry {
-            Some(registry) => tddy_model_registry::registry_agent_defs(registry)
-                .await
-                .map_err(Status::from),
-            None => Ok(Vec::new()),
-        }
     }
 
     /// Resolve the `specialized_agents` references that name **this** daemon against
@@ -422,9 +398,47 @@ impl DaemonSessionHost {
         self.session_rooms
             .ensure_open(
                 &hosting,
-                std::sync::Arc::new(self.clone()).session_room_roster(),
+                || std::sync::Arc::new(self.clone()).session_room_roster(),
                 self,
             )
             .await
+    }
+}
+
+/// [`DaemonSessionHost::resolvable_agent_defs`] over the two fields it reads: the YAML defs under
+/// `<tddy_data_dir>/agents` and `model_registry`'s assistants, the registry winning a name tie.
+///
+/// Free rather than a method so `tddy-daemon-rpc`'s `ListSubagents` answers from the very list a
+/// session start and a roster attach resolve against here, without holding the host — one
+/// resolver, so what a picker is offered and what it can attach cannot drift apart.
+pub async fn resolvable_agent_defs(
+    tddy_data_dir: &std::path::Path,
+    model_registry: Option<&tddy_model_registry::ModelRegistryStore>,
+) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
+    let agents_dir = tddy_data_dir.join("agents");
+    let mut defs = tddy_discovery::agent_def::resolve_agent_defs(&agents_dir);
+    for def in registry_agent_defs(model_registry).await? {
+        match defs.iter_mut().find(|d| d.name == def.name) {
+            Some(existing) => {
+                DaemonSessionHost::report_shadowed_agent_def(&agents_dir, &def.name);
+                *existing = def;
+            }
+            None => defs.push(def),
+        }
+    }
+    Ok(defs)
+}
+
+/// This daemon's registry assistants as agent defs. Empty when no registry is wired (a test
+/// fixture); a registry that is wired but unreadable is an error, never "no assistants" — a
+/// session started against a name that silently stopped resolving runs as something else.
+async fn registry_agent_defs(
+    model_registry: Option<&tddy_model_registry::ModelRegistryStore>,
+) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
+    match model_registry {
+        Some(registry) => tddy_model_registry::registry_agent_defs(registry)
+            .await
+            .map_err(Status::from),
+        None => Ok(Vec::new()),
     }
 }

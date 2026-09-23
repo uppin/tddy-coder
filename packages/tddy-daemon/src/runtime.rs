@@ -278,9 +278,7 @@ type BinaryLocalSocketServices = crate::local_socket_server::LocalSocketServices
     tddy_session_lifecycle::SessionServiceImpl<
         tddy_session_lifecycle::connection_service::DaemonSessionHost,
     >,
-    tddy_projects::ProjectServiceImpl<
-        tddy_session_lifecycle::connection_service::DaemonSessionHost,
-    >,
+    tddy_projects::ProjectServiceImpl<tddy_daemon_rpc::ProjectRpcHandler>,
     tddy_session_lifecycle::connection_service::DemoVmServiceImpl,
     tddy_daemon_livekit::LiveKitServiceImpl,
     tddy_host_service::HostServiceImpl,
@@ -288,15 +286,9 @@ type BinaryLocalSocketServices = crate::local_socket_server::LocalSocketServices
     tddy_terminal_rpc::TerminalSessionServiceImpl,
     tddy_session_lifecycle::connection_service::PeerRoutedSessionAgents,
     tddy_session_lifecycle::connection_service::PeerRoutedActivity,
-    tddy_discovery::CatalogServiceImpl<
-        tddy_session_lifecycle::connection_service::DaemonSessionHost,
-    >,
-    tddy_tool_engine::ExecToolServiceImpl<
-        tddy_session_lifecycle::connection_service::DaemonSessionHost,
-    >,
-    tddy_session_lifecycle::pr_stack_rpc::PrStackServiceImpl<
-        tddy_session_lifecycle::connection_service::DaemonSessionHost,
-    >,
+    tddy_discovery::CatalogServiceImpl<tddy_daemon_rpc::CatalogRpcHandler>,
+    tddy_tool_engine::ExecToolServiceImpl<tddy_daemon_rpc::ExecToolRpcHandler>,
+    tddy_session_lifecycle::pr_stack_rpc::PrStackServiceImpl<tddy_daemon_rpc::PrStackRpcHandler>,
 >;
 
 /// The local Unix-domain-socket `ConnectionService` transport (SO_PEERCRED peer-trust plus
@@ -968,6 +960,11 @@ pub async fn build(
         if let Some(store) = auth_result.github_token_store.clone() {
             connection_impl = connection_impl.with_github_token_store(store);
         }
+        // The families served above the host are built from it and installed on it **last**:
+        // they share its `Arc`s, so a `with_*` after this line would leave them holding the value
+        // it replaced (`tddy_daemon_rpc::families`).
+        let (connection_impl, rpc_handlers) =
+            tddy_daemon_rpc::RpcHandlers::install(connection_impl);
         // Share one instance across transports: the LiveKit/HTTP RpcService server and the
         // local Unix-domain-socket tonic server both reference the same Arc, so a session
         // started over the socket is visible over every other transport.
@@ -1042,7 +1039,7 @@ pub async fn build(
                         Arc::new(connection_arc.session_lifecycle_service()),
                     ),
                     project: tddy_service::proto::project::ProjectServiceTonicAdapter::new(
-                        Arc::new(connection_arc.project_service()),
+                        Arc::new(rpc_handlers.project_service()),
                     ),
                     demo_vm: tddy_service::proto::demo_vm::DemoVmServiceTonicAdapter::new(
                         Arc::new(
@@ -1089,13 +1086,13 @@ pub async fn build(
                         Arc::new(connection_arc.activity_service()),
                     ),
                     catalog: tddy_service::proto::catalog::CatalogServiceTonicAdapter::new(
-                        Arc::new(connection_arc.catalog_rpc_service()),
+                        Arc::new(rpc_handlers.catalog_service()),
                     ),
                     exec_tools: tddy_service::proto::exec_tools::ExecToolServiceTonicAdapter::new(
-                        Arc::new(connection_arc.exec_tool_rpc_service()),
+                        Arc::new(rpc_handlers.exec_tool_service()),
                     ),
                     pr_stack: tddy_service::proto::pr_stack::PrStackServiceTonicAdapter::new(
-                        Arc::new(connection_arc.pr_stack_rpc_service()),
+                        Arc::new(rpc_handlers.pr_stack_service()),
                     ),
                 },
             });
@@ -1130,20 +1127,15 @@ pub async fn build(
         // above.
         rpc_entries.push(connection_arc.activity_entry());
 
-        // CatalogService — tools, agents, models and subagents (`tddy-discovery`).
-        rpc_entries.push(connection_arc.catalog_entry());
-
-        // ExecToolService — execute, stream, list tools and session tool calls (`tddy-tool-engine`).
-        rpc_entries.push(connection_arc.exec_tool_entry());
-
-        // PrStackService — stack planning and branch resolution (`tddy-workflow-recipes` coordinate).
-        rpc_entries.push(connection_arc.pr_stack_entry());
-
         // SessionService — family C (`tddy-session-lifecycle`).
         rpc_entries.push(connection_arc.session_lifecycle_entry());
 
-        // ProjectService — family D (`tddy-projects`).
-        rpc_entries.push(connection_arc.project_entry());
+        // The families served from `tddy-daemon-rpc` — CatalogService (tools, agents, models and
+        // subagents, `tddy-discovery`), ExecToolService (execute, stream, list tools and session
+        // tool calls, `tddy-tool-engine`), ProjectService, family D (`tddy-projects`) and
+        // PrStackService (stack planning and branch resolution, `tddy-pr-stack`) — through the same
+        // handlers the host's session rooms serve.
+        rpc_entries.extend(rpc_handlers.entries());
 
         // DemoVmService — family O (`tddy-vm` coordinate, host logic on the session host).
         rpc_entries.push(connection_arc.demo_vm_entry());

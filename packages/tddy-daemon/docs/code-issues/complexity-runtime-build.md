@@ -1,6 +1,6 @@
 # complexity: build
 
-**Location:** `packages/tddy-daemon/src/runtime.rs:498` — `build`
+**Location:** `packages/tddy-daemon/src/runtime.rs:563` — `build`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **806 lines** · **nesting depth 5** · 2 parameters · 18 branch/match lines · 10 early exits
@@ -15,6 +15,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 806 | 5 | 18 | 10 | first detection |
 | 2026-09-22 | 833 | 5 | — | — | 831 on master before #494; +2 from #494 (`#carve` 8/11), the `SharedPresenterEventSink` cast at the `DaemonSessionHost::new` call. Nesting by indentation unchanged; branches and exits not re-derived |
+| 2026-09-23 | 833 | 5 | — | — | touched by #520 (`#carve` 11/12) and **unchanged by it**, now at `runtime.rs:563`: `RpcHandlers::install(host)` added five lines and the four families' service and entry construction left for `RpcHandlers`, net zero. Nesting and `return`/`?` count identical to master; branches not re-derived |
 
 ## What the tool found
 
