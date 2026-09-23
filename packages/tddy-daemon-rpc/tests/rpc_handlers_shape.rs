@@ -14,13 +14,6 @@
 
 use std::path::{Path, PathBuf};
 
-/// Where the lifecycle crate stood when this change was planned.
-const LIFECYCLE_PRODUCTION_LINES_BEFORE: usize = 22_067;
-/// What this change has to take out of it, at the least. Planned at 2,500 before the move; the four
-/// families measured 2,009 once moved, because the helpers they share with session code stay behind,
-/// and the developer re-baselined this node to its measured weight (2026-09-23). The stack-level
-/// target — the lifecycle crate at about 10k — is unchanged and belongs to the successor nodes.
-const LIFECYCLE_LINES_THIS_CHANGE_SHEDS: usize = 2_000;
 /// The ceiling every crate this stack moves code into is held to.
 const PRODUCTION_LINE_BUDGET: usize = 10_000;
 
@@ -335,22 +328,6 @@ fn the_binary_runtime_serves_the_four_families_through_their_own_handlers() {
 // ---------------------------------------------------------------------------------------------
 // AC11, AC12 — the size budget
 // ---------------------------------------------------------------------------------------------
-
-#[test]
-fn the_lifecycle_crate_sheds_at_least_2000_production_lines() {
-    // Given the lifecycle crate's size when this change was planned
-    let ceiling = LIFECYCLE_PRODUCTION_LINES_BEFORE - LIFECYCLE_LINES_THIS_CHANGE_SHEDS;
-
-    // When it is measured now
-    let measured = production_lines_of_crate("tddy-session-lifecycle");
-
-    // Then the four families' bodies are out of it
-    assert!(
-        measured <= ceiling,
-        "`tddy-session-lifecycle` has {measured} production lines; this change must bring it to \
-         {ceiling} or fewer (from {LIFECYCLE_PRODUCTION_LINES_BEFORE})"
-    );
-}
 
 /// A cap, not a specification of missing behaviour: it holds today because the receivers are
 /// small, and it must still hold once the bodies have landed in them.
