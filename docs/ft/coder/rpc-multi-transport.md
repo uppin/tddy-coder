@@ -72,7 +72,7 @@ deleted once it moves to stdio.
 2. **Linux (`tddy-sandbox-cgroups`) jail-spawn stdio piping.** `tddy-sandbox-darwin::spawn_plan`
    pipes stdin/stdout when `--stdio` is present in the runner's argv; the Linux cgroups+namespaces
    jail-spawn path needs the equivalent change before (1) can work cross-platform.
-3. **Toolcall listener.** `tddy-core/src/toolcall/listener.rs` is a third, unrelated bespoke
+3. **Toolcall listener.** `tddy-toolcall/src/toolcall/listener.rs` is a third, unrelated bespoke
    newline-delimited-JSON protocol (`submit`/`ask`/`approve`/`list-actions`/`invoke-action`/
    `build`/`build-list`) between `tddy-coder` and the Claude Code CLI subprocess it spawns — same
    category of problem (bespoke local IPC where `tddy-rpc`/`tddy-stdio` already fits), same fix.

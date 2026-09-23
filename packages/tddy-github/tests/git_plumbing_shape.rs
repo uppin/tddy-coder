@@ -108,20 +108,22 @@ fn tddy_git_holds_nothing_session_aware() {
     // Then none of them does
     assert!(
         reaching.is_empty(),
-        "these name the session model and belong in `tddy-core`: {reaching:?}"
+        "these name the session model and belong in `tddy-session-worktree`: {reaching:?}"
     );
 }
 
-fn core_worktree_source() -> String {
-    std::fs::read_to_string(package("tddy-core").join("src/worktree.rs"))
-        .expect("tddy-core/src/worktree.rs")
+/// The session-aware worktree module. It was `tddy-core::worktree` when this node landed; `#carve`
+/// 12 moved it, unchanged, into `tddy-session-worktree`.
+fn session_worktree_source() -> String {
+    std::fs::read_to_string(package("tddy-session-worktree").join("src/worktree.rs"))
+        .expect("tddy-session-worktree/src/worktree.rs")
 }
 
-/// AC2 — the plumbing left `tddy-core::worktree`, bringing it under its line budget.
+/// AC2 — the plumbing left the session-aware worktree module, bringing it under its line budget.
 #[test]
-fn the_core_worktree_module_shrinks_below_its_line_budget() {
+fn the_session_worktree_module_shrinks_below_its_line_budget() {
     // Given the module after the split
-    let text = core_worktree_source();
+    let text = session_worktree_source();
 
     // When its production lines are counted
     let lines = production(&text).lines().count();
@@ -133,11 +135,11 @@ fn the_core_worktree_module_shrinks_below_its_line_budget() {
     );
 }
 
-/// AC2 — the session-aware layer stays in `tddy-core::worktree`.
+/// AC2 — the session-aware layer stays with the session model, in `tddy-session-worktree`.
 #[test]
-fn the_core_worktree_module_keeps_the_session_aware_layer() {
+fn the_session_worktree_module_keeps_the_session_aware_layer() {
     // Given the module after the split
-    let text = core_worktree_source();
+    let text = session_worktree_source();
 
     // When its production part is taken
     let production = production(&text);
@@ -145,7 +147,7 @@ fn the_core_worktree_module_keeps_the_session_aware_layer() {
     // Then the session-aware layer is still there
     assert!(
         production.contains("setup_worktree_for_session"),
-        "the session-aware layer was moved out; it belongs in `tddy-core`"
+        "the session-aware layer was moved out; it belongs in `tddy-session-worktree`"
     );
 }
 

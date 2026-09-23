@@ -2,9 +2,21 @@
 
 ## Purpose
 
-**`tddy-workflow`** holds workflow-neutral helpers for **where** session artifacts live on disk, so **`tddy-core`** does not embed fixed basenames (such as `PRD.md`) or ad-hoc path rules.
+**`tddy-workflow`** holds workflow-neutral helpers for **where** session artifacts live on disk, so the workflow engine does not embed fixed basenames (such as `PRD.md`) or ad-hoc path rules.
 
 Recipes in **`tddy-workflow-recipes`** combine **`SessionArtifactManifest`** (defaults and known keys) with these functions to resolve reads and elicitation.
+
+## `hints` module
+
+- **`PermissionHint`**: `ReadOnly` or `AcceptEdits`. Backend-agnostic; each backend maps it to its
+  own flags (Claude permission mode, Cursor and Codex sandbox options).
+- **`GoalHints`**: per-goal backend configuration a recipe produces — display name, permission,
+  allowed tools, default model, whether agent output streams, vendor plan mode, and whether a Claude
+  non-zero exit counts as success when stdout carries a structured response.
+
+Both are plain data that a backend reads and a recipe produces. Keeping them here keeps
+`tddy-agent-backend` below `tddy-workflow-engine`. `tddy_core::workflow::recipe::{GoalHints,
+PermissionHint}` still resolve, through the engine's re-export.
 
 ## `artifact_paths` module
 
@@ -22,5 +34,5 @@ Product contract for attachments: [session-attachments.md](../../../docs/ft/code
 
 ## Related
 
-- **`tddy-core`**: `WorkflowRecipe` trait (`uses_primary_session_document`, `read_primary_session_document_utf8`).
+- **`tddy-workflow-engine`** (re-exported by `tddy-core`): `WorkflowRecipe` trait (`uses_primary_session_document`, `read_primary_session_document_utf8`).
 - **`tddy-workflow-recipes`**: `SessionArtifactManifest`, `TddRecipe`, hook implementations.

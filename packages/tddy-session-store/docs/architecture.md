@@ -4,9 +4,10 @@
 
 Session storage on disk: atomic file writes, session directories, the workflow error type and
 declarative session actions. Nothing here knows about the workflow engine, the backends or the
-presenter. The session-aware layer that needs those stays in
-[`tddy-core`](../../tddy-core/docs/architecture.md), which re-exports every module of this crate at
-its old path with `pub use tddy_session_store::<module>::*;`.
+presenter. The session-aware layer that reads a changeset sits above it, in
+[`tddy-session-actions`](../../tddy-session-actions/docs/architecture.md), and
+[`tddy-core`](../../tddy-core/docs/architecture.md) re-exports this crate's modules at their old
+paths with `pub use tddy_session_store::<module>::*;`.
 
 ### Dependency rule
 
@@ -26,16 +27,17 @@ Exact matching matters because a prefix match on `tddy-workflow` would also admi
 `tddy-workflow-recipes`, which depends on `tddy-core`. The suite also asserts that no allowlisted
 crate reaches `tddy-core`, whether directly or through another workspace crate.
 
-### What stays in `tddy-core`
+### Who builds on it
 
 - **`tddy_core::{atomic_file, error, output}`** are pure glob facades.
-- **`tddy_core::session_actions`** is a facade that also defines something. It re-exports this
-  crate's `session_actions` and keeps `session_dir.rs`, with `list_actions_in_session_dir`,
-  `invoke_action_in_session_dir` and `ListActionsResponse`. Those find the repo root through the
-  session's `changeset.yaml` (`read_changeset`, matching `WorkflowError::ChangesetMissing`). The
-  changeset belongs to the workflow layer, which this crate must not depend on.
-- **`tddy_core::session_action_jobs`** (the async job runner) stays for the same reason, and reaches
-  across the crate boundary into `session_actions::runtime`. See
+- **`tddy_session_actions::session_actions`** (reachable as `tddy_core::session_actions`)
+  re-exports this crate's `session_actions` and adds `session_dir.rs`, with
+  `list_actions_in_session_dir`, `invoke_action_in_session_dir` and `ListActionsResponse`. Those
+  find the repo root through the session's `changeset.yaml` (`read_changeset`, matching
+  `WorkflowError::ChangesetMissing`). The changeset lives in `tddy-changeset`, which depends on
+  this crate, so this crate cannot read it.
+- **`tddy_session_actions::session_action_jobs`** (the async job runner) sits there for the same
+  reason, and reaches across the crate boundary into `session_actions::runtime`. See
   [Runtime](#runtime-session_actionsruntime--dochidden-not-api).
 
 Log targets inside the moved code still read `tddy_core::session_actions::…`. They are part of the
@@ -71,10 +73,11 @@ process is still running and healthy.
   error string, since a bare `ENOSPC` names no file.
 
 Consumers reach it as `tddy_core::atomic_file` or `tddy_session_store::atomic_file`: everything
-that persists session or daemon state. That covers, in `tddy-core`, `session_metadata`,
-`session_context`, `changeset`, `workflow/{session,action_cache}`, `session_action_jobs/runner`,
-`backend/{codex,cursor}` and `presenter`, and in this crate `output/writer.rs` and
-`session_actions/runtime.rs`. Outside both it covers `tddy-workflow-recipes`, `tddy-projects`,
+that persists session or daemon state. That covers `tddy-changeset` (`session_metadata`,
+`session_context`, `changeset`), `tddy-workflow-engine` (`workflow/action_cache`),
+`tddy-session-actions` (`session_action_jobs/runner`), `tddy-agent-backend` (`backend/{codex,cursor}`)
+and `tddy-presenter`, and in this crate `output/writer.rs` and
+`session_actions/runtime.rs`. Beyond those it covers `tddy-workflow-recipes`, `tddy-projects`,
 `tddy-worktree-service`, `tddy-session-lifecycle`, `tddy-telegram`, `tddy-host-service`,
 `tddy-daemon-auth`, `tddy-screen-sharing` and `tddy-sandbox-recipes`.
 
@@ -182,8 +185,8 @@ Every manifest runs as a task on `tddy-actions`' `ProcessRuntime`, tracked in a 
 **`run_manifest_blocking`**.
 
 The module itself is `#[doc(hidden)] pub mod runtime`. It is public only because
-`tddy_core::session_action_jobs::runner` stays in `tddy-core` and reaches it across the crate
-boundary. `runner` needs `read_changeset`, which is why it stays. That exposes seven functions,
+`tddy_session_actions::session_action_jobs::runner` reaches it across the crate boundary.
+`runner` needs `read_changeset`, which is why it cannot live here. That exposes seven functions,
 also through the facade glob as `tddy_core::session_actions::runtime::…`:
 
 - `session_task_registry`
@@ -201,6 +204,6 @@ runtime otherwise.
 ## Tests
 
 The in-module unit tests moved with the code (`atomic_file`, `output/writer.rs`,
-`session_actions/{authoring,tool_gate}.rs`). The integration suite stays in `tddy-core`, where
-**`session_actions_acceptance`** exercises the code through the `tddy_core::session_actions` facade. The crate's dependency shape is pinned by
+`session_actions/{authoring,tool_gate}.rs`). The integration suite lives in `tddy-session-actions`, where
+**`session_actions_acceptance`** exercises the code through that crate's `session_actions` module. The crate's dependency shape is pinned by
 **`tddy-core/tests/session_store_shape.rs`**.

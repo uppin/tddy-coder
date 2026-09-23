@@ -92,5 +92,5 @@ which crate now implements it, which is why they stayed here when their implemen
 - [`tddy-discovery`](../tddy-discovery/docs/roster-and-subagent-runtime.md) — the live agent roster and the subagent conversation runtime
 - [`tddy-tool-engine`](../tddy-tool-engine/README.md) — the exec-tool catalog and its execution
 - [`tddy-workflow-recipes`](../tddy-workflow-recipes/docs/workflow-schemas.md) — `goals.json`, the schemas, and the PR-stack functions
-- [`tddy-core`](../tddy-core/README.md) — the toolcall wire, session actions, and the model catalogue
+- [`tddy-toolcall`](../tddy-toolcall/README.md), [`tddy-session-actions`](../tddy-session-actions/README.md), [`tddy-agent-backend`](../tddy-agent-backend/README.md) — the toolcall wire, session actions, and the model catalogue (all re-exported by `tddy-core`)
 - [`tddy-terminal-rpc`](../tddy-terminal-rpc/) — the PTY relay behind `pty-relay`

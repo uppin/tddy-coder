@@ -1,0 +1,842 @@
+//! Claude Code CLI backend implementation.
+
+use super::{InvokeRequest, InvokeResponse};
+use crate::error::BackendError;
+use crate::stream;
+use std::io::{BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
+use tddy_workflow::PermissionHint;
+
+/// Resolve binary path for logging (which-like). Returns path as string for display.
+pub(crate) fn which_binary(binary: &Path) -> String {
+    let name = binary.to_string_lossy();
+    if name.contains('/') || name.contains('\\') {
+        if let Ok(canon) = std::fs::canonicalize(binary) {
+            return canon.display().to_string();
+        }
+        return name.to_string();
+    }
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join(&*name);
+            if candidate.is_file() {
+                if let Ok(canon) = std::fs::canonicalize(&candidate) {
+                    return canon.display().to_string();
+                }
+                return candidate.display().to_string();
+            }
+        }
+    }
+    format!("{} (not found in PATH)", name)
+}
+
+/// Fold every assistant message's `message.usage` input/output counts in one transcript's
+/// contents (Claude's separate `cache_*` counters are intentionally not folded into input),
+/// returning the summed usage, the assistant-turn count, and the last model seen on those lines.
+fn sum_assistant_usage(
+    contents: &str,
+) -> (crate::token_accounting::TokenUsage, u32, Option<String>) {
+    use crate::token_accounting::TokenUsage;
+
+    let mut usage = TokenUsage::default();
+    let mut turns = 0u32;
+    let mut model: Option<String> = None;
+    for line in contents.lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if value.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+            continue;
+        }
+        let message = &value["message"];
+        usage.input_tokens += message["usage"]["input_tokens"].as_u64().unwrap_or(0);
+        usage.output_tokens += message["usage"]["output_tokens"].as_u64().unwrap_or(0);
+        if let Some(m) = message["model"].as_str() {
+            model = Some(m.to_string());
+        }
+        turns += 1;
+    }
+    (usage, turns, model)
+}
+
+/// Sum the Claude Code agent's *main-thread* token usage from its own session transcript.
+///
+/// Claude Code writes the main transcript to
+/// `<claude_home>/.claude/projects/<encoded-cwd>/<session_id>.jsonl`. Because the runner spawns
+/// `claude --session-id <session_id>`, the file name is deterministic, so we locate it by session
+/// id (unique) rather than reconstructing the cwd encoding. Nested Task-tool subagents are NOT in
+/// this file (they live under `<session_id>/subagents/` — see [`read_claude_subagent_usages`]).
+///
+/// This Claude-Code-specific transcript layout lives with the Claude backend on purpose — other
+/// agents store their transcripts elsewhere. When no transcript exists, the record reports zero
+/// tokens with `fallback_model` — never an error, so a caller can still render a main-agent row.
+pub fn read_claude_transcript_usage(
+    claude_home: &Path,
+    session_id: &str,
+    fallback_model: &str,
+) -> crate::token_accounting::ConversationRecord {
+    use crate::token_accounting::{ConversationRecord, TokenUsage};
+
+    let mut usage = TokenUsage::default();
+    let mut turns = 0u32;
+    let mut model: Option<String> = None;
+
+    let projects_dir = claude_home.join(".claude").join("projects");
+    if let Ok(entries) = std::fs::read_dir(&projects_dir) {
+        for entry in entries.flatten() {
+            let transcript = entry.path().join(format!("{session_id}.jsonl"));
+            let Ok(contents) = std::fs::read_to_string(&transcript) else {
+                continue;
+            };
+            let (turn_usage, turn_count, turn_model) = sum_assistant_usage(&contents);
+            usage = usage + turn_usage;
+            turns += turn_count;
+            if turn_model.is_some() {
+                model = turn_model;
+            }
+        }
+    }
+
+    ConversationRecord {
+        agent: "claude".to_string(),
+        id: session_id.to_string(),
+        model: model.unwrap_or_else(|| fallback_model.to_string()),
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        total_tokens: usage.total(),
+        turns,
+    }
+}
+
+/// One [`ConversationRecord`](crate::token_accounting::ConversationRecord) per Claude Code Task-tool
+/// subagent the session spawned.
+///
+/// Claude Code records each nested subagent in its own transcript at
+/// `<claude_home>/.claude/projects/<encoded-cwd>/<session_id>/subagents/agent-<id>.jsonl`, with a
+/// sibling `agent-<id>.meta.json` carrying its `agentType` (e.g. `"Explore"`). Each record uses the
+/// agent type as `agent`, the `agent-<id>` file stem as the conversation `id`, and sums the
+/// subagent's own assistant `message.usage`. Results are sorted by id for a stable summary. Returns
+/// an empty vec when the session spawned no subagents.
+pub fn read_claude_subagent_usages(
+    claude_home: &Path,
+    session_id: &str,
+    fallback_model: &str,
+) -> Vec<crate::token_accounting::ConversationRecord> {
+    use crate::token_accounting::ConversationRecord;
+
+    let mut records = Vec::new();
+    let projects_dir = claude_home.join(".claude").join("projects");
+    let Ok(projects) = std::fs::read_dir(&projects_dir) else {
+        return records;
+    };
+    for project in projects.flatten() {
+        let subagents_dir = project.path().join(session_id).join("subagents");
+        let Ok(entries) = std::fs::read_dir(&subagents_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Ok(contents) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("subagent")
+                .to_string();
+            let (usage, turns, model) = sum_assistant_usage(&contents);
+            let agent = std::fs::read_to_string(subagents_dir.join(format!("{stem}.meta.json")))
+                .ok()
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                .and_then(|v| {
+                    v.get("agentType")
+                        .and_then(|a| a.as_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| "subagent".to_string());
+            records.push(ConversationRecord {
+                agent,
+                id: stem,
+                model: model.unwrap_or_else(|| fallback_model.to_string()),
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                total_tokens: usage.total(),
+                turns,
+            });
+        }
+    }
+    records.sort_by(|a, b| a.id.cmp(&b.id));
+    records
+}
+
+/// Type for progress callback (tool activity, task events).
+type ProgressCallback = Option<Arc<Mutex<Box<dyn FnMut(&stream::ProgressEvent) + Send>>>>;
+
+/// Claude-specific permission mode (maps from Goal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionMode {
+    Plan,
+    Default,
+    AcceptEdits,
+}
+
+/// Claude-specific config derived from InvokeRequest (permission_mode, allowlist, etc.).
+#[derive(Debug, Clone)]
+pub struct ClaudeInvokeConfig {
+    pub permission_mode: PermissionMode,
+    pub allowed_tools: Vec<String>,
+    pub permission_prompt_tool: Option<String>,
+    pub mcp_config_path: Option<PathBuf>,
+}
+
+/// Build the argument list for the Claude Code CLI (excluding the binary path).
+/// Exposed for testing to verify correct command construction.
+///
+/// When `system_prompt_path` is `Some`, uses `--append-system-prompt-file` with that path
+/// (avoids argument length limits and parsing issues). When `None` and `request.system_prompt`
+/// is `Some`, uses `--append-system-prompt` with inline content.
+///
+/// Always adds `--output-format stream-json` for NDJSON stream processing.
+/// When `session_id` is set: `--session-id <id>` (first call) or `--resume <id>` (followup).
+pub fn build_claude_args(
+    request: &InvokeRequest,
+    config: &ClaudeInvokeConfig,
+    system_prompt_path: Option<&std::path::Path>,
+) -> Vec<String> {
+    // Prompt must come immediately after -p per CLI docs: claude -p "query"
+    let mut args = vec![
+        "-p".to_string(),
+        request.prompt.clone(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+    ];
+
+    match config.permission_mode {
+        PermissionMode::Plan => {
+            args.push("--permission-mode".to_string());
+            args.push("plan".to_string());
+        }
+        PermissionMode::AcceptEdits => {
+            args.push("--permission-mode".to_string());
+            args.push("acceptEdits".to_string());
+        }
+        PermissionMode::Default => {}
+    }
+
+    if let Some(ref model) = request.model {
+        args.push("--model".to_string());
+        args.push(model.clone());
+    }
+
+    if let Some(ref session) = request.session {
+        match session {
+            super::SessionMode::Fresh(id) => {
+                args.push("--session-id".to_string());
+                args.push(id.clone());
+            }
+            super::SessionMode::Resume(id) => {
+                args.push("--resume".to_string());
+                args.push(id.clone());
+            }
+        }
+    }
+
+    if let Some(path) = system_prompt_path {
+        args.push("--append-system-prompt-file".to_string());
+        args.push(path.to_string_lossy().to_string());
+    } else if let Some(ref sys_prompt) = request.system_prompt {
+        args.push("--append-system-prompt".to_string());
+        args.push(sys_prompt.clone());
+    }
+
+    if !config.allowed_tools.is_empty() {
+        for tool in &config.allowed_tools {
+            args.push("--allowedTools".to_string());
+            args.push(tool.clone());
+        }
+    }
+
+    if let Some(ref tool_name) = config.permission_prompt_tool {
+        args.push("--permission-prompt-tool".to_string());
+        args.push(tool_name.clone());
+    }
+
+    if let Some(ref mcp_path) = config.mcp_config_path {
+        args.push("--mcp-config".to_string());
+        args.push(mcp_path.to_string_lossy().to_string());
+    }
+
+    args
+}
+
+/// Resolve tddy-tools binary path (next to current executable, or parent dir for test binaries in deps/).
+pub(crate) fn tddy_tools_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    #[cfg(windows)]
+    let name = "tddy-tools.exe";
+    #[cfg(not(windows))]
+    let name = "tddy-tools";
+    // Try same dir first (tddy-coder and tddy-tools in target/debug/)
+    let path = dir.join(name);
+    if path.is_file() {
+        return path.canonicalize().ok().or(Some(path));
+    }
+    // Fallback: parent dir (test binary in target/debug/deps/)
+    if let Some(parent) = dir.parent() {
+        let path = parent.join(name);
+        if path.is_file() {
+            return path.canonicalize().ok().or(Some(path));
+        }
+        return Some(parent.join(name));
+    }
+    Some(dir.join(name))
+}
+
+/// Create a temporary MCP config file registering tddy-tools. Returns path on success.
+fn create_mcp_config_temp_file() -> Option<PathBuf> {
+    let tddy_tools = tddy_tools_path()?;
+    let tddy_tools_str = tddy_tools.to_string_lossy();
+    let config = serde_json::json!({
+        "mcpServers": {
+            "tddy-tools": {
+                "command": tddy_tools_str,
+                "args": ["--mcp"]
+            }
+        }
+    });
+    let tmp = std::env::temp_dir().join(format!(
+        "tddy-mcp-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&tmp, config.to_string()).ok()?;
+    Some(tmp)
+}
+
+/// Maps [`InvokeRequest`] to Claude CLI config. [`GoalHints::agent_cli_plan_mode`] comes from the
+/// active [`crate::workflow::recipe::WorkflowRecipe`]; Claude sets `--permission-mode plan` only when
+/// that flag is set (not for every read-only goal).
+fn goal_to_claude_config(request: &InvokeRequest) -> ClaudeInvokeConfig {
+    let permission_mode = match request.hints.permission {
+        PermissionHint::AcceptEdits => PermissionMode::AcceptEdits,
+        PermissionHint::ReadOnly => {
+            if request.hints.agent_cli_plan_mode {
+                PermissionMode::Plan
+            } else {
+                PermissionMode::Default
+            }
+        }
+    };
+    let mut allowed_tools = request.hints.allowed_tools.clone();
+    if let Some(ref extras) = request.extra_allowed_tools {
+        allowed_tools.extend(extras.iter().cloned());
+    }
+    ClaudeInvokeConfig {
+        permission_mode,
+        allowed_tools,
+        permission_prompt_tool: None,
+        mcp_config_path: None,
+    }
+}
+
+/// Backend that invokes the Claude Code CLI binary.
+///
+/// Uses `--output-format stream-json` for NDJSON stream processing.
+/// Supports session continuity via `--session-id` / `--resume`.
+pub struct ClaudeCodeBackend {
+    binary_path: PathBuf,
+    progress_callback: ProgressCallback,
+}
+
+impl std::fmt::Debug for ClaudeCodeBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClaudeCodeBackend")
+            .field("binary_path", &self.binary_path)
+            .field(
+                "progress_callback",
+                &if self.progress_callback.is_some() {
+                    "Some(..)"
+                } else {
+                    "None"
+                },
+            )
+            .finish()
+    }
+}
+
+impl Clone for ClaudeCodeBackend {
+    fn clone(&self) -> Self {
+        Self {
+            binary_path: self.binary_path.clone(),
+            progress_callback: self.progress_callback.clone(),
+        }
+    }
+}
+
+impl Default for ClaudeCodeBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ClaudeCodeBackend {
+    /// Create a new backend using the default `claude` binary from PATH.
+    pub fn new() -> Self {
+        Self {
+            binary_path: PathBuf::from("claude"),
+            progress_callback: None,
+        }
+    }
+
+    /// Create a backend with a custom binary path.
+    #[must_use]
+    pub fn with_path(path: PathBuf) -> Self {
+        Self {
+            binary_path: path,
+            progress_callback: None,
+        }
+    }
+
+    /// Set a callback invoked for each progress event (tool use, task started, task progress).
+    #[must_use]
+    pub fn with_progress<F>(mut self, f: F) -> Self
+    where
+        F: FnMut(&stream::ProgressEvent) + Send + 'static,
+    {
+        self.progress_callback = Some(Arc::new(Mutex::new(Box::new(f))));
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl super::CodingBackend for ClaudeCodeBackend {
+    async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        let self_clone = self.clone();
+        tokio::task::spawn_blocking(move || self_clone.invoke_sync(request))
+            .await
+            .map_err(|e| BackendError::InvocationFailed(e.to_string()))?
+    }
+
+    fn name(&self) -> &str {
+        "claude"
+    }
+}
+
+impl ClaudeCodeBackend {
+    fn invoke_sync(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        let (system_prompt_path, cleanup_temp) = if let Some(ref path) = request.system_prompt_path
+        {
+            (Some(path.clone()), false)
+        } else if let Some(ref sys_prompt) = request.system_prompt {
+            let tmp = std::env::temp_dir().join(format!(
+                "tddy-sys-{}-{}.txt",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::write(&tmp, sys_prompt).map_err(|e| {
+                BackendError::InvocationFailed(format!("failed to write system prompt file: {}", e))
+            })?;
+            (Some(tmp), true)
+        } else {
+            (None, false)
+        };
+
+        struct CleanupGuard(PathBuf);
+        impl Drop for CleanupGuard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _cleanup = if cleanup_temp {
+            system_prompt_path.as_ref().map(|p| CleanupGuard(p.clone()))
+        } else {
+            None
+        };
+
+        let mut config = goal_to_claude_config(&request);
+
+        // MCP + permission-prompt-tool for every goal: tool approvals must route through
+        // tddy-tools (same as Plan) whether or not `TDDY_SOCKET` is set — without MCP, non-plan
+        // goals fall back to Claude Code UI-only prompts and break headless workflows.
+        let _mcp_cleanup: Option<CleanupGuard> = if let Some(mcp_path) =
+            create_mcp_config_temp_file()
+        {
+            config.permission_prompt_tool = Some("mcp__tddy-tools__approval_prompt".to_string());
+            config.mcp_config_path = Some(mcp_path.clone());
+            Some(CleanupGuard(mcp_path))
+        } else {
+            None
+        };
+
+        let args = build_claude_args(&request, &config, system_prompt_path.as_deref());
+        let mut cmd = Command::new(&self.binary_path);
+        if let Some(ref wd) = request.working_dir {
+            cmd.current_dir(wd);
+        }
+        for arg in &args {
+            cmd.arg(arg);
+        }
+
+        let resolved = which_binary(&self.binary_path);
+        let cwd_str = request
+            .working_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| "(unknown)".into())
+            });
+        let cmd_str = super::format_command_for_log(&self.binary_path, &args, 200);
+        log::debug!("[tddy-coder] Claude backend command: {}", cmd_str);
+        log::debug!(
+            "[tddy-coder] Claude backend spawning: {} (resolved: {})",
+            self.binary_path.display(),
+            resolved
+        );
+        log::debug!("[tddy-coder] cwd: {}", cwd_str);
+        log::debug!(
+            "[tddy-coder] goal: {:?}, model: {:?}, session: {:?}",
+            request.goal_id,
+            request.model,
+            request.session
+        );
+        log::debug!(
+            "[tddy-coder] prompt ({} bytes): {}",
+            request.prompt.len(),
+            &request.prompt[..request.prompt.floor_char_boundary(500)]
+        );
+        if let Some(ref sp) = request.system_prompt {
+            log::debug!(
+                "[tddy-coder] system_prompt ({} bytes): {}",
+                sp.len(),
+                &sp[..sp.floor_char_boundary(500)]
+            );
+        }
+        if let Some(ref sp_path) = request.system_prompt_path {
+            log::debug!("[tddy-coder] system_prompt_path: {}", sp_path.display());
+        }
+
+        cmd.env("PATH", super::path_with_exe_dir());
+        if let Some(ref p) = request.socket_path {
+            cmd.env("TDDY_SOCKET", p);
+        }
+        if let Some(ref p) = request.working_dir {
+            cmd.env("TDDY_REPO_DIR", p);
+        }
+        if let Some(ref p) = request.session_dir {
+            cmd.env("TDDY_SESSION_DIR", p);
+        }
+        if let Some(ref remote) = request.remote {
+            for (key, value) in remote.env_pairs() {
+                cmd.env(key, value);
+            }
+        }
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        cmd.stdin(if request.inherit_stdin {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        });
+
+        let mut child = cmd.spawn().map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                BackendError::BinaryNotFound(self.binary_path.to_string_lossy().to_string())
+            } else {
+                BackendError::InvocationFailed(e.to_string())
+            }
+        })?;
+        super::set_child_pid(child.id());
+
+        let stdout_handle = child
+            .stdout
+            .take()
+            .ok_or_else(|| BackendError::InvocationFailed("failed to capture stdout".into()))?;
+
+        let stderr_handle = child.stderr.take();
+        let stderr_thread = stderr_handle.map(|h| {
+            std::thread::spawn(move || {
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(&mut BufReader::new(h), &mut buf);
+                buf
+            })
+        });
+
+        let progress_sink = request.progress_sink.clone();
+        let instance_cb = self.progress_callback.clone();
+        let mut on_progress = move |ev: &stream::ProgressEvent| {
+            if let Some(ref sink) = progress_sink {
+                sink.emit(ev);
+            } else if let Some(ref cb) = instance_cb {
+                if let Ok(mut f) = cb.lock() {
+                    f(ev);
+                }
+            }
+        };
+
+        // A resumed `claude` invocation only emits its own new turn's stdout, not a replay of
+        // prior conversation history, so there is nothing to skip when echoing live output.
+        let skip_until_line = 0;
+
+        let agent_output = request.agent_output;
+        let agent_output_sink = request.agent_output_sink.clone();
+        let mut on_raw_output = move |s: &str| {
+            if agent_output {
+                if let Some(ref sink) = agent_output_sink {
+                    sink.emit(s);
+                } else if std::env::var("TDDY_QUIET").is_err() {
+                    eprint!("{}", s);
+                }
+            }
+        };
+
+        let mut on_debug_line = |line: &str| {
+            if request.debug {
+                log::debug!("[tddy-coder debug] {}", line);
+            }
+        };
+
+        let mut conv_file = if let Some(ref path) = request.conversation_output_path {
+            Some(
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .map_err(|e| {
+                        BackendError::InvocationFailed(format!(
+                            "failed to open conversation output {}: {}",
+                            path.display(),
+                            e
+                        ))
+                    })?,
+            )
+        } else {
+            None
+        };
+
+        if let Some(ref mut f) = conv_file {
+            let sys_prompt_content = system_prompt_path
+                .as_ref()
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .or_else(|| request.system_prompt.clone());
+            let (session_id, is_resume) = request
+                .session
+                .as_ref()
+                .map(|s| (s.session_id().to_string(), s.is_resume()))
+                .unwrap_or((String::new(), false));
+            let request_entry = serde_json::json!({
+                "type": "tddy-request",
+                "goal": request.hints.display_name,
+                "prompt": request.prompt,
+                "system_prompt": sys_prompt_content,
+                "model": request.model,
+                "session_id": session_id,
+                "is_resume": is_resume,
+            });
+            let _ = writeln!(f, "{}", request_entry);
+            let _ = f.flush();
+        }
+
+        let mut first_line_logged = false;
+        let mut on_conversation_line = |line: &str| {
+            if !first_line_logged {
+                first_line_logged = true;
+                let preview = if line.len() > 150 {
+                    format!("{}...", &line[..150])
+                } else {
+                    line.to_string()
+                };
+                log::debug!("[tddy-coder] first stream line (format hint): {}", preview);
+            }
+            if let Some(ref mut f) = conv_file {
+                let _ = writeln!(f, "{}", line);
+                let _ = f.flush();
+            }
+        };
+
+        let reader = BufReader::new(stdout_handle);
+        let stream_result = stream::process_ndjson_stream(
+            reader,
+            &mut on_progress,
+            &mut on_raw_output,
+            if request.debug {
+                Some(&mut on_debug_line)
+            } else {
+                None
+            },
+            if request.conversation_output_path.is_some() {
+                Some(&mut on_conversation_line)
+            } else {
+                None
+            },
+            skip_until_line,
+        )
+        .map_err(|e| BackendError::InvocationFailed(format!("stream parse error: {}", e)))?;
+
+        let stderr_buf = stderr_thread
+            .and_then(|j| j.join().ok())
+            .unwrap_or_default();
+
+        let status = child
+            .wait()
+            .map_err(|e| BackendError::InvocationFailed(e.to_string()))?;
+        super::clear_child_pid();
+        let exit_code = status.code().unwrap_or(-1);
+        log::debug!(
+            "[tddy-coder] Claude process exited with code {} (goal: {:?}, session_id: {:?})",
+            exit_code,
+            request.goal_id,
+            request.session
+        );
+
+        if exit_code != 0 {
+            // When plan goal produced valid structured output, treat exit 1 as non-fatal.
+            // CLI may exit 1 after session/ExitPlanMode issues despite successful output.
+            let has_structured_despite_nonzero =
+                request.hints.claude_nonzero_exit_ok_if_structured_response
+                    && stream_result.result_text.contains("<structured-response");
+            if has_structured_despite_nonzero {
+                log::debug!(
+                    "[tddy-coder] CLI exited with code {} but plan output present; treating as success",
+                    exit_code
+                );
+            } else {
+                let detail = if !stream_result.stream_errors.is_empty() {
+                    stream_result.stream_errors.join("; ")
+                } else if !stderr_buf.trim().is_empty() {
+                    stderr_buf.trim().to_string()
+                } else {
+                    String::new()
+                };
+                let msg = if detail.is_empty() {
+                    format!("Claude Code CLI exited with code {}", exit_code)
+                } else {
+                    format!("Claude Code CLI exited with code {}: {}", exit_code, detail)
+                };
+                return Err(BackendError::InvocationFailed(msg));
+            }
+        }
+
+        let raw_stream = if stream_result.raw_lines.is_empty() {
+            None
+        } else {
+            Some(stream_result.raw_lines.join("\n"))
+        };
+
+        let stderr = if stream_result.raw_lines.is_empty() && !stderr_buf.trim().is_empty() {
+            Some(stderr_buf)
+        } else {
+            None
+        };
+
+        if let Some(ref sink) = request.progress_sink {
+            sink.emit(&stream::ProgressEvent::AgentExited {
+                exit_code,
+                goal: request.submit_key.to_string(),
+            });
+        }
+
+        Ok(InvokeResponse {
+            output: stream_result.result_text,
+            exit_code,
+            session_id: if stream_result.session_id.is_empty() {
+                None
+            } else {
+                Some(stream_result.session_id)
+            },
+            questions: stream_result.questions,
+            raw_stream,
+            stderr,
+        })
+    }
+}
+
+#[cfg(test)]
+mod claude_config_tests {
+    use super::{goal_to_claude_config, ClaudeInvokeConfig, PermissionMode};
+    use crate::backend::InvokeRequest;
+    use tddy_workflow::{GoalHints, GoalId, PermissionHint};
+
+    fn minimal_invoke(hints: GoalHints) -> InvokeRequest {
+        InvokeRequest {
+            prompt: "p".to_string(),
+            system_prompt: None,
+            system_prompt_path: None,
+            goal_id: GoalId::new("any"),
+            submit_key: GoalId::new("any"),
+            hints,
+            model: None,
+            session: None,
+            working_dir: None,
+            debug: false,
+            agent_output: false,
+            agent_output_sink: None,
+            progress_sink: None,
+            conversation_output_path: None,
+            inherit_stdin: false,
+            extra_allowed_tools: None,
+            socket_path: None,
+            session_dir: None,
+            remote: None,
+        }
+    }
+
+    #[test]
+    fn readonly_with_planning_intent_maps_to_plan_permission_mode() {
+        let hints = GoalHints {
+            display_name: "Plan".to_string(),
+            permission: PermissionHint::ReadOnly,
+            allowed_tools: vec![],
+            default_model: None,
+            agent_output: false,
+            agent_cli_plan_mode: true,
+            claude_nonzero_exit_ok_if_structured_response: true,
+        };
+        let c: ClaudeInvokeConfig = goal_to_claude_config(&minimal_invoke(hints));
+        assert_eq!(c.permission_mode, PermissionMode::Plan);
+    }
+
+    #[test]
+    fn readonly_without_planning_intent_maps_to_default_permission_mode() {
+        let hints = GoalHints {
+            display_name: "Evaluate".to_string(),
+            permission: PermissionHint::ReadOnly,
+            allowed_tools: vec![],
+            default_model: None,
+            agent_output: false,
+            agent_cli_plan_mode: false,
+            claude_nonzero_exit_ok_if_structured_response: false,
+        };
+        let c: ClaudeInvokeConfig = goal_to_claude_config(&minimal_invoke(hints));
+        assert_eq!(c.permission_mode, PermissionMode::Default);
+    }
+
+    #[test]
+    fn accept_edits_maps_to_accept_edits_permission_mode() {
+        let hints = GoalHints {
+            display_name: "Red".to_string(),
+            permission: PermissionHint::AcceptEdits,
+            allowed_tools: vec![],
+            default_model: None,
+            agent_output: false,
+            agent_cli_plan_mode: false,
+            claude_nonzero_exit_ok_if_structured_response: false,
+        };
+        let c: ClaudeInvokeConfig = goal_to_claude_config(&minimal_invoke(hints));
+        assert_eq!(c.permission_mode, PermissionMode::AcceptEdits);
+    }
+}

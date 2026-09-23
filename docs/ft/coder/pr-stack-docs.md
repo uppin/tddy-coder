@@ -302,7 +302,7 @@ fallback for a server that does not send it.
 `context_docs_for_session` (`session_context_docs.rs:76`), `read_session_context_doc_utf8` (`:167`)
 and `resolve_host_document`'s `SESSION_ARTIFACT` root (`host_documents.rs:105`) — so both files
 report `exists: false` in `context_docs` today and cannot be referenced as host documents at all.
-The exception is `build_context_header` (`tddy-core/src/workflow/mod.rs:262-276`), which probes
+The exception is `build_context_header` (`tddy-workflow-engine/src/workflow/mod.rs:265-279`), which probes
 `artifacts/<name>` and falls back to the session root as `"legacy session root"` — which is why the
 orchestrator agent's own context header finds them and nothing else does.
 

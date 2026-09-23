@@ -31,9 +31,9 @@ fn tdd_recipe_prompts_include_demo_branching_instructions_without_core_importing
         "tddy-workflow-recipes green prompt must document demo / optional demo behavior for agents"
     );
 
-    let presenter = include_str!("../../tddy-core/src/presenter/workflow_runner.rs");
+    let presenter = include_str!("../../tddy-presenter/src/presenter/workflow_runner.rs");
     assert!(
         !presenter.contains("demo-plan.md"),
-        "tddy-core presenter must not hardcode demo-plan.md checks; recipe-owned prompts/hooks only"
+        "tddy-presenter must not hardcode demo-plan.md checks; recipe-owned prompts/hooks only"
     );
 }

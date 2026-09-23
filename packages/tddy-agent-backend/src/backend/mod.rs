@@ -1,0 +1,1366 @@
+//! Coding backend abstraction for LLM-based coders.
+
+mod acp;
+mod claude;
+mod codex;
+pub mod codex_acp;
+mod cursor;
+mod mock;
+pub mod model_catalog;
+mod stub;
+mod tool_executor;
+
+pub use acp::ClaudeAcpBackend;
+pub use claude::{
+    build_claude_args, read_claude_subagent_usages, read_claude_transcript_usage,
+    ClaudeCodeBackend, ClaudeInvokeConfig, PermissionMode,
+};
+pub use codex::write_codex_thread_id_file;
+pub use codex::{CodexBackend, CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_ID_FILENAME};
+pub use codex_acp::CodexAcpBackend;
+pub use cursor::CursorBackend;
+pub use mock::MockBackend;
+pub use model_catalog::{
+    render_models_json, resolve_agent_models, BackendCliPaths, CLAUDE_CLI_AGENT, CURSOR_CLI_AGENT,
+};
+pub use stub::StubBackend;
+pub use tddy_workflow::questions::{ClarificationQuestion, QuestionOption};
+use tddy_workflow::{GoalHints, GoalId};
+pub use tool_executor::{InMemoryToolExecutor, ProcessToolExecutor, ToolExecutor};
+
+/// Enum dispatch for CLI backend selection (avoids trait object overhead).
+/// tddy-coder uses claude/cursor only. tddy-demo uses stub (via lib, not CLI).
+#[derive(Debug)]
+pub enum AnyBackend {
+    Claude(ClaudeCodeBackend),
+    ClaudeAcp(ClaudeAcpBackend),
+    Cursor(CursorBackend),
+    /// OpenAI Codex CLI (`codex exec`, `codex exec resume`, `--json`).
+    Codex(CodexBackend),
+    /// OpenAI Codex via `codex-acp` (ACP over stdio).
+    CodexAcp(CodexAcpBackend),
+    Stub(StubBackend),
+}
+
+/// Shared backend wrapper for "create once at startup" pattern.
+/// Wraps `Arc<dyn CodingBackend>` so the same backend can be reused across multiple Workflows.
+#[derive(Clone)]
+pub struct SharedBackend(std::sync::Arc<dyn CodingBackend>);
+
+impl std::fmt::Debug for SharedBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SharedBackend({})", self.0.name())
+    }
+}
+
+#[async_trait::async_trait]
+impl CodingBackend for SharedBackend {
+    async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        self.0.invoke(request).await
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn submit_channel(&self) -> Option<&crate::toolcall::SubmitResultChannel> {
+        self.0.submit_channel()
+    }
+
+    fn action_invoke_cache_eligible(&self) -> bool {
+        self.0.action_invoke_cache_eligible()
+    }
+
+    async fn list_models(&self) -> Result<BackendModels, BackendError> {
+        self.0.list_models().await
+    }
+}
+
+impl SharedBackend {
+    /// Create a SharedBackend from an AnyBackend (or any CodingBackend).
+    pub fn from_any(backend: AnyBackend) -> Self {
+        Self(std::sync::Arc::new(backend))
+    }
+
+    /// Create SharedBackend from an Arc<dyn CodingBackend> (e.g. for MockBackend in tests).
+    pub fn from_arc(inner: std::sync::Arc<dyn CodingBackend>) -> Self {
+        Self(inner)
+    }
+
+    /// Get the inner Arc for use with graph builders that require Arc<dyn CodingBackend>.
+    pub fn as_arc(&self) -> std::sync::Arc<dyn CodingBackend> {
+        self.0.clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl CodingBackend for AnyBackend {
+    async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        match self {
+            AnyBackend::Claude(b) => b.invoke(request).await,
+            AnyBackend::ClaudeAcp(b) => b.invoke(request).await,
+            AnyBackend::Cursor(b) => b.invoke(request).await,
+            AnyBackend::Codex(b) => b.invoke(request).await,
+            AnyBackend::CodexAcp(b) => b.invoke(request).await,
+            AnyBackend::Stub(b) => b.invoke(request).await,
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            AnyBackend::Claude(b) => b.name(),
+            AnyBackend::ClaudeAcp(b) => b.name(),
+            AnyBackend::Cursor(b) => b.name(),
+            AnyBackend::Codex(b) => b.name(),
+            AnyBackend::CodexAcp(b) => b.name(),
+            AnyBackend::Stub(b) => b.name(),
+        }
+    }
+
+    fn submit_channel(&self) -> Option<&crate::toolcall::SubmitResultChannel> {
+        match self {
+            AnyBackend::Claude(b) => b.submit_channel(),
+            AnyBackend::ClaudeAcp(b) => b.submit_channel(),
+            AnyBackend::Cursor(b) => b.submit_channel(),
+            AnyBackend::Codex(b) => b.submit_channel(),
+            AnyBackend::CodexAcp(b) => b.submit_channel(),
+            AnyBackend::Stub(b) => b.submit_channel(),
+        }
+    }
+
+    fn action_invoke_cache_eligible(&self) -> bool {
+        match self {
+            AnyBackend::Claude(b) => b.action_invoke_cache_eligible(),
+            AnyBackend::ClaudeAcp(b) => b.action_invoke_cache_eligible(),
+            AnyBackend::Cursor(b) => b.action_invoke_cache_eligible(),
+            AnyBackend::Codex(b) => b.action_invoke_cache_eligible(),
+            AnyBackend::CodexAcp(b) => b.action_invoke_cache_eligible(),
+            AnyBackend::Stub(b) => b.action_invoke_cache_eligible(),
+        }
+    }
+
+    async fn list_models(&self) -> Result<BackendModels, BackendError> {
+        match self {
+            AnyBackend::Claude(b) => b.list_models().await,
+            AnyBackend::ClaudeAcp(b) => b.list_models().await,
+            AnyBackend::Cursor(b) => b.list_models().await,
+            AnyBackend::Codex(b) => b.list_models().await,
+            AnyBackend::CodexAcp(b) => b.list_models().await,
+            AnyBackend::Stub(b) => b.list_models().await,
+        }
+    }
+}
+
+use crate::error::BackendError;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static CHILD_PID: AtomicU32 = AtomicU32::new(0);
+
+/// Record the PID of a spawned child process so the SIGINT handler can kill it.
+pub fn set_child_pid(pid: u32) {
+    CHILD_PID.store(pid, Ordering::SeqCst);
+}
+
+/// Clear the child PID after the child has exited.
+pub fn clear_child_pid() {
+    CHILD_PID.store(0, Ordering::SeqCst);
+}
+
+/// Return the currently tracked child PID, or 0 if none.
+pub fn get_child_pid() -> u32 {
+    CHILD_PID.load(Ordering::SeqCst)
+}
+
+/// Kill the tracked child process. Returns true if the kill signal was delivered.
+#[cfg(unix)]
+pub fn kill_child_process() -> bool {
+    let pid = CHILD_PID.swap(0, Ordering::SeqCst);
+    if pid == 0 {
+        return false;
+    }
+    unsafe { libc::kill(pid as i32, libc::SIGKILL) == 0 }
+}
+
+/// Format binary + args as a shell-like command for debug logging.
+/// Truncates args longer than max_arg_len to keep logs readable.
+pub(crate) fn format_command_for_log(
+    binary: &std::path::Path,
+    args: &[String],
+    max_arg_len: usize,
+) -> String {
+    let mut parts = vec![binary.display().to_string()];
+    for arg in args {
+        let s = if arg.len() > max_arg_len {
+            format!(
+                "{}... ({} chars total)",
+                &arg[..arg.floor_char_boundary(max_arg_len)],
+                arg.len()
+            )
+        } else {
+            arg.clone()
+        };
+        let escaped = if s.contains(' ') || s.contains('"') || s.contains('\n') {
+            format!(
+                "\"{}\"",
+                s.replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+            )
+        } else {
+            s
+        };
+        parts.push(escaped);
+    }
+    parts.join(" ")
+}
+
+/// Non-unix stub: clears the tracked PID but cannot actually kill the process.
+#[cfg(not(unix))]
+pub fn kill_child_process() -> bool {
+    let pid = CHILD_PID.swap(0, Ordering::SeqCst);
+    if pid == 0 {
+        return false;
+    }
+    log::warn!(
+        "[tddy-core] kill_child_process: cannot kill pid {} on non-unix platform",
+        pid
+    );
+    false
+}
+
+/// Gather the full per-conversation token-usage snapshot for a session by merging every source,
+/// in a stable order: when `include_main_agent`, the main Claude agent's own transcript usage
+/// ([`read_claude_transcript_usage`]) followed by its nested Task-tool subagents
+/// ([`read_claude_subagent_usages`]); then the tddy subagent conversations the in-jail MCP server
+/// wrote to `<session_dir>/egress/accounting.json`.
+///
+/// Best-effort on the accounting file: a missing or unreadable file simply contributes no rows,
+/// never an error. With no transcript and no accounting file, `include_main_agent` still yields a
+/// single zero-token main-agent row carrying `fallback_model`, so a caller always has something to
+/// render.
+pub fn gather_session_usage(
+    session_dir: &std::path::Path,
+    session_id: &str,
+    claude_home: &std::path::Path,
+    fallback_model: &str,
+    include_main_agent: bool,
+) -> Vec<crate::token_accounting::ConversationRecord> {
+    use crate::token_accounting::ConversationRecord;
+
+    #[derive(serde::Deserialize)]
+    struct AccountingFile {
+        #[serde(default)]
+        conversations: Vec<ConversationRecord>,
+    }
+
+    let mut records = Vec::new();
+    if include_main_agent {
+        records.push(read_claude_transcript_usage(
+            claude_home,
+            session_id,
+            fallback_model,
+        ));
+        records.extend(read_claude_subagent_usages(
+            claude_home,
+            session_id,
+            fallback_model,
+        ));
+    }
+
+    let accounting_path = session_dir.join("egress").join("accounting.json");
+    if let Ok(text) = std::fs::read_to_string(&accounting_path) {
+        if let Ok(parsed) = serde_json::from_str::<AccountingFile>(&text) {
+            records.extend(parsed.conversations);
+        }
+    }
+
+    records
+}
+
+/// Sink for routing agent output (e.g. to TUI instead of stderr).
+#[derive(Clone)]
+pub struct AgentOutputSink(std::sync::Arc<dyn Fn(&str) + Send + Sync>);
+
+impl std::fmt::Debug for AgentOutputSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<agent_output_sink>")
+    }
+}
+
+/// Sink for routing progress events (ToolUse, TaskStarted, TaskProgress) to TUI.
+#[derive(Clone)]
+pub struct ProgressSink(std::sync::Arc<dyn Fn(&crate::stream::ProgressEvent) + Send + Sync>);
+
+impl std::fmt::Debug for ProgressSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<progress_sink>")
+    }
+}
+
+impl ProgressSink {
+    /// Create a sink from a closure.
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(&crate::stream::ProgressEvent) + Send + Sync + 'static,
+    {
+        Self(std::sync::Arc::new(f))
+    }
+
+    /// Invoke the sink with the given event.
+    pub fn emit(&self, ev: &crate::stream::ProgressEvent) {
+        (self.0)(ev);
+    }
+}
+
+impl AgentOutputSink {
+    /// Create a sink from a closure.
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(&str) + Send + Sync + 'static,
+    {
+        Self(std::sync::Arc::new(f))
+    }
+
+    /// Invoke the sink with the given text.
+    pub fn emit(&self, s: &str) {
+        (self.0)(s);
+    }
+}
+
+/// Session mode for backend invocation: fresh session or resume existing.
+#[derive(Debug, Clone)]
+pub enum SessionMode {
+    /// Start a new session with this ID.
+    Fresh(String),
+    /// Resume an existing session.
+    Resume(String),
+}
+
+impl SessionMode {
+    /// Session ID (same for both variants).
+    pub fn session_id(&self) -> &str {
+        match self {
+            SessionMode::Fresh(id) | SessionMode::Resume(id) => id,
+        }
+    }
+
+    /// True when resuming.
+    pub fn is_resume(&self) -> bool {
+        matches!(self, SessionMode::Resume(_))
+    }
+}
+
+/// Environment for remote-codebase mode: the relay daemon address + session credentials.
+///
+/// When set on `InvokeRequest`, the Claude backend exports these as `TDDY_REMOTE_*` env vars
+/// before spawning the subprocess so that the inherited `tddy-tools --mcp` routes correctly.
+#[derive(Debug, Clone)]
+pub struct RemoteToolEnv {
+    pub daemon_url: String,
+    /// Unix socket to reach the daemon on instead of `daemon_url`, for a host that serves no HTTP
+    /// listener at all — an application embedding the daemon in its own process (Tddy Desktop).
+    /// A co-located agent is a separate process, so it can use neither the application's in-process
+    /// bridge nor `listen.web_port`, which on such a host answers only the OAuth callback.
+    pub daemon_socket: Option<String>,
+    pub session_id: String,
+    pub session_token: String,
+    pub daemon_instance_id: Option<String>,
+    pub livekit_url: Option<String>,
+    pub livekit_room: Option<String>,
+    pub server_identity: Option<String>,
+    /// Scoped LiveKit join token minted by the spawning daemon, for a split session whose worktree
+    /// lives on another daemon (docs/ft/daemon/remote-managed-worktree.md). Never the daemon's
+    /// `livekit.api_secret`, which would let the agent join any room as any identity.
+    pub livekit_token: Option<String>,
+}
+
+impl RemoteToolEnv {
+    /// Returns all TDDY_REMOTE_* key-value pairs to be set as environment variables.
+    pub fn env_pairs(&self) -> Vec<(String, String)> {
+        let mut pairs = vec![
+            (
+                "TDDY_REMOTE_DAEMON_URL".to_string(),
+                self.daemon_url.clone(),
+            ),
+            (
+                "TDDY_REMOTE_SESSION_ID".to_string(),
+                self.session_id.clone(),
+            ),
+            (
+                "TDDY_REMOTE_SESSION_TOKEN".to_string(),
+                self.session_token.clone(),
+            ),
+        ];
+        if let Some(v) = &self.daemon_socket {
+            pairs.push(("TDDY_REMOTE_DAEMON_SOCKET".to_string(), v.clone()));
+        }
+        if let Some(v) = &self.daemon_instance_id {
+            pairs.push(("TDDY_REMOTE_DAEMON_INSTANCE_ID".to_string(), v.clone()));
+        }
+        if let Some(v) = &self.livekit_url {
+            pairs.push(("TDDY_REMOTE_LIVEKIT_URL".to_string(), v.clone()));
+        }
+        if let Some(v) = &self.livekit_room {
+            pairs.push(("TDDY_REMOTE_LIVEKIT_ROOM".to_string(), v.clone()));
+        }
+        if let Some(v) = &self.server_identity {
+            pairs.push(("TDDY_REMOTE_SERVER_IDENTITY".to_string(), v.clone()));
+        }
+        if let Some(v) = &self.livekit_token {
+            pairs.push(("TDDY_REMOTE_LIVEKIT_TOKEN".to_string(), v.clone()));
+        }
+        pairs
+    }
+}
+
+/// Request to invoke the coding backend.
+#[derive(Debug, Clone)]
+pub struct InvokeRequest {
+    pub prompt: String,
+    pub system_prompt: Option<String>,
+    /// When set, backend uses this path instead of system_prompt (avoids temp file).
+    pub system_prompt_path: Option<PathBuf>,
+    pub goal_id: GoalId,
+    /// Key for `tddy-tools submit` / progress events (may differ from graph task id, e.g. evaluate vs evaluate-changes).
+    pub submit_key: GoalId,
+    pub hints: GoalHints,
+    /// Optional model name (e.g. "sonnet") passed to the agent.
+    pub model: Option<String>,
+    /// Session mode: Claude uses `--session-id` / `--resume`; Cursor uses only `--resume` (fresh chats omit session flags).
+    pub session: Option<SessionMode>,
+    /// Working directory for the subprocess (default: inherit from parent).
+    pub working_dir: Option<PathBuf>,
+    /// When true, print the command and cwd to stderr before running.
+    pub debug: bool,
+    /// When true, emit raw agent output. If agent_output_sink is set, routes there; else prints to stderr.
+    pub agent_output: bool,
+    /// When set and agent_output is true, routes output here instead of stderr (for TUI).
+    pub agent_output_sink: Option<AgentOutputSink>,
+    /// When set, routes progress events (ToolUse, TaskStarted, TaskProgress) here instead of instance callback.
+    pub progress_sink: Option<ProgressSink>,
+    /// When set, write entire agent conversation (raw bytes from stdout) to this file.
+    pub conversation_output_path: Option<PathBuf>,
+    /// When true, inherit stdin so the user can grant permission prompts interactively.
+    pub inherit_stdin: bool,
+    /// Extra tools to add to the goal's allowlist (backends that support allowlists merge these).
+    pub extra_allowed_tools: Option<Vec<String>>,
+    /// When set, backend sets TDDY_SOCKET env var for tddy-tools relay.
+    pub socket_path: Option<PathBuf>,
+    /// When set, backend sets TDDY_SESSION_DIR and TDDY_REPO_DIR for tddy-tools path pre-allow.
+    pub session_dir: Option<PathBuf>,
+    /// When set, backend exports TDDY_REMOTE_* env vars for remote-codebase mode routing.
+    pub remote: Option<RemoteToolEnv>,
+}
+
+impl Default for InvokeRequest {
+    fn default() -> Self {
+        use tddy_workflow::{GoalHints, PermissionHint};
+        Self {
+            prompt: String::new(),
+            system_prompt: None,
+            system_prompt_path: None,
+            goal_id: GoalId::new(""),
+            submit_key: GoalId::new(""),
+            hints: GoalHints {
+                display_name: String::new(),
+                permission: PermissionHint::ReadOnly,
+                allowed_tools: Vec::new(),
+                default_model: None,
+                agent_output: false,
+                agent_cli_plan_mode: false,
+                claude_nonzero_exit_ok_if_structured_response: false,
+            },
+            model: None,
+            session: None,
+            working_dir: None,
+            debug: false,
+            agent_output: false,
+            agent_output_sink: None,
+            progress_sink: None,
+            conversation_output_path: None,
+            inherit_stdin: false,
+            extra_allowed_tools: None,
+            socket_path: None,
+            session_dir: None,
+            remote: None,
+        }
+    }
+}
+
+/// Build a PATH that prepends the directory of the current executable.
+/// This ensures `tddy-tools` (built alongside `tddy-coder`) is discoverable
+/// by agents that call it as a bare command.
+pub(crate) fn path_with_exe_dir() -> std::ffi::OsString {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            dirs.push(dir.to_path_buf());
+        }
+    }
+    if let Some(existing) = std::env::var_os("PATH") {
+        for p in std::env::split_paths(&existing) {
+            if !dirs.contains(&p) {
+                dirs.push(p);
+            }
+        }
+    }
+    std::env::join_paths(dirs).unwrap_or_default()
+}
+
+/// Build a clarification question for interactive coding backend selection at session start.
+#[must_use]
+pub fn backend_selection_question() -> ClarificationQuestion {
+    ClarificationQuestion {
+        header: "Backend".to_string(),
+        question: "Select the coding backend".to_string(),
+        options: vec![
+            QuestionOption {
+                label: "Claude".to_string(),
+                description: "Claude Code CLI (default model: opus)".to_string(),
+            },
+            QuestionOption {
+                label: "Claude ACP".to_string(),
+                description: "Claude Agent Control Protocol (default model: opus)".to_string(),
+            },
+            QuestionOption {
+                label: "Cursor".to_string(),
+                description: "Cursor agent CLI (default model: composer-2.5)".to_string(),
+            },
+            QuestionOption {
+                label: "Codex".to_string(),
+                description: "OpenAI Codex CLI (default model: gpt-5)".to_string(),
+            },
+            QuestionOption {
+                label: "Codex ACP".to_string(),
+                description: "OpenAI Codex via codex-acp (default model: gpt-5)".to_string(),
+            },
+            QuestionOption {
+                label: "Stub".to_string(),
+                description: "Test backend with simulated responses".to_string(),
+            },
+        ],
+        multi_select: false,
+        allow_other: false,
+    }
+}
+
+/// Single-select question for switching workflow recipe after `/recipe` from the feature slash menu.
+#[must_use]
+pub fn workflow_recipe_selection_question() -> ClarificationQuestion {
+    ClarificationQuestion {
+        header: "Workflow recipe".to_string(),
+        question: "Select the workflow recipe for this session".to_string(),
+        options: vec![
+            QuestionOption {
+                label: "TDD".to_string(),
+                description: "Plan → red → green → refactor cycle".to_string(),
+            },
+            QuestionOption {
+                label: "Bugfix".to_string(),
+                description: "Reproduce → fix workflow".to_string(),
+            },
+            QuestionOption {
+                label: "Free prompting".to_string(),
+                description: "Open-ended agent loop without PRD/TDD gates".to_string(),
+            },
+            QuestionOption {
+                label: "Grill me".to_string(),
+                description: "Grill (questions) then Create plan (grill-me-brief.md)".to_string(),
+            },
+            QuestionOption {
+                label: "Plan PR stack".to_string(),
+                description: "Analyze feature intent and emit a structured PR-stack plan"
+                    .to_string(),
+            },
+            QuestionOption {
+                label: "Orchestrate PR stack".to_string(),
+                description: "Resumable loop that merges a PR stack to master".to_string(),
+            },
+        ],
+        multi_select: false,
+        allow_other: false,
+    }
+}
+
+/// Map a [`workflow_recipe_selection_question`] option label to CLI recipe name.
+#[must_use]
+pub fn recipe_cli_name_from_selection_label(label: &str) -> Option<&'static str> {
+    match label {
+        "TDD" => Some("tdd"),
+        "Bugfix" => Some("bugfix"),
+        "Free prompting" => Some("free-prompting"),
+        "Grill me" => Some("grill-me"),
+        "Plan PR stack" => Some("plan-pr-stack"),
+        "Orchestrate PR stack" => Some("orchestrate-pr-stack"),
+        _ => None,
+    }
+}
+
+/// Map a display label from [`backend_selection_question`] to `(agent_name, default_model)`.
+#[must_use]
+pub fn backend_from_label(label: &str) -> (&'static str, &'static str) {
+    match label {
+        "Claude" => ("claude", "opus"),
+        "Claude ACP" => ("claude-acp", "opus"),
+        "Cursor" => ("cursor", "composer-2.5"),
+        "Codex" => ("codex", "gpt-5"),
+        "Codex ACP" => ("codex-acp", "gpt-5"),
+        "Stub" => ("stub", "stub"),
+        _ => ("claude", "opus"),
+    }
+}
+
+/// Versionless Claude aliases, in dropdown order. `claude --model` resolves each to the newest
+/// model in that tier, so a session started today and one started next quarter both run the current
+/// best model without a code change here. Shared by every Claude catalog below — adding a tier here
+/// adds it everywhere.
+const CLAUDE_MODEL_ALIASES: &[(&str, &str)] = &[
+    ("opus", "Claude Opus (latest)"),
+    ("sonnet", "Claude Sonnet (latest)"),
+    ("haiku", "Claude Haiku (latest)"),
+];
+
+/// Version-pinned Claude ids, offered after [`CLAUDE_MODEL_ALIASES`] for a run that must not drift
+/// between releases (a reproduction, or a benchmark comparing two generations). Labelled `(pinned)`
+/// so the choice reads as deliberate.
+const CLAUDE_PINNED_MODELS: &[(&str, &str)] = &[
+    ("claude-opus-5", "Claude Opus 5 (pinned)"),
+    ("claude-sonnet-5", "Claude Sonnet 5 (pinned)"),
+    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5 (pinned)"),
+];
+
+/// The alias every Claude backend preselects. Versionless on purpose: a pinned default would
+/// silently keep new sessions on an old generation once the next model ships.
+pub const CLAUDE_DEFAULT_MODEL: &str = "opus";
+
+/// Default model name for a given agent identifier (e.g. `claude`, `cursor`).
+#[must_use]
+pub fn default_model_for_agent(agent: &str) -> &'static str {
+    match agent {
+        "cursor" => "composer-2.5",
+        "codex" => "gpt-5",
+        "codex-acp" => "gpt-5",
+        "stub" => "stub",
+        _ => CLAUDE_DEFAULT_MODEL,
+    }
+}
+
+/// Build a catalog from `(id, label)` pairs and the id to preselect.
+fn catalog_from(pairs: &[(&str, &str)], default_model: &str) -> BackendModels {
+    BackendModels {
+        models: pairs
+            .iter()
+            .map(|(id, label)| BackendModel::new(*id, *label))
+            .collect(),
+        default_model: default_model.to_string(),
+    }
+}
+
+/// A model a backend can run with, for UI selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendModel {
+    /// Value passed to the backend as `--model` (e.g. `"opus"`, `"gpt-5.2"`, `"claude-opus-5"`).
+    pub id: String,
+    /// Human-readable label (e.g. `"Claude Opus"`, `"GPT-5.2"`).
+    pub label: String,
+}
+
+impl BackendModel {
+    #[must_use]
+    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+        }
+    }
+}
+
+/// A backend's selectable models plus the id to preselect (its current/default model).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BackendModels {
+    pub models: Vec<BackendModel>,
+    pub default_model: String,
+}
+
+/// Curated model list for backends whose command cannot enumerate models (`claude`, `codex`).
+/// Single source of truth for those catalogs; kept in sync with [`default_model_for_agent`].
+#[must_use]
+pub fn curated_models_for_agent(agent: &str) -> BackendModels {
+    let (models, default_model): (&[(&str, &str)], &str) = match agent {
+        "codex" | "codex-acp" => (&[("gpt-5", "GPT-5")], "gpt-5"),
+        "cursor" => (&[("composer-2.5", "Composer 2.5")], "composer-2.5"),
+        "stub" => (&[("stub", "Stub")], "stub"),
+        _ => (CLAUDE_MODEL_ALIASES, CLAUDE_DEFAULT_MODEL),
+    };
+    catalog_from(models, default_model)
+}
+
+/// Context files every agent reads, whatever tool runs it: the cross-tool `AGENTS.md` convention
+/// and the `.agents/` tree beside it.
+const SHARED_CONTEXT_GLOBS: &[&str] = &["AGENTS.md", ".agents/**"];
+
+/// Worktree-root-relative globs naming the context files an agent reads from the **target repo** —
+/// the repository a session works on, never tddy-coder's own layout. Single source of truth for
+/// what a co-located context directory holds and what a split session syncs to its peer; sibling of
+/// [`curated_models_for_agent`], which answers the same question for models.
+///
+/// An unrecognised agent gets [`SHARED_CONTEXT_GLOBS`] alone. That is a deliberate *narrowing*: an
+/// unknown name can only ever sync less than a known backend does. Widening it — returning the
+/// union of every list — would hand `.claude/` and its permissions to an agent nobody vetted, which
+/// is precisely what a compiled-in allow-list exists to prevent.
+///
+/// # `.claude/settings.local.json` is deliberately not synced
+///
+/// `.claude/**` names it, and it is nevertheless withheld — by `tddy_sandbox`'s
+/// `CONTEXT_EXCLUDE_GLOBS`, which every matcher on both halves consults after this table. Do not
+/// "fix" the omission by narrowing the pattern here or adding the path anywhere: on a managed
+/// session **the daemon owns that file**. `write_claude_hooks_settings`
+/// (`tddy_daemon::connection_service`) writes the six Claude Code hooks that report the session's
+/// status into exactly that path in the agent's working directory, as a whole-file atomic replace
+/// with no merge. Syncing the repository's copy into the same directory only decides which of the
+/// two writes lands last: at spawn the hooks win and the synced bytes were pointless, and on a
+/// later re-sync the repo's copy wins and status reporting dies silently for the rest of the
+/// session. Neither outcome is guidance reaching an agent.
+///
+/// The exclusion lives in `tddy-sandbox` rather than here because that is where matching happens —
+/// one predicate for the manifest walk, the copier, the daemon's reader and the syncer's deletes —
+/// and a second list consulted by only some of them is how a manifest comes to advertise a path the
+/// reader then refuses. (`tddy-sandbox` does not depend on `tddy-core`, and must not start to.)
+#[must_use]
+pub fn context_globs_for_agent(agent: &str) -> &'static [&'static str] {
+    match agent {
+        "claude" | "claude-acp" => &[
+            "AGENTS.md",
+            ".agents/**",
+            "CLAUDE.md",
+            ".claude/**",
+            ".mcp.json",
+        ],
+        // Cursor honours Claude's configuration as well as its own, so it reads both trees.
+        "cursor" => &[
+            "AGENTS.md",
+            ".agents/**",
+            "CLAUDE.md",
+            ".claude/**",
+            ".cursor/**",
+            ".mcp.json",
+        ],
+        "codex" | "codex-acp" => &["AGENTS.md", ".agents/**", ".codex/**"],
+        _ => SHARED_CONTEXT_GLOBS,
+    }
+}
+
+/// Curated model catalog for the `claude-cli` session type (ids passed to `claude --model`). Single
+/// source of truth — the web sources this over `ListAgentModels` rather than keeping its own list.
+///
+/// The versionless aliases lead, so the preselected choice tracks each Claude release on its own;
+/// the version-pinned ids follow for a run that must not drift. See [`CLAUDE_MODEL_ALIASES`] and
+/// [`CLAUDE_PINNED_MODELS`].
+#[must_use]
+pub fn claude_cli_models() -> BackendModels {
+    let pairs: Vec<(&str, &str)> = CLAUDE_MODEL_ALIASES
+        .iter()
+        .chain(CLAUDE_PINNED_MODELS)
+        .copied()
+        .collect();
+    catalog_from(&pairs, CLAUDE_DEFAULT_MODEL)
+}
+
+/// Curated model catalog for the `cursor-cli` session type (ids passed to `agent --model`).
+#[must_use]
+pub fn cursor_cli_models() -> BackendModels {
+    BackendModels {
+        models: vec![
+            BackendModel::new("gpt-5.3-codex", "GPT-5.3 Codex"),
+            BackendModel::new(
+                "claude-4.6-sonnet-medium-thinking",
+                "Claude 4.6 Sonnet (thinking)",
+            ),
+            BackendModel::new(
+                "claude-sonnet-5-thinking-high",
+                "Claude Sonnet 5 (thinking high)",
+            ),
+            BackendModel::new("composer-2.5", "Composer 2.5"),
+            BackendModel::new("glm-5.2-high", "GLM 5.2 High"),
+        ],
+        default_model: "claude-4.6-sonnet-medium-thinking".to_string(),
+    }
+}
+
+/// Map an ACP agent's advertised [`agent_client_protocol::SessionModelState`] into [`BackendModels`].
+/// Errors when the agent advertised no models (an unavailable backend must not look available).
+pub fn acp_models_from_session_state(
+    state: Option<&agent_client_protocol::SessionModelState>,
+) -> Result<BackendModels, BackendError> {
+    let state = state.ok_or_else(|| {
+        BackendError::InvocationFailed("agent advertised no session model state".to_string())
+    })?;
+    if state.available_models.is_empty() {
+        return Err(BackendError::InvocationFailed(
+            "agent advertised no available models".to_string(),
+        ));
+    }
+    Ok(BackendModels {
+        models: state
+            .available_models
+            .iter()
+            .map(|m| BackendModel::new(m.model_id.to_string(), m.name.clone()))
+            .collect(),
+        default_model: state.current_model_id.to_string(),
+    })
+}
+
+/// Index into [`backend_selection_question`] options for a given agent name.
+#[must_use]
+pub fn preselected_index_for_agent(agent: &str) -> usize {
+    match agent {
+        "claude" => 0,
+        "claude-acp" => 1,
+        "cursor" => 2,
+        "codex" => 3,
+        "codex-acp" => 4,
+        "stub" => 5,
+        _ => 0,
+    }
+}
+
+/// Response from the coding backend.
+#[derive(Debug, Clone)]
+pub struct InvokeResponse {
+    pub output: String,
+    pub exit_code: i32,
+    /// Session/thread ID for resume; None when backend does not support or provide one.
+    pub session_id: Option<String>,
+    pub questions: Vec<ClarificationQuestion>,
+    /// Raw stream lines from agent stdout, for debugging when output parsing fails.
+    pub raw_stream: Option<String>,
+    /// Stderr from the subprocess, for debugging when output is empty.
+    pub stderr: Option<String>,
+}
+
+/// Trait for LLM-based coding backends.
+#[async_trait::async_trait]
+pub trait CodingBackend: Send + Sync {
+    async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError>;
+    /// Backend identifier (e.g. "claude", "cursor", "mock") for changeset and display.
+    fn name(&self) -> &str;
+    /// Per-instance submit result channel. Backends using InMemoryToolExecutor
+    /// return their channel here so tasks can read without touching global state.
+    fn submit_channel(&self) -> Option<&crate::toolcall::SubmitResultChannel> {
+        None
+    }
+
+    /// When **`false`**, workflow tasks must call [`CodingBackend::invoke`] for every backend step,
+    /// even when a session action-cache entry would allow a replay.
+    ///
+    /// [`crate::workflow::task::BackendInvokeTask`] uses this to avoid skipping [`MockBackend`]
+    /// invocations — the mock advances a FIFO response queue synchronized with submits.
+    fn action_invoke_cache_eligible(&self) -> bool {
+        true
+    }
+
+    /// Enumerate the models this backend can run with, for UI selection. The default returns the
+    /// curated catalog for the backend's [`CodingBackend::name`]; backends whose command can
+    /// enumerate its own models (cursor, ACP) override this to query the agent at runtime.
+    async fn list_models(&self) -> Result<BackendModels, BackendError> {
+        Ok(curated_models_for_agent(self.name()))
+    }
+
+    /// Worktree-root-relative globs naming what this agent reads from the target repo. The default
+    /// resolves the table by [`CodingBackend::name`], so a caller holding a backend and a caller
+    /// holding only an agent name see the same allow-list.
+    fn context_globs(&self) -> &'static [&'static str] {
+        context_globs_for_agent(self.name())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // Serialize tests that mutate global CHILD_PID.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_and_reset() -> std::sync::MutexGuard<'static, ()> {
+        let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        CHILD_PID.store(0, Ordering::SeqCst);
+        guard
+    }
+
+    #[test]
+    fn set_child_pid_stores_pid() {
+        let _lock = lock_and_reset();
+        set_child_pid(12345);
+        assert_eq!(get_child_pid(), 12345);
+    }
+
+    #[test]
+    fn clear_child_pid_resets_to_zero() {
+        let _lock = lock_and_reset();
+        set_child_pid(99999);
+        clear_child_pid();
+        assert_eq!(get_child_pid(), 0);
+    }
+
+    fn ids(models: &BackendModels) -> Vec<&str> {
+        models.models.iter().map(|m| m.id.as_str()).collect()
+    }
+
+    #[test]
+    fn curated_claude_models_offer_opus_sonnet_and_haiku_defaulting_to_opus() {
+        // When
+        let catalog = curated_models_for_agent("claude");
+
+        // Then
+        assert_eq!(ids(&catalog), vec!["opus", "sonnet", "haiku"]);
+        assert_eq!(catalog.default_model, "opus");
+    }
+
+    #[test]
+    fn curated_codex_models_offer_gpt5_defaulting_to_gpt5() {
+        // When
+        let catalog = curated_models_for_agent("codex");
+
+        // Then
+        assert_eq!(ids(&catalog), vec!["gpt-5"]);
+        assert_eq!(catalog.default_model, "gpt-5");
+    }
+
+    #[test]
+    fn claude_cli_models_lead_with_the_versionless_aliases_defaulting_to_opus() {
+        // When
+        let catalog = claude_cli_models();
+
+        // Then — the aliases come first so the dropdown preselects one, and `opus` is the default
+        assert_eq!(
+            ids(&catalog)[..3],
+            ["opus", "sonnet", "haiku"],
+            "the versionless aliases must lead the catalog"
+        );
+        assert_eq!(catalog.default_model, "opus");
+    }
+
+    #[test]
+    fn claude_cli_models_also_offer_version_pinned_ids_after_the_aliases() {
+        // When
+        let catalog = claude_cli_models();
+
+        // Then — pinning a generation stays available for a run that must not drift
+        assert_eq!(
+            ids(&catalog)[3..],
+            [
+                "claude-opus-5",
+                "claude-sonnet-5",
+                "claude-haiku-4-5-20251001"
+            ]
+        );
+    }
+
+    #[test]
+    fn claude_cli_aliases_match_the_curated_claude_catalog() {
+        // Given — the two Claude catalogs are built from one alias table
+        let cli = claude_cli_models();
+        let curated = curated_models_for_agent("claude");
+
+        // Then — an alias added in one place appears in both
+        assert_eq!(ids(&curated), ids(&cli)[..curated.models.len()]);
+        assert_eq!(curated.default_model, cli.default_model);
+    }
+
+    #[test]
+    fn claude_cli_labels_distinguish_a_moving_alias_from_a_pinned_generation() {
+        // When
+        let catalog = claude_cli_models();
+
+        // Then — the operator can tell which choice drifts with each release
+        let labels: Vec<&str> = catalog.models.iter().map(|m| m.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Claude Opus (latest)",
+                "Claude Sonnet (latest)",
+                "Claude Haiku (latest)",
+                "Claude Opus 5 (pinned)",
+                "Claude Sonnet 5 (pinned)",
+                "Claude Haiku 4.5 (pinned)",
+            ]
+        );
+    }
+
+    #[test]
+    fn every_claude_cli_default_is_selectable_in_its_own_catalog() {
+        // Given / When
+        let catalog = claude_cli_models();
+
+        // Then — a default absent from its own list would leave the dropdown unselected
+        assert!(ids(&catalog).contains(&catalog.default_model.as_str()));
+    }
+
+    #[test]
+    fn acp_session_state_maps_available_models_with_the_current_one_as_default() {
+        // Given — the agent advertises two models and names the current one
+        use agent_client_protocol::{ModelInfo, SessionModelState};
+        let state = SessionModelState::new(
+            "gpt-5.2",
+            vec![
+                ModelInfo::new("auto", "Auto"),
+                ModelInfo::new("gpt-5.2", "GPT-5.2"),
+            ],
+        );
+
+        // When
+        let catalog = acp_models_from_session_state(Some(&state)).expect("should map models");
+
+        // Then
+        assert_eq!(ids(&catalog), vec!["auto", "gpt-5.2"]);
+        assert_eq!(catalog.default_model, "gpt-5.2");
+    }
+
+    #[test]
+    fn acp_enumeration_errors_when_the_agent_advertises_no_models() {
+        // When / Then — no SessionModelState at all is an error, not an empty list
+        let result = acp_models_from_session_state(None);
+
+        assert!(matches!(result, Err(BackendError::InvocationFailed(_))));
+    }
+
+    #[test]
+    fn kill_child_process_returns_false_when_no_child() {
+        let _lock = lock_and_reset();
+        assert!(!kill_child_process());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_child_process_kills_running_child() {
+        let _lock = lock_and_reset();
+
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("failed to spawn sleep");
+        let pid = child.id();
+        set_child_pid(pid);
+
+        assert!(kill_child_process());
+        assert_eq!(get_child_pid(), 0);
+
+        // Reap the child so it doesn't remain a zombie, then verify it was killed.
+        let status = child.wait().expect("failed to wait on child");
+        assert!(!status.success());
+    }
+
+    #[test]
+    fn backend_selection_question_returns_six_options_including_codex_variants() {
+        let q = backend_selection_question();
+        assert_eq!(q.options.len(), 6);
+        assert!(!q.multi_select);
+        assert!(!q.allow_other);
+    }
+
+    #[test]
+    fn codex_backend_selection_question_labels_order() {
+        let q = backend_selection_question();
+        let labels: Vec<&str> = q.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Claude",
+                "Claude ACP",
+                "Cursor",
+                "Codex",
+                "Codex ACP",
+                "Stub"
+            ]
+        );
+    }
+
+    #[test]
+    fn backend_selection_includes_codex_option() {
+        let q = backend_selection_question();
+        let codex = q
+            .options
+            .iter()
+            .find(|o| o.label == "Codex")
+            .expect("Codex option must be present for codex agent support");
+        assert!(
+            codex.description.to_lowercase().contains("codex"),
+            "Codex option should describe Codex CLI, got {:?}",
+            codex.description
+        );
+    }
+
+    #[test]
+    fn backend_from_label_claude() {
+        assert_eq!(backend_from_label("Claude"), ("claude", "opus"));
+    }
+
+    #[test]
+    fn backend_from_label_cursor() {
+        assert_eq!(backend_from_label("Cursor"), ("cursor", "composer-2.5"));
+    }
+
+    #[test]
+    fn backend_from_label_claude_acp() {
+        assert_eq!(backend_from_label("Claude ACP"), ("claude-acp", "opus"));
+    }
+
+    #[test]
+    fn backend_from_label_stub() {
+        assert_eq!(backend_from_label("Stub"), ("stub", "stub"));
+    }
+
+    #[test]
+    fn backend_from_label_codex() {
+        assert_eq!(backend_from_label("Codex"), ("codex", "gpt-5"));
+    }
+
+    #[test]
+    fn backend_from_label_codex_acp() {
+        assert_eq!(backend_from_label("Codex ACP"), ("codex-acp", "gpt-5"));
+    }
+
+    #[test]
+    fn backend_from_label_unknown_defaults_to_claude() {
+        assert_eq!(backend_from_label("Unknown"), ("claude", "opus"));
+    }
+
+    #[test]
+    fn default_model_for_agent_cursor() {
+        assert_eq!(default_model_for_agent("cursor"), "composer-2.5");
+    }
+
+    #[test]
+    fn default_model_for_agent_codex() {
+        assert_eq!(default_model_for_agent("codex"), "gpt-5");
+    }
+
+    #[test]
+    fn default_model_for_agent_codex_acp() {
+        assert_eq!(default_model_for_agent("codex-acp"), "gpt-5");
+    }
+
+    #[test]
+    fn default_model_for_agent_claude() {
+        assert_eq!(default_model_for_agent("claude"), "opus");
+    }
+
+    #[test]
+    fn codex_preselected_index_for_agent_order() {
+        assert_eq!(preselected_index_for_agent("claude"), 0);
+        assert_eq!(preselected_index_for_agent("claude-acp"), 1);
+        assert_eq!(preselected_index_for_agent("cursor"), 2);
+        assert_eq!(preselected_index_for_agent("codex"), 3);
+        assert_eq!(preselected_index_for_agent("codex-acp"), 4);
+        assert_eq!(preselected_index_for_agent("stub"), 5);
+        assert_eq!(preselected_index_for_agent("unknown"), 0);
+    }
+}
+
+#[cfg(test)]
+mod gather_session_usage_tests {
+    use super::gather_session_usage;
+    use crate::token_accounting::ConversationRecord;
+    use std::path::Path;
+
+    /// One `type:"assistant"` transcript line carrying a single turn's input/output usage.
+    fn assistant_line(model: &str, input: u64, output: u64) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "message": { "model": model, "usage": { "input_tokens": input, "output_tokens": output } },
+        })
+        .to_string()
+    }
+
+    /// Write the main Claude transcript at the deterministic
+    /// `<claude_home>/.claude/projects/<proj>/<session_id>.jsonl` path (one assistant turn).
+    fn write_main_transcript(
+        claude_home: &Path,
+        session_id: &str,
+        model: &str,
+        input: u64,
+        output: u64,
+    ) {
+        let dir = claude_home.join(".claude").join("projects").join("proj");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{session_id}.jsonl")),
+            format!("{}\n", assistant_line(model, input, output)),
+        )
+        .unwrap();
+    }
+
+    /// Write a Task-tool subagent transcript + its `agentType` meta sibling.
+    fn write_subagent(
+        claude_home: &Path,
+        session_id: &str,
+        agent_stem: &str,
+        agent_type: &str,
+        model: &str,
+        input: u64,
+        output: u64,
+    ) {
+        let dir = claude_home
+            .join(".claude")
+            .join("projects")
+            .join("proj")
+            .join(session_id)
+            .join("subagents");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{agent_stem}.jsonl")),
+            format!("{}\n", assistant_line(model, input, output)),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(format!("{agent_stem}.meta.json")),
+            serde_json::json!({ "agentType": agent_type }).to_string(),
+        )
+        .unwrap();
+    }
+
+    /// Write the in-jail accounting file the tddy MCP server produces (camelCase token fields).
+    fn write_accounting(session_dir: &Path) {
+        let egress = session_dir.join("egress");
+        std::fs::create_dir_all(&egress).unwrap();
+        std::fs::write(
+            egress.join("accounting.json"),
+            serde_json::json!({
+                "conversations": [{
+                    "agent": "explorer",
+                    "id": "fc-1",
+                    "model": "ollama",
+                    "inputTokens": 5,
+                    "outputTokens": 1,
+                    "totalTokens": 6,
+                    "turns": 1,
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn merges_main_agent_its_task_subagents_and_the_accounting_file_in_order() {
+        // Given a session with a main transcript, one Task subagent, and a tddy accounting file
+        let tmp = tempfile::tempdir().unwrap();
+        let claude_home = tmp.path().join("home");
+        let session_dir = tmp.path().join("session");
+        write_main_transcript(&claude_home, "sess-1", "claude-opus-4-8", 100, 20);
+        write_subagent(
+            &claude_home,
+            "sess-1",
+            "agent-01",
+            "Explore",
+            "claude-haiku-4-5",
+            40,
+            8,
+        );
+        write_accounting(&session_dir);
+
+        // When
+        let records =
+            gather_session_usage(&session_dir, "sess-1", &claude_home, "fallback-model", true);
+
+        // Then — main agent, then its subagent, then the tddy-subagent row
+        assert_eq!(
+            records,
+            vec![
+                ConversationRecord {
+                    agent: "claude".to_string(),
+                    id: "sess-1".to_string(),
+                    model: "claude-opus-4-8".to_string(),
+                    input_tokens: 100,
+                    output_tokens: 20,
+                    total_tokens: 120,
+                    turns: 1,
+                },
+                ConversationRecord {
+                    agent: "Explore".to_string(),
+                    id: "agent-01".to_string(),
+                    model: "claude-haiku-4-5".to_string(),
+                    input_tokens: 40,
+                    output_tokens: 8,
+                    total_tokens: 48,
+                    turns: 1,
+                },
+                ConversationRecord {
+                    agent: "explorer".to_string(),
+                    id: "fc-1".to_string(),
+                    model: "ollama".to_string(),
+                    input_tokens: 5,
+                    output_tokens: 1,
+                    total_tokens: 6,
+                    turns: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn omits_the_main_agent_and_its_subagents_when_include_main_agent_is_false() {
+        // Given a session that has a Claude transcript on disk, but only the tddy accounting file
+        // should be reported (e.g. a Cursor session — no Claude main-agent row)
+        let tmp = tempfile::tempdir().unwrap();
+        let claude_home = tmp.path().join("home");
+        let session_dir = tmp.path().join("session");
+        write_main_transcript(&claude_home, "sess-2", "claude-opus-4-8", 100, 20);
+        write_accounting(&session_dir);
+
+        // When
+        let records = gather_session_usage(
+            &session_dir,
+            "sess-2",
+            &claude_home,
+            "fallback-model",
+            false,
+        );
+
+        // Then — only the accounting conversation, no claude/subagent rows
+        assert_eq!(
+            records,
+            vec![ConversationRecord {
+                agent: "explorer".to_string(),
+                id: "fc-1".to_string(),
+                model: "ollama".to_string(),
+                input_tokens: 5,
+                output_tokens: 1,
+                total_tokens: 6,
+                turns: 1,
+            }]
+        );
+    }
+
+    #[test]
+    fn reports_a_single_zero_token_main_agent_row_with_the_fallback_model_when_no_transcript_exists(
+    ) {
+        // Given an empty home and no accounting file
+        let tmp = tempfile::tempdir().unwrap();
+
+        // When
+        let records = gather_session_usage(
+            &tmp.path().join("session"),
+            "sess-x",
+            &tmp.path().join("home"),
+            "fallback-model",
+            true,
+        );
+
+        // Then — one zero-token main-agent row (never an error)
+        assert_eq!(
+            records,
+            vec![ConversationRecord {
+                agent: "claude".to_string(),
+                id: "sess-x".to_string(),
+                model: "fallback-model".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                turns: 0,
+            }]
+        );
+    }
+}

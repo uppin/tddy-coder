@@ -16,8 +16,8 @@ cargo run -p tddy-acp-stub -- --scenario /path/to/scenario.json
 
 ## Architecture
 
-Implements `acp::Agent` from agent-client-protocol. Reads JSON scenario from `--scenario <path>` or `TDDY_ACP_SCENARIO` env var. Scenario defines responses (chunks, tool_calls, permission_requests, stop_reason). Used by tddy-core ACP acceptance tests.
+Implements `acp::Agent` from agent-client-protocol. Reads JSON scenario from `--scenario <path>` or `TDDY_ACP_SCENARIO` env var. Scenario defines responses (chunks, tool_calls, permission_requests, stop_reason). Used by tddy-agent-backend's ACP acceptance tests.
 
 ## Documentation
 
-- [tddy-core docs](../tddy-core/docs/architecture.md) — ClaudeAcpBackend architecture
+- [tddy-agent-backend docs](../tddy-agent-backend/docs/architecture.md) — ClaudeAcpBackend architecture

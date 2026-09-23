@@ -1,160 +1,35 @@
-//! Core library for tddy-coder.
+//! Core library for tddy-coder — a wiring point.
+//!
+//! Every group of code lives in a crate of its own; this crate re-exports each of them whole, so
+//! every `tddy_core::<module>::…` path and every root-level item consumers name resolves exactly as
+//! it did when the code lived here. New code should name the owning crate directly.
 
-pub mod agent_activity;
-pub mod agent_skills;
+pub use tddy_agent_backend::*;
+pub use tddy_agent_skills::*;
+pub use tddy_changeset::*;
+pub use tddy_log::*;
+pub use tddy_presenter::*;
+pub use tddy_session_actions::*;
+pub use tddy_session_worktree::*;
+pub use tddy_toolcall::*;
+pub use tddy_workflow_engine::*;
+
 pub mod atomic_file;
-pub mod backend;
-pub mod base_sync;
-pub mod branch_worktree_intent;
 pub mod changeset;
-pub mod claude_argv;
-pub mod claude_hooks;
-pub mod cursor_hooks;
-pub mod elapsed_format;
 pub mod error;
-pub mod feature_start_slash;
-pub mod git_head;
-pub mod log_backend;
 pub mod output;
-pub mod post_workflow;
-pub mod presenter;
-pub mod session_action_jobs;
-pub mod session_action_pipeline;
-pub mod session_actions;
-pub mod session_activity;
-pub mod session_agent;
-pub mod session_chain;
-pub mod session_context;
-pub mod session_label;
-pub mod session_lifecycle;
-pub mod session_metadata;
-pub mod session_participant_metadata;
-pub mod source_path;
-pub mod spawn_env;
 pub mod ssh_exec;
-pub mod stdio_safety;
-pub mod stream;
-#[cfg(test)]
-pub(crate) mod test_support;
-pub mod token_accounting;
-pub mod toolcall;
-pub mod usage_watcher;
-pub mod workflow;
-pub mod worktree;
 
-pub use agent_skills::{
-    agents_skills_scan_cache_token, compose_prompt_skill_reference,
-    compose_prompt_with_selected_skill, folder_name_matches_frontmatter_name,
-    parse_skill_frontmatter, read_skill_markdown_body_for_compose, scan_skills_at_project_root,
-    slash_menu_entries, slash_menu_items, DiscoveredSkill, InvalidSkillEntry,
-    ParsedSkillFrontmatter, SkillMdParseError, SkillScanReport, SlashMenuEntry, SlashMenuItem,
-    AGENTS_SKILLS_DIR,
-};
 pub use atomic_file::{write_atomic, write_atomic_labelled};
-pub use backend::{
-    backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,
-    default_model_for_agent, get_child_pid, kill_child_process, preselected_index_for_agent,
-    recipe_cli_name_from_selection_label, set_child_pid, workflow_recipe_selection_question,
-    AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend, ClaudeCodeBackend,
-    ClaudeInvokeConfig, CodexAcpBackend, CodexBackend, CodingBackend, CursorBackend,
-    InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionMode,
-    ProcessToolExecutor, QuestionOption, RemoteToolEnv, SessionMode, SharedBackend, StubBackend,
-    ToolExecutor, CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_ID_FILENAME,
-};
-pub use changeset::{
-    append_session_and_update_state, get_session_for_tag, merge_persisted_workflow_into_context,
-    read_changeset, resolve_agent_from_changeset, resolve_model, start_goal_for_session_continue,
-    update_state, write_changeset, write_changeset_atomic, BranchWorktreeIntent, Changeset,
-    ChangesetState, ChangesetWorkflow, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
-    GithubPrStatus, QuestionOptionForQa, SessionEntry, StateTransition,
-};
-pub use changeset::{
-    link_stack_node_to_child_session, sync_stack_node_from_child, update_stack_atomic,
-    PrInternalStatus, Stack, StackNode,
-};
-pub use claude_hooks::{build_claude_hooks_settings, HookCommandParams};
-pub use cursor_hooks::build_cursor_hooks_settings;
-pub use elapsed_format::format_elapsed_compact;
 pub use error::{BackendError, ParseError, WorkflowError};
-pub use feature_start_slash::{
-    feature_slash_menu_start_command_labels,
-    next_session_recipe_cli_name_after_start_slash_structured_workflow_complete,
-    parse_feature_start_slash_line, remainder_after_start_slash_line,
-    DEFAULT_UNSPECIFIED_WORKFLOW_RECIPE_CLI_NAME, SHIPPED_WORKFLOW_RECIPE_CLI_NAMES,
-};
-pub use log_backend::{
-    config_has_file_output, default_log_config, find_matching_policy, get_buffered_logs,
-    init_tddy_logger, init_tddy_logger_legacy, matches_selector, redirect_debug_output,
-    resolve_log_defaults, resolve_logger, take_buffered_logs, DefaultLogPolicy, LogConfig,
-    LogOutput, LogPolicy, LogRotation, LogSelector, LoggerDefinition, MatchedPolicy,
-};
-pub use post_workflow::{
-    github_pr_operator_question, post_workflow_elicitation_step_order,
-    post_workflow_github_pr_operator_elicitation_pending, post_workflow_pr_status_display_line,
-    post_workflow_session_worktree_elicitation_pending, session_worktree_removal_question,
-    should_prompt_session_worktree_removal, should_reprompt_github_pr_on_resume,
-    GITHUB_PR_OPERATOR_LABEL_YES, SESSION_WORKTREE_LABEL_YES,
-};
-pub use presenter::{
-    format_worktree_for_status_bar, ActivityEntry, ActivityKind, AgentOutputActivityLogMerge,
-    AppMode, CriticalPresenterState, ExitAction, ModeChangedDetails, PendingWorkflowStart,
-    Presenter, PresenterEvent, PresenterHandle, PresenterState, PresenterView, UserIntent,
-    ViewConnection, WorkflowCompletePayload, WorkflowEvent,
-};
-pub use session_activity::{
-    activity_status_from_hook, parse_hook_event, HookEvent, SessionActivityStatus,
-};
-pub use session_agent::{AgentId, AgentIdError, SessionAgentRecord};
-pub use session_chain::{
-    classify_stack_parent_route, integrate_chain_base_into_session_worktree_bootstrap,
-    parent_is_pr_stack_orchestrator, pr_stack_node_for_spawn, resolve_chain_base_for_session_spawn,
-    resolve_chain_base_ref, resolve_chain_integration_base_ref_from_parent_session,
-    select_worktree_base_ref, spawn_chain_child_worktree, StackParentRoute,
-};
-pub use session_lifecycle::{
-    materialize_unified_session_directory, resolve_effective_session_id, unified_session_dir_path,
-    validate_session_id_segment, SessionIdValidationError, SessionLifecycleBootstrap,
-    UnifiedSessionTreeBootstrap,
-};
-pub use session_metadata::{
-    paired_agent, read_session_metadata, repo_root_for_session, update_activity_status,
-    write_initial_tool_session_metadata, write_session_metadata, InitialToolSessionMetadataOpts,
-    SessionMetadata, SESSION_METADATA_FILENAME,
-};
-pub use source_path::{classify_rust_source_path, RustSourcePathKind};
 pub use ssh_exec::{
     contain_remote_path, default_remote_repo_root, run_ssh_batch, shell_single_quote,
 };
-pub use stream::ProgressEvent;
 pub use tddy_workflow::{
     canonical_artifact_write_path, canonical_attachment_write_path, read_session_artifact_utf8,
     read_session_artifact_utf8_or_placeholder, resolve_existing_session_artifact,
     session_artifacts_root, session_attachments_root, SESSION_ARTIFACT_READ_PLACEHOLDER,
     SESSION_ATTACHMENTS_SUBDIR,
-};
-pub use workflow::{
-    engine::WorkflowEngine,
-    find_git_root,
-    graph::{ElicitationEvent, ExecutionResult, ExecutionStatus},
-    ids::{GoalId, WorkflowState},
-    recipe::{GoalHints, PermissionHint, WorkflowRecipe},
-    session::{workflow_engine_storage_dir, WORKFLOW_ENGINE_STORAGE_SUBDIR},
-    GoalOptions,
-};
-#[allow(deprecated)]
-pub use worktree::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF;
-pub use worktree::{
-    create_worktree, detect_default_remote_name, fetch_integration_base, fetch_origin_master,
-    list_recent_remote_branches, list_recent_remote_branches_skip, list_worktrees,
-    local_branch_name, local_branch_name_for_remote, push_new_branch_to_origin,
-    push_new_branch_to_remote, remove_worktree, resolve_default_integration_base_ref,
-    resolve_default_integration_base_ref_with_remote,
-    resolve_persisted_worktree_integration_base_for_session, set_git_ssh_command,
-    setup_worktree_for_session, setup_worktree_for_session_over_ssh,
-    setup_worktree_for_session_with_integration_base,
-    setup_worktree_for_session_with_optional_chain_base, validate_chain_pr_integration_base_ref,
-    validate_integration_base_ref, worktree_dir, worktree_path_for_branch, WorktreeInfo,
-    FALLBACK_DEFAULT_INTEGRATION_BASE_REF,
 };
 
 #[cfg(test)]

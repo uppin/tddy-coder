@@ -1,57 +1,41 @@
 # tddy-core
 
-Core library for tddy-coder.
+A **wiring point**. `tddy-core` defines no behaviour of its own: every group of code lives in a
+crate of its own, and this crate re-exports each of them whole, so every `tddy_core::<module>::…`
+path and every root-level item consumers name resolves. **New code should name the owning crate
+directly.**
 
 ## Quick Start
 
-### Development
 ```bash
 cargo build -p tddy-core
+cargo test -p tddy-core      # the facade shape and path guards
 ```
 
-### Testing
-```bash
-cargo test -p tddy-core
-```
+## Where the code lives
 
-## Architecture
+| Crate | Modules re-exported here |
+|---|---|
+| [`tddy-workflow`](../tddy-workflow/README.md) | the shared vocabulary (`GoalId`, `WorkflowState`, `GoalHints`, `PermissionHint`, questions, progress, events) and artifact paths |
+| [`tddy-log`](../tddy-log/README.md) | `log_backend`, `stdio_safety` |
+| [`tddy-agent-skills`](../tddy-agent-skills/README.md) | `agent_skills`, `feature_start_slash` |
+| [`tddy-session-store`](../tddy-session-store/README.md) | `atomic_file`, `error`, `output` (through one-line facade modules) |
+| [`tddy-changeset`](../tddy-changeset/README.md) | `changeset`, `branch_worktree_intent`, `session_lifecycle`, `session_metadata`, `session_agent`, `session_activity`, `session_label`, `session_participant_metadata`, `session_context`, `agent_activity`, `elapsed_format`, `source_path` |
+| [`tddy-session-worktree`](../tddy-session-worktree/README.md) | `worktree`, `base_sync`, `session_chain`, `git_head` |
+| [`tddy-session-actions`](../tddy-session-actions/README.md) | `session_actions`, `session_action_jobs`, `session_action_pipeline` |
+| [`tddy-toolcall`](../tddy-toolcall/README.md) | `toolcall` |
+| [`tddy-agent-backend`](../tddy-agent-backend/README.md) | `backend`, `stream`, `token_accounting`, `claude_argv`, `claude_hooks`, `cursor_hooks`, `spawn_env` |
+| [`tddy-workflow-engine`](../tddy-workflow-engine/README.md) | `workflow` |
+| [`tddy-presenter`](../tddy-presenter/README.md) | `presenter`, `post_workflow`, `usage_watcher` |
+| [`tddy-git`](../tddy-git/README.md) | `ssh_exec` |
 
-Core library providing: `CodingBackend` trait (async) for LLM backends, `Workflow` state machine, graph-flow-compatible workflow modules (Task, Context, Graph, FlowRunner, SessionStorage), NDJSON stream parser for Claude Code CLI, output parser for PRD/TODO and acceptance-tests (structured-response and delimited), artifact writer, and changeset.yaml persistence. `PlanTask` and `BackendInvokeTask` implement Task; `build_tdd_workflow_graph()` builds plan→acceptance-tests→red→green→end. `StubBackend` for demo/testing with magic catch-words (CLARIFY, FAIL_PARSE, FAIL_INVOKE). `AgentOutputSink` routes agent output to TUI; `log_backend` provides configurable log routing via `LogConfig` (named loggers with output targets and formats, policies that reference loggers by name and map selectors to level filters), multi-output routing, and startup log rotation. Plan resume: when `--session-dir` has Init state and no PRD.md, workflow runs plan() to complete. JSON Schema validation for all structured output types; validates before serde, retries once on failure. Implements `ClaudeCodeBackend`, `CursorBackend` (production), `MockBackend`, `StubBackend` (testing/demo). Supports plan, acceptance-tests, red, green, demo, evaluate, validate, and refactor workflow steps. Changeset stores initial_prompt, clarification_qa, sessions (with system_prompt_file per session), discovery, and workflow state. **Presenter view decoupling**: Presenter exposes `connect_view()` → `ViewConnection` (state snapshot + event_rx + intent_tx) for per-connection virtual TUIs; `NoopView` for headless/daemon mode.
+The per-session SQLite catalog lives in [`tddy-session-catalog`](../tddy-session-catalog/README.md)
+and has **no facade here**, so `tddy-core` never pulls `sqlx` into a dependent's build.
 
-## Shape
-
-`changeset.yaml` persistence is four modules behind a facade that defines nothing:
-`changeset/{model,stack,io,merge}.rs` — the manifest's data model, the PR-stack DAG an orchestrator
-session carries beside it, the atomic reads and writes, and what a stored changeset means for the
-run about to happen.
-
-The **shared vocabulary lives in [`tddy-workflow`](../tddy-workflow/README.md)**, not here:
-`GoalId`, `WorkflowState`, `ClarificationQuestion`, `QuestionOption`, `ProgressEvent`,
-`WorkflowEvent`. Each origin keeps a glob facade, so the old paths still resolve. This is what lets
-`stream`, `toolcall`, `workflow` and `presenter` name a shared DTO without naming each other — three
-of the crate's six module cycles were nothing but that.
-
-`backend/` no longer re-exports the workflow's vocabulary. It still *uses* `GoalId` and `GoalHints`;
-it does not publish them, so `tddy_core::workflow::recipe::` and `tddy_core::workflow::ids::` are
-the paths to name. The remaining `backend <-> workflow` edge is real and is why `backend/` is not
-its own crate — see
-[the todo](../../docs/dev/todo/2026-09-19-backend-cannot-be-extracted-while-workflow-recipe-is-not-a-leaf.md).
-
-The **session storage layer lives in [`tddy-session-store`](../tddy-session-store/README.md)**:
-`atomic_file`, `error`, `output` and `session_actions`. Each old path is a glob facade, so
-`tddy_core::error::WorkflowError` and the rest still resolve. `session_actions` is the one facade
-that also defines something: `list_actions_in_session_dir` and `invoke_action_in_session_dir` stay
-here, because they read the session's `changeset.yaml` through `read_changeset`.
-
-The **per-session SQLite catalog lives in [`tddy-session-catalog`](../tddy-session-catalog/README.md)**
-and has **no facade here**. This crate does not depend on `sqlx`. A facade would put SQLite back
-into every dependent's build, so the catalog's consumers name `tddy_session_catalog` directly.
-
-`Presenter` holds seven fields: five owned state groups (`WorkflowRun`, `PendingQuestions`,
-`ActivityRecorder`, `ViewChannels`, `BackendSelection`) plus `state` and `tddy_data_dir`.
-Its methods follow the same boundaries: `presenter/presenter_impl.rs` keeps the struct, the
-private helpers every group calls and the `poll_workflow` dispatcher, and one `impl Presenter`
-per group lives in `presenter_impl/{wiring,view_channels,activity,questions,backend_selection,workflow_run}.rs`.
+What this crate still holds: `lib.rs` (nine `pub use tddy_<crate>::*;` lines, plus root re-exports
+from `tddy-workflow`, `tddy-session-store` and `ssh_exec`), four facade modules and `ssh_exec.rs` —
+54 production lines by the shape test's count. See [docs/architecture.md](docs/architecture.md) for the dependency order and
+the guards that hold it.
 
 ## Documentation
 
@@ -59,6 +43,6 @@ per group lives in `presenter_impl/{wiring,view_channels,activity,questions,back
 - [Session actions (`tddy-tools`)](../../docs/ft/coder/session-actions.md)
 
 ### Technical Implementation (How)
-- [Architecture](./docs/architecture.md) — Component structure and data flow
-- [Changesets](./docs/changesets/) — Applied changeset history
+- [Architecture](./docs/architecture.md) — the facade, the crates behind it, their dependency order
+- [Changesets](./docs/changesets/) — applied changeset history
 - [Tech Stack](../../docs/dev/guides/tech-stack.md) — Workspace layout, toolchain

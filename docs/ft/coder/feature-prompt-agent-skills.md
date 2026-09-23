@@ -49,7 +49,7 @@ The reference string includes:
 
 | Location | Focus |
 |----------|--------|
-| **`packages/tddy-core/src/agent_skills.rs`** (`#[cfg(test)]`) | Frontmatter parsing, folder/name match, cache token when the skills directory exists. |
+| **`packages/tddy-agent-skills/src/agent_skills.rs`** (`#[cfg(test)]`) | Frontmatter parsing, folder/name match, cache token when the skills directory exists. |
 | **`packages/tddy-coder/tests/prompt_slash_skills_acceptance.rs`** | Discovery, mismatch quarantine, menu contents, composition literals, recipe slash presenter mode. |
 | **`packages/tddy-coder/tests/prompt_slash_skills_lower.rs`** | Menu with no skills directory; non-empty invalid reasons. |
 
@@ -66,4 +66,4 @@ See [rust-code-analysis.md](rust-code-analysis.md) and [rust-code-restructuring.
 
 - [Workflow recipes](workflow-recipes.md) — recipe CLI names, defaults, and **`/start-<recipe>`** behavior.  
 - [Coder overview](1-OVERVIEW.md) — product capabilities table.  
-- **`packages/tddy-core/docs/architecture.md`** — presenter and **`agent_skills`** module notes.
+- **`packages/tddy-agent-skills/docs/architecture.md`** — **`agent_skills`** module notes; **`packages/tddy-presenter/docs/architecture.md`** — presenter.

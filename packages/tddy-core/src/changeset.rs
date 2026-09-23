@@ -1,17 +1,5 @@
-//! Changeset manifest — unified workflow state, sessions, and model configuration.
-//!
-//! Replaces `.session` and `.impl-session` with a single `changeset.yaml` file.
-//!
-//! The manifest is four concerns, each its own module: the [`model`] it stores, the PR [`stack`]
-//! an orchestrator session carries beside it, the [`io`] that persists both, and what [`merge`]
-//! makes of them when a session continues. This module publishes them and defines nothing.
+//! The changeset manifest lives in [`tddy_changeset::changeset`]. Re-exported at its old path for
+//! existing callers, together with the session-continue goal the workflow engine chooses from it.
 
-pub mod io;
-pub mod merge;
-pub mod model;
-pub mod stack;
-
-pub use io::*;
-pub use merge::*;
-pub use model::*;
-pub use stack::*;
+pub use tddy_changeset::changeset::*;
+pub use tddy_workflow_engine::start_goal_for_session_continue;

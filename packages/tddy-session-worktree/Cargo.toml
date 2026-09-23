@@ -1,0 +1,17 @@
+[package]
+name = "tddy-session-worktree"
+version = "0.1.0"
+edition = "2021"
+description = "A session's git worktree: setup and reuse, integration and chain bases, and base sync"
+
+[dependencies]
+log = "0.4"
+tddy-changeset = { path = "../tddy-changeset" }
+# `WorkflowError`, which every worktree operation reports through.
+tddy-session-store = { path = "../tddy-session-store" }
+# The `git` plumbing the worktree is built on. Depends on no workspace crate.
+tddy-git = { path = "../tddy-git" }
+
+[dev-dependencies]
+tempfile = "3"
+tddy-workflow = { path = "../tddy-workflow" }

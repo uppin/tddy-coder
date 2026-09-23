@@ -11755,6 +11755,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-agent-backend"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "async-trait",
+ "glob",
+ "libc",
+ "log",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tddy-sandbox",
+ "tddy-session-store",
+ "tddy-toolcall",
+ "tddy-workflow",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "tddy-agent-skills"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
 name = "tddy-bsp"
 version = "0.1.0"
 dependencies = [
@@ -11872,6 +11904,26 @@ dependencies = [
  "tddy-testing-commons",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "tddy-changeset"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tddy-graph",
+ "tddy-session-store",
+ "tddy-testing-commons",
+ "tddy-workflow",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -12010,37 +12062,18 @@ dependencies = [
 name = "tddy-core"
 version = "0.1.0"
 dependencies = [
- "agent-client-protocol",
- "anyhow",
- "async-trait",
- "chrono",
- "dashmap 6.2.1",
- "futures",
- "glob",
- "jsonschema 0.44.1",
- "libc",
- "log",
- "once_cell",
- "pretty_assertions",
- "rstest 0.24.0",
- "serde",
- "serde_json",
- "serde_yaml",
- "serial_test",
+ "tddy-agent-backend",
+ "tddy-agent-skills",
+ "tddy-changeset",
  "tddy-git",
- "tddy-graph",
- "tddy-rpc",
- "tddy-sandbox",
+ "tddy-log",
+ "tddy-presenter",
+ "tddy-session-actions",
  "tddy-session-store",
- "tddy-stdio",
- "tddy-task",
- "tddy-testing-commons",
+ "tddy-session-worktree",
+ "tddy-toolcall",
  "tddy-workflow",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "uuid",
+ "tddy-workflow-engine",
 ]
 
 [[package]]
@@ -12615,6 +12648,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-log"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "libc",
+ "log",
+ "once_cell",
+ "rstest 0.24.0",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+]
+
+[[package]]
 name = "tddy-lsp"
 version = "0.1.0"
 dependencies = [
@@ -12689,6 +12736,28 @@ dependencies = [
  "tddy-service",
  "tddy-workflow",
  "tempfile",
+]
+
+[[package]]
+name = "tddy-presenter"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pretty_assertions",
+ "serde_json",
+ "tddy-agent-backend",
+ "tddy-agent-skills",
+ "tddy-changeset",
+ "tddy-graph",
+ "tddy-log",
+ "tddy-session-store",
+ "tddy-session-worktree",
+ "tddy-toolcall",
+ "tddy-workflow",
+ "tddy-workflow-engine",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -13046,6 +13115,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-session-actions"
+version = "0.1.0"
+dependencies = [
+ "glob",
+ "jsonschema 0.44.1",
+ "log",
+ "serde",
+ "serde_json",
+ "tddy-changeset",
+ "tddy-session-store",
+ "tddy-task",
+ "tddy-testing-commons",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tddy-session-activity"
 version = "0.1.0"
 dependencies = [
@@ -13281,6 +13367,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-session-worktree"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "tddy-changeset",
+ "tddy-git",
+ "tddy-session-store",
+ "tddy-workflow",
+ "tempfile",
+]
+
+[[package]]
 name = "tddy-spawn"
 version = "0.1.0"
 dependencies = [
@@ -13491,6 +13589,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-toolcall"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "tddy-rpc",
+ "tddy-session-actions",
+ "tddy-stdio",
+ "tddy-workflow",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-tools"
 version = "0.1.0"
 dependencies = [
@@ -13663,6 +13779,26 @@ dependencies = [
  "pretty_assertions",
  "rstest 0.24.0",
  "serde",
+]
+
+[[package]]
+name = "tddy-workflow-engine"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "log",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tddy-agent-backend",
+ "tddy-changeset",
+ "tddy-graph",
+ "tddy-session-store",
+ "tddy-testing-commons",
+ "tddy-toolcall",
+ "tddy-workflow",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]
