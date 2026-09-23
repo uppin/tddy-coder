@@ -201,7 +201,7 @@ characterisation tests.
 ## Green wave
 
 **Wave:** after #522.
-**Greenable independently:** **not until #522 is green.** It inherits #522's three open failures
+**Greenable independently:** **not until #522 is green and #527 (the engine fixes) has reached this branch.** It inherits #522's three open failures
 (`git_plumbing_shape` ×2, `session_store_shape` ×1). The baseline is taken later, at the developer's
 call (2026-09-23), and records them by name if they are still red.
 **Concurrent with:** nothing.
@@ -212,7 +212,7 @@ call (2026-09-23), and records them by name if they are still red.
 | Item | Verdict | What this change does about it |
 |---|---|---|
 | #522 not yet green (3 known failures) | ⛔ **BLOCKING the baseline** | The baseline is taken later; it records the 3 by name if still red |
-| Engine defects E1 (import loop), E2 (`req: _`), E3 (`impl`-seam refusal), in "Restructure plans" | ⛔ **BLOCKING** the seams they refuse | **The developer decides**: fix `tddy-code-restructuring` first (its own node below this one), or hand-split the refused seams (`git mv` plus `use` fixes, each recorded with its refusal) |
+| Engine defects E1 (import loop), E2 (`req: _`), E3 (`impl`-seam refusal), in "Restructure plans" | ⛔ **BLOCKING** the seams they refuse | **Fixed in #527**, a standalone PR on `master` outside this stack (developer, 2026-09-23). The refused plans (`01`, `02`, `05`, `08`, `10`) wait until #527 is on `master` and this branch has been rebased to include it. Then they are re-run with `check --deep` |
 | `docs/code-issues/crap-svc-start-sandboxed-cursor-cli-session.md`: "**Restructure: no — tests first**" | ⛔ **BLOCKING** for that function | Characterisation tests land before its seams are cut |
 | The 10 `complexity-*.md` records (`start_session_core`, `start_sandboxed_claude_cli_session`, `spawn_cursor_cli_session_inner`, `resume_session_at_session_coordinate`, `spawn_split_agent`, `delete_paired_codebase_session`, `start_split_claude_cli_session`, `ensure_project_available_for_start`, `resume_claude_cli_session`, `handle_rpc`) | ✅ **RESOLVED HERE** | Extract-method, then re-measure. Delete the record, or narrow it if the fix is partial |
 | The 5 `oversized-file-*.md` records (`connection_service`, `session_coordinate_handlers`, `split_session`, `svc_spawn_split_agent`, `svc_start_session_core`) | ✅ **RESOLVED HERE** | Split below 500, then re-measure and delete. Their designed seams are the starting point |
