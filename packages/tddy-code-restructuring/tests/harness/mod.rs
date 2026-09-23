@@ -753,6 +753,39 @@ fn a_crate_binding_an_alias_to(generated: &[&str]) -> AFixtureWorkspace {
         .writing(ORIGIN_LIB, &source(&lines))
 }
 
+/// A crate whose parent still names, bare, a trait the seam at lines 3–5 moves.
+///
+/// The assist rewrites a call to a moved function into a path through the new module, but it leaves
+/// `impl Named for Thing` and `&dyn Named` as they were. Those names are unresolved in the parent
+/// only because the seam moved the trait, so the import pass has to restore them there, with a
+/// `use` in the parent rather than one in the module.
+pub fn a_crate_whose_parent_names_a_trait_the_seam_moves() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! The file the seam leaves.",
+                "",
+                "pub trait Named {",
+                "    fn name(&self) -> u32;",
+                "}",
+                "",
+                "pub struct Thing;",
+                "",
+                "impl Named for Thing {",
+                "    fn name(&self) -> u32 {",
+                "        1",
+                "    }",
+                "}",
+                "",
+                "pub fn named(thing: &dyn Named) -> u32 {",
+                "    thing.name()",
+                "}",
+            ]),
+        )
+}
+
 /// A crate that binds a module through a **grouped** `use`, where one seam holds its only user.
 ///
 /// `use shared::sync::{mpsc, RwLock};` is the shape of `cli_session_manager.rs`'s

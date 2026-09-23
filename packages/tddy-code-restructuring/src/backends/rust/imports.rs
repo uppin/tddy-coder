@@ -9,8 +9,8 @@ use serde_json::{json, Value};
 use super::{
     alias_target, apply_lsp_edit, edits_for, facade_will_bind, group_members, import_order,
     module_bounds, occurrences_of, parent_binding, reached_through_qualifier, seam_refusal,
-    server_defect, titled, use_tree, with_module_import, MovedItem, RustBackend, UnresolvedName,
-    IMPORT_PASSES, IMPORT_TITLE,
+    server_defect, titled, use_tree, with_module_import, ModuleBlock, MovedItem, RustBackend,
+    UnresolvedName, IMPORT_PASSES, IMPORT_TITLE,
 };
 use crate::plan::Reexport;
 use crate::Result;
@@ -50,11 +50,21 @@ impl RustBackend {
         // Names every offered path failed. Re-asking one would be offered the same useless import
         // again, and every pass would insert another copy of it.
         let mut unimportable: Vec<String> = Vec::new();
+
+        // Read once, off the file as it was: what was unresolved before the seam was cut is not
+        // something the seam lost.
+        self.did_change(uri, original)?;
+        let already_unresolved = self
+            .unresolved_names(uri, original)?
+            .into_iter()
+            .map(|found| found.text)
+            .collect();
         let seam = Seam {
             original,
             module,
             moved,
             reexport,
+            already_unresolved,
         };
 
         for _ in 0..IMPORT_PASSES {
@@ -77,10 +87,10 @@ impl RustBackend {
     /// fields that are unresolved only because their receiver's type is, and they come back on
     /// their own once it does. What is left when no import remains is for the compiler to judge.
     ///
-    /// Only the new module's names are weighed. A name the server cannot resolve in the parent was
-    /// not lost by this seam, and no `use` written into the module can resolve it there — asking
-    /// about one is how a file whose alias the server could not see had the same line written into
-    /// a module that named nothing, once a pass, until the backstop.
+    /// Only the names the seam lost are weighed — see [`Self::unresolved_the_seam_lost`]. A name
+    /// the parent could not resolve before the cut is not one, and no `use` written into the module
+    /// can resolve it there: asking about one is how a file whose alias the server could not see had
+    /// the same line written into a module that named nothing, once a pass, until the backstop.
     fn next_import(
         &mut self,
         uri: &str,
@@ -90,7 +100,9 @@ impl RustBackend {
     ) -> Result<Option<String>> {
         let module = seam.module;
         let mut asked: Vec<String> = Vec::new();
-        let unresolved = self.unresolved_in_module(uri, text, module)?;
+        let unresolved = self.unresolved_the_seam_lost(uri, text, seam)?;
+        let source: Vec<String> = text.split('\n').map(str::to_string).collect();
+        let block = module_bounds(&source, module)?;
 
         for name in &unresolved {
             // One import serves every occurrence of a name, and a name that offered none here will
@@ -136,10 +148,14 @@ impl RustBackend {
             // offers the *unaliased* path, which does not bind the alias, so asking the server can
             // only produce a `use` that resolves nothing and the run then refuses. The parent's own
             // declaration already says what the moved code meant, so reconstruct it from there.
-            if let Some(path) = alias_target(text, module, &name.text) {
+            //
+            // Both reconstructions write into the module, so they answer only for an occurrence
+            // inside it. One the parent lost is left to what the server offers there.
+            let inside = within(&block, name);
+            if let Some(path) = alias_target(text, module, &name.text).filter(|_| inside) {
                 let declaration = format!("use {path} as {};", name.text);
                 return self
-                    .reconstructed(uri, text, module, &name.text, before, &declaration)
+                    .reconstructed(uri, text, seam, &name.text, before, &declaration)
                     .map(Some);
             }
 
@@ -167,10 +183,10 @@ impl RustBackend {
                 // code with nothing on offer for it — and skipping silently is how three modules
                 // landed referencing an unlinked crate. The parent's own declaration says what it
                 // meant, exactly as for an alias.
-                if let Some(path) = parent_binding(text, module, &name.text) {
+                if let Some(path) = parent_binding(text, module, &name.text).filter(|_| inside) {
                     let declaration = format!("use {path};");
                     return self
-                        .reconstructed(uri, text, module, &name.text, before, &declaration)
+                        .reconstructed(uri, text, seam, &name.text, before, &declaration)
                         .map(Some);
                 }
                 continue;
@@ -194,8 +210,10 @@ impl RustBackend {
 
                 self.did_change(uri, &trial)?;
 
-                let after =
-                    occurrences_of(&self.unresolved_in_module(uri, &trial, module)?, &name.text);
+                let after = occurrences_of(
+                    &self.unresolved_the_seam_lost(uri, &trial, seam)?,
+                    &name.text,
+                );
                 if after < before {
                     return Ok(Some(trial));
                 }
@@ -229,15 +247,15 @@ impl RustBackend {
         &mut self,
         uri: &str,
         text: &str,
-        module: &str,
+        seam: &Seam<'_>,
         name: &str,
         before: usize,
         declaration: &str,
     ) -> Result<String> {
-        let trial = with_module_import(text, module, declaration)?;
+        let trial = with_module_import(text, seam.module, declaration)?;
         self.did_change(uri, &trial)?;
 
-        let after = occurrences_of(&self.unresolved_in_module(uri, &trial, module)?, name);
+        let after = occurrences_of(&self.unresolved_the_seam_lost(uri, &trial, seam)?, name);
         if after < before {
             return Ok(trial);
         }
@@ -251,29 +269,37 @@ impl RustBackend {
         )))
     }
 
-    /// The names the server cannot resolve inside the module the assist wrote, in source order.
-    fn unresolved_in_module(
+    /// The names the server cannot resolve that the seam lost, in source order.
+    ///
+    /// Every unresolved occurrence inside the module the assist wrote counts. One in the parent
+    /// counts only for a name the file resolved everywhere before the cut: that is a reference the
+    /// move stranded — a trait the parent still names bare, which the assist does not rewrite — and
+    /// a `use` in the parent restores it. A name already unresolved before the cut was not lost here,
+    /// and is not this pass's to answer for.
+    fn unresolved_the_seam_lost(
         &mut self,
         uri: &str,
         text: &str,
-        module: &str,
+        seam: &Seam<'_>,
     ) -> Result<Vec<UnresolvedName>> {
         let source: Vec<String> = text.split('\n').map(str::to_string).collect();
-        let block = module_bounds(&source, module)?;
-        let inside = |found: &UnresolvedName| {
-            found
-                .position
-                .get("line")
-                .and_then(Value::as_u64)
-                .is_some_and(|line| line > block.opened as u64 && line < block.closed as u64)
-        };
+        let block = module_bounds(&source, seam.module)?;
 
         Ok(self
             .unresolved_names(uri, text)?
             .into_iter()
-            .filter(inside)
+            .filter(|found| within(&block, found) || !seam.already_unresolved.contains(&found.text))
             .collect())
     }
+}
+
+/// Whether an unresolved name sits inside the module block, between its header and closing brace.
+fn within(block: &ModuleBlock, found: &UnresolvedName) -> bool {
+    found
+        .position
+        .get("line")
+        .and_then(Value::as_u64)
+        .is_some_and(|line| line > block.opened as u64 && line < block.closed as u64)
 }
 
 /// What the import pass knows about the seam it is restoring names for.
@@ -284,6 +310,8 @@ struct Seam<'a> {
     module: &'a str,
     moved: &'a [MovedItem],
     reexport: Reexport,
+    /// Every name the server could not resolve anywhere in the file before the assist ran.
+    already_unresolved: Vec<String>,
 }
 
 impl Seam<'_> {

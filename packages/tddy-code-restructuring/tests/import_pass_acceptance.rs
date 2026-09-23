@@ -1,6 +1,7 @@
 //! The import pass behind `extract_module`, against a live rust-analyzer.
 //!
-//! These cover four things: defect E1, the D8 alias restoration E1 sits in the path of, the
+//! These cover five things: defect E1, the D8 alias restoration E1 sits in the path of, the
+//! restoration of a name the parent lost to the seam, which E1's fix must not scope away, the
 //! grouped-`use` ambiguity, and what the pass does on a server that has only just started. Each
 //! seam is judged by what `cargo check` says of the tree afterwards. The engine can report success
 //! over a `use` line that resolves nothing, so the compiler is the only check it cannot fool.
@@ -19,6 +20,7 @@ use std::ops::RangeInclusive;
 
 use harness::{
     a_crate_whose_alias_only_the_compiler_resolves, a_crate_whose_alias_the_server_resolves,
+    a_crate_whose_parent_names_a_trait_the_seam_moves,
     a_workspace_whose_parent_binds_a_module_in_a_group, an_extract_module_of, assert_compiles,
     performing, performing_once_settled, refusal_once_settled_from, the_module_named, ORIGIN_LIB,
 };
@@ -29,6 +31,8 @@ const A_SEAM_NAMING_NOTHING: RangeInclusive<u32> = 17..=19;
 const A_SEAM_NAMING_THE_ALIAS: RangeInclusive<u32> = 21..=23;
 /// `fn open_channel() -> mpsc::Sender`: the only use of the parent's grouped `mpsc`.
 const A_SEAM_HOLDING_THE_ONLY_USE_OF_MPSC: RangeInclusive<u32> = 11..=13;
+/// `pub trait Named { … }`, which the parent goes on naming in an `impl` and a `&dyn`.
+const A_SEAM_TAKING_THE_TRAIT: RangeInclusive<u32> = 3..=5;
 
 const THE_PARENT_S_ALIAS: &str = "use crate::proto::Event as StartSessionEventKind;";
 
@@ -132,6 +136,30 @@ async fn imports_the_module_the_parent_bound_in_a_group_the_seam_empties() {
     assert!(
         module.contains("use shared::sync::mpsc;"),
         "the module did not import the `mpsc` the parent had bound:\n{module}"
+    );
+    assert_compiles(&workspace);
+}
+
+/// The guard on how narrowly E1's fix scopes the pass: a name the *parent* lost to the seam is
+/// still restored.
+///
+/// E1 is fixed by ignoring what the file could not resolve before the cut. What the cut itself
+/// strands in the parent is a different thing: the assist leaves `impl Named for Thing` naming a
+/// trait that is no longer in scope, and only a `use` in the parent brings it back.
+#[tokio::test(flavor = "multi_thread")]
+async fn imports_into_the_parent_a_trait_the_seam_moved_out_from_under_it() {
+    // Given
+    let workspace = a_crate_whose_parent_names_a_trait_the_seam_moves();
+    let seam = an_extract_module_of(&workspace, ORIGIN_LIB, A_SEAM_TAKING_THE_TRAIT, "naming");
+
+    // When
+    performing_once_settled(&workspace, seam).await;
+
+    // Then
+    let lib = workspace.read(ORIGIN_LIB);
+    assert!(
+        lib.contains("use crate::naming::Named;"),
+        "the parent was not given back the trait it still names:\n{lib}"
     );
     assert_compiles(&workspace);
 }
