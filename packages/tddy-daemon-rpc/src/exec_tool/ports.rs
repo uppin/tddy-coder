@@ -1,12 +1,13 @@
-//! Family L exec-tool RPCs — host side of [`tddy_tool_engine::exec_tool_service::ExecToolHandler`].
+//! Family L — [`tddy_tool_engine::exec_tool_service::ExecToolHandler`], answered by
+//! [`ExecToolRpcHandler`].
 
-use super::family_proto_bridge::wire_same;
-use super::{exec_tool_result_frames, reject_exec_tool_path_traversal, DaemonSessionHost};
-use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
-use crate::tool_engine;
+use super::path_guard::reject_exec_tool_path_traversal;
+use super::result_frames::exec_tool_result_frames;
+use super::ExecToolRpcHandler;
 use async_trait::async_trait;
 use prost::Message as _;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+use tddy_daemon_livekit::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::exec_tools::{
     ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
@@ -19,21 +20,26 @@ use tddy_service::proto::exec_tools::{
     ListExecToolsResponse as ConnListExecToolsResponse,
     ListSessionToolCallsResponse as ConnListSessionToolCallsResponse,
 };
+use tddy_session_lifecycle::connection_service::{
+    authorize_exec_tool_caller, resolve_exec_tool_worktree, wire_same,
+};
+use tddy_session_lifecycle::tool_engine;
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
 use tddy_worktree_service::stream::MpscResultStream;
 
 #[async_trait]
-impl tddy_tool_engine::exec_tool_service::ExecToolHandler for DaemonSessionHost {
+impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler {
     async fn execute_tool(
         &self,
         request: Request<ExecuteToolRequest>,
     ) -> Result<Response<ExecuteToolResponse>, Status> {
-        self.record_rpc_activity();
+        self.rpc_activity.record();
         let req = request.into_inner();
         let req_conn = wire_same::<ExecuteToolRequest, ConnExecuteToolRequest>(&req)?;
 
         // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
         if let Some(answered) = self
+            .peer_routing
             .rpc_served_by_peer(
                 EXEC_TOOL_SERVICE,
                 "ExecuteTool",
@@ -47,24 +53,33 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for DaemonSessionHost 
 
         // Auth before *any* worktree is chosen, because the hosted-clone branch below chooses one
         // that is not this daemon's and proxies its mutations under the clone's own credential.
-        self.authorize_exec_tool_caller(&req_conn)?;
+        authorize_exec_tool_caller(&self.config, &self.user_resolver, &req_conn)?;
 
         // A session this daemon holds an *agent clone* for lives on another daemon, so the ordinary
         // "resolve the worktree from my own sessions base" would find nothing. Checked before that
         // resolution rather than after it, so the read/write split is what answers rather than a
         // not-found for a session that legitimately is not here.
-        if let Some(clone) = self.hosted_clone_for(&req.session_id) {
+        if let Some(clone) = self.local_exec_tools.hosted_clone_for(&req.session_id) {
             reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
-            let answered = self.run_hosted_clone_tool(&req_conn, &clone).await;
+            let answered = self
+                .local_exec_tools
+                .run_hosted_clone_tool(&req_conn, &clone)
+                .await;
             return Ok(Response::new(wire_same::<
                 ConnExecuteToolResponse,
                 ExecuteToolResponse,
             >(&answered)?));
         }
 
-        let (sessions_base, worktree_root) = self.resolve_exec_tool_worktree(&req_conn)?;
+        let (sessions_base, worktree_root) = resolve_exec_tool_worktree(
+            &self.config,
+            &self.user_resolver,
+            &self.tddy_data_dir,
+            &req_conn,
+        )?;
         reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
         let response = self
+            .local_exec_tools
             .run_exec_tool_locally(&req_conn, &sessions_base, &worktree_root)
             .await;
         Ok(Response::new(wire_same::<
@@ -85,17 +100,18 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for DaemonSessionHost 
         &self,
         request: Request<ExecuteToolRequest>,
     ) -> Result<Response<MpscResultStream<ExecuteToolChunk>>, Status> {
-        self.record_rpc_activity();
+        self.rpc_activity.record();
         let req = request.into_inner();
         let req_conn = wire_same::<ExecuteToolRequest, ConnExecuteToolRequest>(&req)?;
 
-        if let PeerRoute::Forward { peer_instance_id } =
-            self.classify_addressed_daemon_route("StreamExecuteTool", &req.daemon_instance_id)?
+        if let PeerRoute::Forward { peer_instance_id } = self
+            .peer_routing
+            .classify_addressed_daemon_route("StreamExecuteTool", &req.daemon_instance_id)?
         {
             log::info!(
                 "StreamExecuteTool: forwarding stream to remote daemon_instance_id={peer_instance_id}"
             );
-            let slot = self.common_room_slot("StreamExecuteTool")?;
+            let slot = self.peer_routing.common_room_slot("StreamExecuteTool")?;
             // A forwarded stream that stalls terminates as an *error*, so a truncated tool result
             // can never reach the caller looking complete.
             let mut conn_rx =
@@ -122,19 +138,27 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for DaemonSessionHost 
 
         // See the unary handler: auth first, because the hosted-clone branch resolves no worktree of
         // this daemon's and would otherwise be reachable with no credential at all.
-        self.authorize_exec_tool_caller(&req_conn)?;
+        authorize_exec_tool_caller(&self.config, &self.user_resolver, &req_conn)?;
 
         // A session this daemon holds an agent clone for is served by the read/write split, from a
         // checkout that is not in this daemon's own sessions base.
-        let response = match self.hosted_clone_for(&req.session_id) {
+        let response = match self.local_exec_tools.hosted_clone_for(&req.session_id) {
             Some(clone) => {
                 reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
-                self.run_hosted_clone_tool(&req_conn, &clone).await
+                self.local_exec_tools
+                    .run_hosted_clone_tool(&req_conn, &clone)
+                    .await
             }
             None => {
-                let (sessions_base, worktree_root) = self.resolve_exec_tool_worktree(&req_conn)?;
+                let (sessions_base, worktree_root) = resolve_exec_tool_worktree(
+                    &self.config,
+                    &self.user_resolver,
+                    &self.tddy_data_dir,
+                    &req_conn,
+                )?;
                 reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
-                self.run_exec_tool_locally(&req_conn, &sessions_base, &worktree_root)
+                self.local_exec_tools
+                    .run_exec_tool_locally(&req_conn, &sessions_base, &worktree_root)
                     .await
             }
         };
@@ -165,12 +189,15 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for DaemonSessionHost 
         let requested_daemon = req.daemon_instance_id.trim();
         if !requested_daemon.is_empty() {
             let local_id = local_instance_id_for_config(&self.config);
-            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
+            let eligible_rows = self
+                .peer_routing
+                .eligible_daemon_source()
+                .list_eligible_daemons();
             let eligible_ids: Vec<String> = eligible_rows
                 .iter()
                 .map(|e| e.instance_id.0.clone())
                 .collect();
-            match crate::livekit_peer_discovery::classify_peer_route(
+            match tddy_daemon_livekit::livekit_peer_discovery::classify_peer_route(
                 &local_id,
                 requested_daemon,
                 &eligible_ids,
@@ -179,18 +206,20 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for DaemonSessionHost 
                     log::info!("ListExecTools: rejected daemon routing: {}", msg);
                     return Err(Status::invalid_argument(msg));
                 }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
+                Ok(tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Forward {
+                    peer_instance_id,
+                }) => {
                     log::info!(
                         "ListExecTools: forwarding RPC to remote daemon_instance_id={}",
                         peer_instance_id
                     );
-                    let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                    let slot = self.peer_routing.common_room_livekit_room().ok_or_else(|| {
                         Status::failed_precondition(
                             "cannot forward ListExecTools: this process has no LiveKit common-room connection",
                         )
                     })?;
                     let body = req.encode_to_vec();
-                    let out = crate::livekit_peer_discovery::forward_to_peer(
+                    let out = tddy_daemon_livekit::livekit_peer_discovery::forward_to_peer(
                         slot,
                         &peer_instance_id,
                         "exec_tools.ExecToolService",
@@ -203,7 +232,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for DaemonSessionHost 
                     })?;
                     return Ok(Response::new(wire_same(&inner)?));
                 }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
+                Ok(tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Local) => {
                     // Fall through to local execution below.
                 }
             }
@@ -233,19 +262,22 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for DaemonSessionHost 
         &self,
         request: Request<ListSessionToolCallsRequest>,
     ) -> Result<Response<ListSessionToolCallsResponse>, Status> {
-        self.record_rpc_activity();
+        self.rpc_activity.record();
         let req = request.into_inner();
 
         // Route BEFORE session lookup so a relay can forward.
         let requested_daemon = req.daemon_instance_id.trim();
         if !requested_daemon.is_empty() {
             let local_id = local_instance_id_for_config(&self.config);
-            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
+            let eligible_rows = self
+                .peer_routing
+                .eligible_daemon_source()
+                .list_eligible_daemons();
             let eligible_ids: Vec<String> = eligible_rows
                 .iter()
                 .map(|e| e.instance_id.0.clone())
                 .collect();
-            match crate::livekit_peer_discovery::classify_peer_route(
+            match tddy_daemon_livekit::livekit_peer_discovery::classify_peer_route(
                 &local_id,
                 requested_daemon,
                 &eligible_ids,
@@ -254,18 +286,20 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for DaemonSessionHost 
                     log::info!("ListSessionToolCalls: rejected daemon routing: {}", msg);
                     return Err(Status::invalid_argument(msg));
                 }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
+                Ok(tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Forward {
+                    peer_instance_id,
+                }) => {
                     log::info!(
                         "ListSessionToolCalls: forwarding RPC to remote daemon_instance_id={}",
                         peer_instance_id
                     );
-                    let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                    let slot = self.peer_routing.common_room_livekit_room().ok_or_else(|| {
                         Status::failed_precondition(
                             "cannot forward ListSessionToolCalls: this process has no LiveKit common-room connection",
                         )
                     })?;
                     let body = req.encode_to_vec();
-                    let out = crate::livekit_peer_discovery::forward_to_peer(
+                    let out = tddy_daemon_livekit::livekit_peer_discovery::forward_to_peer(
                         slot,
                         &peer_instance_id,
                         "exec_tools.ExecToolService",
@@ -279,7 +313,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for DaemonSessionHost 
                         })?;
                     return Ok(Response::new(wire_same(&inner)?));
                 }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
+                Ok(tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Local) => {
                     // Fall through to local execution below.
                 }
             }
@@ -298,9 +332,11 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for DaemonSessionHost 
             .map_err(|e| Status::invalid_argument(e.message()))?;
 
         // Resolve the sessions base path.
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = tddy_session_lifecycle::user_sessions_path::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
 
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
 

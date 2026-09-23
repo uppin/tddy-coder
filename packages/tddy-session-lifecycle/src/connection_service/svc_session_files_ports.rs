@@ -98,9 +98,8 @@ impl DaemonSessionHost {
             self.session_agents_entry(),
             self.activity_entry(),
             self.terminal_session_entry(),
-            // TODO(#carve 11): these two come through the port once their handlers move to
-            // `tddy-daemon-rpc`; until then the host still serves them itself.
-            self.exec_tool_entry(),
+            // TODO(#carve 11): this one comes through the port once its handler moves to
+            // `tddy-daemon-rpc`; until then the host still serves it itself.
             self.pr_stack_entry(),
             self.session_lifecycle_entry(),
             self.demo_vm_entry(),

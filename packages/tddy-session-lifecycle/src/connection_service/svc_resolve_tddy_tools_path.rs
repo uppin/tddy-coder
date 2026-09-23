@@ -93,14 +93,18 @@ impl DaemonSessionHost {
         // report READY for a clone nobody built.
         let session_agent_clones =
             Arc::new(crate::session_agent_clone::SessionAgentCloneStore::new());
+        let peer_routing = crate::peer_routing::PeerRouting::new(
+            config.clone(),
+            eligible_daemon_source,
+            common_room_livekit_room,
+        );
         Self {
             config,
             sessions_base_for_user,
             tddy_data_dir,
             user_resolver,
             spawn_client,
-            eligible_daemon_source,
-            common_room_livekit_room,
+            peer_routing,
             presenter_event_sink,
             claude_cli_manager,
             sandbox_manager: Arc::new(
@@ -340,7 +344,8 @@ impl DaemonSessionHost {
         &mut self,
         eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     ) {
-        self.eligible_daemon_source = eligible_daemon_source;
+        self.peer_routing
+            .set_eligible_daemon_source(eligible_daemon_source);
     }
 
     /// Substitute what builds a sandboxed workspace session's jail (builder pattern) — lets a test
@@ -402,7 +407,7 @@ impl DaemonSessionHost {
     ) {
         (
             self.config.clone(),
-            Arc::clone(&self.eligible_daemon_source),
+            Arc::clone(self.peer_routing.eligible_daemon_source()),
             Arc::clone(&self.user_resolver),
         )
     }

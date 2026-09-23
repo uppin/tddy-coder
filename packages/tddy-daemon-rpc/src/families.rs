@@ -13,8 +13,9 @@ use tddy_projects::ProjectServiceImpl;
 use tddy_rpc::ServiceEntry;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::{DaemonRpcFamilies, PrStackHandler};
+use tddy_tool_engine::ExecToolServiceImpl;
 
-use crate::{CatalogRpcHandler, ProjectRpcHandler};
+use crate::{CatalogRpcHandler, ExecToolRpcHandler, ProjectRpcHandler};
 
 /// Every family served from this crate, each built from the same host.
 ///
@@ -23,6 +24,7 @@ use crate::{CatalogRpcHandler, ProjectRpcHandler};
 pub struct RpcHandlers {
     project: Arc<ProjectRpcHandler>,
     catalog: Arc<CatalogRpcHandler>,
+    exec_tool: Arc<ExecToolRpcHandler>,
 }
 
 impl RpcHandlers {
@@ -32,6 +34,7 @@ impl RpcHandlers {
         Self {
             project: Arc::new(ProjectRpcHandler::from_host(host)),
             catalog: Arc::new(CatalogRpcHandler::from_host(host)),
+            exec_tool: Arc::new(ExecToolRpcHandler::from_host(host)),
         }
     }
 
@@ -57,11 +60,18 @@ impl RpcHandlers {
         CatalogServiceImpl::new(Arc::clone(&self.catalog))
     }
 
+    /// `exec_tools.ExecToolService`, answered by the shared [`ExecToolRpcHandler`].
+    #[must_use]
+    pub fn exec_tool_service(&self) -> ExecToolServiceImpl<ExecToolRpcHandler> {
+        ExecToolServiceImpl::new(Arc::clone(&self.exec_tool))
+    }
+
     /// The transport entries of every family served from this crate.
     #[must_use]
     pub fn entries(&self) -> Vec<ServiceEntry> {
         vec![
             tddy_discovery::build_catalog_entry(self.catalog_service()),
+            tddy_tool_engine::build_exec_tool_entry(self.exec_tool_service()),
             tddy_projects::build_project_entry(self.project_service()),
         ]
     }

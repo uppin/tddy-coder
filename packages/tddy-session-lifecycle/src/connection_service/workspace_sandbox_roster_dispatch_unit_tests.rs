@@ -5,6 +5,7 @@ use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
 use tddy_sandbox::SandboxError;
+use tddy_service::proto::exec_tools::ExecuteToolResponse;
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a44";
 const JAIL_MARKER: &str = "ran-inside-the-workspace-jail";

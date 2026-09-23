@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_daemon_rpc::test_util::{test_service, TestDaemon};
 use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
@@ -30,7 +31,7 @@ use tddy_service::proto::session::{
     DeleteSessionRequest, ResumeSessionRequest, SessionService as SessionServiceTrait,
     StartSessionRequest,
 };
-use tddy_session_lifecycle::test_util::{test_service, TestDaemon, TEST_TOKEN};
+use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a42";
 

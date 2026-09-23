@@ -1,7 +1,8 @@
 //! Acceptance tests: workspace session type (PRD: docs/ft/daemon/remote-codebase-mode.md).
 //!
 //! AC1-3, AC11: workspace session creation (no PTY), `.session.yaml` metadata, empty LiveKit
-//! credentials, connect/resume short-circuit, and ExecuteTool working on the worktree.
+//! credentials and the connect/resume short-circuit. ExecuteTool working on the worktree is
+//! `tddy-daemon-rpc`'s `workspace_session_exec_tool_acceptance.rs`, where the exec tools are served.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,7 +11,6 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::read_session_metadata;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
-use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_service::proto::session::{
     ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
@@ -213,82 +213,5 @@ async fn connect_session_workspace_returns_empty_livekit() {
     assert!(
         connect_resp.get_ref().livekit_server_identity.is_empty(),
         "ConnectSession workspace must return empty livekit_server_identity"
-    );
-}
-
-/// AC1+AC5+AC6: after creating a workspace session, `ExecuteTool("Write")` creates a file
-/// in the worktree, and `ExecuteTool("Read")` on the same path returns the written content.
-#[tokio::test]
-async fn workspace_session_execute_tool_write_then_read_round_trips() {
-    // Given
-    let repo_dir = tempfile::tempdir().unwrap();
-    create_test_repo_with_origin(repo_dir.path());
-
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
-    let (_cfg_dir, config) = write_config();
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
-
-    // When
-    let start_resp = service
-        .start_session(Request::new(StartSessionRequest {
-            session_token: VALID_TOKEN.to_string(),
-            session_type: "workspace".to_string(),
-            project_id: TEST_PROJECT_ID.to_string(),
-            ..Default::default()
-        }))
-        .await
-        .expect("StartSession workspace must succeed");
-    let session_id = start_resp.get_ref().session_id.clone();
-
-    // When — Write a file via ExecuteTool.
-    let write_resp = service
-        .execute_tool(Request::new(ExecuteToolRequest {
-            session_token: VALID_TOKEN.to_string(),
-            session_id: session_id.clone(),
-            tool_name: "Write".to_string(),
-            args_json: r#"{"path":"hello.txt","contents":"hello remote world"}"#.to_string(),
-            daemon_instance_id: String::new(),
-        }))
-        .await
-        .expect("ExecuteTool Write must not return an RPC error");
-
-    // Then
-    assert!(
-        !write_resp.get_ref().is_error,
-        "Write must succeed (is_error=false), got error: {:?}",
-        write_resp.get_ref().error_message
-    );
-
-    // When — Read it back via ExecuteTool.
-    let read_resp = service
-        .execute_tool(Request::new(ExecuteToolRequest {
-            session_token: VALID_TOKEN.to_string(),
-            session_id: session_id.clone(),
-            tool_name: "Read".to_string(),
-            args_json: r#"{"path":"hello.txt"}"#.to_string(),
-            daemon_instance_id: String::new(),
-        }))
-        .await
-        .expect("ExecuteTool Read must not return an RPC error");
-
-    // Then
-    assert!(
-        !read_resp.get_ref().is_error,
-        "Read must succeed, got error: {:?}",
-        read_resp.get_ref().error_message
-    );
-
-    let result: serde_json::Value = serde_json::from_str(&read_resp.get_ref().result_json)
-        .expect("result_json must be valid JSON");
-    let content = result
-        .get("content")
-        .and_then(|v| v.as_str())
-        .expect("result_json must have a 'content' string field");
-
-    assert_eq!(
-        content, "hello remote world",
-        "Read must return the content that was written, got: {:?}",
-        content
     );
 }

@@ -144,7 +144,7 @@ fn start_local_socket_server(
         ActivityServiceTonicAdapter::new(Arc::new(connection.activity_service()));
     let catalog_adapter = CatalogServiceTonicAdapter::new(Arc::new(rpc_handlers.catalog_service()));
     let exec_tool_adapter =
-        ExecToolServiceTonicAdapter::new(Arc::new(connection.exec_tool_rpc_service()));
+        ExecToolServiceTonicAdapter::new(Arc::new(rpc_handlers.exec_tool_service()));
     let pr_stack_adapter =
         PrStackServiceTonicAdapter::new(Arc::new(connection.pr_stack_rpc_service()));
 

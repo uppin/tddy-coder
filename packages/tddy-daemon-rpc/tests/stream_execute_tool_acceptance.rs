@@ -14,11 +14,12 @@
 use std::path::Path;
 
 use futures_util::StreamExt;
+use tddy_daemon_rpc::exec_tool::EXEC_TOOL_FRAME_BYTES;
+use tddy_daemon_rpc::test_util::{test_service, TestDaemon};
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolChunk, ExecuteToolRequest};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
-use tddy_session_lifecycle::connection_service::EXEC_TOOL_FRAME_BYTES;
-use tddy_session_lifecycle::test_util::{test_service, TestDaemon, TEST_TOKEN};
+use tddy_session_lifecycle::test_util::TEST_TOKEN;
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a39";
 
 /// Comfortably more than one frame, so the reassembly path is genuinely exercised.

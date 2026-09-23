@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::stream::Stream;
-use livekit::prelude::Room;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::validate_session_id_segment;
 use tddy_core::Changeset;
@@ -22,14 +21,12 @@ use crate::branch_intent::{
 };
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
-use crate::multi_host::EligibleDaemonSource;
 use crate::project_storage::{self};
 use crate::user_sessions_path::projects_path_for_user;
 use crate::workspace_session;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
 use tddy_daemon_livekit::session_room::ActivityDelta;
 use tddy_service::proto::activity::AgentActivityDeltaChunk;
-use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolResponse};
 use tddy_spawn::spawn_worker;
 use tddy_spawn::spawner::{self};
 use tddy_task::TaskRegistry;
@@ -135,9 +132,9 @@ pub struct DaemonSessionHost {
     tddy_data_dir: PathBuf,
     user_resolver: tddy_daemon_kernel::SessionUserResolver,
     spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
-    eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
-    /// When set, LiveKit **Room** handle for forwarding **StartSession** to peer daemons in `common_room`.
-    common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
+    /// The peers this daemon may route a request to and the common-room slot it forwards through —
+    /// shared with the families served above this crate, which route against the same roster.
+    peer_routing: crate::peer_routing::PeerRouting,
     /// Where each presenter event of a workflow session goes besides the notification bus — the
     /// Telegram chat surface, on a daemon that has one. `None` when no chat surface is configured.
     presenter_event_sink: Option<tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink>,
@@ -1286,6 +1283,15 @@ pub fn resolve_caller_chosen_session_id(
 }
 
 mod svc_resolve_os_user;
+/// Caller identity, shared with `tddy-daemon-rpc`'s exec-tool and PR-stack families, which must
+/// authenticate a caller exactly as the host does.
+pub use svc_resolve_os_user::{
+    authorize_exec_tool_caller, resolve_exec_tool_worktree, resolve_os_user,
+};
+
+/// Where an exec tool runs on this daemon, shared with `tddy-daemon-rpc`'s exec-tool family.
+mod local_exec_tools;
+pub use local_exec_tools::LocalExecTools;
 
 mod svc_materialize_staged_attachment;
 
@@ -1312,7 +1318,6 @@ pub use family_proto_bridge::wire_same;
 /// The host state `tddy-daemon-rpc`'s family handlers are built from.
 mod handler_state;
 mod session_coordinate_handlers;
-mod svc_exec_tool_ports;
 mod svc_family_entries;
 mod svc_pr_stack_ports;
 /// The daemon's half of `session_agents.SessionAgentService` — the host capabilities family B
@@ -1371,65 +1376,6 @@ mod demo_vm_coordinate_handlers;
 mod svc_demo_vm_ports;
 pub use svc_demo_vm_ports::DemoVmServiceImpl;
 
-/// Reject an obvious path traversal in a path-bearing exec tool's arguments, before any I/O.
-///
-/// The worktree root is the boundary an exec tool call is confined to; a `..` component asks to
-/// leave it, which is refused rather than normalized away.
-fn reject_exec_tool_path_traversal(tool_name: &str, args_json: &str) -> Result<(), Status> {
-    if !matches!(tool_name, "Read" | "Write" | "StrReplace" | "Delete") {
-        return Ok(());
-    }
-    let args: serde_json::Value =
-        serde_json::from_str(args_json).unwrap_or(serde_json::Value::Null);
-    let Some(path) = args.get("path").and_then(|v| v.as_str()) else {
-        return Ok(());
-    };
-    if Path::new(path)
-        .components()
-        .any(|c| c == std::path::Component::ParentDir)
-    {
-        return Err(Status::permission_denied(
-            "path contains '..' components (traversal rejected)",
-        ));
-    }
-    Ok(())
-}
-
-/// Bytes of tool result carried per `StreamExecuteTool` frame.
-///
-/// Defined *as* [`HOST_DOCUMENT_FRAME_BYTES`] rather than as the same number, because the budget is
-/// a property of the transport rather than of what rides on it: both are what every transport in the
-/// stack carries per message without applying its own chunk framing. Two constants free to drift
-/// would be two answers to one question, and only one of them could be right.
-pub const EXEC_TOOL_FRAME_BYTES: usize = HOST_DOCUMENT_FRAME_BYTES;
-
-/// Split a completed tool result into ordered [`EXEC_TOOL_FRAME_BYTES`] frames.
-///
-/// The outcome rides the **final** frame — a tool error is a result, not an RPC failure, matching
-/// unary `ExecuteTool`'s contract. An empty result still yields exactly one frame, so a consumer
-/// never has to tell "empty result" from "stream produced nothing", and a stream ending without a
-/// `last` frame is unambiguously a truncation.
-fn exec_tool_result_frames(response: ExecuteToolResponse) -> Vec<ExecuteToolChunk> {
-    let bytes = response.result_json.into_bytes();
-    let mut frames: Vec<ExecuteToolChunk> = bytes
-        .chunks(EXEC_TOOL_FRAME_BYTES)
-        .map(|chunk| ExecuteToolChunk {
-            result_chunk: chunk.to_vec(),
-            ..Default::default()
-        })
-        .collect();
-    if frames.is_empty() {
-        frames.push(ExecuteToolChunk::default());
-    }
-    let last = frames.last_mut().expect("at least one frame");
-    last.is_error = response.is_error;
-    last.error_message = response.error_message;
-    last.job_id = response.job_id;
-    last.job_running = response.job_running;
-    last.last = true;
-    frames
-}
-
 /// Bytes to leave free in a LiveKit data packet for everything in a frame that is not payload: the
 /// RPC envelope (request id, service/method metadata, sender identity) plus the frame's own fields —
 /// `total_byte_size` for a document chunk, `error_message` / `job_id` / the flags for a tool-result
@@ -1442,7 +1388,8 @@ const FRAME_ENVELOPE_HEADROOM: usize = 8 * 1024;
 /// permanently incomplete — the call is then never answered and never fails
 /// (`docs/ft/coder/rpc-multi-transport.md`). A build failure here is the point: the doc comment above
 /// asserts "without its own chunk framing", and raising the frame size to 64 KiB would silently make
-/// that false. One assert covers [`EXEC_TOOL_FRAME_BYTES`] too, which is this same constant.
+/// that false. One assert covers `tddy-daemon-rpc`'s `EXEC_TOOL_FRAME_BYTES` too, which is defined as
+/// this same constant.
 ///
 /// [`FRAME_ENVELOPE_HEADROOM`] is a *shared* budget, not a per-field one, and one frame type spends
 /// more of it than the rest: `ContextFileBatchChunk` repeats `rel_path` on every frame, so a deeply

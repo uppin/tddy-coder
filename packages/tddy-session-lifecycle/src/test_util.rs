@@ -11,11 +11,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
-use tddy_service::proto::exec_tools::{
-    ExecToolService, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
-    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse,
-};
 use tddy_service::proto::pr_stack::{
     AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
     LinkStackNodeRequest, LinkStackNodeResponse, PrStackService, PullBaseIntoBranchRequest,
@@ -29,7 +24,6 @@ use tddy_service::proto::session::{
     ListSessionsResponse, ResumeSessionRequest, ResumeSessionResponse, SessionService,
     SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
 };
-use tddy_worktree_service::stream::MpscResultStream;
 
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
@@ -90,9 +84,9 @@ pub fn test_host(sessions_base: PathBuf) -> DaemonSessionHost {
     )
 }
 
-/// Daemon under test: the connection service plus the exec-tool and PR-stack families unbundled
-/// onto their own coordinates (`#unbundle` node 8). The catalogue and project families are served
-/// by `tddy-daemon-rpc`, whose own `test_util::TestDaemon` answers them.
+/// Daemon under test: the connection service plus the PR-stack family unbundled onto its own
+/// coordinate (`#unbundle` node 8). The catalogue, exec-tool and project families are served by
+/// `tddy-daemon-rpc`, whose own `test_util::TestDaemon` answers them.
 #[derive(Clone)]
 pub struct TestDaemon {
     inner: Arc<DaemonSessionHost>,
@@ -274,51 +268,6 @@ impl SessionService for TestDaemon {
 }
 
 #[async_trait]
-impl ExecToolService for TestDaemon {
-    type StreamExecuteToolStream = MpscResultStream<ExecuteToolChunk>;
-
-    async fn execute_tool(
-        &self,
-        request: Request<ExecuteToolRequest>,
-    ) -> Result<Response<ExecuteToolResponse>, Status> {
-        self.inner
-            .exec_tool_rpc_service()
-            .execute_tool(request)
-            .await
-    }
-
-    async fn stream_execute_tool(
-        &self,
-        request: Request<ExecuteToolRequest>,
-    ) -> Result<Response<Self::StreamExecuteToolStream>, Status> {
-        self.inner
-            .exec_tool_rpc_service()
-            .stream_execute_tool(request)
-            .await
-    }
-
-    async fn list_exec_tools(
-        &self,
-        request: Request<ListExecToolsRequest>,
-    ) -> Result<Response<ListExecToolsResponse>, Status> {
-        self.inner
-            .exec_tool_rpc_service()
-            .list_exec_tools(request)
-            .await
-    }
-
-    async fn list_session_tool_calls(
-        &self,
-        request: Request<ListSessionToolCallsRequest>,
-    ) -> Result<Response<ListSessionToolCallsResponse>, Status> {
-        self.inner
-            .exec_tool_rpc_service()
-            .list_session_tool_calls(request)
-            .await
-    }
-}
-
-#[async_trait]
 impl PrStackService for TestDaemon {
     async fn add_planned_pr(
         &self,
@@ -493,7 +442,6 @@ pub async fn serve_daemon_rpc_participant(
             service.session_files_entry(),
             service.session_agents_entry(),
             service.activity_entry(),
-            service.exec_tool_entry(),
             service.pr_stack_entry(),
             service.session_lifecycle_entry(),
         ]

@@ -31,6 +31,7 @@ anyhow = "1"
 async-trait = "0.1"
 livekit = "0.7"
 log = "0.4"
+prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync"] }
@@ -44,7 +45,16 @@ tempfile = "3"
 # existing workspace crates; nothing new enters the tree.
 futures-util = "0.3"
 pretty_assertions = { workspace = true }
-prost = "0.13"
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-session-tool-client = { path = "../tddy-session-tool-client", features = ["livekit"] }
+# The exec-tool suites that moved here with `ExecToolRpcHandler` — the workspace-jail and seatbelt
+# suites among them, and the session-room test that calls a tool through a room — bring what they
+# already used. All are existing workspace crates; nothing new enters the tree.
+libc = "0.2"
+serial_test = "3"
+serde_yaml = "0.9"
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
+tddy-session-files = { path = "../tddy-session-files" }
+tddy-testing-commons = { path = "../tddy-testing-commons" }

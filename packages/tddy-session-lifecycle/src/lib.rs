@@ -96,6 +96,8 @@ pub use tddy_host_service::{
     host_prompts, host_registry, host_session_service, host_stats, host_tooling, multi_host,
     remote_desktop_probe, ssh_agent, ssh_agent_add,
 };
+/// Which daemon serves an addressed request, shared with the families served above this crate.
+pub mod peer_routing;
 pub mod presenter_intent_client;
 /// The per-session presenter observer: one gRPC stream feeding the notification bus and, through the
 /// kernel's `PresenterEventSink` port, whichever chat surface the daemon injected.

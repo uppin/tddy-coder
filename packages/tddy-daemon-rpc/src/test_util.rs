@@ -17,6 +17,11 @@ use tddy_service::proto::catalog::{
     ListAgentsResponse, ListSubagentsRequest, ListSubagentsResponse, ListToolsRequest,
     ListToolsResponse,
 };
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse,
+};
 use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
@@ -24,6 +29,7 @@ use tddy_service::proto::project::{
     SetProjectDefaultBranchResponse,
 };
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_worktree_service::stream::MpscResultStream;
 
 use crate::RpcHandlers;
 
@@ -48,6 +54,16 @@ impl TestDaemon {
         }
     }
 
+    /// Serve the families here for a lifecycle `daemon` whose host is already behind its `Arc` —
+    /// one a suite built with [`RpcHandlers::install`] and also serves over LiveKit. The handlers
+    /// answering here are built from the same host, so they share every `Arc` with the ones
+    /// installed on it: the same task registry, jails, roster and idle tracker, not copies.
+    #[must_use]
+    pub fn serving(daemon: tddy_session_lifecycle::test_util::TestDaemon) -> Self {
+        let handlers = RpcHandlers::from_host(daemon.connection());
+        Self { daemon, handlers }
+    }
+
     /// The handlers this daemon serves, and installed on its host.
     #[must_use]
     pub fn handlers(&self) -> &RpcHandlers {
@@ -59,6 +75,20 @@ impl TestDaemon {
     #[must_use]
     pub fn with_roster_keepalive_interval(mut self, interval: std::time::Duration) -> Self {
         self.daemon = self.daemon.with_roster_keepalive_interval(interval);
+        self
+    }
+
+    /// Same contract as the lifecycle `TestDaemon`'s. Safe after the handlers are installed: what
+    /// builds a jail is the host's alone, and the exec-tool handler holds only the registry the
+    /// jails it builds land in — the same one the host holds.
+    #[must_use]
+    pub fn with_workspace_sandbox_provisioner(
+        mut self,
+        provisioner: Arc<
+            dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner,
+        >,
+    ) -> Self {
+        self.daemon = self.daemon.with_workspace_sandbox_provisioner(provisioner);
         self
     }
 }
@@ -167,6 +197,51 @@ impl CatalogService for TestDaemon {
         self.handlers
             .catalog_service()
             .list_subagents(request)
+            .await
+    }
+}
+
+#[async_trait]
+impl ExecToolService for TestDaemon {
+    type StreamExecuteToolStream = MpscResultStream<ExecuteToolChunk>;
+
+    async fn execute_tool(
+        &self,
+        request: Request<ExecuteToolRequest>,
+    ) -> Result<Response<ExecuteToolResponse>, Status> {
+        self.handlers
+            .exec_tool_service()
+            .execute_tool(request)
+            .await
+    }
+
+    async fn stream_execute_tool(
+        &self,
+        request: Request<ExecuteToolRequest>,
+    ) -> Result<Response<Self::StreamExecuteToolStream>, Status> {
+        self.handlers
+            .exec_tool_service()
+            .stream_execute_tool(request)
+            .await
+    }
+
+    async fn list_exec_tools(
+        &self,
+        request: Request<ListExecToolsRequest>,
+    ) -> Result<Response<ListExecToolsResponse>, Status> {
+        self.handlers
+            .exec_tool_service()
+            .list_exec_tools(request)
+            .await
+    }
+
+    async fn list_session_tool_calls(
+        &self,
+        request: Request<ListSessionToolCallsRequest>,
+    ) -> Result<Response<ListSessionToolCallsResponse>, Status> {
+        self.handlers
+            .exec_tool_service()
+            .list_session_tool_calls(request)
             .await
     }
 }

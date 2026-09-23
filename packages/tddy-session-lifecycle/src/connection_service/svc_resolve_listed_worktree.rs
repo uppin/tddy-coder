@@ -83,7 +83,8 @@ impl DaemonSessionHost {
         let peer_entries = if registered_locally || facilitating.is_some() {
             Vec::new()
         } else {
-            self.eligible_daemon_source
+            self.peer_routing
+                .eligible_daemon_source()
                 .peer_project_entries(session_token)
                 .await
         };

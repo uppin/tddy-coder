@@ -35,6 +35,7 @@ use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
@@ -51,7 +52,7 @@ use tddy_service::proto::session::{
     StartSessionRequest,
 };
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered, TestDaemon};
+use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -375,8 +376,8 @@ async fn split_hosts_with_codebase_provisioner_and_agent_binary(
     wait_until_discovered(codebase.service.as_ref(), AGENT_INSTANCE_ID).await;
 
     SplitHosts {
-        agent: TestDaemon::from_arc(agent.service.clone()),
-        codebase: TestDaemon::from_arc(codebase.service.clone()),
+        agent: TestDaemon::serving(test_util::TestDaemon::from_arc(agent.service.clone())),
+        codebase: TestDaemon::serving(test_util::TestDaemon::from_arc(codebase.service.clone())),
         agent_sessions_base: agent.sessions_base.clone(),
         codebase_sessions_base: codebase.sessions_base.clone(),
         _agent_rpc_run: agent_rpc_run,

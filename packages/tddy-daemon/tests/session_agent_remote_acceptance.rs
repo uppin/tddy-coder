@@ -23,6 +23,7 @@ use tddy_connectrpc::connect_router;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon::config::DaemonConfig;
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, MultiRpcService, Request, RpcBridge, RpcService, ServiceEntry};
@@ -40,7 +41,7 @@ use tddy_service::{
     LiveKitTokenServiceServer, RemoteGitServiceServer, SessionAdmissionServiceServer,
 };
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::{TestDaemon, TEST_TOKEN};
+use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_worktree_service::remote_git_service::{ProjectsDirResolver, RemoteGitServiceImpl};
 
 const ROOM: &str = "agent-roster-common-room";
@@ -296,7 +297,9 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         running_peers.push(PeerDaemon {
             instance_id: instance_id.to_string(),
             sessions,
-            service: TestDaemon::from_arc(service_arc),
+            service: TestDaemon::serving(tddy_session_lifecycle::test_util::TestDaemon::from_arc(
+                service_arc,
+            )),
             run,
         });
     }
@@ -456,7 +459,9 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     let service_a = Arc::new(tddy_daemon_rpc::RpcHandlers::install(service_a).0);
     service_a.install_sandbox_rpc_bridge();
     let fleet = Fleet {
-        a: TestDaemon::from_arc(service_a),
+        a: TestDaemon::serving(tddy_session_lifecycle::test_util::TestDaemon::from_arc(
+            service_a,
+        )),
         session_id,
         peers: running_peers,
         _livekit: livekit,

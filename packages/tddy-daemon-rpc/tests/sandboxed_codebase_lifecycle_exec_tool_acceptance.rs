@@ -16,6 +16,10 @@
 //!
 //! PRD: docs/ft/daemon/amendments/PRD-2026-09-18-sandboxed-codebase-from-the-web.md
 //! Changeset: docs/dev/1-WIP/2026-09-18-sandboxed-codebase-mode-from-the-web.md
+//!
+//! The exec-tool half of `tddy-session-lifecycle`'s `sandboxed_codebase_lifecycle_acceptance.rs`,
+//! split out because the exec tools are served by `tddy-daemon-rpc`'s `ExecToolRpcHandler`. The
+//! fixture is that suite's, trimmed to what these tests reach.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -23,15 +27,16 @@ use std::sync::{Arc, OnceLock};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_daemon_sandbox::workspace_tool_sandbox::RUNNER_PID_FILE;
 use tddy_github::{GitHubUser, SessionTokenSigner};
 use tddy_rpc::Request;
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_service::proto::session::{
-    DeleteSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+    ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TestDaemon;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -162,7 +167,7 @@ fn a_daemon_with_no_common_room(sessions_base: PathBuf) -> TestDaemon {
         let base = sessions_base.clone();
         Arc::new(move |_| Some(base.clone()))
     };
-    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
+    TestDaemon::from_host(DaemonSessionHost::new(
         test_config(),
         resolver,
         sessions_base,
@@ -171,7 +176,7 @@ fn a_daemon_with_no_common_room(sessions_base: PathBuf) -> TestDaemon {
         None,
         None,
         Arc::new(ClaudeCliSessionManager::new()),
-    )))
+    ))
 }
 
 fn a_sandboxed_codebase_request() -> StartSessionRequest {
@@ -215,10 +220,13 @@ fn process_is_alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
-fn a_deletion_of(session_id: &str) -> DeleteSessionRequest {
-    DeleteSessionRequest {
+fn a_read_of(session_id: &str) -> ExecuteToolRequest {
+    ExecuteToolRequest {
         session_token: a_caller_token().to_string(),
         session_id: session_id.to_string(),
+        tool_name: "Read".to_string(),
+        args_json: r#"{"path":"README.md"}"#.to_string(),
+        ..Default::default()
     }
 }
 
@@ -226,134 +234,10 @@ fn a_deletion_of(session_id: &str) -> DeleteSessionRequest {
 // Delete
 // ---------------------------------------------------------------------------
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
-              provisioned without them, and GitHub's ubuntu runners set \
-              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
-              FailedPrecondition rather than starting an unconfined session, which is correct — see \
-              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
-)]
-#[tokio::test]
-async fn deleting_a_sandboxed_codebase_session_tears_its_jail_down() {
-    // Given a started jailed-codebase session with a live runner
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
-    let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
-        .await
-        .expect("a jailed-codebase session must start")
-        .into_inner();
-    let checkout = checkout_session_of(sessions_tmp.path(), &started.session_id);
-    let runner = recorded_runner_pid(sessions_tmp.path(), &checkout);
-    assert!(
-        process_is_alive(runner),
-        "the jail must be running to start"
-    );
-
-    // When the operator deletes the session
-    service
-        .delete_session(Request::new(a_deletion_of(&started.session_id)))
-        .await
-        .expect("deleting a jailed-codebase session must succeed");
-
-    // Then the jail's runner is gone with it
-    assert!(
-        !process_is_alive(runner),
-        "the jail must not outlive the session that asked for it"
-    );
-}
-
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
-              provisioned without them, and GitHub's ubuntu runners set \
-              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
-              FailedPrecondition rather than starting an unconfined session, which is correct — see \
-              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
-)]
-#[tokio::test]
-async fn deleting_a_sandboxed_codebase_session_removes_its_paired_checkout_session() {
-    // Given a started jailed-codebase session
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
-    let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
-        .await
-        .expect("a jailed-codebase session must start")
-        .into_inner();
-    let checkout = checkout_session_of(sessions_tmp.path(), &started.session_id);
-
-    // When the operator deletes the agent half
-    service
-        .delete_session(Request::new(a_deletion_of(&started.session_id)))
-        .await
-        .expect("deleting a jailed-codebase session must succeed");
-
-    // Then the workspace half goes too — a checkout session with no agent is a stranded worktree
-    assert!(
-        !unified_session_dir_path(sessions_tmp.path(), &checkout).exists(),
-        "the paired checkout session must be removed with the agent that owned it"
-    );
-}
-
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
-              provisioned without them, and GitHub's ubuntu runners set \
-              kernel.apparmor_restrict_unprivileged_userns=1. The daemon refuses with \
-              FailedPrecondition rather than starting an unconfined session, which is correct — see \
-              docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
-)]
-#[tokio::test]
-async fn deleting_a_sandboxed_codebase_session_whose_checkout_is_already_gone_succeeds() {
-    // Given a jailed-codebase session whose paired checkout was deleted on its own — an operator
-    // removing it directly, or an earlier deletion that got that far and then failed on this half
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
-    let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
-        .await
-        .expect("a jailed-codebase session must start")
-        .into_inner();
-    let checkout = checkout_session_of(sessions_tmp.path(), &started.session_id);
-    service
-        .delete_session(Request::new(a_deletion_of(&checkout)))
-        .await
-        .expect("the checkout session must be deletable on its own");
-
-    // When the operator deletes the agent half
-    let deleted = service
-        .delete_session(Request::new(a_deletion_of(&started.session_id)))
-        .await;
-
-    // Then it succeeds. A checkout that is provably gone is the state this teardown exists to
-    // reach, not a failure to reach it — refusing on it would leave the agent half permanently
-    // undeletable, because every retry would re-ask for a session that is not there.
-    assert!(
-        deleted.is_ok(),
-        "a paired checkout that is already gone must be idempotent, not a permanent refusal: {:?}",
-        deleted.err().map(|e| e.message().to_string())
-    );
-    assert!(
-        !unified_session_dir_path(sessions_tmp.path(), &started.session_id).exists(),
-        "the agent half must actually be removed, not merely reported as deleted"
-    );
-
-    // Teardown. Both deletions above are the subject of this test rather than its cleanup, and a
-    // deletion that did not reach the jail is exactly the failure it could be hiding — so the
-    // daemon is shut down explicitly rather than trusted to have nothing left.
-    service.shut_down_children().await;
-}
-
 // ---------------------------------------------------------------------------
 // Resume
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Shutdown — docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md
-// ---------------------------------------------------------------------------
-
 #[cfg_attr(
     not(target_os = "macos"),
     ignore = "needs a host that permits unprivileged user namespaces: the cgroups jail cannot be \
@@ -363,33 +247,65 @@ async fn deleting_a_sandboxed_codebase_session_whose_checkout_is_already_gone_su
               docs/dev/todo/2026-08-02-unprivileged-userns-available-under-approximates-what-the-jail-needs.md"
 )]
 #[tokio::test]
-async fn a_daemon_shutdown_leaves_no_sandbox_runner_behind() {
-    // Given a started jailed-codebase session with a live runner
+async fn resuming_a_sandboxed_codebase_session_re_provisions_its_jail() {
+    // Given a jailed-codebase session whose daemon restarted, losing every jail registration
     let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
-    let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
-        .await
-        .expect("a jailed-codebase session must start")
-        .into_inner();
+    let started = {
+        let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
+        let started = service
+            .start_session(Request::new(a_sandboxed_codebase_request()))
+            .await
+            .expect("a jailed-codebase session must start")
+            .into_inner();
+        // The restart this test simulates is a daemon *stopping*: its jail stops with it. Letting
+        // the daemon merely fall out of scope here would orphan a live `tddy-sandbox-runner`, and
+        // would leave the resumed daemon re-provisioning a jail beside a still-running one — which
+        // is not the state the resume path is supposed to be resuming from.
+        let first_runner = recorded_runner_pid(
+            sessions_tmp.path(),
+            &checkout_session_of(sessions_tmp.path(), &started.session_id),
+        );
+        service.shut_down_children().await;
+        assert!(
+            !process_is_alive(first_runner),
+            "the pre-restart jail must be gone before the resume, or this test resumes onto a \
+             host that never lost it"
+        );
+        started
+    };
     let checkout = checkout_session_of(sessions_tmp.path(), &started.session_id);
-    let runner = recorded_runner_pid(sessions_tmp.path(), &checkout);
+    let restarted = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
+
+    // When the session is resumed
+    restarted
+        .resume_session(Request::new(ResumeSessionRequest {
+            session_token: a_caller_token().to_string(),
+            session_id: started.session_id.clone(),
+        }))
+        .await
+        .expect("a jailed-codebase session must be resumable");
+
+    // Then its tool calls are served again — the jail was re-provisioned from persisted metadata,
+    // not silently redirected to the bare host worktree
+    let response = restarted
+        .execute_tool(Request::new(a_read_of(&checkout)))
+        .await
+        .expect("a resumed jailed checkout must serve its tool calls")
+        .into_inner();
     assert!(
-        process_is_alive(runner),
-        "the jail must be running to start"
+        !response.is_error,
+        "resume must re-provision the jail; got '{}'",
+        response.error_message
     );
 
-    // When the daemon reaps its children on shutdown, without anyone deleting the session first.
-    //
-    // `shut_down_children` is the named seam this changeset adds: today the SIGTERM body is inline
-    // in `tddy-daemon/src/main.rs:153-173` and reaches only `cli_sessions.kill_all()` plus the
-    // index daemon, so nothing outside that closure can drive it — and nothing reaches the
-    // workspace-jail registry at all. The handler calls this method; so does this test.
-    service.shut_down_children().await;
-
-    // Then the runner it spawned went with it, rather than being orphaned onto the host
-    assert!(
-        !process_is_alive(runner),
-        "a jail must not survive the daemon that spawned it"
-    );
+    // Teardown. The resume provisioned a *second* jail, which is a real `tddy-sandbox-runner`
+    // child in its own process group: left alone it is reparented to the init process when this
+    // binary exits and stays on the host for as long as the machine is up.
+    // `WorkspaceSandboxRegistry`'s own `Drop` covers the panicking exit above, where this line is
+    // never reached.
+    restarted.shut_down_children().await;
 }
+
+// ---------------------------------------------------------------------------
+// Shutdown — docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md
+// ---------------------------------------------------------------------------

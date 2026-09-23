@@ -29,6 +29,7 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_daemon_sandbox::workspace_tool_sandbox::RUNNER_PID_FILE;
 use tddy_github::{GitHubUser, SessionTokenSigner};
 use tddy_rpc::Request;
@@ -36,7 +37,6 @@ use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, Execu
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::TestDaemon;
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145b77";
 
@@ -131,7 +131,7 @@ livekit:
             None
         }
     });
-    TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
+    TestDaemon::from_host(DaemonSessionHost::new(
         config,
         resolver,
         sessions_base,
@@ -140,7 +140,7 @@ livekit:
         None,
         None,
         Arc::new(ClaudeCliSessionManager::new()),
-    )))
+    ))
 }
 
 fn run_git(cwd: &Path, args: &[&str]) {

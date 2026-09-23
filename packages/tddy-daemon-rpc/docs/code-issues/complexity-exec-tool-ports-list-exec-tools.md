@@ -1,6 +1,7 @@
 # complexity: list_exec_tools
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_exec_tool_ports.rs:158` — `list_exec_tools`
+**Location:** `packages/tddy-daemon-rpc/src/exec_tool/ports.rs:182` — `list_exec_tools` (now on `ExecToolRpcHandler`)
+**Moved:** 2026-09-23 by #520 (#carve 11) — from `packages/tddy-session-lifecycle/src/connection_service/svc_exec_tool_ports.rs:158`; body unchanged except `self.x` → the handler's fields and components, which rustfmt re-wraps (73 → 78 lines)
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **73 lines** · **nesting depth 5** · 1 parameters · 2 branch/match lines · 7 early exits
@@ -14,6 +15,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 73 | 5 | 2 | 7 | first detection |
+| 2026-09-23 | 78 | 5 | 2 | 7 | moved to `tddy-daemon-rpc`; length from re-wrapped field paths, not new logic |
 
 ## What the tool found
 
