@@ -3,15 +3,16 @@
 **Location:** `packages/tddy-code-restructuring/src/backends/rust.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate on #498
-**Metrics:** **4,788 production lines** (4,772 before #498) · budget 500
+**Metrics:** **4,294 production lines** (4,788 before #527) · budget 500
 **Restructure:** required
-**Status:** Open — pre-existing; #498 added 16 lines and deferred, blocked by stack overlap
+**Status:** Open — pre-existing; #498 added 16 lines and deferred, blocked by stack overlap; #527 narrowed it by 494 lines
 
 ## Measurement history
 
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-19 | 4,788 | first detection; 4,772 before #498 |
+| 2026-09-23 | 4,294 | #527 (engine fixes) changed the import pass, the `impl`-seam refusal and the readiness waits, and moved each into a sibling under `backends/rust/` rather than growing this file: `imports.rs`, `impl_seam.rs`, `chatter.rs` (`ServerChatter`, re-exported at its old path), `readiness.rs`. Still 8.6× the budget |
 
 ## What the gate found
 

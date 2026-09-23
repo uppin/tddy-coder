@@ -98,11 +98,18 @@ not define is refused rather than ignored.
   tree the first plan left. Run state describes one plan's edits, and a journal left in place would
   translate the new plan's coordinates a second time.
 
-  Other Rust operations **do** compose in one plan. They once did not, for a reason that was nothing
-  to do with anchors: the backend reported each operation as a single edit spanning from its first
-  changed line to its last, so an extraction that rewrote two distant places swallowed every
-  untouched line between them. It now reports one hunk per changed region, so the lines between stay
-  addressable and a plan can carry as many seams as you can order correctly.
+  Other Rust operations compose in one plan, **in the right order**. They once did not at all, for a
+  reason that was nothing to do with anchors: the backend reported each operation as a single edit
+  spanning from its first changed line to its last, so an extraction that rewrote two distant places
+  swallowed every untouched line between them. It now reports one hunk per changed region, so the
+  lines between stay addressable and a plan can carry as many seams as you can order correctly.
+
+  **Several `extract_method`s in one function compose only bottom-up**: last range first, so every
+  operation's anchor sits *above* every edit an earlier one made. Each extraction replaces its
+  statements with a call and writes the new function below the one it came from, so taken bottom-up
+  no anchor is ever translated through another extraction. Taken top-down, every later anchor has to
+  be, and on the lifecycle destructure's plans (2026-09-23) those plans did not apply. The engine
+  does not re-anchor them for you.
 - **`extract_module` restores the imports its own assist loses, and refuses when it cannot.** The
   items move out of the scope of the file's `use` declarations, so the backend asks rust-analyzer for
   an import at each name left unresolved. Where the server offers several paths for one name, the
@@ -149,19 +156,20 @@ not define is refused rather than ignored.
   changing. **Moving a whole `impl` is free of caller churn**, and is the cheapest restructuring move
   Rust has.
 
-  **Free of callers is not free of seams, and the difference decides whether a plan runs.** Three
+  **Free of callers is not free of seams, and the difference decides whether a plan runs.** Four
   geometries look alike and only one blocks — measured, not assumed:
 
   | Geometry | Outcome |
   |---|---|
   | A whole `impl` moves; the parent calls its methods | **Succeeds.** A method is reached through its type, so there is nothing to rewrite |
   | A path-reached item moves; the parent still names it | **Succeeds.** The assist rewrites the reference and the import pass restores the binding — which is why an in-file reference "costs nothing" |
-  | **One member is lifted out of an `impl` while a sibling in that same `impl` calls it** | **Refused.** The new module is written *outside* the impl, so the rewritten path never resolved from in there, and rust-analyzer does not rename what does not resolve |
+  | Some members of an **inherent** `impl` move while a sibling left behind calls them | **Succeeds.** The assist writes `mod … { use super::Gauge; impl Gauge { … } }`, so they stay methods of the same type. It also rewrites the call left behind as `self.modname::doubled()`, which is not Rust; the backend undoes exactly that rewrite. A private member comes out `pub(crate)` (below) |
+  | **Some members of a trait `impl` move while a sibling left behind calls them** | **Refused.** The new module would hold a second `impl Meter for Gauge` (`E0119`) and each half would lack the other's items (`E0046`) |
 
-  Only the third is a blocker, and no ordering fixes it: an `impl` body cannot hold a `mod`, so the
+  Only the last is a blocker, and no ordering fixes it: an `impl` body cannot hold a `mod`, so the
   sibling can be moved neither out of the way first nor after. Grow the seam to carry the whole `impl`,
-  or cut it where nothing crosses. The refusal fires before the assist runs and names the member and
-  the lines its siblings reach it from.
+  or cut it where nothing crosses. The refusal fires before the assist runs and names the member, the
+  `impl` it belongs to, and the lines its siblings reach it from.
 
 - **`extract_module` reports every visibility it had to widen, and preserves the rest — except inside
   an `impl`, where it reports but does not restore.** The assist rewrites what it relocates to

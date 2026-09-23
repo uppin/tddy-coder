@@ -48,6 +48,8 @@ seconds; against a cold one an apply costs six to ten minutes before it can refu
 - **No code in plans** — fields `text`, `code`, `content` are refused.
 - **No `create_file`** — files appear via assists only.
 - **Unsupported ops are hard errors** — never skip silently.
+- **Order `extract_method`s bottom-up.** Several in one function compose only last-range-first, so
+  no anchor has to be translated through another extraction; see `references/plan-schema.md`.
 - **Read the refusal's class before its text.** `plan is malformed:` means edit the plan. `this seam
   cannot be cut here:` means the plan is fine and the code will not permit this cut — move the seam or
   change the code. `rust-analyzer's answer was unusable:` means retry against a warm server. Every

@@ -1,7 +1,7 @@
 # Changeset: three restructure-engine defects that block the lifecycle destructure
 
 **Date**: 2026-09-23
-**Status**: 🚧 In Progress — planned
+**Status**: 🚧 In Progress — green; the destructure re-run is #524's
 **Type**: Bug Fix
 **PR**: #527. **Stack**: `#carve` 13/15, between `core-split` (#522) and `lifecycle-wiring` (#524, the destructure node)
 
@@ -122,13 +122,13 @@ it gets the fixed engine in its own tree.
 
 ## Scope
 
-- [~] Failing tests: E1, E2, E3, grouped `use` (commit 2) — written, not yet committed; see "Red-phase findings"
-- [ ] E1 fixed: progress check and unimportable marking in the alias and parent-binding branches; collection scoped to the produced module
-- [ ] E2 cause found; fixed or refused truthfully; never applies a `_` signature
-- [ ] E3 fixed: `self.method()` on the same type is not a refusal
-- [ ] Grouped-`use` binding recognised
-- [ ] Skill and plan-schema corrected on extract-method ordering
-- [ ] Re-run the destructure node's refused plans with `check --deep` and record the results
+- [x] Failing tests: E1, E2, E3, grouped `use`; see "Red-phase findings"
+- [x] E1 fixed: progress check in the alias and parent-binding branches, refusing by name; collection scoped to the names the seam lost (see Implementation, deviation)
+- [x] E2 cause found (readiness declared before build scripts load); fixed by waiting for `serverStatus` quiescence; a `_` signature is still never applied
+- [x] E3 fixed: `self.method()` on the same type is not a refusal, and the assist's `self.modname::method()` rewrite is undone
+- [x] Grouped-`use` binding recognised
+- [x] Skill and plan-schema corrected on extract-method ordering (and on the `impl`-cut table)
+- [ ] Re-run the destructure node's refused plans with `check --deep` and record the results — on #524
 
 ## Testing plan
 
@@ -176,6 +176,77 @@ Each finding was reproduced against the live server (rust-analyzer 2026-03-30) i
   use. `choose_import` then sees `std::sync` and `shared::sync` as equal evidence. The binding has to
   be read from the pre-assist text.
 
+## Implementation
+
+Six commits on top of the two test commits, one per milestone. `backends/rust.rs` was not grown:
+every changed piece moved to a sibling under `backends/rust/`, and the file went from 4,788 to 4,294
+production lines (recorded in its code-issue).
+
+| Module | Holds |
+|---|---|
+| `backends/rust/imports.rs` | `restore_imports`, `next_import`, the verified reconstruction, the seam-lost filter, `names_bound` |
+| `backends/rust/impl_seam.rs` | `refuse_impl_sibling_references`, `is_inherent_impl`, `with_method_calls_restored` |
+| `backends/rust/chatter.rs` | `ServerChatter`, re-exported at `backends::rust::ServerChatter` so `tddy-index-daemon` and the harness are untouched |
+| `backends/rust/readiness.rs` | `ensure_indexed`, `wait_until_resolved` |
+
+- **E1.** *Cause:* `already_bound` read `use a::B as C;` as binding `B`. The alias branch rebuilt the
+  parent's declaration, wrote it into the module, and on the next pass did not see it, so it wrote it
+  again until `IMPORT_PASSES`. The trigger was a name unresolved everywhere in the file, collected
+  file-wide. *Fix:* `names_bound` reads what a `use` binds: the alias, nothing for `as _`, and
+  aliases inside nested groups. `bound_names` (the pruning pass) reads the same way now. Both
+  reconstructions (alias and parent binding) are verified like an offered import. If the unresolved
+  occurrences of the name do not drop, the pass ends with a `SeamRefused` naming the name and the
+  declaration it tried.
+- **E1, deviation from the plan: "produced module only" was too strong.** A live probe showed that
+  the file-wide pass also restores names the *parent* loses to the cut. Example: a trait moved while
+  the parent still writes `impl Named for Thing`, which the assist does not rewrite. Collected from
+  the module alone, the run reported success over a parent that did not compile. The pass now weighs
+  the names **the seam lost**: every unresolved occurrence inside the module, plus an occurrence in
+  the parent only for a name the file resolved everywhere before the cut. It reads a baseline once,
+  with one `semanticTokens` request against the original text. The E1 trigger was already
+  unresolved before the cut, so it is still ignored. The reconstructions write into the module, so
+  they answer only for occurrences inside it. Pinned by
+  `imports_into_the_parent_a_trait_the_seam_moved_out_from_under_it`.
+- **Grouped `use`.** *Cause:* `choose_import` read the post-assist text, from which the assist had
+  already removed `mpsc`. *Fix:* the choice reads the pre-assist file and the current text together
+  (`Seam::evidence_with`). The original holds the binding the assist removed, and the current text
+  holds what earlier passes restored. The existing first tier then decides.
+- **E3.** *Cause:* the refusal assumed that a call left behind "would resolve nowhere". For an
+  inherent `impl` it resolves through the type. *Fix:* only a cut through a trait `impl`, or through
+  an `impl` whose name the survey did not carry, stays refused. The message now names the `impl`
+  and the E0119/E0046 reason. The outline name `impl Meter for Gauge` was confirmed live. **Found in
+  green:** once the refusal lifted, the assist turned out to rewrite the call left behind as
+  `self.modname::doubled()`. That is not Rust, and the rename cannot reach it.
+  `with_method_calls_restored` undoes exactly that rewrite: `.` + placeholder + `::` + a moved
+  inherent member's name, whole-word. A private method keeps the assist's `pub(crate)`, which
+  `impl_widenings` already reports and nothing narrows back.
+- **E2 and the fresh-server alias test.** *Cause:* both readiness waits took the first non-null
+  hover as ready. rust-analyzer answers hover while it is still running build scripts, so `OUT_DIR`
+  types did not exist yet and no name showed as unresolved. *Fix:* `ServerChatter` records whether
+  any `experimental/serverStatus` arrived, and `loading()` is true while the server has said it is
+  not quiescent. Both waits keep polling while that holds. A server that never sends the extension,
+  or whose transition was read by another consumer of the same client (a warm daemon), still gets
+  through on hover alone. `client_capabilities()` already advertised `serverStatusNotification`.
+  `server_settings()` needed no `cargo.buildScripts.enable` / `procMacro.enable`: the defaults are
+  on, and the E2 fixture passes without them. `refuse_inferred_placeholder` is unchanged.
+- **E2 on the real repo: open.** This explains `req: _` for a **cold** `tddy-tools restructure`,
+  which asked before `tddy-service`'s `tonic-build`/`prost-build` output had loaded. It does not
+  explain the **warm-index** failures: `tddy-index-daemon` only reports warm after quiescence. The
+  remaining candidate is still unconfirmed: the build script failing inside rust-analyzer's
+  environment (for example `protoc` not on the server's `PATH`), which leaves the server quiescent
+  with no `OUT_DIR` output. If that holds, the placeholder guard still refuses, but for the wrong
+  reason. The next check is to re-run plans `05`/`10` on #524 against a warm index and read the
+  server's build-script diagnostics.
+- **Docs.** `plan-schema.md` now says that several `extract_method`s in one function compose only
+  bottom-up. The engine does not re-anchor them: re-anchoring would mean re-deriving each later
+  anchor from the produced text, which is not cheap, so it was not attempted. The `impl`-cut table
+  now separates inherent cuts (which succeed) from trait cuts (refused). `SKILL.md` gains the
+  ordering rule.
+- **Backlog.** No item in
+  [2026-09-09 … connection-service split](../todo/2026-09-09-restructure-defects-from-the-connection-service-split.md)
+  or the other restructure todos is closed as a side effect. D8's alias reconstruction is kept, and
+  is now verified. The D8 guard test (`imports_the_alias_the_moved_code_names_exactly_once`) passes.
+
 ## Decisions & trade-offs
 
 - **Fix the engine rather than hand-split.** The developer's decision (2026-09-23).
@@ -183,6 +254,20 @@ Each finding was reproduced against the live server (rust-analyzer 2026-03-30) i
   #524 then runs its plans against the fixed engine without waiting for a merge to `master`.
 
 ## Refactoring needed
+
+### From @green
+
+- Three walkers read the same `use` tree: `expand_use` (paths), `collect_aliases` (alias pairs), and
+  `collect_bound` (bound names). One leaf walker yielding `(path, alias)` would serve all three.
+- The seam-lost baseline is **name-level**. If a name was already unresolved somewhere before the
+  cut, a parent occurrence the seam newly strands is not weighed either. A per-name count would
+  close that gap.
+- `already_bound` still checks the module's block even for an occurrence in the parent. This is
+  pre-existing, and harmless while the reconstructions are gated to the module.
+- A cut through a trait `impl` with **no** sibling reference is not refused, though it is E0119 all
+  the same. This is pre-existing, and out of this change's scope ("no other engine features").
+- `ServerChatter::quiescent`'s doc links to the private `RustBackend::ensure_indexed`, now in
+  another module.
 
 ### From @red (TDD Red Phase)
 
@@ -194,11 +279,20 @@ Each finding was reproduced against the live server (rust-analyzer 2026-03-30) i
 
 ## Validation results
 
+Scoped to the packages touched (2026-09-23). Whole-workspace health is CI's.
+
+- `./test -p tddy-code-restructuring`: every binary green. Lib 353, `import_pass_acceptance` 6,
+  `impl_seam_acceptance` 4, `extract_method_signature_acceptance` 1, and every other suite in the
+  package.
+- `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`: clean. `cargo fmt`: clean.
+- `cargo check -p tddy-tools --all-targets` and `cargo check -p tddy-index-daemon --all-targets`
+  (both consume `ServerChatter` / the library): clean.
+
 ## TODO
 
 - [x] Discovery (from the destructure node's `check --deep` runs)
 - [x] Changeset: this document
-- [~] Failing tests (red)
-- [ ] Green
+- [x] Failing tests (red)
+- [x] Green
 - [ ] Re-run the destructure plans
 - [ ] `/validate-changes`, `/pr-wrap`, `/wrap-context-docs`
