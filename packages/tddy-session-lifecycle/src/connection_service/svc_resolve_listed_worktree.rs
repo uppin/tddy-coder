@@ -1,7 +1,3 @@
-use tddy_core::output::SESSIONS_SUBDIR;
-
-use tddy_core::session_lifecycle::validate_session_id_segment;
-
 use std::path::Path;
 
 use crate::{
@@ -356,54 +352,14 @@ impl DaemonSessionHost {
         self.session_dir_for(session_id)
     }
 
-    /// Where a session this daemon serves keeps its `.session.yaml`.
-    ///
-    /// The id is validated as a single path segment before it is joined, because every roster call
-    /// takes it from the caller and the directory it names is read-modify-written: an id carrying
-    /// `../` would have an attach rewrite another user's `.session.yaml` outside this daemon's
-    /// sessions base entirely.
-    pub(crate) fn session_dir_for(&self, session_id: &str) -> Result<PathBuf, Status> {
-        validate_session_id_segment(session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-        Ok(self.tddy_data_dir.join(SESSIONS_SUBDIR).join(session_id))
-    }
-
     // ── Remote agents: room admission, clones, tool split ────────────────────────────────────
     //
     // docs/ft/daemon/session-agent-roster.md § Remote agents, § Clones.
-
-    /// Open the session's room over a checkout this daemon holds, unless it is open already.
-    ///
-    /// The one place a room is opened outside a split start, and the reason session *creation* no
-    /// longer opens one: a room is what a session is reached through, so it is created when
-    /// something first reaches for it. Every caller here is such a reach — a client connecting to
-    /// the session, an owning daemon being admitted to it — and each of them is already waiting on
-    /// a LiveKit round trip by asking.
-    ///
-    /// `Ok(None)` means this daemon has no LiveKit credentials at all and hosts no rooms; each
-    /// caller decides what that means for it.
-    pub(crate) async fn ensure_session_room(
-        &self,
-        session_id: &str,
-        session_dir: &Path,
-        worktree_root: &Path,
-    ) -> Result<Option<tddy_daemon_livekit::session_room::OpenedSessionRoom>, Status> {
-        let local_instance_id = local_instance_id_for_config(&self.config);
-        let hosting = tddy_daemon_livekit::session_room::DaemonRoomHosting {
-            config: &self.config,
-            instance_id: &local_instance_id,
-            rooms: &self.session_rooms,
-        }
-        .for_worktree(session_id, worktree_root, session_dir);
-        self.session_rooms
-            .ensure_open(
-                &hosting,
-                || std::sync::Arc::new(self.clone()).session_room_roster(),
-                self,
-            )
-            .await
-    }
 }
+
+mod session_dir_lookup;
+
+mod session_room_opening;
 
 /// [`DaemonSessionHost::resolvable_agent_defs`] over the two fields it reads: the YAML defs under
 /// `<tddy_data_dir>/agents` and `model_registry`'s assistants, the registry winning a name tie.
