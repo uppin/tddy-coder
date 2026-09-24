@@ -3,8 +3,8 @@
 **Category:** Future enhancement
 **Source:** `#carve` 14/15, [#524](https://github.com/uppin/tddy-coder/pull/524), plans
 `09b` (plan `09` without op 6), `02-cli-session-manager-dir`, `10b`, `09c` and `11`–`16`,
-changeset
-[`2026-09-23-carve-lifecycle-destructure`](../1-WIP/2026-09-23-carve-lifecycle-destructure.md)
+change history
+[`2026-09-23-carve-lifecycle-destructure`](../changesets/2026-09-23-carve-lifecycle-destructure.md)
 
 Both of these showed up only **after** the compile gate was satisfied: `cargo check --all-targets`
 was clean, and `cargo test -p tddy-session-lifecycle` matched the baseline. Putting the comments

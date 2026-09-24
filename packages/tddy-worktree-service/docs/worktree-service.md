@@ -9,7 +9,7 @@ and restoring them, and browsing and reading the files inside one — served as
 | Group | Files | What is in them |
 |---|---|---|
 | `service.rs` | 1 | `WorktreeServiceImpl` — the nine handlers, the state they read, and the `with_*` builders |
-| `stream.rs` | 1 | `MpscWorktreeStatsStream`, `MpscResultStream`, `worktree_file_frames` — the streaming adapters |
+| `stream.rs` | 1 | `MpscWorktreeStatsStream`, `MpscResultStream`, `worktree_file_frames` — the streaming adapters. `MpscResultStream::into_receiver` hands back the channel a stream wraps. `tddy-session-lifecycle` re-exports the type at `connection_service::MpscResultStream` rather than defining its own |
 | the worktrees | `worktrees`, `worktree_files` | `git worktree list` parsing, the stats cache, path validation against a repo root, and the code-pane file gate |
 | the projects | `project_storage`, `project_provision` | the per-daemon `projects.yaml` registry and the provisioning a session start needs |
 | branches | `branch_owner`, `branch_intent`, `base_sync_cache` | who owns a branch, what a caller meant by one, and the memoised base comparison |
@@ -96,7 +96,7 @@ rooms uses.
   snapshots, path validation and removal
 - [remote-git-service.md](./remote-git-service.md) — every project as a git remote over tddy-rpc
 - Sibling service: [`tddy-host-service`](../../tddy-host-service/docs/host-service.md)
-- What stayed: [connection-service.md](../../tddy-daemon/docs/connection-service.md)
+- What stayed: [`tddy-session-lifecycle` session-service.md](../../tddy-session-lifecycle/docs/session-service.md)
 - Feature: [docs/ft/web/worktrees.md](../../../docs/ft/web/worktrees.md),
   [docs/ft/web/worktree-disk-usage-streaming.md](../../../docs/ft/web/worktree-disk-usage-streaming.md),
   [docs/ft/web/session-worktree-inspector.md](../../../docs/ft/web/session-worktree-inspector.md)

@@ -2,8 +2,8 @@
 
 **Category:** Future enhancement
 **Source:** `#carve` 14/15, [#524](https://github.com/uppin/tddy-coder/pull/524),
-plan `06-ports-files` (and plans `03`, `10a`, `04`, `08` before it), changeset
-[`2026-09-23-carve-lifecycle-destructure`](../1-WIP/2026-09-23-carve-lifecycle-destructure.md)
+plan `06-ports-files` (and plans `03`, `10a`, `04`, `08` before it), change history
+[`2026-09-23-carve-lifecycle-destructure`](../changesets/2026-09-23-carve-lifecycle-destructure.md)
 
 #527's compile gate runs `cargo check --all-targets`. CI's `Rust lint` job runs
 `cargo fmt --all --check` and then `cargo clippy --workspace --all-targets -- -D warnings`. Every

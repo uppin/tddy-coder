@@ -1,7 +1,0 @@
-{"v": 1, "snapshot": {"packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs": "sha256:86eb317ff605980c8dbd81408a9b4934647bc69519bd0b29416ffe4aeff807c7"}}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs","start":{"line":266,"col":5},"end":{"line":278,"col":93}},"name":"write_cursor_cli_session_metadata"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs","start":{"line":244,"col":5},"end":{"line":263,"col":87}},"name":"spawn_cursor_cli_process"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs","start":{"line":226,"col":5},"end":{"line":239,"col":6}},"name":"cursor_cli_semantic_env"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs","start":{"line":209,"col":5},"end":{"line":221,"col":30}},"name":"prepare_cursor_cli_launch"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs","start":{"line":143,"col":13},"end":{"line":154,"col":15}},"name":"spawned_cursor_cli_branch"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs","start":{"line":116,"col":13},"end":{"line":133,"col":21}},"name":"cut_cursor_cli_worktree"}

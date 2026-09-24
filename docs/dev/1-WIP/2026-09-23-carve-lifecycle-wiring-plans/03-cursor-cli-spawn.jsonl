@@ -1,3 +1,0 @@
-{"v": 1, "snapshot": {"packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs": "sha256:5531f903f838c7885b44b3acaa8c275836248526f55decd80489ca6b79725911"}}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs","start":{"line":27,"col":1},"end":{"line":110,"col":2}},"name":"chat","reexport":"glob","to_file":true}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs","start":{"line":451,"col":1},"end":{"line":524,"col":2}},"name":"resume","reexport":"glob","to_file":true}

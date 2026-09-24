@@ -4,9 +4,10 @@
 **Source:** `#carve` 13/15 `/green`, [#527](https://github.com/uppin/tddy-coder/pull/527), changeset
 [`2026-09-23-restructure-engine-fixes`](../changesets/2026-09-23-restructure-engine-fixes.md)
 
-#527's engine was run for real against #524's plans
-(`docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/` on the `feature/carve/lifecycle-wiring`
-branch). Every plan passed `restructure check --deep` against a healthy warm index, and then `apply`
+#527's engine was run for real against #524's plans (the destructure's restructure plans, listed in
+[its change history](../changesets/2026-09-23-carve-lifecycle-destructure.md) and kept in git at
+`52e621a3:docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/`). Every plan passed
+`restructure check --deep` against a healthy warm index, and then `apply`
 went like this:
 
 | Plan | Result | Gap |

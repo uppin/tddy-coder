@@ -1,7 +1,0 @@
-{"v": 1, "snapshot": {"packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs": "sha256:1af9c540ca0c2e39e98b84b1900555c4ceaf49227e4e97b71a1385f363f8eb90"}}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs","start":{"line":776,"col":9},"end":{"line":893,"col":11}},"name":"spawn_tddy_coder"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs","start":{"line":535,"col":13},"end":{"line":632,"col":20}},"name":"start_cursor_cli_branch"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs","start":{"line":431,"col":13},"end":{"line":530,"col":24}},"name":"start_claude_cli_branch"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs","start":{"line":278,"col":13},"end":{"line":426,"col":32}},"name":"start_workspace_branch"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs","start":{"line":227,"col":9},"end":{"line":255,"col":10}},"name":"refuse_unseedable_stack_base"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs","start":{"line":85,"col":9},"end":{"line":136,"col":10}},"name":"forward_start_session_if_remote"}

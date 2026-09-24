@@ -58,8 +58,8 @@ conversation an open had just created.
 Seven of the nine route on the `daemon_instance_id` the **request** names — a roster lives on the
 daemon facilitating its session, so a call served anywhere else answers about the wrong host. That
 fork needs the eligible-daemon roster, the common room slot and the LiveKit forwarding clients, so
-it lives in `tddy-daemon`'s `PeerRoutedSessionAgents`
-([`connection_service/svc_session_agent_ports.rs`](../../tddy-daemon/src/connection_service/svc_session_agent_ports.rs)),
+it lives in `tddy-session-lifecycle`'s `PeerRoutedSessionAgents`
+([`connection_service/svc_session_agent_ports/svc_peer_routed_session_agents.rs`](../../tddy-session-lifecycle/src/connection_service/svc_session_agent_ports/svc_peer_routed_session_agents.rs)),
 which wraps this crate's implementation rather than the crate growing a transport.
 
 The forward that follows the **agent's** owning daemon is a different decision and *is* made here:
@@ -109,4 +109,4 @@ tuples would agree with the runner by construction and prove nothing about the n
 - [docs/ft/daemon/session-agent-roster.md](../../../docs/ft/daemon/session-agent-roster.md) — the feature
 - [docs/ft/coder/specialized-subagents.md](../../../docs/ft/coder/specialized-subagents.md) — where the agent defs come from
 - [tddy-discovery](../../tddy-discovery/docs/roster-and-subagent-runtime.md) — the conversation runtime this crate serves in front of
-- [connection-service.md](../../tddy-daemon/docs/connection-service.md) — the 33 methods that stayed
+- [`tddy-session-lifecycle` session-service.md](../../tddy-session-lifecycle/docs/session-service.md) — the session RPC host this crate stayed beside

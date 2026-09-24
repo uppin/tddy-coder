@@ -3,7 +3,7 @@
 **Product Area**: Web (terminal)
 **Status**: Implemented
 **Updated**: 2026-07-25
-**Related**: [web-terminal.md](web-terminal.md) (§ Connected Terminal UX), [terminal-session-service.md](../../../packages/tddy-terminal-rpc/docs/terminal-session-service.md), [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md)
+**Related**: [web-terminal.md](web-terminal.md) (§ Connected Terminal UX), [terminal-session-service.md](../../../packages/tddy-terminal-rpc/docs/terminal-session-service.md), [`tddy-session-lifecycle` session-service.md](../../../packages/tddy-session-lifecycle/docs/session-service.md)
 
 ## Summary
 
@@ -45,7 +45,7 @@ offset, or acknowledgement:
   received, not that the bytes reached the PTY.
 
 On the daemon, `send_terminal_input` resolves the `PtyHandle` and calls
-`PtyHandle::send_input(data)` (`cli_session_manager.rs`), which forwards to the PTY writer thread
+`PtyHandle::send_input(data)` (`cli_session_manager/pty_handle.rs`), which forwards to the PTY writer thread
 (`tddy-pty/src/runtime.rs`). That write is the authoritative "applied to the PTY" point, and is
 where the ACK originates.
 

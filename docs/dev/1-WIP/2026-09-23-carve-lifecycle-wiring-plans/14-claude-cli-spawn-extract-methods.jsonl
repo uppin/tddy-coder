@@ -1,7 +1,0 @@
-{"v": 1, "snapshot": {"packages/tddy-session-lifecycle/src/connection_service/claude_cli_spawn.rs": "sha256:f56d49741c950fd21135824f264f8b7bb7fa1d5789a7c204ee1934b5fad47659"}}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/claude_cli_spawn.rs","start":{"line":341,"col":5},"end":{"line":351,"col":7}},"name":"claude_cli_livekit_room"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/claude_cli_spawn.rs","start":{"line":266,"col":5},"end":{"line":286,"col":6}},"name":"spawn_claude_cli_process"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/claude_cli_spawn.rs","start":{"line":229,"col":5},"end":{"line":264,"col":6}},"name":"managed_claude_cli_launch"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/claude_cli_spawn.rs","start":{"line":188,"col":5},"end":{"line":210,"col":7}},"name":"install_claude_cli_hooks"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/claude_cli_spawn.rs","start":{"line":164,"col":5},"end":{"line":179,"col":7}},"name":"spawned_claude_cli_branch"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/claude_cli_spawn.rs","start":{"line":120,"col":5},"end":{"line":157,"col":13}},"name":"cut_claude_cli_worktree"}

@@ -3,7 +3,8 @@
 Eight RPCs over a session's whole life: listing, starting (unary or streamed with attachment
 materialization), connecting, resuming, signalling, deleting, and measuring a checkout for a session
 room. The proto is `packages/tddy-service/proto/session.proto`; handlers live under
-`packages/tddy-session-lifecycle/src/` (the modules moved from `tddy-daemon` in `#unbundle` node 9).
+`packages/tddy-session-lifecycle/src/` (the modules moved from `tddy-daemon` in `#unbundle` node 9),
+laid out as [module-layout.md](module-layout.md) describes.
 
 ## The surface
 

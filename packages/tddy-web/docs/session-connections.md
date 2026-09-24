@@ -87,7 +87,7 @@ see it; production states no numbers.
 ### `openHostServedSession` — `connections/hostServedSession.ts`
 
 The case the attach reply names no room for: the host already serves this session's RPC on its own
-roster (`cli_session_manager.rs` hosts `terminal.TerminalService` against a PTY handle). Clients,
+roster (`cli_session_manager/livekit_bridge.rs` hosts `terminal.TerminalService` against a PTY handle). Clients,
 transport and status are read straight through from the host connection — a session cannot be more
 reachable than the host serving it — so identity is stable for exactly as long as the host connection
 is, inherited rather than re-implemented.

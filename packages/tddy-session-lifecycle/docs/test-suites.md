@@ -30,3 +30,32 @@ can have, because nothing in the crate shows it.
 - Crates a suite needs go in `[dev-dependencies]`, never `[dependencies]` — a crate only a test
   needs is not one the library needs, and declaring it in `[dependencies]` makes every consumer
   rebuild it.
+
+## What a local run shows
+
+`./test -p tddy-session-lifecycle` stops at the first red suite, and `./test` passes its arguments
+before its own `-- --test-threads=1`, so a libtest `--skip` becomes a filter. The full local run is
+therefore cargo directly, in the dev shell:
+
+```bash
+cargo test -p tddy-session-lifecycle --no-fail-fast -- --test-threads=1 \
+  --skip sandboxed_bash_pty_action_streams_output
+```
+
+On a macOS developer host this gives 61 targets (60 test binaries plus doctests), **622 passed,
+22 failed, 1 ignored**. The 22 are environmental, not defects in the code they cover:
+
+| Suite | Red | Why |
+|---|---:|---|
+| `sandbox_behavior_acceptance` | 5 of 5 | `sandbox RPC bridge not installed — runtime must call install_sandbox_rpc_bridge`: the harness never installs the bridge, so every sandboxed start panics |
+| `sandboxed_claude_cli_acceptance` | 5 of 5 | the same |
+| `sandboxed_cursor_cli_acceptance` | 4 of 4 | the same |
+| `sandboxed_session_lifecycle_acceptance` | 2 (`delete_sandbox_session_stops_child_and_removes_directory`, `resume_sandbox_session_respawns_and_updates_pid`) | the same |
+| `session_sync_livekit_acceptance` | 6 of 6 | `tddy-remote-git-repo is not built`: `./test`'s prebuild does not build it |
+
+`action_sandbox_acceptance::sandboxed_bash_pty_action_streams_output` does not finish on that host,
+so it is skipped.
+
+So **the sandboxed Claude start, the sandboxed Cursor start and the sandboxed relaunch have no
+passing test on a developer host.** Changing those paths needs that coverage first:
+[`docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md`](../../../docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md).

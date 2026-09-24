@@ -2,8 +2,8 @@
 
 **Category:** Defect (test)
 **Source:** `#carve` 14/15, [#524](https://github.com/uppin/tddy-coder/pull/524), the DRY-target
-baseline of changeset
-[`2026-09-23-carve-lifecycle-destructure`](../1-WIP/2026-09-23-carve-lifecycle-destructure.md)
+baseline of change history
+[`2026-09-23-carve-lifecycle-destructure`](../changesets/2026-09-23-carve-lifecycle-destructure.md)
 
 `packages/tddy-worktree-service/tests/worktree_size_calculator_acceptance.rs` is flaky on master's
 code. At `3a96ca22`, with nothing in `tddy-worktree-service` or `tddy-core` changed since

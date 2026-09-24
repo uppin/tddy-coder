@@ -86,7 +86,7 @@ forwarding clients — all of which are a daemon's transport layer, and a sessio
 reached for them would be back inside the module this crate was extracted from.
 
 So the daemon wraps this implementation. `PeerRoutedSessionFiles`
-(`packages/tddy-daemon/src/connection_service/svc_session_files_ports.rs`) implements the same
+(`packages/tddy-session-lifecycle/src/connection_service/svc_session_files_ports/svc_peer_routed_session_files.rs`) implements the same
 generated trait, decides the route, and either forwards or delegates inward. **Eight of the thirteen
 route**: the three context streams, the three staging methods and both host-document reads. The other
 five — the two workflow-file methods and the three upload methods — address the session directory on
@@ -136,4 +136,4 @@ crossing.
 
 - [agent-context-sync.md](./agent-context-sync.md) — families J in detail
 - [host-documents-and-attachments.md](./host-documents-and-attachments.md) — families R and S in detail
-- [connection-service.md](../../tddy-daemon/docs/connection-service.md) — the host, and `StartSession`
+- [`tddy-session-lifecycle` session-service.md](../../tddy-session-lifecycle/docs/session-service.md) — the host, and `StartSession`
