@@ -147,6 +147,40 @@ The 14 `ptr_arg` fixes and the `mut` are mechanical, and the engine could make t
 `JailSession`, `JailDirs` and `JailLaunch` structs and the `ManagedJailEnv` alias are judgement calls
 about names and grouping. That is a reason for the engine to report them rather than invent them.
 
+### Plan `05` (#524): `ptr_arg` again, and a unit value wrapped in `Ok`
+
+Plan `05`'s four extract-methods on `spawn_split_agent` compile, and leave four clippy findings:
+three `ptr_arg` of the same shape as above, and one new one. The range the assist extracted is an
+`if` statement, an expression of type `()`, so it became the function's tail, wrapped in `Ok`:
+
+```rust
+// after plan 05, formatted
+    async fn join_split_livekit_room(
+        &self,
+        …
+        session_dir: &std::path::PathBuf,          // clippy::ptr_arg
+    ) -> Result<(), Status> {
+        Ok(if livekit.is_some() {                  // clippy::unit_arg
+            …
+        })
+    }
+
+// by hand (#524)
+        session_dir: &std::path::Path,
+    ) -> Result<(), Status> {
+        if livekit.is_some() {
+            …
+                session_dir.to_path_buf(),         // was `session_dir.clone()`, for `RemoteCheckout::new`
+            …
+        }
+        Ok(())
+    }
+```
+
+`split_agent_context_and_args` took `session_dir` and `tddy_tools_path` as `&std::path::PathBuf`,
+fixed the same way. The unit tail is mechanical too: a unit-typed tail belongs before `Ok(())`, not
+inside it.
+
 ## Candidates, undecided
 
 - **P:** carry the trivia with the moved nodes, or refuse an `extract_*` whose output has fewer

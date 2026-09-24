@@ -208,6 +208,12 @@ async fn split_agent_withdrawals(&self, codebase_instance_id: &str, codebase_ses
 So this is composition. Either the server had not re-analysed op 0's edit when the next assist ran
 (stale inference), or the `PositionLedger` mis-mapped the ranges. The two are not yet told apart.
 
+**Not seen again after `51211cd8`** (#524, 2026-09-24). That commit makes the backend close every
+document an operation opens. Before it, a shared server went on answering for a file with the last
+text an earlier run had sent. The same plan, applied once through the warm daemon, applied 5 of 5
+with real signatures and passed the compile gate. One clean run does not establish that stale
+documents caused L, so the gap stays open until it is reproduced or explained.
+
 ### M — a moved `mod x;` declaration changes what the test file's `use super::*` means
 
 Plan `01`, test build only.
