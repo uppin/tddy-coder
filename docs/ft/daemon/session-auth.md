@@ -102,6 +102,13 @@ systemd — so a live PR read as "no PR".
   key both keep a working one. A key that no longer opens its slot still refreshes the session, with
   no key and `LOCKED`; a vault that cannot be read keeps the presented key. At most 16 slots per
   vault; the least recently used is evicted.
+- **An open vault nobody uses is closed.** An unlocked vault's key stays in daemon memory only while
+  something uses it — a sign-in sealing into it, an unlock, a session refresh reopening or rotating
+  through it, or a PR-status read. Asking whether it is open (`GetAuthStatus`) is not a use. After
+  `github.open_vault_idle_ttl_seconds` unused (see [Security / configuration](#security--configuration))
+  the daemon closes it and drops the key. That locks nobody out: the vault is exactly as after a
+  restart — `LOCKED`, PR status *unavailable* with the same reason, and the browser's next refresh
+  reopens it with its unlock key.
 - **A forgotten passphrase is a reset, never a silent re-initialisation.** There is no daemon-held
   master key. `ResetVault(session_token, new_passphrase)` renames the old file aside
   (`credentials-<hex>.locked-<unix>.vault`, never deleted — the old passphrase still opens it) and
@@ -136,7 +143,9 @@ systemd — so a live PR read as "no PR".
   login, refresh and logout and sits in `localStorage`; the passphrase crosses it in `UnlockVault` /
   `ResetVault`. Rotation bounds a copied key against the live file only — an old backup keeps its old
   slots, and a set-aside vault keeps the slots and passphrase it had. A lineage that stops refreshing
-  without logging out keeps the vault open on the daemon until it exits.
+  without logging out keeps the vault open on the daemon for up to
+  `github.open_vault_idle_ttl_seconds` (seven days by default) after its last use — until the daemon
+  exits when that is `0`.
 
 ### Operator migration (breaking for running deployments)
 
@@ -164,6 +173,7 @@ file can be deleted by hand. The steps below are from the change that introduced
 ## Security / configuration
 
 - **`github.pending_login_ttl_seconds`** — how long a sign-in's GitHub token waits in daemon memory for its credential vault, and so how long that sign-in may choose the vault's passphrase. Absent → **600** (ten minutes); `0` → never (held until an unlock, a logout or a restart, and the daemon warns at startup); at most **604800** (seven days, the refresh window). A negative, non-numeric or larger value fails the config load, naming the setting. A sweep drops an expired token at least once a minute. `desktop.yaml.production`, `dev.daemon.yaml` and `dev.desktop.yaml` write it explicitly; `daemon.yaml.production` shows it in its commented `github:` example.
+- **`github.open_vault_idle_ttl_seconds`** — how long an unlocked credential vault may go unused (no sign-in, unlock, session refresh or PR-status read) before the daemon closes it and drops its data key from memory. Absent → **604800** (seven days — the refresh-token lifetime, read from `tddy_github::REFRESH_TOKEN_TTL`), which is also the maximum: past it no lineage that could have used the vault can still refresh. `0` → never (held until the last lineage logs out or the daemon restarts, and the daemon warns at startup). A negative, non-numeric or larger value fails the config load, naming the setting. The startup log names the value; each closing is logged at `info` with the login and how long the vault sat unused. The same sweep as pending sign-ins looks every min(pending lifetime, idle lifetime, 60 s), skipping a kind whose lifetime is `0`, and does not run at all when both are. Written in the same four files as `pending_login_ttl_seconds`.
 - **Authentication needs no `livekit:` block.** A daemon with a `github:` block signs and verifies session tokens whether or not LiveKit is configured, so a sign-in completes and every token-gated RPC — including the settings service an operator repairs the configuration from — answers. `livekit.api_secret` signs LiveKit room JWTs and nothing else.
 - **The key file is guarded, not repaired.** It is written at mode `0600` before any byte of it exists (via `write_atomic_with_mode`), and a key file another account can read is refused at startup rather than tightened — it may already have been read, and the operator is the one to judge that. A present but unparseable key is also refused; the daemon never regenerates over an identity peers have learned. An `auth_storage` directory more permissive than `0700` is warned about once at startup and left as the operator set it.
 - **The key location has no guess.** `auth_storage` when configured, else `<tddy_data_dir>/auth`; the daemon refuses to start when neither is known. Moving `auth_storage` moves the key: a daemon that finds no key generates a new identity, and every session it issued ends.

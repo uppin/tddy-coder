@@ -27,13 +27,15 @@ reports the vault's state (`OPEN` / `LOCKED` / `UNINITIALIZED` / `NONE`); a clos
 token in memory until `UnlockVault` opens it. `ResetVault` is the only answer to a forgotten
 passphrase: the old file is set aside, never deleted, and there is no daemon-held master key. A
 browser's unlock key carries its credentials across a daemon restart without the passphrase.
-Pending sign-ins expire after `github.pending_login_ttl_seconds`.
+Pending sign-ins expire after `github.pending_login_ttl_seconds`, and an open vault nothing uses is
+closed after `github.open_vault_idle_ttl_seconds`.
 
 Where the end state is documented:
 
 - [session-auth.md](../../ft/daemon/session-auth.md) — § GitHub access-token retention (the vault
   states, unlocking, restart, reset, the fresh-sign-in rule, the trade-off), § Refresh, § Logout,
-  § Security / configuration (`pending_login_ttl_seconds`), § Operator migration
+  § Security / configuration (`pending_login_ttl_seconds`, `open_vault_idle_ttl_seconds`), § Operator
+  migration
 - [pr-stack-live-status.md](../../ft/coder/pr-stack-live-status.md) — § Authenticated PR status (the
   unavailable reasons while the vault is closed)
 - [`tddy-credentials/docs/credential-store.md`](../../../packages/tddy-credentials/docs/credential-store.md) —
@@ -41,9 +43,9 @@ Where the end state is documented:
   the passphrase buy, **known limitations**, and **the two retention rules** the deleted trait
   carried (the token stays out of the session token and off every response; a failed write fails
   the login)
-- [`tddy-daemon-auth/docs/auth-service.md`](../../../packages/tddy-daemon-auth/docs/auth-service.md) — § Credential vaults: construction, `pending_login_ttl_seconds`, the sweep, `retained_github_token`
+- [`tddy-daemon-auth/docs/auth-service.md`](../../../packages/tddy-daemon-auth/docs/auth-service.md) — § Credential vaults: construction, `pending_login_ttl_seconds`, `open_vault_idle_ttl_seconds`, the sweep, `retained_github_token`
 - [`tddy-github/docs/device-flow.md`](../../../packages/tddy-github/docs/device-flow.md) — retention in `complete_login`, § The credential vault's half of `AuthServiceImpl`
-- [`tddy-daemon-kernel/docs/daemon-kernel.md`](../../../packages/tddy-daemon-kernel/docs/daemon-kernel.md) — `PendingLoginTtl`
+- [`tddy-daemon-kernel/docs/daemon-kernel.md`](../../../packages/tddy-daemon-kernel/docs/daemon-kernel.md) — `PendingLoginTtl`, `OpenVaultIdleTtl`
 - [`tddy-daemon/docs/daemon-endpoint.md`](../../../packages/tddy-daemon/docs/daemon-endpoint.md) — the vaults' injection and the sweep in `runtime::build`
 - [`tddy-web/docs/daemon-sign-in.md`](../../../packages/tddy-web/docs/daemon-sign-in.md) — § The credential vault: the unlock key, `CredentialVaultPrompt`
 - `tddy-session-lifecycle/docs/session-service.md`, `tddy-daemon-rpc/docs/architecture.md` — `credential_vaults` on the host and the PR-stack handler
@@ -51,10 +53,10 @@ Where the end state is documented:
 
 | Package | Change |
 |---|---|
-| `tddy-credentials` (new) | `ProviderId`, `AccountId`, `CredentialRecord`; `CredentialStore::{path_in, create, open_with_passphrase, open_with_unlock_key, reset}`; `SessionVault`; `UnlockKey`; `SessionVaults` + `VaultState`, `Retained`, `Reset`, `ROTATION_GRACE`, pending sign-ins (`sessions/pending.rs`); `SecretString`, `SecretBytes`, `MIN_PASSPHRASE_CHARS` / `MAX_PASSPHRASE_CHARS`; `VaultError`; `atomic.rs` |
+| `tddy-credentials` (new) | `ProviderId`, `AccountId`, `CredentialRecord`; `CredentialStore::{path_in, create, open_with_passphrase, open_with_unlock_key, reset}`; `SessionVault`; `UnlockKey`; `SessionVaults` + `VaultState`, `Retained`, `Reset`, `ROTATION_GRACE`, pending sign-ins (`sessions/pending.rs`), idle open vaults (`sessions/open.rs`); `SecretString`, `SecretBytes`, `MIN_PASSPHRASE_CHARS` / `MAX_PASSPHRASE_CHARS`; `VaultError`; `atomic.rs` |
 | `tddy-github` | `token_store.rs` deleted; `with_credential_vaults`; retention by vault state; `UnlockVault` / `ResetVault`; unlock-key rotation on refresh, slot removal on logout; `src/auth_service/vault.rs`, `vault/backoff.rs` |
-| `tddy-daemon-auth` | `github_token_store.rs` deleted; `pending_logins.rs`; `AuthBuildResult::credential_vaults`; `retained_github_token` |
-| `tddy-daemon-kernel` | `pending_login_ttl.rs`; `GitHubConfig.pending_login_ttl_seconds` |
+| `tddy-daemon-auth` | `github_token_store.rs` deleted; `vault_lifetimes.rs` (was `pending_logins.rs`); `AuthBuildResult::credential_vaults`; `retained_github_token` |
+| `tddy-daemon-kernel` | `pending_login_ttl.rs`, `open_vault_idle_ttl.rs`; `GitHubConfig.{pending_login_ttl_seconds, open_vault_idle_ttl_seconds}`; path dependency on `tddy-github` (for `REFRESH_TOKEN_TTL`) |
 | `tddy-daemon` | `runtime::build` injects the vaults and spawns the sweep |
 | `tddy-session-lifecycle` | `DaemonSessionHost::{with_credential_vaults, credential_vaults}` |
 | `tddy-daemon-rpc` | `PrStackRpcHandler.credential_vaults`; `pr_stack/pr_status.rs` reads through `retained_github_token`; path dependency on `tddy-credentials` |
@@ -62,7 +64,7 @@ Where the end state is documented:
 | `tddy-web` | the unlock key in `sessionTokenStore`; `CredentialVaultPrompt`; `src/lib/vaultPassphrase.ts`; `src/hooks/authSession.ts` split out of `useAuth.ts` |
 | `tddy-session-sync`, `tddy-remote-git-repo` | a tool's `RefreshSessionRequest` presents no unlock key |
 | `tddy-host-service`, `tddy-rust-typescript-tests` | a doc comment naming the deleted store; regenerated `auth_pb.ts` |
-| config | `daemon.yaml.production` (commented example, wording), `desktop.yaml.production`, `dev.daemon.yaml`, `dev.desktop.yaml` (`pending_login_ttl_seconds: 600`); `install` |
+| config | `daemon.yaml.production` (commented example, wording), `desktop.yaml.production`, `dev.daemon.yaml`, `dev.desktop.yaml` (`pending_login_ttl_seconds: 600`, `open_vault_idle_ttl_seconds: 604800`); `install` |
 
 **Dependencies.** `argon2 0.5` was already in the workspace. **`zeroize` 1.9** — approved by the
 developer after the wrap, and already in `Cargo.lock` — replaces the hand-rolled volatile-write
@@ -146,13 +148,60 @@ alone.
   `2026-09-19-action-sandbox-acceptance-pty-test-does-not-finish` (found by this node's baseline).
 - **Kept, not resolved here**: `2026-07-26-pr-stack-status-polling-and-stack-hygiene` — the
   PR-status read path changed, its polling did not.
+- **Resolved here**: `2026-09-23-credential-vault-open-past-its-last-session` — closed after the
+  wrap on the developer's pattern from the pending-login work (configurable, logged, swept): an
+  open vault nothing has used — no login sealing into it, unlock, refresh or credential read — for
+  `github.open_vault_idle_ttl_seconds` (default and maximum the seven-day refresh-token lifetime,
+  `0` never) is closed and its data key dropped; the next refresh with an unlock key reopens it, as
+  after a restart. The "evict at slot eviction too" candidate was not built: the `MAX_UNLOCK_SLOTS`
+  bound evicts only when a slot is added, for the lineage that just used the vault, so it can
+  never evict a vault's last slot. The entry's "also held" pending tokens were already closed by
+  `pending_login_ttl_seconds`. Entry deleted.
 - **Resolved here**: `2026-09-24-credential-vault-cipher-key-schedule-not-wiped` — closed after the
   wrap, with the developer's approval of `zeroize`: every key-holding type in `tddy-credentials`
   and every RustCrypto instance it builds is `ZeroizeOnDrop` (or, for `Hmac`, made only of parts
   that are), proven by bound in `secret.rs`'s tests; the `TODO(keyring)` in `vault/crypto.rs` is
   gone. Entry deleted.
 
-## Verification
+## After the wrap: the two gaps left open, closed
+
+Two commits on #510 after its wrap (`0918ff8c`), each closing a backlog entry above.
+
+- **Key schedules are wiped** (`zeroize`, developer-approved). See **Dependencies** and the
+  resolved `…-cipher-key-schedule-not-wiped` entry. `secret.rs`'s wipe tests now prove each holder
+  is `ZeroizeOnDrop` by bound — `SecretBytes`, `SecretString`, `ChaCha20Poly1305`, and the SHA-256
+  core and block buffer an `Hmac<Sha256>` is made of — plus a live-value wipe of each secret type;
+  none reads freed memory.
+- **An open vault nothing uses is closed** — `github.open_vault_idle_ttl_seconds`
+  (`tddy-daemon-kernel`'s `open_vault_idle_ttl.rs`; default and maximum
+  `tddy_github::REFRESH_TOKEN_TTL`, seven days; `0` never), built into `SessionVaults` by
+  `tddy-daemon-auth`'s `vault_lifetimes::credential_vaults_in` (renamed from `pending_logins`,
+  which now takes the `github:` block), held per handle by `tddy-credentials`' new
+  `sessions/open.rs`, and swept by `spawn_credential_sweep` every min(pending, idle, 60 s), each
+  kind skipped at `0`. A use is a login sealing into the vault, an unlock/create/reset, a refresh
+  reopening or rotating through it, or `retained_github_token`'s read (`SessionVaults::use_open`);
+  `get`/`state` — a status poll — are not. Logged: the value at startup (`info`, `warn` at `0`),
+  each closing (`info`, login and idle seconds). New suite
+  `tddy-daemon-auth/tests/open_vault_idle_expiry_acceptance.rs`; eight new `sessions.rs` tests; six
+  kernel parsing tests. `MAX_PENDING_LOGIN_TTL_SECONDS` now reads the same constant.
+- **Slot-bound eviction was not added**, by the model: `MAX_UNLOCK_SLOTS` evicts only when a slot is
+  added, and the added slot belongs to the lineage that just used the vault, so the bound can never
+  evict a vault's last slot.
+
+| File | Production lines, wrap → now |
+|---|---|
+| `tddy-daemon-kernel/src/config.rs` | 1,474 → 1,476 (the field and its pointer) — `oversized-file-config` regressed, deferred with consent |
+| `tddy-daemon/src/runtime.rs` | 1,620 → 1,620 (the sweep line renamed); `build` 880 → 880 |
+| `tddy-daemon-auth/src/auth.rs` | 622 → 621; `build_auth_entries_admitting` 110 → 109 |
+| `tddy-credentials/src/sessions.rs` | 420 → 452 (`sessions/open.rs` new, 129) — under budget, not split |
+
+Verification, scoped: `./test -p tddy-credentials -p tddy-daemon-auth -p tddy-github -p
+tddy-daemon-kernel --no-fail-fast` **454 passed / 0 failed** (credentials 78, daemon-auth 153,
+kernel 124, github 99). `cargo check --all-targets` on the eleven touched packages clean;
+`tddy-daemon-rpc` `query_branch_resolution_acceptance` 13 / 0; `cargo clippy -p <pkg>
+--all-targets -- -D warnings` clean on all eleven; rustfmt clean on the touched files.
+
+## Verification at the wrap
 
 Scoped, on the branch at the wrap. `./test -p tddy-credentials -p tddy-daemon-auth -p tddy-github
 -p tddy-daemon-kernel --no-fail-fast`: **428 passed / 0 failed** (credentials 68, daemon-auth 143,

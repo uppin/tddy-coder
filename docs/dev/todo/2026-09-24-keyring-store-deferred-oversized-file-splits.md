@@ -10,10 +10,10 @@
 
 | File | Production lines (`origin/master` → #510) | What #510 added | Record |
 |---|---|---|---|
-| `packages/tddy-daemon-auth/src/auth.rs` | 576 → 622 | the credential-vault construction over `auth_storage` (`pending_logins::credential_vaults_in`) and the half-login rule extended to "cannot open" | `packages/tddy-daemon-auth/docs/code-issues/oversized-file-auth.md` |
+| `packages/tddy-daemon-auth/src/auth.rs` | 576 → 622 (621 after the idle-vault follow-up) | the credential-vault construction over `auth_storage` (`vault_lifetimes::credential_vaults_in`, formerly `pending_logins`) and the half-login rule extended to "cannot open" | `packages/tddy-daemon-auth/docs/code-issues/oversized-file-auth.md` |
 | `packages/tddy-session-sync/src/attach.rs` | 517 → 520 | `RefreshSessionRequest.vault_unlock_key: String::new()` — a tool presents no unlock key | `packages/tddy-session-sync/docs/code-issues/oversized-file-attach.md` |
-| `packages/tddy-daemon-kernel/src/config.rs` | 1,472 → 1,474 | the `github.pending_login_ttl_seconds` field; its type, default and validation live in `pending_login_ttl.rs` | `packages/tddy-daemon-kernel/docs/code-issues/oversized-file-config.md` |
-| `packages/tddy-daemon/src/runtime.rs` | 1,619 → 1,620 | the pending-login expiry sweep's spawn, beside the vaults' injection | `packages/tddy-daemon/docs/code-issues/oversized-file-runtime.md` |
+| `packages/tddy-daemon-kernel/src/config.rs` | 1,472 → 1,474 (1,476 after the idle-vault follow-up) | the `github.pending_login_ttl_seconds` and `github.open_vault_idle_ttl_seconds` fields; their types, defaults and validation live in `pending_login_ttl.rs` and `open_vault_idle_ttl.rs` | `packages/tddy-daemon-kernel/docs/code-issues/oversized-file-config.md` |
+| `packages/tddy-daemon/src/runtime.rs` | 1,619 → 1,620 | the credential sweep's spawn (pending sign-ins, and since the follow-up idle open vaults), beside the vaults' injection | `packages/tddy-daemon/docs/code-issues/oversized-file-runtime.md` |
 | `packages/tddy-service/build.rs` | 692 → 695 | prost `skip_debug` for the two requests that carry a vault passphrase (N1), and its comment | `packages/tddy-service/docs/code-issues/oversized-file-build.md` |
 
 **Why after the stack.**

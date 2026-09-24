@@ -35,9 +35,9 @@ pub mod first_login_admission;
 pub mod github_pr_credentials;
 mod local_token;
 pub mod oauth_loopback_tunnel;
-pub mod pending_logins;
 pub mod signing_key;
 pub mod token_provider;
+pub mod vault_lifetimes;
 
 /// The crate's own surface, at the crate root, so a caller writes `tddy_daemon_auth::…` for the
 /// four things the daemon's wiring layer needs and reaches into a module for nothing else.

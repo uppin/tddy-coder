@@ -75,7 +75,8 @@ pub fn retained_github_token(
         }
         VaultState::Uninitialized => return Ok(None),
     }
-    let Some(vault) = vaults.get(login) else {
+    // A read is a use: it keeps the vault open for another `open_vault_idle_ttl_seconds`.
+    let Some(vault) = vaults.use_open(login) else {
         return Err(not_open(login, VAULT_LOCKED_REASON));
     };
     vault

@@ -148,8 +148,8 @@ status) arrive later, with only a session token. For each user it answers `Vault
   GitHub again, and a later `unlock` seals nothing from it. The state reported is untouched
   (`Locked` or `Uninitialized`, from the disk). Expiry is checked on every look at the pending set
   (`retain`, `holds_pending`, `create`, `reset`, `unlock`) and by a sweep: `expire_pending`, which
-  `tddy-daemon-auth`'s `pending_logins::spawn_pending_login_sweep` runs every min(lifetime, 60 s)
-  on the daemon's runtime — and not at all when the lifetime is `0`. The age is read from an
+  `tddy-daemon-auth`'s `vault_lifetimes::spawn_credential_sweep` runs on the daemon's runtime —
+  skipped when the lifetime is `0`. The age is read from an
   injectable `Clock` (`with_clock`), so tests move time by hand. Logged at `tddy_credentials::sessions`:
   a hold (`info`, the login and its expiry), an expiry (`info`, the login and its age), and a
   refusal because the sign-in expired (`warn`); a record is logged by provider only, never its
@@ -189,9 +189,23 @@ status) arrive later, with only a session token. For each user it answers `Vault
   other failure to read is a real one and is reported where it happens.
 - **Bound.** At most `MAX_UNLOCK_SLOTS` (16) slots per vault; past it the least recently used is
   evicted, and a rotation counts as a use.
-- ⚠ TODO: a lineage that simply stops refreshing never logs out, so its vault stays open until the
-  daemon exits, and a pending token that nobody unlocks lives as long —
-  [`docs/dev/todo/2026-09-23-credential-vault-open-past-its-last-session.md`](../../../docs/dev/todo/2026-09-23-credential-vault-open-past-its-last-session.md).
+- **An open vault nothing uses is closed** (`sessions/open.rs`). A lineage that simply stops
+  refreshing never logs out, so the handle also carries when it was last **used**, and after
+  `with_idle_lifetime` (default `None` — held until the daemon exits; the daemon sets it from
+  `github.open_vault_idle_ttl_seconds`, seven days unless configured) unused, it is dropped and its
+  data key wipes itself as the last `Arc` goes. A use is `retain` sealing into it, `unlock` /
+  `create` / `reset` opening it, `reopen` reopening or rotating through it, and `use_open` — the
+  credential read `retained_github_token` makes. `get` and `state` only ask, and are not a use: a
+  dashboard polling `GetAuthStatus` would otherwise hold the vault open for good. The use is
+  recorded in the same lock as the lookup, so a vault found for a use cannot be closed before it is
+  used. The idle check runs on every lookup and in the sweep (`evict_idle`), on the same `Clock` as
+  the pending set; each closing is logged (`info`, the login and how long it sat unused). The file
+  is untouched, so the vault is exactly as after a restart: `Locked`, and the next refresh
+  presenting an unlock key reopens it.
+- **The slot bound never closes a vault.** Eviction by `MAX_UNLOCK_SLOTS` happens only when a slot
+  is **added**, and the added slot is the lineage that just used the vault — so the bound can never
+  evict a vault's last slot, and there is no "last slot evicted, nobody attached" case to close on.
+  An evicted lineage's refresh fails to reopen; the vault itself idles out like any other.
 
 **What guessing costs** (the auth service, `tddy-github`'s `auth_service/vault.rs`). Every
 passphrase derivation — unlock, create, reset — runs on tokio's blocking pool behind a
@@ -240,6 +254,18 @@ backup of it; and a daemon at rest holds no key.
 
 Stated rather than fixed; each is bounded, and none lets a caller read a credential it could not
 read otherwise.
+
+- **An open vault outlives its last session by up to its idle lifetime.** Session tokens are
+  stateless, so the daemon cannot tell "nobody is present" from "nobody has used the vault lately";
+  a vault a lineage abandoned without logging out holds its data key for up to
+  `github.open_vault_idle_ttl_seconds` (seven days by default) after its last use, and until the
+  daemon exits when that is `0`. A shorter idle lifetime narrows it at the cost of more reopen
+  round-trips. Touching the vault on every authenticated RPC, rather than on its own uses, was the
+  alternative and was not taken: it would plumb a last-seen time through the RPC gate. A handle a
+  read still holds (`Arc`) keeps the data key until that read finishes.
+- **The keyed HMAC state wipes by its parts.** `hmac` 0.13 does not mark `Hmac` itself
+  `ZeroizeOnDrop`; its two SHA-256 states and its block buffer each wipe themselves, which is what
+  `secret.rs`'s tests assert.
 
 - **Set-aside naming is checked, then renamed** (`vault/format.rs` `set_aside`). The free
   `.locked-<unix>[-n].vault` name is found with `exists()` and then `rename`d, and on unix a

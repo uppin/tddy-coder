@@ -12224,6 +12224,7 @@ dependencies = [
  "serde_yaml",
  "tddy-core",
  "tddy-discovery",
+ "tddy-github",
  "tddy-livekit",
  "tddy-rpc",
  "tddy-sandbox",

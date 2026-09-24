@@ -173,12 +173,32 @@ its size budget — carries the field and a one-line pointer.
 
 - `#[serde(default)]` → `DEFAULT_PENDING_LOGIN_TTL_SECONDS`, **600**.
 - `0` → never; `PendingLoginTtl::lifetime()` is `None`.
-- At most `MAX_PENDING_LOGIN_TTL_SECONDS`, **604,800** (seven days, the session refresh window).
+- At most `MAX_PENDING_LOGIN_TTL_SECONDS`, **604,800** (seven days, the session refresh window —
+  `tddy_github::REFRESH_TOKEN_TTL`, read rather than restated).
 - Validated as it is read: `from_seconds` refuses a larger value, and deserialisation refuses a
   negative or non-numeric one, each naming the setting — the config load fails rather than
   clamping. `Display` prints `"600 s"` or `"never (0)"`, as the startup log line uses it.
 
 Inline tests pin the default, `0`, the ceiling, and each refusal's message.
+
+## `open_vault_idle_ttl` — `github.open_vault_idle_ttl_seconds`
+
+`GitHubConfig.open_vault_idle_ttl_seconds: OpenVaultIdleTtl` is how long an unlocked credential
+vault may go unused before the daemon closes it and drops its data key
+([auth-service.md § Credential vaults](../../tddy-daemon-auth/docs/auth-service.md#credential-vaults)).
+Its own module for the same reason as `pending_login_ttl`, and shaped the same way:
+
+- `#[serde(default)]` → `DEFAULT_OPEN_VAULT_IDLE_TTL_SECONDS`, **604,800** — the refresh-token
+  lifetime, `tddy_github::REFRESH_TOKEN_TTL`.
+- `0` → never; `OpenVaultIdleTtl::lifetime()` is `None`.
+- At most `MAX_OPEN_VAULT_IDLE_TTL_SECONDS`, the same **604,800**: past it no lineage that could
+  have used the vault can still refresh.
+- Validated as it is read, each refusal naming the setting; `Display` prints `"3600 s"` or
+  `"never (0)"`.
+
+Reading `REFRESH_TOKEN_TTL` is why this crate depends on `tddy-github` (which depends on no daemon
+crate, so the edge closes no cycle). Inline tests pin the default, `0`, the ceiling, and each
+refusal's message.
 
 ## See also
 

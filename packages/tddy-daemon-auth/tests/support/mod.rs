@@ -8,6 +8,8 @@
 
 #![allow(dead_code)] // each test binary uses its own part of the harness
 
+pub mod captured_log;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -78,6 +80,20 @@ impl ADaemon {
             SessionVaults::new(self.storage())
                 .with_clock(clock)
                 .with_pending_lifetime(lifetime),
+        )
+    }
+
+    /// A fresh daemon process whose open vaults close once unused for `idle`, reading the time
+    /// from `clock`.
+    pub fn running_with_open_vaults_idling_out(
+        &self,
+        clock: tddy_credentials::Clock,
+        idle: std::time::Duration,
+    ) -> ARunningDaemon {
+        self.running_with(
+            SessionVaults::new(self.storage())
+                .with_clock(clock)
+                .with_idle_lifetime(Some(idle)),
         )
     }
 

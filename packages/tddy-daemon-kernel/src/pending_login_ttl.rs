@@ -23,9 +23,10 @@ use std::time::Duration;
 /// The lifetime when the config names none: long enough to find and type a passphrase.
 pub const DEFAULT_PENDING_LOGIN_TTL_SECONDS: u64 = 600;
 
-/// The longest lifetime a config may name — the seven-day session refresh window. A longer one
-/// would outlive every session the sign-in could have started.
-pub const MAX_PENDING_LOGIN_TTL_SECONDS: u64 = 7 * 24 * 60 * 60;
+/// The longest lifetime a config may name — the seven-day session refresh window
+/// (`tddy_github::REFRESH_TOKEN_TTL`). A longer one would outlive every session the sign-in could
+/// have started.
+pub const MAX_PENDING_LOGIN_TTL_SECONDS: u64 = tddy_github::REFRESH_TOKEN_TTL.as_secs();
 
 /// How long a pending sign-in waits for its vault; `0` is never. Validated as it is read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

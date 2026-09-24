@@ -81,6 +81,12 @@ github:
   # GitHub again. 0 means never: held until an unlock, a logout or a daemon restart (warned at
   # startup). Absent means 600; at most 604800 (seven days).
   pending_login_ttl_seconds: 600
+  # How long an unlocked credential vault may go unused — no sign-in, unlock, session refresh or
+  # PR-status read — before the daemon closes it and drops its data key from memory. Closing locks
+  # nobody out: the browser's next session refresh reopens it, as after a restart. 0 means never:
+  # held until its last lineage logs out or the daemon restarts (warned at startup). Absent means
+  # 604800 (seven days, the refresh-token lifetime), which is also the maximum.
+  open_vault_idle_ttl_seconds: 604800
 
 # WHICH OS USER A LOGIN RUNS SESSIONS AS: nobody yet, on purpose.
 #

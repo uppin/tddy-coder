@@ -14,12 +14,12 @@
 //! apart, and the latest token for a provider and account replaces an earlier one.
 //!
 //! **When the handle is dropped.** When the last unlock slot is removed — the last lineage signed
-//! out — no signed-in lineage can use the vault, and its data key leaves memory with the handle. A
-//! handle whose file was replaced or removed underneath it is dropped the next time it is looked up.
-//! TODO(keyring): a lineage that simply stops refreshing (its refresh token lapses after seven
-//! days) never signs out, so its vault stays open until the daemon exits — see
-//! docs/dev/todo/2026-09-23-credential-vault-open-past-its-last-session.md.
+//! out — no signed-in lineage can use the vault, and its data key leaves memory with the handle.
+//! When nothing has used it for its idle lifetime ([`SessionVaults::with_idle_lifetime`]), since a
+//! lineage that simply stops refreshing never signs out (`open.rs`). A handle whose file was
+//! replaced or removed underneath it is dropped the next time it is looked up.
 
+mod open;
 mod pending;
 
 use std::collections::HashMap;
@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 use crate::record::CredentialRecord;
 use crate::secret::SecretString;
 use crate::vault::{CredentialStore, SessionVault, UnlockKey, VaultError};
+use open::OpenVaults;
 pub use pending::{Clock, PENDING_LOGIN_LIFETIME};
 use pending::{Pending, PendingSignIns, LOG_TARGET};
 
@@ -76,7 +77,8 @@ pub struct Reset {
 pub struct SessionVaults {
     auth_storage_dir: PathBuf,
     rotation_grace: Duration,
-    open: Mutex<HashMap<String, Arc<SessionVault>>>,
+    /// The vaults open now, each dropped once unused for its idle lifetime.
+    open: OpenVaults,
     /// Credentials logins produced while their vault was closed, each for a limited time.
     pending: PendingSignIns,
     /// The latest rotation of each `(subject, slot id)`, for the grace window. Also what serialises
@@ -113,7 +115,7 @@ impl SessionVaults {
         Self {
             auth_storage_dir: auth_storage_dir.into(),
             rotation_grace: ROTATION_GRACE,
-            open: Mutex::new(HashMap::new()),
+            open: OpenVaults::default(),
             pending: PendingSignIns::default(),
             rotations: Mutex::new(HashMap::new()),
             transitions: Mutex::new(()),
@@ -135,11 +137,33 @@ impl SessionVaults {
         self
     }
 
+    /// Drop an open vault nothing has used for `lifetime` — `None`, the default, for as long as
+    /// the daemon runs (builder). A use is a login sealing into it, an unlock, a refresh reopening
+    /// or rotating through it, or a credential read ([`Self::use_open`]); [`Self::get`] is not one.
+    #[must_use]
+    pub fn with_idle_lifetime(mut self, lifetime: Option<Duration>) -> Self {
+        self.open.idle_lifetime = lifetime;
+        self
+    }
+
     /// Read the time from `clock` rather than [`Instant::now`] (builder).
     #[must_use]
     pub fn with_clock(mut self, clock: Clock) -> Self {
+        self.open.clock = Arc::clone(&clock);
         self.pending.clock = clock;
         self
+    }
+
+    /// How long an open vault may go unused — `None` when it is held until the daemon exits.
+    #[must_use]
+    pub fn idle_lifetime(&self) -> Option<Duration> {
+        self.open.idle_lifetime
+    }
+
+    /// Drop every open vault unused for its idle lifetime — the periodic sweep, for the vault
+    /// nobody looks up again — and say how many were dropped. Each lookup drops one that is due.
+    pub fn evict_idle(&self) -> usize {
+        self.open.evict_idle()
     }
 
     /// How long a pending credential waits for its vault — `None` when it never expires.
@@ -204,7 +228,7 @@ impl SessionVaults {
     /// says which of those the user is asked for. A failed write is an `Err` — it fails the login.
     pub fn retain(&self, subject: &str, record: CredentialRecord) -> Result<Retained, VaultError> {
         let _transition = held(&self.transitions);
-        if let Some(vault) = self.get(subject) {
+        if let Some(vault) = self.use_open(subject) {
             match vault
                 .put(record.clone())
                 .and_then(|()| vault.add_unlock_slot())
@@ -321,7 +345,7 @@ impl SessionVaults {
                     .filter(|rotation| rotation.retired.is_the_same_key_as(unlock))
                     .ok_or(VaultError::Locked)?;
                 let _transition = held(&self.transitions);
-                if self.get(subject).is_none() {
+                if self.use_open(subject).is_none() {
                     self.register(
                         subject,
                         CredentialStore::open_with_unlock_key(&path, &rotation.successor)?,
@@ -346,17 +370,30 @@ impl SessionVaults {
         held(&self.rotations).remove(&(subject.to_string(), unlock.slot_id().to_string()));
         let _transition = held(&self.transitions);
         if vault.unlock_slot_ids()?.is_empty() {
-            held(&self.open).remove(subject);
+            self.open.remove(subject);
         }
         Ok(())
     }
 
-    /// `subject`'s open vault, or `None` when nothing since this daemon started has opened it.
+    /// `subject`'s open vault, or `None` when nothing since this daemon started has opened it,
+    /// or it has since been closed. Looking is not a use: it does not keep the vault open.
     ///
-    /// A handle whose file was replaced or removed underneath it is dropped rather than returned.
+    /// A handle whose file was replaced or removed underneath it is dropped rather than returned,
+    /// and so is one unused for its idle lifetime.
     #[must_use]
     pub fn get(&self, subject: &str) -> Option<Arc<SessionVault>> {
-        let vault = held(&self.open).get(subject).cloned()?;
+        self.fresh(subject, self.open.peek(subject)?)
+    }
+
+    /// [`Self::get`] for a credential read, which counts as a use of the vault: it stays open for
+    /// another idle lifetime from now.
+    #[must_use]
+    pub fn use_open(&self, subject: &str) -> Option<Arc<SessionVault>> {
+        self.fresh(subject, self.open.use_open(subject)?)
+    }
+
+    /// `vault`, unless its file was replaced or removed underneath it — then it is closed.
+    fn fresh(&self, subject: &str, vault: Arc<SessionVault>) -> Option<Arc<SessionVault>> {
         if vault.is_stale() {
             self.close(subject, &vault);
             return None;
@@ -388,19 +425,14 @@ impl SessionVaults {
         Ok(unlock_key)
     }
 
+    /// Keep `vault` open for `subject`, used as of now.
     fn register(&self, subject: &str, vault: SessionVault) {
-        held(&self.open).insert(subject.to_string(), Arc::new(vault));
+        self.open.insert(subject, vault);
     }
 
     /// Drop `subject`'s handle if it is still `vault` — not one a concurrent unlock put there since.
     fn close(&self, subject: &str, vault: &Arc<SessionVault>) {
-        let mut open = held(&self.open);
-        if open
-            .get(subject)
-            .is_some_and(|held| Arc::ptr_eq(held, vault))
-        {
-            open.remove(subject);
-        }
+        self.open.close(subject, vault);
     }
 
     /// Seal every credential waiting for `subject` into `vault`. What fails to seal is kept
@@ -1199,5 +1231,172 @@ mod tests {
 
         // Then
         assert_eq!((swept, vaults.holds_pending(THE_OPERATOR)), (0, true));
+    }
+
+    const AN_HOUR: Duration = Duration::from_secs(60 * 60);
+    const A_MOMENT: Duration = Duration::from_secs(1);
+
+    /// A daemon on `clock` whose open vaults close after an hour unused, with the operator's vault
+    /// just created and open — and the unlock key that created it handed out.
+    fn a_daemon_whose_open_vault_idles_out_after_an_hour(
+        dir: &Path,
+        clock: &Arc<AHandDrivenClock>,
+    ) -> (SessionVaults, UnlockKey) {
+        let vaults = SessionVaults::new(dir)
+            .with_clock(clock.as_clock())
+            .with_idle_lifetime(Some(AN_HOUR));
+        vaults
+            .retain(THE_OPERATOR, a_github_record(THE_FIRST_TOKEN))
+            .unwrap();
+        let key = vaults.create(THE_OPERATOR, &the_passphrase()).unwrap();
+        (vaults, key)
+    }
+
+    #[test]
+    fn an_open_vault_nothing_used_for_its_idle_lifetime_is_closed_and_reads_as_locked() {
+        // Given an open vault nothing has used for its idle lifetime
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let (vaults, _key) = a_daemon_whose_open_vault_idles_out_after_an_hour(dir.path(), &clock);
+        clock.advance(AN_HOUR);
+
+        // When it is looked up
+        let found = vaults.get(THE_OPERATOR).is_some();
+
+        // Then it is closed, and the file on disk says what opens it: it is locked
+        assert_eq!(
+            (found, vaults.state(THE_OPERATOR)),
+            (false, VaultState::Locked)
+        );
+    }
+
+    #[test]
+    fn a_credential_read_keeps_the_vault_open_for_another_idle_lifetime() {
+        // Given an open vault whose credential was read shortly before its idle lifetime ran out
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let (vaults, _key) = a_daemon_whose_open_vault_idles_out_after_an_hour(dir.path(), &clock);
+        clock.advance(AN_HOUR - A_MOMENT);
+        let _read = vaults.use_open(THE_OPERATOR);
+
+        // When most of an hour passes again — over an hour since it opened
+        clock.advance(AN_HOUR - A_MOMENT);
+
+        // Then it is still open, and its token still readable
+        assert_eq!(
+            (vaults.state(THE_OPERATOR), the_stored_token(&vaults)),
+            (VaultState::Open, Some(THE_FIRST_TOKEN.to_string()))
+        );
+    }
+
+    #[test]
+    fn a_login_sealing_into_the_open_vault_keeps_it_open_for_another_idle_lifetime() {
+        // Given an open vault a later login sealed its token into shortly before it would close
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let (vaults, _key) = a_daemon_whose_open_vault_idles_out_after_an_hour(dir.path(), &clock);
+        clock.advance(AN_HOUR - A_MOMENT);
+        vaults
+            .retain(THE_OPERATOR, a_github_record(A_LATER_TOKEN))
+            .unwrap();
+
+        // When most of an hour passes again
+        clock.advance(AN_HOUR - A_MOMENT);
+
+        // Then it is still open, holding the later token
+        assert_eq!(
+            (vaults.state(THE_OPERATOR), the_stored_token(&vaults)),
+            (VaultState::Open, Some(A_LATER_TOKEN.to_string()))
+        );
+    }
+
+    #[test]
+    fn asking_whether_the_vault_is_open_does_not_keep_it_open() {
+        // Given an open vault whose state was asked for shortly before its idle lifetime ran out
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let (vaults, _key) = a_daemon_whose_open_vault_idles_out_after_an_hour(dir.path(), &clock);
+        clock.advance(AN_HOUR - A_MOMENT);
+        let _asked = vaults.state(THE_OPERATOR);
+
+        // When the rest of its idle lifetime passes
+        clock.advance(A_MOMENT);
+
+        // Then a status poll did not hold it open
+        assert_eq!(vaults.state(THE_OPERATOR), VaultState::Locked);
+    }
+
+    #[test]
+    fn with_no_idle_lifetime_an_open_vault_is_never_closed() {
+        // Given a daemon whose open vaults are held until it exits, with the operator's vault open
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let vaults = SessionVaults::new(dir.path())
+            .with_clock(clock.as_clock())
+            .with_idle_lifetime(None);
+        vaults
+            .retain(THE_OPERATOR, a_github_record(THE_FIRST_TOKEN))
+            .unwrap();
+        vaults.create(THE_OPERATOR, &the_passphrase()).unwrap();
+
+        // When a year passes with nothing using it, and the sweep runs
+        clock.advance(Duration::from_secs(365 * 24 * 60 * 60));
+        let swept = vaults.evict_idle();
+
+        // Then nothing was closed
+        assert_eq!((swept, vaults.state(THE_OPERATOR)), (0, VaultState::Open));
+    }
+
+    #[test]
+    fn a_refresh_after_the_vault_closed_for_idleness_reopens_it_with_its_unlock_key() {
+        // Given a vault closed because nothing used it for its idle lifetime
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let (vaults, key) = a_daemon_whose_open_vault_idles_out_after_an_hour(dir.path(), &clock);
+        clock.advance(AN_HOUR);
+        vaults.evict_idle();
+
+        // When the lineage holding its unlock key refreshes
+        let rotated = vaults.reopen(&key).is_ok();
+
+        // Then it reopens exactly as after a restart, with its token readable again
+        assert_eq!(
+            (
+                rotated,
+                vaults.state(THE_OPERATOR),
+                the_stored_token(&vaults)
+            ),
+            (true, VaultState::Open, Some(THE_FIRST_TOKEN.to_string()))
+        );
+    }
+
+    #[test]
+    fn the_sweep_closes_an_idle_vault_nobody_looked_up() {
+        // Given an open vault nobody has used or looked up for its idle lifetime
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let (vaults, _key) = a_daemon_whose_open_vault_idles_out_after_an_hour(dir.path(), &clock);
+        clock.advance(AN_HOUR);
+
+        // When the sweep runs, twice
+        let swept = (vaults.evict_idle(), vaults.evict_idle());
+
+        // Then the first sweep closed it, and there was nothing left for the second
+        assert_eq!(swept, (1, 0));
+    }
+
+    #[test]
+    fn the_sweep_leaves_a_vault_used_within_its_idle_lifetime() {
+        // Given an open vault within its idle lifetime
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let (vaults, _key) = a_daemon_whose_open_vault_idles_out_after_an_hour(dir.path(), &clock);
+        clock.advance(AN_HOUR - A_MOMENT);
+
+        // When the sweep runs
+        let swept = vaults.evict_idle();
+
+        // Then
+        assert_eq!((swept, vaults.state(THE_OPERATOR)), (0, VaultState::Open));
     }
 }

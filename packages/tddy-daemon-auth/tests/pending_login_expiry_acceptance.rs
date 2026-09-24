@@ -27,9 +27,10 @@ use support::{
 use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SecretString, SessionVaults, VaultError,
 };
-use tddy_daemon_auth::pending_logins::{
-    credential_vaults_in, spawn_pending_login_sweep, sweep_period,
+use tddy_daemon_auth::vault_lifetimes::{
+    credential_vaults_in, spawn_credential_sweep, sweep_period,
 };
+use tddy_daemon_kernel::config::GitHubConfig;
 use tddy_daemon_kernel::pending_login_ttl::PendingLoginTtl;
 use tddy_rpc::Code;
 use tddy_service::proto::auth::VaultState;
@@ -150,7 +151,7 @@ async fn the_sweep_drops_an_expired_token_nobody_touched() {
             .with_clock(clock.as_clock())
             .with_pending_lifetime(Some(TEN_MINUTES)),
     );
-    let _sweep = spawn_pending_login_sweep(&vaults).expect("a lifetime runs a sweep");
+    let _sweep = spawn_credential_sweep(&vaults).expect("a lifetime runs a sweep");
     vaults
         .retain(
             THE_LOGIN,
@@ -160,7 +161,8 @@ async fn the_sweep_drops_an_expired_token_nobody_touched() {
     clock.advance(A_MOMENT_PAST_TEN_MINUTES);
 
     // When the sweep's next tick comes round
-    tokio::time::advance(sweep_period(TEN_MINUTES)).await;
+    tokio::time::advance(sweep_period(Some(TEN_MINUTES), None).expect("a lifetime has a period"))
+        .await;
     tokio::task::yield_now().await;
 
     // Then it has already dropped the token: there is nothing left for anybody to expire
@@ -168,13 +170,17 @@ async fn the_sweep_drops_an_expired_token_nobody_touched() {
 }
 
 #[tokio::test]
-async fn a_daemon_whose_pending_logins_never_expire_runs_no_sweep() {
-    // Given a daemon's vaults whose pending sign-ins never expire
+async fn a_daemon_whose_pending_logins_and_open_vaults_never_expire_runs_no_sweep() {
+    // Given a daemon's vaults whose pending sign-ins never expire, nor do its open vaults
     let storage = tempfile::tempdir().expect("a temporary directory");
-    let vaults = Arc::new(SessionVaults::new(storage.path()).with_pending_lifetime(None));
+    let vaults = Arc::new(
+        SessionVaults::new(storage.path())
+            .with_pending_lifetime(None)
+            .with_idle_lifetime(None),
+    );
 
     // When the sweep is asked for
-    let sweep = spawn_pending_login_sweep(&vaults);
+    let sweep = spawn_credential_sweep(&vaults);
 
     // Then there is none
     assert!(sweep.is_none());
@@ -184,12 +190,15 @@ async fn a_daemon_whose_pending_logins_never_expire_runs_no_sweep() {
 fn the_sweep_runs_at_least_once_a_minute_and_at_least_once_a_lifetime() {
     // Given / When
     let periods = (
-        sweep_period(TEN_MINUTES),
-        sweep_period(Duration::from_secs(20)),
+        sweep_period(Some(TEN_MINUTES), None),
+        sweep_period(Some(Duration::from_secs(20)), None),
     );
 
     // Then
-    assert_eq!(periods, (Duration::from_secs(60), Duration::from_secs(20)));
+    assert_eq!(
+        periods,
+        (Some(Duration::from_secs(60)), Some(Duration::from_secs(20)))
+    );
 }
 
 #[tokio::test]
@@ -199,7 +208,7 @@ async fn startup_logs_the_configured_lifetime() {
     let storage = tempfile::tempdir().expect("a temporary directory");
 
     // When its vaults are built with a two-minute lifetime
-    credential_vaults_in(storage.path(), PendingLoginTtl::from_seconds(120).unwrap());
+    credential_vaults_in(storage.path(), &a_github_block_whose_sign_ins_wait(120));
 
     // Then the lifetime is announced
     assert!(
@@ -216,7 +225,7 @@ async fn startup_warns_when_pending_tokens_never_expire() {
     let storage = tempfile::tempdir().expect("a temporary directory");
 
     // When its vaults are built with a lifetime of 0
-    credential_vaults_in(storage.path(), PendingLoginTtl::from_seconds(0).unwrap());
+    credential_vaults_in(storage.path(), &a_github_block_whose_sign_ins_wait(0));
 
     // Then it warns where the tokens stay, and for how long
     assert!(
@@ -266,6 +275,14 @@ async fn holding_expiring_and_refusing_are_each_logged_and_the_token_never_is() 
         (true, true, true, false),
         "log lines:\n{lines}"
     );
+}
+
+/// A `github:` block whose pending sign-ins wait `seconds`, every other setting at its default.
+fn a_github_block_whose_sign_ins_wait(seconds: u64) -> GitHubConfig {
+    GitHubConfig {
+        pending_login_ttl_seconds: PendingLoginTtl::from_seconds(seconds).unwrap(),
+        ..GitHubConfig::default()
+    }
 }
 
 /// A GitHub record for [`THE_LOGIN`] holding `token`.

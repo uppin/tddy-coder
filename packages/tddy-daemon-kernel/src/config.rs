@@ -1085,6 +1085,8 @@ pub struct GitHubConfig {
     pub stub_codes: Option<String>,
     #[serde(default)] // how long a sign-in's token waits for its vault: `pending_login_ttl.rs`
     pub pending_login_ttl_seconds: crate::pending_login_ttl::PendingLoginTtl,
+    #[serde(default)] // how long an open vault may go unused: `open_vault_idle_ttl.rs`
+    pub open_vault_idle_ttl_seconds: crate::open_vault_idle_ttl::OpenVaultIdleTtl,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]

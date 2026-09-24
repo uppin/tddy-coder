@@ -64,6 +64,7 @@ pub mod config;
 pub mod daemon_identity;
 pub mod first_login_enrolment;
 pub mod live_users;
+pub mod open_vault_idle_ttl;
 pub mod peer_forwarding;
 pub mod pending_login_ttl;
 pub mod presenter_observer;

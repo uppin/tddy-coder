@@ -1073,7 +1073,7 @@ pub async fn build(
             connection_impl = connection_impl.with_idle_tracker(tracker.clone());
         }
         if let Some(vaults) = auth_result.credential_vaults.clone() {
-            tddy_daemon_auth::pending_logins::spawn_pending_login_sweep(&vaults);
+            tddy_daemon_auth::vault_lifetimes::spawn_credential_sweep(&vaults);
             connection_impl = connection_impl.with_credential_vaults(vaults);
         }
         // The families served above the host are built from it and installed on it **last**:
