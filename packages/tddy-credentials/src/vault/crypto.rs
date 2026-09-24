@@ -128,7 +128,8 @@ pub(super) fn wrap_under_passphrase(
 
 fn cipher(key: &SecretBytes) -> ChaCha20Poly1305 {
     // TODO(keyring): the cipher holds its own copy of the key schedule, which is not wiped when it
-    // drops; that needs `chacha20poly1305`'s `zeroize` feature, a CLAUDE.md § ASK decision.
+    // drops; that needs `chacha20poly1305`'s `zeroize` feature, a CLAUDE.md § ASK decision —
+    // docs/dev/todo/2026-09-24-credential-vault-cipher-key-schedule-not-wiped.md.
     ChaCha20Poly1305::new(key.expose().into())
 }
 

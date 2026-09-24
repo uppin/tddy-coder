@@ -29,3 +29,11 @@ each need a decision:
 
 A login that finds the vault closed holds its GitHub token in memory (`pending`) until the vault is
 unlocked, reset or created. That, too, lives until the daemon exits when nobody unlocks it.
+
+**Narrowed by #510's wrap (S5).** A lineage that signed in to a closed vault holds no unlock key,
+so its logout used to remove nothing and its token stayed pending. A logout with no unlock key now
+drops that user's pending records (`SessionVaults::discard_pending`, verified by the logout's access
+token). What remains is the same as for an open vault: a lineage that never logs out, or whose
+access token has expired by the time it does, leaves its pending token until the next unlock or
+restart.
+

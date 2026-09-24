@@ -94,14 +94,20 @@ CLAUDE.md § ASK approval.
   `credentials-<hex>.locked-<unix seconds>.vault` beside it — **never deletes it**; whoever still
   knows the old passphrase can open it there — and creates a fresh vault under the new passphrase,
   both in one critical section. It does not parse the old file first, so it is also the way out of a
-  vault this build cannot read.
+  vault this build cannot read. At most `MAX_SET_ASIDE_VAULTS` (5) of one subject's old vaults are
+  kept: past that a reset is `TooManySetAside` and **nothing is deleted to make room** — an operator
+  removes an old vault from the daemon's disk by hand first. Refusing was chosen over keeping the
+  newest five because deleting an old vault destroys credentials its old passphrase still opens.
 - **Zeroization.** Key material lives in `SecretBytes`, secret text in `SecretString`; both wipe
   themselves on drop with a volatile write plus a compiler fence. Transient plaintext buffers — an
   unwrapped key, a serialised record, Argon2's output — are wiped the same way. `zeroize` would be
   tidier and needs approval. ⚠ The cipher and HMAC instances hold their own copies of the key
   schedule, which are not wiped without `chacha20poly1305`'s `zeroize` feature (a TODO in
-  `vault/crypto.rs`), and a passphrase that arrived in an RPC request also sits in that request's
-  decode buffer, which this crate never sees.
+  `vault/crypto.rs`, recorded in
+  [`2026-09-24-credential-vault-cipher-key-schedule-not-wiped.md`](../../../docs/dev/todo/2026-09-24-credential-vault-cipher-key-schedule-not-wiped.md)),
+  and a passphrase that arrived in an RPC request also sits in that request's decode buffer, which
+  this crate never sees. The two `auth` requests that carry one print it redacted (`tddy-service`
+  generates them without prost's `Debug` derive).
 
 **There is no daemon-held key.** A second way in that needs no user would let the daemon read
 credentials with nobody present, which is the property this crate removes.
@@ -126,6 +132,18 @@ status) arrive later, with only a session token. For each user it answers `Vault
 - **At unlock / create / reset**: the vault opens, everything pending is sealed (anything that fails
   to seal stays pending and the failure is reported), the lineage is handed an unlock slot, and the
   handle is kept.
+- **Who may choose a passphrase.** Creating a vault or resetting one decides who controls it from
+  then on, and a session token alone does not prove the caller holds the account: an access token
+  crosses plain http and may have been copied. So `create` and `reset` need a credential **a fresh
+  login left pending** for the vault (`NoFreshLogin` otherwise) — only a login proves possession of
+  the GitHub account — and a reset is refused while the vault is open (`AlreadyOpen`: nothing was
+  forgotten). A pending record is consumed by the create or reset that seals it, so each reset needs
+  its own sign-in. ⚠ The gate is the pending record, not its age: a caller holding a copied access
+  token for a user who signed in to a closed vault and has not unlocked it yet can still reset it.
+- **One lock for every change of state** (`transitions`). A login's look-up-then-retain and an
+  unlock's seal-then-register happen under it, so a login racing an unlock is either sealed into the
+  vault it opened (and told `Open`, with a key) or held pending and told the vault is closed — never
+  told `Open` with no key while its token waits unsealed. Key derivation happens outside it.
 - **At a session refresh** (`reopen`): the client sends `U` back. The daemon opens the vault through
   that slot, which proves possession even when the vault is already open, registers it, and
   **rotates** the slot: the presented `U` opens nothing afterwards, and `U'` is returned. The proof
@@ -139,10 +157,18 @@ status) arrive later, with only a session token. For each user it answers `Vault
   origins. A key that fails outside the window is logged, and the refresh still succeeds, with an
   empty key and the vault's state — failing it would sign the operator out of everything for a
   credential-store problem.
+- **An empty key means the key is dead, nothing else.** The auth service returns `""` only for a key
+  that can never open this user's vault again: `Locked` (rotated, removed or evicted), another
+  user's, or malformed. Any other failure — the file could not be read — says nothing about the key,
+  so the presented key is handed back **unrotated** and the failure logged; the web client then
+  keeps whatever key it has stored, which another tab may have rotated meanwhile.
 - **At logout** (`forget`): the client sends `U`, and the daemon removes that lineage's slot. The key
   identifies the slot itself, so an expired access token does not keep a slot alive. When that was
   the **last** slot, no signed-in lineage can use the vault, and the open handle — its data key — is
-  dropped.
+  dropped. A lineage that signed in to a closed vault holds no key; its logout drops the credential
+  its login left pending (`discard_pending`, for the user its access token names). Pending records
+  are per user, so this also drops one another lineage of the same user left waiting — that lineage
+  was told the vault is closed, and signs in again for its token to be kept.
 - **A stale handle** — its file removed, or replaced by a reset from here or another process — is
   dropped the next time it is looked up, and the vault reads as whatever the disk now says. Any
   other failure to read is a real one and is reported where it happens.
@@ -151,6 +177,14 @@ status) arrive later, with only a session token. For each user it answers `Vault
 - ⚠ TODO: a lineage that simply stops refreshing never logs out, so its vault stays open until the
   daemon exits, and a pending token that nobody unlocks lives as long —
   [`docs/dev/todo/2026-09-23-credential-vault-open-past-its-last-session.md`](../../../docs/dev/todo/2026-09-23-credential-vault-open-past-its-last-session.md).
+
+**What guessing costs** (the auth service, `tddy-github`'s `auth_service/vault.rs`). Every
+passphrase derivation — unlock, create, reset — runs on tokio's blocking pool behind a
+service-wide semaphore of 2, so a flood of attempts queues rather than starving the RPC executor.
+Wrong passphrases earn a per-user backoff: 3 are free, then each further attempt waits 2 s,
+doubling to at most 15 min, refused as `RESOURCE_EXHAUSTED` with the retry-after in the message. The
+count is in memory only, cleared by the right passphrase and by a daemon restart. A passphrase is
+at most `MAX_PASSPHRASE_CHARS` (1024) characters, checked before anything is derived.
 
 A stub login (`issues_usable_access_token() == false`) retains nothing, creates nothing, is handed no
 unlock key and reports `VaultState::None` on the wire: its token is synthetic and a demo holds no
@@ -174,7 +208,9 @@ This is the trade-off, stated plainly.
 - **Rotation bounds a copied `U` against the live file only.** A refresh rotates the slot, so a
   copied `U` stops opening the *current* file after the next refresh, and a logout removes the slot
   outright. **An old backup keeps the slots it was taken with**, and rotation cannot reach it: a `U`
-  copied before the backup opens that backup for good.
+  copied before the backup opens that backup for good. **A set-aside vault is the same**: a reset
+  renames the old file with every unlock slot it had, so a `U` from before the reset plus that
+  `.locked-*` file is still its plaintext, exactly as the old passphrase plus it is.
 - **No rollback protection.** Someone who can write `auth_storage` can put back an older file — with
   a slot since removed, or an older record — and it opens. The vault authenticates content, not
   freshness.
@@ -184,6 +220,24 @@ This is the trade-off, stated plainly.
 
 What it does buy: a disk **without** a copy of `U` or the passphrase is ciphertext, including every
 backup of it; and a daemon at rest holds no key.
+
+## Known limitations
+
+Stated rather than fixed; each is bounded, and none lets a caller read a credential it could not
+read otherwise.
+
+- **Set-aside naming is checked, then renamed** (`vault/format.rs` `set_aside`). The free
+  `.locked-<unix>[-n].vault` name is found with `exists()` and then `rename`d, and on unix a
+  `rename` replaces an existing target. Within one daemon the process-wide write lock covers the
+  gap; a second process writing the same `auth_storage` at the same second could overwrite a
+  set-aside vault. The same one-process assumption as below.
+- **Refreshes serialise daemon-wide.** `reopen` holds the `rotations` mutex — one for all users —
+  across its file read, rotation write and fsync, inside an async handler. Every user's refreshes
+  therefore queue behind each other, and each blocks a tokio worker for its I/O. Refreshes are rare
+  (every few minutes per tab) and short, so this is a throughput limit, not a correctness one.
+- **Two tabs that both unlock by passphrase each add a slot.** Both are handed their own `U`, and
+  the second overwrites the first's in the shared `localStorage`, so the first slot is orphaned: it
+  opens the vault for nobody, and lingers until `MAX_UNLOCK_SLOTS` eviction removes it.
 
 ## Two retention rules this crate carries
 

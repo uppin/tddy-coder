@@ -2,7 +2,7 @@
 
 **Date**: 2026-09-19
 **PRD Type**: Architecture Change
-**Stack**: `#keyring` 3/9 — depends on 1/9 `signing-key`
+**Stack**: `#keyring` 3/9 — PR #510, based on `master`; 1/9 `signing-key` (#508) and 2/9 `desktop-login` (#509) are merged
 
 ## Affected Features
 
@@ -46,9 +46,10 @@ The surface being replaced is small, which is what makes replacing it outright r
 `write_atomic_with_mode` and guarded by a process-wide `static PUT_LOCK: Mutex<()>` because
 concurrent logins would otherwise clobber each other.
 
-Its **only reader outside the auth crate** is
-`packages/tddy-session-lifecycle/src/connection_service/svc_pr_status_for_caller.rs:93`. Everything
-else is construction and plumbing (`auth.rs:83-152`, `runtime.rs:882`).
+Its **only reader outside the auth crate** is the PR-status read, now
+`packages/tddy-daemon-rpc/src/pr_stack/pr_status.rs:56` (it was `svc_pr_status_for_caller.rs:93` in `tddy-session-lifecycle` before
+`#carve` moved it). Everything else is construction and plumbing (`auth.rs:168-275`,
+`runtime.rs:1076`).
 
 Three properties of that trait are why it cannot be extended in place:
 
@@ -173,7 +174,7 @@ either is ciphertext, including every backup of it, and that a daemon at rest ho
 only, so one shared file would lock out every user after the first.
 
 **`GitHubTokenStore` and `FileGitHubTokenStore` are deleted.** The one external reader,
-`svc_pr_status_for_caller.rs:93`, moves to the new store's read path. `github-tokens.json` is not
+`packages/tddy-daemon-rpc/src/pr_stack/pr_status.rs:56`, moves to the new store's read path. `github-tokens.json` is not
 read, not migrated, and not renamed: on first login after this change the vault is created and the
 token stored afresh. That is one re-login, and `#keyring` 1/9 already ends every session once.
 
@@ -205,9 +206,10 @@ asks for the passphrase, and PR status names the remedy. A failed write still fa
 |---|---|
 | **`tddy-credentials`** (new) | the record model, the sealed file, key derivation, the session-scoped handle |
 | `tddy-github` | `token_store.rs` **deleted**; `auth_service.rs` writes through the new store |
-| `tddy-daemon-auth` | `github_token_store.rs` **deleted**; `auth.rs:83-152` constructs the vault registry; PR-status reads by vault state |
-| `tddy-daemon` | `runtime.rs:882` — the store's construction and injection |
-| `tddy-session-lifecycle` | `svc_pr_status_for_caller.rs:93` — the one external read, migrated |
+| `tddy-daemon-auth` | `github_token_store.rs` **deleted**; `auth.rs:168-275` constructs the vault registry; PR-status reads by vault state |
+| `tddy-daemon` | `runtime.rs:1076` — the store's construction and injection |
+| `tddy-session-lifecycle` | `handler_state.rs:68` — `DaemonSessionHost::credential_vaults()`, which hands the registry to the PR-stack handler |
+| `tddy-daemon-rpc` | `pr_stack/pr_status.rs:56` — the one external read, migrated; a path dependency on `tddy-credentials` |
 | `tddy-service` | `auth.proto` — additive `vault_unlock_key` fields on five messages, a `VaultState` enum on four, and **two new RPCs**, `UnlockVault` and `ResetVault` |
 | `tddy-web` | the unlock key stored beside the refresh token, presented on refresh, sent on logout; a passphrase prompt for a `LOCKED` or `UNINITIALIZED` vault |
 
@@ -250,7 +252,7 @@ claimed by 2/9). No other package this node touches is unanalyzed.
    browser unlock slots.
 3. Wire construction in `auth.rs` and `runtime.rs`; retain a login's token by vault state; the
    `VaultState` fields, `UnlockVault` and `ResetVault`.
-4. Migrate `svc_pr_status_for_caller.rs:93` to the new read path.
+4. Migrate the PR-status read (`packages/tddy-daemon-rpc/src/pr_stack/pr_status.rs:56`) to the new read path.
 5. Delete `token_store.rs`, `github_token_store.rs` and every reference to `github-tokens.json`.
 6. The web passphrase prompt.
 
@@ -292,6 +294,13 @@ claimed by 2/9). No other package this node touches is unanalyzed.
       tabs sharing one key both keep a working one
 - [x] Logout removes the lineage's unlock slot
 - [x] The vault file never contains an unlock key; a stub login is handed none
+- [x] Choosing a vault passphrase — a first one, or a reset — needs a fresh GitHub sign-in on this
+      daemon; an access token alone cannot, a reset is refused while the vault is open, and old
+      vaults set aside are capped with nothing ever deleted (`credential_vault_guard_acceptance.rs`)
+- [x] Wrong passphrases are throttled per user and say when to retry, and no passphrase derivation
+      runs on an RPC worker (`credential_vault_guard_acceptance.rs`, `auth_service/vault/backoff.rs`)
+- [x] A refresh that cannot read the vault keeps the browser's unlock key
+      (`vault_unlock_across_restart_acceptance.rs`, `sessionTokenStore.test.ts`)
 
 ## References
 
@@ -303,7 +312,7 @@ claimed by 2/9). No other package this node touches is unanalyzed.
 
 ### Stack
 
-`#keyring` 3/9. Parent: 1/9 `signing-key`. Dependents: 4/9 `accounts` (the service and screen over
+`#keyring` 3/9. Parents: 1/9 `signing-key` (#508) and 2/9 `desktop-login` (#509), both merged. Dependents: 4/9 `accounts` (the service and screen over
 this store), 6/9 `sync` (propagates this file), 7/9 `screen-share` (becomes a provider in it),
 8/9 `link-github` (a second account row).
 
@@ -313,4 +322,4 @@ this store), 6/9 `sync` (propagates this file), 7/9 `screen-share` (becomes a pr
 
 ### Code issues
 
-- ⚠ [`complexity-runtime-build`](../../../../packages/tddy-daemon/docs/code-issues/complexity-runtime-build.md) — `runtime.rs:498`, 806 lines, covering the `:882` store wiring. Recorded, **not claimed**; this node must not split it
+- ⚠ [`complexity-runtime-build`](../../../../packages/tddy-daemon/docs/code-issues/complexity-runtime-build.md) — `runtime.rs:623` (`build`), covering the `:1076` store wiring. Recorded, **not claimed**; this node must not split it
