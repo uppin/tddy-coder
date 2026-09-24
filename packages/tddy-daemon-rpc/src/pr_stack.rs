@@ -11,9 +11,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use prost::Message;
+use tddy_credentials::SessionVaults;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
-use tddy_credentials::SessionVaults;
 use tddy_session_lifecycle::connection_service::{wire_same, DaemonSessionHost};
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::relay_idle::RpcActivity;
