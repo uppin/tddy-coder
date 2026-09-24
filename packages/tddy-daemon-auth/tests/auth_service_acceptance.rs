@@ -120,7 +120,10 @@ async fn refreshes_a_session_into_a_fresh_access_token_for_the_same_login() {
     let extended: RefreshSessionResponse = call(
         &config,
         "RefreshSession",
-        RefreshSessionRequest { refresh_token },
+        RefreshSessionRequest {
+            refresh_token,
+            ..Default::default()
+        },
     )
     .await
     .expect("a valid refresh token extends the session");
@@ -145,8 +148,15 @@ async fn logs_out_without_needing_any_server_side_session_state() {
     let session_token = an_access_token_for(&config, THE_LOGIN);
 
     // When they sign out
-    let farewell: Result<LogoutResponse, Status> =
-        call(&config, "Logout", LogoutRequest { session_token }).await;
+    let farewell: Result<LogoutResponse, Status> = call(
+        &config,
+        "Logout",
+        LogoutRequest {
+            session_token,
+            ..Default::default()
+        },
+    )
+    .await;
 
     // Then the daemon answers — session tokens are stateless, so there is nothing to invalidate
     assert_eq!(farewell.map(|_| ()).map_err(|refusal| refusal.code), Ok(()));

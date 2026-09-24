@@ -10,69 +10,64 @@
 //! - the retained token must never reach the client: the session token is handed to a browser over a
 //!   plain-http LAN origin, so it stays an identity assertion only.
 //!
-//! PRD: docs/ft/coder/pr-stack-live-status.md (C3, D7, D12).
+//! The token is retained in the operator's own credential vault (`tddy-credentials`), sealed under
+//! a key derived from the operator's passphrase. A first login has no vault yet, so its token waits
+//! in memory until a passphrase creates one — these tests read it back the way the operator would,
+//! by choosing that passphrase and then reading the vault.
+//!
+//! PRD: docs/ft/coder/pr-stack-live-status.md (C3, D7, D12);
+//! docs/ft/daemon/session-auth.md (§ GitHub access-token retention).
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use base64::Engine;
 
+use tddy_credentials::{AccountId, ProviderId, SecretString, SessionVaults};
 use tddy_github::provider::{DeviceLoginPoll, DeviceLoginStart, GitHubOAuthProvider, GitHubUser};
-use tddy_github::token_store::GitHubTokenStore;
 use tddy_github::{
     AuthServiceImpl, RealGitHubProvider, SessionClaims, SessionTokenAuthority, SessionTokenError,
-    SessionTokenSigner, StubGitHubProvider,
+    SessionTokenSigner, StubGitHubProvider, GITHUB_PROVIDER,
 };
 use tddy_rpc::Request;
 use tddy_service::proto::auth::{AuthService, ExchangeCodeRequest, ExchangeCodeResponse};
 
 const GRANTED_TOKEN: &str = "gho_granted_by_the_operator";
 
-/// An in-memory `GitHubTokenStore` — the daemon's file-backed store without the filesystem.
-#[derive(Default)]
-struct InMemoryTokenStore {
-    tokens: Mutex<HashMap<String, String>>,
+const THE_PASSPHRASE: &str = "correct horse battery staple";
+
+/// The operator's GitHub token as they would find it: their vault, created with a first
+/// passphrase (which seals the token their login left waiting), then read.
+fn the_token_retained_for(vaults: &SessionVaults, login: &str) -> Option<String> {
+    vaults
+        .create(login, &SecretString::new(THE_PASSPHRASE))
+        .expect("a first passphrase creates the vault");
+    vaults
+        .get(login)?
+        .get(&ProviderId::new(GITHUB_PROVIDER), &AccountId::new(login))
+        .expect("the retained record authenticates")
+        .map(|record| record.secret.expose().to_string())
 }
 
-impl InMemoryTokenStore {
-    fn logins(&self) -> Vec<String> {
-        let mut logins: Vec<String> = self.tokens.lock().unwrap().keys().cloned().collect();
-        logins.sort();
-        logins
-    }
-}
-
-impl GitHubTokenStore for InMemoryTokenStore {
-    fn put(&self, login: &str, access_token: &str) -> Result<(), String> {
-        self.tokens
-            .lock()
-            .unwrap()
-            .insert(login.to_string(), access_token.to_string());
-        Ok(())
-    }
-
-    fn get(&self, login: &str) -> Option<String> {
-        self.tokens.lock().unwrap().get(login).cloned()
-    }
-}
-
-/// The server-side detail the daemon's own store names in a failed `put`: the file it could not
-/// write. It is logged, never returned to the browser.
-const UNWRITABLE_PATH: &str = "/var/lib/tddy/auth/github-tokens.json";
-
-/// A store whose backing medium cannot be written — an unwritable `auth_storage` path. Its error
-/// carries the same server-side path detail `FileGitHubTokenStore` reports.
-struct AnUnwritableTokenStore;
-
-impl GitHubTokenStore for AnUnwritableTokenStore {
-    fn put(&self, _login: &str, _access_token: &str) -> Result<(), String> {
-        Err(format!("opening {UNWRITABLE_PATH}: Permission denied"))
-    }
-
-    fn get(&self, _login: &str) -> Option<String> {
-        None
-    }
+/// A service whose operator's vault is open, and whose vault file has then been made impossible
+/// to read or replace — a directory where the file was, standing in for a disk that fails under a
+/// running daemon.
+async fn a_service_whose_open_vault_can_no_longer_be_written() -> (
+    tempfile::TempDir,
+    AuthServiceImpl<ProviderWithARealCredential>,
+) {
+    let storage = tempfile::tempdir().expect("a temporary directory");
+    let vaults = Arc::new(SessionVaults::new(storage.path()));
+    let service =
+        a_signed_service(ProviderWithARealCredential).with_credential_vaults(Arc::clone(&vaults));
+    exchange(&service, "login-code", "s").await;
+    vaults
+        .create("operator", &SecretString::new(THE_PASSPHRASE))
+        .expect("a first passphrase creates the vault");
+    let vault_file = vaults.path_for("operator");
+    std::fs::remove_file(&vault_file).expect("the vault file is removed");
+    std::fs::create_dir(&vault_file).expect("a directory takes its place");
+    (storage, service)
 }
 
 /// A provider that completes the OAuth exchange offline while declaring — as the real GitHub
@@ -172,21 +167,25 @@ async fn exchange(
 #[tokio::test]
 async fn retains_a_real_logins_access_token_under_its_github_login() {
     // Given — a login through a provider whose token is a usable GitHub credential
-    let store = Arc::new(InMemoryTokenStore::default());
-    let service = a_signed_service(ProviderWithARealCredential).with_token_store(store.clone());
+    let storage = tempfile::tempdir().expect("a temporary directory");
+    let vaults = Arc::new(SessionVaults::new(storage.path()));
+    let service =
+        a_signed_service(ProviderWithARealCredential).with_credential_vaults(Arc::clone(&vaults));
 
     // When
     exchange(&service, "login-code", "s").await;
 
     // Then — the operator's own credential is available for server-side GitHub reads
-    assert_eq!(store.get("operator").as_deref(), Some(GRANTED_TOKEN));
+    assert_eq!(
+        the_token_retained_for(&vaults, "operator").as_deref(),
+        Some(GRANTED_TOKEN)
+    );
 }
 
 #[tokio::test]
 async fn fails_the_login_when_the_access_token_cannot_be_retained() {
-    // Given — a real login whose token store cannot be written
-    let service = a_signed_service(ProviderWithARealCredential)
-        .with_token_store(Arc::new(AnUnwritableTokenStore));
+    // Given — a real login over an open vault whose file cannot be written
+    let (_storage, service) = a_service_whose_open_vault_can_no_longer_be_written().await;
 
     // When
     let err = service
@@ -209,9 +208,8 @@ async fn fails_the_login_when_the_access_token_cannot_be_retained() {
 
 #[tokio::test]
 async fn keeps_the_servers_storage_path_out_of_the_failure_the_client_is_shown() {
-    // Given — a real login whose token store fails with the path it could not write
-    let service = a_signed_service(ProviderWithARealCredential)
-        .with_token_store(Arc::new(AnUnwritableTokenStore));
+    // Given — a real login whose credential vault fails with the path it could not write
+    let (storage, service) = a_service_whose_open_vault_can_no_longer_be_written().await;
 
     // When
     let err = service
@@ -225,7 +223,8 @@ async fn keeps_the_servers_storage_path_out_of_the_failure_the_client_is_shown()
     // Then — the browser learns *that* retention failed; where the server keeps its tokens is
     // operator-side detail that belongs in the daemon log only
     assert!(
-        !err.message().contains(UNWRITABLE_PATH),
+        !err.message()
+            .contains(&storage.path().display().to_string()),
         "the server's storage path must not reach the client, got: {}",
         err.message()
     );
@@ -234,7 +233,7 @@ async fn keeps_the_servers_storage_path_out_of_the_failure_the_client_is_shown()
 #[tokio::test]
 async fn retains_nothing_for_a_stub_login() {
     // Given — the demo/stub provider, whose access token is synthetic
-    let store = Arc::new(InMemoryTokenStore::default());
+    let storage = tempfile::tempdir().expect("a temporary directory");
     let stub = StubGitHubProvider::new("https://github.com", "client-id");
     stub.register_code(
         "demo-code",
@@ -248,32 +247,42 @@ async fn retains_nothing_for_a_stub_login() {
     let (_, state) = stub
         .authorize_url()
         .expect("the stub issues an authorize URL");
-    let service = a_signed_service(stub).with_token_store(store.clone());
+    let service =
+        a_signed_service(stub).with_credential_vaults(Arc::new(SessionVaults::new(storage.path())));
 
     // When
-    exchange(&service, "demo-code", &state).await;
+    let resp = exchange(&service, "demo-code", &state).await;
 
     // Then — a demo login holds no credential at all, so its PR lookups read as "no PRs" rather
-    // than as a credential that GitHub would reject
-    assert_eq!(store.logins(), Vec::<String>::new());
+    // than as a credential that GitHub would reject: no vault, and no key to one
+    let left_behind: Vec<_> = std::fs::read_dir(storage.path())
+        .expect("the storage directory is readable")
+        .map(|entry| entry.expect("an entry").file_name())
+        .collect();
+    assert_eq!(
+        (left_behind, resp.vault_unlock_key),
+        (Vec::new(), String::new())
+    );
 }
 
 #[tokio::test]
 async fn keeps_the_github_token_out_of_everything_the_client_receives() {
     // Given
+    let storage = tempfile::tempdir().expect("a temporary directory");
     let service = a_signed_service(ProviderWithARealCredential)
-        .with_token_store(Arc::new(InMemoryTokenStore::default()));
+        .with_credential_vaults(Arc::new(SessionVaults::new(storage.path())));
 
     // When
     let resp = exchange(&service, "login-code", "s").await;
 
     // Then — the browser is on a plain-http LAN origin; the session and refresh tokens assert an
-    // identity and nothing more
+    // identity and nothing more, and the vault unlock key is a wrap key rather than the credential
     let client_visible = format!(
-        "{} {} {:?}",
+        "{} {} {:?} {}",
         decoded_parts(&resp.session_token),
         decoded_parts(&resp.refresh_token),
-        resp.user
+        resp.user,
+        resp.vault_unlock_key
     );
     assert!(
         !client_visible.contains(GRANTED_TOKEN),

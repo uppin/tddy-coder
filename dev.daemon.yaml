@@ -73,6 +73,14 @@ livekit:
 github:
   stub: true
   stub_codes: "test-code:testuser"
+  # How long a sign-in's token waits in memory for its credential vault (and permits choosing its
+  # passphrase). 0 = never; absent = 600. A stub login holds no token, so this matters only with a
+  # real provider.
+  pending_login_ttl_seconds: 600
+  # How long an unlocked credential vault — its data key in memory — may go unused (no login,
+  # unlock, refresh or credential read) before it is closed; the next refresh reopens it. 0 = never;
+  # absent = 604800 (seven days, the refresh-token lifetime), which is also the maximum.
+  open_vault_idle_ttl_seconds: 604800
 
 users:
   - github_user: "testuser"

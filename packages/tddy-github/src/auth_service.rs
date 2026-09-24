@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use tddy_credentials::SessionVaults;
 use tddy_rpc::{Request, RequestTransport, Response, Status};
 
 use crate::provider::{DeviceLoginPoll, GitHubOAuthProvider, GitHubUser};
@@ -13,9 +14,14 @@ use tddy_service::proto::auth::{
     AuthService as AuthServiceTrait, DeviceLoginState, ExchangeCodeRequest, ExchangeCodeResponse,
     GetAuthStatusRequest, GetAuthStatusResponse, GetAuthUrlRequest, GetAuthUrlResponse,
     GitHubUser as ProtoGitHubUser, LogoutRequest, LogoutResponse, PollDeviceLoginRequest,
-    PollDeviceLoginResponse, RefreshSessionRequest, RefreshSessionResponse,
-    StartDeviceLoginRequest, StartDeviceLoginResponse,
+    PollDeviceLoginResponse, RefreshSessionRequest, RefreshSessionResponse, ResetVaultRequest,
+    ResetVaultResponse, StartDeviceLoginRequest, StartDeviceLoginResponse, UnlockVaultRequest,
+    UnlockVaultResponse, VaultState as ProtoVaultState,
 };
+
+mod vault;
+
+pub use vault::{AVATAR_URL_METADATA, FREE_WRONG_PASSPHRASES, GITHUB_ID_METADATA};
 
 fn to_proto_user(user: &GitHubUser) -> ProtoGitHubUser {
     ProtoGitHubUser {
@@ -58,15 +64,24 @@ pub struct AuthServiceImpl<P: GitHubOAuthProvider> {
     /// When set, sign-in mints tokens and status/refresh verify them. When `None`, authentication
     /// is non-functional: minting fails and every token is rejected.
     signing: Option<Signing>,
-    /// When set, a real provider's GitHub access token is retained here on login so the server can
-    /// later act on that operator's behalf (e.g. read their PRs). Separate from `signing` on purpose:
-    /// the GitHub token never enters the session token and is never returned to the client.
-    token_store: Option<Arc<dyn crate::token_store::GitHubTokenStore>>,
+    /// When set, a real provider's GitHub access token is retained in the operator's credential
+    /// vault so the server can later act on their behalf (e.g. read their PRs): sealed at once when
+    /// the vault is open, held in memory until its passphrase is given when it is not. Each lineage
+    /// that opens the vault is handed an unlock key its refreshes reopen it with after a restart.
+    /// Separate from `signing` on purpose: the GitHub token never enters the session token and is
+    /// never returned to the client.
+    credential_vaults: Option<Arc<SessionVaults>>,
     /// When set, asked whether each completed login is admitted before it is retained or minted.
     /// Unset admits every login GitHub vouches for, and leaves authorization to the RPCs that
     /// resolve the caller's OS user.
     admission: Option<Arc<dyn LoginAdmission>>,
+    /// Bounds what `UnlockVault` / `ResetVault` passphrases cost this daemon: concurrent key
+    /// derivations, and each user's backoff after wrong passphrases.
+    unlock_throttle: vault::UnlockThrottle,
 }
+
+/// The provider a GitHub login's access token is filed under in the credential vault.
+pub const GITHUB_PROVIDER: &str = "github";
 
 /// What a signed service mints with and verifies through.
 struct Signing {
@@ -85,8 +100,9 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         Self {
             provider: Arc::new(provider),
             signing: None,
-            token_store: None,
+            credential_vaults: None,
             admission: None,
+            unlock_throttle: vault::UnlockThrottle::default(),
         }
     }
 
@@ -102,18 +118,17 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         Self {
             provider: Arc::new(provider),
             signing: Some(Signing { signer, authority }),
-            token_store: None,
+            credential_vaults: None,
             admission: None,
+            unlock_throttle: vault::UnlockThrottle::default(),
         }
     }
 
-    /// Retain each real login's GitHub access token in `store` (builder). Without a store the token
-    /// is dropped at the end of the exchange, and GitHub-backed reads report themselves unavailable.
-    pub fn with_token_store(
-        mut self,
-        store: Arc<dyn crate::token_store::GitHubTokenStore>,
-    ) -> Self {
-        self.token_store = Some(store);
+    /// Retain each real login's GitHub access token in that operator's vault in `vaults`
+    /// (builder), and serve `UnlockVault` / `ResetVault` over them. Without vaults the token is
+    /// dropped at the end of the exchange, and GitHub-backed reads report themselves unavailable.
+    pub fn with_credential_vaults(mut self, vaults: Arc<SessionVaults>) -> Self {
+        self.credential_vaults = Some(vaults);
         self
     }
 
@@ -129,6 +144,8 @@ struct MintedSession {
     session_token: String,
     user: ProtoGitHubUser,
     refresh_token: String,
+    vault_unlock_key: String,
+    vault_state: ProtoVaultState,
 }
 
 impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
@@ -150,34 +167,6 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
             admission.admit(&user.login, transport)?;
         }
 
-        // Retain the operator's own credential for later server-side GitHub reads. A stub provider's
-        // token is synthetic and is never stored (D12), so a demo login holds none by construction.
-        //
-        // Retention failure fails the login. A session minted without its token is a half-login: the
-        // operator appears signed in while every GitHub-backed read silently reports itself
-        // unavailable, and re-authenticating is the one action that could fix it — which they have no
-        // reason to attempt, because they are already signed in. Failing here surfaces the real fault
-        // (an unwritable token store) at the moment it is caused and keeps retry the obvious remedy.
-        if self.provider.issues_usable_access_token() {
-            if let Some(ref store) = self.token_store {
-                store.put(&user.login, access_token).map_err(|e| {
-                    // The store's own error names server-side detail — the filesystem path it could
-                    // not write, the OS error behind it. That belongs in the daemon log, not in a
-                    // status handed to a browser, so the client is told only *what* failed and for
-                    // which login.
-                    log::error!(
-                        target: "tddy_github::auth_service",
-                        "could not retain the GitHub access token for login '{}': {e}",
-                        user.login
-                    );
-                    Status::internal(format!(
-                        "could not retain the GitHub access token for login '{}'",
-                        user.login
-                    ))
-                })?;
-            }
-        }
-
         // Signed mode: return a stateless token any daemon that can resolve this daemon's key
         // verifies. No server-side session state is kept.
         let Some(Signing { ref signer, .. }) = self.signing else {
@@ -185,12 +174,21 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
                 "session token signing is not configured",
             ));
         };
+
+        // Retain the operator's own credential for later server-side GitHub reads — or fail the
+        // login, see `retain_the_login_credential`. After the signing check, so a service that
+        // cannot mint a session leaves no unlock slot behind for a lineage that will never exist.
+        let (vault_state, vault_unlock_key) =
+            self.retain_the_login_credential(user, access_token)?;
+
         // A short-lived access token for RPCs plus a long-lived refresh token to mint further
         // access tokens without re-login.
         Ok(MintedSession {
             session_token: signer.mint_access(user),
             user: to_proto_user(user),
             refresh_token: signer.mint_refresh(user),
+            vault_unlock_key,
+            vault_state,
         })
     }
 }
@@ -230,6 +228,8 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
             session_token: session.session_token,
             user: Some(session.user),
             refresh_token: session.refresh_token,
+            vault_unlock_key: session.vault_unlock_key,
+            vault_state: session.vault_state as i32,
         }))
     }
 
@@ -249,11 +249,9 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
             Some(claims) => GetAuthStatusResponse {
                 authenticated: true,
                 user: Some(proto_user_from_claims(&claims)),
+                vault_state: self.vault_state_of(&claims.login) as i32,
             },
-            None => GetAuthStatusResponse {
-                authenticated: false,
-                user: None,
-            },
+            None => GetAuthStatusResponse::default(),
         }))
     }
 
@@ -284,6 +282,8 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
             ));
         }
         let user = claims.user();
+        let (vault_unlock_key, vault_state) =
+            self.reopen_the_vault(&user.login, &req.vault_unlock_key);
         // Mint a fresh access token plus a slid refresh token (fresh 7-day window), signed with
         // this daemon's own key whichever daemon signed the refresh token it was given.
         let session_token = signer.mint_access(&user);
@@ -292,6 +292,8 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
             session_token,
             user: Some(to_proto_user(&user)),
             refresh_token,
+            vault_unlock_key,
+            vault_state: vault_state as i32,
         }))
     }
 
@@ -299,9 +301,8 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
         &self,
         request: Request<LogoutRequest>,
     ) -> Result<Response<LogoutResponse>, Status> {
-        // Signed session tokens are stateless — logout is client-side (the client discards its
-        // token). There is nothing to invalidate server-side.
-        let _ = request.into_inner();
+        let req = request.into_inner();
+        self.forget_the_lineage(&req).await;
         Ok(Response::new(LogoutResponse {}))
     }
 
@@ -355,9 +356,29 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
                     session_token: session.session_token,
                     user: Some(session.user),
                     refresh_token: session.refresh_token,
+                    vault_unlock_key: session.vault_unlock_key,
+                    vault_state: session.vault_state as i32,
                 }
             }
         }))
+    }
+
+    async fn unlock_vault(
+        &self,
+        request: Request<UnlockVaultRequest>,
+    ) -> Result<Response<UnlockVaultResponse>, Status> {
+        self.unlock_the_vault(request.into_inner())
+            .await
+            .map(Response::new)
+    }
+
+    async fn reset_vault(
+        &self,
+        request: Request<ResetVaultRequest>,
+    ) -> Result<Response<ResetVaultResponse>, Status> {
+        self.reset_the_vault(request.into_inner())
+            .await
+            .map(Response::new)
     }
 }
 
@@ -692,7 +713,10 @@ mod tests {
 
         // When the session is refreshed
         let resp = service
-            .refresh_session(Request::direct(RefreshSessionRequest { refresh_token }))
+            .refresh_session(Request::direct(RefreshSessionRequest {
+                refresh_token,
+                ..Default::default()
+            }))
             .await
             .expect("refresh of a valid refresh token should succeed")
             .into_inner();
@@ -718,6 +742,7 @@ mod tests {
         let result = service
             .refresh_session(Request::direct(RefreshSessionRequest {
                 refresh_token: access_token,
+                ..Default::default()
             }))
             .await;
 
@@ -745,6 +770,7 @@ mod tests {
         let result = service
             .refresh_session(Request::direct(RefreshSessionRequest {
                 refresh_token: expired,
+                ..Default::default()
             }))
             .await;
 

@@ -199,10 +199,54 @@ rules:
    the completing request's `RequestMetadata::transport()`, as the host that received it stamped
    it — see [`tddy-rpc` request transport](../../tddy-rpc/docs/request-transport.md). The desktop's
    implementation is `tddy-daemon-auth`'s `FirstLoginEnrolment`.
-2. **Retention** — a usable access token is put into the `GitHubTokenStore`; a failed put fails
-   the login.
+2. **Retention** — a usable access token becomes a `github` `CredentialRecord` (account = the
+   login; `GITHUB_ID_METADATA` / `AVATAR_URL_METADATA` in its metadata) and goes to the operator's
+   credential vault through `SessionVaults::retain` — sealed at once when the vault is open,
+   otherwise held in memory until it opens. The login reports the vault's state (`vault_state`)
+   and, when open, an unlock key for its lineage (`vault_unlock_key`). A failed write fails the
+   login; a closed vault never does. A provider whose `issues_usable_access_token()` is `false` (the
+   stub) retains nothing and reports `NONE`, as does a service built without vaults.
 3. **Minting** — the `v2` access and refresh tokens ([session-token.md](./session-token.md)).
    Without a signer the login fails `failed_precondition`.
+
+Admission runs before retention, so a refused login leaves no pending token and no unlock slot.
+
+## The credential vault's half of `AuthServiceImpl`
+
+`with_credential_vaults(Arc<SessionVaults>)` gives the service the registry
+([`tddy-credentials` credential-store.md](../../tddy-credentials/docs/credential-store.md)). The code
+is `src/auth_service/vault.rs`, with the unlock throttle in `src/auth_service/vault/backoff.rs`;
+`auth_service.rs` delegates to it and re-exports the two metadata constants.
+
+| RPC | Vault behaviour |
+|---|---|
+| `ExchangeCode`, a completing `PollDeviceLogin` | retention, above |
+| `GetAuthStatus` | the caller's `vault_state` — so a page reloaded while `LOCKED` knows to ask again |
+| `RefreshSession(refresh_token, vault_unlock_key)` | a presented key must name the refreshing login; it reopens a closed vault through its slot, rotates the slot and returns the successor. A key that no longer opens its slot still refreshes, returning `""` and `LOCKED` (logged at `warn`); a vault that cannot be *read* hands the presented key back unrotated, so the browser keeps it |
+| `UnlockVault(session_token, passphrase, create)` | opens the vault (or, with `create`, makes it), seals the waiting token, adds a slot, returns its key and `OPEN`. A wrong passphrase is `failed_precondition` naming `Locked`, with nothing on disk changed |
+| `ResetVault(session_token, new_passphrase)` | sets the old vault aside and seals the waiting token into a fresh one under the new passphrase |
+| `Logout(session_token, vault_unlock_key)` | removes the lineage's slot; with no key, drops the token that login left waiting (`discard_pending`) |
+
+- **The caller is the access token's login.** `UnlockVault` and `ResetVault` take the subject from a
+  verified **access** token — a refresh token is `unauthenticated`. A daemon with no vaults answers
+  `failed_precondition`.
+- **Choosing a passphrase needs a fresh sign-in.** A create or a reset needs the token a sign-in
+  left waiting (refused `NoFreshLogin`, whose message says to sign in to GitHub again), and a reset
+  is refused while the vault is open (`AlreadyOpen`). The waiting token and the permission both
+  expire after `github.pending_login_ttl_seconds`.
+- **The passphrase rule.** `MIN_PASSPHRASE_CHARS` (8) to `MAX_PASSPHRASE_CHARS` (1024) characters,
+  counted as `str::chars`; outside it `invalid_argument` before anything is derived. The maximum
+  applies to unlock too, the minimum only to create and reset.
+- **Guessing costs time, and derivation never runs on an RPC worker.** Each Argon2 derivation runs
+  under `spawn_blocking`, at most `CONCURRENT_KEY_DERIVATIONS` (2) at once. Per login, past
+  `FREE_WRONG_PASSPHRASES` (3) wrong answers each attempt waits longer — 2 s, doubling to 15 min —
+  and an early attempt is `resource_exhausted` naming the retry-after, checked once a turn is held.
+- **Refusals.** A `VaultError::Io` is logged with its detail (`tddy_github::auth_service`) and
+  answered `internal`, naming only the operation and the login; every other refusal is
+  `failed_precondition` carrying the refusal, because the remedy depends on which it is.
+- **No secret on a response path.** No response carries the GitHub token or the passphrase;
+  `UnlockVaultRequest` and `ResetVaultRequest` print redacted (`tddy-service`'s
+  `auth_redacted_debug.rs`).
 
 ## Tests
 
@@ -210,7 +254,8 @@ rules:
 |---|---|
 | `tests/real_provider_over_http.rs` | `RealGitHubProvider` against a GitHub served on loopback by `axum` (a dev-dependency only). The device flow's start, each poll state, `slow_down` widening (named, unnamed, twice in a row, and refused for want of an open attempt), an unknown error code, the attempt window's pruning, a full public-client sign-in hitting `/login/device/code`, `/login/oauth/access_token` and `/user` in order, and that **no part of any device-flow request — path, query, headers or body — carries the secret**. `exchange_code`'s success path and every one of its error returns: a forged state, the token leg's transport, status and parse failures, the user leg's transport, status and parse failures, and a public client's refusal. Its `authorize_url` refusal too |
 | `src/auth_service.rs` (inline) | the proto mapping of `SlowDown`, `Denied` and `Expired` to `(state, interval_seconds)` through a scripted provider; admission being told the transport a redirect login and a device login each completed over; a refused admission failing the login with the daemon's reason |
-| `tests/github_token_retention_acceptance.rs` | retention through `ExchangeCode`, and the authorize URL's scope |
+| `tests/github_token_retention_acceptance.rs` | retention through `ExchangeCode` into the operator's vault under their GitHub login; a vault that can no longer be written failing the login, with the server's storage path kept out of what the client is shown; a stub retaining nothing; the GitHub token kept out of everything the client receives; and the authorize URL's `repo` scope |
+| `src/auth_service/vault/backoff.rs` (inline) | the free wrong answers, the doubling wait and its ceiling, per login |
 
 `AuthServiceImpl::exchange_code` (the service) and `RealGitHubProvider::exchange_code` (the
 network) share a name and nothing else. Coverage of one is not coverage of the other.

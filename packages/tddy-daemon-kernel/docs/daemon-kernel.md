@@ -163,6 +163,29 @@ second account deliberately is `#keyring` 8/9 ([#515](https://github.com/uppin/t
 `tests/first_login_enrolment_acceptance.rs` pins the first login written down, a second account
 refused, the rest of the config kept, and an unmapped login still resolving to nobody.
 
+## `pending_login_ttl`, `open_vault_idle_ttl` — two settings read here and meant elsewhere
+
+`GitHubConfig.pending_login_ttl_seconds` (how long a sign-in's GitHub token may wait in memory for
+its credential vault, and so how long that sign-in may choose the vault's passphrase) and
+`GitHubConfig.open_vault_idle_ttl_seconds` (how long an open vault may go unused before the daemon
+closes it) are both a plain **`Option<u64>`** of seconds, `#[serde(default)]`. This crate reads
+them and nothing more:
+
+- absent → `None`; a whole number → `Some(n)`, **including `0` and values past any limit**;
+- a negative or non-numeric value fails the config load, and serde_yaml names the field path
+  (`github.open_vault_idle_ttl_seconds: invalid type: …`).
+
+**What the numbers mean is `tddy-daemon-auth`'s** (`vault_lifetimes::VaultLifetimes::of`, where
+the credential vaults are built): the defaults (600 s; the refresh-token lifetime), the ceiling (the
+refresh-token lifetime, past which the **daemon does not start**) and `0` = never — see
+[auth-service.md § Credential vaults](../../tddy-daemon-auth/docs/auth-service.md#credential-vaults).
+The ceiling is `tddy_github::REFRESH_TOKEN_TTL`, and this crate, with seventeen dependents, does
+**not** depend on `tddy-github`; the meaning lives in a crate that already does.
+
+`pending_login_ttl.rs` and `open_vault_idle_ttl.rs` now hold only their module doc and the parsing
+tests (absent, `0`, a value past the ceiling read as given, and the two refusals naming the
+setting), so `config.rs` — far over its size budget — carries each field and a one-line pointer.
+
 ## See also
 
 - [`packages/tddy-daemon/docs/connection-service.md`](../../tddy-daemon/docs/connection-service.md)

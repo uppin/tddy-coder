@@ -11,34 +11,34 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use prost::Message;
+use tddy_credentials::SessionVaults;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
-use tddy_github::GitHubTokenStore;
 use tddy_session_lifecycle::connection_service::{wire_same, DaemonSessionHost};
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::relay_idle::RpcActivity;
 
 /// The eight PR-stack RPCs: the caller's identity, the sessions and stack plans under
-/// `tddy_data_dir`, the GitHub token a PR status is read with, and the peer an orchestrator one
+/// `tddy_data_dir`, the vaults the GitHub token a PR status is read with is sealed in, and the peer an orchestrator one
 /// host over is reached through.
 pub struct PrStackRpcHandler {
     config: DaemonConfig,
     user_resolver: SessionUserResolver,
     tddy_data_dir: PathBuf,
-    github_token_store: Option<Arc<dyn GitHubTokenStore>>,
+    credential_vaults: Option<Arc<SessionVaults>>,
     rpc_activity: RpcActivity,
     peer_routing: PeerRouting,
 }
 
 impl PrStackRpcHandler {
-    /// A handler sharing `host`'s state — the same token store, idle tracker and peer routing.
+    /// A handler sharing `host`'s state — the same credential vaults, idle tracker and peer routing.
     #[must_use]
     pub fn from_host(host: &DaemonSessionHost) -> Self {
         Self {
             config: host.config().clone(),
             user_resolver: host.user_resolver(),
             tddy_data_dir: host.tddy_data_dir().to_path_buf(),
-            github_token_store: host.github_token_store(),
+            credential_vaults: host.credential_vaults(),
             rpc_activity: host.rpc_activity(),
             peer_routing: host.peer_routing(),
         }

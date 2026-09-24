@@ -1,0 +1,44 @@
+[package]
+name = "tddy-credentials"
+version = "0.1.0"
+edition = "2021"
+description = "Where a secret lives and what it takes to read one — a provider-extensible credential store, sealed at rest and openable only while a user session exists"
+
+[lib]
+name = "tddy_credentials"
+path = "src/lib.rs"
+
+[dependencies]
+# AEAD over each record, with the record's identity as associated data. Already this workspace's
+# authenticated cipher (tddy-screen-sharing), so the pattern is one a reviewer here has read before.
+# It wipes its own key on drop, unconditionally.
+chacha20poly1305 = "0.10"
+# Never imported: named only to turn on the wipe of the one-time Poly1305 key each seal and open
+# derives, which `chacha20poly1305` leaves off. Already in the tree beneath it, at this version.
+poly1305 = { version = "0.8", features = ["zeroize"] }
+# Argon2id over the vault passphrase — the one key-encryption key a user holds. Already this
+# workspace's password KDF (tddy-screen-sharing), at the same version; `zeroize` wipes its working
+# memory — the passphrase-derived blocks — when a derivation ends.
+argon2 = { version = "0.5", features = ["zeroize"] }
+# HKDF-Extract/Expand for the unlock slots and record ids, hand-rolled in a dozen lines rather than
+# taken as a dependency — `hkdf` would be tidier and needs CLAUDE.md § ASK approval first. At 0.13 /
+# 0.11 (both already in the tree) because those are the releases whose `zeroize` wipes the keyed
+# HMAC state on drop; 0.12 / 0.10 have no way to.
+hmac = { version = "0.13", features = ["zeroize"] }
+sha2 = { version = "0.11", features = ["zeroize"] }
+# How every secret this crate holds is wiped: its own `SecretBytes` and `SecretString`, the
+# transient plaintext buffers, and — through the features above — the ciphers' and MACs' key
+# schedules. Approved by the developer for #keyring 3/9; already in the tree at 1.9.
+zeroize = "1.9"
+# Constant-time comparison of the verifier, so a wrong key cannot be found a byte at a time.
+subtle = "2.6"
+rand = "0.8"
+# Where a pending sign-in's credential is held and expires. Already every daemon crate's logger;
+# never given a secret: records are logged by provider only.
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

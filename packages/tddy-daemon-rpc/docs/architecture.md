@@ -49,7 +49,7 @@ workspace jails, hosted clones, peer roster and token store the host does. **No 
 | `ProjectRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `eligible_daemon_source`, `spawn_client`, `common_room_livekit_room` | 6 |
 | `CatalogRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `model_registry`, `rpc_activity` | 5 |
 | `ExecToolRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `peer_routing`, `rpc_activity`, `local_exec_tools` | 9 |
-| `PrStackRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `github_token_store`, `rpc_activity`, `peer_routing` | 7 |
+| `PrStackRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `credential_vaults`, `rpc_activity`, `peer_routing` | 7 |
 
 The budget is each family's measured transitive field set on the host, as an upper bound; a shared
 component that bundles several host fields counts as one. `DaemonConfig` is never mutated once the
@@ -91,7 +91,7 @@ the same handlers as the original.
 `RpcHandlers::install` runs **after the host's last `with_*`**: a `with_*` applied later would
 replace a value the handlers still hold, splitting the host from its handlers. The lifecycle crate
 guards this with a `debug_assert` in the setters that feed handler state (`with_model_registry`,
-`with_github_token_store`, `with_idle_tracker`, `with_eligible_daemon_source`). The host keeps a
+`with_credential_vaults`, `with_idle_tracker`, `with_eligible_daemon_source`). The host keeps a
 clone of the bundle, which holds handlers and never the host, so there is no `Arc` cycle.
 
 ### The `DaemonRpcFamilies` implementation

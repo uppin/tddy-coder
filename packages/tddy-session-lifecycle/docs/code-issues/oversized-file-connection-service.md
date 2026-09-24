@@ -17,6 +17,7 @@
 | 2026-09-22 | ~1931 | unchanged in substance — total 1,944 → 1,945; #494 (`#carve` 8/11) swapped the `telegram` field for `presenter_event_sink` and its doc comment, +1 line net |
 | 2026-09-23 | ~1634 | #520 (`#carve` 11/12): total 1,945 → 1,647 (−298). The free functions only the four moved RPC families used left for `tddy-daemon-rpc` — `merge_listed_projects_with_peers`, `require_pr_stack_orchestrator`, `owner_repo_from_repo_root`, the `base_sync_*` helpers, the `agent_models_cache` group, the path guard and result framing — with four test-module declarations. Same method as the rows above (lines before the trailing test-module declaration, `:1635`). Excluding every `#[cfg(test)]` item and its doc comment: 1,859 → 1,569 |
 | 2026-09-23 | ~1639 | total 1,647 on `origin/master` (`4e260d7f`, after #520) → 1,652 after #508 (`#keyring` 1/9): the `session_tokens: Option<SessionTokens>` field on `DaemonSessionHost` and its doc comment — all five lines production, none test. Split deferred to a follow-up after `#keyring` lands, since dependents #509–#513 touch this file |
+| 2026-09-24 | ~1639 | **unchanged by #510** (`#keyring` 3/9), which touched it: total 1,652 on `origin/master` (`35cf2913`) → 1,652. The `DaemonSessionHost.github_token_store` field and its three-line doc comment became `credential_vaults: Option<Arc<tddy_daemon_auth::SessionVaults>>` with a three-line doc comment — four lines replaced by four |
 
 ## The number has to be taken by hand
 

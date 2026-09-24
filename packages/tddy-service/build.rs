@@ -142,9 +142,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/token.proto"], &["proto"])?;
 
-    // Auth service (async trait + RpcService server)
+    // Auth service (async trait + RpcService server). The two requests carrying a vault passphrase
+    // get no derived `Debug` — it would print the passphrase — and format it redacted instead
+    // (`src/auth_redacted_debug.rs`).
     prost_build::Config::new()
         .out_dir(std::env::var("OUT_DIR")?)
+        .skip_debug([".auth.UnlockVaultRequest", ".auth.ResetVaultRequest"])
         .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
             generate_rpc_server: true,
             generate_tonic_adapter: false,

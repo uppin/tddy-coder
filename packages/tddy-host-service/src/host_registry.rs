@@ -212,9 +212,9 @@ pub trait HostRegistry: Send + Sync {
 
 /// A [`HostRegistry`] persisted as one JSON file under a storage directory.
 ///
-/// The file is published through [`tddy_core::atomic_file`] rather than the hand-rolled
-/// staging-file-plus-rename in [`crate::github_token_store::FileGitHubTokenStore`]. That store, and
-/// the two others like it, are excluded from `atomic_file` because `write_atomic` only carries
+/// The file is published through [`tddy_core::atomic_file`] rather than a hand-rolled
+/// staging-file-plus-rename like the one the since-deleted GitHub token store used. That store, and
+/// the two others like it, were excluded from `atomic_file` because `write_atomic` only carries
 /// permission bits over from an *existing* target, so a credential file would be created at the
 /// process umask on its very first write. **A host list is not a credential** — knowing which
 /// machines this daemon has seen grants nothing — so the reason for the exclusion does not apply

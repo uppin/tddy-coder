@@ -57,7 +57,7 @@ defines (`rpc_families.rs`, re-exported as `tddy_session_lifecycle::DaemonRpcFam
 - `DaemonSessionHost::with_rpc_families(Arc<dyn DaemonRpcFamilies>)` installs it. The composition
   root calls it **last**, after every other `with_*`, through `tddy_daemon_rpc::RpcHandlers::install`:
   the handlers are built from this host's state and share it. The setters that feed handler state
-  (`with_model_registry`, `with_github_token_store`, `with_idle_tracker`,
+  (`with_model_registry`, `with_credential_vaults`, `with_idle_tracker`,
   `with_eligible_daemon_source`) `debug_assert` that the port is not installed yet.
 - `rpc_families()` returns the port, or **`FAILED_PRECONDITION`** naming the missing wiring when it
   was never installed. A host without it refuses the two paths above rather than opening a room that
@@ -97,8 +97,10 @@ holding it (all re-exported from `connection_service`):
 
 `handler_state.rs` gives the handlers their inputs: `DaemonSessionHost::{config, user_resolver,
 tddy_data_dir, eligible_daemon_source, spawn_client, common_room_livekit_room, model_registry,
-github_token_store, rpc_activity, peer_routing, local_exec_tools}`, each shared value handed out as
-a clone of the same handle.
+credential_vaults, rpc_activity, peer_routing, local_exec_tools}`, each shared value handed out as
+a clone of the same handle. `credential_vaults()` is the daemon's one `tddy_credentials::SessionVaults`
+registry (re-exported as `tddy_daemon_auth::SessionVaults`), `None` when `auth_storage` is unset; the
+PR-stack handler reads a caller's GitHub token from it.
 
 `pr_stack_rpc` is a facade re-exporting `PrStackHandler`, `PrStackServiceImpl` and
 `build_pr_stack_entry` from [`tddy_pr_stack::rpc`](../../tddy-pr-stack/docs/architecture.md#rpcrs--the-pr-stack-rpc-family),

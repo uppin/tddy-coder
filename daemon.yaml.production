@@ -25,8 +25,11 @@ listen:
 
 web_bundle_path: "__WEB_BUNDLE_PATH__"
 
-# Where each GitHub login's access token is retained (github-tokens.json, mode 0600). Must be writable
-# by the daemon user or the daemon refuses to start — see the `github:` block below.
+# Where each GitHub login's access token is retained, sealed in that user's own credential vault
+# (credentials-<hex login>.vault, mode 0600). A vault opens only with its owner's vault passphrase,
+# or with the unlock key one of their signed-in browsers holds — never from a login alone, and the
+# daemon keeps no key of its own. Must be writable by the daemon user or the daemon refuses to start
+# — see the `github:` block below.
 auth_storage: "__AUTH_STORAGE_DIR__/auth"
 
 # tddy-supervisor — the root process that started this daemon as an unprivileged child. This block
@@ -96,6 +99,18 @@ local:
 #   client_id: "<your-github-oauth-app-client-id>"
 #   client_secret: "<secret>"
 #   redirect_uri: "https://your-host:8899/auth/callback"
+#   # How long a sign-in's GitHub token waits in the daemon's memory, unsealed, for the operator to
+#   # unlock (or first create) their credential vault — and how long that sign-in permits choosing
+#   # the vault's passphrase or resetting it. Past it both are dropped: the operator signs in to
+#   # GitHub again. 0 means never: held until an unlock, a logout or a daemon restart (warned at
+#   # startup). Absent means 600; at most 604800 (seven days).
+#   pending_login_ttl_seconds: 600
+#   # How long an unlocked credential vault may go unused — no sign-in, unlock, session refresh or
+#   # PR-status read — before the daemon closes it and drops its data key from memory. Closing
+#   # locks nobody out: the browser's next session refresh reopens it, as after a restart. 0 means
+#   # never: held until its last lineage logs out or the daemon restarts (warned at startup).
+#   # Absent means 604800 (seven days, the refresh-token lifetime), which is also the maximum.
+#   open_vault_idle_ttl_seconds: 604800
 
 # Max seconds for git clone / session spawn (hung worker fails with DEADLINE_EXCEEDED). Default: 300.
 # spawn_worker_request_timeout_secs: 300

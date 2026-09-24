@@ -37,10 +37,10 @@ operator as tddy having forgotten.
 **Liveness is never persisted.** A stored "online" flag is wrong the moment a daemon exits without
 notice, so `HostRegistry::known_hosts` takes the live roster as an argument and intersects.
 
-The registry is published through `tddy_core::atomic_file` rather than the hand-rolled
-staging-file-plus-rename used by `FileGitHubTokenStore`. That store and the two like it are excluded
-from `atomic_file` because `write_atomic` carries permission bits over only from an *existing*
-target, so a credential file would be created at the process umask on its first write. A host list is
+The registry is published through `tddy_core::atomic_file`'s plain `write_atomic`. Credential files
+use a mode-aware writer instead — `write_atomic_with_mode`, or `tddy-credentials`' own owner-only
+writer for the credential vaults — because `write_atomic` carries permission bits over only from an
+*existing* target, so a credential file would be created at the process umask on its first write. A host list is
 not a credential — knowing which machines this daemon has seen grants nothing — so the reason for
 that exclusion does not apply here.
 

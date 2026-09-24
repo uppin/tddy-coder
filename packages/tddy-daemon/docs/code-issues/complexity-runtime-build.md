@@ -1,12 +1,12 @@
 # complexity: build
 
-**Location:** `packages/tddy-daemon/src/runtime.rs:563` — `build`
+**Location:** `packages/tddy-daemon/src/runtime.rs:623` — `build`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
-**Metrics:** **879 lines** (2026-09-24; 806 at detection) · **nesting depth 5** · 2 parameters · 20 branch/match lines · 15 early exits (the 2026-09-23 exit count; the first row's 10 used a different count)
-**Thresholds breached:** length 879 > 60; nesting 5 > 4 (`/analyze-clean-code`)
+**Metrics:** **880 lines** (2026-09-24, #510 HEAD; 806 at detection) · **nesting depth 5** · 2 parameters · 20 branch/match lines · 15 early exits (the 2026-09-23 exit count; the first row's 10 used a different count)
+**Thresholds breached:** length 880 > 60; nesting 5 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — regressed 2026-09-24 (806 → 879 lines since detection; +2 from #494, +45 from #508, +1 from #509) — **unclaimed**
+**Status:** Open — regressed 2026-09-24 (806 → 879 lines since detection; +2 from #494, +45 from #508, +1 from #509, +1 from #510) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -18,6 +18,8 @@
 | 2026-09-23 | 833 | 5 | — | — | touched by #520 (`#carve` 11/12) and **unchanged by it**, now at `runtime.rs:563`: `RpcHandlers::install(host)` added five lines and the four families' service and entry construction left for `RpcHandlers`, net zero. Nesting and `return`/`?` count identical to master; branches not re-derived |
 | 2026-09-23 | 878 | 5 | 20 | 14 | 833 on `origin/master` (`4e260d7f`, after #520) → 878 after #508 (`#keyring` 1/9): the common-room peer registry resolved once before auth, the signing-key load, the `KeyDirectory` choice (`CommonRoomKeyDirectory` vs `StandaloneKeyDirectory`), `build_auth_entries_with`, and the advertised key handed to discovery. Same scan on master gives 18 branches / 13 exits, so #508 added 2 and 1; the first row's 10 exits used a different exit count. Nesting by indentation identical on master and HEAD. Split deferred to a follow-up after `#keyring` lands, as for `oversized-file-runtime` |
 | 2026-09-24 | 879 | 5 | 20 | 15 | 878 on the merge-base with `origin/master` (`4e7157d2`) → 879 after #509 (`#keyring` 2/9): `build_auth_entries_with` became `build_auth_entries_admitting`, taking `first_login_enrolment(&config, &options)?` as a fifth argument (+1 line, +1 `?`). The enrolment decision itself went into a new free function above `build`, not into it. Branches unchanged; nesting by indentation identical. Split deferred with the developer's consent to a follow-up after `#keyring` lands, as for `oversized-file-runtime` |
+| 2026-09-24 | 880 | 5 | 20 | 15 | 879 on `origin/master` (`35cf2913`) → 880 after #510 (`#keyring` 3/9): the `if let Some(store) = auth_result.github_token_store` injection becomes `if let Some(vaults) = auth_result.credential_vaults` and gains one line, `tddy_daemon_auth::pending_logins::spawn_pending_login_sweep(&vaults)` — the pending-login expiry sweep. The vaults' construction and the sweep's body went into `tddy-daemon-auth`'s `pending_logins.rs`, not here. Branches, exits and nesting unchanged (the `if let` was already there; no `?` added). Split deferred with the developer's consent to a follow-up after `#keyring` lands (`docs/dev/todo/2026-09-24-keyring-store-deferred-oversized-file-splits.md`) |
+| 2026-09-24 | 880 | 5 | 20 | 15 | touched by #510's post-wrap follow-up and **unchanged**: the sweep line is renamed to `vault_lifetimes::spawn_credential_sweep(&vaults)`, which also covers idle open vaults. Same line, no branch, exit or nesting change |
 
 ## What the tool found
 

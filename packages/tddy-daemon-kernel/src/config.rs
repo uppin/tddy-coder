@@ -319,9 +319,9 @@ pub struct DaemonConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github: Option<GitHubConfig>,
     /// Directory holding server-side auth state: this daemon's Ed25519 session-token signing key
-    /// (`signing_key.pem`, mode `0600`, generated on first boot) and the GitHub access token each
-    /// web login granted (`github-tokens.json`, mode `0600`), which is the credential PR-status
-    /// reads act with. Unset means no GitHub token is retained, so PR status reports itself
+    /// (`signing_key.pem`, mode `0600`, generated on first boot) and each user's credential vault
+    /// (`credentials-<hex login>.vault`, mode `0600`), sealing the GitHub access token their login
+    /// granted — the credential PR-status reads act with. Unset means no GitHub token is retained, so PR status reports itself
     /// *unavailable* for a real login — and the signing key lives in the `auth` directory under
     /// `tddy_data_dir` instead. Session tokens themselves are stateless and are never stored here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1083,6 +1083,10 @@ pub struct GitHubConfig {
     pub stub: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stub_codes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] // `pending_login_ttl.rs`
+    pub pending_login_ttl_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] // `open_vault_idle_ttl.rs`
+    pub open_vault_idle_ttl_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]

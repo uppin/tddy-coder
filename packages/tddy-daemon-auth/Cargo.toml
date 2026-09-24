@@ -22,6 +22,10 @@ thiserror = "2"
 # `write_atomic_with_mode`: the one implementation of "replace a secret without ever truncating
 # the file that is already there" (docs/dev/todo/2026-08-16-…-truncate-in-place.md).
 tddy-core = { path = "../tddy-core" }
+# Each operator's credential vault — opened at login, where their GitHub token is sealed (`#keyring`
+# 3/9). Depends on neither this crate nor LiveKit, so later nodes use it without reaching through
+# auth.
+tddy-credentials = { path = "../tddy-credentials" }
 # `SessionUserResolver` and `DaemonConfig` — the two shapes this crate needs from the daemon, and
 # the whole of what node 1 published so the auth subsystem could leave without depending on it.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
@@ -34,6 +38,8 @@ url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
+# `test-util` pauses tokio's clock, so the pending-login sweep's ticks are driven by hand.
+tokio = { version = "1", features = ["test-util"] }
 base64 = "0.22"
 # LiveKit's own JWT verifier. Already in the tree through `tddy-livekit`, which mints with the
 # matching `AccessToken` — so `token_service_acceptance.rs` checks the signature the way a LiveKit

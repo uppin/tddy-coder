@@ -50,6 +50,24 @@ export const TEST_IDS = {
   authProbeStatus: "auth-probe-status",
   /** Probe: the error the shared auth context holds, empty when it holds none. */
   authProbeError: "auth-probe-error",
+  /** Credential vault prompt: shown while the signed-in operator's vault is locked or not created. */
+  credentialVaultPrompt: "credential-vault-prompt",
+  /** Credential vault prompt: the passphrase field (the new one, when creating or resetting). */
+  credentialVaultPassphrase: "credential-vault-passphrase",
+  /** Credential vault prompt: the confirmation field, when a passphrase is being chosen. */
+  credentialVaultPassphraseConfirm: "credential-vault-passphrase-confirm",
+  /** Credential vault prompt: unlock, create, or reset — whichever the prompt is asking for. */
+  credentialVaultSubmit: "credential-vault-submit",
+  /** Credential vault prompt: why the last attempt was refused. */
+  credentialVaultError: "credential-vault-error",
+  /** Credential vault prompt: the "forgot passphrase" path to a reset. */
+  credentialVaultForgot: "credential-vault-forgot",
+  /** Credential vault prompt: the warning a reset shows before it is confirmed. */
+  credentialVaultResetWarning: "credential-vault-reset-warning",
+  /** Credential vault prompt: "Not now" — hides the prompt until the vault's state next changes. */
+  credentialVaultDismiss: "credential-vault-dismiss",
+  /** Harness: a control of the page behind the credential vault prompt, to prove it is usable. */
+  credentialVaultBystander: "credential-vault-bystander",
 
   // App / Connection
   livekitUrl: "livekit-url",

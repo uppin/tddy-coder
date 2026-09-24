@@ -1,0 +1,7 @@
+# 2026-09-24 — github.pending_login_ttl_seconds and github.open_vault_idle_ttl_seconds
+
+**Type:** Feature
+
+`#keyring` 3/9, PR [#510](https://github.com/uppin/tddy-coder/pull/510). Cross-package entry: [`docs/dev/changesets/2026-09-24-keyring-store.md`](../../../../docs/dev/changesets/2026-09-24-keyring-store.md)
+
+`GitHubConfig.pending_login_ttl_seconds` and `GitHubConfig.open_vault_idle_ttl_seconds` are plain `Option<u64>` fields, `#[serde(default)]`: a negative or non-numeric value fails the config load naming the setting, and that is all this crate decides. Their defaults, `0` = never and the ceiling (`tddy_github::REFRESH_TOKEN_TTL`, past which the daemon does not start) are `tddy-daemon-auth`'s `vault_lifetimes::VaultLifetimes::of` — this crate has seventeen dependents and does not depend on `tddy-github`. (During #510's post-wrap follow-up the defaults and ceilings briefly lived here, as `PendingLoginTtl` / `OpenVaultIdleTtl`, over a `tddy-github` edge; the developer had the edge removed.) `pending_login_ttl.rs` and `open_vault_idle_ttl.rs` hold the module docs and the parsing tests. `config.rs` +4 production lines (1,472 → 1,476; `oversized-file-config` regressed, deferred with consent). The `auth_storage` doc comment names the credential vault instead of `github-tokens.json`. Detail: [daemon-kernel.md](../daemon-kernel.md#pending_login_ttl-open_vault_idle_ttl--two-settings-read-here-and-meant-elsewhere).

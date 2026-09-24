@@ -17,12 +17,15 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# Where a login's GitHub token is sealed — the operator's own credential vault, opened by the login.
+tddy-credentials = { path = "../tddy-credentials" }
 tddy-core = { path = "../tddy-core" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 # github_pr.rs stages the REST request body in a temp file for `curl --data-binary`.
 tempfile = "3"
-tokio = { version = "1", features = ["sync"] }
+# `sync` for the unlock semaphore; `rt` for `spawn_blocking`, which keeps Argon2id off RPC workers.
+tokio = { version = "1", features = ["sync", "rt"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

@@ -8,17 +8,30 @@
  * the device wakes transparently refreshes instead of failing. When the refresh token itself is
  * rejected, both tokens are cleared and the caller is told the session has ended.
  *
+ * Beside the pair it keeps the **vault unlock key** the daemon handed this session lineage: a wrap
+ * key for the lineage's slot in the daemon's credential vault — not a stored credential, and
+ * useless without the vault file on the daemon's disk. Every refresh presents it, so a daemon that
+ * restarted can reopen the operator's stored credentials without a new login, and every refresh
+ * replaces it with the rotated one the daemon returns. A lineage that has none — its vault was
+ * locked at sign-in — gets one by unlocking the vault with its passphrase (`unlockVault`).
+ *
+ * It also reports where the vault stands (`onVaultStateChange`), from every refresh, unlock and
+ * reset, so the page can ask for the passphrase while the vault is locked or not created yet.
+ *
  * Storage, the auth client, and the clock are injected so the store is unit-testable without a DOM.
  */
 
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
-import { AuthService } from "../gen/auth_pb";
+import { AuthService, VaultState } from "../gen/auth_pb";
 
 /** Persistence seam for the token pair (production backs this with `localStorage`). */
 export interface TokenStorage {
   getAccess(): string | null;
   getRefresh(): string | null;
-  set(access: string, refresh: string): void;
+  /** The vault unlock key the last login or refresh returned; `null` when none is held. */
+  getVaultUnlockKey(): string | null;
+  /** Replace all three together — an empty `vaultUnlockKey` means the daemon handed none back. */
+  set(access: string, refresh: string, vaultUnlockKey: string): void;
   clear(): void;
 }
 
@@ -33,6 +46,8 @@ export interface SessionTokenStoreDeps {
   onRefreshingChange?: (refreshing: boolean) => void;
   /** Notified with the new access token whenever a refresh installs one — keeps consumers in sync. */
   onAccessTokenChange?: (accessToken: string) => void;
+  /** Notified with where the credential vault stands, whenever a refresh, unlock or reset says. */
+  onVaultStateChange?: (vaultState: VaultState) => void;
 }
 
 export interface SessionTokenStore {
@@ -43,6 +58,34 @@ export interface SessionTokenStore {
    * possible — the server decides). `null` only when neither token is present.
    */
   ensureFreshAccessToken(): Promise<string | null>;
+  /**
+   * Refresh now, whether or not the access token is still fresh (single-flight like the above).
+   * A page load does this when it holds a vault unlock key, so a daemon that restarted since the
+   * last refresh reopens the operator's credentials straight away rather than when the access
+   * token next lapses.
+   */
+  refreshNow(): Promise<string>;
+  /**
+   * A page load's refresh: only when a vault unlock key is held, so a daemon that restarted since
+   * the last refresh reopens the operator's credentials now rather than when the access token next
+   * lapses. A failure is not the page load's to report — a definitive one already ended the session
+   * through `onLoggedOut`, and a transient one is retried at the next refresh.
+   */
+  reopenVaultOnLoad(): Promise<void>;
+  /**
+   * Open the vault with its passphrase — or, with `create`, create it under a first one — and keep
+   * the unlock key the daemon hands this lineage. A refusal (a wrong passphrase) rejects, with
+   * nothing stored.
+   */
+  unlockVault(passphrase: string, create: boolean): Promise<void>;
+  /** Set the vault aside on the daemon and open a fresh one under `newPassphrase`; keeps its key. */
+  resetVault(newPassphrase: string): Promise<void>;
+  /**
+   * Sign out: hand the daemon this lineage's unlock key so it removes the slot — even when the
+   * access token has lapsed, since the key identifies the slot itself — then clear every token,
+   * whether or not the daemon answered.
+   */
+  logout(): Promise<void>;
   /** True while a `RefreshSession` is in flight. */
   isRefreshing(): boolean;
 }
@@ -77,7 +120,7 @@ function base64UrlDecode(segment: string): string | null {
 }
 
 export function createSessionTokenStore(deps: SessionTokenStoreDeps): SessionTokenStore {
-  const { authClient, storage, onLoggedOut, onRefreshingChange, onAccessTokenChange } = deps;
+  const { authClient, storage, onLoggedOut, onRefreshingChange, onAccessTokenChange, onVaultStateChange } = deps;
   const now = deps.now ?? Date.now;
 
   // Holds the shared promise while a refresh is in flight so concurrent callers await one call.
@@ -91,11 +134,19 @@ export function createSessionTokenStore(deps: SessionTokenStoreDeps): SessionTok
 
   async function refresh(): Promise<string> {
     const refreshToken = storage.getRefresh() ?? "";
+    const vaultUnlockKey = storage.getVaultUnlockKey() ?? "";
     onRefreshingChange?.(true);
     try {
-      const res = await authClient.refreshSession({ refreshToken });
-      storage.set(res.sessionToken, res.refreshToken);
+      const res = await authClient.refreshSession({ refreshToken, vaultUnlockKey });
+      // The presented unlock key opens nothing once the daemon has rotated it, so a rotated one
+      // replaces it — and so does an empty one, which the daemon returns only for a key that can
+      // never open the vault again. The daemon hands the presented key back unrotated when it
+      // could not read the vault; that says nothing new, so whatever is stored now is kept — it
+      // may be newer, stored meanwhile by another tab's refresh.
+      const keptKey = res.vaultUnlockKey === vaultUnlockKey && vaultUnlockKey !== "" ? (storage.getVaultUnlockKey() ?? "") : res.vaultUnlockKey;
+      storage.set(res.sessionToken, res.refreshToken, keptKey);
       onAccessTokenChange?.(res.sessionToken);
+      onVaultStateChange?.(res.vaultState);
       return res.sessionToken;
     } catch (err) {
       // Only a definitive server rejection of the refresh token (Unauthenticated) means the
@@ -113,26 +164,68 @@ export function createSessionTokenStore(deps: SessionTokenStoreDeps): SessionTok
     }
   }
 
+  function refreshSingleFlight(): Promise<string> {
+    if (!inFlight) {
+      inFlight = refresh().finally(() => {
+        inFlight = null;
+      });
+    }
+    return inFlight;
+  }
+
+  function ensureFreshAccessToken(): Promise<string | null> {
+    const access = storage.getAccess();
+    if (access && accessTokenIsFresh(access)) {
+      return Promise.resolve<string | null>(access);
+    }
+    // Without a refresh token there is nothing to mint from — send the current access token as-is
+    // (may be null) and let the server reject it if it is truly invalid.
+    if (!storage.getRefresh()) {
+      return Promise.resolve<string | null>(access);
+    }
+    return refreshSingleFlight();
+  }
+
+  /** Keep the unlock key an unlock or a reset returned, beside the tokens it belongs with. */
+  function adoptUnlockKey(vaultUnlockKey: string, vaultState: VaultState) {
+    storage.set(storage.getAccess() ?? "", storage.getRefresh() ?? "", vaultUnlockKey);
+    onVaultStateChange?.(vaultState);
+  }
+
   return {
     isRefreshing() {
       return inFlight !== null;
     },
-    ensureFreshAccessToken() {
-      const access = storage.getAccess();
-      if (access && accessTokenIsFresh(access)) {
-        return Promise.resolve<string | null>(access);
-      }
-      // Without a refresh token there is nothing to mint from — send the current access token as-is
-      // (may be null) and let the server reject it if it is truly invalid.
-      if (!storage.getRefresh()) {
-        return Promise.resolve<string | null>(access);
-      }
-      if (!inFlight) {
-        inFlight = refresh().finally(() => {
-          inFlight = null;
-        });
-      }
-      return inFlight;
+    refreshNow() {
+      return refreshSingleFlight();
     },
+    async reopenVaultOnLoad() {
+      if (!storage.getVaultUnlockKey() || !storage.getRefresh()) return;
+      await refreshSingleFlight().catch(() => undefined);
+    },
+    async unlockVault(passphrase: string, create: boolean) {
+      const sessionToken = (await ensureFreshAccessToken()) ?? "";
+      const res = await authClient.unlockVault({ sessionToken, passphrase, create });
+      adoptUnlockKey(res.vaultUnlockKey, res.vaultState);
+    },
+    async resetVault(newPassphrase: string) {
+      const sessionToken = (await ensureFreshAccessToken()) ?? "";
+      const res = await authClient.resetVault({ sessionToken, newPassphrase });
+      adoptUnlockKey(res.vaultUnlockKey, res.vaultState);
+    },
+    async logout() {
+      const sessionToken = storage.getAccess() ?? "";
+      const vaultUnlockKey = storage.getVaultUnlockKey() ?? "";
+      if (sessionToken || vaultUnlockKey) {
+        try {
+          await authClient.logout({ sessionToken, vaultUnlockKey });
+        } catch {
+          // The browser discards its tokens regardless; a slot left on the daemon opens nothing
+          // without the key, and this is the last copy of the key.
+        }
+      }
+      storage.clear();
+    },
+    ensureFreshAccessToken,
   };
 }

@@ -47,9 +47,9 @@ tddy_data_dir: "__TDDY_DATA_DIR__"
 
 # Where this daemon keeps its auth state: the Ed25519 key it signs session tokens with
 # (signing_key.pem, mode 0600, generated on first boot and reused on every boot after — deleting it
-# ends every signed-in session) and each GitHub login's retained access token (github-tokens.json,
-# mode 0600). The daemon REFUSES TO START when this is set and not writable, because a failed token
-# write would fail every login — ./install --desktop creates it mode 0700, and the daemon warns at
+# ends every signed-in session) and each GitHub login's retained access token, sealed in that user's
+# own credential vault (credentials-<hex login>.vault, mode 0600). The daemon REFUSES TO START when
+# this is set and not writable, because a failed credential write would fail every login — ./install --desktop creates it mode 0700, and the daemon warns at
 # startup if it has since been opened wider.
 auth_storage: "__AUTH_STORAGE_DIR__/auth"
 
@@ -75,6 +75,18 @@ listen:
 # user token does not expire, so no refresh exchange ever needs a secret.
 github:
   client_id: "Ov23lioH6CfiaZR8ESr5"
+  # How long a sign-in's GitHub token waits in the daemon's memory, unsealed, for the operator to
+  # unlock (or first create) their credential vault — and how long that sign-in permits choosing
+  # the vault's passphrase or resetting it. Past it both are dropped: the operator signs in to
+  # GitHub again. 0 means never: held until an unlock, a logout or a daemon restart (warned at
+  # startup). Absent means 600; at most 604800 (seven days).
+  pending_login_ttl_seconds: 600
+  # How long an unlocked credential vault may go unused — no sign-in, unlock, session refresh or
+  # PR-status read — before the daemon closes it and drops its data key from memory. Closing locks
+  # nobody out: the browser's next session refresh reopens it, as after a restart. 0 means never:
+  # held until its last lineage logs out or the daemon restarts (warned at startup). Absent means
+  # 604800 (seven days, the refresh-token lifetime), which is also the maximum.
+  open_vault_idle_ttl_seconds: 604800
 
 # WHICH OS USER A LOGIN RUNS SESSIONS AS: nobody yet, on purpose.
 #
