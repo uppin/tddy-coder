@@ -1,7 +1,7 @@
 # Changeset: destructure tddy-session-lifecycle, close its code issues, remove its duplicate code
 
 **Date**: 2026-09-23
-**Status**: 🚧 In Progress — baseline taken; plans `03`, `10a`, `04`, `08`, `06`, `07` and `02` applied; `05` refused, `01` and `09b` held (see "Apply run 2026-09-24")
+**Status**: 🚧 In Progress — baseline taken; plans `03`, `10a`, `04`, `08`, `06`, `07`, `02` and `09b` applied; `05` refused, `01` held (see "Apply run 2026-09-24")
 **Type**: Refactor (in-crate restructure; no behaviour change)
 **Stack**: `#carve` 14/15, on top of `restructure-engine-fixes` (#527), which sits on `core-split` (#522)
 
@@ -237,7 +237,7 @@ call (2026-09-23), and records them by name if they are still red.
 - [x] `split_session` → `agent_argv.rs` + `agent_credentials.rs` (`04`)
 - [ ] `start_session_core` extract-method; DRY #2 `spawn_tddy_coder`, DRY #4 prelude. ✅ `spawn_tddy_coder` extracted (`10a`); plan `10`'s other extract-methods were refused for their early returns and need re-cut ranges; the DRY merges are open
 - [ ] `session_coordinate_handlers` split; `session_entry_from_listing`. ✅ split (`08`); `session_entry_from_listing` open
-- [ ] DRY #1 `svc_sandboxed_jail_launch`: Claude, then Cursor, then relaunch
+- [ ] DRY #1 `svc_sandboxed_jail_launch`: Claude, then Cursor, then relaunch. ✅ Claude's start split into its jail steps (`09b`); plan `09` op 6 and the merge with Cursor and relaunch are open
 - [ ] Ports files split; DRY #9. ✅ split (`06`, `86670241`); DRY #9 open
 - [ ] `svc_spawn_split_agent` teardown split + extract-method; `svc_host_builders.rs`. ✅ `svc_host_builders.rs` (`07`, `1a9a72d4`); ⛔ `05` refused
 - [ ] Every non-test file < 500 production lines; no function > 150 lines
@@ -349,7 +349,7 @@ P and Q are [the extract TODO](../todo/2026-09-24-restructure-extract-drops-comm
 | `02-cli-session-manager-dir` | 9/9 moved; the compile gate failed. The engine widened 4 methods to `pub(crate)` | `strip_resize` → `pub(super)` in `livekit_bridge.rs` (J; the E0282 went with it). `async_trait` (G) and `prost::Message as _` (I) into `livekit_bridge.rs`. Parent imports (N1). 7 unused globs (N2). fmt | identical, and all 6 dependent crates `check --all-targets` clean | `834a76b2` |
 | `05` spawn_split_agent | ⛔ **refused** at `check --deep` and at `apply`, 3 of 3 runs, for op 0 and for the full plan | none; nothing was written | — | — |
 | `01` connection_service | ⏸ **held** because it depends on `05`: its `split_start` seam (lines 1166–1288) moves `SplitStartFailure` (line 1179), the type `05` op 0 is refused on | — | — | — |
-| `09b` sandboxed claude | 7/7 moved; the compile gate failed on K. It builds after the K fix | `WorkflowRecipe` qualified as `tddy_core::workflow::recipe::WorkflowRecipe` at the two new signatures (K) | identical | ⏸ **held, not committed**: P and Q need the developer |
+| `09b` sandboxed claude | 7/7 moved; the compile gate failed on K. It builds after the K fix | `WorkflowRecipe` qualified as `tddy_core::workflow::recipe::WorkflowRecipe` at the two new signatures (K). With the developer's consent: 14 comment lines restored (P) and the signatures reshaped (Q) | identical | `09b` commit, "split start_sandboxed_claude_cli_session into its jail steps" |
 
 After every commit, `cargo clippy -p tddy-session-lifecycle --all-targets -- -D warnings` and
 `cargo fmt -p tddy-session-lifecycle --check` are clean.
@@ -367,16 +367,32 @@ it is a plain `pub(crate) enum` in `connection_service.rs:1179`, not build-scrip
 gaps TODO records this plan applying 5 of 5 on the same engine before this branch's applies, so the
 refusal is new. It waits on the developer.
 
-**`09b` is held** after passing its tests:
+**`09b` was held** after passing its tests:
 - **P:** the assist dropped 14 comment lines from the extracted ranges. They are the readiness-gate
   and Seatbelt canonical-path rationale.
 - **Q:** the new signatures leave 18 clippy findings (`ptr_arg` ×14, `too_many_arguments` ×3,
   `type_complexity`, an unneeded `mut`).
 
-Restoring the comments and reshaping the signatures are both beyond a build correction. The
-developer chooses: restore by hand and reshape to `&Path`/`&str`/`&[_]`; restore and add `#[allow]`s;
-re-cut the ranges; or wait for an engine fix. The applied, K-fixed and formatted state was saved as
-a patch outside the tree, and the tree was restored.
+Restoring the comments and reshaping the signatures are both beyond a build correction, so the
+applied, K-fixed and formatted state was saved as a patch outside the tree.
+
+**The developer's decision** (2026-09-24): "Restore comments and sigs, file TODO for the engine
+fix." The saved patch applied cleanly to `4a99f0e8`. Then, by hand:
+- **P:** the 14 comment lines went back unreworded, each beside its statement in the function it
+  moved into: 2 + 4 in `warm_up_jail_agents` and 6 + 2 in `prepare_jail_dirs`. The comment-line
+  multiset is HEAD's plus the 4 new doc comments below.
+- **Q:** the signatures were reshaped with no new `#[allow]`:
+  - `&PathBuf`/`&String`/`&Vec<_>` → `&Path`/`&str`/`&[_]`, and `sessions_base` borrowed;
+  - the 3 over-arity functions take file-local structs: `JailSession<'a>` (id, project, session and
+    worktree dirs), `JailDirs` (was `prepare_jail_dirs`'s 5-tuple) and `JailLaunch` (what the
+    runner is spawned with);
+  - `type ManagedJailEnv` for `managed_jail_env`'s return;
+  - the `mut` dropped.
+- **Tests:** the same 61 / 622 / 22 / 1 as the baseline, with the same 22 by name. clippy and fmt
+  are clean.
+
+The engine fix is [the extract TODO](../todo/2026-09-24-restructure-extract-drops-comments-and-writes-clippy-failing-signatures.md).
+It now also records the hand-fixed shape.
 
 **Plan `02` also lost a comment** (P): the 3-line `LiveKit bridge` section banner. It is already
 pushed. The module's name now says what the banner said, so it was left as is.
@@ -384,7 +400,7 @@ pushed. The module's name now says what the banner said, so it was left as is.
 ### Still to do in Scope, not part of this run
 
 - `05` (refused) and `01` (held behind it), once the developer decides on the refusal.
-- `09b` (held), then plan `09` op 6, which returns early.
+- Plan `09` op 6, which returns early.
 - **Plan `10`'s refused extract-methods on `start_session_core`.** They are early returns and need
   re-cut ranges. `svc_start_session_core.rs` is 966 lines.
 - **The remaining extract-methods:** `resume_session_at_session_coordinate`, the CLI spawn
@@ -398,8 +414,9 @@ pushed. The module's name now says what the banner said, so it was left as is.
   - `connection_service.rs`: at least 823. Its first `#[cfg(test)] mod …;` is at line ~823, which is
     the 2026-09-19 measurement caveat;
   - `svc_start_session_core.rs`: 966;
-  - `svc_start_sandboxed_claude_cli_session.rs`: 661, which `09b` does not shrink until its helpers
-    move out;
+  - `svc_start_sandboxed_claude_cli_session.rs`: 834 after `09b` (was 661). The helpers and the
+    3 parameter structs are still in the file. The handler is down to 436 lines, still over the
+    150-line limit, until op 6 and DRY #1;
   - `svc_start_sandboxed_cursor_cli_session.rs`: 505;
   - `svc_spawn_split_agent.rs`: 505.
 
@@ -437,7 +454,7 @@ pushed. The module's name now says what the banner said, so it was left as is.
 - [x] Restructure plans proven with `check --deep`: 8 of 14 clean, 3 engine defects
 - [ ] USER REVIEW — layout and DRY inventory
 - [x] Baseline (characterisation tests only where a seam needs one)
-- [ ] Implementation: plans `03`, `10a`, `04`, `08`, `06`, `07` and `02` applied; `05` ⛔ refused, `01` and `09b` held, waiting on the developer
+- [ ] Implementation: plans `03`, `10a`, `04`, `08`, `06`, `07`, `02` and `09b` applied; `05` ⛔ refused, `01` held, waiting on the developer
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`)

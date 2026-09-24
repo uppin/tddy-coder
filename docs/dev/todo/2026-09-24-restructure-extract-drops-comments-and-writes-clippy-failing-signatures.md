@@ -6,9 +6,14 @@
 [`2026-09-23-carve-lifecycle-destructure`](../1-WIP/2026-09-23-carve-lifecycle-destructure.md)
 
 Both of these showed up only **after** the compile gate was satisfied: `cargo check --all-targets`
-was clean, and `cargo test -p tddy-session-lifecycle` matched the baseline. Plan `09b` was
-therefore **not committed**. Putting the comments back and reshaping the signatures are both edits
-beyond a build correction, and they wait on the developer.
+was clean, and `cargo test -p tddy-session-lifecycle` matched the baseline. Putting the comments
+back and reshaping the signatures are both edits beyond a build correction, so plan `09b` was first
+held for the developer.
+
+**Landed on #524 by hand** (developer, 2026-09-24: "Restore comments and sigs, file TODO for the
+engine fix"). The 14 comment lines went back unreworded, each beside its statement in the function
+it moved into. The signatures were reshaped with no `#[allow]` (see "After the hand fix" under Q).
+The engine defects below are still open. This file is what tracks them.
 
 ## P — `extract_method` drops the comments inside the range it extracts
 
@@ -85,7 +90,9 @@ fn prepare_jail_dirs(session_dir: &PathBuf) -> Result<(PathBuf, PathBuf, PathBuf
 ```
 
 ```text
-error: writing `&PathBuf` instead of `&Path` involves a new object where a slice will do   (×14)
+error: writing `&PathBuf` instead of `&Path` involves a new object where a slice will do   (×12)
+error: writing `&String` instead of `&str` involves a new object where a slice will do    (×1)
+error: writing `&Vec` instead of `&[_]` involves a new object where a slice will do       (×1)
 error: this function has too many arguments (10/7)   managed_jail_env
 error: this function has too many arguments (16/7)   launch_jail
 error: this function has too many arguments (8/7)    write_jail_session_metadata
@@ -100,6 +107,45 @@ error: variable does not need to be mutable          warm_up_jail_agents: `let m
 - Plan `10a`'s `spawn_tddy_coder` (22 parameters) is the same shape. It carries
   `#[allow(clippy::too_many_arguments)]`, the crate's existing pattern, until DRY #2 folds it into a
   `ToolSpawnPlan`. The crate has **no** precedent for allowing `ptr_arg` or `type_complexity`.
+
+### After the hand fix (#524)
+
+This is what a person writes, and the engine should come as close to it as it can:
+
+```rust
+/// The session a sandboxed start is building a jail for: who it is and where it lives on the host.
+struct JailSession<'a> {
+    session_id: &'a str,
+    project_id: &'a str,
+    session_dir: &'a Path,
+    worktree_path: &'a Path,
+}
+
+/// A managed-workflow session's controller, its orchestration prompt file and its host-side env.
+type ManagedJailEnv = (
+    Option<crate::session_toolcall::ManagedWorkflow>,
+    Option<PathBuf>,
+    Vec<(String, String)>,
+);
+
+    fn managed_jail_env(
+        &self,
+        jail: &JailSession<'_>,
+        os_user: &str,
+        sessions_base: &Path,
+        managed_recipe: &Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
+        context_dir: &Path,
+        tddy_tools_path: &str,
+    ) -> Result<ManagedJailEnv, Status>
+
+fn prepare_jail_dirs(session_dir: &Path) -> Result<JailDirs, Status>   // a named struct, not a 5-tuple
+async fn launch_jail(&self, jail: &JailSession<'_>, jail_dirs: &JailDirs, launch: JailLaunch)
+fn write_jail_session_metadata(jail: &JailSession<'_>, model: &str, managed_recipe: …, started_agents: …, pid: u32)
+```
+
+The 14 `ptr_arg` fixes and the `mut` are mechanical, and the engine could make them. The
+`JailSession`, `JailDirs` and `JailLaunch` structs and the `ManagedJailEnv` alias are judgement calls
+about names and grouping. That is a reason for the engine to report them rather than invent them.
 
 ## Candidates, undecided
 

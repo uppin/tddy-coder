@@ -36,9 +36,46 @@ use tddy_rpc::Response;
 
 use std::sync::Arc;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::DaemonSessionHost;
+
+/// The session a sandboxed start is building a jail for: who it is and where it lives on the host.
+struct JailSession<'a> {
+    session_id: &'a str,
+    project_id: &'a str,
+    session_dir: &'a Path,
+    worktree_path: &'a Path,
+}
+
+/// The per-session jail directories, created and resolved to their canonical paths.
+struct JailDirs {
+    sandbox_root: PathBuf,
+    egress_dir: PathBuf,
+    scratch_dir: PathBuf,
+    scratch_tmp: PathBuf,
+    context_dir: PathBuf,
+}
+
+/// Everything the sandbox runner is spawned with, beyond the session and its directories.
+struct JailLaunch {
+    managed: Option<crate::session_toolcall::ManagedWorkflow>,
+    session_env: Vec<(String, String)>,
+    scratch_home: PathBuf,
+    tool_ipc_socket: PathBuf,
+    ready_marker: PathBuf,
+    profile_path: PathBuf,
+    loopback_allow_ports: Vec<u16>,
+    runner_argv: Vec<String>,
+    env: std::collections::BTreeMap<String, String>,
+}
+
+/// A managed-workflow session's controller, its orchestration prompt file and its host-side env.
+type ManagedJailEnv = (
+    Option<crate::session_toolcall::ManagedWorkflow>,
+    Option<PathBuf>,
+    Vec<(String, String)>,
+);
 
 impl DaemonSessionHost {
     /// Handle `StartSession` for sandboxed `claude-cli` sessions (darwin Seatbelt, local gRPC).
@@ -102,23 +139,8 @@ impl DaemonSessionHost {
         // what the withdrawal is computed from and what `.session.yaml` persists, and a reference
         // naming no agent must fail the start rather than leave the main agent holding tools it was
         // told it had given away.
-        let mut started_agents = self.seeded_roster_records(specialized_agents).await?;
-        // The defs behind those records, which the jail env can only carry for agents this host
-        // holds — the records above are what carries the rest.
-        let specialized_defs = self
-            .resolve_specialized_agent_defs(specialized_agents)
-            .await?;
-
-        // Readiness gate: wake every specialized agent's endpoint and wait until each answers
-        // before spawning the jail, so a cold/unreachable model fails session start here rather
-        // than stalling the main agent's first subagent call. No fallback — the jail is never
-        // spawned if warm-up fails. Resume gates separately, in `relaunch_sandboxed_runner`.
-        tddy_discovery::warmup::warm_up_agents(
-            &specialized_defs,
-            &self.config.agent_warmup_options(),
-        )
-        .await
-        .map_err(|e| Status::failed_precondition(e.to_string()))?;
+        let (mut started_agents, specialized_defs) =
+            self.warm_up_jail_agents(specialized_agents).await?;
 
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
@@ -319,52 +341,15 @@ impl DaemonSessionHost {
             )
             .await?;
 
-        let sandbox_root = session_dir.join("sandbox");
-        let egress_dir = session_dir.join("egress");
-        std::fs::create_dir_all(sandbox_root.join(".work").join("home"))
-            .map_err(|e| Status::internal(format!("mkdir sandbox scratch: {e}")))?;
-        std::fs::create_dir_all(sandbox_root.join(".work").join("tmp"))
-            .map_err(|e| Status::internal(format!("mkdir sandbox tmp: {e}")))?;
-        std::fs::create_dir_all(sandbox_root.join("context"))
-            .map_err(|e| Status::internal(format!("mkdir sandbox context: {e}")))?;
-        std::fs::create_dir_all(&egress_dir)
-            .map_err(|e| Status::internal(format!("mkdir sandbox egress: {e}")))?;
+        let jail = JailSession {
+            session_id,
+            project_id,
+            session_dir: &session_dir,
+            worktree_path: &worktree_path,
+        };
+        let jail_dirs = prepare_jail_dirs(&session_dir)?;
 
-        // Resolve to the real (symlink-free) paths now that the dirs exist. Seatbelt
-        // evaluates file rules — including AF_UNIX socket bind — against the fully
-        // resolved path, so the socket/marker paths the runner binds must match the
-        // canonical paths baked into the SBPL profile. Session dirs live under TMPDIR,
-        // which on macOS is reached via the /tmp -> /private/tmp symlink; without this
-        // the tool-IPC socket bind fails with "Operation not permitted".
-        let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
-        let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
-        let scratch_dir = sandbox_root.join(".work");
-        // scratch_home (jail $HOME) is the persistent daemon-wide claude home, resolved and mounted
-        // below — not a per-session dir — so auth/history persist across sessions.
-        let scratch_tmp = scratch_dir.join("tmp");
-        let context_dir = sandbox_root.join("context");
-
-        let replacement_pairs = roster_replacement_pairs(&started_agents);
-        let replacement_refs: Vec<Vec<&str>> = replacement_pairs
-            .iter()
-            .map(|(_, tools)| tools.iter().map(String::as_str).collect())
-            .collect();
-        let replacements: Vec<tddy_sandbox::SubagentReplacement<'_>> = replacement_pairs
-            .iter()
-            .zip(replacement_refs.iter())
-            .map(|((name, _), refs)| tddy_sandbox::SubagentReplacement {
-                name,
-                replaced: refs,
-            })
-            .collect();
-        let ctx = tddy_daemon_sandbox::sandbox_session::prepare_context_dir_with_subagent(
-            &worktree_path,
-            &replacements,
-            crate::context_files::context_globs_for_session_type("claude-cli"),
-        )
-        .map_err(Status::internal)?;
-        tddy_daemon_sandbox::sandbox_session::copy_dir_all(ctx.path(), &context_dir)
-            .map_err(Status::internal)?;
+        prepare_jail_context_dir(&started_agents, &worktree_path, &jail_dirs.context_dir)?;
 
         let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
             self.config
@@ -376,34 +361,14 @@ impl DaemonSessionHost {
         // Managed workflow: build the per-session controller + toolcall listener, write the recipe's
         // orchestration prompt into the jail-visible context dir, and prepare the per-session env
         // (TDDY_SOCKET + PATH) applied to host-side `tddy-tools transition` (run via the Shell relay).
-        let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
-        let mut append_system_prompt_file: Option<PathBuf> = None;
-        let mut session_env: Vec<(String, String)> = Vec::new();
-        if let Some(recipe) = managed_recipe.clone() {
-            // A grill-me session gets a conversation-spawn handler bound to its toolcall listener so
-            // the agent's `spawn_conversation` relay can start a fresh implementation conversation.
-            let conversation_spawn_handler = self.conversation_spawn_handler_for(
-                &recipe,
-                os_user,
-                session_id,
-                project_id,
-                &sessions_base,
-                &session_dir,
-            );
-            let launch = self.prepare_managed_workflow(
-                session_id,
-                recipe,
-                &session_dir,
-                &worktree_path,
-                &context_dir,
-                &tddy_tools_path,
-                None,
-                conversation_spawn_handler,
-            )?;
-            append_system_prompt_file = Some(launch.prompt_file);
-            session_env = launch.env;
-            managed = Some(launch.workflow);
-        }
+        let (managed, append_system_prompt_file, session_env) = self.managed_jail_env(
+            &jail,
+            os_user,
+            &sessions_base,
+            &managed_recipe,
+            &jail_dirs.context_dir,
+            &tddy_tools_path,
+        )?;
 
         // Canonicalize the binary paths the runner will exec: the SBPL allow-list is built
         // from the canonical (symlink-resolved) parent dirs, so a symlinked spelling (e.g. a
@@ -439,8 +404,8 @@ impl DaemonSessionHost {
         // canonical session dir is far too deep, so use a short out-of-tree path that the
         // SBPL profile grants an explicit literal allow (see SandboxSpec::ipc_socket).
         let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(session_id);
-        let ready_marker = sandbox_root.join("sandbox.ready");
-        let profile_path = sandbox_root.join("sandbox.sb");
+        let ready_marker = jail_dirs.sandbox_root.join("sandbox.ready");
+        let profile_path = jail_dirs.sandbox_root.join("sandbox.sb");
 
         let perm = if permission_mode.trim().is_empty() {
             "auto"
@@ -457,7 +422,7 @@ impl DaemonSessionHost {
             "--session-id".into(),
             session_id.to_string(),
             "--context-dir".into(),
-            context_dir.to_string_lossy().to_string(),
+            jail_dirs.context_dir.to_string_lossy().to_string(),
             "--tool-ipc-socket".into(),
             tool_ipc_socket.to_string_lossy().to_string(),
             "--tddy-tools-path".into(),
@@ -496,6 +461,139 @@ impl DaemonSessionHost {
         // fallback), and inject `TDDY_SEMANTIC_INDEX_DB` into the jail env. Its presence both points
         // the in-jail `SemanticSearch` tool at the per-session index and signals the runner to keep
         // `SemanticSearch` in the tool set (it is otherwise folded into the replaced set).
+        let semantic_index_env_pair = self
+            .jail_semantic_index_env(session_id, semantic_index, &session_dir, &worktree_path)
+            .await?;
+
+        let mut env = tddy_daemon_sandbox::sandbox_session::build_sandbox_runner_env(
+            &scratch_home,
+            &jail_dirs.scratch_tmp,
+            session_id,
+            &tool_ipc_socket,
+            &jail_dirs.egress_dir,
+        );
+        if !specialized_defs.is_empty() {
+            env.extend(self.specialized_subagent_env(&specialized_defs)?);
+        }
+        env.extend(self.jail_daemon_identity_env());
+        env.extend(self.lsp_tools_env(&worktree_path));
+        env.extend(semantic_index_env_pair);
+
+        let pid = self
+            .launch_jail(
+                &jail,
+                &jail_dirs,
+                JailLaunch {
+                    managed,
+                    session_env,
+                    scratch_home,
+                    tool_ipc_socket,
+                    ready_marker,
+                    profile_path,
+                    loopback_allow_ports,
+                    runner_argv,
+                    env,
+                },
+            )
+            .await?;
+
+        write_jail_session_metadata(&jail, model, managed_recipe, started_agents, pid)?;
+        // The roster naming them is on disk now, so the clones belong to the session rather than to
+        // the start that claimed them.
+        seeded_clones.keep();
+
+        log::info!(
+            target: "tddy_daemon::connection_service",
+            "started sandboxed claude-cli session {session_id} pid={pid} worktree={}",
+            worktree_path.display()
+        );
+
+        Ok(Response::new(StartSessionResponse {
+            session_id: session_id.to_string(),
+            livekit_room: String::new(),
+            livekit_url: String::new(),
+            livekit_server_identity: String::new(),
+            branch_conflict: None,
+        }))
+    }
+
+    async fn warm_up_jail_agents(
+        &self,
+        specialized_agents: &[String],
+    ) -> Result<
+        (
+            Vec<tddy_core::SessionAgentRecord>,
+            Vec<tddy_discovery::agent_def::SpecializedAgentDef>,
+        ),
+        Status,
+    > {
+        let started_agents = self.seeded_roster_records(specialized_agents).await?;
+        // The defs behind those records, which the jail env can only carry for agents this host
+        // holds — the records above are what carries the rest.
+        let specialized_defs = self
+            .resolve_specialized_agent_defs(specialized_agents)
+            .await?;
+
+        // Readiness gate: wake every specialized agent's endpoint and wait until each answers
+        // before spawning the jail, so a cold/unreachable model fails session start here rather
+        // than stalling the main agent's first subagent call. No fallback — the jail is never
+        // spawned if warm-up fails. Resume gates separately, in `relaunch_sandboxed_runner`.
+        tddy_discovery::warmup::warm_up_agents(
+            &specialized_defs,
+            &self.config.agent_warmup_options(),
+        )
+        .await
+        .map_err(|e| Status::failed_precondition(e.to_string()))?;
+        Ok((started_agents, specialized_defs))
+    }
+
+    fn managed_jail_env(
+        &self,
+        jail: &JailSession<'_>,
+        os_user: &str,
+        sessions_base: &Path,
+        managed_recipe: &Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
+        context_dir: &Path,
+        tddy_tools_path: &str,
+    ) -> Result<ManagedJailEnv, Status> {
+        let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
+        let mut append_system_prompt_file: Option<PathBuf> = None;
+        let mut session_env: Vec<(String, String)> = Vec::new();
+        if let Some(recipe) = managed_recipe.clone() {
+            // A grill-me session gets a conversation-spawn handler bound to its toolcall listener so
+            // the agent's `spawn_conversation` relay can start a fresh implementation conversation.
+            let conversation_spawn_handler = self.conversation_spawn_handler_for(
+                &recipe,
+                os_user,
+                jail.session_id,
+                jail.project_id,
+                sessions_base,
+                jail.session_dir,
+            );
+            let launch = self.prepare_managed_workflow(
+                jail.session_id,
+                recipe,
+                jail.session_dir,
+                jail.worktree_path,
+                context_dir,
+                tddy_tools_path,
+                None,
+                conversation_spawn_handler,
+            )?;
+            append_system_prompt_file = Some(launch.prompt_file);
+            session_env = launch.env;
+            managed = Some(launch.workflow);
+        }
+        Ok((managed, append_system_prompt_file, session_env))
+    }
+
+    async fn jail_semantic_index_env(
+        &self,
+        session_id: &str,
+        semantic_index: bool,
+        session_dir: &Path,
+        worktree_path: &Path,
+    ) -> Result<Option<(String, String)>, Status> {
         let mut semantic_index_env_pair: Option<(String, String)> = None;
         if semantic_index {
             let embedder =
@@ -505,8 +603,8 @@ impl DaemonSessionHost {
                     ))
                 })?;
             tddy_semantic_index::semantic_index::run_semantic_index_blocking(
-                &worktree_path,
-                &session_dir,
+                worktree_path,
+                session_dir,
                 embedder,
                 &self.task_registry,
                 session_id,
@@ -514,24 +612,41 @@ impl DaemonSessionHost {
             .await
             .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
             semantic_index_env_pair = Some(
-                tddy_semantic_index::semantic_index::semantic_index_env(&session_dir),
+                tddy_semantic_index::semantic_index::semantic_index_env(session_dir),
             );
         }
+        Ok(semantic_index_env_pair)
+    }
 
-        let mut env = tddy_daemon_sandbox::sandbox_session::build_sandbox_runner_env(
-            &scratch_home,
-            &scratch_tmp,
+    async fn launch_jail(
+        &self,
+        jail: &JailSession<'_>,
+        jail_dirs: &JailDirs,
+        launch: JailLaunch,
+    ) -> Result<u32, Status> {
+        let JailSession {
             session_id,
-            &tool_ipc_socket,
-            &egress_dir,
-        );
-        if !specialized_defs.is_empty() {
-            env.extend(self.specialized_subagent_env(&specialized_defs)?);
-        }
-        env.extend(self.jail_daemon_identity_env());
-        env.extend(self.lsp_tools_env(&worktree_path));
-        env.extend(semantic_index_env_pair);
-
+            session_dir,
+            worktree_path,
+            ..
+        } = *jail;
+        let JailDirs {
+            sandbox_root,
+            egress_dir,
+            scratch_dir,
+            ..
+        } = jail_dirs;
+        let JailLaunch {
+            managed,
+            session_env,
+            scratch_home,
+            tool_ipc_socket,
+            ready_marker,
+            profile_path,
+            loopback_allow_ports,
+            runner_argv,
+            env,
+        } = launch;
         let mut handle = tddy_daemon_sandbox::sandbox_session::spawn_sandbox_runner(
             tddy_daemon_sandbox::sandbox_session::SandboxRunnerSpawn {
                 project_root: sandbox_root.clone(),
@@ -551,47 +666,43 @@ impl DaemonSessionHost {
             },
         )
         .map_err(|e| {
-            let logs = tddy_sandbox::format_egress_logs(&egress_dir);
+            let logs = tddy_sandbox::format_egress_logs(egress_dir);
             let mut status = tddy_daemon_sandbox::sandbox_session::sandbox_error_to_status(e);
             status.message = format!("{}\n{logs}", status.message);
             status
         })?;
-
         tddy_daemon_sandbox::sandbox_session::wait_for_sandbox_ready(
             &mut handle,
             &ready_marker,
             std::time::Duration::from_secs(120),
-            &egress_dir,
+            egress_dir,
         )
         .await
         .map_err(Status::deadline_exceeded)?;
-
         let (stdout_tx, _) = tokio::sync::broadcast::channel(256);
         let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
         let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
-
         tddy_daemon_sandbox::sandbox_session::dial_and_bridge(
             session_id,
-            worktree_path.clone(),
+            worktree_path.to_path_buf(),
             &mut handle,
             self.task_registry.clone(),
             stdout_tx.clone(),
             Arc::clone(&capture),
             stdin_rx,
             Arc::new(session_env),
-            session_dir.clone(),
+            session_dir.to_path_buf(),
             self.agent_activity_hub(),
             self.sandbox_rpc_handler(),
         )
         .await
         .map_err(Status::internal)?;
-
         let pid = handle.pid();
         let state = Arc::new(
             tddy_daemon_sandbox::sandbox_session::SandboxSessionState::new(
                 tddy_daemon_sandbox::sandbox_session::SandboxSessionStateInit {
                     pid,
-                    worktree_path: worktree_path.clone(),
+                    worktree_path: worktree_path.to_path_buf(),
                     stdout_tx,
                     capture,
                     stdin_tx,
@@ -607,55 +718,117 @@ impl DaemonSessionHost {
         self.sandbox_manager
             .insert(session_id.to_string(), state)
             .await;
-
-        let now = chrono::Utc::now().to_rfc3339();
-        let meta = tddy_core::SessionMetadata {
-            session_id: session_id.to_string(),
-            project_id: project_id.to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-            status: "active".to_string(),
-            repo_path: Some(worktree_path.to_string_lossy().to_string()),
-            pid: Some(pid),
-            tool: None,
-            livekit_room: None,
-            pending_elicitation: false,
-            previous_session_id: None,
-            session_type: Some("claude-cli".to_string()),
-            model: Some(model.to_string()),
-            cursor_chat_id: None,
-            activity_status: None,
-            hook_token: None,
-            sandbox: Some(true),
-            agent: None,
-            recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-            agents_rev: agent_roster::started_roster_rev(&started_agents),
-            agents: started_agents,
-            legacy_specialized_agents: Vec::new(),
-            codebase_daemon_instance_id: None,
-            codebase_session_id: None,
-            agent_daemon_instance_id: None,
-            agent_session_id: None,
-            ssh_config_host: None,
-        };
-        tddy_core::write_session_metadata(&session_dir, &meta)
-            .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
-        // The roster naming them is on disk now, so the clones belong to the session rather than to
-        // the start that claimed them.
-        seeded_clones.keep();
-
-        log::info!(
-            target: "tddy_daemon::connection_service",
-            "started sandboxed claude-cli session {session_id} pid={pid} worktree={}",
-            worktree_path.display()
-        );
-
-        Ok(Response::new(StartSessionResponse {
-            session_id: session_id.to_string(),
-            livekit_room: String::new(),
-            livekit_url: String::new(),
-            livekit_server_identity: String::new(),
-            branch_conflict: None,
-        }))
+        Ok(pid)
     }
+}
+
+fn prepare_jail_dirs(session_dir: &Path) -> Result<JailDirs, Status> {
+    let sandbox_root = session_dir.join("sandbox");
+    let egress_dir = session_dir.join("egress");
+    std::fs::create_dir_all(sandbox_root.join(".work").join("home"))
+        .map_err(|e| Status::internal(format!("mkdir sandbox scratch: {e}")))?;
+    std::fs::create_dir_all(sandbox_root.join(".work").join("tmp"))
+        .map_err(|e| Status::internal(format!("mkdir sandbox tmp: {e}")))?;
+    std::fs::create_dir_all(sandbox_root.join("context"))
+        .map_err(|e| Status::internal(format!("mkdir sandbox context: {e}")))?;
+    std::fs::create_dir_all(&egress_dir)
+        .map_err(|e| Status::internal(format!("mkdir sandbox egress: {e}")))?;
+
+    // Resolve to the real (symlink-free) paths now that the dirs exist. Seatbelt
+    // evaluates file rules — including AF_UNIX socket bind — against the fully
+    // resolved path, so the socket/marker paths the runner binds must match the
+    // canonical paths baked into the SBPL profile. Session dirs live under TMPDIR,
+    // which on macOS is reached via the /tmp -> /private/tmp symlink; without this
+    // the tool-IPC socket bind fails with "Operation not permitted".
+    let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
+    let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
+    let scratch_dir = sandbox_root.join(".work");
+    // scratch_home (jail $HOME) is the persistent daemon-wide claude home, resolved and mounted
+    // below — not a per-session dir — so auth/history persist across sessions.
+    let scratch_tmp = scratch_dir.join("tmp");
+    let context_dir = sandbox_root.join("context");
+    Ok(JailDirs {
+        sandbox_root,
+        egress_dir,
+        scratch_dir,
+        scratch_tmp,
+        context_dir,
+    })
+}
+
+fn prepare_jail_context_dir(
+    started_agents: &[tddy_core::SessionAgentRecord],
+    worktree_path: &Path,
+    context_dir: &Path,
+) -> Result<(), Status> {
+    let replacement_pairs = roster_replacement_pairs(started_agents);
+    let replacement_refs: Vec<Vec<&str>> = replacement_pairs
+        .iter()
+        .map(|(_, tools)| tools.iter().map(String::as_str).collect())
+        .collect();
+    let replacements: Vec<tddy_sandbox::SubagentReplacement<'_>> = replacement_pairs
+        .iter()
+        .zip(replacement_refs.iter())
+        .map(|((name, _), refs)| tddy_sandbox::SubagentReplacement {
+            name,
+            replaced: refs,
+        })
+        .collect();
+    let ctx = tddy_daemon_sandbox::sandbox_session::prepare_context_dir_with_subagent(
+        worktree_path,
+        &replacements,
+        crate::context_files::context_globs_for_session_type("claude-cli"),
+    )
+    .map_err(Status::internal)?;
+    tddy_daemon_sandbox::sandbox_session::copy_dir_all(ctx.path(), context_dir)
+        .map_err(Status::internal)?;
+    Ok(())
+}
+
+fn write_jail_session_metadata(
+    jail: &JailSession<'_>,
+    model: &str,
+    managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
+    started_agents: Vec<tddy_core::SessionAgentRecord>,
+    pid: u32,
+) -> Result<(), Status> {
+    let JailSession {
+        session_id,
+        project_id,
+        session_dir,
+        worktree_path,
+    } = *jail;
+    let now = chrono::Utc::now().to_rfc3339();
+    let meta = tddy_core::SessionMetadata {
+        session_id: session_id.to_string(),
+        project_id: project_id.to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+        status: "active".to_string(),
+        repo_path: Some(worktree_path.to_string_lossy().to_string()),
+        pid: Some(pid),
+        tool: None,
+        livekit_room: None,
+        pending_elicitation: false,
+        previous_session_id: None,
+        session_type: Some("claude-cli".to_string()),
+        model: Some(model.to_string()),
+        cursor_chat_id: None,
+        activity_status: None,
+        hook_token: None,
+        sandbox: Some(true),
+        agent: None,
+        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
+        agents_rev: agent_roster::started_roster_rev(&started_agents),
+        agents: started_agents,
+        legacy_specialized_agents: Vec::new(),
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
+        ssh_config_host: None,
+    };
+    tddy_core::write_session_metadata(session_dir, &meta)
+        .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
+    Ok(())
 }
