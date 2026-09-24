@@ -435,33 +435,13 @@ const _: () = assert!(
 
 /// Split one [`ActivityDelta`]'s patch into ordered [`HOST_DOCUMENT_FRAME_BYTES`] frames.
 ///
-/// Every frame carries the whole description — `seq`, `prev_seq`, `base_commit`,
-/// `total_byte_size` and `scoped_paths` — for the reason the wire contract gives: a reader knows
-/// what it is receiving from the first frame, and a client can check the server scoped the way it
-/// asked rather than trusting that it did.
-///
-/// A call that changed nothing is **one** frame with an empty patch and `total_byte_size` 0 — AC9.
-/// That is the same discipline [`worktree_file_frames`] applies, and for the same reason: an empty
-/// answer must not look like a failed one.
+/// The framing is [`tddy_session_activity::service::activity_delta_frames`], the one the activity
+/// service streams with; this takes the session room's own delta type. Every frame carries the whole
+/// description, and a call that changed nothing is **one** frame with an empty patch — AC9.
 pub fn activity_delta_frames(delta: &ActivityDelta) -> Vec<AgentActivityDeltaChunk> {
-    let total_byte_size = delta.patch.len() as u64;
-    let describe = |patch: Vec<u8>| AgentActivityDeltaChunk {
-        patch,
-        seq: delta.seq,
-        prev_seq: delta.prev_seq,
-        base_commit: delta.base_commit.clone(),
-        total_byte_size,
-        scoped_paths: delta.scoped_paths.clone(),
-    };
-    let mut frames: Vec<AgentActivityDeltaChunk> = delta
-        .patch
-        .chunks(HOST_DOCUMENT_FRAME_BYTES)
-        .map(|chunk| describe(chunk.to_vec()))
-        .collect();
-    if frames.is_empty() {
-        frames.push(describe(Vec::new()));
-    }
-    frames
+    tddy_session_activity::service::activity_delta_frames(&svc_activity_ports::measured_delta(
+        delta.clone(),
+    ))
 }
 
 mod stack_seed_validation;
