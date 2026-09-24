@@ -212,7 +212,7 @@ Touches this node's config surface. Recorded, not fixed.
 ### ⚠ DURING — Tauri desktop single-process daemon — [`2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md`](../todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md)
 
 The application's own process **is** the daemon, which is why enrolment can know the running OS user
-without asking anything. The entry's open items are unrelated to this node and stay open.
+without asking anything. The entry's open items are unrelated to this node and stay open. This node extended the entry's comment-loss item with its own writer, `enrol_first_login` (V2) — recorded, not fixed.
 
 ### ⚠ DURING — `build_auth_entries` complexity — [`complexity-auth-build-auth-entries`](../../../packages/tddy-daemon-auth/docs/code-issues/complexity-auth-build-auth-entries.md)
 
@@ -494,6 +494,12 @@ package, and the single web spec. Whole-workspace green comes from CI.
 - Generated bidi handler metadata, and the `Http` (connectrpc router) / `Grpc` (tonic adapters) stamps, untested — none can enrol today.
 - Free-port bind-then-drop races (repo pattern); `DeviceLoginAcceptance.cy.tsx` `/api/config` cases duplicate `clientConfig.test.ts`; `sees_participant` duplicated across two LiveKit suites.
 
+### From /validate-prod-ready
+
+- ~~**Fix now:** `tddy-github/src/stub.rs:11,15` — `STUB_DEVICE_LOGIN_PENDING_POLLS` / `STUB_DEVICE_LOGIN_INTERVAL_SECONDS` to private `const`; nothing outside `stub.rs` reads them.~~ **Done in pr-wrap step 3** — both private; re-grepped `packages/`, no reader outside `stub.rs`, no `lib.rs` re-export; the struct doc names the constant as plain code instead of an intra-doc link to a private item.
+- ~~**Fix now (V2 debt):** extend `docs/dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md:11` to name `tddy-daemon-kernel/src/first_login_enrolment.rs` `enrol_first_login` as the second writer that loses comments — on every desktop's first sign-in, header included — and point the TODO at `first_login_enrolment.rs:84` to that entry.~~ **Done in pr-wrap step 3** — the backlog bullet now names both writers and one fix; the TODO is `TODO(docs/dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md)`. The comment loss itself is recorded, not fixed.
+- Recorded only: `first_login_enrolment.rs:61` `pub fn enrol_first_login` skips `LiveUsers`' file-write lock (production caller is `live_users.rs` only; narrowing it means moving `tddy-daemon-kernel/tests/first_login_enrolment_acceptance.rs` onto `LiveUsers::enrol_first_login`); `live_users.rs` `snapshot` and `From<Vec<UserMapping>>` are test-support API.
+
 ## Validation Results
 
 **Run:** `/validate-changes`, 2026-09-24, `pr-509-green` @ `09ca3eb3`, base `origin/master`. Supersedes
@@ -562,7 +568,7 @@ No `println!` / `eprintln!` added. New `unwrap`/`expect` in production are lock-
 | # | Severity | Where | Finding |
 |---|---|---|---|
 | V1 | ✅ Resolved (was 🔴 High, security) | `tddy-rpc/src/message.rs`, `server_engine.rs` `metadata_of`, `first_login_admission.rs:57-72` | Re-checked at `09ca3eb3`. Every `ServerEngine::new` names its transport (5 sites: `tauri-rpc/host.rs:95`, `multi_host.rs:120` `InProcess`; `livekit/participant.rs:338,495` `LiveKit`; `stdio/endpoint.rs:65` from its opener); the Connect router stamps `Http` (`router.rs:181`); tonic stamps `Grpc`. No production code reads the envelope for the transport, and `RequestTransport::InProcess` is constructed only by the two Tauri hosts. The admission match is exhaustive. Both Tauri hosts are pinned (`tddy-tauri-rpc/tests/stamps_the_in_process_transport.rs`); the acceptance suite drives the roster with a hand-stamped `InProcess` message, plus the real `LiveKitParticipant` and agent tool socket for the refusals. Residual notes: V10, V11, V12 |
-| V2 | 🟠 Medium, open | `tddy-daemon-kernel/src/first_login_enrolment.rs:84` | Unchanged: the first login rewrites `~/.tddy/desktop.yaml` through `serde_yaml::Value` and strips every comment, the rendered explanatory header included. TODO present. Hits every desktop on its first sign-in |
+| V2 | 🟠 Medium, open | `tddy-daemon-kernel/src/first_login_enrolment.rs:84` | Unchanged: the first login rewrites `~/.tddy/desktop.yaml` through `serde_yaml::Value` and strips every comment, the rendered explanatory header included. Hits every desktop on its first sign-in. The TODO now references the backlog entry [`2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md`](../todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md), which names this writer beside `daemon_config_service.rs` (pr-wrap step 3) |
 | V3 | ⏸ Deferred | `desktop.yaml.production:90-92` | M8 — deferred to the developer — 'I'll configure and test production myself'. The file is unchanged and still documents `client_secret`. Not a gap of this run |
 | V4 | ✅ Resolved | `real.rs` `device_attempts` | Re-checked: `DeviceAttempt { interval_seconds, expires_at }`, pruned on every start and poll, removed on every terminal answer |
 | V5 | ✅ Resolved | `useAuth.ts:311,327` | Re-checked: a non-positive grant or `SLOW_DOWN` interval ends the attempt `failed` |
@@ -590,6 +596,19 @@ No `println!` / `eprintln!` added. New `unwrap`/`expect` in production are lock-
 - **No-fallback decisions pinned:** absent `auth_flow` ✅, unknown `auth_flow` ✅, public client refuses `GetAuthUrl` ✅, slow_down without interval ✅ (provider assertions loose — T3), `runtime::build` refusal ✅ (positive case only), COMPLETE missing user/tokens ❌ unpinned (T1).
 - **Critical:** `DeviceLoginAcceptance.cy.tsx` had no test for a COMPLETE poll missing its user or tokens (`useAuth.ts`); `real_provider_over_http.rs` `no_request_in_the_device_flow_carries_the_client_secret` recorded bodies only and never polled to `Complete`.
 - **Description-body mismatches:** `device_login_acceptance.rs` ("When they approve it" — the stub approves); `server_options_acceptance.rs` and `daemon_config_service.rs` framed an absent `auth_flow` as backward compatibility; kernel `first_login_enrolment_acceptance.rs` says "only `users:` changed" but compares two fields.
+
+### /validate-prod-ready (2026-09-24)
+
+**Run:** `/validate-prod-ready`, 2026-09-24, `pr-509-green` @ `09ca3eb3`, base `origin/master`, over 78 production files (2,187 added lines); 175 excluded (tests, cypress, `src/gen/`, docs, `Cargo.lock`).
+**Status:** ⚠️ Gaps → fixed in the step 3 refactor (see below) — 0 blockers.
+
+| Category | Count | Status |
+|---|---|---|
+| Mock code | 0 | ✅ `StubGitHubProvider`'s device-flow methods (`stub.rs`) follow the existing production-shipped stub: no `cfg(test)`/env branch, deterministic, fail loudly with no `stub_codes`. Reachable only by direct RPC — a stub daemon declares `redirect` |
+| Dev fallbacks | 0 new | ✅ Every `unwrap_or*`/`Default` among the added lines is moved from master (`auth.rs` stub flag, redirect-URI default, `"stub-client-id"`; `real.rs` `name.unwrap_or_default()`), error formatting only, or already in the fallback table. `runtime.rs` `cfg(not(unix)) this_process_os_user() → None` fails `runtime::build` loudly. No env-conditional branch |
+| TODO/FIXME | 2 | ⚠️ `run.rs` `TODO(#keyring 2/9)` — V9, fixed in step 1. `first_login_enrolment.rs:84` — V2, unreferenced → referenced to the backlog entry in step 3 |
+| Unused code | 3 | ⚠️ `stub.rs` `pub const STUB_DEVICE_LOGIN_*` referenced only in `stub.rs`; `live_users.rs` `snapshot` / `From<Vec<UserMapping>>` test-only support API; `first_login_enrolment.rs` `pub fn enrol_first_login` bypasses `LiveUsers`' file lock (one kernel acceptance test uses it). `new_public*`'s `redirect_uri` — V13, step 1 |
+| Debug output | 0 | ✅ No `println!`/`eprintln!`/`dbg!`/`console.*` added |
 
 ### V1 options (green, 2026-09-23)
 

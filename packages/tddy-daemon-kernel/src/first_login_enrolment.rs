@@ -81,8 +81,9 @@ pub fn enrol_first_login(
 
     // Edit the document rather than re-serialise the typed config, so every key the operator
     // wrote stays exactly as they wrote it and only `users:` changes.
-    // TODO: comments in the file are still lost — preserving them needs a comment-aware YAML
-    // editor, the same open question `DaemonConfigService`'s `write_config` records.
+    // TODO(docs/dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md):
+    // comments in the file are still lost — preserving them needs a comment-aware YAML editor,
+    // the same open question `DaemonConfigService`'s `write_config` records.
     let contents = std::fs::read_to_string(config_path)
         .map_err(|e| not_writable(format!("{}: {e}", config_path.display())))?;
     let mut document: serde_yaml::Value = serde_yaml::from_str(&contents)

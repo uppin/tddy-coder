@@ -8,17 +8,17 @@ use crate::provider::{DeviceLoginPoll, DeviceLoginStart, GitHubOAuthProvider, Gi
 
 /// How many polls of a stub device login answer `Pending` before it is approved — one, so a
 /// client sees the waiting state and then the approval, deterministically.
-pub const STUB_DEVICE_LOGIN_PENDING_POLLS: u32 = 1;
+const STUB_DEVICE_LOGIN_PENDING_POLLS: u32 = 1;
 
 /// The poll interval a stub device login hands out. Short, so a client driving it is not kept
 /// waiting, and non-zero, because zero is not an interval GitHub would ever send.
-pub const STUB_DEVICE_LOGIN_INTERVAL_SECONDS: u64 = 1;
+const STUB_DEVICE_LOGIN_INTERVAL_SECONDS: u64 = 1;
 
 /// In-memory stub that mimics GitHub OAuth without HTTP calls.
 /// Pre-register code→user mappings via `register_code` before tests.
 ///
 /// A device login completes as the user of the **first** code registered — the same user
-/// `exchange_code` returns for that code — after [`STUB_DEVICE_LOGIN_PENDING_POLLS`] pending polls.
+/// `exchange_code` returns for that code — after `STUB_DEVICE_LOGIN_PENDING_POLLS` pending polls.
 pub struct StubGitHubProvider {
     pending_states: Mutex<HashSet<String>>,
     code_to_user: Mutex<HashMap<String, GitHubUser>>,
