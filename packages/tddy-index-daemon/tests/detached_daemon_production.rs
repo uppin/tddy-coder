@@ -162,3 +162,113 @@ fn status_refuses_a_socket_with_no_listener_behind_it() {
         String::from_utf8_lossy(&status.stdout)
     );
 }
+
+/// The pid the script recorded for the daemon it started, from the only pid file in `runtime`.
+fn recorded_pid(runtime: &Path) -> String {
+    let pid_file = std::fs::read_dir(runtime)
+        .expect("read the runtime directory")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .find(|path| path.extension().is_some_and(|extension| extension == "pid"))
+        .expect("the script wrote a pid file for the daemon it started");
+    std::fs::read_to_string(pid_file)
+        .expect("read the pid file")
+        .trim()
+        .to_string()
+}
+
+/// The `NAME=value` words of a running process's environment, as `ps` shows them.
+fn environment_of(pid: &str) -> Vec<String> {
+    let shown = Command::new("ps")
+        .args(["eww", "-o", "command=", "-p", pid])
+        .output()
+        .expect("run ps");
+    String::from_utf8_lossy(&shown.stdout)
+        .split_whitespace()
+        .filter(|word| word.contains('='))
+        .map(str::to_string)
+        .collect()
+}
+
+/// rust-analyzer runs every build script in the environment the daemon hands it. With the dev
+/// shell's PATH alone, `webrtc-sys`'s build script and the `sqlx-macros` proc macro failed to link
+/// inside it while the same `cargo check` passed in the shell, and the daemon served a degraded index
+/// whose extract-methods came out as `req: _`.
+#[test]
+#[ignore = "runs the real script — nix develop and a cargo build, so minutes and a toolchain"]
+fn the_daemon_runs_with_the_dev_shells_whole_environment() {
+    let root = repo_root();
+    let runtime = tempfile::tempdir().expect("a runtime directory of this suite's own");
+
+    // Given a daemon the script started
+    let announced = Command::new("./run-index-daemon")
+        .current_dir(&root)
+        .env("TDDY_INDEX_RUNTIME_DIR", runtime.path())
+        .stdin(Stdio::null())
+        .output()
+        .expect("start the script");
+    assert!(
+        announced.status.success(),
+        "the script did not start a daemon: {}",
+        String::from_utf8_lossy(&announced.stderr)
+    );
+
+    // When its environment is read
+    let environment = environment_of(&recorded_pid(runtime.path()));
+    stop_the_daemon(&root, runtime.path());
+
+    // Then it is the dev shell's, with the temporary directory a `nix develop` deletes on exit
+    // replaced — this suite itself runs under `./dev`, so the caller's TMPDIR is one of those too
+    assert!(
+        environment
+            .iter()
+            .any(|word| word.starts_with("IN_NIX_SHELL=")),
+        "the daemon was not given the dev shell's environment: {environment:?}"
+    );
+    assert!(
+        !environment
+            .iter()
+            .any(|word| word.starts_with("TMPDIR=") && word.contains("/nix-shell.")),
+        "the daemon kept the TMPDIR `nix develop` deletes when it exits: {environment:?}"
+    );
+}
+
+/// A restart reads a log the previous daemon left behind. Truncating it inside the background job
+/// raced the readiness loop, which then found the old `listening on` line and announced a daemon
+/// that had not started yet — with no pid file, so `--stop` had nothing to stop.
+#[test]
+#[ignore = "runs the real script — nix develop and a cargo build, so minutes and a toolchain"]
+fn a_restart_announces_the_daemon_it_started_not_the_previous_ones_log() {
+    let root = repo_root();
+    let runtime = tempfile::tempdir().expect("a runtime directory of this suite's own");
+
+    // Given a daemon that was started and stopped, leaving its `listening on` line in the log
+    let first = Command::new("./run-index-daemon")
+        .current_dir(&root)
+        .env("TDDY_INDEX_RUNTIME_DIR", runtime.path())
+        .stdin(Stdio::null())
+        .output()
+        .expect("start the script");
+    assert!(first.status.success());
+    stop_the_daemon(&root, runtime.path());
+
+    // When the script starts it again
+    let second = Command::new("./run-index-daemon")
+        .current_dir(&root)
+        .env("TDDY_INDEX_RUNTIME_DIR", runtime.path())
+        .stdin(Stdio::null())
+        .output()
+        .expect("restart the script");
+    let socket = exported_socket(&String::from_utf8_lossy(&second.stdout));
+    let answering = ping_succeeds(&socket);
+    let pid = recorded_pid(runtime.path());
+    stop_the_daemon(&root, runtime.path());
+
+    // Then it announced a daemon that answers, and recorded that daemon's pid
+    assert!(
+        second.status.success(),
+        "the restart did not announce its daemon: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert!(answering, "the announced daemon does not answer");
+    assert!(!pid.is_empty(), "no pid was recorded for the daemon");
+}

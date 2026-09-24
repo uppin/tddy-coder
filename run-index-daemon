@@ -21,7 +21,8 @@
 # above sees exactly one assignment.
 #
 # Environment variables:
-#   TDDY_INDEX_RUNTIME_DIR  — where the socket, pid file and log live (default: $TMPDIR, else /tmp).
+#   TDDY_INDEX_RUNTIME_DIR  — where the socket, pid file and log live (default: $TMPDIR, else /tmp;
+#                             a `nix develop` TMPDIR is not used, see durable_tmpdir).
 #                             Deliberately not inside the checkout: an AF_UNIX path is limited to
 #                             ~104 bytes and a worktree path plus a subdirectory already exceeds it.
 #   TDDY_INDEX_LOG          — RUST_LOG for the daemon (default: info). Readiness is read from the
@@ -31,7 +32,23 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 ROOT_DIR="$(pwd -P)"
-RUNTIME_DIR="${TDDY_INDEX_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
+
+# A temporary directory that outlives the shell this script was started from.
+#
+# Inside `./dev` (or any `nix develop`) TMPDIR is `/tmp/nix-shell.XXXX`, which nix deletes when that
+# shell exits — and the daemon is built to outlive it. A socket, pid file or log there vanishes under
+# a running daemon, and so does the TMPDIR its rust-analyzer copies `Cargo.lock` into for every
+# build-script run. The user's own temporary directory is what such a shell replaced.
+durable_tmpdir() {
+  case "${TMPDIR:-}" in
+    "" | */nix-shell.*) getconf DARWIN_USER_TEMP_DIR 2>/dev/null || printf '/tmp' ;;
+    *) printf '%s' "$TMPDIR" ;;
+  esac
+}
+DURABLE_TMPDIR="$(durable_tmpdir)"
+DURABLE_TMPDIR="${DURABLE_TMPDIR%/}"
+
+RUNTIME_DIR="${TDDY_INDEX_RUNTIME_DIR:-$DURABLE_TMPDIR}"
 RUNTIME_DIR="${RUNTIME_DIR%/}"
 
 # One daemon per checkout, keyed by its path. Not one for the machine: the daemon serves whichever
@@ -173,18 +190,35 @@ if [[ ! -x "$BINARY" ]]; then
   exit 1
 fi
 
-# The daemon spawns rust-analyzer, which only the nix dev shell provides — so it needs that shell's
-# PATH, not this script's. Taking the PATH and launching the binary directly, rather than launching
-# through `nix develop -c`, keeps `$!` the daemon's own pid: wrapping it would record the wrapper's,
-# and `--stop` would then kill the wrapper and orphan the daemon it was supposed to stop.
+# The daemon spawns rust-analyzer, and rust-analyzer runs every build script and proc macro in the
+# workspace to load `OUT_DIR` code — so it needs the dev shell's whole environment, not only its PATH.
+# Launching the binary directly with that environment, rather than through `nix develop -c`, keeps
+# `$!` the daemon's own pid: wrapping it would record the wrapper's, and `--stop` would then kill the
+# wrapper and orphan the daemon it was supposed to stop.
 #
-# Without this the daemon comes up, binds, serves, and refuses every LSP-backed operation with
-# `Unavailable: lsp server exited` — a daemon that looks healthy and cannot do the one thing it is
-# for.
-narrate "Resolving the dev shell's PATH so the daemon can find rust-analyzer"
-DEV_SHELL_PATH="$(nix develop --profile ./.nix-profile -c sh -c 'printf %s "$PATH"')"
+# PATH alone was not enough, and failed silently: the linker the nix toolchain drives needs the
+# shell's `NIX_*` flags and SDK, so under a PATH-only environment the build scripts of `webrtc-sys`
+# and the `sqlx-macros` proc macro fail to link inside rust-analyzer — while the same command
+# succeeds in the dev shell. rust-analyzer then reports its index as degraded and answers without
+# the code it could not build; that is where `req: _` signatures came from. The caller's own
+# environment is not inherited either: a host `LDFLAGS`/`CPPFLAGS` (Homebrew sets both) is a
+# different linker configuration from the one the dev shell's `cargo build` uses.
+#
+# Without rust-analyzer on PATH at all the daemon comes up, binds, serves, and refuses every
+# LSP-backed operation with `Unavailable: lsp server exited`.
+narrate "Resolving the dev shell's environment so the daemon's rust-analyzer builds what cargo builds"
+DEV_SHELL_ENV=()
+while IFS= read -r -d '' assignment; do
+  DEV_SHELL_ENV+=("$assignment")
+done < <(nix develop --profile ./.nix-profile -c env -0)
+DEV_SHELL_PATH=""
+for assignment in "${DEV_SHELL_ENV[@]}"; do
+  if [[ "$assignment" == PATH=* ]]; then
+    DEV_SHELL_PATH="${assignment#PATH=}"
+  fi
+done
 if [[ -z "$DEV_SHELL_PATH" ]]; then
-  narrate "run-index-daemon: could not read the dev shell's PATH; the daemon would not find rust-analyzer"
+  narrate "run-index-daemon: could not read the dev shell's environment; the daemon would not find rust-analyzer"
   exit 1
 fi
 
@@ -214,12 +248,22 @@ narrate "Starting index daemon on ${SOCKET}, in a session of its own"
 #
 # stderr to the log by shell redirection rather than via the daemon's own --log-file, so this script
 # owns the truncation: readiness is decided by finding `listening on` in the file, and an appended
-# log would answer with the previous run's line.
+# log would answer with the previous run's line. The truncation happens here, before the launch, and
+# not in the background job's own `2>` — that runs whenever the job gets scheduled, and a readiness
+# loop that ticks first reads the previous daemon's `listening on` and announces a daemon that has
+# not started, with no pid file behind it.
 rm -f "$PID_FILE"
-env PATH="$DEV_SHELL_PATH" RUST_LOG="${TDDY_INDEX_LOG:-info}" \
-  setsid sh -c 'echo $$ >"$1"; exec "$2" --grpc-uds "$3"' \
+: >"$LOG_FILE"
+# The temporary directories are the one part of the dev shell's environment not taken: `nix develop`
+# points all four (and `NIX_BUILD_TOP`) at a directory of its own and deletes it when it exits, and
+# rust-analyzer copies `Cargo.lock` into `TMPDIR` for every build-script run.
+env -i "${DEV_SHELL_ENV[@]}" \
+  TMPDIR="$DURABLE_TMPDIR" TMP="$DURABLE_TMPDIR" TEMP="$DURABLE_TMPDIR" TEMPDIR="$DURABLE_TMPDIR" \
+  NIX_BUILD_TOP="$DURABLE_TMPDIR" \
+  RUST_LOG="${TDDY_INDEX_LOG:-info}" \
+  "$(env PATH="$DEV_SHELL_PATH" command -v setsid)" sh -c 'echo $$ >"$1"; exec "$2" --grpc-uds "$3"' \
   run-index-daemon "$PID_FILE" "$BINARY" "$SOCKET" \
-  </dev/null >/dev/null 2>"$LOG_FILE" &
+  </dev/null >/dev/null 2>>"$LOG_FILE" &
 
 daemon_pid=""
 for _ in $(seq 1 "$READY_TICKS"); do

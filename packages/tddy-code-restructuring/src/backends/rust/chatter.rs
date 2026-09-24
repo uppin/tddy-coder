@@ -208,8 +208,11 @@ impl ServerChatter {
             "rust-analyzer reports its index as degraded (health `{health}`){quoted} An index in \
              that state answers without the code it could not load — a type a failed build script \
              should have generated does not exist for it — so no result it gives here can be \
-             trusted. Fix what it names (a `cargo check` of the workspace shows the underlying \
-             error) and run again."
+             trusted. rust-analyzer runs build scripts in the environment it was started with, so \
+             this can fail there while `cargo check` in the dev shell succeeds: a linker missing \
+             the shell's flags is the usual cause. Start the server — or the index daemon, with \
+             `./run-index-daemon --stop && ./run-index-daemon` — from the dev shell's whole \
+             environment and run again."
         ))
     }
 
@@ -312,8 +315,11 @@ mod tests {
                  build scripts of some packages. Please refer to the logs for more details on the \
                  errors.\" An index in that state answers without the code it could not load — a \
                  type a failed build script should have generated does not exist for it — so no \
-                 result it gives here can be trusted. Fix what it names (a `cargo check` of the \
-                 workspace shows the underlying error) and run again."
+                 result it gives here can be trusted. rust-analyzer runs build scripts in the environment it was \
+                 started with, so this can fail there while `cargo check` in the dev shell \
+                 succeeds: a linker missing the shell's flags is the usual cause. Start the server \
+                 — or the index daemon, with `./run-index-daemon --stop && ./run-index-daemon` — \
+                 from the dev shell's whole environment and run again."
             )
         );
     }
@@ -333,8 +339,11 @@ mod tests {
                 "rust-analyzer reports its index as degraded (health `error`) and gives no reason. \
                  An index in that state answers without the code it could not load — a type a \
                  failed build script should have generated does not exist for it — so no result it \
-                 gives here can be trusted. Fix what it names (a `cargo check` of the workspace \
-                 shows the underlying error) and run again."
+                 gives here can be trusted. rust-analyzer runs build scripts in the environment it was \
+                 started with, so this can fail there while `cargo check` in the dev shell \
+                 succeeds: a linker missing the shell's flags is the usual cause. Start the server \
+                 — or the index daemon, with `./run-index-daemon --stop && ./run-index-daemon` — \
+                 from the dev shell's whole environment and run again."
             )
         );
     }
