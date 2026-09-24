@@ -1,17 +1,18 @@
 # crap: start_sandboxed_cursor_cli_session — untested, and the sweep ranked it low
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_cursor_cli_session.rs:40` — `start_sandboxed_cursor_cli_session`
+**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_cursor_cli_session.rs:31` — `start_sandboxed_cursor_cli_session`
 **Category:** CRAP
 **Detected:** 2026-09-18 by `tddy-tools analyze coverage` + `report` (245 tests across 96 files, join rate 51.9%)
 **Metrics:** **CRAP 1,722** · complexity **41** · **never executed by any test** · rank **5/50** in this crate · 465 lines · nesting depth 3
 **Restructure:** **no** — tests first. Same rule as `packages/tddy-telegram-control/docs/code-issues/crap-telegram-bot-handlers.md`
-**Status:** Open — **unclaimed**
+**Status:** Open — touched 2026-09-24 by #524 through mechanical DRY merges only; still never executed — **unclaimed**
 
 ## Measurement history
 
 | Run | CRAP | Complexity | Coverage | Lines | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 1,722 | 41 | 0% | 465 | first detection |
+| 2026-09-24 | — | — | never executed | 414 | #524 touched it only through merges of proven-identical copies: DRY #3 (project lookup, metadata), #5 (semantic index), #6 (initial changeset), #7 (worktree cut): 465 → 414. Its suite is still red on this host (the RPC bridge is never installed), so it is still unexecuted, and it was not restructured, per this record. CRAP and complexity not re-derived |
 
 ## What the tool found
 

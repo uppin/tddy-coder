@@ -1,6 +1,7 @@
 # complexity: start_split_claude_cli_session
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_materialize_staged_attachment.rs:270` — `start_split_claude_cli_session`
+**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_materialize_staged_attachment/split_claude_cli_start.rs:32` — `start_split_claude_cli_session`
+**Moved:** 2026-09-24 by #524 plan `11` (misplaced code: split sessions), from `connection_service/svc_materialize_staged_attachment.rs:270`; this record was `complexity-svc-materialize-staged-attachment-start-split-claude-cli-session.md`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **146 lines** · **nesting depth 3** · 1 parameters · 6 branch/match lines · 9 early exits
@@ -15,6 +16,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 146 | 3 | 6 | 9 | first detection |
+| 2026-09-24 | 146 | — | — | — | #524: moved whole by plan `11`, body unchanged |
 
 ## What the tool found
 

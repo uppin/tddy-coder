@@ -1,12 +1,12 @@
 # complexity: ensure_project_available_for_start
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_resolve_listed_worktree.rs:34` — `ensure_project_available_for_start`
+**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_resolve_listed_worktree.rs:30` — `ensure_project_available_for_start`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **157 lines** · **nesting depth 8** · 1 parameters · 9 branch/match lines · 2 early exits
 **Thresholds breached:** length 157 > 60; nesting 8 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — regressed 2026-09-23 (157 → 158 in #520, one re-wrapped field read) — **unclaimed**
+**Status:** Open — narrowed 2026-09-24 by #524 (158 → 99); still over the 60-line budget — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -15,6 +15,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 157 | 8 | 9 | 2 | first detection |
 | 2026-09-23 | 158 | 8 | — | — | +1 from #520 (`#carve` 11/12): the peer-project read goes through `self.peer_routing.eligible_daemon_source()`, which rustfmt splits over one more line. No control flow added: nesting and `return`/`?` count identical to master; branches not re-derived |
+| 2026-09-24 | 99 | — | — | — | #524 plan `20`: the blocking-pool clone task → `spawn_project_clone` (158 → 99). The placement `match` and its early return stay; nesting not re-derived |
 
 ## What the tool found
 

@@ -13,6 +13,7 @@
 | Run | Lines | Params | Note |
 |---|---|---|---|
 | 2026-09-19 | 119 | 9 | 112 → 119 and **8 → 9 parameters** in PR #518 |
+| 2026-09-24 | 119 | 9 | re-measured for #524 (2026-09-24): unchanged, and not touched by it |
 
 ## What grew it
 

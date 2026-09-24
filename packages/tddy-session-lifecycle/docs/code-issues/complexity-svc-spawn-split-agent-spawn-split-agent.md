@@ -1,12 +1,12 @@
 # complexity: spawn_split_agent
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs` — `spawn_split_agent`
+**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs:56` — `spawn_split_agent`
 **Category:** complexity
 **Detected:** 2026-09-19 — `/analyze-clean-code` on PR #518; **missed by the #507 sweep**
 **Metrics:** **233 lines** · **nesting 5** · **9 parameters** · budget 60 / 4 / 5
 **Thresholds breached:** length 233 > 60; nesting 5 > 4; parameters 9 > 5
 **Restructure:** `extract_method --variant module` for the length; an options struct for the parameters
-**Status:** Open — **regressed 2026-09-23** (+3 lines from #508)
+**Status:** Open — narrowed 2026-09-24 by #524 (254 → 110); parameters unchanged — **unclaimed**
 
 ## Measurement history
 
@@ -15,6 +15,7 @@
 | 2026-09-19 | 233 | 5 | 9 | 213 → 233 in PR #518; **nesting crossed 4 → 5** |
 | 2026-09-23 | 251 | — | 9 | touched by #520 (`#carve` 11/12) and **unchanged by it**: the room roster argument became a builder closure (`|| Arc::new(self.clone()).session_room_roster()`), same line count. 251 on master before #520 — the 233 → 251 growth predates it and is unattributed; nesting not re-derived |
 | 2026-09-23 | 254 | 5 | 9 | 251 on `origin/master` (`4e260d7f`, after #520; grown since the first row by other merges) → 254 after #508 (`#keyring` 1/9): `split_remote_tool_env` takes this daemon's `SessionTokens` and a `SplitSpawnTarget` literal instead of four loose arguments, and the room poller's minter is built from `SessionTokens` instead of `livekit.api_secret`. Nesting and signature unchanged |
+| 2026-09-24 | 110 | — | 9 | #524: plan `05` (4 extract-methods, the teardown out), DRY #4 (`attached_initial_prompt`) and plan `20` (the tool wiring and the process spawn): 254 → 110 by the plan's count. The signature is untouched, so still 9 parameters; nesting not re-derived |
 
 ## What grew it
 
@@ -36,3 +37,5 @@ it is recorded here rather than absorbed silently.
 Note the file itself is over budget at 502 production lines — see
 `oversized-file-svc-spawn-split-agent.md`, whose seam moves `delete_paired_codebase_session` and
 `tear_down_codebase_session` out but leaves this function where it is.
+That record closed on 2026-09-24 (#524): plan `05` moved the teardown out, and the file is 445
+production lines.

@@ -1,13 +1,13 @@
 # complexity: start_session_core
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs:54` — `start_session_core`
+**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs:51` — `start_session_core`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **842 lines** · **nesting depth 6** · 1 parameters · 40 branch/match lines · 54 early exits
 **CRAP:** **CRAP 80** · complexity 80 · rank 46/50 in this crate · **fully covered** (CRAP == complexity means coverage 1.0)
 **Thresholds breached:** length 842 > 60; nesting 6 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — regressed 2026-09-23 (842 → 857 since detection; +3 of it from #520, re-wrapped field reads) — **unclaimed**, **low priority**: fully covered, so this is a readability cost, not a risk
+**Status:** Open — narrowed 2026-09-24 by #524 (857 → 358); what is left is its early-return guards, which the engine refuses to extract (E4, plan `19`) — **unclaimed**, **low priority**: fully covered, so this is a readability cost, not a risk
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -17,6 +17,7 @@
 | 2026-09-18 | 842 | 6 | 40 | 54 | first detection |
 | 2026-09-23 | 857 | 6 | — | — | 854 on master before #520 (+12 since detection, unrecorded); +3 from #520 (`#carve` 11/12) — rustfmt re-wraps the peer-roster and common-room reads that moved behind `self.peer_routing`. No control flow added: nesting, and `return`/`?` count, identical to master; branches not re-derived |
 | 2026-09-24 | 857 | 6 | — | — | touched by #509 (`#keyring` 2/9) and **unchanged by it**: `let os_user = self` → `&self` (the live `users:` holder), same line count; nesting and `return`/`?` count identical on the merge-base with `origin/master` (`4e7157d2`) and HEAD; branches not re-derived |
+| 2026-09-24 | 358 | — | — | — | #524: plans `10a` and `10b` (15 extract-methods between the returns) and DRY #2, #4, #8 (857 → 358). Plan `19` authored the four branch bodies and the agent-allowlist check as extract-methods; each was refused for its early returns (E4) |
 
 ## What the tool found
 

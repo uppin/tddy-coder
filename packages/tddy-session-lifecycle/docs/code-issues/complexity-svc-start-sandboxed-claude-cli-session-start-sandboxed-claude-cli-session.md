@@ -1,13 +1,13 @@
 # complexity: start_sandboxed_claude_cli_session
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_claude_cli_session.rs:46` — `start_sandboxed_claude_cli_session`
+**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_claude_cli_session.rs:96` — `start_sandboxed_claude_cli_session`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **615 lines** · **nesting depth 5** · 1 parameters · 17 branch/match lines · 32 early exits
 **CRAP:** **CRAP 2862** · complexity 53 · rank 2/50 in this crate · **never executed by any test**
 **Thresholds breached:** length 615 > 60; nesting 5 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — narrowed 2026-09-24 by #524 (615 → 342) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -15,6 +15,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 615 | 5 | 17 | 32 | first detection |
+| 2026-09-24 | 342 | — | — | — | #524: plans `09b`, `09c`, `13` (the helpers into `jail_*` modules) and `18`, and DRY #5–#7 (615 → 342). What is left: the 23-parameter signature (~50 lines), three early returns and the two parameter-struct literals; the length goes with DRY #1's request struct, which waits on coverage |
 
 ## What the tool found
 
