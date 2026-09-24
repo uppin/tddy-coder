@@ -47,6 +47,72 @@ use super::DaemonSessionHost;
 
 use tddy_daemon_kernel::trim_to_option;
 
+/// Why a `tddy-coder` child is spawned. It is all that differs between a start's spawn and a
+/// resume's: the label the deadline and its log lines carry, and whether the forked worker traces
+/// itself (only a start's does).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ToolSpawnPurpose {
+    Start,
+    Resume,
+}
+
+impl ToolSpawnPurpose {
+    fn supervisor_label(self) -> &'static str {
+        match self {
+            Self::Start => "StartSession: spawn via tddy-supervisor",
+            Self::Resume => "ResumeSession: spawn via tddy-supervisor",
+        }
+    }
+
+    fn worker_label(self) -> &'static str {
+        match self {
+            Self::Start => "StartSession: spawn",
+            Self::Resume => "ResumeSession: spawn",
+        }
+    }
+}
+
+/// What a `tddy-coder` child is spawned with, beyond what the daemon's own config supplies. The
+/// optional fields are the child's optional flags ([`SpawnOptions`]), owned so the plan can cross
+/// into the blocking pool.
+pub(super) struct ToolSpawnPlan {
+    pub(super) purpose: ToolSpawnPurpose,
+    pub(super) os_user: String,
+    pub(super) tool_path: String,
+    pub(super) repo_path: std::path::PathBuf,
+    pub(super) livekit: spawner::LiveKitCreds,
+    pub(super) resume_session_id: Option<String>,
+    pub(super) new_session_id: Option<String>,
+    pub(super) project_id: Option<String>,
+    pub(super) agent: Option<String>,
+    pub(super) agent_def_json: Option<String>,
+    pub(super) recipe: Option<String>,
+    pub(super) stack_parent: Option<String>,
+    pub(super) stack_node_id: Option<String>,
+    pub(super) stack_seed_base_session: Option<String>,
+    pub(super) model: Option<String>,
+    pub(super) host_session_socket: Option<String>,
+}
+
+impl ToolSpawnPlan {
+    fn options(&self, mouse: bool) -> SpawnOptions<'_> {
+        SpawnOptions {
+            resume_session_id: self.resume_session_id.as_deref(),
+            new_session_id: self.new_session_id.as_deref(),
+            project_id: self.project_id.as_deref(),
+            agent: self.agent.as_deref(),
+            agent_def_json: self.agent_def_json.as_deref(),
+            mouse,
+            recipe: self.recipe.as_deref(),
+            stack_parent: self.stack_parent.as_deref(),
+            stack_node_id: self.stack_node_id.as_deref(),
+            stack_seed_base_session: self.stack_seed_base_session.as_deref(),
+            model: self.model.as_deref(),
+            host_session_socket: self.host_session_socket.as_deref(),
+        }
+    }
+}
+
 /// What a CLI-agent start holds once its prelude has run: where the session lives, the id it was
 /// given, and the first prompt, with any attached changeset named in it.
 struct CliStart {
@@ -837,14 +903,11 @@ impl DaemonSessionHost {
         project: &project_storage::ProjectData,
     ) -> Result<spawner::SpawnResult, Status> {
         log::debug!("StartSession: entering spawn_blocking session_id=new");
-        let spawn_client = self.spawn_client.clone();
-        let spawn_mouse = self.config.spawn_mouse;
         let os_user = os_user.to_string();
         // The spawn closure below takes ownership; the presenter observer started afterwards needs
         // the same user to resolve the session's label from its sessions directory.
         let observer_os_user = os_user.clone();
         let tool_path = req.tool_path.clone();
-        let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
         let repo_path = Path::new(&project.main_repo_path).to_path_buf();
         let livekit = livekit.clone();
         let pid_for_spawn = project.project_id.clone();
@@ -867,10 +930,6 @@ impl DaemonSessionHost {
         // the session that owns a `changeset.yaml` is the process that writes it.
         let stack_seed_base_session_for_spawn = trim_to_option(&req.pr_stack_base_session_id);
         let model_for_spawn = trim_to_option(&req.model);
-        let timeout = self.config.spawn_worker_request_timeout();
-        let daemon_log = self.config.log.clone();
-        let startup_watch = spawner::StartupWatch::from_config(&self.config);
-        let coder_config_path = self.config.coder_config_path.clone();
         // Grill-me tool sessions relay `spawn_conversation` back over a per-session unix socket.
         // Because the coder needs the socket path (and orchestrator id) at spawn time — and the
         // socket path is what crosses the forked `spawn_worker` boundary — bind it and pre-generate
@@ -915,29 +974,24 @@ impl DaemonSessionHost {
             pre_session_id = Some(tool_session_id);
         }
         let result = self
-            .spawn_tddy_coder(
-                spawn_client,
-                spawn_mouse,
+            .spawn_tddy_coder(ToolSpawnPlan {
+                purpose: ToolSpawnPurpose::Start,
                 os_user,
                 tool_path,
-                tddy_data_dir_for_spawn,
                 repo_path,
                 livekit,
-                pid_for_spawn,
-                agent_for_spawn,
-                agent_def_for_spawn,
-                recipe_for_spawn,
-                stack_parent_for_spawn,
-                stack_node_id_for_spawn,
-                stack_seed_base_session_for_spawn,
-                model_for_spawn,
-                timeout,
-                daemon_log,
-                startup_watch,
-                coder_config_path,
-                pre_session_id,
+                resume_session_id: None,
+                new_session_id: pre_session_id,
+                project_id: Some(pid_for_spawn),
+                agent: agent_for_spawn,
+                agent_def_json: agent_def_for_spawn,
+                recipe: recipe_for_spawn,
+                stack_parent: stack_parent_for_spawn,
+                stack_node_id: stack_node_id_for_spawn,
+                stack_seed_base_session: stack_seed_base_session_for_spawn,
+                model: model_for_spawn,
                 host_session_socket,
-            )
+            })
             .await?;
         log::debug!(
             "StartSession: spawn returned, session_id={}",
@@ -951,63 +1005,38 @@ impl DaemonSessionHost {
         Ok(result)
     }
 
-    // TODO(#carve 14/15, DRY #2): the parameters become one `ToolSpawnPlan` when
-    // `session_coordinate_handlers`' copy of this spawn is folded into it.
-    #[allow(clippy::too_many_arguments)]
-    async fn spawn_tddy_coder(
+    /// Spawn a `tddy-coder` child for a starting or resuming tool session, through whichever
+    /// backend the config chooses: `tddy-supervisor`, or the forked spawn worker (or, without
+    /// one, a direct spawn) on the blocking pool. Both run under the spawn deadline.
+    pub(super) async fn spawn_tddy_coder(
         &self,
-        spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
-        spawn_mouse: bool,
-        os_user: String,
-        tool_path: String,
-        tddy_data_dir_for_spawn: std::path::PathBuf,
-        repo_path: std::path::PathBuf,
-        livekit: spawner::LiveKitCreds,
-        pid_for_spawn: String,
-        agent_for_spawn: Option<String>,
-        agent_def_for_spawn: Option<String>,
-        recipe_for_spawn: Option<String>,
-        stack_parent_for_spawn: Option<String>,
-        stack_node_id_for_spawn: Option<String>,
-        stack_seed_base_session_for_spawn: Option<String>,
-        model_for_spawn: Option<String>,
-        timeout: std::time::Duration,
-        daemon_log: Option<tddy_core::LogConfig>,
-        startup_watch: spawner::StartupWatch,
-        coder_config_path: Option<std::path::PathBuf>,
-        pre_session_id: Option<String>,
-        host_session_socket: Option<String>,
+        plan: ToolSpawnPlan,
     ) -> Result<spawner::SpawnResult, Status> {
+        let spawn_client = self.spawn_client.clone();
+        let spawn_mouse = self.config.spawn_mouse;
+        let tddy_data_dir = self.tddy_data_dir.clone();
+        let timeout = self.config.spawn_worker_request_timeout();
+        let daemon_log = self.config.log.clone();
+        let startup_watch = spawner::StartupWatch::from_config(&self.config);
+        let coder_config_path = self.config.coder_config_path.clone();
+        let purpose = plan.purpose;
         let result = match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
             tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
                 let spawn_req = spawn_worker::build_spawn_request(
-                    &os_user,
-                    &tool_path,
-                    &tddy_data_dir_for_spawn,
-                    &repo_path,
-                    &livekit,
-                    SpawnOptions {
-                        resume_session_id: None,
-                        new_session_id: pre_session_id.as_deref(),
-                        project_id: Some(pid_for_spawn.as_str()),
-                        agent: agent_for_spawn.as_deref(),
-                        agent_def_json: agent_def_for_spawn.as_deref(),
-                        mouse: spawn_mouse,
-                        recipe: recipe_for_spawn.as_deref(),
-                        stack_parent: stack_parent_for_spawn.as_deref(),
-                        stack_node_id: stack_node_id_for_spawn.as_deref(),
-                        stack_seed_base_session: stack_seed_base_session_for_spawn.as_deref(),
-                        model: model_for_spawn.as_deref(),
-                        host_session_socket: host_session_socket.as_deref(),
-                    },
+                    &plan.os_user,
+                    &plan.tool_path,
+                    &tddy_data_dir,
+                    &plan.repo_path,
+                    &plan.livekit,
+                    plan.options(spawn_mouse),
                     daemon_log.as_ref(),
                     coder_log_yaml,
                     startup_watch,
                 );
                 service_util::await_supervised_with_timeout(
                     timeout,
-                    "StartSession: spawn via tddy-supervisor",
+                    purpose.supervisor_label(),
                     tddy_spawn::supervisor_spawn::spawn_session_via_supervisor(
                         &socket_path,
                         &spawn_req,
@@ -1018,45 +1047,24 @@ impl DaemonSessionHost {
             tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
                 service_util::spawn_blocking_with_timeout(
                     timeout,
-                    "StartSession: spawn",
+                    purpose.worker_label(),
                     move || {
-                        log::debug!(
-                            "StartSession: spawn_blocking running, using_spawn_worker={}",
-                            spawn_client.is_some()
-                        );
-                        let pid = Some(pid_for_spawn.as_str());
-                        let agent = agent_for_spawn.as_deref();
-                        let agent_def = agent_def_for_spawn.as_deref();
-                        let recipe = recipe_for_spawn.as_deref();
-                        let stack_parent = stack_parent_for_spawn.as_deref();
-                        let stack_node_id = stack_node_id_for_spawn.as_deref();
-                        let stack_seed_base_session = stack_seed_base_session_for_spawn.as_deref();
-                        let model = model_for_spawn.as_deref();
-                        let new_session_id = pre_session_id.as_deref();
-                        let host_socket = host_session_socket.as_deref();
+                        if purpose == ToolSpawnPurpose::Start {
+                            log::debug!(
+                                "StartSession: spawn_blocking running, using_spawn_worker={}",
+                                spawn_client.is_some()
+                            );
+                        }
                         let coder_log_yaml =
                             spawner::coder_log_config_yaml(coder_config_path.as_deref());
                         if let Some(ref client) = spawn_client {
                             let spawn_req = spawn_worker::build_spawn_request(
-                                &os_user,
-                                &tool_path,
-                                &tddy_data_dir_for_spawn,
-                                &repo_path,
-                                &livekit,
-                                SpawnOptions {
-                                    resume_session_id: None,
-                                    new_session_id,
-                                    project_id: pid,
-                                    agent,
-                                    agent_def_json: agent_def,
-                                    mouse: spawn_mouse,
-                                    recipe,
-                                    stack_parent,
-                                    stack_node_id,
-                                    stack_seed_base_session,
-                                    model,
-                                    host_session_socket: host_socket,
-                                },
+                                &plan.os_user,
+                                &plan.tool_path,
+                                &tddy_data_dir,
+                                &plan.repo_path,
+                                &plan.livekit,
+                                plan.options(spawn_mouse),
                                 daemon_log.as_ref(),
                                 coder_log_yaml,
                                 startup_watch,
@@ -1066,25 +1074,12 @@ impl DaemonSessionHost {
                             let (child_log_level, child_log_format) =
                                 spawner::child_log_yaml_tuning(daemon_log.as_ref());
                             spawner::spawn_as_user(
-                                &os_user,
-                                &tool_path,
-                                &tddy_data_dir_for_spawn,
-                                &repo_path,
-                                &livekit,
-                                SpawnOptions {
-                                    resume_session_id: None,
-                                    new_session_id,
-                                    project_id: pid,
-                                    agent,
-                                    agent_def_json: agent_def,
-                                    mouse: spawn_mouse,
-                                    recipe,
-                                    stack_parent,
-                                    stack_node_id,
-                                    stack_seed_base_session,
-                                    model,
-                                    host_session_socket: host_socket,
-                                },
+                                &plan.os_user,
+                                &plan.tool_path,
+                                &tddy_data_dir,
+                                &plan.repo_path,
+                                &plan.livekit,
+                                plan.options(spawn_mouse),
                                 child_log_level.as_str(),
                                 child_log_format.as_str(),
                                 coder_log_yaml.as_deref(),
