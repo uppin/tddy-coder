@@ -468,7 +468,7 @@ async fn declares_no_sign_in_flow_for_a_daemon_without_github() {
     // When the page it hosts asks for the configuration it starts up with
     let response = the_client_config_of(&daemon).await;
 
-    // Then no flow is declared, as a daemon predating the device flow declares none
+    // Then no flow is declared: absent means this daemon serves no GitHub sign-in
     assert_eq!(response.auth_flow, None);
 }
 

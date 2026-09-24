@@ -53,7 +53,12 @@ const SOMEBODY_ELSES_CODE: &str = "stranger-code";
 /// The identity the desktop's roster is served under in the test room.
 const THE_DESKTOPS_ROOM_IDENTITY: &str = "daemon-first-login-desktop";
 const A_ROOM_PEERS_IDENTITY: &str = "web-a-room-peer";
+/// 20 s, over the integration ceiling: the roster is served through a LiveKit server in a Docker
+/// container, and joining its room then completing an RPC over it is seconds on a loaded CI runner.
 const SERVING_TIMEOUT: Duration = Duration::from_secs(20);
+/// How many polls [`Deployment::a_device_login`] makes before giving up. More than the stub
+/// answers `Pending` before approving, so only a device login that never completes exhausts it.
+const POLLS_BEFORE_GIVING_UP: usize = 5;
 
 #[tokio::test]
 async fn a_desktops_first_device_login_is_authorized_at_once() {
@@ -278,7 +283,8 @@ impl Deployment {
             )
             .await
             .expect("a device login begins");
-        loop {
+        let mut seen = Vec::new();
+        for _ in 0..POLLS_BEFORE_GIVING_UP {
             let polled: PollDeviceLoginResponse = self
                 .call(
                     via,
@@ -290,12 +296,17 @@ impl Deployment {
                 )
                 .await
                 .expect("a started device login can be polled");
+            seen.push(polled.state());
             match polled.state() {
-                DeviceLoginState::Pending => continue,
+                DeviceLoginState::Pending => {}
                 DeviceLoginState::Complete => return polled.session_token,
-                other => panic!("the stub's device login ended {other:?}"),
+                other => panic!("the stub's device login ended {other:?}; states seen: {seen:?}"),
             }
         }
+        panic!(
+            "the stub's device login never completed in {POLLS_BEFORE_GIVING_UP} polls; states \
+             seen: {seen:?}"
+        );
     }
 
     /// Sign in with the redirect flow, as whoever `code` names, and return the session token.

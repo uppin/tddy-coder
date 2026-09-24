@@ -886,25 +886,144 @@ mod tests {
         .await;
 
         // When it is polled to completion over a Unix socket
-        loop {
-            let polled: PollDeviceLoginResponse = call_over(
-                &bridge,
-                RequestTransport::UnixSocket,
-                "PollDeviceLogin",
-                PollDeviceLoginRequest {
-                    device_code: started.device_code.clone(),
-                },
-            )
-            .await;
-            if polled.state() == DeviceLoginState::Complete {
-                break;
-            }
-        }
+        poll_to_completion(&bridge, RequestTransport::UnixSocket, &started.device_code).await;
 
         // Then admission was told the transport of the poll that completed it
         assert_eq!(
             *admission.0.lock().unwrap(),
             vec![RequestTransport::UnixSocket]
         );
+    }
+
+    /// How many polls [`poll_to_completion`] makes before giving up. More than the stub answers
+    /// `Pending` before approving, so only a stub that never approves exhausts it.
+    const POLLS_BEFORE_GIVING_UP: usize = 5;
+
+    /// Poll `device_code` over `transport` until it completes, failing — with every state seen —
+    /// rather than spinning forever if it never does.
+    async fn poll_to_completion(
+        bridge: &RpcBridge<AuthServiceServer<AuthServiceImpl<StubGitHubProvider>>>,
+        transport: RequestTransport,
+        device_code: &str,
+    ) {
+        let mut seen = Vec::new();
+        for _ in 0..POLLS_BEFORE_GIVING_UP {
+            let polled: PollDeviceLoginResponse = call_over(
+                bridge,
+                transport,
+                "PollDeviceLogin",
+                PollDeviceLoginRequest {
+                    device_code: device_code.to_string(),
+                },
+            )
+            .await;
+            seen.push(polled.state());
+            if polled.state() == DeviceLoginState::Complete {
+                return;
+            }
+        }
+        panic!(
+            "the device login never completed in {POLLS_BEFORE_GIVING_UP} polls; states seen: \
+             {seen:?}"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Every poll outcome that is not a completion reaches the client as its own proto state, with
+    // an interval only when GitHub widened one.
+    // -------------------------------------------------------------------------
+
+    /// A provider whose every device-login poll answers `poll`. Nothing else is scripted: any
+    /// other call fails, naming itself, so a test that strays off the poll path says so.
+    struct ScriptedDeviceProvider {
+        poll: DeviceLoginPoll,
+    }
+
+    impl ScriptedDeviceProvider {
+        fn answering(poll: DeviceLoginPoll) -> Self {
+            Self { poll }
+        }
+    }
+
+    #[async_trait]
+    impl GitHubOAuthProvider for ScriptedDeviceProvider {
+        fn authorize_url(&self) -> Result<(String, String), String> {
+            Err("ScriptedDeviceProvider scripts no authorize URL".to_string())
+        }
+
+        async fn exchange_code(
+            &self,
+            _code: &str,
+            _state: &str,
+        ) -> Result<(String, GitHubUser), String> {
+            Err("ScriptedDeviceProvider scripts no code exchange".to_string())
+        }
+
+        async fn start_device_login(&self) -> Result<crate::provider::DeviceLoginStart, String> {
+            Err("ScriptedDeviceProvider scripts no device-login start".to_string())
+        }
+
+        async fn poll_device_login(&self, _device_code: &str) -> Result<DeviceLoginPoll, String> {
+            Ok(self.poll.clone())
+        }
+
+        fn issues_usable_access_token(&self) -> bool {
+            false
+        }
+    }
+
+    /// The `(state, interval_seconds)` a client is told when GitHub answers a poll with `poll`.
+    async fn what_the_client_is_told_when_github_answers(
+        poll: DeviceLoginPoll,
+    ) -> (DeviceLoginState, u64) {
+        let service = AuthServiceImpl::new(ScriptedDeviceProvider::answering(poll));
+        let polled = AuthServiceTrait::poll_device_login(
+            &service,
+            Request::direct(PollDeviceLoginRequest {
+                device_code: "the-device-code".to_string(),
+            }),
+        )
+        .await
+        .expect("a poll GitHub answered is not a failure")
+        .into_inner();
+        (polled.state(), polled.interval_seconds)
+    }
+
+    #[tokio::test]
+    async fn a_slow_down_reaches_the_client_with_the_interval_to_obey() {
+        // Given a GitHub that asks this daemon to slow down to ten seconds
+        let answer = DeviceLoginPoll::SlowDown {
+            interval_seconds: 10,
+        };
+
+        // When the client polls
+        let told = what_the_client_is_told_when_github_answers(answer).await;
+
+        // Then it is told to slow down, and by how much
+        assert_eq!(told, (DeviceLoginState::SlowDown, 10));
+    }
+
+    #[tokio::test]
+    async fn a_denial_reaches_the_client_as_denied_with_no_interval() {
+        // Given a GitHub on which the operator refused the code
+        let answer = DeviceLoginPoll::Denied;
+
+        // When the client polls
+        let told = what_the_client_is_told_when_github_answers(answer).await;
+
+        // Then the attempt ends as denied, with no interval to wait out
+        assert_eq!(told, (DeviceLoginState::Denied, 0));
+    }
+
+    #[tokio::test]
+    async fn an_expiry_reaches_the_client_as_expired_with_no_interval() {
+        // Given a GitHub on which the code outlived its window
+        let answer = DeviceLoginPoll::Expired;
+
+        // When the client polls
+        let told = what_the_client_is_told_when_github_answers(answer).await;
+
+        // Then the attempt ends as expired — not as denied — with no interval to wait out
+        assert_eq!(told, (DeviceLoginState::Expired, 0));
     }
 }

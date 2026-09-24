@@ -18,8 +18,9 @@ use tddy_rpc::{
     Code, MultiRpcService, RequestMetadata, RpcBridge, RpcMessage, ServiceEntry, Status,
 };
 use tddy_service::proto::auth::{
-    DeviceLoginState, GetAuthUrlRequest, GetAuthUrlResponse, PollDeviceLoginRequest,
-    PollDeviceLoginResponse, StartDeviceLoginRequest, StartDeviceLoginResponse,
+    DeviceLoginState, GetAuthStatusRequest, GetAuthStatusResponse, GetAuthUrlRequest,
+    GetAuthUrlResponse, PollDeviceLoginRequest, PollDeviceLoginResponse, StartDeviceLoginRequest,
+    StartDeviceLoginResponse,
 };
 
 /// A GitHub OAuth App's client id is public by design — it appears in every authorize URL.
@@ -103,22 +104,30 @@ async fn a_device_login_hands_the_operator_a_code_to_approve_elsewhere() {
             .await
             .expect("a daemon serving sign-in can begin a device login");
 
-    // Then the operator is given a code and somewhere to type it, and the daemon keeps its own half
+    // Then the operator is given the stub's first code and somewhere to type it, and the daemon
+    // keeps its own half, with the window and poll interval the stub hands out
     assert_eq!(
         (
-            started.user_code.is_empty(),
-            started.verification_uri.is_empty(),
-            started.device_code.is_empty(),
-            started.interval_seconds > 0,
+            started.user_code.as_str(),
+            started.verification_uri.as_str(),
+            started.device_code.as_str(),
+            started.expires_in_seconds,
+            started.interval_seconds,
         ),
-        (false, false, false, true),
-        "a started device login carries both halves of the exchange and a poll interval"
+        (
+            "STUB-0001",
+            "https://github.com/login/device",
+            "stub-device-code-1",
+            900,
+            1,
+        ),
+        "a started device login carries both halves of the exchange, its window and a poll interval"
     );
 }
 
 #[tokio::test]
 async fn an_approved_device_login_yields_the_session_a_callback_would_have() {
-    // Given a device login the operator has not approved yet
+    // Given a started device login, on a stub GitHub that approves it on the poll after the first
     let (config, _dir) = a_stub_daemon();
     let auth = the_auth_service(&config);
     let started: StartDeviceLoginResponse =
@@ -127,10 +136,20 @@ async fn an_approved_device_login_yields_the_session_a_callback_would_have() {
             .expect("a daemon serving sign-in can begin a device login");
     let waiting: PollDeviceLoginResponse = poll(&auth, &started.device_code).await;
 
-    // When they approve it and the daemon polls again
+    // When the daemon polls again, after the stub has approved it
     let approved: PollDeviceLoginResponse = poll(&auth, &started.device_code).await;
+    let authenticated: GetAuthStatusResponse = call(
+        &auth,
+        "GetAuthStatus",
+        GetAuthStatusRequest {
+            session_token: approved.session_token.clone(),
+        },
+    )
+    .await
+    .expect("a daemon serving sign-in answers GetAuthStatus");
 
-    // Then the wait was reported as pending, and the approval carries a whole session
+    // Then the wait was reported as pending, the approval carries a whole session, and the session
+    // token it carries authenticates as the operator
     assert_eq!(
         (
             waiting.state(),
@@ -138,6 +157,10 @@ async fn an_approved_device_login_yields_the_session_a_callback_would_have() {
             approved.session_token.is_empty(),
             approved.refresh_token.is_empty(),
             approved.user.map(|user| user.login),
+            (
+                authenticated.authenticated,
+                authenticated.user.map(|user| user.login),
+            ),
         ),
         (
             DeviceLoginState::Pending,
@@ -145,6 +168,7 @@ async fn an_approved_device_login_yields_the_session_a_callback_would_have() {
             false,
             false,
             Some(THE_LOGIN.to_string()),
+            (true, Some(THE_LOGIN.to_string())),
         ),
         "an approved device login produces the same session an OAuth callback does"
     );

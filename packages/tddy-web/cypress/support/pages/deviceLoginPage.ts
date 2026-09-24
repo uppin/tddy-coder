@@ -49,9 +49,9 @@ export const deviceLoginPage = {
     byTestId(TEST_IDS.deviceLoginExpired).should("not.exist");
   },
 
-  /** The attempt ended on an error rather than on GitHub's answer. */
-  expectFailedMessage() {
-    byTestId(TEST_IDS.deviceLoginError).should("be.visible").and("not.be.empty");
+  /** The attempt ended on an error rather than on GitHub's answer, and the error says `containing`. */
+  expectFailedMessage(containing: string) {
+    byTestId(TEST_IDS.deviceLoginError).should("be.visible").and("contain.text", containing);
   },
 
   /** The daemon declared no sign-in flow: the screen says so rather than offering one. */

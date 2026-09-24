@@ -22,9 +22,12 @@ use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService};
 
-const COMMON_ROOM: &str = "forwarded-rpc-stamp";
+/// The common room's name before each run's own suffix — see [`Fleet::start`].
+const COMMON_ROOM_PREFIX: &str = "forwarded-rpc-stamp";
 const PEER_INSTANCE_ID: &str = "stamp-receiving-peer";
 const FORWARDER_IDENTITY: &str = "stamp-forwarding-daemon";
+/// 10 s, over the integration ceiling: a join reaches the other participant through a LiveKit
+/// server in a Docker container, whose signalling round trip is seconds on a loaded CI runner.
 const PARTICIPANT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[tokio::test]
@@ -64,8 +67,18 @@ impl RpcService for TransportNamer {
 /// forwarding daemon's common-room connection, in the room slot `forward_to_peer` reads.
 struct Fleet {
     forwarders_room: Arc<RwLock<Option<Arc<Room>>>>,
-    _peer: tokio::task::JoinHandle<()>,
+    _peer: AbortedOnDrop,
     _livekit: LiveKitTestkit,
+}
+
+/// A spawned task that ends with the test rather than outliving it — the peer's participant loop
+/// otherwise stays in the room of a container the next test reuses.
+struct AbortedOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortedOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl Fleet {
@@ -75,11 +88,12 @@ impl Fleet {
             .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
         let url = livekit.get_ws_url();
         let peer_identity = daemon_rpc_identity(PEER_INSTANCE_ID);
+        let common_room = format!("{COMMON_ROOM_PREFIX}-{}", uuid::Uuid::new_v4());
 
         let peer = LiveKitParticipant::connect(
             &url,
             &livekit
-                .generate_token(COMMON_ROOM, &peer_identity)
+                .generate_token(&common_room, &peer_identity)
                 .expect("a token for the peer"),
             TransportNamer,
             RoomOptions::default(),
@@ -88,12 +102,12 @@ impl Fleet {
         )
         .await
         .expect("the peer joins the common room");
-        let peer = tokio::spawn(peer.run());
+        let peer = AbortedOnDrop(tokio::spawn(peer.run()));
 
         let (room, mut events) = Room::connect(
             &url,
             &livekit
-                .generate_token(COMMON_ROOM, FORWARDER_IDENTITY)
+                .generate_token(&common_room, FORWARDER_IDENTITY)
                 .expect("a token for the forwarder"),
             RoomOptions::default(),
         )

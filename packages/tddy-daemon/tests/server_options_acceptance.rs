@@ -389,7 +389,7 @@ async fn omits_the_sign_in_flow_at_api_config_for_a_daemon_without_github() {
     // When the page it serves reads the configuration it starts up with
     let served = api_config_of_a_daemon_configured_with(&config).await;
 
-    // Then the key is off the wire, as a daemon predating the device flow leaves it
+    // Then the key is off the wire: absent means this daemon serves no GitHub sign-in
     assert_eq!(served.get("auth_flow"), None);
 }
 

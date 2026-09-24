@@ -12238,6 +12238,7 @@ dependencies = [
  "tddy-worktree-service",
  "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

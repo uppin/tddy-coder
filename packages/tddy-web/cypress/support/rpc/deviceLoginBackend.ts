@@ -111,6 +111,28 @@ export function aCompletedPoll(): PollDeviceLoginResponse {
   });
 }
 
+/** One of the three parts of the session a completed device login carries. */
+export type CompletedSessionPart = "user" | "sessionToken" | "refreshToken";
+
+/**
+ * Approved, but without `missing` — the user absent, or a token empty, as proto3 leaves a field the
+ * daemon never set. Every other part is exactly what {@link aCompletedPoll} carries.
+ */
+export function aCompletedPollMissing(missing: CompletedSessionPart): PollDeviceLoginResponse {
+  const absent: Record<CompletedSessionPart, Partial<PollDeviceLoginResponse>> = {
+    user: { user: undefined },
+    sessionToken: { sessionToken: "" },
+    refreshToken: { refreshToken: "" },
+  };
+  return create(PollDeviceLoginResponseSchema, {
+    state: DeviceLoginState.COMPLETE,
+    sessionToken: DEVICE_LOGIN_ACCESS_TOKEN,
+    refreshToken: DEVICE_LOGIN_REFRESH_TOKEN,
+    user: theApprovingOperator(),
+    ...absent[missing],
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Backend
 // ---------------------------------------------------------------------------

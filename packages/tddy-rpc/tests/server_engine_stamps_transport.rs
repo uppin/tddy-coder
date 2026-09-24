@@ -91,6 +91,46 @@ async fn a_bidi_handler_is_handed_its_sessions_stamp_before_any_message() {
     );
 }
 
+#[tokio::test]
+async fn a_bidi_continuation_claiming_the_in_process_bridge_is_stamped_by_the_host() {
+    // Given an engine whose host serves the LiveKit room, and a bidi session opened honestly and
+    // left open
+    let recorder = TransportRecorder::default();
+    let engine = ServerEngine::new(recorder.clone(), THE_HOSTS_TRANSPORT);
+    let (outgoing, mut responses) = mpsc::channel(8);
+    engine
+        .on_request(
+            "peer",
+            an_honest_request("RecordBidi", false),
+            outgoing.clone(),
+        )
+        .await;
+
+    // When a continuation arrives whose envelope claims, in every field its sender writes, to have
+    // come over the in-process bridge
+    engine
+        .on_request("peer", a_continuation_claiming_in_process(), outgoing)
+        .await;
+    responses
+        .recv()
+        .await
+        .expect("the opening message is answered");
+    responses
+        .recv()
+        .await
+        .expect("the continuation is answered");
+
+    // Then the session, its opening message and the continuation all carry the host's transport
+    assert_eq!(
+        recorder.seen(),
+        vec![
+            THE_HOSTS_TRANSPORT,
+            THE_HOSTS_TRANSPORT,
+            THE_HOSTS_TRANSPORT
+        ]
+    );
+}
+
 /// Records the transport of every request it is handed, and answers each call with an empty body.
 #[derive(Clone, Default)]
 struct TransportRecorder {
@@ -188,7 +228,8 @@ fn a_request_claiming_in_process(method: &str, end_of_stream: bool) -> RpcReques
     }
 }
 
-/// The terminal fragment of the call [`an_honest_request`] opened, claiming the bridge.
+/// The terminal fragment of the call [`an_honest_request`] opened — client-streaming or bidi —
+/// claiming the bridge.
 fn a_continuation_claiming_in_process() -> RpcRequest {
     RpcRequest {
         call_metadata: None,

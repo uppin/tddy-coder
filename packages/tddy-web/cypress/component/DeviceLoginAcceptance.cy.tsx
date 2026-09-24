@@ -33,6 +33,7 @@ import { TEST_IDS } from "../support/testIds";
 import { deviceLoginPage } from "../support/pages/deviceLoginPage";
 import {
   aCompletedPoll,
+  aCompletedPollMissing,
   aDeniedPoll,
   aDeviceCodeGrant,
   aDeviceLoginBackend,
@@ -44,11 +45,20 @@ import {
   DEVICE_LOGIN_REFRESH_TOKEN,
   GITHUB_DEVICE_VERIFICATION_URI,
   REFRESH_TOKEN_KEY,
+  type CompletedSessionPart,
 } from "../support/rpc/deviceLoginBackend";
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
+
+/** What the operator is told when a slow-down answer names no interval — `useAuth.ts`. */
+const NO_SLOW_DOWN_INTERVAL_MESSAGE =
+  "The daemon asked to slow down device sign-in without naming an interval";
+/** What the operator is told when a device code comes with no interval — `useAuth.ts`. */
+const NO_GRANTED_INTERVAL_MESSAGE = "The daemon issued a device sign-in code with no interval between polls";
+/** What the operator is told when an approval lacks its user or a token — `useAuth.ts`. */
+const NO_WHOLE_SESSION_MESSAGE = "The daemon completed device sign-in without a whole session";
 
 /** GitHub's default minimum gap between polls. */
 const FIVE_SECOND_INTERVAL = 5;
@@ -162,6 +172,20 @@ function expectStoredSession(accessToken: string, refreshToken: string) {
   cy.window().should((win) => {
     expect(win.localStorage.getItem(ACCESS_TOKEN_KEY), "stored access token").to.equal(accessToken);
     expect(win.localStorage.getItem(REFRESH_TOKEN_KEY), "stored refresh token").to.equal(refreshToken);
+  });
+}
+
+function expectNoStoredAccessToken() {
+  cy.window().should((win) => {
+    expect(win.localStorage.getItem(ACCESS_TOKEN_KEY), "stored access token").to.equal(null);
+  });
+}
+
+/** The device code the most recent poll presented. */
+function expectLatestPollPresented(backend: InMemoryRpcBackend, deviceCode: string) {
+  cy.wrap(null).should(() => {
+    const polls = pollsTo(backend);
+    expect(polls[polls.length - 1]?.deviceCode, "the latest poll's device code").to.equal(deviceCode);
   });
 }
 
@@ -339,7 +363,7 @@ describe("Device-flow GitHub sign-in", () => {
     afterSeconds(FIVE_SECOND_INTERVAL);
 
     // Then — a protocol error, not a poll loop with no delay
-    deviceLoginPage.expectFailedMessage();
+    deviceLoginPage.expectFailedMessage(NO_SLOW_DOWN_INTERVAL_MESSAGE);
     deviceLoginPage.expectNoUserCode();
     afterSeconds(FIVE_SECOND_INTERVAL * 4);
     expectPollCount(backend, 1);
@@ -357,7 +381,7 @@ describe("Device-flow GitHub sign-in", () => {
     deviceLoginPage.startSignIn();
 
     // Then — nothing is polled, and the operator is told the attempt failed
-    deviceLoginPage.expectFailedMessage();
+    deviceLoginPage.expectFailedMessage(NO_GRANTED_INTERVAL_MESSAGE);
     afterSeconds(FIVE_SECOND_INTERVAL * 4);
     expectPollCount(backend, 0);
   });
@@ -409,6 +433,26 @@ describe("Device-flow GitHub sign-in", () => {
 
     // Then
     expectPollCount(backend, 1);
+  });
+
+  const EVERY_PART_OF_A_SESSION: CompletedSessionPart[] = ["user", "sessionToken", "refreshToken"];
+
+  EVERY_PART_OF_A_SESSION.forEach((missing) => {
+    it(`ends the attempt as failed when an approval arrives without a whole session (no ${missing})`, () => {
+      // Given — GitHub approves the code, but the daemon's answer lacks one part of the session
+      const backend = aDeviceLoginBackend({ grants: [FIRST_GRANT], polls: [aCompletedPollMissing(missing)] });
+      givenTheDeviceSignInPanel(backend);
+      deviceLoginPage.startSignIn();
+      deviceLoginPage.expectUserCode("WDJB-MJHT");
+
+      // When
+      afterSeconds(FIVE_SECOND_INTERVAL);
+
+      // Then — the operator is told why, stays signed out, and no part of the session is kept
+      deviceLoginPage.expectFailedMessage(NO_WHOLE_SESSION_MESSAGE);
+      deviceLoginPage.expectSignedOut();
+      expectNoStoredAccessToken();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -548,9 +592,7 @@ describe("Device-flow GitHub sign-in", () => {
 
     // Then
     expectPollCount(backend, 2);
-    cy.wrap(null).should(() => {
-      expect(pollsTo(backend)[1].deviceCode).to.equal("7c3f1e0a9b2d4e6f8a1c3e5f7a9b1d3f5e7a9c1e");
-    });
+    expectLatestPollPresented(backend, "7c3f1e0a9b2d4e6f8a1c3e5f7a9b1d3f5e7a9c1e");
   });
 });
 

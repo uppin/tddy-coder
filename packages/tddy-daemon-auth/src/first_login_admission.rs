@@ -110,3 +110,167 @@ impl LoginAdmission for FirstLoginEnrolment {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tddy_daemon_kernel::config::{DaemonConfig, UserMapping};
+    use tddy_rpc::Code;
+
+    const THE_OPERATOR: &str = "operator";
+    const THE_OS_USER: &str = "operator-os";
+
+    /// An unenrolled desktop's config file, byte for byte: configured, and mapping nobody.
+    const AN_UNENROLLED_CONFIG: &str = "repos_base_path: \"/tmp/repos\"\n";
+
+    /// Every transport a login can arrive on that is not the desktop's own window.
+    const NOT_THE_DESKTOPS_WINDOW: [RequestTransport; 6] = [
+        RequestTransport::LiveKit,
+        RequestTransport::UnixSocket,
+        RequestTransport::Pipe,
+        RequestTransport::Http,
+        RequestTransport::Grpc,
+        RequestTransport::Direct,
+    ];
+
+    /// A desktop deployment that has never enrolled anybody — in memory and in its config file.
+    struct AnUnenrolledDesktop {
+        users: LiveUsers,
+        config_path: PathBuf,
+        dir: tempfile::TempDir,
+    }
+
+    fn an_unenrolled_desktop() -> AnUnenrolledDesktop {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let config_path = dir.path().join("desktop.yaml");
+        std::fs::write(&config_path, AN_UNENROLLED_CONFIG).expect("the config is written");
+        AnUnenrolledDesktop {
+            users: LiveUsers::default(),
+            config_path,
+            dir,
+        }
+    }
+
+    impl AnUnenrolledDesktop {
+        /// The admission this desktop's daemon is assembled with.
+        fn admission(&self) -> FirstLoginEnrolment {
+            FirstLoginEnrolment::new(
+                self.users.clone(),
+                self.config_path.clone(),
+                THE_OS_USER.to_string(),
+            )
+        }
+
+        /// Its config file as it now reads.
+        fn config_file(&self) -> String {
+            std::fs::read_to_string(&self.config_path).expect("the config file is readable")
+        }
+
+        /// Its config file, gone — the daemon can no longer record anything in it.
+        fn whose_config_file_has_gone(self) -> (LiveUsers, PathBuf) {
+            let Self {
+                users,
+                config_path,
+                dir,
+            } = self;
+            drop(dir);
+            (users, config_path)
+        }
+    }
+
+    #[test]
+    fn a_first_login_from_anywhere_but_the_desktops_own_window_is_admitted_unenrolled() {
+        // Given one unenrolled desktop for each transport that is not its own window
+        let desktops =
+            NOT_THE_DESKTOPS_WINDOW.map(|transport| (transport, an_unenrolled_desktop()));
+
+        // When the first login completes over each
+        let outcomes: Vec<_> = desktops
+            .iter()
+            .map(|(transport, desktop)| {
+                let admitted = desktop
+                    .admission()
+                    .admit(THE_OPERATOR, *transport)
+                    .map_err(|status| status.code);
+                (
+                    *transport,
+                    admitted,
+                    desktop.users.snapshot(),
+                    desktop.config_file(),
+                )
+            })
+            .collect();
+
+        // Then every one is admitted — to be minted unmapped, its RPCs refused — and nobody is
+        // mapped or written down
+        assert_eq!(
+            outcomes,
+            NOT_THE_DESKTOPS_WINDOW
+                .map(|transport| (
+                    transport,
+                    Ok(()),
+                    Vec::<UserMapping>::new(),
+                    AN_UNENROLLED_CONFIG.to_string(),
+                ))
+                .to_vec()
+        );
+    }
+
+    #[test]
+    fn a_first_login_from_the_desktops_own_window_is_enrolled_and_persisted() {
+        // Given an unenrolled desktop
+        let desktop = an_unenrolled_desktop();
+
+        // When its first login completes in its own window
+        let admitted = desktop
+            .admission()
+            .admit(THE_OPERATOR, RequestTransport::InProcess)
+            .map_err(|status| status.code);
+
+        // Then the operator is mapped to the account the daemon runs as — at once, and in the file
+        // the next start will read
+        let reloaded =
+            DaemonConfig::load(&desktop.config_path).expect("the rewritten config loads");
+        assert_eq!(
+            (
+                admitted,
+                desktop.users.snapshot(),
+                reloaded.os_user_for_github(THE_OPERATOR),
+            ),
+            (
+                Ok(()),
+                vec![UserMapping {
+                    github_user: THE_OPERATOR.to_string(),
+                    os_user: THE_OS_USER.to_string(),
+                }],
+                Some(THE_OS_USER.to_string()),
+            )
+        );
+    }
+
+    #[test]
+    fn a_first_login_whose_enrolment_cannot_be_recorded_is_refused_as_a_failed_precondition() {
+        // Given an unenrolled desktop whose config file has gone
+        let desktop = an_unenrolled_desktop();
+        let admission = desktop.admission();
+        let (users, _) = desktop.whose_config_file_has_gone();
+
+        // When its first login completes in its own window
+        let refusal = admission
+            .admit(THE_OPERATOR, RequestTransport::InProcess)
+            .expect_err("a login that cannot be recorded is not admitted");
+
+        // Then it is refused naming why, and nobody is mapped
+        const THE_REASON: &str = "could not enrol GitHub user \"operator\" as this desktop's \
+                                  operator: the daemon config cannot be rewritten";
+        assert_eq!(
+            (
+                refusal.code,
+                refusal.message.get(..THE_REASON.len()),
+                users.snapshot()
+            ),
+            (Code::FailedPrecondition, Some(THE_REASON), vec![]),
+            "the refusal was {refusal:?}"
+        );
+    }
+}

@@ -132,6 +132,11 @@ already talks to, and `tokio::time` for the poll interval.
 > **`[dev-dependencies]` only**, to serve a GitHub on loopback. It is already this workspace's HTTP
 > server in five crates and already in `Cargo.lock`, so it resolves nothing new and ships nothing.
 > Without it the device flow's four non-error states are unreachable by any test.
+>
+> **A second dev-dependency, at `/pr-wrap` step 2 (developer-approved, 2026-09-24):** `uuid` (v4) on
+> `tddy-daemon-livekit`, **`[dev-dependencies]` only**, so `forwarded_rpc_is_stamped_by_the_receiver`
+> names a common room of its own run on a reused LiveKit testkit container. Already in `Cargo.lock`
+> through `tddy-testing-commons`; ships nothing.
 
 **Two answers owed before the green phase**, recorded rather than assumed (PRD § *Technical Impact*):
 whether the app registers as an **OAuth App** (recommended — its user token does not expire, so no
@@ -463,6 +468,32 @@ package, and the single web spec. Whole-workspace green comes from CI.
 - Recorded only: V2 (comment stripping — add a `docs/dev/todo/` entry at wrap if still open), V6,
   V7, V8, V11, V12, V14, V15, V17.
 
+### From /validate-tests
+
+**Fix before merge (test-only):**
+- ~~**T1 (critical):** Cypress test for a COMPLETE poll missing user / session token / refresh token → attempt `failed`, signed out, nothing stored.~~ ✅ Done (step 2): `aCompletedPollMissing(part)` in `deviceLoginBackend.ts`; `DeviceLoginAcceptance.cy.tsx` "ends the attempt as failed when an approval arrives without a whole session", once per missing part (3 tests), asserting the exact message, `expectSignedOut()` and nothing under `ACCESS_TOKEN_KEY`.
+- ~~**T2 (critical):** `real_provider_over_http.rs` — the fake records path+query, headers and body; the no-secret test polls through to `Complete` and asserts no part of any request carries the secret; assert the endpoint sequence in `a_public_client_signs_in_by_the_device_flow`.~~ ✅ Done (step 2): `AReceivedRequest { path_and_query, headers, body }`; the no-secret test scripts DeviceCode → AccessToken → User, polls to `Complete`, and asserts the three endpoints were hit and no part of any request holds the secret; the public-client test asserts `/login/device/code`, `/login/oauth/access_token`, `/user` in order.
+- ~~**T3:** exact error prefixes instead of `is_err()` for the interval-less `slow_down` tests.~~ ✅ Done (step 2): `assert_refused_for_want_of_an_open_attempt` asserts the `real.rs` `widened_interval` prefix ("GitHub asked to slow down polling for a device code with no open attempt on this daemon") at all three sites.
+- ~~**T4:** consecutive `slow_down` widening (5→10→15), and an unknown device error that fails and forgets the code.~~ ✅ Done (step 2): `a_second_slow_down_widens_from_the_first`, `an_unknown_device_error_fails_and_forgets_the_code` (`incorrect_device_code` → `Err("device login failed: incorrect_device_code")`, then an interval-less `slow_down` is refused for want of an open attempt).
+- ~~**T5:** bound the poll loops in `tddy-github/src/auth_service.rs` tests and `tddy-daemon/tests/first_login_enrolment_acceptance.rs`.~~ ✅ Done (step 2): both loops are `for _ in 0..POLLS_BEFORE_GIVING_UP` (a local constant of 5, documented as exceeding the stub's pending polls) and then `panic!` naming the states seen. The `STUB_DEVICE_LOGIN_*` constants are **not** needed outside `stub.rs`, so the prod-ready finding may make them private.
+- ~~**T6:** `auth_service.rs` — a scripted provider pins `SlowDown{interval}` / `Denied` / `Expired` → proto state and interval.~~ ✅ Done (step 2): `ScriptedDeviceProvider` plus three tests asserting `(state(), interval_seconds)`: `(SlowDown, 10)`, `(Denied, 0)`, `(Expired, 0)`.
+- ~~**T7:** `FirstLoginEnrolment` unit tests — every non-`InProcess` transport admits unmapped and writes nothing; `InProcess` enrols; an unwritable file → `failed_precondition`.~~ ✅ Done (step 2): `#[cfg(test)] mod tests` in `first_login_admission.rs`. All six non-`InProcess` transports → `Ok(())`, an empty snapshot and a byte-identical file. `InProcess` → enrolled in memory and on reload. A config file that has gone (the kernel's own `ConfigNotWritable` precedent) → `Code::FailedPrecondition` with the exact reason prefix, nobody mapped.
+- ~~**T8:** bidi continuation frame claiming `InProcess` is stamped by the host (`server_engine_stamps_transport.rs`).~~ ✅ Done (step 2): `a_bidi_continuation_claiming_the_in_process_bridge_is_stamped_by_the_host`. It opens honestly with `end_of_stream: false`, sends a continuation claiming `InProcess`, and asserts the session, the opening message and the continuation are all `LiveKit`.
+- ~~**T9:** `forwarded_rpc_is_stamped_by_the_receiver.rs` — UUID room name; abort the peer task on drop.~~ ✅ Done (step 2): the room is `forwarded-rpc-stamp-<uuid v4>`, and the peer task is held in an `AbortedOnDrop` guard. `uuid` was added as a **dev-dependency** of `tddy-daemon-livekit`. It is already in `Cargo.lock` (1.23.3) through that crate's `tddy-testing-commons` dev-dep, so it is a new edge, not a new crate.
+- ~~**T10:** `expectFailedMessage(containing)` with the specific text in the two interval-less tests.~~ ✅ Done (step 2): the two interval-less tests pass the exact `useAuth.ts` strings.
+- ~~**T11:** `device_login_acceptance.rs` — reword the When; prove the approved token authenticates; exact stub values.~~ ✅ Done (step 2): the Given and When now say the stub approves on the poll after the first; `GetAuthStatus` with the approved token → `(true, Some("operator"))`; the start asserts `STUB-0001`, `https://github.com/login/device`, `stub-device-code-1`, 900, 1.
+- ~~**T12:** reword the "daemon predating the device flow" Then-comments (`server_options_acceptance.rs`, `daemon_config_service.rs`).~~ ✅ Done (step 2): both now read "absent means this daemon serves no GitHub sign-in".
+- ~~**T13:** justify `SERVING_TIMEOUT` (20 s) and `PARTICIPANT_TIMEOUT` (10 s); extract `expectLatestPollPresented`; move the trailing `use` in `real_provider_over_http.rs`.~~ ✅ Done (step 2): both timeouts carry a justification comment (LiveKit in Docker on a loaded CI runner); `expectLatestPollPresented` is extracted; the `use` is in the top import block.
+
+**Recorded only:**
+- Remaining `real.rs` device-flow error branches (start/poll non-2xx and unparseable, `(None, None)`, a user-leg failure after a device grant, a remembered explicit interval).
+- Second-account test uses the redirect flow (stub completes device logins only as the first user); both flows share `complete_login`.
+- `runtime::build` refusal boundaries (non-empty `users:`, no `github:`) unpinned; loose `contains`.
+- Kernel `enrolment_keeps_everything_else_the_config_says` compares two fields only.
+- Web: `StartDeviceLogin`/`PollDeviceLogin` RPC failure and unrecognised `DeviceLoginState` untested.
+- Generated bidi handler metadata, and the `Http` (connectrpc router) / `Grpc` (tonic adapters) stamps, untested — none can enrol today.
+- Free-port bind-then-drop races (repo pattern); `DeviceLoginAcceptance.cy.tsx` `/api/config` cases duplicate `clientConfig.test.ts`; `sees_participant` duplicated across two LiveKit suites.
+
 ## Validation Results
 
 **Run:** `/validate-changes`, 2026-09-24, `pr-509-green` @ `09ca3eb3`, base `origin/master`. Supersedes
@@ -501,6 +532,7 @@ touched packages, and CI is the whole-workspace gate.
 | the 34 touched Rust packages | see orchestrator | not run by this validation — CI |
 | tddy-web `DeviceLoginAcceptance.cy.tsx` | n/a | ✅ 22/22 at `bba454da`; ⚠ `55a44090` changed the spec and `clientConfig.test.ts` — not re-run here |
 | `/pr-wrap` step 1 refactor (V9, V10, V13): tddy-rpc, tddy-github, tddy-bsp, tddy-daemon-auth, tddy-coder | ✅ `cargo check --all-targets` and `cargo clippy --all-targets -- -D warnings` clean over all five | ✅ `./test -p tddy-rpc -p tddy-github -p tddy-bsp -p tddy-daemon-auth`: 237 passed, 0 failed (30 binaries); ✅ `./test -p tddy-coder --lib`: 107 passed, 0 failed (includes the 5 new `standalone_auth_flow_declaration_tests`); tddy-coder integration suites not run locally, so CI covers them |
+| `/pr-wrap` step 2 refactor (T1–T13, test-only): tddy-github, tddy-daemon-auth, tddy-rpc, tddy-daemon-livekit, tddy-daemon, tddy-web | ✅ `cargo clippy -p <pkg> --all-targets -- -D warnings` clean on all five Rust packages | ✅ `./test -p tddy-github -p tddy-daemon-auth`: 195 passed, 0 failed; ✅ `./test -p tddy-rpc`: 39 passed, 0 failed; ✅ `./test -p tddy-daemon-livekit --test forwarded_rpc_is_stamped_by_the_receiver`: 1 passed; ✅ `./test -p tddy-daemon --test first_login_enrolment_acceptance --test server_options_acceptance --test daemon_config_service`: 9 + 14 + 20 passed, 0 failed; ✅ `DeviceLoginAcceptance.cy.tsx` alone: 28/28 (25 before, plus the 3 T1 cases). Other tddy-daemon suites are left to CI |
 
 ### Fallback scan (production code added since `origin/master`)
 
@@ -546,6 +578,18 @@ No `println!` / `eprintln!` added. New `unwrap`/`expect` in production are lock-
 | V15 | ℹ Info, **new** | `tddy-web/src/index.tsx:133`, `rpc/clientConfig.ts:140` | Pre-existing, documented: an unreachable daemon or a non-OK `/api/config` renders the standalone connection form (`daemonMode: false`). On a desktop a failed `GetClientConfig` would show that form rather than an error. Not introduced here |
 | V16 | ✅ Resolved (was ℹ Info) | PRD `docs/ft/desktop/1-WIP/PRD-2026-09-19-keyring-desktop-login.md` | Both green decisions are now in § What's Changing ("Only a login completed from the desktop's own window enrols"; "The sign-in flow is declared, never inferred") and are ticked acceptance criteria citing their tests. The PRD's checkboxes are synced with this changeset: 11 of 12 ticked, and `./install --desktop` stays unticked and deferred to the developer |
 | V17 | ℹ Info, carried | `first_login_admission.rs` / `live_users.rs` `enrol_first_login` | Synchronous file I/O under a `std::sync::Mutex` on an async RPC task, once per deployment. Acceptable; `spawn_blocking` would be tidier |
+
+### /validate-tests (2026-09-24)
+
+**Run:** `/validate-tests`, 2026-09-24, `pr-509-green` @ `09ca3eb3`, base `origin/master`.
+
+- **Tests analyzed:** 85 added/meaningfully changed (Rust 56, Cypress 25, vitest 4) across 14 files, plus a scan of ~590 `Request::new` → `Request::direct` substitutions.
+- **Status:** ⚠ 2 critical, 22 warnings → the fix-now set is addressed in the step 2 refactor (see *From /validate-tests*).
+- **Substitutions:** mechanical (598 `Request::new(` removed, 592 `Request::direct(` added, ~98 `RequestMetadata::over(Direct)`, `A_PIPE` in dispatch-only engine suites). No test proves the wrong thing through its transport: every transport-sensitive test stamps `InProcess` / `LiveKit` / `UnixSocket` explicitly or goes through the real host.
+- **Markers:** no `#[ignore]`, `.only`, `.skip` or `sleep`; Cypress timing is `cy.clock`-driven.
+- **No-fallback decisions pinned:** absent `auth_flow` ✅, unknown `auth_flow` ✅, public client refuses `GetAuthUrl` ✅, slow_down without interval ✅ (provider assertions loose — T3), `runtime::build` refusal ✅ (positive case only), COMPLETE missing user/tokens ❌ unpinned (T1).
+- **Critical:** `DeviceLoginAcceptance.cy.tsx` had no test for a COMPLETE poll missing its user or tokens (`useAuth.ts`); `real_provider_over_http.rs` `no_request_in_the_device_flow_carries_the_client_secret` recorded bodies only and never polled to `Complete`.
+- **Description-body mismatches:** `device_login_acceptance.rs` ("When they approve it" — the stub approves); `server_options_acceptance.rs` and `daemon_config_service.rs` framed an absent `auth_flow` as backward compatibility; kernel `first_login_enrolment_acceptance.rs` says "only `users:` changed" but compares two fields.
 
 ### V1 options (green, 2026-09-23)
 

@@ -15,6 +15,8 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::State;
+use axum::http::{HeaderMap, Uri};
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use tddy_github::provider::{DeviceLoginPoll, GitHubOAuthProvider};
@@ -112,38 +114,41 @@ async fn an_unapproved_device_login_is_pending_rather_than_failed() {
 
 #[tokio::test]
 async fn no_request_in_the_device_flow_carries_the_client_secret() {
-    // Given a provider that holds a client secret, and a GitHub recording what it receives
+    // Given a provider that holds a client secret, and a GitHub recording everything it receives
     let github = a_github_answering(vec![
         Answer::DeviceCode {
             user_code: "WDJB-MJHT".to_string(),
             interval: 5,
         },
-        Answer::PollError {
-            error: "authorization_pending".to_string(),
-            interval: None,
+        Answer::AccessToken("gho_a-granted-token".to_string()),
+        Answer::User {
+            login: "operator".to_string(),
         },
     ])
     .await;
     let provider = the_provider(&github);
 
-    // When a whole device login is started and polled
+    // When a whole device login is started and polled through to its completion
     let started = provider
         .start_device_login()
         .await
         .expect("GitHub issued a device code");
-    let _ = provider.poll_device_login(&started.device_code).await;
+    let polled = provider.poll_device_login(&started.device_code).await;
 
-    // Then the secret never left this process — the flow exists precisely so it need not
+    // Then every leg was asked for, and the secret travelled in no path, query, header or body of
+    // any of them — the flow exists precisely so it need not
     assert_eq!(
-        github
-            .received
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|body| body.contains(THE_SECRET))
-            .count(),
-        0,
-        "the device flow authenticates with a public client id alone; bodies were {:?}",
+        (
+            polled.map(|poll| matches!(poll, DeviceLoginPoll::Complete { .. })),
+            github.requested_endpoints(),
+            github.request_parts_containing(THE_SECRET),
+        ),
+        (
+            Ok(true),
+            THE_DEVICE_FLOW_ENDPOINTS.map(str::to_string).to_vec(),
+            Vec::<String>::new(),
+        ),
+        "the device flow authenticates with a public client id alone; requests were {:?}",
         github.received.lock().unwrap()
     );
 }
@@ -346,10 +351,7 @@ async fn a_slow_down_naming_no_interval_for_a_device_code_never_started_is_an_er
         .await;
 
     // Then there is no interval to widen, and no invented one is widened instead
-    assert!(
-        polled.is_err(),
-        "a slow_down with no base interval must fail; got {polled:?}"
-    );
+    assert_refused_for_want_of_an_open_attempt(&polled);
 }
 
 #[tokio::test]
@@ -377,10 +379,7 @@ async fn a_device_code_is_forgotten_once_its_window_has_passed() {
     let polled = provider.poll_device_login(&started.device_code).await;
 
     // Then its interval was dropped with it, so nothing remains to widen from
-    assert!(
-        polled.is_err(),
-        "an expired device code's entry must be pruned; got {polled:?}"
-    );
+    assert_refused_for_want_of_an_open_attempt(&polled);
 }
 
 #[tokio::test]
@@ -412,10 +411,90 @@ async fn a_device_code_is_forgotten_once_github_answers_it_expired() {
     let polled = provider.poll_device_login(&started.device_code).await;
 
     // Then the expiry ended the entry, so a later slow_down finds nothing to widen
+    assert_eq!(expired, Ok(DeviceLoginPoll::Expired));
+    assert_refused_for_want_of_an_open_attempt(&polled);
+}
+
+#[tokio::test]
+async fn a_second_slow_down_widens_from_the_first() {
+    // Given a device login GitHub started at a 5-second interval, then asks twice to slow down
+    // without saying by how much
+    let github = a_github_answering(vec![
+        Answer::DeviceCode {
+            user_code: "WDJB-MJHT".to_string(),
+            interval: 5,
+        },
+        Answer::PollError {
+            error: "slow_down".to_string(),
+            interval: None,
+        },
+        Answer::PollError {
+            error: "slow_down".to_string(),
+            interval: None,
+        },
+    ])
+    .await;
+    let provider = the_provider(&github);
+    let started = provider
+        .start_device_login()
+        .await
+        .expect("GitHub issued a device code");
+
+    // When the device login is polled twice
+    let first = provider.poll_device_login(&started.device_code).await;
+    let second = provider.poll_device_login(&started.device_code).await;
+
+    // Then each slow_down widens the interval the last one set — 5, then 10, then 15 — as RFC 8628
+    // §3.5 requires "for this and all subsequent requests"
     assert_eq!(
-        (expired, polled.is_err()),
-        (Ok(DeviceLoginPoll::Expired), true)
+        (first, second),
+        (
+            Ok(DeviceLoginPoll::SlowDown {
+                interval_seconds: 10
+            }),
+            Ok(DeviceLoginPoll::SlowDown {
+                interval_seconds: 15
+            })
+        )
     );
+}
+
+#[tokio::test]
+async fn an_unknown_device_error_fails_and_forgets_the_code() {
+    // Given a started device login GitHub answers with an error the device flow does not define,
+    // and is then asked to slow down without an interval
+    let github = a_github_answering(vec![
+        Answer::DeviceCode {
+            user_code: "WDJB-MJHT".to_string(),
+            interval: 5,
+        },
+        Answer::PollError {
+            error: "incorrect_device_code".to_string(),
+            interval: None,
+        },
+        Answer::PollError {
+            error: "slow_down".to_string(),
+            interval: None,
+        },
+    ])
+    .await;
+    let provider = the_provider(&github);
+    let started = provider
+        .start_device_login()
+        .await
+        .expect("GitHub issued a device code");
+
+    // When the code is polled, and polled again
+    let failed = provider.poll_device_login(&started.device_code).await;
+    let polled = provider.poll_device_login(&started.device_code).await;
+
+    // Then the unknown error fails the attempt by name, and ended its entry, so the later
+    // slow_down finds nothing to widen
+    assert_eq!(
+        failed,
+        Err("device login failed: incorrect_device_code".to_string())
+    );
+    assert_refused_for_want_of_an_open_attempt(&polled);
 }
 
 #[tokio::test]
@@ -441,16 +520,45 @@ async fn a_public_client_signs_in_by_the_device_flow() {
         .expect("GitHub issued a device code");
     let polled = provider.poll_device_login(&started.device_code).await;
 
-    // Then it completes with the token GitHub granted and the user it belongs to
+    // Then it completes with the token GitHub granted and the user it belongs to, having asked
+    // for a device code, a token for it and the token's user — in that order
     assert_eq!(
-        polled.map(|poll| match poll {
-            DeviceLoginPoll::Complete { access_token, user } => Some((access_token, user.login)),
-            _ => None,
-        }),
-        Ok(Some((
-            "gho_a-granted-token".to_string(),
-            "operator".to_string()
-        )))
+        (
+            polled.map(|poll| match poll {
+                DeviceLoginPoll::Complete { access_token, user } =>
+                    Some((access_token, user.login)),
+                _ => None,
+            }),
+            github.requested_endpoints(),
+        ),
+        (
+            Ok(Some((
+                "gho_a-granted-token".to_string(),
+                "operator".to_string()
+            ))),
+            THE_DEVICE_FLOW_ENDPOINTS.map(str::to_string).to_vec(),
+        )
+    );
+}
+
+/// A device login's three legs, in order: a code, a token for the code, and the token's user.
+const THE_DEVICE_FLOW_ENDPOINTS: [&str; 3] =
+    ["/login/device/code", "/login/oauth/access_token", "/user"];
+
+/// What `poll_device_login` begins its refusal with when a `slow_down` names no interval and there
+/// is no open attempt to widen one from. Only the prefix: the rest quotes the device code.
+const NO_OPEN_ATTEMPT_TO_WIDEN: &str =
+    "GitHub asked to slow down polling for a device code with no open attempt on this daemon";
+
+/// Assert the poll was refused because no open attempt held an interval to widen — not merely
+/// that it failed, which a transport error or an unparseable answer would also do.
+fn assert_refused_for_want_of_an_open_attempt(polled: &Result<DeviceLoginPoll, String>) {
+    assert_eq!(
+        polled
+            .as_ref()
+            .map_err(|refusal| refusal.get(..NO_OPEN_ATTEMPT_TO_WIDEN.len())),
+        Err(Some(NO_OPEN_ATTEMPT_TO_WIDEN)),
+        "expected a refusal for want of an open attempt; got {polled:?}"
     );
 }
 
@@ -527,16 +635,62 @@ enum Answer {
 }
 
 /// A GitHub that lives on loopback for the length of one test, answering in a fixed order and
-/// keeping every request body it was sent.
+/// keeping every request it was sent — where it went, its headers and its body.
 struct AGitHub {
     address: SocketAddr,
-    received: Arc<Mutex<Vec<String>>>,
+    received: Arc<Mutex<Vec<AReceivedRequest>>>,
+}
+
+/// One request as GitHub saw it, whole: nothing a client sends can live anywhere but here.
+#[derive(Debug)]
+struct AReceivedRequest {
+    path_and_query: String,
+    /// Each header as `name: value`.
+    headers: Vec<String>,
+    body: String,
+}
+
+impl AReceivedRequest {
+    /// Every part of this request a secret could have travelled in.
+    fn parts(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.path_and_query.as_str())
+            .chain(self.headers.iter().map(String::as_str))
+            .chain(std::iter::once(self.body.as_str()))
+    }
+}
+
+impl AGitHub {
+    /// The endpoints asked for, in the order they were asked.
+    fn requested_endpoints(&self) -> Vec<String> {
+        self.received
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.path_and_query.clone())
+            .collect()
+    }
+
+    /// Every part of every request received that contains `needle`.
+    fn request_parts_containing(&self, needle: &str) -> Vec<String> {
+        self.received
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|request| {
+                request
+                    .parts()
+                    .filter(|part| part.contains(needle))
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone)]
 struct TheDesk {
     answers: Arc<Mutex<Vec<Answer>>>,
-    received: Arc<Mutex<Vec<String>>>,
+    received: Arc<Mutex<Vec<AReceivedRequest>>>,
 }
 
 async fn a_github_answering(answers: Vec<Answer>) -> AGitHub {
@@ -560,8 +714,24 @@ async fn a_github_answering(answers: Vec<Answer>) -> AGitHub {
     AGitHub { address, received }
 }
 
-async fn answer(State(desk): State<TheDesk>, body: String) -> axum::response::Response {
-    desk.received.lock().unwrap().push(body);
+async fn answer(
+    State(desk): State<TheDesk>,
+    uri: Uri,
+    headers: HeaderMap,
+    body: String,
+) -> axum::response::Response {
+    desk.received.lock().unwrap().push(AReceivedRequest {
+        path_and_query: uri
+            .path_and_query()
+            .expect("a request GitHub receives names its path")
+            .as_str()
+            .to_string(),
+        headers: headers
+            .iter()
+            .map(|(name, value)| format!("{name}: {}", String::from_utf8_lossy(value.as_bytes())))
+            .collect(),
+        body,
+    });
     let next = {
         let mut answers = desk.answers.lock().unwrap();
         (!answers.is_empty()).then(|| answers.remove(0))
@@ -614,5 +784,3 @@ fn a_device_code_answer(
     }))
     .into_response()
 }
-
-use axum::response::IntoResponse;
