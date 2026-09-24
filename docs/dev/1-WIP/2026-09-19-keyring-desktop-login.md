@@ -249,7 +249,7 @@ open them, because its own `tddy-github` finding is the one in its path.
 - [x] **Base-URL seam** in `RealGitHubProvider`, with the six error returns covered — **before** the device flow (`604c4994`; all **seven** covered, the user-leg one included)
 - [~] **Implementation**: device flow, RPCs, the gate, enrolment, the web sign-in screen, transport-stamped metadata (V1) — done (M1–M7); `desktop.yaml.production` (M8) — deferred to the developer — 'I'll configure and test production myself'
 - [~] **Decisions answered**: **OAuth App** (developer, during green) — ⚠ not yet verified against the live API; client id **rendered into `desktop.yaml.production`** — decided; the id itself and M8 are deferred to the developer — 'I'll configure and test production myself'
-- [~] **Testing**: acceptance + unit written for every item, V1's transport tests included; the `tddy-web` spec passed 22/22 at `bba454da` — ⚠ not re-run by the 2026-09-24 validation; the orchestrator's scoped `cargo check --all-targets` over the 34 touched packages is the build gate for this run, and CI is the test gate (see *Validation Results*)
+- [~] **Testing**: acceptance + unit written for every item, V1's transport tests included; scoped runs green after `/pr-wrap` steps 1, 2 and 4 (Rust per package; Cypress `DeviceLoginAcceptance` 28/28 and `RedirectLoginAcceptance` 4/4, each spec alone); ⚠ the `/pr-wrap` step 6 scoped re-run from a cold `target/` and CI are still pending (see *Validation Results*)
 - [ ] **Package Documentation**: the six packages above
 - [ ] **Code Quality**: scoped clippy per package; CI green — ⚠ not ticked. Scoped clippy is clean on the four Rust packages `/pr-wrap` step 4 touched, but the clean-code score is **C**, not B. `build_auth_entries_admitting` (106, recorded only) and `startDeviceLogin` (73) are still must-refactor; see *Validation Results → /analyze-clean-code*
 
@@ -368,7 +368,7 @@ open them, because its own `tddy-github` finding is the one in its path.
 |---|---|---|
 | `InProcess` | Tauri IPC — `WebviewRpcHost`, `MultiConnectionHost` (the desktop's window) | `tddy-tauri-rpc/src/host.rs:95`, `src/multi_host.rs:120` |
 | `LiveKit` | `LiveKitParticipant::connect` / `::join` — the common room, session rooms, peer forwards | `tddy-livekit/src/participant.rs:338`, `:495` |
-| `UnixSocket` | `StdioEndpoint::from_duplex` over a Unix socket: agent tool socket, sandbox tool socket, toolcall listener, supervisor socket, host-session socket | `tddy-daemon/src/agent_tool_socket.rs:71`; `tddy-sandbox-runner/src/runner.rs:1699`; `tddy-sandbox-app/src/sandboxed_session.rs:688`; `tddy-toolcall/src/toolcall/listener.rs:200`; `tddy-session-lifecycle/src/session_toolcall.rs:123`; `…/connection_service/svc_start_claude_cli_session.rs:224`; `tddy-supervisor/src/server.rs:596`; `tddy-coder/src/run.rs:1940`; clients (host a no-callback service): `tddy-session-tool-client/src/lib.rs:777`, `tddy-toolcall/src/toolcall/client.rs:73`, `tddy-supervisor/src/client.rs:68` |
+| `UnixSocket` | `StdioEndpoint::from_duplex` over a Unix socket: agent tool socket, sandbox tool socket, toolcall listener, supervisor socket, host-session socket | `tddy-daemon/src/agent_tool_socket.rs:71`; `tddy-sandbox-runner/src/runner.rs:1699`; `tddy-sandbox-app/src/sandboxed_session.rs:688`; `tddy-toolcall/src/toolcall/listener.rs:200`; `tddy-session-lifecycle/src/session_toolcall.rs:123`; `…/connection_service/svc_start_claude_cli_session.rs:224`; `tddy-supervisor/src/server.rs:596`; `tddy-coder/src/run.rs:1958`; clients (host a no-callback service): `tddy-session-tool-client/src/lib.rs:777`, `tddy-toolcall/src/toolcall/client.rs:73`, `tddy-supervisor/src/client.rs:68` |
 | `Pipe` | a parent/child's stdio: `StdioEndpoint::from_process_stdio`, `from_child_stdio`; a jail's piped stdio | `tddy-stdio/src/endpoint.rs:87`, `:120`; `tddy-daemon-sandbox/src/sandbox_session.rs:210` |
 | `Http` | Connect-RPC `/rpc` router | `tddy-connectrpc/src/router.rs:181` (`over_http`) |
 | `Grpc` | tonic: codegen'd `*TonicAdapter`, the exec-tool supplement, `From<tonic::Request>` | `tddy-codegen/src/generator.rs:1081`, `:1094`; `tddy-service/exec_tool_tonic_adapter_supplement.rs:32,55,72,88`; `tddy-rpc/src/types.rs:114` |
@@ -466,13 +466,13 @@ package, and the single web spec. Whole-workspace green comes from CI.
 - ~~**V13 — optional:** drop `redirect_uri` from `RealGitHubProvider::new_public` /
   `new_public_with_base_urls`.~~ — done: dropped, and the secret and callback became one
   `Option<RedirectClient>`, so a public client holds no callback.
-- Recorded only: V2 (comment stripping — add a `docs/dev/todo/` entry at wrap if still open), V6,
+- Recorded only: V2 (comment stripping — the backlog entry was extended in pr-wrap step 3, see *From /validate-prod-ready*), V6,
   V7, V8, V11, V12, V14, V15, V17. (V14 resolved and V12 implemented — unverified at runtime — on the developer's decision, 2026-09-24.)
 
 ### From /validate-tests
 
 **Fix before merge (test-only):**
-- ~~**T1 (critical):** Cypress test for a COMPLETE poll missing user / session token / refresh token → attempt `failed`, signed out, nothing stored.~~ ✅ Done (step 2): `aCompletedPollMissing(part)` in `deviceLoginBackend.ts`; `DeviceLoginAcceptance.cy.tsx` "ends the attempt as failed when an approval arrives without a whole session", once per missing part (3 tests), asserting the exact message, `expectSignedOut()` and nothing under `ACCESS_TOKEN_KEY`.
+- ~~**T1 (critical):** Cypress test for a COMPLETE poll missing user / session token / refresh token → attempt `failed`, signed out, nothing stored.~~ ✅ Done (step 2): `aCompletedPollMissing(part)` in `deviceLoginBackend.ts`; `DeviceLoginAcceptance.cy.tsx` "ends the attempt as failed when an approval arrives without a whole session", once per missing part (3 tests), asserting the message (its common prefix, via `contain.text` — since V14 the message also names the missing part, which this spec does not pin; `RedirectLoginAcceptance.cy.tsx` does), `expectSignedOut()` and nothing under `ACCESS_TOKEN_KEY`.
 - ~~**T2 (critical):** `real_provider_over_http.rs` — the fake records path+query, headers and body; the no-secret test polls through to `Complete` and asserts no part of any request carries the secret; assert the endpoint sequence in `a_public_client_signs_in_by_the_device_flow`.~~ ✅ Done (step 2): `AReceivedRequest { path_and_query, headers, body }`; the no-secret test scripts DeviceCode → AccessToken → User, polls to `Complete`, and asserts the three endpoints were hit and no part of any request holds the secret; the public-client test asserts `/login/device/code`, `/login/oauth/access_token`, `/user` in order.
 - ~~**T3:** exact error prefixes instead of `is_err()` for the interval-less `slow_down` tests.~~ ✅ Done (step 2): `assert_refused_for_want_of_an_open_attempt` asserts the `real.rs` `widened_interval` prefix ("GitHub asked to slow down polling for a device code with no open attempt on this daemon") at all three sites.
 - ~~**T4:** consecutive `slow_down` widening (5→10→15), and an unknown device error that fails and forgets the code.~~ ✅ Done (step 2): `a_second_slow_down_widens_from_the_first`, `an_unknown_device_error_fails_and_forgets_the_code` (`incorrect_device_code` → `Err("device login failed: incorrect_device_code")`, then an interval-less `slow_down` is refused for want of an open attempt).
@@ -645,12 +645,12 @@ lines, and why it is not one:
 | Where | What | Verdict |
 |---|---|---|
 | `tddy-daemon-auth/src/auth.rs:89` `github.stub.unwrap_or(false)`, `:213` redirect-URI default, `:217` `"stub-client-id"` | moved from the old `if/else if` gate into `github_provider_kind` / the `match` | pre-existing, not introduced. `:213` now also feeds the **public** provider, which never uses it (V13) |
-| `tddy-github/src/real.rs:197` `name.unwrap_or_default()` | GitHub's nullable display name | pre-existing (`origin/master` `real.rs:120`), moved into `fetch_user` |
-| `tddy-github/src/real.rs:409` `.unwrap_or_default()` | formats an absent `error_description` as nothing inside an `Err` | not a fallback |
+| `tddy-github/src/real.rs:243` `name.unwrap_or_default()` | GitHub's nullable display name | pre-existing (`origin/master` `real.rs:120`), moved into `fetch_user` |
+| `tddy-github/src/real.rs:354` `.unwrap_or_default()` | formats an absent `error_description` as nothing inside an `Err` | not a fallback |
 | `tddy-daemon-kernel/src/live_users.rs:23,28` `#[derive(Default)]` | empty `users:` — refuses everyone | the safe direction, and exactly the old `#[serde(default)] Vec` |
-| `tddy-daemon-auth/src/first_login_admission.rs:53,70,85,95` `Ok(())` | mapped login; non-`InProcess` transport; `AlreadyEnrolled` | deliberate: the login is minted *unmapped* and every token-gated RPC refuses it — the developer's decision, not an admission |
+| `tddy-daemon-auth/src/first_login_admission.rs:64,74,113,121` `Ok(())` | enrolled; `AlreadyEnrolled`; mapped login; non-`InProcess` transport | deliberate: the login is minted *unmapped* and every token-gated RPC refuses it — the developer's decision, not an admission |
 | `tddy-rpc/src/server_engine.rs:256,361` `let _ = …send(…)` | pre-existing shape, now with `self.to_rpc_message` | unchanged semantics |
-| `tddy-web/src/hooks/useAuth.ts:257` `res.user ?? null` | `ExchangeCode` without a user → signed in with `user: null` | pre-existing behaviour, moved from inside `adoptSession`; the device path now refuses the same shape (`COMPLETE` without a user → `failed`), so the two flows differ here (V14) |
+| `tddy-web/src/hooks/useAuth.ts:257` `res.user ?? null` | `ExchangeCode` without a user → signed in with `user: null` | ~~pre-existing behaviour, moved from inside `adoptSession`; the two flows differed here (V14)~~ — **removed by `6779f7fc`** (V14): `handleCallback` goes through `checkWholeSession`, and no `??` remains on the session |
 
 Removed by `55a44090`: the 5 s `DEFAULT_DEVICE_POLL_INTERVAL_SECONDS`; absent `auth_flow` read as the
 redirect flow; unknown `auth_flow` read as absent; `GetAuthUrl` handing a public client a URL; an
@@ -658,23 +658,23 @@ embedded host with no config path silently never enrolling. `09ca3eb3` removed
 `RequestMetadata: Default` and `Request::new`.
 
 No `println!` / `eprintln!` added. New `unwrap`/`expect` in production are lock-poisoning only
-(`real.rs:203`, `live_users.rs:53,102,112,124`, `stub.rs`).
+(`real.rs:279`, `live_users.rs:53,62,117`, `stub.rs`).
 
 ### Risks
 
 | # | Severity | Where | Finding |
 |---|---|---|---|
-| V1 | ✅ Resolved (was 🔴 High, security) | `tddy-rpc/src/message.rs`, `server_engine.rs` `metadata_of`, `first_login_admission.rs:57-72` | Re-checked at `09ca3eb3`. Every `ServerEngine::new` names its transport (5 sites: `tauri-rpc/host.rs:95`, `multi_host.rs:120` `InProcess`; `livekit/participant.rs:338,495` `LiveKit`; `stdio/endpoint.rs:65` from its opener); the Connect router stamps `Http` (`router.rs:181`); tonic stamps `Grpc`. No production code reads the envelope for the transport, and `RequestTransport::InProcess` is constructed only by the two Tauri hosts. The admission match is exhaustive. Both Tauri hosts are pinned (`tddy-tauri-rpc/tests/stamps_the_in_process_transport.rs`); the acceptance suite drives the roster with a hand-stamped `InProcess` message, plus the real `LiveKitParticipant` and agent tool socket for the refusals. Residual notes: V10, V11, V12 |
+| V1 | ✅ Resolved (was 🔴 High, security) | `tddy-rpc/src/message.rs`, `server_engine.rs` `metadata_of`, `first_login_admission.rs:98-108` (`is_this_desktops_window`) | Re-checked at `09ca3eb3`. Every `ServerEngine::new` names its transport (5 sites: `tauri-rpc/host.rs:95`, `multi_host.rs:120` `InProcess`; `livekit/participant.rs:338,495` `LiveKit`; `stdio/endpoint.rs:65` from its opener); the Connect router stamps `Http` (`router.rs:181`); tonic stamps `Grpc`. No production code reads the envelope for the transport, and `RequestTransport::InProcess` is constructed only by the two Tauri hosts. The admission match is exhaustive. Both Tauri hosts are pinned (`tddy-tauri-rpc/tests/stamps_the_in_process_transport.rs`); the acceptance suite drives the roster with a hand-stamped `InProcess` message, plus the real `LiveKitParticipant` and agent tool socket for the refusals. Residual notes: V10, V11, V12 |
 | V2 | 🟠 Medium, open | `tddy-daemon-kernel/src/first_login_enrolment.rs:84` | Unchanged: the first login rewrites `~/.tddy/desktop.yaml` through `serde_yaml::Value` and strips every comment, the rendered explanatory header included. Hits every desktop on its first sign-in. The TODO now references the backlog entry [`2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md`](../todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md), which names this writer beside `daemon_config_service.rs` (pr-wrap step 3) |
 | V3 | ⏸ Deferred | `desktop.yaml.production:90-92` | M8 — deferred to the developer — 'I'll configure and test production myself'. The file is unchanged and still documents `client_secret`. Not a gap of this run |
 | V4 | ✅ Resolved | `real.rs` `device_attempts` | Re-checked: `DeviceAttempt { interval_seconds, expires_at }`, pruned on every start and poll, removed on every terminal answer |
-| V5 | ✅ Resolved | `useAuth.ts:311,327` | Re-checked: a non-positive grant or `SLOW_DOWN` interval ends the attempt `failed` |
+| V5 | ✅ Resolved | `useAuth.ts:91` `intervalMsOf`, read at `:115` and `:400` | Re-checked: a non-positive grant or `SLOW_DOWN` interval ends the attempt `failed` |
 | V6 | 🟡 Low, open | `tddy-daemon-kernel/src/config.rs:341` | Unchanged: cloning a `DaemonConfig` shares `users:` (`LiveUsers`). Documented at the field and in `live_users.rs` |
-| V7 | ℹ Info, open | `DeviceLoginPanel.tsx:23` | Unchanged: `target="_blank"` inside the Tauri webview, relying on `tauri-plugin-opener`. Untested; confirm on the desktop |
+| V7 | ℹ Info, open | `DeviceLoginPanel.tsx:24` | Unchanged: `target="_blank"` inside the Tauri webview, relying on `tauri-plugin-opener`. Untested; confirm on the desktop |
 | V8 | ℹ Info, open | PRD § Technical Impact | Unchanged: the OAuth App's device-flow response not yet checked against the live API for the absence of an expiring `refresh_token`. Part of the developer's production check |
 | V9 | ✅ Resolved (was 🟠 Medium) | `tddy-coder/src/run.rs` `standalone_auth_provider` | Refactored in `/pr-wrap` step 1: `StandaloneAuthProvider { Stub, Confidential }` + `standalone_auth_provider(args)` is the one decision both `build_auth_service_entry` (now an exhaustive `match`) and `build_client_config` read. `auth_flow` is `Some("redirect")` exactly when an entry is registered, `None` otherwise; the TODO is gone. The standalone server has no public/device provider (a client id without a secret registers nothing), so it never declares `"device"`. Pinned by `run::standalone_auth_flow_declaration_tests` (5 cases: stub, stub codes alone, confidential, id without secret, no GitHub args) |
 | V10 | ✅ Resolved where the metadata is in scope (was 🟡 Low) | `tddy-bsp/src/bsp_service.rs`; `tddy-rpc/src/message.rs` `RequestTransport::Direct`, `types.rs` `Request::direct` | `DaemonBspService`'s seven relays now capture `request.metadata().clone()` before `into_inner()` and rebuild with `Request::with_metadata(req, metadata)`, so the inner `BspServiceImpl` sees the stamp its host gave the request. **Left as `Direct`, by design:** `tddy-session-lifecycle/src/connection_service/daemon_rpc_handler.rs` (`HostRpcHandler::handle_rpc(service, method, payload: &[u8])` receives raw bytes, with no metadata in scope to pass on) and `svc_split_context_from_codebase_host.rs:216,235` (requests the daemon builds itself from its own state, not relays). `Direct`'s rustdoc now says it is a call made in code carrying no transport claim, including a payload re-dispatched after its request was decoded, and that a relay that still holds the original metadata must pass it through. `Direct` is never a stand-in for an unknown transport |
-| V11 | ℹ Info, **new** | `first_login_admission.rs`, `auth_service.rs:331` | Enrolment is decided by the transport of the *completing* poll only; the `StartDeviceLogin` that issued the code is not bound to it. Not exploitable — a `device_code` is returned only to its starter — but binding the attempt to its starting transport would be defence in depth |
+| V11 | ℹ Info, **new** | `first_login_admission.rs`, `auth_service.rs:351` | Enrolment is decided by the transport of the *completing* poll only; the `StartDeviceLogin` that issued the code is not bound to it. Not exploitable — a `device_code` is returned only to its starter — but binding the attempt to its starting transport would be defence in depth |
 | V12 | 🟡 Implemented — **unverified at runtime** (developer decision, 2026-09-24) | `tddy-desktop/src-tauri/tauri.conf.json` | Was `"csp": null`, while `InProcess` means "the person at the machine", so script injected into the dashboard before sign-in could enrol. **Implemented:** a strict policy (Tauri 2.11.5, delivered as a response header on `tauri://` HTML; Tauri adds sha256 hashes for bundled JS and a nonce for `index.html`'s one `<style>`): `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; style-src-elem 'self' 'unsafe-inline'; img-src 'self' https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost data: ws: wss:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'`. No `unsafe-eval`, no inline script. `'wasm-unsafe-eval'` + `data:` are ghostty-web's inlined WASM; `ws: wss:` any host because the LiveKit URL is per-deployment and typed at runtime; `'unsafe-inline'` only in `style-src-elem`, for runtime `<style>` elements (`ConnectionTerminalChrome` / `SessionDrawer` dot styles, react-remove-scroll-bar, react-resizable-panels). No `devCsp`: a dev build loads Vite directly and Tauri applies no policy. **Verified:** `cargo check -p tddy-desktop` with and without `tauri/custom-protocol`; the header Tauri serves for `index.html`, read through a scratch asset-resolver probe; the built bundle grepped for inline script/eval. **Not verified:** a launched production (`custom-protocol`) build — terminal WASM, IPC, LiveKit `ws://` from `tauri://localhost`, console CSP errors. The wdio e2e runs a dev build, where no policy applies. Follow-ups: move the two dot-style strings into bundled CSS and hand Tauri's nonce to `get-nonce` to drop `'unsafe-inline'`; narrow `connect-src` from the configured `livekit.url` at runtime |
 | V13 | ✅ Resolved (was ℹ Info) | `tddy-github/src/real.rs`; `tddy-daemon-auth/src/auth.rs:236`; `tddy-github/tests/real_provider_over_http.rs` | `new_public(client_id)` / `new_public_with_base_urls(client_id, oauth, api)` take no redirect URI. `client_secret: Option<String>` + `redirect_uri: String` became one `redirect_client: Option<RedirectClient { client_secret, redirect_uri }>`, so a public client holds no callback at all, rather than a placeholder. `authorize_url` and `exchange_code` refuse on `None` exactly as before. The defaulted `redirect_uri()` in `build_auth_entries_admitting` now feeds only the stub and the confidential client |
 | V14 | ✅ Resolved (developer decision, 2026-09-24) | `useAuth.ts` `handleCallback` / `adoptSession` | Was: `ExchangeCode` without a `user` still signed in with `user: null`, while a device `COMPLETE` without one failed. **Resolved:** both flows share one `checkWholeSession` guard — a redirect exchange missing its user, session token or refresh token ends sign-in with an error naming the missing part, stores nothing and leaves the operator signed out; `adoptSession` accepts only a whole session. Pinned test-first by `cypress/component/RedirectLoginAcceptance.cy.tsx` (red 1/4 → green 4/4) |
@@ -800,6 +800,143 @@ options, for the developer:
 | Acceptance criteria | 9/10 | 9/10 — the fresh-install criterion is deferred to the developer — 'I'll configure and test production myself' |
 | Stamping-site table | — | corrected `router.rs:182` → `:181` |
 
+### /validate-changes — final (step 5, 2026-09-24)
+
+**Run:** `/pr-wrap` step 5, `pr-509-green` @ `3ba42bcc` (= `origin/feature/keyring/desktop-login`),
+base `origin/master`. It re-validates what the wrap changed, `09ca3eb3..HEAD`. The full analysis
+above (at `09ca3eb3`) still stands for the rest of the diff. This run did not run cargo, bun or
+tests: `/pr-wrap` step 6 (scoped fmt, clippy and tests from a cold `target/`) runs in parallel.
+
+**Gate:** ✅ `origin/master` is an ancestor of `HEAD`. `origin/master..HEAD` is 20 commits, all
+`(#keyring 2/9)`. No rebase was needed and nothing leaked. The wrap's range touches 42 files, all
+claimed by a step below. It deletes nothing.
+
+**Commits reviewed:** these ten, each read in full.
+
+| Commit | Step | Verdict |
+|---|---|---|
+| `0a0e31d7` | 1: V9, V10, V13 | ✅ V9: `standalone_auth_provider` is the one decision, and `auth_flow` is `Some("redirect")` iff an entry is registered. V10: all seven `DaemonBspService` relays pass `Request::with_metadata`. V13: `RedirectClient` means a public client holds no callback |
+| `da68e10b` | 2: T1–T13 | ✅ Bounded loops, exact prefixes, `AReceivedRequest` checks path, query, headers and body. No `sleep`, `.only`, `.skip` or `#[ignore]` added. The `uuid` dev-dep adds exactly one `Cargo.lock` edge |
+| `d1923dfe` | 3: stub constants, TODO ref | ✅ Both `STUB_DEVICE_LOGIN_*` are private. `first_login_enrolment.rs:84` is `TODO(docs/dev/todo/…single-process-daemon.md)`, and that entry names the second writer |
+| `9a98292c` | 3.5: file-length records | ✅ Six new `oversized-file-*` records, all under `packages/*/docs/code-issues/`, which is the permitted exception |
+| `4429fb9f` | consent deferral | ✅ The thirteen files were deferred with the developer's consent (`2026-09-24-…-thirteen-over-budget-files.md`) |
+| `6e955c31` | narrowed backlog entry | ⚠ Narrowed and kept, and it names the developer as owner. **W1** below |
+| `6779f7fc` | V14 | ✅ Both flows use one `checkWholeSession`. **I2** below |
+| `bf54e645` | V12 CSP | ✅ No `unsafe-eval`, and no inline script is allowed. `'unsafe-inline'` appears only in `style-src-elem`. **I5** below |
+| `01cf79de` | 4: clean code | ✅ Behaviour is preserved. See the check below |
+| `3ba42bcc` | V12 record | ✅ Matches `tauri.conf.json` |
+
+**The step 4 refactors preserve behaviour.** Each refactor was checked against the code it replaced:
+
+- `real.rs` `post_for_json` sends the same URL (`{oauth_base_url}{path}`), the same `Accept:
+  application/json` header, and the same `.json(body)`. All three bodies keep the same keys.
+  `TOKEN_EXCHANGE_FAILURES`, `DEVICE_CODE_FAILURES` and `DEVICE_POLL_FAILURES` reproduce all nine
+  prior error strings byte for byte.
+- `public_client_refusal` reproduces both refusals. The Rust `\` line continuation strips the
+  leading whitespace, so each refusal reads exactly as before.
+- `SCOPES.replace(' ', "%20")` gives `read:user%20repo`.
+- `device_poll_outcome` is the old match moved unchanged.
+- `first_login_admission.rs` `is_this_desktops_window` is an **exhaustive match with no wildcard
+  arm**: `InProcess => true` and the other six transports `=> false`. The log target is `crate::AUTH_LOG_TARGET`,
+  which equals `"tddy_daemon::auth"`. The three `enrol` arms and their messages are unchanged.
+- `StubGitHubProvider::register_code_mappings` is token-for-token the deleted `register_stub_codes`
+  and the `run.rs` copy.
+- `run.rs` `redirect_uri`'s three-way `match` equals the old `unwrap_or_else` chain.
+  `auth_callback_on` keeps `trim_end_matches('/')`.
+- `live_users.rs` `lock_file_writes` has the same `expect` message.
+- `useAuth.ts`: `intervalMsOf` maps NaN and non-positive intervals to `null`, as `!(n > 0)` did.
+  `devicePollStep` keeps every state's outcome. The `default:` arm over the proto enum is the
+  pre-existing "unrecognised state" failure, not a fallback.
+
+**Fallback scan of the wrap's added production lines:** no fallback introduced. The only
+`unwrap_or*` are `stub-client-id`, `127.0.0.1` and `8080` in `run.rs`
+`build_auth_service_entry`. They moved verbatim and are already recorded as backlog candidates. The
+same holds for `unwrap_or_default` in `device_poll_outcome` (moved, error formatting only) and
+`..Default::default()` in `without_session` (renamed, prost message). No `??` was added to
+`tddy-web/src` (the two in `RedirectLoginAcceptance.cy.tsx` are display-only in a test probe).
+V14 **removed** the last `??` on the session (`res.user ?? null`).
+
+**Boundaries:** ✅ No `#keyring` 3/9 surface (`token_store.rs` and `GitHubTokenStore` untouched). No
+8/9 surface (no second-account path, and `os_user_for_github` has no default arm). No
+`packages/*/docs/` edit outside `code-issues/`.
+
+**TODO/FIXME:** ✅ The wrap added one, and it carries its reference
+(`first_login_enrolment.rs:84`). It removed one (`run.rs` `TODO(#keyring 2/9)`, V9).
+
+#### Findings
+
+| # | Severity | Where | Finding |
+|---|---|---|---|
+| W1 | 🟠 Warning | `docs/dev/todo/2026-09-18-desktop-install-configures-no-identity.md:13` | The narrowed entry tells the developer to render the `client_id` into **`packages/tddy-desktop/desktop.yaml.production`**. No such file exists: the template is repo-root `desktop.yaml.production` (the `github:` block is at `:90-92`). Fix the path when this entry is next touched (step 7). Not fixed here, because this run edits only the changeset |
+| I1 | ℹ Info | `tddy-web/cypress/component/DeviceLoginAcceptance.cy.tsx:61,452` | Since V14 the device message names the missing part (`… without a whole session (no user)`). The spec asserts only the common prefix through `contain.text`, so it would not catch the wrong part being named. `RedirectLoginAcceptance.cy.tsx:39-43` pins all three messages exactly |
+| I2 | ℹ Info | `useAuth.ts:122` vs `:343-349` | (c) holds: on a partial session neither flow calls `adoptSession`, so nothing is stored, and both name the missing part. The one asymmetry is pre-existing: the redirect `catch` also calls `storage.clear()`, which drops a session stored earlier, while the device path leaves storage untouched |
+| I3 | ℹ Info | *Restructuring*, step 3.5 table | Measured at `d1923dfe`, before step 4. Now: `auth.rs` 596 → **576** (still over 500 and deferred), `run.rs` 2,715 → 2,707, `real.rs` 424 → 463, `stub.rs` 182 → 206, `first_login_admission.rs` 113 → 126. No file newly crosses 500. The backlog entry gives the gate's range as `4e7157d2..9a98292c` and this changeset gives `..d1923dfe`: the same code, since `9a98292c` is docs-only |
+| I4 | ℹ Info | `tddy-coder/src/run.rs:1144` `standalone_auth_provider` | This keeps the pre-existing inference that non-empty `--github-stub-codes` means stub mode ("treat non-empty codes as stub mode"). It moved verbatim and is not introduced here. It is one of the recorded CLI-default backlog candidates |
+| I5 | ℹ Info | `tddy-desktop/src-tauri/tauri.conf.json` | `style-src 'self'` also governs `style-src-attr`, so a `style="…"` attribute written in markup or by `setAttribute` is blocked. `tddy-web/src` has none, and CSSOM `element.style` (React's `style` prop) is unaffected. Third-party use falls under V12's existing "not verified at runtime" item |
+| I6 | ℹ Info | this changeset | Factual fixes, listed below |
+
+**Factual fixes made to this changeset (no status or scope changed):**
+
+1. Scope → Testing: the stale "22/22 at `bba454da`, not re-run" replaced with the step 1/2/4 scoped runs, with step 6 and CI still pending.
+2. Stamping table: `tddy-coder/src/run.rs:1940` → `:1958`.
+3. Fallback table: `real.rs:197` → `:243`.
+4. Fallback table: `real.rs:409` → `:354`.
+5. Fallback table: `first_login_admission.rs:53,70,85,95` → `:64,74,113,121`, with the arms named in order.
+6. Fallback table: the `useAuth.ts:257` `res.user ?? null` row struck through, marked removed by `6779f7fc` (V14). It contradicted the code.
+7. Lock-poisoning refs: `real.rs:203` → `:279`; `live_users.rs:53,102,112,124` → `:53,62,117`.
+8. V1: `first_login_admission.rs:57-72` → `:98-108` (`is_this_desktops_window`).
+9. V5: `useAuth.ts:311,327` → `:91` `intervalMsOf`, read at `:115`, `:400`.
+10. V7: `DeviceLoginPanel.tsx:23` → `:24`.
+11. V11: `auth_service.rs:331` → `:351`.
+12. Acceptance (second login): `first_login_admission.rs:63-70` → `:66-75`.
+13. From @validate-changes: V2's "add a `docs/dev/todo/` entry at wrap if still open" noted as done in step 3.
+14. T1: "asserting the exact message" corrected to the prefix it asserts (I1).
+15. TODO → OAuth App live-API check annotated as deferred to the developer (V8, item 2 of the narrowed backlog entry).
+
+The 09ca3eb3 run's *Stack boundary* row, which says `run.rs:1217` `TODO(#keyring 2/9)` remains,
+is left as that run's dated record. The TODO is gone (V9).
+
+#### Risk table — current state at `3ba42bcc`
+
+- **V1** ✅ Resolved: transport-stamped metadata; the admission match is exhaustive with no wildcard
+- **V2** 🟠 Open, recorded: comment loss on first enrolment. The TODO references the backlog entry
+- **V3** ⏸ Deferred to the developer: M8, `desktop.yaml.production:90-92` unchanged
+- **V4** ✅ Resolved: `DeviceAttempt` is pruned and bounded
+- **V5** ✅ Resolved: `intervalMsOf` → `failed` on a non-positive interval
+- **V6** 🟡 Open, recorded: a cloned `DaemonConfig` shares `LiveUsers`
+- **V7** ℹ Open: `target="_blank"` in the Tauri webview. Confirm on the desktop
+- **V8** ℹ Open, deferred to the developer: the OAuth App live-API refresh-token check
+- **V9** ✅ Resolved (step 1)
+- **V10** ✅ Resolved where the metadata is in scope (step 1)
+- **V11** ℹ Open, recorded: the enrolment transport is the completing poll's, not the start's
+- **V12** 🟡 Implemented, **unverified at runtime**: needs a launched `custom-protocol` build
+- **V13** ✅ Resolved (step 1)
+- **V14** ✅ Resolved (`6779f7fc`)
+- **V15** ℹ Open, pre-existing: an unreachable `/api/config` → the standalone form
+- **V16** ✅ Resolved (step 1): the PRD carries both decisions, 11 of 12 ticked
+- **V17** ℹ Open, recorded: sync I/O under a `std::sync::Mutex`, once per deployment
+
+#### Readiness — every checkbox still unticked
+
+| Checkbox | State | Why |
+|---|---|---|
+| Scope → Implementation `[~]` | ⏸ Deferred | M8 is the developer's: "I'll configure and test production myself" |
+| Scope → Decisions answered `[~]` | ⏸ Deferred | The OAuth App is decided. The live-API check (V8) is the developer's production check |
+| Scope → Testing `[~]` | ⏳ Pending, not a gap | Waits on the step 6 scoped re-run and CI |
+| Scope → Package Documentation `[ ]` | ⏳ Step 7 | `/wrap-context-docs` |
+| Scope → Code Quality `[ ]` | ⏳ Orchestrator | The score is **C** (`build_auth_entries_admitting` 106, recorded; `startDeviceLogin` 73) |
+| M8 `[ ]` | ⏸ Deferred | The developer's, as above |
+| Acceptance → fresh `./install --desktop` `[ ]` | ⏸ Deferred | The developer's. It is kept in the narrowed backlog entry, item 2 |
+| TODO → M2–M8 `[~]` | ⏸ Deferred | M8 only |
+| TODO → OAuth App live-API `[~]` | ⏸ Deferred | V8, the developer's |
+| TODO → package docs (six packages) `[ ]` | ⏳ Step 7 | |
+| TODO → package docs for V1 (`tddy-rpc`, `tddy-stdio`) `[ ]` | ⏳ Step 7 | |
+| TODO → `/wrap-context-docs` `[ ]` | ⏳ Steps 7 / 7.5 | Keeps the narrowed `2026-09-18-desktop-install-configures-no-identity.md` (verdict: narrowed, kept; fix W1's path there). `missing-tests-real-exchange-code` is still **claimed by #509** and is reconciled at step 7.5 |
+
+**Gaps that block wrap:** none in code. W1 is a one-line path fix, owed at step 7.
+
+**Risk summary:** 0 Critical, 1 Warning, 6 Info.
+
 ## Acceptance Criteria
 
 - [x] A daemon configured with **`client_id` only** registers `auth.AuthService` and serves `StartDeviceLogin`
@@ -809,7 +946,7 @@ options, for the developer:
 - [x] The **first** login on an empty `users:` is enrolled against the running OS user and persisted
 - [x] A **second, different** login on an enrolled deployment is refused — no fallback
       (**decision, developer:** the login itself is minted and is **not** enrolled; every
-      token-gated RPC it calls is refused `permission_denied`, as before — `first_login_admission.rs:63-70`)
+      token-gated RPC it calls is refused `permission_denied`, as before — `first_login_admission.rs:66-75`)
 - [x] `os_user_for_github` is unchanged and has no default arm
 - [x] `client_id` + `client_secret` still serves the redirect flow unchanged
 - [x] `RealGitHubProvider` takes a base URL; `exchange_code`'s six error returns are covered
@@ -827,7 +964,7 @@ options, for the developer:
 - [x] Publish the draft-PR contract — wave 2
 - [x] M1 — the seam (do this first)
 - [~] M2–M8 — M2–M7 done; M8 deferred to the developer — 'I'll configure and test production myself'
-- [~] Answer the OAuth App / GitHub App question against the live API — **OAuth App** decided; live-API check still owed
+- [~] Answer the OAuth App / GitHub App question against the live API — **OAuth App** decided; live-API check ⏸ deferred to the developer's production check (V8; item 2 of the narrowed [`2026-09-18-desktop-install-configures-no-identity.md`](../todo/2026-09-18-desktop-install-configures-no-identity.md)) — 'I'll configure and test production myself'
 - [x] Decide and record the client-id placement — rendered into `desktop.yaml.production`
 - [ ] Package documentation for the six affected packages
 - [ ] Package documentation for V1's API change, at wrap: `tddy-rpc` (the transport stamp and who

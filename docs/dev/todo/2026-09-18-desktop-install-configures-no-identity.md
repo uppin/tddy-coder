@@ -10,7 +10,7 @@ Features [tddy-desktop-tauri.md](../../ft/desktop/tddy-desktop-tauri.md),
 
 ## What remains
 
-1. **Render the OAuth App's public `client_id` into `packages/tddy-desktop/desktop.yaml.production`**
+1. **Render the OAuth App's public `client_id` into `desktop.yaml.production` (repo root)**
    (`github: { client_id: … }`, **no** `client_secret`), and rewrite the template's barrier notes
    (`desktop.yaml.production`, the `github:` / `users:` comments), which still tell an operator to add
    a `client_secret` and a `users:` row.
