@@ -17,10 +17,14 @@ use std::ops::RangeInclusive;
 
 use harness::{
     a_crate_whose_impl_member_calls_a_private_one_the_seam_moves,
+    a_crate_whose_impl_member_calls_an_associated_fn_the_seam_moves,
     a_crate_whose_impl_member_calls_one_the_seam_moves,
     a_crate_whose_moving_impl_member_calls_one_left_behind,
+    a_crate_whose_tests_call_an_associated_fn_the_seam_moves_through_an_alias,
+    a_crate_whose_tests_call_an_associated_fn_the_seam_moves_through_the_type,
     a_crate_whose_trait_impl_member_calls_a_sibling, an_extract_module_of, assert_compiles,
-    performing_once_settled, refusal_once_settled_from, the_module_named, ORIGIN_LIB,
+    assert_compiles_with_its_tests, performing_once_settled, refusal_once_settled_from,
+    the_module_named, ORIGIN_LIB,
 };
 
 /// `doubled`, in each of the inherent-`impl` fixtures.
@@ -87,6 +91,66 @@ async fn moves_a_method_that_calls_one_left_behind() {
         "`doubled` did not move into the new module:\n{module}"
     );
     assert_compiles(&workspace);
+}
+
+/// `reading` stays behind and calls `Self::doubled(…)`, an associated function that moves. The
+/// path is reached through the type, and `doubled` is still an associated function of `Gauge`.
+/// That is plan 02's `Self::build_claude_argv(…)` in `cli_session_manager.rs`.
+#[tokio::test(flavor = "multi_thread")]
+async fn moves_an_associated_function_a_member_left_behind_calls_through_self() {
+    // Given
+    let workspace = a_crate_whose_impl_member_calls_an_associated_fn_the_seam_moves();
+    let seam = an_extract_module_of(&workspace, ORIGIN_LIB, THE_SEAM_TAKING_DOUBLED, "doubling");
+
+    // When
+    performing_once_settled(&workspace, seam).await;
+
+    // Then
+    let lib = workspace.read(ORIGIN_LIB);
+    assert!(
+        lib.contains("        Self::doubled(self.level) + 1"),
+        "the call left behind is no longer `Self::doubled`:\n{lib}"
+    );
+    assert_compiles(&workspace);
+}
+
+/// The file's tests call the moved associated function through the type's name,
+/// `Gauge::doubled(2)`, which resolves wherever its `impl` lives.
+#[tokio::test(flavor = "multi_thread")]
+async fn moves_an_associated_function_the_file_s_tests_call_through_the_type() {
+    // Given
+    let workspace = a_crate_whose_tests_call_an_associated_fn_the_seam_moves_through_the_type();
+    let seam = an_extract_module_of(&workspace, ORIGIN_LIB, THE_SEAM_TAKING_DOUBLED, "doubling");
+
+    // When
+    performing_once_settled(&workspace, seam).await;
+
+    // Then
+    let lib = workspace.read(ORIGIN_LIB);
+    assert!(
+        lib.contains("        let doubled = Gauge::doubled(2);"),
+        "the test's call is no longer `Gauge::doubled`:\n{lib}"
+    );
+    assert_compiles_with_its_tests(&workspace);
+}
+
+/// The same through a type alias, `Meter::doubled(2)`: `ClaudeCliSessionManager::build_claude_argv`.
+#[tokio::test(flavor = "multi_thread")]
+async fn moves_an_associated_function_the_file_s_tests_call_through_a_type_alias() {
+    // Given
+    let workspace = a_crate_whose_tests_call_an_associated_fn_the_seam_moves_through_an_alias();
+    let seam = an_extract_module_of(&workspace, ORIGIN_LIB, THE_SEAM_TAKING_DOUBLED, "doubling");
+
+    // When
+    performing_once_settled(&workspace, seam).await;
+
+    // Then
+    let lib = workspace.read(ORIGIN_LIB);
+    assert!(
+        lib.contains("        let doubled = Meter::doubled(2);"),
+        "the test's call is no longer `Meter::doubled`:\n{lib}"
+    );
+    assert_compiles_with_its_tests(&workspace);
 }
 
 /// Half of a trait `impl` cannot move. The new module would hold a second `impl Meter for Gauge`,

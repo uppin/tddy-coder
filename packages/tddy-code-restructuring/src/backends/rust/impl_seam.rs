@@ -75,17 +75,25 @@ fn is_inherent_impl(holder: &str) -> bool {
             .any(|token| token == "for")
 }
 
-/// The assist's output with its rewrite of a moved method's calls undone.
+/// The assist's output with its rewrite of a moved member's calls undone.
 ///
 /// `extract_module` prefixes every reference to an item it moves with the new module's path, and it
-/// does that to a method call too: `self.doubled()` left behind comes back as
-/// `self.modname::doubled()`. That is not a path and not Rust, the rename of `modname` cannot reach
-/// it, and the call was right as it stood. A member of an inherent `impl` moves as a member of an
-/// `impl` of the same type, so the receiver still finds it wherever the call is.
+/// does that to a call of an `impl` member too, by inserting `modname::` straight before the name.
+/// Three forms come back, none of them Rust, and the rename of `modname` reaches none:
 ///
-/// Only a `.` directly before the placeholder is undone, and only for the inherent members the seam
-/// moves. A path through the new module that does not follow a `.` is the assist's to write, and is
-/// left for the rename.
+/// - a method call, `self.doubled()`, as `self.modname::doubled()`;
+/// - an associated-function call through `Self`, as `Self::modname::doubled(…)`;
+/// - one through the type's name or an alias of it, from anywhere in the file (its `mod tests`
+///   included), as `Gauge::modname::doubled(…)`.
+///
+/// Every one of those calls was right as it stood. A member of an inherent `impl` moves as a
+/// member of an `impl` of the same type, so the receiver, `Self` or the type still finds it
+/// wherever the call is — and a module path cannot name an associated function at all.
+///
+/// Undone only for the inherent members the seam moves, and only where the placeholder follows a
+/// `.` or a qualifier a type can be: an identifier other than `super`, `self` and `crate`, which
+/// are how a nested module reaches a moved *free* item and are the rename's to finish. A bare
+/// `modname::doubled` is left alone too: nothing says which type it was called through.
 pub(super) fn with_method_calls_restored(
     text: &str,
     placeholder: &str,
@@ -99,7 +107,7 @@ pub(super) fn with_method_calls_restored(
             .last()
             .is_some_and(|holder| is_inherent_impl(holder))
     }) {
-        let rewritten = format!(".{placeholder}::{}", member.name);
+        let rewritten = format!("{placeholder}::{}", member.name);
         let mut from = 0;
         while let Some(found) = restored[from..]
             .find(&rewritten)
@@ -107,14 +115,33 @@ pub(super) fn with_method_calls_restored(
         {
             let end = found + rewritten.len();
             let whole = !restored[end..].starts_with(is_identifier_char);
-            if whole {
-                restored.replace_range(found + 1..end - member.name.len(), "");
+            if whole && reached_through_the_type(&restored[..found]) {
+                restored.replace_range(found..found + placeholder.len() + "::".len(), "");
             }
             from = found + 1;
         }
     }
 
     restored
+}
+
+/// Whether the text before a placeholder ends in something only a type's member follows: a method
+/// call's `.`, or a `Qualifier::` whose qualifier is an identifier that is not a module keyword.
+fn reached_through_the_type(before: &str) -> bool {
+    if before.ends_with('.') {
+        return true;
+    }
+    let Some(qualified) = before.strip_suffix("::") else {
+        return false;
+    };
+    let qualifier = qualified
+        .rsplit(|character: char| !is_identifier_char(character))
+        .next()
+        .unwrap_or("");
+
+    !qualifier.is_empty()
+        && !qualifier.starts_with(|character: char| character.is_ascii_digit())
+        && !matches!(qualifier, "super" | "self" | "crate")
 }
 
 #[cfg(test)]
@@ -169,6 +196,75 @@ mod tests {
     fn leaves_a_longer_name_the_moved_one_is_only_a_prefix_of() {
         // Given
         let produced = "        self.modname::doubled_twice()\n";
+
+        // When
+        let restored = with_method_calls_restored(
+            produced,
+            "modname",
+            &[a_member_of("impl Gauge", "doubled")],
+        );
+
+        // Then
+        assert_eq!(restored, produced);
+    }
+
+    #[test]
+    fn puts_back_an_associated_function_call_the_assist_wrote_through_the_module() {
+        // Given
+        let produced = "        Self::modname::doubled(self.level) + 1\n";
+
+        // When
+        let restored = with_method_calls_restored(
+            produced,
+            "modname",
+            &[a_member_of("impl Gauge", "doubled")],
+        );
+
+        // Then
+        assert_eq!(restored, "        Self::doubled(self.level) + 1\n");
+    }
+
+    #[test]
+    fn puts_back_an_associated_function_call_the_assist_wrote_through_the_type() {
+        // Given
+        let produced = "        let argv = ClaudeCliSessionManager::modname::build_claude_argv(\n";
+
+        // When
+        let restored = with_method_calls_restored(
+            produced,
+            "modname",
+            &[a_member_of("impl CliSessionManager", "build_claude_argv")],
+        );
+
+        // Then
+        assert_eq!(
+            restored,
+            "        let argv = ClaudeCliSessionManager::build_claude_argv(\n"
+        );
+    }
+
+    /// `super::modname::doubled` is how a nested module reaches a moved *free* function, and the
+    /// rename is what finishes it. It is no qualifier an associated function is called through.
+    #[test]
+    fn leaves_a_path_through_super_alone() {
+        // Given
+        let produced = "        super::modname::doubled(level)\n";
+
+        // When
+        let restored = with_method_calls_restored(
+            produced,
+            "modname",
+            &[a_member_of("impl Gauge", "doubled")],
+        );
+
+        // Then
+        assert_eq!(restored, produced);
+    }
+
+    #[test]
+    fn leaves_a_path_from_the_crate_root_alone() {
+        // Given
+        let produced = "        crate::modname::doubled(level)\n";
 
         // When
         let restored = with_method_calls_restored(

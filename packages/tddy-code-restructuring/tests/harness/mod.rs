@@ -153,8 +153,19 @@ impl AFixtureWorkspace {
     /// four small files, and it is the only thing that can tell an edit that looks right from one
     /// that resolves.
     pub fn cargo_check(&self) -> std::result::Result<(), String> {
+        self.cargo_check_with(&[])
+    }
+
+    /// [`Self::cargo_check`], over test targets too: a `#[cfg(test)]` module is not compiled
+    /// without them.
+    pub fn cargo_check_all_targets(&self) -> std::result::Result<(), String> {
+        self.cargo_check_with(&["--all-targets"])
+    }
+
+    fn cargo_check_with(&self, extra: &[&str]) -> std::result::Result<(), String> {
         let output = Command::new("cargo")
             .args(["check", "--workspace", "--quiet"])
+            .args(extra)
             .current_dir(&self.root)
             // Its own target directory, so a check here never contends with the build running it.
             .env("CARGO_TARGET_DIR", self.root.join("target"))
@@ -663,6 +674,14 @@ pub fn a_rename_of(symbol: &str, to: &str) -> RefactorOp {
 pub fn assert_compiles(fixture: &AFixtureWorkspace) {
     if let Err(said) = fixture.cargo_check() {
         panic!("the workspace no longer compiles after the operation:\n{said}");
+    }
+}
+
+/// [`assert_compiles`], over test targets too, for a fixture whose `#[cfg(test)]` module a seam
+/// touches.
+pub fn assert_compiles_with_its_tests(fixture: &AFixtureWorkspace) {
+    if let Err(said) = fixture.cargo_check_all_targets() {
+        panic!("the workspace and its tests no longer compile after the operation:\n{said}");
     }
 }
 
@@ -1378,4 +1397,109 @@ fn a_crate_whose_host_module_reads(host: &[&str]) -> AFixtureWorkspace {
             ]),
         )
         .writing(HOST_MODULE, &source(host))
+}
+
+/// A type whose `impl` a seam cuts in half, where a member left behind calls an **associated
+/// function** that moves, as `Self::doubled(…)`.
+///
+/// The shape of `cli_session_manager.rs`, whose `build_claude_argv` / `build_cursor_argv` take no
+/// `self` and are called as `Self::build_claude_argv(…)`. The seam at lines 12–14 takes `doubled`.
+/// An associated function is reached through its type wherever its `impl` is, so the call resolves
+/// from either side of the cut.
+pub fn a_crate_whose_impl_member_calls_an_associated_fn_the_seam_moves() -> AFixtureWorkspace {
+    a_crate_whose_gauge_reads_then(
+        &[
+            "    pub fn reading(&self) -> u32 {",
+            "        Self::doubled(self.level) + 1",
+            "    }",
+            "",
+            "    pub fn doubled(level: u32) -> u32 {",
+            "        level * 2",
+            "    }",
+        ],
+        &[],
+    )
+}
+
+/// A type whose associated function the seam at lines 12–14 moves, called **through the type's
+/// name** from the file's own `#[cfg(test)] mod tests`: `Gauge::doubled(2)`.
+///
+/// `cli_session_manager.rs`'s tests call `ClaudeCliSessionManager::build_claude_argv(…)` this way.
+pub fn a_crate_whose_tests_call_an_associated_fn_the_seam_moves_through_the_type(
+) -> AFixtureWorkspace {
+    a_crate_whose_gauge_reads_then(
+        &[
+            "    pub fn reading(&self) -> u32 {",
+            "        self.level + 1",
+            "    }",
+            "",
+            "    pub fn doubled(level: u32) -> u32 {",
+            "        level * 2",
+            "    }",
+        ],
+        &[
+            "",
+            "#[cfg(test)]",
+            "mod tests {",
+            "    use super::*;",
+            "",
+            "    #[test]",
+            "    fn doubles_the_level() {",
+            "        let doubled = Gauge::doubled(2);",
+            "        assert_eq!(doubled, 4);",
+            "    }",
+            "}",
+        ],
+    )
+}
+
+/// The same, called through a **type alias** of the type: `Meter::doubled(2)`, where
+/// `pub type Meter = Gauge;`. `ClaudeCliSessionManager` is such an alias.
+pub fn a_crate_whose_tests_call_an_associated_fn_the_seam_moves_through_an_alias(
+) -> AFixtureWorkspace {
+    a_crate_whose_gauge_reads_then(
+        &[
+            "    pub fn reading(&self) -> u32 {",
+            "        self.level + 1",
+            "    }",
+            "",
+            "    pub fn doubled(level: u32) -> u32 {",
+            "        level * 2",
+            "    }",
+        ],
+        &[
+            "",
+            "pub type Meter = Gauge;",
+            "",
+            "#[cfg(test)]",
+            "mod tests {",
+            "    use super::*;",
+            "",
+            "    #[test]",
+            "    fn doubles_the_level() {",
+            "        let doubled = Meter::doubled(2);",
+            "        assert_eq!(doubled, 4);",
+            "    }",
+            "}",
+        ],
+    )
+}
+
+fn a_crate_whose_gauge_reads_then(members: &[&str], after: &[&str]) -> AFixtureWorkspace {
+    let mut lines: Vec<&str> = vec![
+        "//! A type whose `impl` a seam cuts in half.",
+        "",
+        "pub struct Gauge {",
+        "    level: u32,",
+        "}",
+        "",
+        "impl Gauge {",
+    ];
+    lines.extend_from_slice(members);
+    lines.push("}");
+    lines.extend_from_slice(after);
+
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(ORIGIN_LIB, &source(&lines))
 }
