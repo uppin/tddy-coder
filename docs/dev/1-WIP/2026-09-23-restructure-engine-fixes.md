@@ -29,6 +29,8 @@ Related, already on master:
 - **`tddy-code-restructuring`**: [README.md](../../../packages/tddy-code-restructuring/README.md).
   The import pass (`backends/rust.rs`, `next_import`, `choose_import` and the alias path), the
   extract-method signature handling, and the refusal check for `impl`-cutting seams.
+  Gaps A–C (2026-09-24): `backends/rust/imports.rs`, `backends/rust/impl_seam.rs` and the new
+  `backends/rust/nested_modules.rs`; `rust.rs` only wires the last in and rewords one refusal.
 - **`tddy-tools`**: no change. It renders the new refusals through the library's existing error
   path.
 - **`tddy-lsp`** (added 2026-09-24): `LspClient::server_status`, the latest `experimental/serverStatus`
@@ -157,6 +159,9 @@ it gets the fixed engine in its own tree.
 - [x] E4: early-return refusal for `extract_method`, static tier (developer-approved 2026-09-24)
 - [x] Compile gate on `apply`, with a baseline check, on the CLI and daemon paths (developer-approved 2026-09-24)
 - [x] Plan 10 re-checked on the real repo with `check --deep`: ops 1–5 refused by E4, op 0 clean (see Implementation)
+- [x] Gap A (2026-09-24): a relative `use` the parent wrote is rebased for the child module (`super::X` → `super::super::X`, `self::X` → `super::X`) in both reconstructions
+- [x] Gap B (2026-09-24): the assist's `Self::modname::f` / `Type::modname::f` rewrite of a moved associated function's call is undone
+- [x] Gap C (2026-09-24): a call inside a module the file already had, beside that module's own import of the moved item, is put back; the refusal's module wording names that case
 - [ ] Re-run the destructure node's refused plans with `check --deep` and record the results — on #524
 
 ## Testing plan
@@ -331,6 +336,59 @@ production lines (recorded in its code-issue).
   or the other restructure todos is closed as a side effect. D8's alias reconstruction is kept, and
   is now verified. The D8 guard test (`imports_the_alias_the_moved_code_names_exactly_once`) passes.
 
+### Three more gaps, from running #524's plans against this engine (2026-09-24)
+
+Each was reproduced in a live fixture before the fix; the assist's output quoted is what the
+fixture's residual-placeholder refusal showed, and matches the real plan's refusal line for line.
+
+| Module | Holds |
+|---|---|
+| `backends/rust/imports.rs` | `rebased_for_child` (Gap A) |
+| `backends/rust/impl_seam.rs` | `with_method_calls_restored` widened, `reached_through_the_type` (Gap B) |
+| `backends/rust/nested_modules.rs` (new) | `with_nested_references_restored` (Gap C) |
+
+- **Gap A, a relative `use` one level off** (blocked plan 05a). The alias and parent-binding
+  reconstructions wrote the parent's declaration verbatim into the module the seam becomes, which
+  is the parent's *child*. *Fix:* `rebased_for_child` rewrites `super::X` as `super::super::X` and
+  `self::X` as `super::X` before the trial; `crate::`, `::` and extern-crate paths are unchanged.
+  Grouped trees are read one flat path per member, so a group member is rebased the same way.
+  *Reproduced:* the alias form (`use super::Failure as HostFailure;` in `service/host.rs`) was
+  refused exactly as 05a was ("left 3 unresolved occurrence(s) of it, where there were 3"). The
+  plain `use super::Failure;` form did **not** reproduce: in the fixture rust-analyzer offers
+  `super::super::Failure` itself, so the pass never reaches the parent-binding fallback. Its test is
+  a guard. A `self::inner::rules` module binding did not reproduce either: the assist wrote
+  `use crate::service::host::inner::rules;` itself. **Not handled:** a bare path through an item the
+  parent declares (`sibling::X`, 2018 uniform paths) cannot be told from an extern crate by reading;
+  it is left as written, and the verification refuses it by name.
+- **Gap B, associated-function path calls** (blocked plan 02 op 3). *What the assist writes:* it
+  inserts `modname::` straight before the moved member's name in every form of call:
+  `Self::modname::doubled(self.level)` from a member left behind, and `Gauge::modname::doubled(2)` /
+  `Meter::modname::doubled(2)` (type alias) from the file's `mod tests`. On the real file:
+  `Self::modname::build_cursor_argv(…)`, `Self::modname::build_claude_argv(`, and
+  `ClaudeCliSessionManager::modname::build_claude_argv(` twice. *Fix:* `with_method_calls_restored`
+  removes the placeholder wherever it follows a `.` or an identifier qualifier other than `super`,
+  `self` and `crate` (those reach a moved *free* item and are the rename's). An associated function
+  is reached through its type wherever its `impl` lives, and a module path cannot name one. A bare
+  `modname::f` for an associated function is left alone: nothing says which type it was called
+  through. *Found in red:* the first fixtures called through the type inside `assert_eq!(…)`, and
+  the assist does **not** rewrite a reference inside a macro call; they passed before the fix. The
+  fixtures bind the call with a `let` now, as the real tests do.
+- **Gap C, a reference inside the file's existing module** (blocked plan 04 op 0). *What the assist
+  writes:* in `mod tests { use super::base; … let read = base(); }` it repoints the import to
+  `use super::modname::base;` **and** rewrites the call to `modname::base()`. `modname` is a child of
+  the file's module, not of `tests`, so the call names nothing and the rename cannot reach it. On the
+  real file it was `modname::split_claude_extra_args(session_dir, "/usr/bin/tddy-tools", &[])` inside
+  `mod withdrawal_contract_tests`. With `use super::*;` instead, the rewritten call resolves through
+  the same glob and the rename finishes it (a guard test). *Fix:* `with_nested_references_restored`
+  removes the placeholder from a path it starts, in a module other than the placeholder's whose own
+  `use` declarations bind the moved name. The assist rewrites only references to what it moved, so
+  that binding is the one the call resolved through. The module blocks are read lexically (brace
+  depth); a brace in a string literal could mislead it, and the compile gate on `apply` catches what
+  that leaves. *Refusal:* the old module advice ("extract a definition before the items that
+  reference it") was wrong for a module the file already had, and the two cannot be told apart
+  lexically. The advice now names both: reorder for an already-extracted module; for one the file
+  had, reach the item through `use super::*;` or cut the seam elsewhere.
+
 ## Decisions & trade-offs
 
 - **Fix the engine rather than hand-split.** The developer's decision (2026-09-23).
@@ -347,6 +405,13 @@ production lines (recorded in its code-issue).
   targeting a loop outside the range are the same hazard and are not refused.
 - (2026-09-24) `tddy-index-daemon`'s `Warm` reports `ready` for a degraded root; only the first
   operation refuses. `GraphLoad` could carry the health, so `Warm` says so too.
+- (2026-09-24, gaps A–C) Two more lexical repairs of the assist's output
+  (`with_method_calls_restored`, `with_nested_references_restored`) now sit between the assist and
+  the rename, each with its own scanner. A generic qualifier (`Foo::<T>::modname::f`) is not undone
+  and is still refused. If a free item and an inherent member with the same name both move, the
+  type-qualifier rule could strip a legitimate `file_module::modname::f`; not seen, not guarded.
+- (2026-09-24, gap A) The parent-binding reconstruction's `super::` case was not reproducible in a
+  fixture (rust-analyzer offers the import itself there); only the alias path is proven live.
 - (2026-09-24) The compile gate adds a `cargo check --all-targets` before and after every writing
   apply. On a warm target directory that is incremental, but on a cold one it is the price of a
   check. No opt-out exists, by direction. If one is ever wanted, it needs the developer's consent.
@@ -372,6 +437,21 @@ production lines (recorded in its code-issue).
   (`nested_module_move_acceptance`, `cluster_move_acceptance`, `facade_cycle_acceptance`, …).
 
 ## Validation results
+
+**2026-09-24, after gaps A–C.** Scoped to `tddy-code-restructuring`; whole-workspace health is CI's.
+
+- `./test -p tddy-code-restructuring`: every binary green. Lib 389, `import_pass_acceptance` 8,
+  `impl_seam_acceptance` 7, `test_module_reference_acceptance` 2 (new), and every other suite in the
+  package.
+- `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`: clean. `cargo fmt --check`:
+  clean.
+- **Real plans, `check --deep` against the index daemon rebuilt from this tree** (restarted, cold
+  then warm, this branch's `tddy-session-lifecycle`): `05a-spawn-split-agent-teardown` **no
+  findings**; `04-split-session` (2 ops) **no findings**; `02-cli-session-manager-dir` (9 ops) **no
+  findings**. Before the fixes, a daemon built with only diagnostics added reported 04 op 0 and 02
+  op 3 refused exactly as #524 saw them. **05a was already clean on that build**, before Gap A's fix:
+  its original refusal did not recur on a freshly started daemon, so its real-repo trigger is not
+  confirmed (see Gap A).
 
 **2026-09-24, after the three guards.** Scoped to the packages touched; whole-workspace health is CI's.
 
