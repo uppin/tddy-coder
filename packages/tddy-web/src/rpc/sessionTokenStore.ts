@@ -138,9 +138,13 @@ export function createSessionTokenStore(deps: SessionTokenStoreDeps): SessionTok
     onRefreshingChange?.(true);
     try {
       const res = await authClient.refreshSession({ refreshToken, vaultUnlockKey });
-      // The presented unlock key opens nothing once the daemon has rotated it, so the returned one
-      // always replaces it — including an empty one, when the daemon could not reopen the vault.
-      storage.set(res.sessionToken, res.refreshToken, res.vaultUnlockKey);
+      // The presented unlock key opens nothing once the daemon has rotated it, so a rotated one
+      // replaces it — and so does an empty one, which the daemon returns only for a key that can
+      // never open the vault again. The daemon hands the presented key back unrotated when it
+      // could not read the vault; that says nothing new, so whatever is stored now is kept — it
+      // may be newer, stored meanwhile by another tab's refresh.
+      const keptKey = res.vaultUnlockKey === vaultUnlockKey && vaultUnlockKey !== "" ? (storage.getVaultUnlockKey() ?? "") : res.vaultUnlockKey;
+      storage.set(res.sessionToken, res.refreshToken, keptKey);
       onAccessTokenChange?.(res.sessionToken);
       onVaultStateChange?.(res.vaultState);
       return res.sessionToken;

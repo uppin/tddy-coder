@@ -351,6 +351,32 @@ describe("the vault unlock key a session lineage holds", () => {
     expect(storage.getVaultUnlockKey()).toBe(null);
   });
 
+  it("stays as it is when a refresh hands back the very key it presented", async () => {
+    // Given — a daemon that could not read its vault, so it hands the presented key back unrotated,
+    // while another tab has meanwhile stored the key its own refresh was rotated to
+    const storage = anInMemoryStorage(EXPIRED_ACCESS, VALID_REFRESH, PRESENTED_UNLOCK_KEY);
+    const backend = anInMemoryRpcBackend().implement(AuthService, {
+      refreshSession: async (req: { vaultUnlockKey?: string }) => {
+        storage.set(storage.getAccess() ?? "", storage.getRefresh() ?? "", ROTATED_UNLOCK_KEY);
+        return {
+          sessionToken: REFRESHED_ACCESS,
+          refreshToken: SLID_REFRESH,
+          vaultUnlockKey: req.vaultUnlockKey ?? "",
+          vaultState: VaultState.LOCKED,
+          user: undefined,
+        };
+      },
+    });
+    const { store } = aStore({ storage, backend });
+
+    // When — the token is refreshed
+    await store.ensureFreshAccessToken();
+
+    // Then — the stored key is not overwritten with the one this refresh presented: that one was
+    // not rotated, and the key already stored is the newer of the two
+    expect(storage.getVaultUnlockKey()).toBe(ROTATED_UNLOCK_KEY);
+  });
+
   it("is removed when a refresh returns an empty one", async () => {
     // Given — a lineage holding a key the daemon can no longer open its slot with
     const storage = anInMemoryStorage(EXPIRED_ACCESS, VALID_REFRESH, "6f70.slot.long-gone");

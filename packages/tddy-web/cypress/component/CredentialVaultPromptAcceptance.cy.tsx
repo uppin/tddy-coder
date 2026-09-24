@@ -78,6 +78,38 @@ function expectThePageToKnowTheVaultIs(vaultState: VaultState) {
   byTestId(TEST_IDS.authProbeStatus).should("have.text", `vault:${VaultState[vaultState]}`);
 }
 
+/**
+ * The page behind the prompt, standing in for the rest of the app: a control that counts its own
+ * clicks. Cypress refuses to click an element another one covers, so a click that lands proves
+ * the prompt no longer stands in the way.
+ */
+function TheRestOfThePage() {
+  const [clicks, setClicks] = React.useState(0);
+  return (
+    <button type="button" data-testid={TEST_IDS.credentialVaultBystander} onClick={() => setClicks((n) => n + 1)}>
+      {`clicked ${clicks}`}
+    </button>
+  );
+}
+
+function useTheRestOfThePage() {
+  byTestId(TEST_IDS.credentialVaultBystander).click();
+}
+
+function expectTheRestOfThePageToHaveResponded() {
+  byTestId(TEST_IDS.credentialVaultBystander).should("have.text", "clicked 1");
+}
+
+/** Fails if any key or value in `localStorage` or `sessionStorage` holds `secret`. */
+function expectNoStorageToHold(secret: string) {
+  cy.window().should((win) => {
+    const stored = [win.localStorage, win.sessionStorage]
+      .flatMap((storage) => Object.keys(storage).map((key) => `${key}=${storage.getItem(key)}`))
+      .join("\n");
+    expect(stored.includes(secret), `browser storage holding the passphrase:\n${stored}`).to.equal(false);
+  });
+}
+
 /** A signed-in operator — a stored session, no unlock key yet — looking at the prompt. */
 function givenASignedInOperatorOn(backend: InMemoryRpcBackend) {
   cy.clearLocalStorage();
@@ -89,6 +121,7 @@ function givenASignedInOperatorOn(backend: InMemoryRpcBackend) {
     <AuthProvider>
       <CredentialVaultPrompt />
       <VaultStateProbe />
+      <TheRestOfThePage />
     </AuthProvider>,
     backend,
   );
@@ -256,5 +289,43 @@ describe("Credential vault prompt — nothing to unlock", () => {
     // Then
     expectThePageToKnowTheVaultIs(VaultState.NONE);
     credentialVaultPromptPage.expectNoPrompt();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Declining, and what the page keeps
+// ---------------------------------------------------------------------------
+
+describe("Credential vault prompt — not now", () => {
+  it("hides the prompt and leaves the rest of the page usable", () => {
+    // Given
+    givenASignedInOperatorOn(aDaemonWhoseVaultIs(VaultState.LOCKED));
+    credentialVaultPromptPage.expectAskingToUnlock();
+
+    // When
+    credentialVaultPromptPage.dismiss();
+    useTheRestOfThePage();
+
+    // Then
+    credentialVaultPromptPage.expectNoPrompt();
+    expectTheRestOfThePageToHaveResponded();
+  });
+
+  it("never puts a passphrase in the browser's storage, refused or accepted", () => {
+    // Given
+    givenASignedInOperatorOn(aDaemonWhoseVaultIs(VaultState.LOCKED));
+
+    // When — a wrong passphrase is refused, and the right one then unlocks the vault
+    credentialVaultPromptPage.typePassphrase(A_WRONG_PASSPHRASE);
+    credentialVaultPromptPage.submit();
+    credentialVaultPromptPage.expectRefusalSaying("locked");
+    credentialVaultPromptPage.typePassphrase(THE_PASSPHRASE);
+    credentialVaultPromptPage.submit();
+    expectThePageToKnowTheVaultIs(VaultState.OPEN);
+
+    // Then — the unlock key is kept, and neither passphrase is
+    expectStoredUnlockKey(THE_UNLOCK_KEY);
+    expectNoStorageToHold(A_WRONG_PASSPHRASE);
+    expectNoStorageToHold(THE_PASSPHRASE);
   });
 });

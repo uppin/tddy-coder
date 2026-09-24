@@ -42,6 +42,10 @@ export const credentialVaultPromptPage = {
     byTestId(TEST_IDS.credentialVaultError).should("be.visible").and("contain.text", text);
   },
 
+  dismiss() {
+    byTestId(TEST_IDS.credentialVaultDismiss).click();
+  },
+
   chooseForgotPassphrase() {
     byTestId(TEST_IDS.credentialVaultForgot).click();
   },

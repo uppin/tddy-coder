@@ -64,6 +64,10 @@ export const TEST_IDS = {
   credentialVaultForgot: "credential-vault-forgot",
   /** Credential vault prompt: the warning a reset shows before it is confirmed. */
   credentialVaultResetWarning: "credential-vault-reset-warning",
+  /** Credential vault prompt: "Not now" — hides the prompt until the vault's state next changes. */
+  credentialVaultDismiss: "credential-vault-dismiss",
+  /** Harness: a control of the page behind the credential vault prompt, to prove it is usable. */
+  credentialVaultBystander: "credential-vault-bystander",
 
   // App / Connection
   livekitUrl: "livekit-url",

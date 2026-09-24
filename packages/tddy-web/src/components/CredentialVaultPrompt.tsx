@@ -2,10 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { VaultState } from "../gen/auth_pb";
 import { useAuthContext } from "../hooks/authProvider";
+import { isAcceptableNewPassphrase, MIN_PASSPHRASE_CHARS } from "../lib/vaultPassphrase";
 import { inputClassName, labelClassName } from "./connection/standaloneFormStyles";
-
-/** The daemon refuses a shorter one (`tddy_credentials::MIN_PASSPHRASE_CHARS`); saying so first. */
-const MIN_PASSPHRASE_CHARS = 8;
 
 type Mode = "unlock" | "create" | "reset";
 
@@ -44,7 +42,7 @@ export function CredentialVaultPrompt() {
   const mode: Mode = vaultState === VaultState.UNINITIALIZED ? "create" : resetting ? "reset" : "unlock";
   const choosing = mode !== "unlock";
   const ready = choosing
-    ? passphrase.length >= MIN_PASSPHRASE_CHARS && passphrase === confirmation
+    ? isAcceptableNewPassphrase(passphrase) && passphrase === confirmation
     : passphrase.length > 0;
 
   const submit = async (event: FormEvent) => {
@@ -139,7 +137,7 @@ export function CredentialVaultPrompt() {
               Back
             </Button>
           ) : null}
-          <Button type="button" variant="ghost" onClick={() => setDismissed(true)}>
+          <Button type="button" variant="ghost" data-testid="credential-vault-dismiss" onClick={() => setDismissed(true)}>
             Not now
           </Button>
         </div>
