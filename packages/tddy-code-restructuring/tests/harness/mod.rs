@@ -966,6 +966,116 @@ pub fn a_crate_whose_function_returns_early() -> AFixtureWorkspace {
         )
 }
 
+/// The test binary the compile-gate fixtures move, from `origin` to `destination`.
+pub const THE_TEST_BINARY: &str = "crates/origin/tests/golden.rs";
+
+/// A test binary that reads its expected output from a file **beside it**, with `include_str!`.
+///
+/// `move_test_binary_to_crate` accepts it, moves the file and leaves `golden/expected.txt` where it
+/// was, so the moved binary no longer compiles — and nothing but a compiler can say so. Only a
+/// `cargo check` that includes test targets builds it at all.
+pub fn a_workspace_whose_test_binary_reads_a_file_beside_it() -> AFixtureWorkspace {
+    a_workspace_with_a_test_binary(&[
+        "//! Reads its expected output from a file beside it.",
+        "",
+        "#[test]",
+        "fn matches_the_golden_output() {",
+        "    assert_eq!(include_str!(\"golden/expected.txt\"), \"2\\n\");",
+        "}",
+    ])
+    .writing("crates/origin/tests/golden/expected.txt", "2\n")
+    .tracked_by_git()
+}
+
+/// A test binary that needs nothing beside it, so moving it leaves a tree that still compiles.
+pub fn a_workspace_whose_test_binary_stands_alone() -> AFixtureWorkspace {
+    a_workspace_with_a_test_binary(&[
+        "//! Needs nothing but itself.",
+        "",
+        "#[test]",
+        "fn doubles() {",
+        "    assert_eq!(1 + 1, 2);",
+        "}",
+    ])
+    .tracked_by_git()
+}
+
+fn a_workspace_with_a_test_binary(test: &[&str]) -> AFixtureWorkspace {
+    a_workspace_of(&["origin", "destination"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(ORIGIN_LIB, "pub fn level() -> u32 {\n    2\n}\n")
+        .writing(THE_TEST_BINARY, &source(test))
+        .writing(
+            "crates/destination/Cargo.toml",
+            &a_manifest_for("destination", ""),
+        )
+        .writing(
+            "crates/destination/src/lib.rs",
+            "//! Where the test goes.\n",
+        )
+}
+
+/// Apply a one-operation plan moving [`THE_TEST_BINARY`] to `destination`, through the library's
+/// own `apply` — the entry point `tddy-tools restructure apply` dispatches to.
+///
+/// The server is the deterministic fake: a test-binary move is authored by the engine and asks the
+/// server nothing, so a real rust-analyzer would only add an index nobody reads.
+pub async fn applying_a_move_of_the_test_binary(
+    fixture: &AFixtureWorkspace,
+) -> Result<tddy_code_restructuring::runner::RunSummary, String> {
+    let root = fixture.path().to_path_buf();
+    let digest = tddy_code_restructuring::apply::hash_file(&root.join(THE_TEST_BINARY))
+        .expect("the test binary hashes");
+    let plan = root.join("plan.jsonl");
+    std::fs::write(
+        &plan,
+        format!(
+            "{{\"v\":1,\"snapshot\":{{\"{THE_TEST_BINARY}\":\"{digest}\"}}}}\n\
+             {{\"op\":\"move_test_binary_to_crate\",\"anchor\":{{\"kind\":\"symbol\",\
+             \"file\":\"{THE_TEST_BINARY}\",\"path\":\"golden\"}},\"to\":\"crates/destination\"}}\n"
+        ),
+    )
+    .expect("the plan is written");
+
+    let client = a_server_no_operation_asks(&root).await;
+    let options = tddy_code_restructuring::runner::Options {
+        command: tddy_code_restructuring::runner::Command::Apply,
+        target: Some(plan),
+        ..tddy_code_restructuring::runner::Options::default()
+    };
+    tokio::task::spawn_blocking(move || {
+        tddy_code_restructuring::runner::apply(
+            &root,
+            options,
+            Some(client),
+            CancellationToken::new(),
+        )
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .expect("the blocking half of the apply joins")
+}
+
+/// The deterministic fake language server, for an operation that never asks it anything.
+async fn a_server_no_operation_asks(root: &Path) -> Arc<tddy_lsp::client::LspClient> {
+    let mut allow = LspAllowList::new();
+    allow.allow(
+        Language::Rust,
+        LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
+            .with_capabilities(client_capabilities())
+            .with_initialization_options(server_settings()),
+    );
+    let registry = LspRegistry::new(allow, TaskRegistry::new(), A_WAIT_A_TEST_CAN_OUTLAST);
+    let service = registry
+        .get_or_spawn(LspKey {
+            root: root.to_path_buf(),
+            language: Language::Rust,
+        })
+        .await
+        .expect("the fake language server starts");
+    Arc::clone(&service.client)
+}
+
 /// A type whose `impl` a seam cuts in half, where a member **left behind** calls one that moves.
 ///
 /// The seam at lines 12–14 takes `doubled`. The assist writes it as

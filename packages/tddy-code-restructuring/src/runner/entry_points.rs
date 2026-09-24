@@ -21,8 +21,9 @@ use super::comparison::verify;
 use super::options::usage;
 use super::rehearsal::{survey_lines, Rehearsal};
 use super::{
-    commit_operation, open_run, parse_options, refuse_repo_scoped_state, restore_ledger, Command,
-    Finding, Options, Outcome, PlanProgress, RunSummary, SnapshotRewrite, StatePaths,
+    commit_operation, open_run, parse_options, refuse_a_broken_baseline, refuse_a_broken_result,
+    refuse_repo_scoped_state, restore_ledger, Command, Finding, Options, Outcome, PlanProgress,
+    RunSummary, SnapshotRewrite, StatePaths,
 };
 
 /// Dispatch a restructuring subcommand given a raw command line.
@@ -130,6 +131,7 @@ pub fn apply(
 
     let mut journal = open_run(&plan, root, &paths, &options)?;
     let mut ledger = restore_ledger(&journal, &paths)?;
+    refuse_a_broken_baseline(root, &plan, &options)?;
     let mut registry = registry_for(client, cancel, Arc::clone(&options.progress), options.trace);
     let start = options.from.unwrap_or_else(|| journal.next_op());
     let total = plan.ops.len();
@@ -215,6 +217,7 @@ pub fn apply(
         done += 1;
     }
 
+    refuse_a_broken_result(root, &options, &journal, &paths, done, total)?;
     Ok(RunSummary {
         applied: done,
         total: plan.ops.len(),

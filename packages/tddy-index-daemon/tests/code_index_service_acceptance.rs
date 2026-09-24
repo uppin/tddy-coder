@@ -535,6 +535,84 @@ async fn ends_an_apply_by_reporting_what_the_whole_run_amounted_to() {
     );
 }
 
+/// A two-crate workspace whose `origin` test binary reads a file beside it with `include_str!`.
+///
+/// Moving the binary to `destination` is an operation the engine accepts and authors without
+/// asking the server anything, and it leaves the file behind — so the moved binary no longer
+/// compiles, which only a compiler can say.
+fn a_workspace_whose_test_binary_reads_a_file_beside_it() -> tempfile::TempDir {
+    let workspace = a_workspace_holding("");
+    for (path, text) in [
+        (
+            "Cargo.toml",
+            "[workspace]\nresolver = \"2\"\nmembers = [\"crates/origin\", \"crates/destination\"]\n",
+        ),
+        (
+            "crates/origin/Cargo.toml",
+            "[package]\nname = \"origin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        ),
+        ("crates/origin/src/lib.rs", "pub fn level() -> u32 {\n    2\n}\n"),
+        (
+            "crates/origin/tests/golden.rs",
+            "#[test]\nfn matches_the_golden_output() {\n    \
+             assert_eq!(include_str!(\"golden/expected.txt\"), \"2\\n\");\n}\n",
+        ),
+        ("crates/origin/tests/golden/expected.txt", "2\n"),
+        (
+            "crates/destination/Cargo.toml",
+            "[package]\nname = \"destination\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        ),
+        ("crates/destination/src/lib.rs", "//! Where the test goes.\n"),
+    ] {
+        let absolute = workspace.path().join(path);
+        std::fs::create_dir_all(absolute.parent().expect("a parent")).expect("a directory");
+        std::fs::write(absolute, text).expect("a fixture file");
+    }
+    git(&workspace, &["add", "--all"]);
+    workspace
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fails_an_apply_that_leaves_a_tree_the_compiler_rejects() {
+    // Given a plan whose one operation leaves a test binary that no longer compiles
+    let workspace = a_workspace_whose_test_binary_reads_a_file_beside_it();
+    let plan = a_plan_in(
+        &workspace,
+        &[
+            "{\"op\":\"move_test_binary_to_crate\",\"anchor\":{\"kind\":\"symbol\",\
+           \"file\":\"crates/origin/tests/golden.rs\",\"path\":\"golden\"},\
+           \"to\":\"crates/destination\"}",
+        ],
+    );
+    let entry = a_host_over_fake_language_servers();
+
+    // When it is applied through the daemon
+    let refusal = stream_at::<_, RestructureEvent>(
+        &entry,
+        "Apply",
+        ApplyRequest {
+            workspace_root: workspace.path().to_string_lossy().to_string(),
+            plan: plan.to_string_lossy().to_string(),
+            dry_run: false,
+            resume: false,
+            from: None,
+            stop_after: None,
+        },
+    )
+    .await
+    .expect_err("an apply whose result does not compile is a failed run");
+
+    // Then the run fails saying the applied tree does not compile, rather than reporting an outcome
+    assert_eq!(refusal.code(), tddy_rpc::Code::Internal);
+    assert!(
+        refusal
+            .message()
+            .starts_with("1 of 1 operation(s) were applied, and the tree no longer compiles"),
+        "{}",
+        refusal.message()
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_an_apply_whose_plan_names_a_file_no_backend_handles() {
     // Given a plan anchored in a file no language backend claims

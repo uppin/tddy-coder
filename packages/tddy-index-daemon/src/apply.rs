@@ -46,6 +46,7 @@ pub(crate) fn apply_plan(
 
     let mut journal = runner::open_run(&plan, root, &paths, options)?;
     let mut ledger = runner::restore_ledger(&journal, &paths)?;
+    runner::refuse_a_broken_baseline(root, &plan, options)?;
     let mut registry = runner::registry_for(client, cancel.clone(), progress, logged_trace);
     let start = options.from.unwrap_or_else(|| journal.next_op());
     let mut overlay = Overlay::new();
@@ -107,6 +108,10 @@ pub(crate) fn apply_plan(
         }
     }
 
+    // Judged before the outcome is sent, so a tree that does not compile ends the stream with the
+    // refusal and never with "applied N of N" — the same gate, from the same library, as the cold
+    // path's `runner::apply`.
+    runner::refuse_a_broken_result(root, options, &journal, &paths, done, plan.ops.len())?;
     emit(
         events,
         &cancel,

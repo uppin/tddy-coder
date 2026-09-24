@@ -136,6 +136,39 @@ pub enum RestructureError {
     /// index got; it is visible here for the paths that have no index to report on.
     #[error("the caller stopped waiting, so the request was abandoned")]
     CallerStopped,
+    /// The tree did not compile before a fresh `apply` wrote anything.
+    ///
+    /// Refused up front rather than applied, because [`RestructureError::AppliedTreeDoesNotCompile`]
+    /// could not then be told from damage that was already there. None of the other classes is
+    /// true of it: the plan is not malformed, no seam was refused, and no server was asked.
+    #[error(
+        "the tree does not compile before the plan runs: `{checked}` fails, so a failure after it \
+         could not be told from one the plan caused. Nothing was written. Make the tree compile, \
+         then apply again.\n{errors}"
+    )]
+    BaselineDoesNotCompile { checked: String, errors: String },
+    /// An `apply` wrote its operations and the tree it left does not compile.
+    ///
+    /// Every operation was accepted — an assist's output the engine could not see through, a file a
+    /// move left behind — and the compiler still rejects the result. The run is a failure, never
+    /// "applied N of N": that line over a broken crate is the implicit failure this replaces. The
+    /// edits stay on disk and in the journal so they can be inspected; the message says how to
+    /// roll them back, because nothing here does it.
+    #[error(
+        "{applied} of {total} operation(s) were applied, and the tree no longer compiles: \
+         `{checked}` fails. The edits are left on disk for inspection and nothing is committed. To \
+         roll back, restore what the run touched from git ({touched} — `git checkout HEAD -- \
+         <path>` for what HEAD holds, delete what it created, `git reset` what it staged) and \
+         remove its journal, {journal}, so the plan can run again.\n{errors}"
+    )]
+    AppliedTreeDoesNotCompile {
+        applied: usize,
+        total: usize,
+        checked: String,
+        touched: String,
+        journal: String,
+        errors: String,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
