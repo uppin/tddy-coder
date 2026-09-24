@@ -1,7 +1,7 @@
 # Changeset: destructure tddy-session-lifecycle, close its code issues, remove its duplicate code
 
 **Date**: 2026-09-23
-**Status**: 🚧 In Progress — baseline taken; plans `03`, `10a`, `04`, `08`, `06`, `07`, `02` and `09b` applied; `05` refused, `01` held (see "Apply run 2026-09-24")
+**Status**: 🚧 In Progress — baseline taken; plans `03`, `10a`, `04`, `08`, `06`, `07`, `02`, `09b`, `05` and `01` applied. `05`'s refusal was an engine defect, fixed on this PR (see "Apply run 2026-09-24")
 **Type**: Refactor (in-crate restructure; no behaviour change)
 **Stack**: `#carve` 14/15, on top of `restructure-engine-fixes` (#527), which sits on `core-split` (#522)
 
@@ -184,12 +184,16 @@ clean checks took 2–14 s.
 - **The public `tddy_session_lifecycle::…` surface is unchanged.**
 - **The `PeerRouted*` wrappers stay in this crate.** They are split into their own files, not moved.
 - **Nothing in `tddy-core` or the nine #522 crates is touched.**
+- **`tddy-code-restructuring` is touched once, for the plan `05` refusal** (developer, 2026-09-24).
+  This relaxes the original "does not touch `tddy-code-restructuring`" boundary. The change is
+  `51211cd8`: the Rust backend closes every document an operation opens, with its live-server test.
+  No other engine change lands here. The open gaps G–Q stay in their TODOs.
 
 ## Dependencies
 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
-| `13` restructure-engine-fixes (#527) | the fixed `tddy-tools restructure`: E1, E2 and E3 no longer refuse correct plans | runs the refused plans against the engine in this branch's tree | touch `tddy-code-restructuring` |
+| `13` restructure-engine-fixes (#527) | the fixed `tddy-tools restructure`: E1, E2 and E3 no longer refuse correct plans | runs the refused plans against the engine in this branch's tree. **One engine fix lands here instead of on #527** (developer, 2026-09-24): `51211cd8`, which closes documents so a shared server reads the tree again (see "Apply run 2026-09-24") | touch `tddy-code-restructuring` beyond that one fix |
 | `12` core-split (#522) | `tddy-core` as facades over nine crates | lifecycle keeps naming `tddy_core::…`, and those paths resolve through the facades | touch `tddy-core` or the nine crates, or repoint lifecycle's `tddy_core::` imports |
 
 ## Draft PR contract
@@ -227,11 +231,11 @@ call (2026-09-23), and records them by name if they are still red.
 
 - [x] Baseline recorded (`./test -p tddy-session-lifecycle`, per-suite counts, known-red names, known hang). Taken 2026-09-24; the DRY-target packages' baseline is still to take
 - [ ] Characterisation tests: `start_sandboxed_cursor_cli_session`; the relaunch path. **Only if a seam needs one** (developer, 2026-09-24); none of the plans applied so far did
-- [ ] Warm index (`./run-index-daemon`); every plan passes `restructure check --deep` before `apply`. Every applied plan did; `05` is ⛔ refused
+- [ ] Warm index (`./run-index-daemon`); every plan passes `restructure check --deep` before `apply`. Every applied plan did, `05` and `01` included, once `51211cd8` fixed the refusal
 - [ ] DRY #10, #11, #13 (the cross-crate one-liners)
 - [ ] Misplaced code relocated (table above)
-- [ ] `connection_service.rs` split (placement, split_start, attachment_progress, managed_launch, stack_parent, spawn handlers, agent_roster)
-- [ ] `spawn_claude_cli_session_inner` → `cli_spawn/claude.rs`; `cursor_cli_spawn` → `cli_spawn/cursor.rs` + `chat.rs` + `resume.rs`. ✅ `chat.rs` and `resume.rs` (`03`); the rest waits on `01` and the `git mv`
+- [ ] `connection_service.rs` split (placement, split_start, attachment_progress, managed_launch, stack_parent, spawn handlers, agent_roster). ✅ 10 topic files (`01`, `23b73d0b`); 1,652 → 542 lines; folding them into existing siblings is open
+- [ ] `spawn_claude_cli_session_inner` → `cli_spawn/claude.rs`; `cursor_cli_spawn` → `cli_spawn/cursor.rs` + `chat.rs` + `resume.rs`. ✅ `chat.rs` and `resume.rs` (`03`); ✅ `connection_service/claude_cli_spawn.rs` (`01`); the `git mv` into `cli_spawn/` is open
 - [ ] DRY #3, #5, #6, #7, #8: `cli_spawn/common.rs` + `CliSpawnRequest`
 - [ ] `cli_session_manager` → directory module (7 files); DRY #12 resize decoder → `tddy-pty`. ✅ directory module, 9 files (`02`, `834a76b2`); DRY #12 open
 - [x] `split_session` → `agent_argv.rs` + `agent_credentials.rs` (`04`)
@@ -239,7 +243,7 @@ call (2026-09-23), and records them by name if they are still red.
 - [ ] `session_coordinate_handlers` split; `session_entry_from_listing`. ✅ split (`08`); `session_entry_from_listing` open
 - [ ] DRY #1 `svc_sandboxed_jail_launch`: Claude, then Cursor, then relaunch. ✅ Claude's start split into its jail steps (`09b`); plan `09` op 6 and the merge with Cursor and relaunch are open
 - [ ] Ports files split; DRY #9. ✅ split (`06`, `86670241`); DRY #9 open
-- [ ] `svc_spawn_split_agent` teardown split + extract-method; `svc_host_builders.rs`. ✅ `svc_host_builders.rs` (`07`, `1a9a72d4`); ⛔ `05` refused
+- [x] `svc_spawn_split_agent` teardown split + extract-method; `svc_host_builders.rs`. ✅ `svc_host_builders.rs` (`07`, `1a9a72d4`); ✅ `svc_paired_codebase_teardown.rs` and 4 extract-methods (`05`, `8b55523e`)
 - [ ] Every non-test file < 500 production lines; no function > 150 lines
 - [ ] All 16 code-issue records re-measured and deleted or narrowed
 
@@ -347,8 +351,8 @@ P and Q are [the extract TODO](../todo/2026-09-24-restructure-extract-drops-comm
 | lint of `03`/`10a`/`04`/`08` | — | unused imports (N1), 2 unused globs (N2), fmt (N4), and `#[allow(clippy::too_many_arguments)]` on `spawn_tddy_coder` with a TODO for DRY #2 | — | `1d7fded9` |
 | `07-host-builders` | 1/1 moved; the compile gate failed | `super::DaemonRpcHandler` → `super::super::` (H). 13 parent imports (N1). The glob (N2). A stray `use tddy_rpc::Status;` (N3). fmt | identical | `1a9a72d4` |
 | `02-cli-session-manager-dir` | 9/9 moved; the compile gate failed. The engine widened 4 methods to `pub(crate)` | `strip_resize` → `pub(super)` in `livekit_bridge.rs` (J; the E0282 went with it). `async_trait` (G) and `prost::Message as _` (I) into `livekit_bridge.rs`. Parent imports (N1). 7 unused globs (N2). fmt | identical, and all 6 dependent crates `check --all-targets` clean | `834a76b2` |
-| `05` spawn_split_agent | ⛔ **refused** at `check --deep` and at `apply`, 3 of 3 runs, for op 0 and for the full plan | none; nothing was written | — | — |
-| `01` connection_service | ⏸ **held** because it depends on `05`: its `split_start` seam (lines 1166–1288) moves `SplitStartFailure` (line 1179), the type `05` op 0 is refused on | — | — | — |
+| `05` spawn_split_agent | first run: ⛔ **refused** at `check --deep` and at `apply`, 3 of 3, for op 0 and for the full plan. After the engine fix `51211cd8`: 5/5 moved, and the compile gate passed. **L did not recur**, so the plan was not split | 6 parent imports (N1). The glob (N2). 3 × `&PathBuf` → `&Path`, with one `.clone()` → `.to_path_buf()`, and a new Q shape: `Ok(if … { … })` (`unit_arg`) → the `if`, then `Ok(())` (Q). fmt (N4). No comment lost | identical | `8b55523e` |
+| `01` connection_service | first run: ⏸ **held** behind `05`. After the fix: 10/10 moved; the library built, and the test build failed on M | M: `Path`, `Changeset`, `SessionAttachment`, `SplitAgentPlacement` into the parent's `#[cfg(test)]` block, plus the dropped `pub use … spawn_blocking_with_timeout` restored (see below). 10 parent imports, 2 of them emptied groups (N1). 2 stray `PathBuf` imports (N3). fmt (N4). No comment lost | identical, and all 6 dependent crates `check --all-targets` clean | `23b73d0b` |
 | `09b` sandboxed claude | 7/7 moved; the compile gate failed on K. It builds after the K fix | `WorkflowRecipe` qualified as `tddy_core::workflow::recipe::WorkflowRecipe` at the two new signatures (K). With the developer's consent: 14 comment lines restored (P) and the signatures reshaped (Q) | identical | `09b` commit, "split start_sandboxed_claude_cli_session into its jail steps" |
 
 After every commit, `cargo clippy -p tddy-session-lifecycle --all-targets -- -D warnings` and
@@ -365,7 +369,59 @@ After every commit, `cargo clippy -p tddy-session-lifecycle --all-targets -- -D 
 The path is correct. `svc_spawn_split_agent.rs` imports it as `use super::SplitStartFailure;`, and
 it is a plain `pub(crate) enum` in `connection_service.rs:1179`, not build-script output. The
 gaps TODO records this plan applying 5 of 5 on the same engine before this branch's applies, so the
-refusal is new. It waits on the developer.
+refusal is new.
+
+**The developer's decision** (2026-09-24): reproduce and fix it on this PR, relaxing the
+"does not touch `tddy-code-restructuring`" boundary (see Boundaries and Dependencies), then land `05`
+and `01` through the fixed engine.
+
+**Root cause: a document left open on a shared server.** The Rust backend sent `didOpen` for every
+document it worked on and never sent `didClose`. rust-analyzer treats an open document as the
+authority on its file. `tddy-index-daemon` keeps one server per root and serves a new backend per
+request, so a document outlived the run that opened it. It went on answering for its file with the
+last text that run sent. The evidence comes from a temporary trace, removed before commit:
+
+- **A/B on one warm daemon.** `05` op 0 gave no findings. Then a `check --deep` of plan `01`, which
+  writes nothing, gave no findings. Then `05` op 0 again was refused with the exact message above. A
+  fresh daemon never refuses it.
+- **What `01` left behind.** Plan `01`'s check left `connection_service.rs` open at a **999-line**
+  rehearsed text of a 1,652-line file. That was op 10's text, after nine seams had moved into
+  `mod placement;`, `mod split_start;` and others. Their files existed only in the check's overlay, so
+  for the server `connection_service::SplitStartFailure` was declared nowhere.
+- **What the refused run saw.** Before anything was cut, the untouched file already reported 16
+  unresolved names (the passing run: 0). Among them was every `use super::X` naming an item of
+  `connection_service.rs`: `SplitStartFailure`, `peer_has_no_such_session`,
+  `AttachmentMaterialization`, `AttachmentProgressSink`.
+- **The hypothesis in the brief was wrong on two counts.** The assist never wrote the `use` (528
+  lines against 532), so `prune_assist_imports` dropped nothing. `codeAction` offered no import at
+  all. The reconstruction then wrote `use super::super::SplitStartFailure;`, and its own token read
+  unresolved: 3 → 4.
+- **Not a missing re-analysis wait.** `serverStatus` said `quiescent: true`, `loading: false` at every
+  read.
+- **Why a cold run or a restarted daemon passes.** Only vacuously: a server that has only just
+  started reports no unresolved names at all.
+
+**The fix** (`51211cd8`): `backends/rust/documents.rs` owns `did_open`, records each document it
+opens, and closes them all when `resolve`, `anchor_for` or `outside_references` ends, whatever it
+ended with. The test runs a real `check --deep` of two seams in the parent on a settled server, then
+resolves a seam that names the parent's type through `super` on a fresh backend on the same server:
+`import_pass_acceptance::imports_the_parent_s_type_on_a_server_an_earlier_check_rehearsed_its_parent_on`.
+It failed with the production message ("left 4 unresolved occurrence(s) of it, where there were 3")
+and passes after the fix. `./test -p tddy-code-restructuring`: 488 passed, 0 failed, 1 ignored.
+After the fix, the same A/B on one daemon (`05` → `01` → `05`, then the full `05`) gives no findings
+throughout.
+
+**What the fix does not change.** Within one `check --deep`, an operation after the first is still
+resolved against overlay text whose new files the server cannot see. The server now forgets that
+text when the operation ends, so it no longer reaches the next run.
+
+**`01`'s M, as it actually happens.** The shape the gaps TODO guessed was a moved `mod x;`, and no
+seam of plan `01` carries one. Instead, the assist removed names from the parent's `use` groups when
+a seam held their last non-test use. The test children reach those names through `use super::*`,
+and nothing counted them. It also removed `spawn_blocking_with_timeout` from a **`pub use`**. The
+build stayed green through the `pub(crate)` glob, but the crate's public path narrowed. It was
+restored, because the public surface is a Boundary here. The gaps TODO's M section now has the
+before/after.
 
 **`09b` was held** after passing its tests:
 - **P:** the assist dropped 14 comment lines from the extracted ranges. They are the readiness-gate
@@ -399,7 +455,6 @@ pushed. The module's name now says what the banner said, so it was left as is.
 
 ### Still to do in Scope, not part of this run
 
-- `05` (refused) and `01` (held behind it), once the developer decides on the refusal.
 - Plan `09` op 6, which returns early.
 - **Plan `10`'s refused extract-methods on `start_session_core`.** They are early returns and need
   re-cut ranges. `svc_start_session_core.rs` is 966 lines.
@@ -411,14 +466,15 @@ pushed. The module's name now says what the banner said, so it was left as is.
 - **The misplaced-code relocations** (table above).
 - `cli_spawn/{claude,cursor}.rs` `git mv`s after `01` and `03`; `session_entry_from_listing`.
 - **Files still at or over 500 production lines** (lines before the first `#[cfg(test)]`):
-  - `connection_service.rs`: at least 823. Its first `#[cfg(test)] mod …;` is at line ~823, which is
-    the 2026-09-19 measurement caveat;
+  - `connection_service.rs`: 542 lines after `01` (was 1,652). Its first `#[cfg(test)] mod …;` is
+    at line 298, which is the 2026-09-19 measurement caveat. The lines after it are almost all
+    test-module declarations and the `#[cfg(test)]` imports, so the production count is under 500
+    by any reading. It is measured properly at wrap;
   - `svc_start_session_core.rs`: 966;
   - `svc_start_sandboxed_claude_cli_session.rs`: 834 after `09b` (was 661). The helpers and the
     3 parameter structs are still in the file. The handler is down to 436 lines, still over the
     150-line limit, until op 6 and DRY #1;
-  - `svc_start_sandboxed_cursor_cli_session.rs`: 505;
-  - `svc_spawn_split_agent.rs`: 505.
+  - `svc_start_sandboxed_cursor_cli_session.rs`: 505.
 
   Now under 500:
   - `cli_session_manager.rs`: 173 production;
@@ -428,7 +484,12 @@ pushed. The module's name now says what the banner said, so it was left as is.
   - `svc_session_files_ports.rs`: 200;
   - `svc_resolve_tddy_tools_path.rs`: 51;
   - `cursor_cli_spawn.rs`: 367;
-  - `svc_host_builders.rs`: 453, above the ≤ 400 target.
+  - `svc_host_builders.rs`: 453, above the ≤ 400 target;
+  - `svc_spawn_split_agent.rs`: 416 after `05` (was 505), above the ≤ 400 target.
+    `8b55523e`'s message says 372, but that count was taken before fmt;
+  - the ten files `01` created: 24–155 lines each, except `claude_cli_spawn.rs` at 449, which
+    `spawn_claude_cli_session_inner` (408 lines) fills on its own until its extract-methods land;
+  - `svc_paired_codebase_teardown.rs`: 178.
 - **The 16 code-issue records**, re-measured at wrap.
 
 ## Decisions & trade-offs
@@ -441,6 +502,14 @@ pushed. The module's name now says what the banner said, so it was left as is.
   behaviour risk.
 - **The resize decoder goes to `tddy-pty`, not `tddy-terminal-rpc`.** `tddy-sandbox-runner` runs inside
   every jail, so the lightest possible crate is the one it should depend on.
+- **Fix the `05` refusal here, not on #527 or #529** (developer, 2026-09-24). The engine defect that
+  refused `05` is fixed on this PR, relaxing the boundary against touching
+  `tddy-code-restructuring`. It lands test-first: a live-harness fixture reproduces the mechanism
+  with the production message. #529's fixture did not reproduce it, and the developer closes that
+  PR.
+- **Restore a `pub use` the engine narrows** (this PR, under the public-surface Boundary). It is a
+  `use`-line edit, but its purpose is keeping the surface unchanged, not making the tree build. It
+  is listed as such in `23b73d0b`.
 
 ## Refactoring needed
 
@@ -454,7 +523,7 @@ pushed. The module's name now says what the banner said, so it was left as is.
 - [x] Restructure plans proven with `check --deep`: 8 of 14 clean, 3 engine defects
 - [ ] USER REVIEW — layout and DRY inventory
 - [x] Baseline (characterisation tests only where a seam needs one)
-- [ ] Implementation: plans `03`, `10a`, `04`, `08`, `06`, `07`, `02` and `09b` applied; `05` ⛔ refused, `01` held, waiting on the developer
+- [ ] Implementation: plans `03`, `10a`, `04`, `08`, `06`, `07`, `02`, `09b`, `05` and `01` applied (`05`'s refusal fixed in the engine, `51211cd8`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`)
