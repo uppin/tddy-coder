@@ -174,3 +174,29 @@ provider arm): **regressed**, deferred with the file-length consent.
 **Code quality: C.** The remaining must-refactor is the recorded `build_auth_entries_admitting`
 (106 lines, `tddy-daemon-auth/src/auth.rs`), whose split waits for #keyring 3/9 and the post-stack
 restructure.
+
+## Verification
+
+Scoped to the 34 Rust packages this change touches, plus the web specs under change; whole-workspace
+green is CI's.
+
+- **Format and lint:** `cargo fmt --all --check` clean. `cargo clippy --all-targets -D warnings` over
+  the 34 packages is clean apart from the pre-existing `tddy-daemon-sandbox`
+  `sandbox_stdio_seatbelt_acceptance` compile error (`SandboxHandle` not in scope), which fails
+  identically on `master`.
+- **Tests** (`cargo test -p <pkg> --no-fail-fast -- --test-threads=1`, one package at a time): 4,373
+  passed and 56 failed across the 34 packages. Every failure is pre-existing or environmental, none from this
+  change:
+  - macOS-only jail suites: 16 `tddy-session-lifecycle` "sandbox RPC bridge not installed" panics, 16 in
+    `tddy-sandbox-app` `sandboxed_codebase_seatbelt_acceptance`, and
+    `real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_over_stdio`. The Linux CI
+    has none of these suites.
+  - 23 LiveKit `wait_pc_connection timed out` against a long-running shared testkit container. Re-run
+    against a fresh container they pass: `tddy-livekit` 10/10, `tddy-session-lifecycle`
+    `session_room_acceptance` + `session_sync_livekit_acceptance` 27/27, `tddy-worktree-service`
+    `remote_git_livekit_acceptance` 12/12. They also pass in CI.
+- **Web:** each spec run on its own: `DeviceLoginAcceptance` 28/28, `RedirectLoginAcceptance` 4/4,
+  `DurableSessionAcceptance` 6/6, `AuthProviderRefreshAcceptance` 4/4, `App` 4/4; `clientConfig.test.ts`
+  13/13.
+- **CI** (`nextest --workspace`, Linux): 7,252 passed, 0 failed (2 flaky that passed on retry), 71 skipped.
+- **Not verified:** the Content Security Policy in a launched production (`custom-protocol`) desktop build.
