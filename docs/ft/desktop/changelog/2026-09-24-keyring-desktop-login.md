@@ -15,9 +15,8 @@
   redirect flow unchanged.
 - **A strict Content Security Policy** on release builds. It has not yet been checked in a launched
   production build.
-- **Not yet zero-configuration out of the box.** `desktop.yaml.production` still ships `github:`
-  unset, so a fresh install reports "no sign-in configured" until the OAuth App's `client_id` is
-  rendered into it.
+- **Zero-configuration out of the box** — the install template carries the OAuth App's public
+  `client_id`; see the same day's *A fresh Tddy Desktop install is ready to sign in*.
 
 See [tddy-desktop-tauri.md § Signing in](../tddy-desktop-tauri.md#signing-in) and
 [Cross-daemon session authentication](../../daemon/session-auth.md).

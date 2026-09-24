@@ -29,11 +29,12 @@ The dashboard reads the flow a daemon **declares** (`auth_flow` on `/api/config`
 Tauri application gains a strict Content Security Policy.
 
 Together with #508 this removes the code side of all three things a fresh `./install --desktop` had
-to have hand-edited. `desktop.yaml.production` still ships `github:` unset (see *Backlog*).
+to have hand-edited, and `desktop.yaml.production` renders the OAuth App's public `client_id`
+(M8, `2026-09-24-keyring-desktop-client-id`), so a fresh install serves the device flow.
 
 Where the end state is documented:
 
-- [tddy-desktop-tauri.md](../../ft/desktop/tddy-desktop-tauri.md) — § Signing in, § What a fresh install still lacks, § Security
+- [tddy-desktop-tauri.md](../../ft/desktop/tddy-desktop-tauri.md) — § Signing in, § What a fresh install signs in with, § Security
 - [session-auth.md](../../ft/daemon/session-auth.md) — § Minting (both flows, the declared flow), § Who a login is
 - [daemon-settings.md](../../ft/daemon/daemon-settings.md), [auth-livekit-services.md](../../ft/daemon/auth-livekit-services.md)
 - [`tddy-github/docs/device-flow.md`](../../../packages/tddy-github/docs/device-flow.md) — the provider seam, both flows, the polling state machine, the stub
@@ -168,7 +169,7 @@ provider arm): **regressed**, deferred with the file-length consent.
 | V12 | implemented, **unverified at runtime** | the CSP has not been run in a launched `custom-protocol` build (terminal WASM, IPC, LiveKit `ws://`, console errors) |
 | V15 | open, pre-existing | an unreachable daemon or non-OK `/api/config` renders the standalone connection form; on a desktop a failed `GetClientConfig` would too |
 | V17 | open, recorded | `admit` does synchronous file I/O under a `std::sync::Mutex` on an async RPC task, once per deployment |
-| M8 | deferred to the developer | `desktop.yaml.production` unchanged — `github:` unset, comments still describing a secret and a hand-written `users:` |
+| M8 | done (2026-09-24) | `desktop.yaml.production` renders `github: { client_id: "Ov23lioH6CfiaZR8ESr5" }`, no secret; see `packages/tddy-desktop/docs/changesets/2026-09-24-keyring-desktop-client-id.md` |
 | — | deferred to the developer | the fresh-install acceptance criterion: `./install --desktop` reaching a signed-in dashboard with no file edited by hand |
 
 **Code quality: C.** The remaining must-refactor is the recorded `build_auth_entries_admitting`
