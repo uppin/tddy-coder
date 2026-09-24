@@ -215,10 +215,13 @@ Touches this node's config surface. Recorded, not fixed.
 The application's own process **is** the daemon, which is why enrolment can know the running OS user
 without asking anything. The entry's open items are unrelated to this node and stay open. This node extended the entry's comment-loss item with its own writer, `enrol_first_login` (V2) — recorded, not fixed.
 
-### ⚠ DURING — `build_auth_entries` complexity — [`complexity-auth-build-auth-entries`](../../../packages/tddy-daemon-auth/docs/code-issues/complexity-auth-build-auth-entries.md)
+### ⚠ DURING — `build_auth_entries` complexity — [`complexity-auth-build-auth-entries-admitting`](../../../packages/tddy-daemon-auth/docs/code-issues/complexity-auth-build-auth-entries-admitting.md)
 
-104 lines spanning both `:68` and `:109`. This node edits the second gate and `#keyring` 1/9 edits
-the first. Both shrink it; neither restructures it. Recorded, not claimed.
+104 lines spanning both `:68` and `:109` at planning. This node edits the second gate and `#keyring`
+1/9 edits the first. Neither restructures it. Recorded, not claimed. At wrap (2026-09-24) the body
+lives in `build_auth_entries_admitting` (92 → 106 lines — the enrolment admission and the public
+provider arm), so the record moved with it and reads **regressed**, deferred with the file-length
+consent (`auth.rs` is touched by #510, #511 and `## Boundaries` rules out restructuring it here).
 
 ### ✅ RESOLVED HERE — `RealGitHubProvider::exchange_code` is untestable by construction — [`missing-tests-real-exchange-code`](../../../packages/tddy-github/docs/code-issues/missing-tests-real-exchange-code.md)
 
@@ -251,7 +254,7 @@ open them, because its own `tddy-github` finding is the one in its path.
 - [~] **Decisions answered**: **OAuth App** (developer, during green) — ⚠ not yet verified against the live API; client id **rendered into `desktop.yaml.production`** — decided; the id itself and M8 are deferred to the developer — 'I'll configure and test production myself'
 - [~] **Testing**: acceptance + unit written for every item, V1's transport tests included; scoped runs green after `/pr-wrap` steps 1, 2 and 4 (Rust per package; Cypress `DeviceLoginAcceptance` 28/28 and `RedirectLoginAcceptance` 4/4, each spec alone); ⚠ the `/pr-wrap` step 6 scoped re-run from a cold `target/` and CI are still pending (see *Validation Results*)
 - [ ] **Package Documentation**: the six packages above
-- [ ] **Code Quality**: scoped clippy per package; CI green — ⚠ not ticked. Scoped clippy is clean on the four Rust packages `/pr-wrap` step 4 touched, but the clean-code score is **C**, not B. `build_auth_entries_admitting` (106, recorded only) and `startDeviceLogin` (73) are still must-refactor; see *Validation Results → /analyze-clean-code*
+- [x] **Code Quality**: scoped clippy `--all-targets -D warnings` clean over all 34 touched packages (step 6; only the known `sandbox_stdio_seatbelt_acceptance` compile error); `cargo fmt --check` clean. Clean-code score **C**, with its one remaining must-refactor **deferred with reason**: `build_auth_entries_admitting` (`tddy-daemon-auth/src/auth.rs`, 106 lines) is a pre-existing body in a file `## Boundaries` rules out restructuring in this stack and dependents #510/#511 touch, recorded as [`complexity-auth-build-auth-entries-admitting`](../../../packages/tddy-daemon-auth/docs/code-issues/complexity-auth-build-auth-entries-admitting.md) and covered by the file-length consent. Every must-refactor this PR introduced is fixed (`startDeviceLogin` 98 → 35). CI is the whole-workspace gate
 
 ## Technical Changes
 
@@ -526,9 +529,14 @@ package, and the single web spec. Whole-workspace green comes from CI.
 - ~~`useAuth.ts` `startDeviceLogin` (98): `intervalMsOf` + `MS_PER_SECOND`, hoist the poll-answer switch
   to a pure module function, `signedInState(user, token)` for the duplicated signed-in literal.~~ —
   done (step 4): `devicePollStep` returns a `DevicePollStep` (`poll` after N ms / `settle` on a
-  `DeviceLogin` / `adopt` a whole session). 98 → 73 lines, nesting 5 → 3 — ⚠ still over 60; the
-  rest is the attempt's own closure state (`isCurrent`, `poll`, `scheduleNextPoll`), and cutting it
-  further means restructuring the poll loop, which this step did not
+  `DeviceLogin` / `adopt` a whole session). 98 → 73 lines, nesting 5 → 3. **Follow-up (step 4,
+  second pass):** the poll loop moved to module functions over an explicit `DevicePollLoop` (client,
+  device code, attempt slot, `isCurrent`, `setDeviceLogin`, `adoptSession`): `scheduleDevicePoll`,
+  `pollDeviceOnce`, `actOnDevicePollStep`, plus `deviceLoginError` for the two `failed`-from-`e`
+  sites. The interval is passed poll to poll instead of held in a mutable closure variable, with the
+  same semantics: the first poll after the granted interval, each later one after the latest
+  `afterMs`. Every message, the generation guard and `checkWholeSession` are unchanged. 73 → 35
+  lines, nesting 3 → 2
 - ~~`DeviceLoginPanel.tsx`: reuse `GitHubLoginButton`'s class instead of the copied string.~~ — done
   (step 4): `GITHUB_BUTTON_CLASS_NAME` exported from `GitHubLoginButton.tsx`
 - Recorded only: `build_auth_entries_admitting` (106) — extract `github_token_store` /
@@ -635,6 +643,7 @@ touched packages, and CI is the whole-workspace gate.
 | tddy-web `DeviceLoginAcceptance.cy.tsx` | n/a | ✅ 22/22 at `bba454da`; ⚠ `55a44090` changed the spec and `clientConfig.test.ts` — not re-run here |
 | `/pr-wrap` step 1 refactor (V9, V10, V13): tddy-rpc, tddy-github, tddy-bsp, tddy-daemon-auth, tddy-coder | ✅ `cargo check --all-targets` and `cargo clippy --all-targets -- -D warnings` clean over all five | ✅ `./test -p tddy-rpc -p tddy-github -p tddy-bsp -p tddy-daemon-auth`: 237 passed, 0 failed (30 binaries); ✅ `./test -p tddy-coder --lib`: 107 passed, 0 failed (includes the 5 new `standalone_auth_flow_declaration_tests`); tddy-coder integration suites not run locally, so CI covers them |
 | `/pr-wrap` step 4 refactor (clean code): tddy-github, tddy-daemon-auth, tddy-daemon-kernel, tddy-coder, tddy-web | ✅ `cargo check -p tddy-daemon --all-targets` clean (consumes `auth.rs`); ✅ `cargo clippy -p <pkg> --all-targets -- -D warnings` clean on tddy-github, tddy-daemon-auth, tddy-daemon-kernel, tddy-coder | ✅ `./test -p tddy-github -p tddy-daemon-auth -p tddy-daemon-kernel`: 307 passed, 0 failed (22 binaries); ✅ `./test -p tddy-coder --lib`: 107 passed, 0 failed; ✅ Cypress component, each spec alone: `DeviceLoginAcceptance` 28/28, `RedirectLoginAcceptance` 4/4, `DurableSessionAcceptance` 6/6, `AuthProviderRefreshAcceptance` 4/4, `App` 4/4. No test modified. The authorize URL and both public-client refusals were also compared byte for byte with the pre-refactor literals by a throwaway test, deleted after the run. tddy-coder integration suites and the other tddy-daemon suites are left to CI |
+| `/pr-wrap` step 4 follow-up (`startDeviceLogin` poll loop): tddy-web `useAuth.ts` only | n/a (`tsc` not a gate; it reports no error in `useAuth.ts`) | ✅ Cypress component, each spec alone: `DeviceLoginAcceptance` 28/28, `RedirectLoginAcceptance` 4/4, `DurableSessionAcceptance` 6/6, `AuthProviderRefreshAcceptance` 4/4, `App` 4/4. No test modified; no cargo run (no Rust touched) |
 | `/pr-wrap` step 2 refactor (T1–T13, test-only): tddy-github, tddy-daemon-auth, tddy-rpc, tddy-daemon-livekit, tddy-daemon, tddy-web | ✅ `cargo clippy -p <pkg> --all-targets -- -D warnings` clean on all five Rust packages | ✅ `./test -p tddy-github -p tddy-daemon-auth`: 195 passed, 0 failed; ✅ `./test -p tddy-rpc`: 39 passed, 0 failed; ✅ `./test -p tddy-daemon-livekit --test forwarded_rpc_is_stamped_by_the_receiver`: 1 passed; ✅ `./test -p tddy-daemon --test first_login_enrolment_acceptance --test server_options_acceptance --test daemon_config_service`: 9 + 14 + 20 passed, 0 failed; ✅ `DeviceLoginAcceptance.cy.tsx` alone: 28/28 (25 before, plus the 3 T1 cases). Other tddy-daemon suites are left to CI |
 
 ### Fallback scan (production code added since `origin/master`)
@@ -733,9 +742,11 @@ Magic values: the authorize URL's scope literal duplicates `SCOPES`; `stub.rs` `
 `first_login_admission.rs` `"tddy_daemon::auth"` ×4 despite `crate::AUTH_LOG_TARGET`;
 `run.rs` `"redirect"` duplicates `GitHubAuthFlow::as_str`; `useAuth.ts` `* 1000` ×2.
 
-**After the step 4 refactor: Score C** (2 must-refactor, down from 5). They are the recorded-only
-`build_auth_entries_admitting`, which alone caps the grade at C whatever else is fixed, and
-`startDeviceLogin`, down to 73 lines but still over 60. Needs-attention: none of the priority
+**After the step 4 refactor and its follow-up: Score C** (1 must-refactor, down from 5). It is the
+recorded-only `build_auth_entries_admitting`, which alone caps the grade at C whatever else is fixed.
+`startDeviceLogin` was 73 after the first pass and is 35 after the follow-up, whose new helpers are
+all excellent (`pollDeviceOnce` 11, `actOnDevicePollStep` 14, `scheduleDevicePoll` 3,
+`deviceLoginError` 3; nesting ≤ 2). Needs-attention: none of the priority
 functions; `device_poll_outcome` (new) is acceptable at 39. Measured
 with one brace-depth counter over `HEAD` (`6779f7fc`) and the working tree. It reproduces the
 analysis's `HEAD` lengths exactly, but reads `startDeviceLogin`'s nesting as 5 where the analysis
@@ -749,7 +760,7 @@ said 4.
 | `real.rs` `start_device_login` | 42 → 29 | 1 → 1 |
 | `first_login_admission.rs` `admit` | 61 → **14** | 3 → 2 |
 | `run.rs` `build_auth_service_entry` | 61 → **36** | 6 → **3** |
-| `useAuth.ts` `startDeviceLogin` | 98 → **73** ⚠ | 5 → 3 |
+| `useAuth.ts` `startDeviceLogin` | 98 → 73 → **35** (follow-up) | 5 → 3 → **2** |
 | `auth.rs` `build_auth_entries_admitting` (recorded only) | 106 → 106 | 4 → 4 |
 
 Magic values after: the scope is built from `SCOPES`, `900` is `STUB_DEVICE_LOGIN_EXPIRES_IN_SECONDS`,
@@ -924,7 +935,7 @@ is left as that run's dated record. The TODO is gone (V9).
 | Scope → Decisions answered `[~]` | ⏸ Deferred | The OAuth App is decided. The live-API check (V8) is the developer's production check |
 | Scope → Testing `[~]` | ⏳ Pending, not a gap | Waits on the step 6 scoped re-run and CI |
 | Scope → Package Documentation `[ ]` | ⏳ Step 7 | `/wrap-context-docs` |
-| Scope → Code Quality `[ ]` | ⏳ Orchestrator | The score is **C** (`build_auth_entries_admitting` 106, recorded; `startDeviceLogin` 73) |
+| Scope → Code Quality `[ ]` | ⏳ Orchestrator | The score is **C**: one must-refactor, `build_auth_entries_admitting` 106, recorded only (`startDeviceLogin` is now 35) |
 | M8 `[ ]` | ⏸ Deferred | The developer's, as above |
 | Acceptance → fresh `./install --desktop` `[ ]` | ⏸ Deferred | The developer's. It is kept in the narrowed backlog entry, item 2 |
 | TODO → M2–M8 `[~]` | ⏸ Deferred | M8 only |

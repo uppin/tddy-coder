@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Code, ConnectError } from "@connectrpc/connect";
+import { Code, ConnectError, type Client } from "@connectrpc/connect";
 import { AuthService, DeviceLoginState } from "../gen/auth_pb";
 import type { GitHubUser, PollDeviceLoginResponse } from "../gen/auth_pb";
 import { useHttpClient, useAuthTokenGate } from "../rpc/transportProvider";
@@ -131,6 +131,64 @@ function devicePollStep(res: PollDeviceLoginResponse, intervalMs: number): Devic
       return { next: "settle", deviceLogin: { phase: "expired" } };
     default:
       return deviceLoginFailed(`Unrecognised device sign-in state ${res.state}`);
+  }
+}
+
+/** An attempt that ended on `e`, worded by `e` itself when it is an `Error`, else `defaultMessage`. */
+function deviceLoginError(e: unknown, defaultMessage: string): DeviceLogin {
+  return { phase: "failed", error: e instanceof Error ? e.message : defaultMessage };
+}
+
+/** The device-flow attempt in progress: its generation, and the timer of its next poll. */
+interface DeviceAttemptSlot {
+  generation: number;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+/**
+ * What one device-flow attempt's poll loop needs: the code it polls for, the slot that holds its
+ * timer, whether it is still the latest attempt, and where its answers land.
+ */
+interface DevicePollLoop {
+  client: Client<typeof AuthService>;
+  deviceCode: string;
+  attempt: DeviceAttemptSlot;
+  isCurrent: () => boolean;
+  setDeviceLogin: (deviceLogin: DeviceLogin) => void;
+  adoptSession: (session: WholeSession) => void;
+}
+
+/** Poll again after `intervalMs` — the delay every later poll keeps until a slow-down widens it. */
+function scheduleDevicePoll(loop: DevicePollLoop, intervalMs: number): void {
+  loop.attempt.timer = setTimeout(() => void pollDeviceOnce(loop, intervalMs), intervalMs);
+}
+
+/** One poll; its answer acts only while the attempt is still the latest. */
+async function pollDeviceOnce(loop: DevicePollLoop, intervalMs: number): Promise<void> {
+  loop.attempt.timer = null;
+  let res;
+  try {
+    res = await loop.client.pollDeviceLogin({ deviceCode: loop.deviceCode });
+  } catch (e) {
+    if (loop.isCurrent()) loop.setDeviceLogin(deviceLoginError(e, "Device sign-in failed"));
+    return;
+  }
+  if (loop.isCurrent()) actOnDevicePollStep(loop, devicePollStep(res, intervalMs));
+}
+
+/** Carry out `step`: schedule the next poll, end the attempt, or take up its session. */
+function actOnDevicePollStep(loop: DevicePollLoop, step: DevicePollStep): void {
+  switch (step.next) {
+    case "poll":
+      scheduleDevicePoll(loop, step.afterMs);
+      return;
+    case "settle":
+      loop.setDeviceLogin(step.deviceLogin);
+      return;
+    case "adopt":
+      loop.setDeviceLogin(DEVICE_LOGIN_IDLE);
+      loop.adoptSession(step.session);
+      return;
   }
 }
 
@@ -360,10 +418,7 @@ export function useAuth() {
   // again (or unmounting) bumps `generation`, so a poll still in flight for the old device code
   // lands on a dead attempt and schedules nothing.
   const [deviceLogin, setDeviceLogin] = useState<DeviceLogin>(DEVICE_LOGIN_IDLE);
-  const deviceAttemptRef = useRef<{ generation: number; timer: ReturnType<typeof setTimeout> | null }>({
-    generation: 0,
-    timer: null,
-  });
+  const deviceAttemptRef = useRef<DeviceAttemptSlot>({ generation: 0, timer: null });
 
   const endDeviceAttempt = useCallback(() => {
     const attempt = deviceAttemptRef.current;
@@ -379,22 +434,17 @@ export function useAuth() {
     const attempt = deviceAttemptRef.current;
     const generation = attempt.generation;
     const isCurrent = () => attempt.generation === generation;
-    const fail = (e: unknown, defaultMessage: string) => {
-      if (!isCurrent()) return;
-      setDeviceLogin({ phase: "failed", error: e instanceof Error ? e.message : defaultMessage });
-    };
 
     setDeviceLogin({ phase: "starting" });
     let grant;
     try {
       grant = await client.startDeviceLogin({});
     } catch (e) {
-      fail(e, "Failed to start device sign-in");
+      if (isCurrent()) setDeviceLogin(deviceLoginError(e, "Failed to start device sign-in"));
       return;
     }
     if (!isCurrent()) return;
 
-    const { deviceCode } = grant;
     // GitHub's floor between polls. A slow-down answer raises it for every later poll. An interval
     // that is not positive is a protocol error, never a reason to poll with no delay.
     const grantedIntervalMs = intervalMsOf(grant.intervalSeconds);
@@ -405,47 +455,14 @@ export function useAuth() {
       });
       return;
     }
-    let intervalMs = grantedIntervalMs;
-
-    const answered = (res: PollDeviceLoginResponse) => {
-      const step = devicePollStep(res, intervalMs);
-      switch (step.next) {
-        case "poll":
-          intervalMs = step.afterMs;
-          scheduleNextPoll();
-          return;
-        case "settle":
-          setDeviceLogin(step.deviceLogin);
-          return;
-        case "adopt":
-          setDeviceLogin(DEVICE_LOGIN_IDLE);
-          adoptSession(step.session);
-          return;
-      }
-    };
-
-    const poll = async () => {
-      attempt.timer = null;
-      let res;
-      try {
-        res = await client.pollDeviceLogin({ deviceCode });
-      } catch (e) {
-        fail(e, "Device sign-in failed");
-        return;
-      }
-      if (isCurrent()) answered(res);
-    };
-
-    const scheduleNextPoll = () => {
-      attempt.timer = setTimeout(() => void poll(), intervalMs);
-    };
 
     setDeviceLogin({
       phase: "awaiting-approval",
       userCode: grant.userCode,
       verificationUri: grant.verificationUri,
     });
-    scheduleNextPoll();
+    const { deviceCode } = grant;
+    scheduleDevicePoll({ client, deviceCode, attempt, isCurrent, setDeviceLogin, adoptSession }, grantedIntervalMs);
   }, [client, adoptSession, endDeviceAttempt]);
 
   const logout = useCallback(async () => {
