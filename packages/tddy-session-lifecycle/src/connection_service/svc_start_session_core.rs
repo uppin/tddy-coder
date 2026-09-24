@@ -402,51 +402,16 @@ impl DaemonSessionHost {
 
         // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
         if req.session_type.trim() == "claude-cli" {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
-                os_user,
-                Some(&self.tddy_data_dir),
-            )
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-            let session_id = Uuid::now_v7().to_string();
-            let materialized = self
-                .prepare_session_attachments(&AttachmentMaterialization {
-                    session_token: &req.session_token,
-                    os_user,
-                    sessions_base: &sessions_base,
-                    session_id: &session_id,
-                    attachments: &req.attachments,
-                    progress,
-                })
-                .await?;
             // A child of a planned PR is told where its boundaries are, however it was started: the
             // dialog opens with the node's documents pre-attached but carries only the node's title
             // and description as the prompt, so the line is added here rather than in the browser.
             // Derived from what materialized, so it can only name a document the child holds.
-            let initial_prompt = crate::stack_doc_attachments::prompt_with_attached_changeset(
-                req.initial_prompt.trim(),
-                &materialized,
-            );
+            let start = self.cli_start_prelude(&req, progress, os_user).await?;
             let stack_parent_for_claude_cli = trim_to_option(&req.stack_parent);
             // A managed-codebase claude-cli session with a recipe is launched workflow-aware. An
             // unknown recipe is a request error (never silently ignored). Non-managed sessions and
             // managed sessions without a recipe keep the plain launch (managed_recipe = None).
-            let managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>> =
-                if req.managed_codebase && !req.recipe.trim().is_empty() {
-                    Some(
-                        tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(
-                            req.recipe.trim(),
-                        )
-                        .map_err(Status::invalid_argument)?,
-                    )
-                } else {
-                    None
-                };
-
-            let start = CliStart {
-                sessions_base,
-                session_id,
-                initial_prompt,
-            };
+            let managed_recipe = managed_recipe_for(&req)?;
             if req.sandbox {
                 return self
                     .start_sandboxed_claude_cli_from_request(
@@ -785,6 +750,35 @@ impl DaemonSessionHost {
         .await
     }
 
+    /// Materialize the request's attachments into the session, and return its first prompt with a
+    /// line naming the attached changeset when one materialized.
+    pub(super) async fn attached_initial_prompt(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        sessions_base: &Path,
+        session_id: &str,
+        progress: &AttachmentProgressSink,
+    ) -> Result<String, Status> {
+        let materialized = self
+            .prepare_session_attachments(&AttachmentMaterialization {
+                session_token: &req.session_token,
+                os_user,
+                sessions_base,
+                session_id,
+                attachments: &req.attachments,
+                progress,
+            })
+            .await?;
+        Ok(
+            crate::stack_doc_attachments::prompt_with_attached_changeset(
+                req.initial_prompt.trim(),
+                &materialized,
+            ),
+        )
+    }
+
+    /// Where a new CLI-agent session lives, the id it is given, and its first prompt.
     async fn cli_start_prelude(
         &self,
         req: &StartSessionRequest,
@@ -795,20 +789,9 @@ impl DaemonSessionHost {
             crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
                 .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let session_id = Uuid::now_v7().to_string();
-        let materialized = self
-            .prepare_session_attachments(&AttachmentMaterialization {
-                session_token: &req.session_token,
-                os_user,
-                sessions_base: &sessions_base,
-                session_id: &session_id,
-                attachments: &req.attachments,
-                progress,
-            })
+        let initial_prompt = self
+            .attached_initial_prompt(req, os_user, &sessions_base, &session_id, progress)
             .await?;
-        let initial_prompt = crate::stack_doc_attachments::prompt_with_attached_changeset(
-            req.initial_prompt.trim(),
-            &materialized,
-        );
         Ok(CliStart {
             sessions_base,
             session_id,

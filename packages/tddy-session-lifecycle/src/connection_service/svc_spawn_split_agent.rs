@@ -8,8 +8,6 @@ use crate::{
 
 use std::sync::Arc;
 
-use super::AttachmentMaterialization;
-
 use tddy_core::output::SESSIONS_SUBDIR;
 
 use tddy_rpc::Status;
@@ -56,23 +54,12 @@ impl DaemonSessionHost {
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
-        let materialized = self
-            .prepare_session_attachments(&AttachmentMaterialization {
-                session_token: &req.session_token,
-                os_user,
-                sessions_base,
-                session_id,
-                attachments: &req.attachments,
-                progress,
-            })
-            .await?;
         // Where the codebase lives is not a reason for a planned PR's child to come up without its
         // boundaries: the same rule the co-located branches apply, on the attachments this host
         // materialized into the session it is about to run the agent for.
-        let initial_prompt = crate::stack_doc_attachments::prompt_with_attached_changeset(
-            req.initial_prompt.trim(),
-            &materialized,
-        );
+        let initial_prompt = self
+            .attached_initial_prompt(req, os_user, sessions_base, session_id, progress)
+            .await?;
 
         let tddy_tools_path = self.resolve_tddy_tools_path()?;
         let remote = match livekit {
