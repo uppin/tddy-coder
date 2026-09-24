@@ -20,7 +20,9 @@
 //! days) never signs out, so its vault stays open until the daemon exits — see
 //! docs/dev/todo/2026-09-23-credential-vault-open-past-its-last-session.md.
 
-use std::collections::{HashMap, HashSet};
+mod pending;
+
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -28,21 +30,8 @@ use std::time::{Duration, Instant};
 use crate::record::CredentialRecord;
 use crate::secret::SecretString;
 use crate::vault::{CredentialStore, SessionVault, UnlockKey, VaultError};
-
-/// Where this module logs: the credentials a sign-in left waiting, and when they expire.
-const LOG_TARGET: &str = "tddy_credentials::sessions";
-
-/// How long a sign-in's credential waits in memory for its vault to open, unless the daemon
-/// configures otherwise ([`SessionVaults::with_pending_lifetime`]).
-///
-/// The waiting credential is a live GitHub token, unsealed, and it is also what permits a first
-/// passphrase or a reset (see [`SessionVaults::create`]); neither should outlive the moment the
-/// operator could reasonably be choosing a passphrase.
-pub const PENDING_LOGIN_LIFETIME: Duration = Duration::from_secs(600);
-
-/// Where [`SessionVaults`] reads the time from when deciding a pending credential's age —
-/// `Instant::now` in a daemon, a clock the test moves by hand in a test.
-pub type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
+pub use pending::{Clock, PENDING_LOGIN_LIFETIME};
+use pending::{Pending, PendingSignIns, LOG_TARGET};
 
 /// How long the key a refresh just rotated away from still answers, with the key it was rotated to.
 ///
@@ -88,14 +77,8 @@ pub struct SessionVaults {
     auth_storage_dir: PathBuf,
     rotation_grace: Duration,
     open: Mutex<HashMap<String, Arc<SessionVault>>>,
-    /// Credentials logins produced while their vault was closed, by subject, with when each was
-    /// held. Each expires after `pending_lifetime`; its secret is wiped as the record drops.
-    pending: Mutex<HashMap<String, Vec<Pending>>>,
-    /// How long a pending credential waits — `None` for never.
-    pending_lifetime: Option<Duration>,
-    /// Subjects whose last pending credential expired unused, so a refusal can say so.
-    expired: Mutex<HashSet<String>>,
-    clock: Clock,
+    /// Credentials logins produced while their vault was closed, each for a limited time.
+    pending: PendingSignIns,
     /// The latest rotation of each `(subject, slot id)`, for the grace window. Also what serialises
     /// refreshes: a rotation and the answer to a refresh racing it happen under this lock.
     rotations: Mutex<HashMap<(String, String), Rotation>>,
@@ -107,12 +90,6 @@ pub struct SessionVaults {
     ///
     /// Lock order: `rotations` before `transitions`, never the other way round.
     transitions: Mutex<()>,
-}
-
-/// A credential waiting for its vault, and when the sign-in that produced it arrived.
-struct Pending {
-    record: CredentialRecord,
-    since: Instant,
 }
 
 /// One rotation of one slot: the key it retired, the key it handed out, and when.
@@ -137,10 +114,7 @@ impl SessionVaults {
             auth_storage_dir: auth_storage_dir.into(),
             rotation_grace: ROTATION_GRACE,
             open: Mutex::new(HashMap::new()),
-            pending: Mutex::new(HashMap::new()),
-            pending_lifetime: Some(PENDING_LOGIN_LIFETIME),
-            expired: Mutex::new(HashSet::new()),
-            clock: Arc::new(Instant::now),
+            pending: PendingSignIns::default(),
             rotations: Mutex::new(HashMap::new()),
             transitions: Mutex::new(()),
         }
@@ -157,28 +131,28 @@ impl SessionVaults {
     /// [`PENDING_LOGIN_LIFETIME`] — `None` for as long as the daemon runs (builder).
     #[must_use]
     pub fn with_pending_lifetime(mut self, lifetime: Option<Duration>) -> Self {
-        self.pending_lifetime = lifetime;
+        self.pending.lifetime = lifetime;
         self
     }
 
     /// Read the time from `clock` rather than [`Instant::now`] (builder).
     #[must_use]
     pub fn with_clock(mut self, clock: Clock) -> Self {
-        self.clock = clock;
+        self.pending.clock = clock;
         self
     }
 
     /// How long a pending credential waits for its vault — `None` when it never expires.
     #[must_use]
     pub fn pending_lifetime(&self) -> Option<Duration> {
-        self.pending_lifetime
+        self.pending.lifetime
     }
 
     /// Drop every pending credential older than its lifetime — the periodic sweep, so a token
     /// nobody touches does not wait in memory past its time — and say how many were dropped.
     /// Each lookup that consults the pending set expires what is due as well.
     pub fn expire_pending(&self) -> usize {
-        self.drop_expired(&mut held(&self.pending))
+        self.pending.expire()
     }
 
     /// Where `subject`'s vault lives.
@@ -208,11 +182,7 @@ impl SessionVaults {
     /// Whether a credential for `subject` is waiting in memory for their vault to open.
     #[must_use]
     pub fn holds_pending(&self, subject: &str) -> bool {
-        let mut pending = held(&self.pending);
-        self.drop_expired(&mut pending);
-        pending
-            .get(subject)
-            .is_some_and(|records| !records.is_empty())
+        self.pending.holds(subject)
     }
 
     /// Drop every credential waiting in memory for `subject`'s vault — a sign-out by a lineage
@@ -223,8 +193,7 @@ impl SessionVaults {
     /// for its token to be kept.
     pub fn discard_pending(&self, subject: &str) {
         let _transition = held(&self.transitions);
-        held(&self.pending).remove(subject);
-        held(&self.expired).remove(subject);
+        self.pending.discard(subject);
     }
 
     /// Retain a credential a login produced for `subject`.
@@ -251,7 +220,7 @@ impl SessionVaults {
                 Err(failed) => return Err(failed),
             }
         }
-        self.hold_pending(subject, record);
+        self.pending.hold(subject, record);
         Ok(Retained {
             state: self.state(subject),
             unlock_key: None,
@@ -400,7 +369,7 @@ impl SessionVaults {
         if self.holds_pending(subject) {
             return Ok(());
         }
-        if held(&self.expired).contains(subject) {
+        if self.pending.expired_unused(subject) {
             log::warn!(
                 target: LOG_TARGET,
                 "refused to choose a credential vault passphrase for '{subject}': the GitHub \
@@ -408,37 +377,6 @@ impl SessionVaults {
             );
         }
         Err(VaultError::NoFreshLogin)
-    }
-
-    /// Drop from `pending` every credential older than the lifetime, logging each; its secret is
-    /// wiped as it drops. Returns how many went.
-    fn drop_expired(&self, pending: &mut HashMap<String, Vec<Pending>>) -> usize {
-        let Some(lifetime) = self.pending_lifetime else {
-            return 0;
-        };
-        let now = (self.clock)();
-        let mut dropped = 0;
-        pending.retain(|subject, records| {
-            records.retain(|waiting| {
-                let age = now.saturating_duration_since(waiting.since);
-                if age < lifetime {
-                    return true;
-                }
-                log::info!(
-                    target: LOG_TARGET,
-                    "dropped the {} credential a sign-in of '{subject}' left waiting for their \
-                     vault: it waited {} s, its lifetime is {} s",
-                    waiting.record.provider.as_str(),
-                    age.as_secs(),
-                    lifetime.as_secs()
-                );
-                held(&self.expired).insert(subject.clone());
-                dropped += 1;
-                false
-            });
-            !records.is_empty()
-        });
-        dropped
     }
 
     /// Seal what was waiting for `subject`'s newly opened `vault`, hand the lineage that opened it
@@ -465,65 +403,19 @@ impl SessionVaults {
         }
     }
 
-    /// Keep `record` until `subject`'s vault opens, replacing one held for the same account.
-    fn hold_pending(&self, subject: &str, record: CredentialRecord) {
-        let mut pending = held(&self.pending);
-        self.drop_expired(&mut pending);
-        held(&self.expired).remove(subject);
-        match self.pending_lifetime {
-            Some(lifetime) => log::info!(
-                target: LOG_TARGET,
-                "holding the {} credential of a sign-in of '{subject}' in memory until their vault \
-                 opens; it expires in {} s (at unix {})",
-                record.provider.as_str(),
-                lifetime.as_secs(),
-                unix_seconds_in(lifetime)
-            ),
-            None => log::info!(
-                target: LOG_TARGET,
-                "holding the {} credential of a sign-in of '{subject}' in memory until their vault \
-                 opens; it never expires",
-                record.provider.as_str()
-            ),
-        }
-        let records = pending.entry(subject.to_string()).or_default();
-        records.retain(|held| {
-            (&held.record.provider, &held.record.account) != (&record.provider, &record.account)
-        });
-        records.push(Pending {
-            record,
-            since: (self.clock)(),
-        });
-    }
-
     /// Seal every credential waiting for `subject` into `vault`. What fails to seal is kept
     /// waiting, and the failure reported — nothing held in memory is dropped by a failed write.
     fn seal_pending(&self, subject: &str, vault: &SessionVault) -> Result<(), VaultError> {
-        let mut waiting = {
-            let mut pending = held(&self.pending);
-            self.drop_expired(&mut pending);
-            pending.remove(subject).unwrap_or_default()
-        };
+        let mut waiting = self.pending.take(subject);
         while let Some(Pending { record, .. }) = waiting.first() {
             if let Err(failed) = vault.put(record.clone()) {
-                held(&self.pending)
-                    .entry(subject.to_string())
-                    .or_default()
-                    .append(&mut waiting);
+                self.pending.restore(subject, waiting);
                 return Err(failed);
             }
             waiting.remove(0);
         }
         Ok(())
     }
-}
-
-/// The Unix time `after` from now, for a log line; `0` on a clock before the epoch.
-fn unix_seconds_in(after: Duration) -> u64 {
-    std::time::SystemTime::now()
-        .checked_add(after)
-        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0, |since| since.as_secs())
 }
 
 #[cfg(test)]
