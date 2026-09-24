@@ -106,7 +106,7 @@ Two tiers.
   fn resolve_placement(&self, req: &StartSessionRequest) -> Placement { … }
   ```
 
-### 3. `change_signature`, engine-performed, for adding, reordering and retyping parameters
+### 3. `change_signature`, for adding, reordering and retyping parameters (no assist behind it)
 
 This is the same shape as `move_module_to_crate`: engine-informed rather than engine-performed.
 Every call site comes from a real `textDocument/references` result, never a text search. The plan
