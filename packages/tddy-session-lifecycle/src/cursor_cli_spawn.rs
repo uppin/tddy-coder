@@ -14,8 +14,7 @@ use crate::branch_intent::{
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::{resolve_cursor_binary_path, DaemonConfig};
 use crate::connection_service::{
-    effective_spawn_branch, session_worktree_source, spawn_blocking_with_timeout,
-    spawned_branch_of_session, WorktreeSource,
+    effective_spawn_branch, session_worktree_source, spawned_branch_of_session, WorktreeSource,
 };
 use crate::project_storage;
 use crate::user_sessions_path::projects_path_for_user;
@@ -141,19 +140,12 @@ pub async fn spawn_cursor_cli_session_inner(
                 .await?;
             let worktree_base_ref =
                 tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
-            let repo_root_clone = repo_root.clone();
-            let session_dir_clone = session_dir.clone();
-            let wt = spawn_blocking_with_timeout(
+            let wt = crate::connection_service::create_session_worktree(
                 timeout,
                 "start_cursor_cli_session: create worktree",
-                move || {
-                    tddy_core::setup_worktree_for_session_with_optional_chain_base(
-                        &repo_root_clone,
-                        &session_dir_clone,
-                        worktree_base_ref.as_deref(),
-                    )
-                    .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
-                },
+                &repo_root,
+                &session_dir,
+                worktree_base_ref,
             )
             .await?;
             crate::connection_service::push_new_branch_to_origin_if_requested(

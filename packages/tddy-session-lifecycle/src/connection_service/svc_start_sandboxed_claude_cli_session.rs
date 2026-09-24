@@ -500,20 +500,13 @@ impl DaemonSessionHost {
             branch.selected_integration_base_ref,
             chain_base_ref,
         );
-        let repo_root_clone = repo_root.to_path_buf();
-        let session_dir_clone = session_dir.to_path_buf();
         let timeout = self.config.spawn_worker_request_timeout();
-        let wt = service_util::spawn_blocking_with_timeout(
+        let wt = service_util::create_session_worktree(
             timeout,
             "start_sandboxed_claude_cli_session: create worktree",
-            move || {
-                tddy_core::setup_worktree_for_session_with_optional_chain_base(
-                    &repo_root_clone,
-                    &session_dir_clone,
-                    worktree_base_ref.as_deref(),
-                )
-                .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
-            },
+            repo_root,
+            session_dir,
+            worktree_base_ref,
         )
         .await?;
         service_util::push_new_branch_to_origin_if_requested(

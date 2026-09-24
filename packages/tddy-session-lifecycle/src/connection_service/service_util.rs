@@ -38,6 +38,28 @@ pub(crate) async fn index_session_worktree(
     Ok(())
 }
 
+/// Cut a session's git worktree from `repo_root` into `session_dir` (blocking: a fetch plus
+/// `git worktree add`), based on `base_ref` when there is one, under the spawn deadline.
+pub(crate) async fn create_session_worktree(
+    timeout: Duration,
+    op_label: &'static str,
+    repo_root: &Path,
+    session_dir: &Path,
+    base_ref: Option<String>,
+) -> Result<std::path::PathBuf, Status> {
+    let repo_root = repo_root.to_path_buf();
+    let session_dir = session_dir.to_path_buf();
+    spawn_blocking_with_timeout(timeout, op_label, move || {
+        tddy_core::setup_worktree_for_session_with_optional_chain_base(
+            &repo_root,
+            &session_dir,
+            base_ref.as_deref(),
+        )
+        .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
+    })
+    .await
+}
+
 /// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
 pub async fn spawn_blocking_with_timeout<T: Send + 'static>(
     timeout: Duration,
