@@ -38,7 +38,10 @@ ROOT_DIR="$(pwd -P)"
 # Inside `./dev` (or any `nix develop`) TMPDIR is `/tmp/nix-shell.XXXX`, which nix deletes when that
 # shell exits — and the daemon is built to outlive it. A socket, pid file or log there vanishes under
 # a running daemon, and so does the TMPDIR its rust-analyzer copies `Cargo.lock` into for every
-# build-script run. The user's own temporary directory is what such a shell replaced.
+# build-script run. The user's own temporary directory is what such a shell replaced: on macOS
+# that is `getconf DARWIN_USER_TEMP_DIR` (the per-user `/var/folders/…/T/`), and where `getconf`
+# does not know that name — every other platform — it is `/tmp`, the same default this script had
+# before.
 durable_tmpdir() {
   case "${TMPDIR:-}" in
     "" | */nix-shell.*) getconf DARWIN_USER_TEMP_DIR 2>/dev/null || printf '/tmp' ;;
@@ -200,9 +203,11 @@ fi
 # shell's `NIX_*` flags and SDK, so under a PATH-only environment the build scripts of `webrtc-sys`
 # and the `sqlx-macros` proc macro fail to link inside rust-analyzer — while the same command
 # succeeds in the dev shell. rust-analyzer then reports its index as degraded and answers without
-# the code it could not build; that is where `req: _` signatures came from. The caller's own
-# environment is not inherited either: a host `LDFLAGS`/`CPPFLAGS` (Homebrew sets both) is a
-# different linker configuration from the one the dev shell's `cargo build` uses.
+# the code it could not build; that is where `req: _` signatures came from. The daemon gets exactly
+# what `./dev` gets, the caller's environment included: `nix develop` is impure and passes the
+# caller's variables through, so a host `LDFLAGS`/`CPPFLAGS` (Homebrew sets both) reaches the daemon
+# just as it reaches a `./dev cargo build`. That is intended — the daemon's rust-analyzer then
+# builds with the same linker configuration as the developer's own cargo does in the dev shell.
 #
 # Without rust-analyzer on PATH at all the daemon comes up, binds, serves, and refuses every
 # LSP-backed operation with `Unavailable: lsp server exited`.
@@ -225,8 +230,10 @@ fi
 # `setsid` comes from the dev shell, so a host without util-linux on its own PATH is not a reason
 # for the daemon to come up un-detached. Resolved explicitly rather than trusted to a `VAR=x cmd`
 # prefix, because the shell looks a command up on the PATH it already has, not the one the prefix
-# sets.
-if ! env PATH="$DEV_SHELL_PATH" command -v setsid >/dev/null 2>&1; then
+# sets. Resolved in a subshell that assigns PATH, not through `env PATH=… command -v`: `command` is
+# a shell builtin, and `env` runs it as a program on disk — which only macOS ships.
+SETSID="$(PATH="$DEV_SHELL_PATH"; command -v setsid || true)"
+if [[ -z "$SETSID" ]]; then
   narrate "run-index-daemon: the dev shell provides no setsid, so the daemon could not be given a"
   narrate "session of its own — and one that shares this shell's process group does not outlive it."
   exit 1
@@ -261,7 +268,7 @@ env -i "${DEV_SHELL_ENV[@]}" \
   TMPDIR="$DURABLE_TMPDIR" TMP="$DURABLE_TMPDIR" TEMP="$DURABLE_TMPDIR" TEMPDIR="$DURABLE_TMPDIR" \
   NIX_BUILD_TOP="$DURABLE_TMPDIR" \
   RUST_LOG="${TDDY_INDEX_LOG:-info}" \
-  "$(env PATH="$DEV_SHELL_PATH" command -v setsid)" sh -c 'echo $$ >"$1"; exec "$2" --grpc-uds "$3"' \
+  "$SETSID" sh -c 'echo $$ >"$1"; exec "$2" --grpc-uds "$3"' \
   run-index-daemon "$PID_FILE" "$BINARY" "$SOCKET" \
   </dev/null >/dev/null 2>>"$LOG_FILE" &
 

@@ -66,6 +66,36 @@ fn ping_succeeds(socket: &Path) -> bool {
         .success()
 }
 
+/// This suite's own runtime directory, which stops whatever daemon the script started in it when
+/// the test ends — passing or panicking.
+///
+/// A panic between a start and its stop would otherwise leak a detached daemon: it has a session
+/// of its own, so nothing the test runner tears down reaches it. The directory is removed after
+/// the stop, because the stop reads the pid file inside it.
+struct ASuiteRuntime {
+    root: PathBuf,
+    directory: tempfile::TempDir,
+}
+
+impl ASuiteRuntime {
+    fn new() -> Self {
+        Self {
+            root: repo_root(),
+            directory: tempfile::tempdir().expect("a runtime directory of this suite's own"),
+        }
+    }
+
+    fn path(&self) -> &Path {
+        self.directory.path()
+    }
+}
+
+impl Drop for ASuiteRuntime {
+    fn drop(&mut self) {
+        stop_the_daemon(&self.root, self.directory.path());
+    }
+}
+
 fn stop_the_daemon(root: &Path, runtime: &Path) {
     let _ = Command::new("./run-index-daemon")
         .arg("--stop")
@@ -82,7 +112,7 @@ fn the_daemon_outlives_the_shell_that_started_it() {
     use std::os::unix::process::CommandExt;
 
     let root = repo_root();
-    let runtime = tempfile::tempdir().expect("a runtime directory of this suite's own");
+    let runtime = ASuiteRuntime::new();
 
     // Given the script run in a process group of its own, which is what makes the teardown below
     // a teardown of *its* group and not of this test runner's
@@ -116,11 +146,8 @@ fn the_daemon_outlives_the_shell_that_started_it() {
         .status();
 
     // Then the daemon is still answering, because it never belonged to that group
-    let answering = ping_succeeds(&socket);
-    stop_the_daemon(&root, runtime.path());
-
     assert!(
-        answering,
+        ping_succeeds(&socket),
         "the daemon died with the process group of the shell that started it — it was not given \
          a session of its own"
     );
@@ -130,7 +157,7 @@ fn the_daemon_outlives_the_shell_that_started_it() {
 #[ignore = "runs the real script — nix develop and a cargo build, so minutes and a toolchain"]
 fn status_refuses_a_socket_with_no_listener_behind_it() {
     let root = repo_root();
-    let runtime = tempfile::tempdir().expect("a runtime directory of this suite's own");
+    let runtime = ASuiteRuntime::new();
 
     // Given a daemon that was started and then stopped, which leaves the pid file's claim stale
     let announced = Command::new("./run-index-daemon")
@@ -139,7 +166,11 @@ fn status_refuses_a_socket_with_no_listener_behind_it() {
         .stdin(Stdio::null())
         .output()
         .expect("start the script");
-    assert!(announced.status.success());
+    assert!(
+        announced.status.success(),
+        "the script did not start a daemon: {}",
+        String::from_utf8_lossy(&announced.stderr)
+    );
     let socket = exported_socket(&String::from_utf8_lossy(&announced.stdout));
     stop_the_daemon(&root, runtime.path());
 
@@ -197,7 +228,7 @@ fn environment_of(pid: &str) -> Vec<String> {
 #[ignore = "runs the real script — nix develop and a cargo build, so minutes and a toolchain"]
 fn the_daemon_runs_with_the_dev_shells_whole_environment() {
     let root = repo_root();
-    let runtime = tempfile::tempdir().expect("a runtime directory of this suite's own");
+    let runtime = ASuiteRuntime::new();
 
     // Given a daemon the script started
     let announced = Command::new("./run-index-daemon")
@@ -214,7 +245,6 @@ fn the_daemon_runs_with_the_dev_shells_whole_environment() {
 
     // When its environment is read
     let environment = environment_of(&recorded_pid(runtime.path()));
-    stop_the_daemon(&root, runtime.path());
 
     // Then it is the dev shell's, with the temporary directory a `nix develop` deletes on exit
     // replaced — this suite itself runs under `./dev`, so the caller's TMPDIR is one of those too
@@ -235,11 +265,18 @@ fn the_daemon_runs_with_the_dev_shells_whole_environment() {
 /// A restart reads a log the previous daemon left behind. Truncating it inside the background job
 /// raced the readiness loop, which then found the old `listening on` line and announced a daemon
 /// that had not started yet — with no pid file, so `--stop` had nothing to stop.
+///
+/// **This cannot force the race it guards.** The bug showed only when the readiness loop's first
+/// tick ran before the background job was scheduled, and nothing outside the script can arrange
+/// that ordering — so with the bug back, this test still passes whenever the job happens to win.
+/// A failure here is proof of the bug; a pass is evidence against it, not proof. The fix itself
+/// (truncating before the launch, in `run-index-daemon`) is what removes the race, and this stays
+/// as the regression check that catches it on the runs where the scheduler exposes it.
 #[test]
 #[ignore = "runs the real script — nix develop and a cargo build, so minutes and a toolchain"]
 fn a_restart_announces_the_daemon_it_started_not_the_previous_ones_log() {
     let root = repo_root();
-    let runtime = tempfile::tempdir().expect("a runtime directory of this suite's own");
+    let runtime = ASuiteRuntime::new();
 
     // Given a daemon that was started and stopped, leaving its `listening on` line in the log
     let first = Command::new("./run-index-daemon")
@@ -248,7 +285,11 @@ fn a_restart_announces_the_daemon_it_started_not_the_previous_ones_log() {
         .stdin(Stdio::null())
         .output()
         .expect("start the script");
-    assert!(first.status.success());
+    assert!(
+        first.status.success(),
+        "the first start did not announce its daemon: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
     stop_the_daemon(&root, runtime.path());
 
     // When the script starts it again
@@ -261,7 +302,6 @@ fn a_restart_announces_the_daemon_it_started_not_the_previous_ones_log() {
     let socket = exported_socket(&String::from_utf8_lossy(&second.stdout));
     let answering = ping_succeeds(&socket);
     let pid = recorded_pid(runtime.path());
-    stop_the_daemon(&root, runtime.path());
 
     // Then it announced a daemon that answers, and recorded that daemon's pid
     assert!(
