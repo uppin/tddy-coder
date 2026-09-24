@@ -85,7 +85,7 @@ impl Destination {
 /// where `[dependencies]` and `[[bin]]` also carry a `name`. Scoping the search to the lines between
 /// `[package]` and the next table header is what keeps those out; a dependency's name being returned
 /// as the crate's would produce a `use` path that compiles nowhere.
-fn declared_package_name(manifest: &str) -> Option<&str> {
+pub(crate) fn declared_package_name(manifest: &str) -> Option<&str> {
     manifest
         .lines()
         .map(str::trim)

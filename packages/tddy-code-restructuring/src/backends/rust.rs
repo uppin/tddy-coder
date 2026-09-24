@@ -17,7 +17,6 @@ use crate::plan::{Anchor, Reexport, RefactorKind, RefactorOp};
 use crate::registry::{Language, LanguageBackend, Workspace};
 use crate::{RestructureError, Result};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -25,6 +24,21 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
+
+mod chatter;
+mod early_return;
+mod impl_seam;
+mod imports;
+mod nested_modules;
+mod readiness;
+
+pub use chatter::ServerChatter;
+
+use early_return::refuse_early_returns;
+
+use impl_seam::{refuse_impl_sibling_references, with_method_calls_restored};
+use imports::names_bound;
+use nested_modules::with_nested_references_restored;
 
 /// LSP `SymbolKind::Object` — how rust-analyzer reports an `impl` block. Its members are reached
 /// through the type, never through a module path, which is why a seam may move a whole `impl` freely
@@ -307,176 +321,6 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
         }),
         _ => None,
     }
-}
-
-/// What the server has said about its own progress while a request was in flight.
-///
-/// `request` used to drop every message it was not waiting for, which is why a run that spent two
-/// minutes loading a crate graph showed nothing at all and then failed claiming the plan was
-/// malformed. Folding those messages in costs one match per message and turns the wait into
-/// something a developer can watch.
-///
-/// **Published because the fold is not this backend's alone.** `tddy-index-daemon` observes the
-/// same two notifications — `$/progress` and `experimental/serverStatus` — to answer "is this
-/// root's graph loaded?", and there is exactly one right way to read them: a title arrives only
-/// with `begin` and has to be carried forward per token, the same phase reports once per file
-/// scanned, and the furthest percentage is not the last one. A second reading of that would drift
-/// from this one, and the two would then disagree about a load they were both watching.
-#[derive(Default)]
-pub struct ServerChatter {
-    /// The title of each work-done progress token in flight, by token. A title arrives only with
-    /// `begin`, so it has to be carried forward to the `report` lines that follow — and per token,
-    /// because rust-analyzer runs several phases at once and a single field would attribute one
-    /// phase's reports to another's title.
-    titles: HashMap<String, String>,
-    /// The last line built, which is what the timeout message needs in order to say where the
-    /// server got to.
-    last: Option<String>,
-    /// What was last printed for each token, deduplicated per token for the same reason the titles
-    /// are: two phases running at once would otherwise each defeat the other's deduplication.
-    shown: HashMap<String, String>,
-    /// Whether the server has reported itself quiescent — an extension, so never the only signal.
-    quiescent: bool,
-    /// The furthest percentage any phase reported, and the phase it belonged to.
-    ///
-    /// Kept apart from `last` because the two answer different questions and the server routinely
-    /// makes them disagree: it counts files inside a phase, then emits sub-steps carrying no
-    /// percentage at all (`working: tddy_desktop (lib)`). A timeout landing on one of those had a
-    /// `last` with no number in it, so the message could not say how far the index had got — which
-    /// is the one thing a reader needs in order to decide whether raising the budget will help.
-    furthest: Option<(u64, String)>,
-}
-
-impl ServerChatter {
-    /// Fold one server-sent message in, and return the line worth printing for it.
-    ///
-    /// A message that answers a request carries no `method`, which is what keeps every result out
-    /// of the progress stream without having to know the ids in flight.
-    pub fn absorb(&mut self, message: &Value) -> Option<String> {
-        match message.get("method").and_then(Value::as_str)? {
-            "$/progress" => self.progress(message.get("params")?),
-            "experimental/serverStatus" => {
-                self.quiescent = message
-                    .get("params")?
-                    .get("quiescent")
-                    .and_then(Value::as_bool)?;
-                None
-            }
-            _ => None,
-        }
-    }
-
-    /// Fold one `$/progress` notification in.
-    ///
-    /// The title arrives only with `begin`, so it is held and reused for the `report` lines that
-    /// follow it — without that, a report reads as a bare percentage with nothing to attach it to.
-    /// Lines are deduplicated on the phase and its percentage rather than on the whole line, because
-    /// the server reports one notification per *file* scanned and each carries a different absolute
-    /// path. Printing all of them buries the phases; one line per percent of each phase is the
-    /// progress a reader can actually follow. A notification with no percentage — every `begin`, and
-    /// the sub-steps of a phase that does not count — falls back to the line itself.
-    fn progress(&mut self, params: &Value) -> Option<String> {
-        let token = token_key(params.get("token")?);
-        let value = params.get("value")?;
-        match value.get("kind").and_then(Value::as_str)? {
-            "begin" => {
-                if let Some(title) = value.get("title").and_then(Value::as_str) {
-                    self.titles.insert(token.clone(), title.to_string());
-                }
-            }
-            "end" => {
-                self.titles.remove(&token);
-                return None;
-            }
-            _ => {}
-        }
-
-        let title = self.titles.get(&token).map(String::as_str);
-        let line = progress_line(title, value);
-        self.last = Some(line.clone());
-
-        if let Some(percentage) = value.get("percentage").and_then(Value::as_u64) {
-            let phase = title.unwrap_or("working").to_string();
-            if self
-                .furthest
-                .as_ref()
-                .is_none_or(|(seen, _)| percentage >= *seen)
-            {
-                self.furthest = Some((percentage, phase));
-            }
-        }
-
-        let key = match value.get("percentage").and_then(Value::as_u64) {
-            Some(percentage) => percentage.to_string(),
-            None => line.clone(),
-        };
-        if self.shown.get(&token) == Some(&key) {
-            return None;
-        }
-        self.shown.insert(token, key);
-        Some(line)
-    }
-}
-
-impl ServerChatter {
-    /// Where the index got to, for a message that has to explain a timeout.
-    ///
-    /// The last line on its own is not enough: it is often a sub-step with no percentage. This
-    /// pairs it with the furthest percentage seen, so the reader can tell a server that stalled at
-    /// 12% from one that timed out at 99% — the first wants investigating, the second wants a
-    /// bigger budget.
-    pub fn how_far(&self) -> String {
-        let last = self
-            .last
-            .clone()
-            .unwrap_or_else(|| "nothing reported".to_string());
-        match &self.furthest {
-            Some((percentage, phase)) => format!("{last}; furthest {phase} {percentage}%"),
-            None => last,
-        }
-    }
-
-    /// Whether the server has reported its own graph loaded and queryable.
-    ///
-    /// `experimental/serverStatus` is an extension, so a `false` here means "has not said so",
-    /// never "is not loaded" — which is why [`RustBackend::ensure_indexed`] treats it as a shortcut
-    /// out of a hover probe rather than as the probe itself. A consumer with no probe available has
-    /// only this, and must say so rather than presenting it as the stronger claim.
-    pub fn quiescent(&self) -> bool {
-        self.quiescent
-    }
-
-    /// The furthest percentage any phase has reported, and the phase it belonged to.
-    ///
-    /// Kept apart from the last line for the reason the field states: the server counts files
-    /// inside a phase and then emits sub-steps carrying no percentage at all, so the last line is
-    /// routinely the one with no number in it.
-    pub fn furthest(&self) -> Option<(u64, &str)> {
-        self.furthest
-            .as_ref()
-            .map(|(percentage, phase)| (*percentage, phase.as_str()))
-    }
-}
-
-/// A progress token as a map key. The specification allows a string or a number.
-fn token_key(token: &Value) -> String {
-    match token.as_str() {
-        Some(text) => text.to_string(),
-        None => token.to_string(),
-    }
-}
-
-/// One progress notification as a line: what the server is doing, where it has got to, and how far.
-fn progress_line(title: Option<&str>, value: &Value) -> String {
-    let mut line = title.unwrap_or("working").to_string();
-    if let Some(message) = value.get("message").and_then(Value::as_str) {
-        line.push_str(": ");
-        line.push_str(message);
-    }
-    if let Some(percentage) = value.get("percentage").and_then(Value::as_u64) {
-        line.push_str(&format!(" ({percentage}%)"));
-    }
-    line
 }
 
 /// rust-analyzer answers `codeAction` with an empty list until it has finished loading the crate
@@ -894,7 +738,7 @@ impl RustBackend {
             // The self-spawned transport folds progress in as it reads the stream; a bridged one
             // never sees the stream, so it collects what arrived and folds it in here. Without
             // this the whole load is silent and a timeout cannot say where the server got to.
-            for notification in bridge.drain_notifications() {
+            for notification in bridge.notifications_to_fold() {
                 if let Some(line) = self.chatter.absorb(&notification) {
                     (self.progress)(&line);
                 }
@@ -1166,6 +1010,13 @@ impl LanguageBackend for RustBackend {
         if let Err(refusal) = refuse_split_attribute_paths(&text, planned) {
             findings.push(refusal.to_string());
         }
+        if op.op == RefactorKind::ExtractMethod {
+            findings.extend(
+                refuse_early_returns(&text, planned)
+                    .err()
+                    .map(|e| e.to_string()),
+            );
+        }
 
         if op.op == RefactorKind::ExtractModule {
             if let Some(name) = op.name.as_deref() {
@@ -1255,6 +1106,9 @@ impl LanguageBackend for RustBackend {
                 end: *end,
             };
             refuse_split_attribute_paths(&original, planned)?;
+            if op.op == RefactorKind::ExtractMethod {
+                refuse_early_returns(&original, planned)?;
+            }
             if op.op == RefactorKind::ExtractModule {
                 if let Some(name) = op.name.as_deref() {
                     refuse_module_name_taken(&original, name, planned)?;
@@ -1482,6 +1336,8 @@ impl RustBackend {
         let placeholder = assist_for(op.op)
             .and_then(|assist| assist.placeholder)
             .ok_or_else(|| failure(format!("{:?} introduces nothing to name", op.op)))?;
+        let extracted = with_method_calls_restored(&extracted, placeholder.name, &impl_members);
+        let extracted = with_nested_references_restored(&extracted, placeholder.name, &moved);
 
         let named = self.rename_placeholder(uri, &extracted, placeholder, &name)?;
         refuse_residual_placeholder(original, &named, placeholder.name)?;
@@ -1499,7 +1355,7 @@ impl RustBackend {
         // Versions 1 and 2 belong to the open and to the rename above; both import phases send
         // more, so the counter runs across them rather than restarting.
         let pruned = self.prune_assist_imports(uri, &named, &name)?;
-        let imported = self.restore_imports(uri, &pruned, &name, &moved, reexport)?;
+        let imported = self.restore_imports(uri, original, &pruned, &name, &moved, reexport)?;
         let (preserved, mut report) = restore_visibility(&imported, &name, &moved)?;
 
         // The widenings the pass above cannot see, because the survey feeding it stops above an
@@ -1686,49 +1542,6 @@ impl RustBackend {
         Ok(reach)
     }
 
-    /// Import every name the relocated items lost, until the server reports none left to import.
-    ///
-    /// Extracting a module moves items away from the `use` declarations that gave their references
-    /// meaning: the declarations stay in the parent and the names go unresolved in the new scope.
-    /// rust-analyzer will not carry them across, but it will say which names it cannot resolve and
-    /// what would resolve each one — so every path written here is still the server's own.
-    ///
-    /// One import per pass. Each inserts a `use` line that moves everything below it, and a name
-    /// that looked unimportable often becomes resolvable once the name it hung off is restored.
-    ///
-    /// Every import is *verified* before it is kept: the trial text goes back to the server and the
-    /// name it was meant to resolve has to stop being unresolved. rust-analyzer offers imports that
-    /// resolve nothing — one for an inherent associated function, one naming a path two module levels
-    /// too high — and the difference between a good and a useless offer is not readable from its
-    /// title. Trusting the title wrote four `use` lines that did not compile across one real
-    /// restructure, in a run that reported success.
-    fn restore_imports(
-        &mut self,
-        uri: &str,
-        extracted: &str,
-        module: &str,
-        moved: &[MovedItem],
-        reexport: Reexport,
-    ) -> Result<String> {
-        let mut text = extracted.to_string();
-        // Names every offered path failed. Re-asking one would be offered the same useless import
-        // again, and every pass would insert another copy of it.
-        let mut unimportable: Vec<String> = Vec::new();
-
-        for _ in 0..IMPORT_PASSES {
-            self.did_change(uri, &text)?;
-
-            match self.next_import(uri, &text, module, moved, reexport, &mut unimportable)? {
-                Some(imported) => text = imported,
-                None => return Ok(text),
-            }
-        }
-
-        Err(server_defect(format!(
-            "rust-analyzer was still offering imports after {IMPORT_PASSES} passes"
-        )))
-    }
-
     /// Drop the `use` lines the assist wrote that cannot be an import the move lost.
     ///
     /// rust-analyzer's `extract_module` writes the new module's imports itself, and this runs before
@@ -1753,150 +1566,6 @@ impl RustBackend {
         let block = module_bounds(&source, module)?;
 
         Ok(without_dead_imports(&source, &block, &unresolved).join("\n"))
-    }
-
-    /// The text with one more import restored, or `None` once no name is left to import.
-    ///
-    /// A name with no import offered is skipped rather than refused: most of them are methods and
-    /// fields that are unresolved only because their receiver's type is, and they come back on
-    /// their own once it does. What is left when no import remains is for the compiler to judge.
-    #[allow(clippy::too_many_arguments)]
-    fn next_import(
-        &mut self,
-        uri: &str,
-        text: &str,
-        module: &str,
-        moved: &[MovedItem],
-        reexport: Reexport,
-        unimportable: &mut Vec<String>,
-    ) -> Result<Option<String>> {
-        let mut asked: Vec<String> = Vec::new();
-        let unresolved = self.unresolved_names(uri, text)?;
-
-        for name in &unresolved {
-            // One import serves every occurrence of a name, and a name that offered none here will
-            // not offer one at its next occurrence either.
-            if asked.contains(&name.text) || unimportable.contains(&name.text) {
-                continue;
-            }
-            asked.push(name.text.clone());
-
-            // A name reached through a qualifier is an associated item or a field, and no `use`
-            // binds either. rust-analyzer offers one anyway — `use super::new_with_config;` for a
-            // constructor called as `NativePDFContextManager::new_with_config` — and that import
-            // resolves nothing while looking exactly like a good one.
-            if reached_through_qualifier(text, &name.position) {
-                unimportable.push(name.text.clone());
-                continue;
-            }
-
-            // Already bound in this module and still unresolved: the binding that exists is the
-            // broken one, and a second is `E0252` however well its path reads.
-            if already_bound(text, module, &name.text)? {
-                unimportable.push(name.text.clone());
-                continue;
-            }
-
-            // A name this seam's own facade will re-export. The facade is written *after* this
-            // pass, so the server sees the name as unresolved and offers a path through the new
-            // module — and the named import it writes is private, which then *shadows* the
-            // `pub use module::*;` added moments later. The facade is left present and inert, and
-            // an outside caller gets `E0603` on a symbol the facade was asked to keep reachable.
-            if facade_will_bind(&name.text, moved, reexport) {
-                unimportable.push(name.text.clone());
-                continue;
-            }
-
-            // A name the parent binds under an alias — `ProbeOutcome as ProtoProbeOutcome`, which
-            // is how every generated proto type in this workspace is referred to. rust-analyzer
-            // offers the *unaliased* path, which does not bind the alias, so asking the server can
-            // only produce a `use` that resolves nothing and the run then refuses. The parent's own
-            // declaration already says what the moved code meant, so reconstruct it from there.
-            if let Some(path) = alias_target(text, module, &name.text) {
-                return Ok(Some(with_module_import(
-                    text,
-                    module,
-                    &format!("use {path} as {};", name.text),
-                )?));
-            }
-
-            let actions = self.request_settled(
-                "textDocument/codeAction",
-                json!({
-                    "textDocument": { "uri": uri },
-                    "range": { "start": name.position, "end": name.position },
-                    "context": { "diagnostics": [], "only": ["quickfix"] }
-                }),
-            )?;
-
-            let offered: Vec<String> = actions
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|action| action.get("title").and_then(Value::as_str))
-                .filter(|title| title.starts_with(IMPORT_TITLE))
-                .map(str::to_string)
-                .collect();
-
-            if offered.is_empty() {
-                // rust-analyzer offers `Import` for items, not for a bare module path, so a name
-                // the parent reached through `use crate::tool_engine;` is unresolved in the moved
-                // code with nothing on offer for it — and skipping silently is how three modules
-                // landed referencing an unlinked crate. The parent's own declaration says what it
-                // meant, exactly as for an alias.
-                if let Some(path) = parent_binding(text, module, &name.text) {
-                    return Ok(Some(with_module_import(
-                        text,
-                        module,
-                        &format!("use {path};"),
-                    )?));
-                }
-                continue;
-            }
-
-            let ordered = import_order(text, &offered).ok_or_else(|| {
-                seam_refusal(format!(
-                    "`{}` could be imported {} ways and neither rust-analyzer nor this file's own \
-                     imports say which the moved code meant: {}",
-                    name.text,
-                    offered.len(),
-                    offered.join(", ")
-                ))
-            })?;
-
-            // How many occurrences the import has to account for. Counted rather than asked as a
-            // yes/no, because one name is routinely unresolved in several places and only the
-            // occurrence this import was offered for is the one it can answer for.
-            let before = occurrences_of(&unresolved, &name.text);
-
-            for title in &ordered {
-                let action = titled(&actions, &title.to_lowercase())
-                    .ok_or_else(|| server_defect("the import offered could not be read back"))?;
-                let resolved = self.request_settled("codeAction/resolve", action)?;
-                let trial = apply_lsp_edit(text, edits_for(&resolved, uri)?);
-
-                self.did_change(uri, &trial)?;
-
-                let after = occurrences_of(&self.unresolved_names(uri, &trial)?, &name.text);
-                if after < before {
-                    return Ok(Some(trial));
-                }
-            }
-
-            // Every path the server offered leaves the name unresolved. Writing one anyway is how a
-            // successful run lands source that does not compile, so the operation says which name it
-            // could not import and what it tried.
-            return Err(seam_refusal(format!(
-                "no import rust-analyzer offered for `{}` left fewer of its {} unresolved \
-                 occurrence(s) — tried {}. Writing one anyway is how a run reports success over a \
-                 `use` that resolves nothing.",
-                name.text,
-                before,
-                ordered.join(", ")
-            )));
-        }
-
-        Ok(None)
     }
 
     /// Every identifier in the open document that the server cannot resolve, in source order.
@@ -2113,75 +1782,6 @@ impl RustBackend {
         }
 
         Ok(WorkspaceEdit { changes })
-    }
-
-    /// Wait, once per process, for the crate graph to load — with the server's progress on screen.
-    ///
-    /// Every request that needs name resolution is answered emptily until rust-analyzer has loaded
-    /// the graph, so waiting for it here once is what keeps every later wait short. On a real crate
-    /// the alternative is paid per operation, and `survey_moved_items` pays it per moved item.
-    ///
-    /// Hover is the authority, because it is the cheapest request that needs the graph and it is the
-    /// same signal a rename is gated on. `serverStatus` is only a shortcut out: it is an extension,
-    /// so a server that never sends it still has to get past this.
-    ///
-    /// A document with no symbols has nothing to hover, so the warm-up is skipped rather than spent
-    /// on a position that would never resolve — which leaves `indexed` false, and the first real
-    /// wait doing the waiting instead.
-    fn ensure_indexed(&mut self, uri: &str) -> Result<()> {
-        if self.indexed {
-            return Ok(());
-        }
-        (self.progress)("warming crate index (until ready, or until you stop waiting)");
-        let symbols = self.request_settled(
-            "textDocument/documentSymbol",
-            json!({ "textDocument": { "uri": uri } }),
-        )?;
-        let Some(probe) = first_symbol_position(&symbols) else {
-            (self.progress)("no indexable symbols in file; skipping warm-up");
-            return Ok(());
-        };
-
-        let started = Instant::now();
-        loop {
-            let hover = self.request_settled(
-                "textDocument/hover",
-                json!({ "textDocument": { "uri": uri }, "position": probe }),
-            )?;
-
-            if !hover.is_null() || self.chatter.quiescent {
-                self.indexed = true;
-                (self.progress)("crate index ready");
-                return Ok(());
-            }
-            if !self.keep_waiting(INDEXING_POLL) {
-                return Err(self.incomplete_index(started.elapsed()));
-            }
-        }
-    }
-
-    /// Block until the server can resolve names at `position`.
-    ///
-    /// `documentSymbol` is answered from the syntax tree and so succeeds immediately, but a rename
-    /// needs the crate graph. Hover is the cheapest request that also needs it, so a non-null hover
-    /// is the signal that a rename will be accepted.
-    fn wait_until_resolved(&mut self, uri: &str, position: &Value) -> Result<()> {
-        (self.progress)("waiting for type inference at the anchor");
-        let started = Instant::now();
-        loop {
-            let hover = self.request_settled(
-                "textDocument/hover",
-                json!({ "textDocument": { "uri": uri }, "position": position }),
-            )?;
-
-            if !hover.is_null() {
-                self.indexed = true;
-                return Ok(());
-            }
-            if !self.keep_waiting(INDEXING_POLL) {
-                return Err(self.incomplete_index(started.elapsed()));
-            }
-        }
     }
 
     /// Where a named symbol is declared in the open document.
@@ -2963,7 +2563,7 @@ fn without_dead_imports(
         .iter()
         .enumerate()
         .filter(|(index, line)| inside(*index) && simple_import(line).is_none())
-        .flat_map(|(_, line)| bound_names(line))
+        .flat_map(|(_, line)| names_bound(line))
         .collect();
 
     let mut kept = Vec::with_capacity(source.len());
@@ -2991,19 +2591,11 @@ fn simple_import(line: &str) -> Option<String> {
         return None;
     }
 
-    let names = bound_names(line);
+    let names = names_bound(line);
     let [only] = names.as_slice() else {
         return None;
     };
     Some(only.clone())
-}
-
-/// The final segment of every path a line's `use` declaration binds.
-fn bound_names(line: &str) -> Vec<String> {
-    imported_paths(line)
-        .iter()
-        .filter_map(|path| path.rsplit("::").next().map(str::to_string))
-        .collect()
 }
 
 /// Whether the server reports any unresolved name on the given zero-based line.
@@ -3069,9 +2661,7 @@ fn already_bound(text: &str, module: &str, name: &str) -> Result<bool> {
     let block = module_bounds(&source, module)?;
     let body = source[block.opened..block.closed].join("\n");
 
-    Ok(imported_paths(&body)
-        .iter()
-        .any(|path| path.rsplit("::").next() == Some(name)))
+    Ok(names_bound(&body).iter().any(|bound| bound == name))
 }
 
 /// The path an `Import` quickfix names, read out of its title.
@@ -3467,10 +3057,14 @@ fn refuse_residual_placeholder(original: &str, produced: &str, name: &str) -> Re
 
     // Two causes, and they want opposite advice. A leftover inside an already-extracted *module* is
     // an ordering mistake: extract the definition first and no reference to it is sitting in a scope
-    // the rewritten path cannot reach. A leftover inside an `impl` is not, and reordering the plan
-    // provably does not help — one real split was reordered in full and produced byte-identical
-    // refusals at identical offsets. An `impl` body cannot hold a `mod`, so the sibling can be moved
-    // neither first nor second; only a wider seam removes the reference.
+    // the rewritten path cannot reach. A module the file already had (its `mod tests`) reads the
+    // same lexically and wants no reordering, so that wording names it too; the one such leftover
+    // known, a call beside the module's own import of the item, is repaired before this runs
+    // (`with_nested_references_restored`). A leftover inside an `impl` is not an ordering mistake
+    // either, and reordering the plan provably does not help — one real split was reordered in full
+    // and produced byte-identical refusals at identical offsets. An `impl` body cannot hold a
+    // `mod`, so the sibling can be moved neither first nor second; only a wider seam removes the
+    // reference.
     //
     // Where both occur the `impl` wording wins, because it is the one no ordering can satisfy.
     let inside_an_impl = sites
@@ -3482,8 +3076,11 @@ fn refuse_residual_placeholder(original: &str, produced: &str, name: &str) -> Re
          this plan makes the path resolve — an `impl` body cannot hold a `mod`. Either grow the \
          seam to carry the whole `impl`, or cut it where nothing crosses."
     } else {
-        "Extract a definition before the items that reference it, so no reference to it is sitting \
-         inside an already-extracted module when it moves."
+        "That reference sits inside another module of this file. If an earlier operation of this \
+         plan extracted that module, extract a definition before the items that reference it, so \
+         no reference to it is sitting inside an already-extracted module when it moves. If the \
+         file already had that module, such as its `mod tests`, no ordering helps: reach the item \
+         there through `use super::*;`, or cut the seam where that module does not name it."
     };
 
     Err(server_defect(format!(
@@ -3662,9 +3259,8 @@ struct MovedItem {
     /// it after the seam moves.
     ///
     /// Distinct from `reached_from_outside`, which is true of any reference beyond the range and is
-    /// only a visibility signal. This one is the blocker: the new module is written outside the
-    /// `impl`, so from inside it `modname::Item` never named anything, and rust-analyzer does not
-    /// rename an unresolved path.
+    /// only a visibility signal. This one blocks a seam that cuts a trait `impl`, whose halves cannot
+    /// both be `impl`s of the trait; see [`refuse_impl_sibling_references`].
     referenced_in_impl_at: Vec<u32>,
 }
 
@@ -3694,78 +3290,6 @@ fn refuse_stranded(items: &[MovedItem]) -> Result<()> {
          and rust-analyzer rewrites no reference it did not move: {}. Ask for `reexport` to leave the \
          old path resolving through the parent, or cut the seam where these references do not reach.",
         stranded.join("; ")
-    )))
-}
-
-/// Refuse a seam that lifts an `impl` member away from a sibling in that same `impl`.
-///
-/// The one geometry that cannot be repaired, and it is narrower than it first looks. Three cases that
-/// look alike behave differently, and only the third blocks:
-///
-/// - A whole `impl` moves while the parent calls its methods: nothing to rewrite, because a method is
-///   reached through its type. Succeeds.
-/// - A path-reached item moves while the parent names it: the assist rewrites the reference and the
-///   import pass restores the binding, which is why [`refuse_stranded`] says an in-file reference
-///   costs nothing. Succeeds.
-/// - A member is lifted out of an `impl` while a sibling in that same `impl` calls it: the new module
-///   is written *outside* the impl, so from inside it `modname::Item` never named anything and the
-///   rename cannot reach the call. Refuses.
-///
-/// Refusing the first two would turn working restructures into refusals, which is the most expensive
-/// way a check can be wrong — so only `referenced_in_impl_at` is weighed here.
-///
-/// The prescription differs from [`refuse_residual_placeholder`]'s on purpose. Reordering is the fix
-/// when the stranded reference sits in an already-extracted *module*; it cannot help here, because an
-/// `impl` body cannot hold a `mod`, so the sibling can be moved neither out of the way first nor
-/// after. The seam has to grow to carry both.
-///
-/// Refuse a seam that cuts an `impl` in half while a member left behind still calls one that moves.
-///
-/// The one geometry of three that cannot be repaired, and it is narrower than it first looks:
-///
-/// - A whole `impl` moves while the parent calls its methods: nothing to rewrite, because a method is
-///   reached through its type. Succeeds, and the crate compiles.
-/// - A path-reached item moves while the parent names it: the assist rewrites the reference and the
-///   import pass restores the binding, which is why [`refuse_stranded`] says an in-file reference
-///   costs nothing. Succeeds.
-/// - A member is lifted out of an `impl` while a sibling in that same `impl` calls it: the new module
-///   is written *outside* the impl, so from in there the rewritten path never named anything and
-///   rust-analyzer will not rename what does not resolve. Refuses.
-///
-/// Refusing either of the first two would turn working restructures into refusals, which is why this
-/// weighs only members of an `impl` the seam cut through.
-///
-/// The prescription differs from [`refuse_residual_placeholder`]'s deliberately. Reordering is the fix
-/// when the stranded reference sits in an already-extracted *module*; it cannot help here, because an
-/// `impl` body cannot hold a `mod`, so the sibling can be moved neither out of the way first nor
-/// after. The seam has to grow.
-fn refuse_impl_sibling_references(items: &[MovedItem]) -> Result<()> {
-    let blocked: Vec<String> = items
-        .iter()
-        .filter(|item| !item.referenced_in_impl_at.is_empty())
-        .map(|item| {
-            format!(
-                "`{}` from line(s) {}",
-                item.name,
-                item.referenced_in_impl_at
-                    .iter()
-                    .map(u32::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })
-        .collect();
-
-    if blocked.is_empty() {
-        return Ok(());
-    }
-
-    Err(seam_refusal(format!(
-        "this seam cuts an `impl` in half, and a member left behind still calls one that would move: \
-         {}. The new module is written outside the `impl`, so that call would resolve nowhere and \
-         rust-analyzer will not rewrite it. An `impl` body cannot hold a `mod`, so no ordering helps — \
-         grow the seam to carry the whole `impl`, or cut it where nothing crosses.",
-        blocked.join("; ")
     )))
 }
 
@@ -6375,6 +5899,94 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         assert!(!already_bound(text, "xobject_pdf", "Object").unwrap());
     }
 
+    /// A module that received the parent's rebuilt `use … as …` for an alias.
+    fn a_module_importing(declaration: &str) -> String {
+        format!("mod readings {{\n    {declaration}\n\n    fn go() {{}}\n}}\n")
+    }
+
+    /// E1: `use a::B as C;` binds `C`. Read as binding `B`, the alias branch never sees the line it
+    /// has just written, and writes it again on every pass until the backstop.
+    #[test]
+    fn finds_an_alias_the_module_already_binds() {
+        // Given
+        let text = a_module_importing("use crate::proto::Event as StartSessionEventKind;");
+
+        // When
+        let bound = already_bound(&text, "readings", "StartSessionEventKind").unwrap();
+
+        // Then
+        assert!(
+            bound,
+            "the module's own `as` import was not seen binding its alias"
+        );
+    }
+
+    /// The other half of the same misreading: an aliased import does not bind the name it renames.
+    #[test]
+    fn does_not_count_the_renamed_name_as_bound_by_an_alias() {
+        // Given
+        let text = a_module_importing("use crate::proto::Event as StartSessionEventKind;");
+
+        // When
+        let bound = already_bound(&text, "readings", "Event").unwrap();
+
+        // Then
+        assert!(
+            !bound,
+            "`Event` was counted as bound, though only its alias is"
+        );
+    }
+
+    /// An alias inside a nested group binds its alias like any other.
+    #[test]
+    fn finds_an_alias_bound_inside_a_nested_group() {
+        // Given
+        let text = a_module_importing(
+            "use crate::proto::{session::Event as StartSessionEventKind, Signal};",
+        );
+
+        // When
+        let bound = already_bound(&text, "readings", "StartSessionEventKind").unwrap();
+
+        // Then
+        assert!(
+            bound,
+            "an alias inside a nested group was not seen as bound"
+        );
+    }
+
+    /// Guard: the plain member beside an aliased one in the same group is still bound.
+    #[test]
+    fn still_finds_a_plain_name_beside_an_alias_in_a_group() {
+        // Given
+        let text = a_module_importing(
+            "use crate::proto::{session::Event as StartSessionEventKind, Signal};",
+        );
+
+        // When
+        let bound = already_bound(&text, "readings", "Signal").unwrap();
+
+        // Then
+        assert!(
+            bound,
+            "the plain group member stopped being recognised as bound"
+        );
+    }
+
+    /// `as _` imports a trait for its methods and binds no name at all, so it cannot be the binding
+    /// that makes a later import of the trait's name `E0252`.
+    #[test]
+    fn does_not_count_an_underscore_import_as_binding_its_name() {
+        // Given
+        let text = a_module_importing("use std::fmt::Write as _;");
+
+        // When
+        let bound = already_bound(&text, "readings", "Write").unwrap();
+
+        // Then
+        assert!(!bound, "`use … as _;` was counted as binding `Write`");
+    }
+
     /// The file's own imports still pick first — that is `choose_import` — but the rest stay
     /// available, because the first choice is now verified rather than trusted.
     #[test]
@@ -6761,6 +6373,51 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         assert!(refuse_impl_sibling_references(&[moved("doubled", "pub", true)]).is_ok());
     }
 
+    /// A member of the `impl` the outline names `holder`, which a sibling left behind calls from
+    /// line 9.
+    fn a_member_called_from_behind(name: &str, holder: &str) -> MovedItem {
+        let mut item = moved(name, "pub", true);
+        item.within = vec![holder.to_string()];
+        item.referenced_in_impl_at = vec![9];
+        item
+    }
+
+    /// E3: the assist writes an inherent member as `mod … { use super::Gauge; impl Gauge { … } }`,
+    /// so it stays a method of `Gauge`, and `self.doubled()` from the half left behind still
+    /// resolves through the type.
+    #[test]
+    fn accepts_a_seam_whose_inherent_impl_sibling_calls_what_it_moves() {
+        // Given
+        let items = [a_member_called_from_behind("doubled", "impl Gauge")];
+
+        // When
+        let verdict = refuse_impl_sibling_references(&items);
+
+        // Then
+        assert!(
+            verdict.is_ok(),
+            "an inherent method called through `self` was refused: {:?}",
+            verdict.err().map(|refusal| refusal.to_string())
+        );
+    }
+
+    /// Guard: half of a trait `impl` really cannot move. The new module would hold a second
+    /// `impl Meter for Gauge` (E0119), and each half would lack the other's items (E0046).
+    #[test]
+    fn still_refuses_a_seam_that_splits_a_trait_impl() {
+        // Given
+        let items = [a_member_called_from_behind(
+            "doubled",
+            "impl Meter for Gauge",
+        )];
+
+        // When
+        let verdict = refuse_impl_sibling_references(&items);
+
+        // Then
+        assert!(verdict.is_err(), "half of a trait `impl` was accepted");
+    }
+
     /// The widening the report has never mentioned, because `restore_visibility` iterates only what
     /// the path-reached survey returned and that survey stops above an `impl`.
     #[test]
@@ -6842,6 +6499,30 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
 
         assert!(
             message.contains("before the items that reference it"),
+            "{message}"
+        );
+    }
+
+    /// The leftover can equally sit inside a module the file already had, such as its `mod tests`,
+    /// which no ordering of the plan changes; lexically the two look alike, so the advice names both.
+    #[test]
+    fn names_a_module_the_file_already_had_when_the_leftover_sits_in_a_module() {
+        // Given a file whose own `mod tests` the assist left calling through the placeholder
+        let original = "mod tests {\n    fn a() -> u32 { base() }\n}\n";
+        let produced = "mod tests {\n    fn a() -> u32 { modname::base() }\n}\n";
+
+        // When the leftover is refused
+        let message = refuse_residual_placeholder(original, produced, "modname")
+            .unwrap_err()
+            .to_string();
+
+        // Then the refusal names a module the file already had, for which no ordering helps
+        assert!(
+            message.contains(
+                "If the file already had that module, such as its `mod tests`, no ordering helps: \
+                 reach the item there through `use super::*;`, or cut the seam where that module \
+                 does not name it."
+            ),
             "{message}"
         );
     }

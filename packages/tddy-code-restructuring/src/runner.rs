@@ -13,12 +13,14 @@
 
 mod budget;
 mod comparison;
+mod compile_gate;
 mod entry_points;
 mod options;
 mod outcome;
 mod rehearsal;
 
 pub use comparison::verify;
+pub use compile_gate::{refuse_a_broken_baseline, refuse_a_broken_result, AppliedRun};
 pub use entry_points::{anchors, apply, check, dispatch, registry_for, run, snapshot, status};
 pub use options::{command_of, parse_options, Command, Options};
 pub use outcome::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
@@ -107,20 +109,43 @@ pub fn open_run(
     paths: &StatePaths,
     options: &Options,
 ) -> Result<Journal> {
+    open_run_after(plan, root, paths, options, || Ok(()))
+}
+
+/// [`open_run`], with one more refusal — `before_writing` — run after its own and before it writes
+/// anything.
+///
+/// For a gate that is expensive, which is why it comes last: the baseline compile check
+/// ([`refuse_a_broken_baseline`]) takes minutes, so a plan the cheap refusals would turn away is
+/// turned away first. And for a gate whose refusal says "Nothing was written", which is why it comes
+/// before `.restructure/` is created — that directory is the first thing a run writes.
+pub fn open_run_after(
+    plan: &Plan,
+    root: &Path,
+    paths: &StatePaths,
+    options: &Options,
+    before_writing: impl FnOnce() -> Result<()>,
+) -> Result<Journal> {
     ensure_git_worktree(root)?;
-    paths.ensure_self_ignoring()?;
 
-    let continuing = options.resume || options.from.is_some();
-    adopt_or_refuse_repo_scoped_state(root, paths, continuing, &options.progress)?;
-
-    let journal = Journal::load(&paths.journal)?;
-
-    if !journal.records.is_empty() && !continuing {
-        return Err(RestructureError::JournalExists);
-    }
+    let continuing = options.continues_a_journal();
+    // A fresh run's refusals read and never write, so they all come before `.restructure/` exists.
+    // A continuing run may adopt a repository-scoped journal, which moves it into the directory.
     if !continuing {
+        refuse_repo_scoped_state(root, paths)?;
+        if !Journal::load(&paths.journal)?.records.is_empty() {
+            return Err(RestructureError::JournalExists);
+        }
         plan.verify_snapshot(root)?;
     }
+    before_writing()?;
+
+    paths.ensure_self_ignoring()?;
+    if continuing {
+        adopt_or_refuse_repo_scoped_state(root, paths, continuing, &options.progress)?;
+    }
+
+    let journal = Journal::load(&paths.journal)?;
     if let Some(ResumeDecision::Abort(op)) = journal.resume_decision(root)? {
         return Err(RestructureError::IndeterminateJournal { op });
     }

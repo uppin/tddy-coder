@@ -503,7 +503,7 @@ fn grouped_members(braced: &str) -> Vec<&str> {
 
 /// Whether a stretch of a file is code the compiler resolves, or prose written beside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Prose {
+pub(crate) enum Prose {
     Code,
     Comment,
 }
@@ -601,7 +601,7 @@ fn segment_length(text: &str) -> usize {
 /// - **String literals are left alone entirely.** What is written in one is data the suite asserts
 ///   on — an error message, a fixture, a path — produced by whatever emits it rather than resolved
 ///   from this file's imports. Rewriting it would change what the test asserts.
-fn readable_spans(text: &str) -> Vec<(std::ops::Range<usize>, Prose)> {
+pub(crate) fn readable_spans(text: &str) -> Vec<(std::ops::Range<usize>, Prose)> {
     let bytes = text.as_bytes();
     let mut spans = Vec::new();
     let mut code_from = 0usize;

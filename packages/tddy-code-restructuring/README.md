@@ -15,6 +15,15 @@ Exposed via `tddy-tools restructure`:
 - `verify --against <git-ref>`
 
 A run waits until the server is ready or until its caller stops waiting; there is no budget flag.
+"Ready" means rust-analyzer has reported itself quiescent (or never sends the status at all) **and**
+healthy: an index whose health is anything but `ok` is refused, quoting the server's message.
+
+Every writing `apply` is bracketed by `cargo check --all-targets` over the packages it touches. A
+tree that did not compile before the plan is refused with nothing written; a tree the plan's
+accepted operations left uncompilable fails the run, with the compiler's errors, the edits left on
+disk and the way to roll them back. `check --deep` does not run the compiler, so a clean deep check
+is not a promise that the applied tree builds. See
+[docs/readiness-and-gates.md](docs/readiness-and-gates.md).
 
 Plans hold intents only — no source text (`text` / `code` / `content` refused). Unsupported operations are hard errors.
 
@@ -76,3 +85,17 @@ which names went unresolved — the operation re-points the `crate::`/`super::` 
 of `use` declarations, which changed meaning by definition, and nothing else. The
 [feature doc's known limitations](../../docs/ft/coder/rust-code-restructuring.md#known-limitations)
 list what that leaves for the build to catch.
+
+## Between the assist and the result
+
+The delegated operations take an assist's output as a draft, not a result. The import pass restores
+what the cut stranded, weighing only the names the seam lost and applying an import only when it
+reduces its name's unresolved occurrences; two lexical repairs undo the `modname::` rewrites the
+assist writes into calls it leaves behind; and an `extract_method` whose range returns from the
+enclosing function is refused before the assist runs. See
+[docs/assist-output-repairs.md](docs/assist-output-repairs.md) and
+[docs/readiness-and-gates.md](docs/readiness-and-gates.md).
+
+Several `extract_method`s in one function compose only when the plan orders them **bottom-up**, last
+range first, so no anchor is ever translated through another extraction's edit. The engine does not
+re-anchor them: that would mean re-deriving each later anchor from the produced text.

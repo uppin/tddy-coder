@@ -51,9 +51,19 @@ impl LspClientBridge {
             .map_err(map_lsp_error)
     }
 
-    /// Take every server notification received since the last drain, oldest first.
-    pub fn drain_notifications(&self) -> Vec<Value> {
-        self.client.drain_notifications()
+    /// Every server notification received since the last call, oldest first, followed by the
+    /// server's latest `experimental/serverStatus`.
+    ///
+    /// The status is appended even when it was drained long ago, because the client is shared: on
+    /// a warm server an earlier run — or the daemon's first request — has already taken the
+    /// transitions, and the server does not repeat them. Folding the latest one in last leaves a
+    /// fold of this list at the server's current health and quiescence, which is what a backend
+    /// deciding whether to trust its answers has to know. Folding it twice is harmless: a status is
+    /// a state, not an event.
+    pub fn notifications_to_fold(&self) -> Vec<Value> {
+        let mut notifications = self.client.drain_notifications();
+        notifications.extend(self.client.server_status());
+        notifications
     }
 
     /// The `initialize` result the shared client negotiated with the server.

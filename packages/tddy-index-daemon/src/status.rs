@@ -40,7 +40,10 @@ pub fn status_of(error: &RestructureError) -> Status {
         | RestructureError::RepoScopedJournal { .. }
         | RestructureError::CheckpointDivergence { .. }
         | RestructureError::IndeterminateJournal { .. }
-        | RestructureError::NotAGitWorktree { .. } => Status::failed_precondition(refusal),
+        | RestructureError::NotAGitWorktree { .. }
+        // A tree that did not compile before the plan ran: nothing was written, and the same
+        // request fails identically until the tree is repaired.
+        | RestructureError::BaselineDoesNotCompile { .. } => Status::failed_precondition(refusal),
         // The wait ended before the index was ready. Nothing here says the plan is wrong, which is
         // the distinction `docs/dev/todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md`
         // records as actively misleading when it is lost.
@@ -58,7 +61,12 @@ pub fn status_of(error: &RestructureError) -> Status {
         // Nothing the caller did produced it and nothing the caller changes fixes it. The server
         // answered and the answer could not be used, which is this service's own problem to report
         // rather than the client's to act on.
-        RestructureError::ServerDefect(_) | RestructureError::Io(_) => Status::internal(refusal),
+        //
+        // A tree the run's own accepted operations left uncompilable is the same kind of fault:
+        // the executor produced it, and the caller asked for nothing it should not have.
+        RestructureError::ServerDefect(_)
+        | RestructureError::AppliedTreeDoesNotCompile { .. }
+        | RestructureError::Io(_) => Status::internal(refusal),
     }
 }
 

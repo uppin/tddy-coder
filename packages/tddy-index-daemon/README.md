@@ -22,4 +22,6 @@ subcommand nor a transport is an error rather than a default.
 - **Product documentation**:
   [`docs/ft/coder/warm-code-intelligence-daemon.md`](../../docs/ft/coder/warm-code-intelligence-daemon.md)
 - **Running it**: `./run-index-daemon` at the repo root starts or reuses one per checkout and prints
-  `export TDDY_INDEX_SOCKET=…`
+  `export TDDY_INDEX_SOCKET=…`. It launches the daemon with the dev shell's **whole** environment
+  (not only its `PATH`), because rust-analyzer builds every build script and proc macro in it, and
+  with a temporary directory that outlives the shell that started it

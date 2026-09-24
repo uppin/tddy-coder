@@ -22,6 +22,9 @@ use tokio::sync::broadcast;
 /// The same bound governs how far a subscriber may fall behind before it starts losing them.
 pub(crate) const NOTIFICATION_BACKLOG: usize = 256;
 
+/// rust-analyzer's account of its own state: health, and whether it is quiescent.
+const SERVER_STATUS: &str = "experimental/serverStatus";
+
 /// What a subscriber is handed by [`NotificationStream::recv`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotificationEvent {
@@ -74,6 +77,14 @@ pub(crate) struct NotificationSink {
     /// Handed to every subscriber. Sending never blocks on a slow one, so no observer can stall
     /// the reader loop that feeds this.
     live: broadcast::Sender<Value>,
+    /// The last `experimental/serverStatus` the server sent, whoever drained it.
+    ///
+    /// A status is sent on a transition and only then, and it is the one notification whose
+    /// *latest* value is a fact about the server now rather than news: its health and whether it is
+    /// quiescent. Both queues lose it — the drainer takes it from everyone after, and a long load's
+    /// progress pushes it out of the backlog — so a second consumer of a warm server would never
+    /// learn that its build scripts failed. Kept here, it can be read by anyone at any time.
+    status: Mutex<Option<Value>>,
 }
 
 impl NotificationSink {
@@ -82,11 +93,15 @@ impl NotificationSink {
         Self {
             kept: Mutex::new(VecDeque::new()),
             live,
+            status: Mutex::new(None),
         }
     }
 
     /// Record `notification` for both kinds of consumer.
     pub(crate) fn record(&self, notification: Value) {
+        if notification.get("method").and_then(Value::as_str) == Some(SERVER_STATUS) {
+            *self.status.lock().unwrap() = Some(notification.clone());
+        }
         let mut kept = self.kept.lock().unwrap();
         if kept.len() == NOTIFICATION_BACKLOG {
             kept.pop_front();
@@ -101,6 +116,11 @@ impl NotificationSink {
     /// Take every notification kept since the last drain, oldest first.
     pub(crate) fn drain(&self) -> Vec<Value> {
         self.kept.lock().unwrap().drain(..).collect()
+    }
+
+    /// The last `experimental/serverStatus` the server sent, if it has sent one.
+    pub(crate) fn latest_status(&self) -> Option<Value> {
+        self.status.lock().unwrap().clone()
     }
 
     /// Watch the notifications that arrive from now on, taking none of them from anyone.
@@ -132,6 +152,59 @@ mod tests {
 
         // Then it is told what it lost, rather than handed the remainder as if nothing had gone
         assert_eq!(event, NotificationEvent::Lost(1));
+    }
+
+    fn a_server_status(health: &str, quiescent: bool) -> Value {
+        json!({
+            "jsonrpc": "2.0",
+            "method": "experimental/serverStatus",
+            "params": { "health": health, "quiescent": quiescent }
+        })
+    }
+
+    #[test]
+    fn keeps_the_latest_server_status_after_the_backlog_is_drained() {
+        // Given a server that reported loading, then settled with a warning, and a drainer that
+        // has already taken both
+        let sink = NotificationSink::new();
+        sink.record(a_server_status("ok", false));
+        sink.record(a_server_status("warning", true));
+        sink.drain();
+
+        // When the status is asked for
+        let status = sink.latest_status();
+
+        // Then the last one the server sent is still there to be read
+        assert_eq!(status, Some(a_server_status("warning", true)));
+    }
+
+    #[test]
+    fn keeps_a_server_status_that_progress_pushed_out_of_the_backlog() {
+        // Given a status followed by more progress than the backlog holds
+        let sink = NotificationSink::new();
+        sink.record(a_server_status("warning", true));
+        for n in 0..=NOTIFICATION_BACKLOG {
+            sink.record(json!({ "method": "$/progress", "params": { "n": n } }));
+        }
+
+        // When the status is asked for
+        let status = sink.latest_status();
+
+        // Then it survived the backlog overflowing
+        assert_eq!(status, Some(a_server_status("warning", true)));
+    }
+
+    #[test]
+    fn has_no_server_status_before_the_server_sends_one() {
+        // Given a sink that has seen only progress
+        let sink = NotificationSink::new();
+        sink.record(json!({ "method": "$/progress", "params": {} }));
+
+        // When the status is asked for
+        let status = sink.latest_status();
+
+        // Then there is none
+        assert_eq!(status, None);
     }
 
     #[tokio::test]

@@ -29,7 +29,7 @@ code path rather than a second one.
 | `index.rs` | `WorkspaceIndex`: root validation, the per-root request queue, warm-root enumeration, the process-wide complexity cache |
 | `operations.rs` | `Warm`, `Workspaces`, `Check`, `Apply` — the streaming half, the event channel, the per-request progress sink |
 | `queries.rs` | `Anchors`, `PlanStatus`, `Verify` — the unary half |
-| `apply.rs` | The host-driven apply loop over the promoted `StatePaths` / `open_run` / `restore_ledger` / `commit_operation` |
+| `apply.rs` | The host-driven apply loop over the promoted `StatePaths` / `open_run_after` / `restore_ledger` / `commit_operation`, bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event) |
 | `analyze.rs` | `Coverage`, `Report`, `DuplicateTests`, `Complexity` |
 | `status.rs` | One exhaustive `match` per error type, mapping every variant to a gRPC status |
 | `activity.rs` | Composes what the daemon says about its own requests |
@@ -59,7 +59,8 @@ workspace. A versioned name for one new service would be the partial adoption th
 | State | Held by |
 |---|---|
 | rust-analyzer process and its `LspClient` | `tddy_lsp::LspRegistry`, keyed `(root, Rust)`, idle-reaped, respawned when its task dies |
-| `BackendRegistry` / `RustBackend` | rebuilt per request — so the readiness probe is re-paid even against a warm server |
+| `BackendRegistry` / `RustBackend` | rebuilt per request through `runner::registry_for` — so the readiness probe is re-paid even against a warm server, and holds the same quiescence and health rules as the cold path |
+| rust-analyzer's latest `experimental/serverStatus` | `LspClient::server_status`, kept on the client for every reader. A status is sent only on a transition, so without it a request arriving after another had drained the transition would never learn the index is degraded |
 | Open-document versions | `LspClient`, per URI |
 | Complexity scores | process-wide, keyed by a hash of the content scored |
 | `Overlay`, `PositionLedger`, `Journal` | per request, never shared |
@@ -77,6 +78,21 @@ So each long operation owns a `CancellationToken` checked *inside* the engine's 
 send failing into the response stream's dropped receiver is the signal that cancels it**. That is the
 only disconnect signal a handler gets, and it is why the long operations stream.
 
+## The health gate and the compile gate
+
+Both are the restructuring library's, reached through the same entry points the CLI uses, so the
+daemon path cannot drift from the cold one. See
+[`tddy-code-restructuring/docs/readiness-and-gates.md`](../../tddy-code-restructuring/docs/readiness-and-gates.md).
+
+- **A degraded index is refused at the first operation** (`ServerDefect`, quoting rust-analyzer's
+  message) — `health` anything but `ok`, `warning` included, because that is how a failed build
+  script is reported. `Warm` still reports `ready` for such a root: it answers "is the graph loaded",
+  and the gate refuses when an operation first asks it something.
+- **`Apply` is bracketed by `cargo check --all-targets`** over the packages it touches. The baseline
+  runs after the cheap read-only refusals and before `.restructure/` is created; the result check runs
+  before the outcome event is emitted, so a stream never ends with "applied N of N" over a tree that
+  does not compile. Both checks are killed when the request's cancellation token fires.
+
 ## Refusals
 
 `status.rs` holds one `match` per error type — `RestructureError`, `AnalysisError`, `LspError` — each
@@ -85,6 +101,10 @@ than a silent `Internal`. An unclassified error maps to `Internal` deliberately:
 cannot act on is exactly what that class means, and the fix for a mis-classified one is a new
 variant, not a cleverer default.
 
+The compile gate's two variants map by who can fix them: `BaselineDoesNotCompile` is
+`FailedPrecondition` (nothing was written, and the same request fails until the tree is repaired),
+`AppliedTreeDoesNotCompile` is `Internal` (the executor's own accepted operations produced it).
+
 ## Testing
 
 Every suite runs against `fake_lsp`, `tddy-lsp`'s deterministic fake, reached through a re-declared
@@ -92,13 +112,15 @@ Every suite runs against `fake_lsp`, `tddy-lsp`'s deterministic fake, reached th
 
 | Suite | Covers |
 |---|---|
-| `code_index_service_acceptance.rs` | Every RPC dispatched at the registered coordinate through `handle_rpc`, plus the coordinate-integrity trio — including one test that reads the `.proto` off disk and asserts the published constant matches the schema |
+| `code_index_service_acceptance.rs` | Every RPC dispatched at the registered coordinate through `handle_rpc`, plus the coordinate-integrity trio — including one test that reads the `.proto` off disk and asserts the published constant matches the schema — and an `Apply` the compile gate fails |
 | `dual_transport_acceptance.rs` | The binary as a process: single-shot exit codes, both transports concurrently, stdout silence under `--stdio`, fail-fast with no transport |
 | `activity_log_acceptance.rs` | The whole journal of one request, through a capturing logger — which caught a double-logged outcome that no test of the pure composer could see |
 | `warm_index_production.rs` | `#[ignore]`. Real rust-analyzer; the index-reuse claim, asserted as a ratio against the cold run the test creates itself |
+| `detached_daemon_production.rs` | `#[ignore]`. The real `run-index-daemon` script: the daemon outlives its starting shell, runs with the dev shell's whole environment, and a restart announces the daemon it started rather than the previous one's log line. A drop guard owns the runtime directory and runs `--stop` when a test ends, pass or panic. The restart test guards a scheduling race it cannot force, so a pass is evidence, not proof |
 
 Run the production tier deliberately:
 
 ```bash
 ./dev cargo test -p tddy-index-daemon --test warm_index_production -- --ignored --test-threads=1
+./dev cargo test -p tddy-index-daemon --test detached_daemon_production -- --ignored --test-threads=1
 ```

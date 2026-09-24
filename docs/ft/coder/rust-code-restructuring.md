@@ -151,6 +151,16 @@ unable to answer one method is `ServerNotSettled`, kept distinct from a malforme
 fixed by waiting or by looking at the server, the second by editing the plan, and reporting the
 second as the first sends the reader to the wrong place.
 
+**Ready means quiescent and healthy.** rust-analyzer answers hover while it is still running build
+scripts, before any `OUT_DIR` type exists for it, so a first answer is not readiness: an extraction
+asked then writes `req: _`. The waits keep polling while the server's last `experimental/serverStatus`
+said it was not quiescent; a server that never sends the status gets through on its first answer.
+Once ready, an index whose reported `health` is anything but `ok` — **`warning` included**, because
+that is how a failed build script is reported — is refused, quoting the server's own message. An
+index in that state answers without the code it could not build, so nothing it says can be trusted.
+The latest status is kept on the shared client, so the gate holds against a warm daemon whose status
+transition another request already read.
+
 ### Refusal classes
 
 Every refusal is fatal — the executor never falls back — and its **class** is what says who has to do
@@ -161,8 +171,11 @@ something about it. Read the class before the text.
 | `plan is malformed: …` | The plan says something this executor will not do | Edit the plan | `InvalidArgument` |
 | `this seam cannot be cut here: …` | The plan is well formed and the code will not permit this cut — stranded references, an `impl` cut in half, a module name already taken, an import the file's own bindings cannot disambiguate | Move the seam, or change the code | `FailedPrecondition` |
 | `rust-analyzer's answer was unusable: …` | The server answered and the answer cannot be used — an extraction produced before inference, a mangled rewrite, a response with no edits | Retry against a warm server, or look at the server | `Internal` |
+| `rust-analyzer reports its index as degraded …` | The server said its own index is incomplete — usually build scripts or proc macros that failed to link in the environment it was started in | Restart the server (or `./run-index-daemon --stop && ./run-index-daemon`) from the dev shell's whole environment | `Internal` |
 | `rust-analyzer would not settle …` | The wait ended before the index did | Wait, or look at the server | `DeadlineExceeded` |
 | snapshot / journal / anchor mismatches | The tree is not in the state the plan was written against | Repair the tree, or re-snapshot | `FailedPrecondition` |
+| `the tree does not compile before the plan runs …` | `apply`'s baseline `cargo check` failed; nothing was written | Make the tree compile, then apply again | `FailedPrecondition` |
+| `N of M operation(s) were applied, and the tree no longer compiles …` | Every operation was accepted and the compiler rejects the result. The edits are left on disk and in the journal | Fix the compiler-named errors by hand, or roll back as the message says (restore the touched paths from git, remove the journal) | `Internal` |
 
 The distinction is not cosmetic. These were one class until a live extraction was refused twice with
 `plan is malformed` over a plan that was correct both times, sending its author to edit the one thing
@@ -183,8 +196,14 @@ cannot answer, reads the parent's own `use` tree:
 | A name the parent binds under an alias (`ProbeOutcome as ProtoProbeOutcome`) | reconstructed from the parent's declaration — rust-analyzer offers the unaliased path, which binds nothing |
 | A **module** binding (`use crate::tool_engine;`) | reconstructed the same way; `Import` is offered for items, never for a bare module path |
 | A name the seam's own facade will re-export | left to the facade — a named import here would be private and would shadow it |
+| A relative path in a reconstructed declaration (`use super::Failure as HostFailure;`) | rebased for the new module, which is the parent's child: `super::X` → `super::super::X`, `self::X` → `super::X`. `crate::`, `::` and extern-crate paths are unchanged |
+| A name the parent bound in a group the assist emptied (`use tokio::sync::{…, mpsc, …};`) | the choice reads the file as it was before the assist together with the current text, so the binding the assist removed still decides |
 
-An import that does not reduce its name's unresolved occurrences is refused rather than written,
+Only the names **the seam lost** are weighed: every unresolved occurrence inside the new module, and
+one in the parent only for a name the file resolved everywhere before the cut. A name the server
+could not resolve anywhere to begin with is not something the cut did, and is left alone.
+
+An import — offered or reconstructed — that does not reduce its name's unresolved occurrences is refused by name rather than written,
 because a `use` that resolves nothing is how a successful run lands source that will not build. The
 same principle guards the rewrite itself: every `module::Ident` the assist writes must name something
 the seam actually moved.
@@ -199,6 +218,8 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
 2. Run [analyze-code-issues](rust-code-analysis.md); record CRAP targeting in the changeset.
 3. Author intents in JSONL; `restructure check` (optionally `--deep`) before apply.
 4. `apply --dry-run`, then apply; `verify --against HEAD` after successful extract operations.
+   `apply` runs `cargo check --all-targets` over the touched packages before and after, and fails the
+   run when the result does not compile.
 5. `cargo fmt --all`, then the baseline suite. Relocated bodies sit at a new indentation, and a body
    correctly wrapped at one indentation is not correctly wrapped at another — at any scale beyond a
    few items this is every run, and `cargo fmt --all --check` is the first thing CI's lint step does.
@@ -229,11 +250,24 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
   where `extract_module` needs only the syntax tree — so on a large file in a large workspace the
   module operations succeed while an extraction waits. An expired budget distinguishes the two causes:
   a range that does not support the assist, versus a server that cannot yet type it.
+- **An `extract_method` range may not return from the function around it.** rust-analyzer copies a
+  `return` verbatim into a function of another return type, so such a range is refused, naming the
+  lines, by `check`, `check --deep` and `apply` alike. A `return` inside a closure, an `async` block
+  or a nested `fn` does not count. The scan is lexical: a `return` a macro expands to (`bail!`) and a
+  `break`/`continue` leaving the range are not seen, and only `apply`'s compile gate catches them.
+- **Several `extract_method`s in one function compose only bottom-up**, last range first. The
+  engine does not re-anchor a later operation through an earlier one's edit.
+- **`check --deep` does not compile.** It resolves every operation and writes nothing, but a clean
+  deep check can still be followed by an `apply` the compile gate fails; the gaps behind that are in
+  the backlog.
 - **A whole method body is not extractable.** rust-analyzer declines to wrap a complete body in a
   function that adds nothing; the range has to be a proper subset, so leave the first statement behind.
 - **An `impl` block moves whole or not at all.** `extract_module` is the only splitting operation and
   an `impl` body cannot hold a `mod`, so cutting one block into several is a hand edit — insert the
-  `}` / `impl Type {` pair, then move each block, which is free of caller churn.
+  `}` / `impl Type {` pair, then move each block, which is free of caller churn. A seam that takes
+  some of a type's **inherent** `impl` blocks and leaves others is fine: calls between them resolve
+  through the type, and the `modname::` the assist writes into them is undone. A seam through a
+  **trait** `impl` that the rest of the file references is refused (E0119/E0046).
 - **A facade re-exports items, not imports.** A glob cannot re-export a name the module merely
   imports, so a child module reaching names through `use super::*` loses any name that was a parent
   *import* consumed by moved code. Bind those in the child, or under `#[cfg(test)]` in the parent when

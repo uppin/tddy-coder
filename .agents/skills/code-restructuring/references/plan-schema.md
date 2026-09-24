@@ -98,11 +98,40 @@ not define is refused rather than ignored.
   tree the first plan left. Run state describes one plan's edits, and a journal left in place would
   translate the new plan's coordinates a second time.
 
-  Other Rust operations **do** compose in one plan. They once did not, for a reason that was nothing
-  to do with anchors: the backend reported each operation as a single edit spanning from its first
-  changed line to its last, so an extraction that rewrote two distant places swallowed every
-  untouched line between them. It now reports one hunk per changed region, so the lines between stay
-  addressable and a plan can carry as many seams as you can order correctly.
+  Other Rust operations compose in one plan, **in the right order**. They once did not at all, for a
+  reason that was nothing to do with anchors: the backend reported each operation as a single edit
+  spanning from its first changed line to its last, so an extraction that rewrote two distant places
+  swallowed every untouched line between them. It now reports one hunk per changed region, so the
+  lines between stay addressable and a plan can carry as many seams as you can order correctly.
+
+  **Several `extract_method`s in one function compose only bottom-up**: last range first, so every
+  operation's anchor sits *above* every edit an earlier one made. Each extraction replaces its
+  statements with a call and writes the new function below the one it came from, so taken bottom-up
+  no anchor is ever translated through another extraction. Taken top-down, every later anchor has to
+  be, and on the lifecycle destructure's plans (2026-09-23) those plans did not apply. The engine
+  does not re-anchor them for you.
+
+  **An `extract_method` range may not hold an early exit of the function around it.** rust-analyzer
+  copies a `return` in the range verbatim into the new function, whose return type is not the
+  caller's: plan 10 of the destructure applied six such extractions over `start_session_core` and left
+  seven `E0308`s (and where the types happen to agree, the caller's exit is silently skipped). The
+  backend refuses such a range as `this seam cannot be cut here:`, naming each line, before a server is
+  asked — so a plain `check` reports it too. A `return` inside a closure, an `async` block or a nested
+  `fn` within the range leaves that body, not the caller's, and is allowed. The check is lexical:
+  strings and comments are masked first, and a `return` a macro expands to (`bail!`) is not seen —
+  `apply`'s compile gate catches what that leaves.
+- **`apply` is judged by the compiler.** After its operations, `apply` runs `cargo check
+  --all-targets` over every package owning a file it changed (test targets included, because moves
+  re-point imports tests use). A failure fails the run with the compiler's errors; the edits stay on
+  disk and in the journal for inspection, and the message names the touched paths and the journal to
+  remove when rolling back. A fresh apply first checks the packages owning the files the plan names,
+  and refuses — writing nothing — when that baseline already fails, so a pre-broken tree is never
+  blamed on the plan. A dry run, and a run continuing a journal, skip the baseline.
+- **A degraded index is refused.** rust-analyzer finishes loading even when a build script failed,
+  and then answers as though the generated code did not exist (`req: _`, imports it cannot find). It
+  says so only through its `experimental/serverStatus` health; any health but `ok` — `warning`
+  included — refuses the run as `rust-analyzer's answer was unusable:`, quoting the server's message.
+  This holds against a warm `tddy-index-daemon` too.
 - **`extract_module` restores the imports its own assist loses, and refuses when it cannot.** The
   items move out of the scope of the file's `use` declarations, so the backend asks rust-analyzer for
   an import at each name left unresolved. Where the server offers several paths for one name, the
@@ -149,19 +178,20 @@ not define is refused rather than ignored.
   changing. **Moving a whole `impl` is free of caller churn**, and is the cheapest restructuring move
   Rust has.
 
-  **Free of callers is not free of seams, and the difference decides whether a plan runs.** Three
+  **Free of callers is not free of seams, and the difference decides whether a plan runs.** Four
   geometries look alike and only one blocks — measured, not assumed:
 
   | Geometry | Outcome |
   |---|---|
   | A whole `impl` moves; the parent calls its methods | **Succeeds.** A method is reached through its type, so there is nothing to rewrite |
   | A path-reached item moves; the parent still names it | **Succeeds.** The assist rewrites the reference and the import pass restores the binding — which is why an in-file reference "costs nothing" |
-  | **One member is lifted out of an `impl` while a sibling in that same `impl` calls it** | **Refused.** The new module is written *outside* the impl, so the rewritten path never resolved from in there, and rust-analyzer does not rename what does not resolve |
+  | Some members of an **inherent** `impl` move while a sibling left behind calls them | **Succeeds.** The assist writes `mod … { use super::Gauge; impl Gauge { … } }`, so they stay methods of the same type. It also inserts `modname::` before the moved member's name in every call to it, none of which is Rust: `self.modname::doubled()` and `Self::modname::doubled(…)` from a member left behind, `Gauge::modname::doubled(2)` (or through a type alias) from the file's `mod tests`. The backend undoes exactly those rewrites — the placeholder after a `.` or after a type qualifier, never after `super`/`self`/`crate`, which reach a moved *free* item and are the rename's. A private member comes out `pub(crate)` (below) |
+  | **Some members of a trait `impl` move while a sibling left behind calls them** | **Refused.** The new module would hold a second `impl Meter for Gauge` (`E0119`) and each half would lack the other's items (`E0046`) |
 
-  Only the third is a blocker, and no ordering fixes it: an `impl` body cannot hold a `mod`, so the
+  Only the last is a blocker, and no ordering fixes it: an `impl` body cannot hold a `mod`, so the
   sibling can be moved neither out of the way first nor after. Grow the seam to carry the whole `impl`,
-  or cut it where nothing crosses. The refusal fires before the assist runs and names the member and
-  the lines its siblings reach it from.
+  or cut it where nothing crosses. The refusal fires before the assist runs and names the member, the
+  `impl` it belongs to, and the lines its siblings reach it from.
 
 - **`extract_module` reports every visibility it had to widen, and preserves the rest — except inside
   an `impl`, where it reports but does not restore.** The assist rewrites what it relocates to
@@ -214,6 +244,16 @@ not define is refused rather than ignored.
   **extract a definition before anything that references it.** Line order and dependency order are
   different axes and dependency order wins — build a small DAG of which seams define symbols other
   seams use, topologically sort it definitions-first, and use line order only to break ties.
+
+  A module the file **already had** — its `mod tests` — reads the same lexically and is not an
+  ordering mistake either. The one such leftover known is repaired before the check runs: in
+  `mod tests { use super::base; … base() }` the assist repoints the import to
+  `use super::modname::base;` *and* rewrites the call to `modname::base()`, which names nothing from
+  inside `tests`. The backend puts the call back where the placeholder starts its path, the reference
+  sits in a module other than the placeholder's, and that module's own `use` binds the moved name.
+  With `use super::*;` the rewritten call resolves through the glob and the rename finishes it, so it
+  is left alone. Any other leftover in such a module is refused with wording that names this case:
+  reach the item through `use super::*;`, or cut the seam where that module does not name it.
 
   A leftover inside an **`impl`** is not an ordering mistake and reordering cannot fix it. One real
   split was reordered in full and produced byte-identical refusals at identical offsets, because the

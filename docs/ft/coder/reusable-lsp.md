@@ -170,6 +170,11 @@ definitions, and three parts of `LspClient` exist for it:
   without limit. `$/progress` and `experimental/serverStatus` are the two that matter: during a load
   that answers no requests they are the only account of what the server is doing, and the only way a
   wait can report progress or a timeout can say where the server got to.
+- **The latest `experimental/serverStatus` is kept for every reader.** `LspClient::server_status`
+  returns the last one the server sent, verbatim, whoever drained it and however far progress has
+  pushed it out of the backlog. A status is sent only on a transition, and its latest value is a fact
+  about the server now — its health and whether it is quiescent — so a consumer arriving at a server
+  that is already warm has no other way to learn that its build scripts failed.
 
 `set_request_timeout` adjusts the per-request wait through `&self`, because consumers hold the client
 behind an `Arc` from the registry. Ten seconds suits the interactive queries; a code-action request
