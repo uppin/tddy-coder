@@ -10,9 +10,6 @@ use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::StartSessionResponse;
 
-use crate::project_storage;
-use crate::user_sessions_path::projects_path_for_user;
-
 /// The branch a workspace session's worktree is cut on, as asked for by the request that created it.
 ///
 /// A workspace session is also the codebase half of a split session
@@ -73,18 +70,9 @@ pub async fn start_workspace_session(
     }
 
     // Resolve project registry.
-    let projects_dir = projects_path_for_user(os_user, Some(tddy_data_dir))
-        .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-    let project = project_storage::find_project(&projects_dir, project_id)
-        .map_err(|e| Status::internal(e.to_string()))?
-        .ok_or_else(|| Status::not_found("project not found"))?;
-
-    let repo_root = PathBuf::from(&project.main_repo_path);
-    if !repo_root.exists() {
-        return Err(Status::invalid_argument(
-            "project main repo path does not exist",
-        ));
-    }
+    let (_, project) =
+        crate::connection_service::find_registered_project(tddy_data_dir, os_user, project_id)?;
+    let repo_root = crate::connection_service::project_repo_root(&project)?;
 
     // Resolved before anything is created: a branch intent this daemon cannot honour is a malformed
     // request, and a request refused after a session directory exists leaves the caller — which for
@@ -206,17 +194,9 @@ pub async fn start_agent_clone_session(
             "project_id is required for an agent clone",
         ));
     }
-    let projects_dir = projects_path_for_user(os_user, Some(tddy_data_dir))
-        .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-    let project = project_storage::find_project(&projects_dir, project_id)
-        .map_err(|e| Status::internal(e.to_string()))?
-        .ok_or_else(|| Status::not_found("project not found"))?;
-    let repo_root = PathBuf::from(&project.main_repo_path);
-    if !repo_root.exists() {
-        return Err(Status::invalid_argument(
-            "project main repo path does not exist",
-        ));
-    }
+    let (_, project) =
+        crate::connection_service::find_registered_project(tddy_data_dir, os_user, project_id)?;
+    let repo_root = crate::connection_service::project_repo_root(&project)?;
 
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
     std::fs::create_dir_all(&session_dir)

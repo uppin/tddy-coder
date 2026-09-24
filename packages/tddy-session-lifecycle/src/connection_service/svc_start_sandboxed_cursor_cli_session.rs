@@ -7,14 +7,11 @@ use super::roster_replacement_pairs;
 use crate::{
     branch_intent::BranchIntentPolicy,
     connection_service::{agent_roster, seed_codebase, service_util, stack_parent},
-    project_storage,
 };
 
 use crate::branch_intent::BranchIntentRequest;
 
 use tddy_core::output::SESSIONS_SUBDIR;
-
-use crate::user_sessions_path::projects_path_for_user;
 
 use tddy_rpc::Status;
 
@@ -90,17 +87,9 @@ impl DaemonSessionHost {
         .await
         .map_err(|e| Status::failed_precondition(e.to_string()))?;
 
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        let project = project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-        let repo_root = PathBuf::from(&project.main_repo_path);
-        if !repo_root.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
+        let (_, project) =
+            service_util::find_registered_project(&self.tddy_data_dir, os_user, project_id)?;
+        let repo_root = service_util::project_repo_root(&project)?;
 
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)

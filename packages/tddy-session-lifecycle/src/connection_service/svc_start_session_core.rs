@@ -470,18 +470,9 @@ impl DaemonSessionHost {
             return Err(Status::invalid_argument("project_id is required"));
         }
 
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        let project = project_storage::find_project(&projects_dir, project_id_req)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let repo_path = Path::new(&project.main_repo_path);
-        if !repo_path.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
+        let (_, project) =
+            service_util::find_registered_project(&self.tddy_data_dir, os_user, project_id_req)?;
+        service_util::project_repo_root(&project)?;
 
         let result = self
             .spawn_tool_session(req, progress, os_user, agent_def, livekit, &project)
@@ -564,11 +555,8 @@ impl DaemonSessionHost {
         sessions_base: std::path::PathBuf,
         project_id: &str,
     ) -> Result<(), Status> {
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        let project = project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
+        let (_, project) =
+            service_util::find_registered_project(&self.tddy_data_dir, os_user, project_id)?;
         validate_stack_seed_base_session(
             &sessions_base,
             &req.recipe,

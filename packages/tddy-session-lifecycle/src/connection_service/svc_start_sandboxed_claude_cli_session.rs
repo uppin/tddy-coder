@@ -200,17 +200,9 @@ impl DaemonSessionHost {
                         "project_id is required for claude-cli sessions",
                     ));
                 }
-                let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-                    .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-                let project = project_storage::find_project(&projects_dir, &pid)
-                    .map_err(|e| Status::internal(e.to_string()))?
-                    .ok_or_else(|| Status::not_found("project not found"))?;
-                let repo_root = PathBuf::from(&project.main_repo_path);
-                if !repo_root.exists() {
-                    return Err(Status::invalid_argument(
-                        "project main repo path does not exist",
-                    ));
-                }
+                let (projects_dir, project) =
+                    service_util::find_registered_project(&self.tddy_data_dir, os_user, &pid)?;
+                let repo_root = service_util::project_repo_root(&project)?;
                 let wt = self
                     .create_jail_project_worktree(&branch, &session_dir, intent, &pid, &repo_root)
                     .await?;

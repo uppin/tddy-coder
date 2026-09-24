@@ -1,10 +1,6 @@
 use std::path::PathBuf;
 
-use crate::{
-    connection_service::{service_util, stack_parent},
-    project_storage,
-    user_sessions_path::projects_path_for_user,
-};
+use crate::connection_service::{service_util, stack_parent};
 
 use tddy_service::proto::types::BranchSession;
 
@@ -301,11 +297,11 @@ impl DaemonSessionHost {
             return Ok(None);
         };
 
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        let project = project_storage::find_project(&projects_dir, req.project_id.trim())
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
+        let (_, project) = service_util::find_registered_project(
+            &self.tddy_data_dir,
+            os_user,
+            req.project_id.trim(),
+        )?;
         let repo_root = PathBuf::from(&project.main_repo_path);
         let branch_for_suggestion = branch.clone();
         let suggested_branch_name = service_util::spawn_blocking_with_timeout(
