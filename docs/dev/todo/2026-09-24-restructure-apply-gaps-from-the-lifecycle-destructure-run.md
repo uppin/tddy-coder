@@ -241,6 +241,44 @@ workspace_start_request_unit_tests.rs:182  error[E0422]: cannot find struct `Ses
 workspace_sandbox_roster_dispatch_unit_tests.rs:58  error[E0425]: cannot find type `Path`
 ```
 
+**Re-run on #524 (2026-09-24, after `51211cd8`)**: the same 10 of 10, and the same 9 errors. No seam
+of plan `01` carries a `mod x;` declaration, so the shape above is not the mechanism. What happened is
+that the **parent's own `use` groups** lost every name that only the moved code used outside tests.
+The assist drops a name from a group when the seam held its last use, and it does not count the
+test children that reach the name through `use super::*`:
+
+```rust
+// before: connection_service.rs
+use std::path::{Path, PathBuf};
+use tddy_core::Changeset;
+use tddy_service::proto::session::{SplitAgentPlacement, StartSessionResponse};
+…
+pub use service_util::{await_supervised_with_timeout, spawn_blocking_with_timeout};
+
+// after the apply
+use std::path::{PathBuf};
+use tddy_core::Changeset;                    // kept, but unused in the lib build (N1)
+…
+pub use service_util::{await_supervised_with_timeout};   // a `pub` re-export narrowed
+
+// by hand (#524): into the parent's existing block "Bound for the extracted test modules, which
+// reach the code under test through `use super::*`"
+#[cfg(test)]
+use std::path::Path;
+#[cfg(test)]
+use tddy_core::Changeset;                    // moved here when N1 removed the lib-level line
+#[cfg(test)]
+use tddy_service::proto::session::{SessionAttachment, SplitAgentPlacement};
+…
+pub use service_util::{await_supervised_with_timeout, spawn_blocking_with_timeout};   // restored
+```
+
+The dropped **`pub use`** member is worse than a build error. The build stays green, since in-crate
+callers still reach the name through the `pub(crate) use service_util::*;` glob, but
+`tddy_session_lifecycle::connection_service::spawn_blocking_with_timeout` stops being public. Nothing
+outside the crate names it today, which is why no dependent crate failed. The engine should never
+narrow a `pub use` it did not write.
+
 The import pass sees only the text it produced. The names that go unresolved are in **other files**,
 the out-of-line child modules whose `super` just changed, and nothing opens those. Two fixes are
 possible. One is to carry the parent's glob-visible bindings the child files use into the new module.
