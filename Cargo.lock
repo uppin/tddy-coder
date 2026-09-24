@@ -13032,6 +13032,7 @@ dependencies = [
  "serde_json",
  "tddy-core",
  "tddy-discovery",
+ "tddy-pty",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-sandbox-recipes",

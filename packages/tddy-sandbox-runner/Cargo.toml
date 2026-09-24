@@ -24,6 +24,7 @@ tddy-stdio = { path = "../tddy-stdio" }
 # same engine the daemon would have run on the host, but from inside the jail.
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 tddy-task = { path = "../tddy-task" }
+tddy-pty = { path = "../tddy-pty" }
 log = "0.4"
 env_logger = "0.11"
 anyhow = "1"

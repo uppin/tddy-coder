@@ -1,4 +1,4 @@
-use super::strip_resize;
+use tddy_pty::strip_resize;
 
 use crate::pty_runtime::DEFAULT_TERM_COLS;
 
