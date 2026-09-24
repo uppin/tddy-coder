@@ -1,12 +1,11 @@
 //! Family C session RPCs at the `session.SessionService` coordinate.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use super::{service_util, AttachmentProgressSink, DaemonSessionHost, MpscResultStream};
 use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
-use crate::user_sessions_path::projects_path_for_user;
-use crate::{session_deletion, session_list_enrichment, session_reader};
+use crate::{session_list_enrichment, session_reader};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
@@ -17,14 +16,11 @@ use tddy_service::proto::session::ResumeSessionResponse as ConnResumeSessionResp
 use tddy_service::proto::session::SessionEntry as ConnSessionEntry;
 use tddy_service::proto::session::StartSessionEvent as ConnStartSessionEvent;
 use tddy_service::proto::session::{
-    ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
-    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListSessionsRequest,
-    ListSessionsResponse, ResumeSessionRequest, ResumeSessionResponse, SessionEntry,
-    SignalSessionRequest, SignalSessionResponse, StartSessionEvent, StartSessionRequest,
-    StartSessionResponse,
+    ConnectSessionRequest, ConnectSessionResponse, GetWorktreeSnapshotRequest,
+    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, ResumeSessionResponse,
+    SessionEntry, StartSessionEvent, StartSessionRequest, StartSessionResponse,
 };
-use tddy_spawn::spawner::SpawnOptions;
-use tddy_spawn::{spawn_worker, spawner};
+use tddy_spawn::spawner;
 
 /// The coordinate a forwarded call from the legacy connection service is addressed at on the peer.
 const SESSION_SERVICE: &str = "session.SessionService";
@@ -414,7 +410,5 @@ impl DaemonSessionHost {
 }
 
 mod svc_resume_session;
-pub(crate) use svc_resume_session::*;
 
 mod svc_signal_delete_session;
-pub(crate) use svc_signal_delete_session::*;

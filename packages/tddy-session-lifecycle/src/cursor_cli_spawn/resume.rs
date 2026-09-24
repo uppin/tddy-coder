@@ -1,6 +1,5 @@
 use tddy_core::write_session_metadata;
 
-
 use crate::{config::resolve_cursor_binary_path, cursor_cli_spawn::chat};
 
 use std::path::PathBuf;

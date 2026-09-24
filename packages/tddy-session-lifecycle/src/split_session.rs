@@ -7,13 +7,11 @@
 //! `tddy-tools --mcp` at the *codebase* daemon over LiveKit. Everything here is per-spawn and is
 //! rebuilt on resume — notably the join token, which is scoped to a lifetime that may have elapsed.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tddy_core::backend::RemoteToolEnv;
 use tddy_daemon_auth::SessionTokens;
-use tddy_github::{GitHubUser, };
 use tddy_rpc::Status;
 
 /// Lifetime of the agent's scoped LiveKit join token.
@@ -987,7 +985,8 @@ mod tests {
 
     /// The flags a split session spawns with while nothing is attached to it.
     fn split_args_with_no_agents(session_dir: &Path) -> Vec<String> {
-        agent_argv::split_claude_extra_args(session_dir, "/usr/bin/tddy-tools", &[]).expect("extra args")
+        agent_argv::split_claude_extra_args(session_dir, "/usr/bin/tddy-tools", &[])
+            .expect("extra args")
     }
 
     /// The flags a split session spawns with, given the roster its codebase daemon holds.
@@ -1109,7 +1108,8 @@ mod tests {
     #[test]
     fn a_replaced_tool_is_spelled_as_the_catalog_spells_it() {
         // When — a def wrote its replacement in the casing a human types
-        let withdrawals = agent_argv::wire_roster_withdrawals(&[an_agent_on_the_roster("explorer", &["grep"])]);
+        let withdrawals =
+            agent_argv::wire_roster_withdrawals(&[an_agent_on_the_roster("explorer", &["grep"])]);
 
         // Then — normalized to the exec-catalog name, or the allowlist it feeds would drop nothing
         assert_eq!(

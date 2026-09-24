@@ -4,12 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::{
-    write_session_metadata, Changeset, SessionMetadata,
-};
+use tddy_core::{write_session_metadata, Changeset, SessionMetadata};
 use tddy_rpc::{Response, Status};
-use tddy_service::proto::session::{StartSessionResponse};
-use uuid::Uuid;
+use tddy_service::proto::session::StartSessionResponse;
 
 use crate::branch_intent::{
     resolve_branch_workflow, BranchIntentPolicy, BranchIntentRequest, ResolvedBranchWorkflow,
@@ -239,7 +236,8 @@ pub async fn spawn_cursor_cli_session_inner(
         )
         .await?;
 
-    let hook_token = chat::install_cursor_hooks_in_worktree(config, &worktree_path, session_id, os_user);
+    let hook_token =
+        chat::install_cursor_hooks_in_worktree(config, &worktree_path, session_id, os_user);
 
     let binary_path = resolve_cursor_binary_path(config);
     let initial_prompt_opt = {
