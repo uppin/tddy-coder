@@ -2,7 +2,7 @@
 
 **Category:** Future enhancement
 **Source:** `#carve` 14/15, [#524](https://github.com/uppin/tddy-coder/pull/524), plans
-`09b` (plan `09` without op 6) and `02-cli-session-manager-dir`, changeset
+`09b` (plan `09` without op 6), `02-cli-session-manager-dir` and `10b`, changeset
 [`2026-09-23-carve-lifecycle-destructure`](../1-WIP/2026-09-23-carve-lifecycle-destructure.md)
 
 Both of these showed up only **after** the compile gate was satisfied: `cargo check --all-targets`
@@ -180,6 +180,86 @@ three `ptr_arg` of the same shape as above, and one new one. The range the assis
 `split_agent_context_and_args` took `session_dir` and `tddy_tools_path` as `&std::path::PathBuf`,
 fixed the same way. The unit tail is mechanical too: a unit-typed tail belongs before `Ok(())`, not
 inside it.
+
+### Plan `10b` (#524): the same P and Q, three build breaks, a refusal and a hang
+
+Plan `10b` re-cuts plan `10`'s refused extract-methods on `start_session_core` into 15 ranges that
+hold no `return`. Two of them are **expressions after a `return`**
+(`return self.start_sandboxed_claude_cli_session(…).await;` loses everything after `return `), so
+the long argument lists move and the early exit stays. It applied 15 of 15 and the compile gate
+failed. The gate printed only the first error class (K, 5 × `WorkflowRecipe`); the rest appeared
+after the K fix.
+
+**P:** 22 comment lines were lost. The biggest was the 6-line "Written before this call answers"
+rationale for writing the roster before the workspace start returns. All went back unreworded.
+
+**Three build breaks the gate did not reach**, each fixed by hand:
+
+```rust
+// 1. a deref written before a macro statement (E0614: type `()` cannot be dereferenced)
+        ) {
+            *log::warn!(
+                "StartSession: could not remove session {session_id} after its \
+                 jail could not be provisioned: {}",
+// by hand: `log::warn!(`
+
+// 2. a value passed by move while a reference into it is passed too (E0505)
+        let repo_path = Path::new(&project.main_repo_path);
+        …
+            .spawn_tool_session(req, progress, os_user, agent_def, livekit, project, repo_path)
+// by hand: `&project`, and `repo_path` derived inside from the project (see Q below)
+
+// 3. an expression range after `return` borrows what the callee consumes (E0308 ×2)
+    async fn start_sandboxed_claude_cli_from_request(&self, …,
+        sessions_base: &std::path::PathBuf,                 // the callee takes `PathBuf`
+        managed_recipe: &Option<Arc<dyn WorkflowRecipe + 'static>>,   // the callee takes it by value
+// by hand: by value, and `&String`/`&Option<String>` → `&str`/`Option<&str>`
+```
+
+**Q:** `unit_arg` again (`Ok(if !project_id.is_empty() { … })`), `ptr_arg` ×3,
+`too_many_arguments` ×4 (8/7, 8/7, 9/7, 8/7), and an unused `mut` in the **caller**. The callee's
+`&mut started_agents` is now the only mutation, so the caller's binding no longer needs `mut`, which
+is the reverse of the `09b` case. The hand fix follows `09b`, with no `#[allow]`:
+- a file-local `CliStart` (sessions base, session id, initial prompt) is what `cli_start_prelude`
+  returns, in place of a 3-tuple, and the four `*_from_request` functions take it;
+- `spawn_tool_session` derives `repo_path` from the project it is handed, rather than taking both.
+
+**Refused (S)** at `check --deep`. The range was an expression, the `if … else` value of a `let`:
+
+```jsonl
+{"op":"extract_method","anchor":{…"start":{"line":558,"col":17},"end":{"line":567,"col":18}},"name":"managed_recipe_for"}
+```
+
+```text
+3: rust-analyzer's answer was unusable: rust-analyzer did not produce a `fn fun_name` to name
+```
+
+Re-cut to the whole `let managed_recipe … ;` statement (557–567), which passed.
+
+**Hang (R)**, which wedges the index daemon. The range was a bare block statement `{ … }`:
+
+```rust
+// svc_start_session_core.rs, lines 208–222: the range started on the `{`
+        {
+            let project_id = req.project_id.trim();
+            if !project_id.is_empty() { … }
+        }
+```
+
+```text
+   indexing (+0ms): op 11 of 15: deep resolve ExtractMethod in `…/svc_start_session_core.rs`
+   indexing (+4ms): starting rust-analyzer session
+   indexing (+1ms): assist: ExtractMethod in this file
+   indexing (+0ms): waiting for type inference at the anchor
+```
+
+After this there was no further output, and rust-analyzer, `tddy-index-daemon` and the client all
+sat at 0% CPU. It happened three times: twice inside the full plan (the first time for over 11
+minutes), and once with the op on its own, on a warm daemon that had just answered the block's
+contents in 425 ms. That run never answered (400 s timeout), and **every later request to that
+daemon queued behind it** until `./run-index-daemon --stop`. The wait needs a deadline, or a refusal for a range that starts on a block's `{`. The assist then left the
+braces around the call it wrote (`{ self.provision_project_for_start(&req, os_user).await?; }`).
+That builds and lints clean, so it was left as the engine wrote it.
 
 ## Candidates, undecided
 

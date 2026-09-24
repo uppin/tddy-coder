@@ -45,6 +45,14 @@ use tddy_service::proto::session::StartSessionRequest;
 
 use super::DaemonSessionHost;
 
+/// What a CLI-agent start holds once its prelude has run: where the session lives, the id it was
+/// given, and the first prompt, with any attached changeset named in it.
+struct CliStart {
+    sessions_base: std::path::PathBuf,
+    session_id: String,
+    initial_prompt: String,
+}
+
 impl DaemonSessionHost {
     /// The one implementation behind both `StartSession` and `StreamStartSession`.
     ///
@@ -83,15 +91,7 @@ impl DaemonSessionHost {
         }
 
         let requested_daemon = req.daemon_instance_id.trim();
-        let local_id = local_instance_id_for_config(&self.config);
-        let eligible_rows = self
-            .peer_routing
-            .eligible_daemon_source()
-            .list_eligible_daemons();
-        let eligible_ids: Vec<String> = eligible_rows
-            .iter()
-            .map(|e| e.instance_id.0.clone())
-            .collect();
+        let (local_id, eligible_ids) = self.eligible_daemon_ids();
         let route =
             match tddy_daemon_livekit::livekit_peer_discovery::classify_start_session_peer_route(
                 &local_id,
@@ -109,27 +109,7 @@ impl DaemonSessionHost {
             tddy_daemon_livekit::livekit_peer_discovery::StartSessionPeerRoute::Forward {
                 peer_instance_id,
             } => {
-                log::info!(
-                    "StartSession: forwarding RPC to remote daemon_instance_id={}",
-                    peer_instance_id
-                );
-                let slot = self.peer_routing.common_room_livekit_room().ok_or_else(|| {
-                    Status::failed_precondition(
-                        "cannot forward StartSession: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
-                    )
-                })?;
-                let inner =
-                    tddy_daemon_livekit::livekit_peer_discovery::forward_start_session_via_livekit(
-                        slot,
-                        &peer_instance_id,
-                        &req,
-                    )
-                    .await?;
-                log::info!(
-                    "StartSession: forward succeeded session_id={} livekit_server_identity={}",
-                    inner.session_id,
-                    inner.livekit_server_identity
-                );
+                let inner = self.forward_start_session(&req, peer_instance_id).await?;
                 return Ok(Response::new(inner));
             }
             tddy_daemon_livekit::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
@@ -139,21 +119,7 @@ impl DaemonSessionHost {
         // refused split is a malformed request, so it is classified before anything is created and
         // before the project is provisioned — a session whose codebase host is wrong should not
         // leave a clone behind on the way to being rejected.
-        let placement = classify_placement(&PlacementRequest {
-            local_instance_id: local_id.clone(),
-            requested_codebase_id: req.codebase_daemon_instance_id.clone(),
-            eligible_ids: eligible_ids.clone(),
-            managed_codebase: req.managed_codebase,
-            sandbox: req.sandbox,
-            sandboxed_codebase: req.sandboxed_codebase,
-            session_type: req.session_type.trim().to_string(),
-            recipe: req.recipe.clone(),
-            dangerously_skip_permissions: req.dangerously_skip_permissions,
-        })
-        .map_err(|msg| {
-            log::info!("StartSession: rejected codebase placement: {msg}");
-            Status::invalid_argument(msg)
-        })?;
+        let placement = classify_start_placement(&req, local_id, eligible_ids)?;
 
         // Checked here, alongside the other request-shape decisions, so a session type that does not
         // honour a caller-chosen id refuses it before anything is created rather than generating one
@@ -206,19 +172,7 @@ impl DaemonSessionHost {
         // peer), clone it into the host's base location so the session can start on a host that
         // doesn't have the project yet. A truly unknown project surfaces as NotFound.
         {
-            let project_id = req.project_id.trim();
-            if !project_id.is_empty() {
-                let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-                    .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-                self.ensure_project_available_for_start(
-                    os_user,
-                    &projects_dir,
-                    project_id,
-                    &req.session_token,
-                    req.agent_clone.as_ref(),
-                )
-                .await?;
-            }
+            self.provision_project_for_start(&req, os_user).await?;
         }
 
         // A base session that cannot seed a stack is refused here, before the session-type dispatch
@@ -240,18 +194,7 @@ impl DaemonSessionHost {
                     "project_id is required to seed a PR stack from a base session",
                 ));
             }
-            let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-            let project = project_storage::find_project(&projects_dir, project_id)
-                .map_err(|e| Status::internal(e.to_string()))?
-                .ok_or_else(|| Status::not_found("project not found"))?;
-            validate_stack_seed_base_session(
-                &sessions_base,
-                &req.recipe,
-                &req.pr_stack_base_session_id,
-                Path::new(&project.main_repo_path),
-            )
-            .map_err(tddy_service::to_rpc_status)?;
+            self.validate_stack_seed_against_project(&req, os_user, sessions_base, project_id)?;
         }
 
         // A requested new branch another session already owns is refused here, before the
@@ -321,34 +264,15 @@ impl DaemonSessionHost {
                 // for the codebase half of a split session the roster lives here, so "co-located"
                 // means "owned by this daemon" and an agent of any other host is the one that needs
                 // a clone (docs/ft/daemon/session-agent-roster.md § Remote agents).
-                let seed = self.seeded_roster_records(&req.specialized_agents).await?;
-                let started = workspace_session::start_workspace_session(
-                    os_user,
-                    &session_id,
-                    sessions_base.clone(),
-                    req.project_id.trim(),
-                    &workspace_session::WorkspaceBranchIntent {
-                        branch_worktree_intent: req.branch_worktree_intent.trim(),
-                        new_branch_name: req.new_branch_name.trim(),
-                        selected_integration_base_ref: req.selected_integration_base_ref.trim(),
-                        selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
-                    },
-                    paired_agent.as_ref(),
-                    req.sandbox,
-                    &self.tddy_data_dir,
-                    timeout,
-                )
-                .await?;
-                // Written before this call answers, because the answer is what releases the agent
-                // host to spawn its agent — and that spawn fixes the tool allowlist at launch. A
-                // roster written afterwards would leave a seeded agent's `replaces` unenforced until
-                // the first resume. The seed takes its own artifacts back out on failure; the
-                // session it was recorded on is the caller's to reclaim, which is what the split
-                // start's teardown does with the id it minted.
-                let session_dir = unified_session_dir_path(&sessions_base, &session_id);
-                let codebase = seed_codebase::SeedCodebase::read(&session_id, &session_dir)?;
-                let seeded = self
-                    .seed_session_agent_roster(&session_id, &codebase, &req.session_token, seed)
+                let (started, codebase, seeded) = self
+                    .seed_and_start_workspace_session(
+                        &req,
+                        os_user,
+                        paired_agent,
+                        &sessions_base,
+                        &session_id,
+                        timeout,
+                    )
                     .await?;
                 if req.semantic_index {
                     // Unwound here rather than inside the seed, because the seed cannot see this
@@ -381,48 +305,30 @@ impl DaemonSessionHost {
                         // The failed index's unwind, plus the session directory itself: a session
                         // surviving a start that answered with an error is one the operator can
                         // see, list and resume, whose tools were never confined.
-                        self.unwind_seeded_roster(
+                        self.remove_unconfined_workspace_session(
+                            &req,
+                            os_user,
+                            &sessions_base,
                             &session_id,
-                            &codebase,
-                            &req.session_token,
+                            codebase,
                             seeded,
                         )
                         .await;
-                        let projects_dir =
-                            projects_path_for_user(os_user, Some(&self.tddy_data_dir));
-                        if let Err(e) = session_deletion::delete_session_directory(
-                            &sessions_base,
-                            &session_id,
-                            projects_dir.as_deref(),
-                        ) {
-                            log::warn!(
-                                "StartSession: could not remove session {session_id} after its \
-                                 jail could not be provisioned: {}",
-                                e.message()
-                            );
-                        }
                         return Err(status);
                     }
                 }
                 return Ok(started);
             };
-            let started = workspace_session::start_agent_clone_session(
-                os_user,
-                &session_id,
-                sessions_base.clone(),
-                req.project_id.trim(),
-                &self.tddy_data_dir,
-                timeout,
-            )
-            .await?;
-            self.start_hosted_agent_clone(
-                &placement,
-                &sessions_base,
-                &session_id,
-                req.project_id.trim(),
-                &req.session_token,
-            )
-            .await?;
+            let started = self
+                .start_agent_clone_workspace_session(
+                    &req,
+                    os_user,
+                    sessions_base,
+                    session_id,
+                    timeout,
+                    placement,
+                )
+                .await?;
             return Ok(started);
         }
 
@@ -475,161 +381,59 @@ impl DaemonSessionHost {
                     None
                 };
 
+            let start = CliStart {
+                sessions_base,
+                session_id,
+                initial_prompt,
+            };
             if req.sandbox {
                 return self
-                    .start_sandboxed_claude_cli_session(
+                    .start_sandboxed_claude_cli_from_request(
+                        &req,
                         os_user,
-                        &session_id,
-                        &req.session_token,
-                        sessions_base,
-                        req.model.trim(),
-                        req.project_id.trim(),
-                        req.repo_path.trim(),
-                        req.branch_worktree_intent.trim(),
-                        req.new_branch_name.trim(),
-                        req.selected_integration_base_ref.trim(),
-                        req.selected_branch_to_work_on.trim(),
-                        &initial_prompt,
-                        &req.claude_args,
-                        req.permission_mode.trim(),
-                        req.dangerously_skip_permissions,
+                        start,
                         stack_parent_for_claude_cli.as_deref(),
-                        req.stack_parent_daemon_instance_id.trim(),
-                        req.stack_node_id.trim(),
-                        req.managed_codebase,
-                        &req.specialized_agents,
                         managed_recipe,
-                        req.semantic_index,
-                        req.create_remote_branch,
                     )
                     .await;
             }
             return self
-                .start_claude_cli_session(
+                .start_claude_cli_from_request(
+                    &req,
                     os_user,
-                    &session_id,
-                    sessions_base,
-                    req.model.trim(),
-                    req.project_id.trim(),
-                    req.branch_worktree_intent.trim(),
-                    req.new_branch_name.trim(),
-                    req.selected_integration_base_ref.trim(),
-                    req.selected_branch_to_work_on.trim(),
-                    &initial_prompt,
-                    req.permission_mode.trim(),
-                    req.dangerously_skip_permissions,
-                    stack_parent_for_claude_cli.as_deref(),
-                    req.stack_parent_daemon_instance_id.trim(),
-                    req.stack_node_id.trim(),
-                    &req.session_token,
+                    start,
+                    stack_parent_for_claude_cli,
                     managed_recipe,
-                    req.semantic_index,
-                    req.create_remote_branch,
-                    req.ssh_config_host.trim(),
                 )
                 .await;
         }
 
         // --- cursor-cli branch: no LiveKit; spawns Cursor Agent CLI in a PTY worktree ---
         if req.session_type.trim() == "cursor-cli" {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
-                os_user,
-                Some(&self.tddy_data_dir),
-            )
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-            let session_id = Uuid::now_v7().to_string();
-            let materialized = self
-                .prepare_session_attachments(&AttachmentMaterialization {
-                    session_token: &req.session_token,
-                    os_user,
-                    sessions_base: &sessions_base,
-                    session_id: &session_id,
-                    attachments: &req.attachments,
-                    progress,
-                })
-                .await?;
             // Same rule as the claude-cli branch above: which agent runs a planned PR's child is
             // not a reason for it to come up without its boundaries.
-            let initial_prompt = crate::stack_doc_attachments::prompt_with_attached_changeset(
-                req.initial_prompt.trim(),
-                &materialized,
-            );
-            let managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>> =
-                if req.managed_codebase && !req.recipe.trim().is_empty() {
-                    Some(
-                        tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(
-                            req.recipe.trim(),
-                        )
-                        .map_err(Status::invalid_argument)?,
-                    )
-                } else {
-                    None
-                };
+            let start = self.cli_start_prelude(&req, progress, os_user).await?;
+            let managed_recipe = managed_recipe_for(&req)?;
             if req.sandbox {
                 return self
-                    .start_sandboxed_cursor_cli_session(
-                        os_user,
-                        &session_id,
-                        &req.session_token,
-                        sessions_base,
-                        req.model.trim(),
-                        req.project_id.trim(),
-                        req.branch_worktree_intent.trim(),
-                        req.new_branch_name.trim(),
-                        req.selected_integration_base_ref.trim(),
-                        req.selected_branch_to_work_on.trim(),
-                        Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
-                        req.stack_parent_daemon_instance_id.trim(),
-                        req.stack_node_id.trim(),
-                        &initial_prompt,
-                        req.managed_codebase,
-                        &req.specialized_agents,
-                        managed_recipe,
-                        req.semantic_index,
-                        req.create_remote_branch,
-                    )
+                    .start_sandboxed_cursor_cli_from_request(&req, os_user, start, managed_recipe)
                     .await;
             }
             // Resolved before the spawn, not after: an agent the request names and this daemon
             // cannot resolve fails the start, exactly as it does on the sandboxed paths, rather
             // than persisting a roster entry that resolves to nothing on the next resume.
-            let mut started_agents = self.seeded_roster_records(&req.specialized_agents).await?;
+            let started_agents = self.seeded_roster_records(&req.specialized_agents).await?;
             let clones = self.seed_clone_claimant();
-            return crate::cursor_cli_spawn::spawn_cursor_cli_session_inner(
-                &self.config,
-                &self.tddy_data_dir,
-                &self.claude_cli_manager,
-                os_user,
-                &session_id,
-                &req.session_token,
-                sessions_base,
-                req.model.trim(),
-                req.project_id.trim(),
-                req.branch_worktree_intent.trim(),
-                req.new_branch_name.trim(),
-                req.selected_integration_base_ref.trim(),
-                req.selected_branch_to_work_on.trim(),
-                req.repo_path.trim(),
-                match Some(req.stack_parent.trim()).filter(|s| !s.is_empty()) {
-                    Some(session_id) => stack_parent::SpawnStackParent::OwnedBy {
-                        session_id,
-                        daemon_instance_id: req.stack_parent_daemon_instance_id.trim(),
-                        stack_node_id: req.stack_node_id.trim(),
-                        session_token: &req.session_token,
-                        host: self,
-                    },
-                    None => stack_parent::SpawnStackParent::NoParent,
-                },
-                &initial_prompt,
-                req.managed_codebase,
-                &mut started_agents,
-                managed_recipe,
-                req.semantic_index,
-                req.create_remote_branch,
-                &self.task_registry,
-                &clones,
-            )
-            .await;
+            return self
+                .spawn_cursor_cli_from_request(
+                    &req,
+                    os_user,
+                    start,
+                    managed_recipe,
+                    started_agents,
+                    clones,
+                )
+                .await;
         }
 
         let livekit = spawner::livekit_creds_from_config(&self.config)
@@ -653,6 +457,390 @@ impl DaemonSessionHost {
             ));
         }
 
+        let result = self
+            .spawn_tool_session(req, progress, os_user, agent_def, livekit, &project)
+            .await?;
+        Ok(Response::new(StartSessionResponse {
+            session_id: result.session_id,
+            livekit_room: result.livekit_room,
+            livekit_url: result.livekit_url,
+            livekit_server_identity: result.livekit_server_identity,
+            branch_conflict: None,
+        }))
+    }
+
+    fn eligible_daemon_ids(&self) -> (String, Vec<String>) {
+        let local_id = local_instance_id_for_config(&self.config);
+        let eligible_rows = self
+            .peer_routing
+            .eligible_daemon_source()
+            .list_eligible_daemons();
+        let eligible_ids: Vec<String> = eligible_rows
+            .iter()
+            .map(|e| e.instance_id.0.clone())
+            .collect();
+        (local_id, eligible_ids)
+    }
+
+    async fn forward_start_session(
+        &self,
+        req: &StartSessionRequest,
+        peer_instance_id: String,
+    ) -> Result<StartSessionResponse, Status> {
+        log::info!(
+            "StartSession: forwarding RPC to remote daemon_instance_id={}",
+            peer_instance_id
+        );
+        let slot = self.peer_routing.common_room_livekit_room().ok_or_else(|| {
+            Status::failed_precondition(
+                "cannot forward StartSession: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
+            )
+        })?;
+        let inner = tddy_daemon_livekit::livekit_peer_discovery::forward_start_session_via_livekit(
+            slot,
+            &peer_instance_id,
+            req,
+        )
+        .await?;
+        log::info!(
+            "StartSession: forward succeeded session_id={} livekit_server_identity={}",
+            inner.session_id,
+            inner.livekit_server_identity
+        );
+        Ok(inner)
+    }
+
+    async fn provision_project_for_start(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+    ) -> Result<(), Status> {
+        let project_id = req.project_id.trim();
+        if !project_id.is_empty() {
+            let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+            self.ensure_project_available_for_start(
+                os_user,
+                &projects_dir,
+                project_id,
+                &req.session_token,
+                req.agent_clone.as_ref(),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    fn validate_stack_seed_against_project(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        sessions_base: std::path::PathBuf,
+        project_id: &str,
+    ) -> Result<(), Status> {
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        let project = project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+        validate_stack_seed_base_session(
+            &sessions_base,
+            &req.recipe,
+            &req.pr_stack_base_session_id,
+            Path::new(&project.main_repo_path),
+        )
+        .map_err(tddy_service::to_rpc_status)?;
+        Ok(())
+    }
+
+    async fn seed_and_start_workspace_session(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        paired_agent: Option<workspace_session::PairedAgentSession>,
+        sessions_base: &Path,
+        session_id: &str,
+        timeout: std::time::Duration,
+    ) -> Result<
+        (
+            Response<StartSessionResponse>,
+            super::SeedCodebase,
+            Vec<super::SeededAgent>,
+        ),
+        Status,
+    > {
+        let seed = self.seeded_roster_records(&req.specialized_agents).await?;
+        let started = workspace_session::start_workspace_session(
+            os_user,
+            session_id,
+            sessions_base.to_path_buf(),
+            req.project_id.trim(),
+            &workspace_session::WorkspaceBranchIntent {
+                branch_worktree_intent: req.branch_worktree_intent.trim(),
+                new_branch_name: req.new_branch_name.trim(),
+                selected_integration_base_ref: req.selected_integration_base_ref.trim(),
+                selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
+            },
+            paired_agent.as_ref(),
+            req.sandbox,
+            &self.tddy_data_dir,
+            timeout,
+        )
+        .await?;
+        // Written before this call answers, because the answer is what releases the agent
+        // host to spawn its agent — and that spawn fixes the tool allowlist at launch. A
+        // roster written afterwards would leave a seeded agent's `replaces` unenforced until
+        // the first resume. The seed takes its own artifacts back out on failure; the
+        // session it was recorded on is the caller's to reclaim, which is what the split
+        // start's teardown does with the id it minted.
+        let session_dir = unified_session_dir_path(sessions_base, session_id);
+        let codebase = seed_codebase::SeedCodebase::read(session_id, &session_dir)?;
+        let seeded = self
+            .seed_session_agent_roster(session_id, &codebase, &req.session_token, seed)
+            .await?;
+        Ok((started, codebase, seeded))
+    }
+
+    async fn remove_unconfined_workspace_session(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        sessions_base: &Path,
+        session_id: &str,
+        codebase: super::SeedCodebase,
+        seeded: Vec<super::SeededAgent>,
+    ) {
+        self.unwind_seeded_roster(session_id, &codebase, &req.session_token, seeded)
+            .await;
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
+        if let Err(e) = session_deletion::delete_session_directory(
+            sessions_base,
+            session_id,
+            projects_dir.as_deref(),
+        ) {
+            log::warn!(
+                "StartSession: could not remove session {session_id} after its \
+                                 jail could not be provisioned: {}",
+                e.message()
+            );
+        }
+    }
+
+    async fn start_agent_clone_workspace_session(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        sessions_base: std::path::PathBuf,
+        session_id: String,
+        timeout: std::time::Duration,
+        placement: tddy_service::proto::session::AgentClonePlacement,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        let started = workspace_session::start_agent_clone_session(
+            os_user,
+            &session_id,
+            sessions_base.clone(),
+            req.project_id.trim(),
+            &self.tddy_data_dir,
+            timeout,
+        )
+        .await?;
+        self.start_hosted_agent_clone(
+            &placement,
+            &sessions_base,
+            &session_id,
+            req.project_id.trim(),
+            &req.session_token,
+        )
+        .await?;
+        Ok(started)
+    }
+
+    async fn start_sandboxed_claude_cli_from_request(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        start: CliStart,
+        stack_parent_for_claude_cli: Option<&str>,
+        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        self.start_sandboxed_claude_cli_session(
+            os_user,
+            &start.session_id,
+            &req.session_token,
+            start.sessions_base,
+            req.model.trim(),
+            req.project_id.trim(),
+            req.repo_path.trim(),
+            req.branch_worktree_intent.trim(),
+            req.new_branch_name.trim(),
+            req.selected_integration_base_ref.trim(),
+            req.selected_branch_to_work_on.trim(),
+            &start.initial_prompt,
+            &req.claude_args,
+            req.permission_mode.trim(),
+            req.dangerously_skip_permissions,
+            stack_parent_for_claude_cli,
+            req.stack_parent_daemon_instance_id.trim(),
+            req.stack_node_id.trim(),
+            req.managed_codebase,
+            &req.specialized_agents,
+            managed_recipe,
+            req.semantic_index,
+            req.create_remote_branch,
+        )
+        .await
+    }
+
+    async fn start_claude_cli_from_request(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        start: CliStart,
+        stack_parent_for_claude_cli: Option<String>,
+        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        self.start_claude_cli_session(
+            os_user,
+            &start.session_id,
+            start.sessions_base,
+            req.model.trim(),
+            req.project_id.trim(),
+            req.branch_worktree_intent.trim(),
+            req.new_branch_name.trim(),
+            req.selected_integration_base_ref.trim(),
+            req.selected_branch_to_work_on.trim(),
+            &start.initial_prompt,
+            req.permission_mode.trim(),
+            req.dangerously_skip_permissions,
+            stack_parent_for_claude_cli.as_deref(),
+            req.stack_parent_daemon_instance_id.trim(),
+            req.stack_node_id.trim(),
+            &req.session_token,
+            managed_recipe,
+            req.semantic_index,
+            req.create_remote_branch,
+            req.ssh_config_host.trim(),
+        )
+        .await
+    }
+
+    async fn cli_start_prelude(
+        &self,
+        req: &StartSessionRequest,
+        progress: &AttachmentProgressSink,
+        os_user: &str,
+    ) -> Result<CliStart, Status> {
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let session_id = Uuid::now_v7().to_string();
+        let materialized = self
+            .prepare_session_attachments(&AttachmentMaterialization {
+                session_token: &req.session_token,
+                os_user,
+                sessions_base: &sessions_base,
+                session_id: &session_id,
+                attachments: &req.attachments,
+                progress,
+            })
+            .await?;
+        let initial_prompt = crate::stack_doc_attachments::prompt_with_attached_changeset(
+            req.initial_prompt.trim(),
+            &materialized,
+        );
+        Ok(CliStart {
+            sessions_base,
+            session_id,
+            initial_prompt,
+        })
+    }
+
+    async fn start_sandboxed_cursor_cli_from_request(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        start: CliStart,
+        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        self.start_sandboxed_cursor_cli_session(
+            os_user,
+            &start.session_id,
+            &req.session_token,
+            start.sessions_base,
+            req.model.trim(),
+            req.project_id.trim(),
+            req.branch_worktree_intent.trim(),
+            req.new_branch_name.trim(),
+            req.selected_integration_base_ref.trim(),
+            req.selected_branch_to_work_on.trim(),
+            Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
+            req.stack_parent_daemon_instance_id.trim(),
+            req.stack_node_id.trim(),
+            &start.initial_prompt,
+            req.managed_codebase,
+            &req.specialized_agents,
+            managed_recipe,
+            req.semantic_index,
+            req.create_remote_branch,
+        )
+        .await
+    }
+
+    async fn spawn_cursor_cli_from_request(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        start: CliStart,
+        managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
+        mut started_agents: Vec<tddy_core::SessionAgentRecord>,
+        clones: super::DaemonSeedCloneClaimant,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        crate::cursor_cli_spawn::spawn_cursor_cli_session_inner(
+            &self.config,
+            &self.tddy_data_dir,
+            &self.claude_cli_manager,
+            os_user,
+            &start.session_id,
+            &req.session_token,
+            start.sessions_base,
+            req.model.trim(),
+            req.project_id.trim(),
+            req.branch_worktree_intent.trim(),
+            req.new_branch_name.trim(),
+            req.selected_integration_base_ref.trim(),
+            req.selected_branch_to_work_on.trim(),
+            req.repo_path.trim(),
+            match Some(req.stack_parent.trim()).filter(|s| !s.is_empty()) {
+                Some(session_id) => stack_parent::SpawnStackParent::OwnedBy {
+                    session_id,
+                    daemon_instance_id: req.stack_parent_daemon_instance_id.trim(),
+                    stack_node_id: req.stack_node_id.trim(),
+                    session_token: &req.session_token,
+                    host: self,
+                },
+                None => stack_parent::SpawnStackParent::NoParent,
+            },
+            &start.initial_prompt,
+            req.managed_codebase,
+            &mut started_agents,
+            managed_recipe,
+            req.semantic_index,
+            req.create_remote_branch,
+            &self.task_registry,
+            &clones,
+        )
+        .await
+    }
+
+    async fn spawn_tool_session(
+        &self,
+        req: StartSessionRequest,
+        progress: &AttachmentProgressSink,
+        os_user: &str,
+        agent_def: Option<tddy_discovery::agent_def::SpecializedAgentDef>,
+        livekit: spawner::LiveKitCreds,
+        project: &project_storage::ProjectData,
+    ) -> Result<spawner::SpawnResult, Status> {
         log::debug!("StartSession: entering spawn_blocking session_id=new");
         let spawn_client = self.spawn_client.clone();
         let spawn_mouse = self.config.spawn_mouse;
@@ -662,7 +850,7 @@ impl DaemonSessionHost {
         let observer_os_user = os_user.clone();
         let tool_path = req.tool_path.clone();
         let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
-        let repo_path = repo_path.to_path_buf();
+        let repo_path = Path::new(&project.main_repo_path).to_path_buf();
         let livekit = livekit.clone();
         let pid_for_spawn = project.project_id.clone();
         let agent_for_spawn: Option<String> = {
@@ -807,13 +995,7 @@ impl DaemonSessionHost {
             &result.session_id,
             result.grpc_port,
         );
-        Ok(Response::new(StartSessionResponse {
-            session_id: result.session_id,
-            livekit_room: result.livekit_room,
-            livekit_url: result.livekit_url,
-            livekit_server_identity: result.livekit_server_identity,
-            branch_conflict: None,
-        }))
+        Ok(result)
     }
 
     // TODO(#carve 14/15, DRY #2): the parameters become one `ToolSpawnPlan` when
@@ -963,4 +1145,42 @@ impl DaemonSessionHost {
         };
         Ok(result)
     }
+}
+
+fn classify_start_placement(
+    req: &StartSessionRequest,
+    local_id: String,
+    eligible_ids: Vec<String>,
+) -> Result<CodebasePlacement, Status> {
+    let placement = classify_placement(&PlacementRequest {
+        local_instance_id: local_id.clone(),
+        requested_codebase_id: req.codebase_daemon_instance_id.clone(),
+        eligible_ids: eligible_ids.clone(),
+        managed_codebase: req.managed_codebase,
+        sandbox: req.sandbox,
+        sandboxed_codebase: req.sandboxed_codebase,
+        session_type: req.session_type.trim().to_string(),
+        recipe: req.recipe.clone(),
+        dangerously_skip_permissions: req.dangerously_skip_permissions,
+    })
+    .map_err(|msg| {
+        log::info!("StartSession: rejected codebase placement: {msg}");
+        Status::invalid_argument(msg)
+    })?;
+    Ok(placement)
+}
+
+fn managed_recipe_for(
+    req: &StartSessionRequest,
+) -> Result<Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>, Status> {
+    let managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>> =
+        if req.managed_codebase && !req.recipe.trim().is_empty() {
+            Some(
+                tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
+                    .map_err(Status::invalid_argument)?,
+            )
+        } else {
+            None
+        };
+    Ok(managed_recipe)
 }
