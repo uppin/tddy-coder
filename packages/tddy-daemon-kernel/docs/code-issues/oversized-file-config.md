@@ -3,9 +3,9 @@
 **Location:** `packages/tddy-daemon-kernel/src/config.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by structural audit
-**Metrics:** **1,470 production lines** (2026-09-23; 1,447 at detection, 2,511 total and first `#[cfg(test)]` at `:1448` then) — **2.9× the 500-line budget** · 19 structs · 11 `resolve_*` functions · 5 env-var consts · `DaemonConfig` carries 33 fields
+**Metrics:** **1,472 production lines** (2026-09-24; 1,447 at detection, 2,511 total and first `#[cfg(test)]` at `:1448` then) — **2.9× the 500-line budget** · 19 structs · 11 `resolve_*` functions · 5 env-var consts · `DaemonConfig` carries 33 fields (struct/field counts not re-derived 2026-09-24)
 **Restructure:** required — `extract_module`, `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-09-24 (1,470 → 1,472 in #509, `#keyring` 2/9; split deferred with consent) — **unclaimed**
 **Verified:** ✅ hand-verified 2026-09-19 — see *Verified by hand*
 
 ## Measurement history
@@ -14,6 +14,7 @@
 |---|---|---|---|---|
 | 2026-09-19 | 1,447 | 2,511 | 19 | first detection |
 | 2026-09-23 | 1,470 | — | — | master 1,467 → 1,470 after #508 (`#keyring` 1/9; two doc comments) — grown by #508; split deferred to a follow-up after #keyring lands because dependents #509–#513 touch it |
+| 2026-09-24 | 1,472 | — | — | 1,470 on the merge-base with `origin/master` (`4e7157d2`) → 1,472 after #509 (`#keyring` 2/9): `users:` becomes the shared `LiveUsers` holder. Grown; the split is deferred with the developer's consent — #509's `## Boundaries` rules it out inside the stack and #510–#513 touch this file (`docs/dev/todo/2026-09-24-keyring-desktop-login-grew-thirteen-over-budget-files.md`). First `#[cfg(test)]` now at L1473 |
 
 ## What the tool found
 

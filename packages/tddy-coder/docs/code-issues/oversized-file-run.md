@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-coder/src/run.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 — `/pr-wrap` step 3.5 file-length gate
-**Metrics:** **2,682 production lines** (5,083 total) · budget 500 · **5.4× over** · residue `run_daemon` is **620 lines**
+**Metrics:** **2,707 production lines** (2026-09-24; 2,682 at detection, 5,083 total then) · budget 500 · **5.4× over** · residue `run_daemon` is **620 lines** (not re-measured 2026-09-24)
 **Thresholds breached:** length 2682 > 500; `run_daemon` 620 > 60; `run_with_args` ~196 > 60; `run_main` ~153 > 60
 **Restructure:** five `extract_module --to_file` seams **plus** function splitting — designed, not applied
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-09-24 (2,682 → 2,707 in #509, `#keyring` 2/9; split deferred with consent) — **unclaimed**
 
 ## Measurement history
 
@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-09-19 | 2682 | 2679 → 2682 in this PR — a **three-line** change (`ClientConfig` gains one field) |
 | 2026-09-22 | 2682 | 2682 → 2682 in #493 — catalog paths repointed to `tddy_session_catalog`; not grown |
+| 2026-09-24 | 2707 | 2682 on the merge-base with `origin/master` (`4e7157d2`) → 2707 after #509 (`#keyring` 2/9): the `standalone_auth_provider` / `StandaloneAuthProvider` auth-flow declaration (step 1 V9) and transport stamping. Grown; the split is deferred with the developer's consent to a follow-up after `#keyring` lands, because #510 and #511 touch this file (`docs/dev/todo/2026-09-24-keyring-desktop-login-grew-thirteen-over-budget-files.md`). The step 3.5 gate read 2715; step 4's `build_auth_service_entry` cleanup took 8 back. First `#[cfg(test)]` now at L2708 |
 
 ## What would close it — designed seams
 

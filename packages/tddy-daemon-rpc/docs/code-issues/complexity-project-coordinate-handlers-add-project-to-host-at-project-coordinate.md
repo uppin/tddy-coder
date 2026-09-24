@@ -17,6 +17,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 178 | 6 | 9 | 15 | first detection |
 | 2026-09-23 | 174 | 6 | 9 | 15 | moved to `tddy-daemon-rpc` by #520, at `project/coordinate_handlers.rs:186`; −4 lines is rustfmt re-wrapping the shortened paths (`hooks_and_urls::` → `entries::`, `service_util::` dropped), no logic change. Nesting and early exits identical to the lifecycle original |
+| 2026-09-24 | 174 | 6 | 9 | 15 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: `let os_user = self` → `&self` (the live `users:` holder), same line count, nesting and exits; still at `coordinate_handlers.rs:186`. Hand structural scan (fn line to closing brace; nesting by indentation; `return`/`?` count), identical method on the merge-base with `origin/master` (`4e7157d2`) and HEAD. CRAP not re-run |
 
 ## What the tool found
 

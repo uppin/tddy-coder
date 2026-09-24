@@ -17,6 +17,7 @@
 | 2026-09-18 | 94 | 5 | 2 | 9 | first detection |
 | 2026-09-23 | 101 | 5 | 2 | 9 | moved to `tddy-daemon-rpc`; length from re-wrapped field paths, not new logic |
 | 2026-09-23 | 101 | 5 | 2 | 9 | re-measured at the #520 wrap: unchanged since the move; still at `exec_tool/ports.rs:261`, nesting and early exits identical to the lifecycle original |
+| 2026-09-24 | 101 | 5 | 2 | 9 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: `let os_user = self` → `&self` (the live `users:` holder), same line count, nesting and exits. Hand structural scan (fn line to closing brace; nesting by indentation; `return`/`?` count), identical method on the merge-base with `origin/master` (`4e7157d2`) and HEAD |
 
 ## What the tool found
 

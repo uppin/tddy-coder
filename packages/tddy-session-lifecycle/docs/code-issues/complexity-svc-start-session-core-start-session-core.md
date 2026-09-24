@@ -16,6 +16,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 842 | 6 | 40 | 54 | first detection |
 | 2026-09-23 | 857 | 6 | — | — | 854 on master before #520 (+12 since detection, unrecorded); +3 from #520 (`#carve` 11/12) — rustfmt re-wraps the peer-roster and common-room reads that moved behind `self.peer_routing`. No control flow added: nesting, and `return`/`?` count, identical to master; branches not re-derived |
+| 2026-09-24 | 857 | 6 | — | — | touched by #509 (`#keyring` 2/9) and **unchanged by it**: `let os_user = self` → `&self` (the live `users:` holder), same line count; nesting and `return`/`?` count identical on the merge-base with `origin/master` (`4e7157d2`) and HEAD; branches not re-derived |
 
 ## What the tool found
 

@@ -16,6 +16,7 @@
 | 2026-09-19 | 502 | first detection — **this PR pushed it over**, 398 → 502 |
 | 2026-09-23 | 520 | touched by #520 (`#carve` 11/12) and **unchanged by it** (one-line change: the room roster passed as a builder). 520 on master before #520 — the 502 → 520 growth predates it and is unattributed. The file has no `#[cfg(test)]`, so the count is its whole length |
 | 2026-09-23 | 505 | 520 on `origin/master` (`4e260d7f`, after #520; grown by earlier merges) → 505 after #508 (`#keyring` 1/9): `agent_session_token_for` lost its `livekit.api_secret` lookup and refusal (−18 net), offset by the `SplitSpawnTarget` literal at the `split_remote_tool_env` call (+3). The file has no `#[cfg(test)]`, so production = total |
+| 2026-09-24 | 505 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: 505 on the merge-base with `origin/master` (`4e7157d2`) and HEAD. One `Request::new` → `Request::direct` in `delete_paired_codebase_session`, no lines added. No `#[cfg(test)]`, so production = total |
 
 ## What the tool found
 

@@ -15,6 +15,7 @@
 |---|---|---|
 | 2026-09-19 | 908 | 896 → 908 in this PR (the new `SandboxedCodebase` placement arm) |
 | 2026-09-23 | 911 | 908 → 911 in #520 (`#carve` 11/12): rustfmt re-wraps the two field reads that moved behind `self.peer_routing` in `start_session_core`; no logic added |
+| 2026-09-24 | 911 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: 911 on the merge-base with `origin/master` (`4e7157d2`) and HEAD. One `let os_user = self` → `&self` edit in `start_session_core`, no lines added. No `#[cfg(test)]` |
 
 ## What the tool found
 

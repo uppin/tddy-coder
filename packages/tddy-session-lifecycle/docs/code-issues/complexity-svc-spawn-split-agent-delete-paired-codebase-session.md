@@ -1,12 +1,12 @@
 # complexity: delete_paired_codebase_session
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs:337` — `delete_paired_codebase_session`
+**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs:410` — `delete_paired_codebase_session`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
-**Metrics:** **61 lines** · **nesting depth 3** · 1 parameters · 3 branch/match lines · 5 early exits
-**Thresholds breached:** length 61 > 60 (`/analyze-clean-code`)
+**Metrics:** **95 lines** (2026-09-24; 61 at detection) · **nesting depth 3** (at detection) · 1 parameters · 3 branch/match lines · 5 early exits (at detection)
+**Thresholds breached:** length 95 > 60 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed (61 → 95 lines since detection, measured 2026-09-24; none of it from #509, unattributed) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 61 | 3 | 3 | 5 | first detection |
+| 2026-09-24 | 95 | — | — | — | touched by #509 (`#keyring` 2/9) and **unchanged by it**: one `Request::new` → `Request::direct`, no lines added. Now at `svc_spawn_split_agent.rs:410`, **95 lines on the merge-base with `origin/master` (`4e7157d2`) and HEAD** — the 61 → 95 growth since detection predates #509 and is unattributed. Nesting, branches and exits not re-derived on the record's scale (the hand scan gives identical values on base and HEAD) |
 
 ## What the tool found
 
