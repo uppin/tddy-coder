@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use tddy_core::backend::RemoteToolEnv;
 use tddy_daemon_auth::SessionTokens;
-use tddy_github::{GitHubUser, SessionTokenError, SessionTokenSigner, TokenKind};
+use tddy_github::{GitHubUser, };
 use tddy_rpc::Status;
 
 /// Lifetime of the agent's scoped LiveKit join token.
@@ -134,8 +134,8 @@ pub fn build_split_context_dir(
     let context_dir = split_context_dir(session_dir);
     std::fs::create_dir_all(&context_dir)
         .map_err(|e| Status::internal(format!("failed to create split context dir: {e}")))?;
-    let borrowed = borrowed_withdrawals(withdrawals);
-    let replacements = subagent_replacements(withdrawals, &borrowed);
+    let borrowed = agent_argv::borrowed_withdrawals(withdrawals);
+    let replacements = agent_argv::subagent_replacements(withdrawals, &borrowed);
     let preamble = tddy_sandbox::managed_codebase_preamble(&replacements);
 
     crate::context_sync::ContextSyncer::populate(&context_dir, &preamble, globs, source)?;
@@ -162,270 +162,11 @@ pub fn build_split_context_dir(
     Ok(context_dir)
 }
 
-/// The `(agent, withdrawn tools)` pairs a session's roster imposes, from the roster as the daemon
-/// holding it serves it over the wire.
-///
-/// A split session's roster lives on the daemon holding its codebase, so the host running the agent
-/// only ever sees it as wire entries — never as the `.session.yaml` records
-/// [`crate::connection_service::roster_replacement_pairs`] reads on the co-located paths. Same rule
-/// and the same normalizer as those: each entry's own snapshot of `replaces`, spelled as the exec
-/// catalog spells it, or the allowlist this feeds would filter on a name that is not in it and drop
-/// nothing.
-pub fn wire_roster_withdrawals(
-    agents: &[tddy_service::proto::session_agents_svc::SessionAgentEntry],
-) -> Vec<(String, Vec<String>)> {
-    agents
-        .iter()
-        .map(|agent| {
-            (
-                agent.name.clone(),
-                tddy_discovery::subagent::normalize_replaced_tools(&agent.replaces),
-            )
-        })
-        .collect()
-}
+mod agent_argv;
+pub use agent_argv::*;
 
-/// Every tool the roster withdraws from the main agent, once each: the union across its agents,
-/// which is the rule (PRD § Tool replacement, AC19).
-fn withdrawn_tools(withdrawals: &[(String, Vec<String>)]) -> Vec<String> {
-    tddy_discovery::subagent::normalize_replaced_tools(
-        &withdrawals
-            .iter()
-            .flat_map(|(_, tools)| tools.clone())
-            .collect::<Vec<String>>(),
-    )
-}
-
-/// The withdrawn tool names as borrowed slices, one `Vec` per agent — the storage
-/// [`subagent_replacements`] borrows from, kept separate because
-/// [`tddy_sandbox::SubagentReplacement`] holds `&[&str]`.
-fn borrowed_withdrawals(withdrawals: &[(String, Vec<String>)]) -> Vec<Vec<&str>> {
-    withdrawals
-        .iter()
-        .map(|(_, tools)| tools.iter().map(String::as_str).collect())
-        .collect()
-}
-
-/// The per-agent breakdown the appendix renders, over storage from [`borrowed_withdrawals`].
-fn subagent_replacements<'a>(
-    withdrawals: &'a [(String, Vec<String>)],
-    borrowed: &'a [Vec<&'a str>],
-) -> Vec<tddy_sandbox::SubagentReplacement<'a>> {
-    withdrawals
-        .iter()
-        .zip(borrowed.iter())
-        .map(|((name, _), replaced)| tddy_sandbox::SubagentReplacement { name, replaced })
-        .collect()
-}
-
-/// Filename of the MCP server's log, under the session directory.
-///
-/// Same basename the sandbox runner writes into its egress dir (`tddy-sandbox-runner`): a split
-/// session's session dir is its equivalent — the per-session place the host can read afterwards.
-const MCP_LOG_BASENAME: &str = "tddy-tools.mcp.log";
-
-/// `RUST_LOG` for the agent's `tddy-tools --mcp` child.
-///
-/// Mirrors the sandbox runner's default, minus its `tddy_discovery=debug` — that one exists for
-/// specialized subagents' HTTP activity, which a split session has none of. `tddy_tools=debug` is
-/// the part that matters here: it is where a failed LiveKit dispatch to the codebase daemon (room
-/// connect refused, peer absent, truncated stream) is reported.
-const MCP_RUST_LOG: &str = "info,tddy_tools=debug";
-
-/// Where a split session's MCP server writes its log.
-pub fn split_mcp_log_path(session_dir: &Path) -> PathBuf {
-    session_dir.join(MCP_LOG_BASENAME)
-}
-
-/// Build the `claude` flags that leave the agent no route to this host's filesystem and point its
-/// MCP server at `tddy-tools`.
-///
-/// The MCP config is written under `session_dir` rather than the context directory so the agent's
-/// cwd holds only guidance.
-///
-/// `withdrawals` is what this session's roster takes away from the main agent — `(agent, tools)`
-/// pairs, from [`wire_roster_withdrawals`] over the roster its codebase daemon serves. It is the
-/// first of the two layers a withdrawal is enforced at (PRD § Enforced at two layers): the second
-/// is `tddy-tools`, which stops advertising a withdrawn tool and refuses a call to one. Both are
-/// needed. Without this layer the withdrawn tool stays *pre-approved*, so the main agent is invited
-/// to reach for it and meets the second layer's refusal mid-turn, every turn.
-pub fn split_claude_extra_args(
-    session_dir: &Path,
-    tddy_tools_path: &str,
-    withdrawals: &[(String, Vec<String>)],
-) -> Result<Vec<String>, Status> {
-    // Every tool call a split session makes crosses LiveKit to the codebase daemon, and every way
-    // that can fail is reported by `tddy-tools` itself. Claude Code captures an MCP server's stderr,
-    // so without a log file those reports exist only inside a process nobody can attach to: a split
-    // session whose dispatch is failing would leave no evidence on either daemon. The sandbox path
-    // solves this the same way, pointing the same variable at its egress dir.
-    let mcp_env = BTreeMap::from([
-        (
-            "TDDY_TOOLS_LOG_FILE".to_string(),
-            split_mcp_log_path(session_dir)
-                .to_string_lossy()
-                .into_owned(),
-        ),
-        ("RUST_LOG".to_string(), MCP_RUST_LOG.to_string()),
-    ]);
-    let mcp_config = tddy_sandbox_recipes::write_claude_mcp_config(
-        session_dir,
-        Path::new(tddy_tools_path),
-        &mcp_env,
-    )
-    .map_err(|e| Status::internal(format!("failed to write MCP config: {e}")))?;
-
-    let withdrawn = withdrawn_tools(withdrawals);
-    let withdrawn_refs: Vec<&str> = withdrawn.iter().map(String::as_str).collect();
-
-    let mut args = Vec::new();
-    // Every exec tool the roster leaves alone is pre-approved: they are all reachable, they simply
-    // execute on the codebase daemon. The subagent tools are pre-approved whether or not this
-    // session has agents *yet* — unlike the jail, which reads a seed fixed at spawn, a split
-    // session's roster is live and an operator may attach an agent at minute forty, while Claude's
-    // own lists are fixed for the life of the process they were passed to. Nothing is granted by
-    // pre-approving them on a session with no agents: `tddy-tools` advertises them only while the
-    // roster has someone to address, so the flag names a tool the model is never offered.
-    let subagent_tools_are_pre_approved = true;
-    for tool in tddy_sandbox_recipes::build_claude_allowlist(
-        subagent_tools_are_pre_approved,
-        &withdrawn_refs,
-    ) {
-        args.push("--allowedTools".to_string());
-        args.push(tool);
-    }
-    // Dropping a tool from `--allowedTools` only un-pre-approves it. A split session's *native*
-    // routes are already hard-disabled below, but a withdrawn tool's proxied `mcp__tddy-tools__`
-    // form is the route this agent actually had, and it stays callable through the permission
-    // prompt until `--disallowedTools` names it (`PermissionServer::decide` allows every
-    // `mcp__tddy-tools__*` call it is asked about).
-    let mut disallowed: Vec<String> = NATIVE_FILESYSTEM_TOOLS
-        .iter()
-        .map(|tool| (*tool).to_string())
-        .collect();
-    for tool in tddy_sandbox_recipes::build_claude_disallowlist(&withdrawn_refs) {
-        if !disallowed.contains(&tool) {
-            disallowed.push(tool);
-        }
-    }
-    for tool in disallowed {
-        args.push("--disallowedTools".to_string());
-        args.push(tool);
-    }
-    args.push("--permission-prompt-tool".to_string());
-    args.push(PERMISSION_PROMPT_TOOL.to_string());
-    args.push("--mcp-config".to_string());
-    args.push(mcp_config.to_string_lossy().into_owned());
-    // `--mcp-config` alone *adds* to the user-scoped MCP configuration, so any filesystem or shell
-    // MCP server the operator has configured would load beside `tddy-tools` — reachable under an
-    // `mcp__*` name the disallowlist above does not cover, on this host rather than the codebase
-    // host. The restriction the split placement rests on has to be impossible to route around, not
-    // merely the default, so this config is the only one loaded.
-    args.push("--strict-mcp-config".to_string());
-    Ok(args)
-}
-
-/// Mint the agent's own session token from the caller's, refusing anything the caller could not
-/// legitimately have presented.
-///
-/// The web caller's access token lives [`tddy_github::SESSION_TOKEN_TTL`] — five minutes — because
-/// the browser holds a refresh token and re-mints it long before expiry. A spawned agent holds
-/// neither: whatever life was left on the caller's token when the session started is all its
-/// `tddy-tools --mcp` child would ever have, and every remote tool call after that fails
-/// `UNAUTHENTICATED` on the codebase daemon with nothing on this host to notice. So the agent is
-/// given a credential of its own, scoped to the same [`SPLIT_AGENT_TOKEN_TTL`] as the join token
-/// minted beside it — one agent process's working life, not the session's.
-///
-/// It is minted under the *verified* caller's identity, never the claimed one: the login in these
-/// claims is what the codebase daemon looks up in its own `users[]` table to pick the OS user the
-/// tools run as, so a token this daemon could not verify would be this daemon choosing a user on
-/// another host's behalf. It is signed with this daemon's own key, which the codebase daemon
-/// resolves from this daemon's common-room advertisement — which is exactly why it will accept
-/// what is minted here. Every failure is a refusal rather than a fallback to forwarding the
-/// caller's token: an expired, forged or malformed credential must not buy a session-length one.
-pub(crate) fn mint_agent_session_token(
-    tokens: &SessionTokens,
-    caller_token: &str,
-) -> Result<String, Status> {
-    let caller = verified_caller(tokens, caller_token)?;
-    Ok(tokens.signer().mint(&caller, SPLIT_AGENT_TOKEN_TTL))
-}
-
-/// The identity a caller's token *proves*, or a refusal.
-///
-/// Shared by everything a split session start signs under the caller, because each of them
-/// (the agent's own token, the room poller's per-poll credential) is this daemon asserting an
-/// identity to another host: the login in the claims is what the codebase daemon looks up in its
-/// own `users[]` table to pick the OS user, so a token this daemon could not verify would be this
-/// daemon choosing a user on another host's behalf. Every failure is a refusal rather than a
-/// fallback to forwarding the caller's token: an expired, forged or malformed credential must not
-/// buy a minted one.
-fn verified_caller(tokens: &SessionTokens, caller_token: &str) -> Result<GitHubUser, Status> {
-    let refused =
-        |why: String| Status::unauthenticated(format!("cannot wire a split session: {why}"));
-    let claims = tokens.verifier().verify_now(caller_token).map_err(|e| {
-        refused(match e {
-            SessionTokenError::Expired => "the caller's session token has expired".to_string(),
-            SessionTokenError::InvalidSignature => {
-                "the caller's session token does not verify under the key it names".to_string()
-            }
-            SessionTokenError::Malformed => "the caller's session token is malformed".to_string(),
-            SessionTokenError::UnsupportedVersion => "the caller's session token is in a \
-                     format this daemon no longer accepts — sign in again"
-                .to_string(),
-            SessionTokenError::UnknownKeyId(key_id) => format!(
-                "the caller's session token is signed by key {key_id}, which no daemon this \
-                     one knows has published"
-            ),
-        })
-    })?;
-    // A refresh token mints access tokens and never authenticates an RPC (see [`TokenKind`]), so
-    // accepting one here would let the credential a browser keeps at rest authorize a whole
-    // session's toolchain on the codebase host.
-    if claims.kind == TokenKind::Refresh {
-        return Err(refused(
-            "the caller presented a refresh token, which never authenticates an RPC".to_string(),
-        ));
-    }
-    Ok(claims.user())
-}
-
-/// The credential the facilitating daemon's room poller presents to the codebase daemon, minted
-/// fresh for every poll.
-///
-/// The room asks the codebase daemon for a worktree snapshot on a timer, and that peer
-/// authenticates each one exactly as it authenticates a tool call. Holding the caller's token for
-/// that would give the room five minutes ([`tddy_github::SESSION_TOKEN_TTL`]) of working life and
-/// then a silent, permanent `Unauthenticated`. Unlike the agent — which lives in another process
-/// and has to be handed something up front (see [`mint_agent_session_token`]) — the poller runs
-/// inside the daemon that holds the signing key, so it keeps the *identity* and signs a
-/// short-lived token per poll: no expiry ceiling on the room, and no long-lived bearer token at
-/// rest in this process.
-pub struct RoomPollTokenMinter {
-    signer: SessionTokenSigner,
-    /// The verified caller, never the claimed one — [`verified_caller`].
-    caller: GitHubUser,
-}
-
-impl RoomPollTokenMinter {
-    /// Verify the caller once, here, so a session whose room could never authenticate anything
-    /// fails to start rather than starting and then measuring nothing forever.
-    pub fn new(tokens: &SessionTokens, caller_token: &str) -> Result<Self, Status> {
-        let caller = verified_caller(tokens, caller_token)?;
-        Ok(Self {
-            signer: tokens.signer().clone(),
-            caller,
-        })
-    }
-}
-
-impl tddy_daemon_livekit::session_room::SessionTokenMinter for RoomPollTokenMinter {
-    /// [`tddy_github::SESSION_TOKEN_TTL`] and no longer: a poll that outlives its own credential is
-    /// the bug this exists to remove, and the next poll mints another.
-    fn mint(&self) -> String {
-        self.signer.mint_access(&self.caller)
-    }
-}
+mod agent_credentials;
+pub use agent_credentials::*;
 
 /// Mint the agent's scoped LiveKit join token and build the `TDDY_REMOTE_*` environment around it.
 ///
@@ -457,7 +198,7 @@ pub fn split_remote_tool_env(
         codebase_session_id,
         session_token,
     } = *target;
-    let agent_session_token = mint_agent_session_token(tokens, session_token)?;
+    let agent_session_token = agent_credentials::mint_agent_session_token(tokens, session_token)?;
     let identity = split_agent_participant_identity(session_id);
     let token = tddy_livekit::TokenGenerator::new(
         livekit.api_key.clone(),
@@ -625,7 +366,7 @@ pub fn prepare_split_agent_wiring(
     let remote = split_remote_tool_env(&livekit, tokens, target)?;
     Ok(SplitAgentWiring {
         context_dir: build_split_context_dir(session_dir, withdrawals, globs, source)?,
-        extra_args: split_claude_extra_args(session_dir, tddy_tools_path, withdrawals)?,
+        extra_args: agent_argv::split_claude_extra_args(session_dir, tddy_tools_path, withdrawals)?,
         env: remote.env_pairs(),
     })
 }
@@ -1246,7 +987,7 @@ mod tests {
 
     /// The flags a split session spawns with while nothing is attached to it.
     fn split_args_with_no_agents(session_dir: &Path) -> Vec<String> {
-        split_claude_extra_args(session_dir, "/usr/bin/tddy-tools", &[]).expect("extra args")
+        agent_argv::split_claude_extra_args(session_dir, "/usr/bin/tddy-tools", &[]).expect("extra args")
     }
 
     /// The flags a split session spawns with, given the roster its codebase daemon holds.
@@ -1254,10 +995,10 @@ mod tests {
         session_dir: &Path,
         agents: &[tddy_service::proto::session_agents_svc::SessionAgentEntry],
     ) -> Vec<String> {
-        split_claude_extra_args(
+        agent_argv::split_claude_extra_args(
             session_dir,
             "/usr/bin/tddy-tools",
-            &wire_roster_withdrawals(agents),
+            &agent_argv::wire_roster_withdrawals(agents),
         )
         .expect("extra args")
     }
@@ -1368,7 +1109,7 @@ mod tests {
     #[test]
     fn a_replaced_tool_is_spelled_as_the_catalog_spells_it() {
         // When — a def wrote its replacement in the casing a human types
-        let withdrawals = wire_roster_withdrawals(&[an_agent_on_the_roster("explorer", &["grep"])]);
+        let withdrawals = agent_argv::wire_roster_withdrawals(&[an_agent_on_the_roster("explorer", &["grep"])]);
 
         // Then — normalized to the exec-catalog name, or the allowlist it feeds would drop nothing
         assert_eq!(
@@ -1386,7 +1127,7 @@ mod tests {
         let (_repo, source) = a_repo_with_no_guidance();
         let context = build_split_context_dir(
             tmp.path(),
-            &wire_roster_withdrawals(&[an_agent_on_the_roster("explorer", &["Grep"])]),
+            &agent_argv::wire_roster_withdrawals(&[an_agent_on_the_roster("explorer", &["Grep"])]),
             CLAUDE_GLOBS,
             &source,
         )
@@ -1518,7 +1259,7 @@ mod colocated_jail_tool_env_tests {
 /// PRD: docs/ft/daemon/amendments/PRD-2026-09-18-sandboxed-codebase-from-the-web.md
 #[cfg(test)]
 mod withdrawal_contract_tests {
-    use super::split_claude_extra_args;
+    use super::agent_argv::split_claude_extra_args;
     use std::path::Path;
 
     /// Every native route to a filesystem or a shell. An unconfined agent that kept any one of
