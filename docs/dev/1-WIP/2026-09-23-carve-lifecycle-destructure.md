@@ -1,7 +1,7 @@
 # Changeset: destructure tddy-session-lifecycle, close its code issues, remove its duplicate code
 
 **Date**: 2026-09-23
-**Status**: 🚧 In Progress — baseline taken; plans `03`, `10a`, `04`, `08`, `06`, `07`, `02`, `09b`, `05` and `01` applied. `05`'s refusal was an engine defect, fixed on this PR (see "Apply run 2026-09-24")
+**Status**: 🚧 In Progress — plans `03`–`01`, then `10b`, `09c`, `11`–`18`, `20`, `21` applied, and DRY #2–#13 done. No file is at or over 500 production lines. What is left needs the developer: see "Consent list"
 **Type**: Refactor (in-crate restructure; no behaviour change)
 **Stack**: `#carve` 14/15, on top of `restructure-engine-fixes` (#527), which sits on `core-split` (#522)
 
@@ -229,23 +229,23 @@ call (2026-09-23), and records them by name if they are still red.
 
 ## Scope
 
-- [x] Baseline recorded (`./test -p tddy-session-lifecycle`, per-suite counts, known-red names, known hang). Taken 2026-09-24; the DRY-target packages' baseline is still to take
+- [x] Baseline recorded (`./test -p tddy-session-lifecycle`, per-suite counts, known-red names, known hang). Taken 2026-09-24; the DRY-target packages' too (58 / 481 / 12 / 1, at `3a96ca22`)
 - [ ] Characterisation tests: `start_sandboxed_cursor_cli_session`; the relaunch path. **Only if a seam needs one** (developer, 2026-09-24); none of the plans applied so far did
 - [ ] Warm index (`./run-index-daemon`); every plan passes `restructure check --deep` before `apply`. Every applied plan did, `05` and `01` included, once `51211cd8` fixed the refusal
-- [ ] DRY #10, #11, #13 (the cross-crate one-liners)
-- [ ] Misplaced code relocated (table above)
-- [ ] `connection_service.rs` split (placement, split_start, attachment_progress, managed_launch, stack_parent, spawn handlers, agent_roster). ✅ 10 topic files (`01`, `23b73d0b`); 1,652 → 542 lines; folding them into existing siblings is open
+- [x] DRY #10, #11, #13 (the cross-crate one-liners): `b6be2b73`, `4cd52230` (kept as a delegate: the path is public), `3616c80c`
+- [ ] Misplaced code relocated (table above). ✅ 9 seams into modules of their own (`11`, `93a95054`); re-parenting them, and `ManagedWorkflow`, is a hand move (consent list)
+- [x] `connection_service.rs` split (placement, split_start, attachment_progress, managed_launch, stack_parent, spawn handlers, agent_roster). ✅ 10 topic files (`01`, `23b73d0b`); 434 production lines now. Folding them into existing siblings is a hand move (consent list)
 - [ ] `spawn_claude_cli_session_inner` → `cli_spawn/claude.rs`; `cursor_cli_spawn` → `cli_spawn/cursor.rs` + `chat.rs` + `resume.rs`. ✅ `chat.rs` and `resume.rs` (`03`); ✅ `connection_service/claude_cli_spawn.rs` (`01`); the `git mv` into `cli_spawn/` is open
-- [ ] DRY #3, #5, #6, #7, #8: `cli_spawn/common.rs` + `CliSpawnRequest`
-- [ ] `cli_session_manager` → directory module (7 files); DRY #12 resize decoder → `tddy-pty`. ✅ directory module, 9 files (`02`, `834a76b2`); DRY #12 open
+- [x] DRY #3, #5, #6, #7, #8, as `service_util` helpers rather than `cli_spawn/common.rs` + `CliSpawnRequest` (see "DRY rows")
+- [x] `cli_session_manager` → directory module (7 files); DRY #12 resize decoder → `tddy-pty`. ✅ directory module, 9 files (`02`, `834a76b2`); DRY #12 (`0ce85fe8`)
 - [x] `split_session` → `agent_argv.rs` + `agent_credentials.rs` (`04`)
-- [ ] `start_session_core` extract-method; DRY #2 `spawn_tddy_coder`, DRY #4 prelude. ✅ `spawn_tddy_coder` extracted (`10a`); plan `10`'s other extract-methods were refused for their early returns and need re-cut ranges; the DRY merges are open
+- [ ] `start_session_core` extract-method; DRY #2 `spawn_tddy_coder`, DRY #4 prelude. ✅ `10a`, `10b` (857 → 358), file split (`12`), DRY #2 (`d4ef468d`) and #4 (`be55575c`); the guards that remain are refused (E4, consent list)
 - [ ] `session_coordinate_handlers` split; `session_entry_from_listing`. ✅ split (`08`); `session_entry_from_listing` open
-- [ ] DRY #1 `svc_sandboxed_jail_launch`: Claude, then Cursor, then relaunch. ✅ Claude's start split into its jail steps (`09b`); plan `09` op 6 and the merge with Cursor and relaunch are open
-- [ ] Ports files split; DRY #9. ✅ split (`06`, `86670241`); DRY #9 open
+- [ ] DRY #1 `svc_sandboxed_jail_launch`: Claude, then Cursor, then relaunch. ✅ Claude's steps (`09b`, `09c`, `13`, `18`) and relaunch's (`16`, `21`) are in modules; the merge waits on coverage (consent list)
+- [x] Ports files split; DRY #9. ✅ split (`06`, `86670241`); DRY #9 (`4b2c2726`)
 - [x] `svc_spawn_split_agent` teardown split + extract-method; `svc_host_builders.rs`. ✅ `svc_host_builders.rs` (`07`, `1a9a72d4`); ✅ `svc_paired_codebase_teardown.rs` and 4 extract-methods (`05`, `8b55523e`)
-- [ ] Every non-test file < 500 production lines; no function > 150 lines
-- [ ] All 16 code-issue records re-measured and deleted or narrowed
+- [ ] Every non-test file < 500 production lines; no function > 150 lines. ✅ files: 0 at or over 500 (was 11); functions: 5 over 150 (was 10), each on the consent list
+- [x] All 16 code-issue records re-measured and deleted or narrowed (`3e05735c`)
 
 ## Technical changes
 
@@ -453,44 +453,332 @@ It now also records the hand-fixed shape.
 **Plan `02` also lost a comment** (P): the 3-line `LiveKit bridge` section banner. It is already
 pushed. The module's name now says what the banner said, so it was left as is.
 
-### Still to do in Scope, not part of this run
+## Apply run 2026-09-24, second half
 
-- Plan `09` op 6, which returns early.
-- **Plan `10`'s refused extract-methods on `start_session_core`.** They are early returns and need
-  re-cut ranges. `svc_start_session_core.rs` is 966 lines.
-- **The remaining extract-methods:** `resume_session_at_session_coordinate`, the CLI spawn
-  functions, and `start_sandboxed_cursor_cli_session`, which may need characterisation tests, per its
-  CRAP record.
-- **Every DRY row** (#1–#13). Only `spawn_tddy_coder` is extracted so far, not yet merged with its
-  copy.
-- **The misplaced-code relocations** (table above).
-- `cli_spawn/{claude,cursor}.rs` `git mv`s after `01` and `03`; `session_entry_from_listing`.
-- **Files still at or over 500 production lines** (lines before the first `#[cfg(test)]`):
-  - `connection_service.rs`: 542 lines after `01` (was 1,652). Its first `#[cfg(test)] mod …;` is
-    at line 298, which is the 2026-09-19 measurement caveat. The lines after it are almost all
-    test-module declarations and the `#[cfg(test)]` imports, so the production count is under 500
-    by any reading. It is measured properly at wrap;
-  - `svc_start_session_core.rs`: 966;
-  - `svc_start_sandboxed_claude_cli_session.rs`: 834 after `09b` (was 661). The helpers and the
-    3 parameter structs are still in the file. The handler is down to 436 lines, still over the
-    150-line limit, until op 6 and DRY #1;
-  - `svc_start_sandboxed_cursor_cli_session.rs`: 505.
+Work items 1–5 of the developer's brief, in order: the refused extract-methods, the DRY rows, the
+relocations, the oversized files and functions, and the code-issue records. The same rules held: a
+refusal stops that op with no hand move around it, and hand edits are only corrections that make an
+engine move build and lint (use lines, paths, visibility, clippy signature shapes, restoring dropped
+comments). The DRY rows are hand edits by design, behaviour-preserving only. Letters G–M and W–X are
+[the gaps TODO](../todo/2026-09-24-restructure-apply-gaps-from-the-lifecycle-destructure-run.md);
+P–V are [the extract TODO](../todo/2026-09-24-restructure-extract-drops-comments-and-writes-clippy-failing-signatures.md).
 
-  Now under 500:
-  - `cli_session_manager.rs`: 173 production;
-  - `split_session.rs`: 386;
-  - `session_coordinate_handlers.rs`: 414;
-  - `svc_session_agent_ports.rs`: 113;
-  - `svc_session_files_ports.rs`: 200;
-  - `svc_resolve_tddy_tools_path.rs`: 51;
-  - `cursor_cli_spawn.rs`: 367;
-  - `svc_host_builders.rs`: 453, above the ≤ 400 target;
-  - `svc_spawn_split_agent.rs`: 416 after `05` (was 505), above the ≤ 400 target.
-    `8b55523e`'s message says 372, but that count was taken before fmt;
-  - the ten files `01` created: 24–155 lines each, except `claude_cli_spawn.rs` at 449, which
-    `spawn_claude_cli_session_inner` (408 lines) fills on its own until its extract-methods land;
-  - `svc_paired_codebase_teardown.rs`: 178.
-- **The 16 code-issue records**, re-measured at wrap.
+**Setup.** This checkout's engine (`target/debug/tddy-tools`, with `51211cd8`) against the warm
+`./run-index-daemon`. **The daemon was restarted whenever a hand edit touched code the next plan's
+files depend on** (V): it answers from the tree as it was when it started, and a stale answer reads
+as a refusal (`project: _`). N1–N4 are [the lint-gate TODO](../todo/2026-09-24-restructure-apply-leaves-the-lint-gate-red.md).
+
+### Plans, in the order applied
+
+| Plan | Target | Engine | Hand fixes | Tests | Commit |
+|---|---|---|---|---|---|
+| `10b` | `start_session_core`, 15 ranges between its early returns (bodies between exits, and call expressions after `return`) | 15/15; compile gate failed. The first cut refused one range (S: an `if … else` expression) and hung the daemon on another (R: a bare block `{`); both re-cut | K ×5; three breaks the gate never reached (a stray `*` before `log::warn!`, a value moved while borrowed, by-reference params the callee consumes); Q (`CliStart`; `repo_path` derived from the project); P ×22 | baseline | `5d9d0486` |
+| `09c` | plan `09`'s op 6 (the worktree `match`), 4 ranges between its returns | 4/4; gate failed | K; Q (`JailBranch<'a>`, and a new `redundant_field_names` shape); P ×2 | baseline | `3a96ca22` |
+| `11` | misplaced code (table above), 9 × `extract_module` | 9/9; gate passed | N1/N2 with `cargo fix` (imports only) | baseline | `93a95054` |
+| `12` | `svc_start_session_core.rs` → 5 modules | first apply refused after a cold start (W); after a warming check, 5/5; gate failed | H ×3; X (`pub(super)` → `pub(in crate::connection_service)`); 16 engine-widened methods back to `pub(super)`; N1/N2 | baseline | `f6e9414b` |
+| `13` | the sandboxed claude start's jail helpers → 3 modules | 3/3; gate passed | 10 widened items → `pub(super)`; N1/N2 | baseline | `cb7e387c` |
+| `14` | `spawn_claude_cli_session_inner`, 6 extract-methods | 3 more ops refused (T, `SpawnStackParent<'_>`) and dropped; 6/6; gate failed | K ×3; Q (`ClaudeCliWorktreeCut`, `ManagedClaudeCliLaunch`, `ClaudeCliProcess`, each destructured on the first line so the body is the engine's); ptr_arg ×6; P ×7 | baseline | `7106b8cf` |
+| `15` | `spawn_cursor_cli_session_inner`, 6 extract-methods | 6/6; gate failed | K; Q (`CursorCliSessionRecord`); ptr_arg ×8 | baseline | `3b6227c7` |
+| `16` | `relaunch_sandboxed_runner`, 7 extract-methods | op on a comment line hung the daemon (R); argv op panicked rust-analyzer (U) and was dropped; 7/7; gate failed | K; Q (`RelaunchJailEnv`, `RelaunchedRunnerSpawn`, `RelaunchedJailBridge`, `type RelaunchManagedEnv`); ptr_arg; P ×2 | baseline | `c2ad27cd` |
+| `17` | `claude_cli_spawn.rs`'s new steps → 1 module | 1/1; gate passed | widened items and fields → `pub(super)`; N1/N2 | baseline | `334d0d6f` |
+| `18` | the sandboxed claude handler, 2 extract-methods | argv op panicked rust-analyzer again (U), dropped; 2/2; gate failed | one E0505 (`session_dir` moved while borrowed); Q (`JailRunnerEnv`) | baseline | `c21667c4` |
+| `19` | `start_session_core`'s four branch bodies and its agent-allowlist check | ⛔ **refused, 4 of 4** (E4), nothing written | — | — | — |
+| `20` | `spawn_split_agent`, `ensure_project_available_for_start`, `delete_session_directory` | 4/4; gate passed | Q (`SplitAgentProcess`, `ProjectClone`); P ×6 | baseline | `767d2333` |
+| `21` | the relaunch's new steps → 2 modules | 2/2; gate passed | widened items → `pub(super)`; N1/N2 | baseline | `64912abc` |
+
+"Baseline" means the plan's command gave 61 targets, **622 passed, 22 failed, 1 ignored**, with the
+same 22 by name. The suite was run after `10b`, after `09c`, after the DRY rows, after `11`, after
+`20` and after `21`, so each row's tests are those of the next run at or after its commit.
+The run after `21` had one extra failure, `session_room_acceptance::the_terminal_bridge_publishes_the_block_the_session_was_started_with`:
+Docker could not start the LiveKit testkit container ("failed to bind host port … address already in
+use"). The suite re-run alone passed 21 of 21, so the count matches the baseline. The plan JSONLs are saved as `10b-…` to `21-…` in the plans directory, each as it was
+applied (re-cut ops included, refused ops removed).
+
+### DRY rows
+
+| # | Result | Commit | Net lines |
+|---:|---|---|---:|
+| 1 | ⛔ **not done**, needs coverage: see the consent list | — | — |
+| 2 | ✅ `spawn_tddy_coder(ToolSpawnPlan)`. What differed is `ToolSpawnPurpose` (labels; the start-only debug line) | `d4ef468d` | −111 |
+| 3 | ✅ partly: one `starting_session_metadata` for 7 literals, and `find_registered_project` + `project_repo_root` for 9 lookups. The empty-LiveKit response literals (5 start, 4 resume) are left: they are field lists, not logic. No `CliSpawnRequest` struct: the shared pieces are `service_util` helpers, and the two spawn functions keep their signatures | `4f1d738f`, `1eca6b90` | −141 |
+| 4 | ✅ `cli_start_prelude`, `managed_recipe_for`, and `attached_initial_prompt`, which the split agent shares | `be55575c` | −30 |
+| 5 | ✅ `index_session_worktree` for all five | `682e824c` | −3 |
+| 6 | ✅ `write_initial_changeset` for the four CLI starts (it replaces `09c`'s `write_jail_changeset`). workspace_session keeps its own call: it resolves before the session directory exists | `27e7fb3a` | −49 |
+| 7 | ✅ `create_session_worktree` for four copies. workspace_session differs (own timeout mapping, no log) and is left | `141eb0c6` | −7 |
+| 8 | ✅ `tddy_daemon_kernel::trim_to_option` (already hoisted), 7 sites plus 3 the sweep found | `ea9bc2a3`, `c6f756d0` | −68 |
+| 9 | ✅ `req` for 8 literals (the inventory said 7), plus 2 the sweep found in `svc_activity_ports.rs` | `4b2c2726` | −65 |
+| 10 | ✅ `tddy-worktree-service` gains `into_receiver`; lifecycle's path is a `pub use` | `b6be2b73` | −24 |
+| 11 | ✅ **with a deviation**: the lifecycle function is public, so it stays as a one-line delegate (through the `measured_delta` conversion both callers now share) rather than being deleted, and its test is untouched | `4cd52230` | −13 |
+| 12 | ✅ `tddy_pty::strip_resize`; the runner imports it as `strip_resize_escape`, so its call sites and tests are untouched | `0ce85fe8` | −74 |
+| 13 | ✅ exported from `tddy-sandbox-recipes` | `3616c80c` | 0 |
+
+**Net: +568 / −1,153 = −585 lines across the repo, of which −563 in `tddy-session-lifecycle`.**
+
+Sweep findings, recorded and **not** merged: `tddy-tui`'s `parse_resize_from_buf` is a different
+decoder (anchored at the buffer start, returns the bytes consumed). The resize *encoder* has three
+copies (`tddy-terminal-rpc`, and two in `tddy-sandbox-app`); `tddy-sandbox-app` is not one of the
+consumer-edit exceptions.
+
+**The DRY-target baseline**, taken before the first row at `3a96ca22`: 58 targets, 481 passed,
+12 failed, 1 ignored. The 12 are all of `tddy-worktree-service`'s `remote_git_livekit_acceptance`
+(`tddy-remote-git-repo is not built`, the same cause as lifecycle's `session_sync` six). After the
+rows: the same, plus `a_cached_size_is_served_after_reload_without_recomputing`, which fails 2 of 4
+runs at `3a96ca22` itself. It is a race in the test, not a regression:
+[its TODO](../todo/2026-09-24-worktree-size-reload-test-races-the-persist-it-reads.md). Every crate
+that depends on lifecycle (`tddy-daemon-rpc`, `tddy-daemon`, `tddy-model-registry`,
+`tddy-telegram-control`, `tddy-tool-engine`, `tddy-worktree-service`) passes `check --all-targets`.
+
+### Code-issue records (`3e05735c`)
+
+- **Clean, removed**, final numbers (production lines by the rule below): `connection_service.rs`
+  1,634 → **434**; `session_coordinate_handlers.rs` 818 → **414**; `split_session.rs` 647 → **409**;
+  `svc_spawn_split_agent.rs` 502 → **445**; `svc_start_session_core.rs` 911 → **455**.
+- **Moved and renamed**: `resume_session_at_session_coordinate` (also 242 → 137),
+  `start_split_claude_cli_session` (146, unchanged), `delete_paired_codebase_session` (unchanged).
+- **Narrowed**: `start_session_core` 857 → 358, `start_sandboxed_claude_cli_session` 615 → 342,
+  `spawn_cursor_cli_session_inner` 337 → 244, `spawn_split_agent` 254 → 110,
+  `ensure_project_available_for_start` 158 → 99. All are still over their records' 60-line budget.
+- **Touched, still open**: the sandboxed cursor start's CRAP record (465 → 414, mechanical DRY
+  merges only; still never executed).
+- **Unchanged, untouched**: `handle_rpc` (147), `resume_claude_cli_session` (119).
+
+### Consent list — refusals, and the hand moves not made
+
+Each of these needs the developer's decision. None was worked around.
+
+1. **E4 refuses every range in `start_session_core` that holds an early return** (plan `19`,
+   verbatim, one of four):
+   > 2: this seam cannot be cut here: the range returns early from the function around it, on line
+   > 221 (`return Err(Status {`) and line 284 (`return Err(status);`) and line 306
+   > (`return Err(status);`) and line 309 (`return Ok(started);`) and line 321
+   > (`return Ok(started);`). An extracted function cannot carry an early exit of its caller: the
+   > assist copies the `return` verbatim, so it returns from the new function instead — whose return
+   > type differs, which is `E0308` at best and a silently skipped exit at worst. Cut the range so it
+   > holds no `return`, or end it before the first one.
+
+   What is left of the function (358 lines) is its 19 early exits and the code around them. Nine are
+   `return Err(…)` guards, which *would* extract soundly into a `Result`-returning helper and a `?`.
+   The other ten are the dispatch's own exits (six `return self.start_…().await`, four
+   `return Ok(…)`). The engine cannot tell the two kinds apart. A hand extract of the `Err`-only
+   guards is the option.
+2. **T refuses every range naming `SpawnStackParent<'_>`** (plan `14`, 3 ops, verbatim in the
+   extract TODO). That is why both CLI spawns stop at 255 and 244 lines. An engine fix is the option,
+   or a hand extract.
+3. **U: rust-analyzer panics on the runner-argv ranges** (plans `16` and `18`). They stay inline.
+4. **DRY #1, the shared jail launch.** The Cursor start's CRAP record says "tests first", and its
+   suite, the relaunch path's and the Claude start's are all in the known-red set on this host (the
+   harness never installs the sandbox RPC bridge). So a hand merge would land with nothing exercising
+   it. The Claude steps now sit in `jail_*` modules and the relaunch's in `relaunch_jail_*`, ready
+   for it. It needs either the harness fixed or characterisation tests first.
+   `start_sandboxed_cursor_cli_session` (414) and the Claude handler (342) stay over 150 until then.
+5. **Re-parenting**: every module plan `11` created, and `cli_spawn/{claude,cursor}.rs`, need a
+   `git mv` to their topic's parent. The engine cannot move code under a different parent.
+   `ManagedWorkflow` (`session_toolcall.rs`) is the same case.
+6. **Folding** plan `01`'s topic files into existing siblings: refused by the name-collision check,
+   so it is a hand move.
+7. **Not done, not refused**: `session_entry_from_listing` (the State B row); the ≤ 400 target for
+   the 14 files that end between 400 and 493 production lines; `run_exec_tool_locally` is moved, but
+   its exec-tool siblings in `svc_resolve_os_user.rs` are not contiguous with it.
+8. **Deleting the 2026-08-13 trim-to-option backlog entry**, which DRY #8 resolved. The Final
+   Checklist deletes it at wrap; CLAUDE.md asks before deleting files, so it stays until then.
+
+## LoC assessment
+
+`origin/master` merge-base (`e72a0e97`) against `64912abc`, for `packages/tddy-session-lifecycle`.
+
+| Measure | Before | After |
+|---|---:|---:|
+| Files (whole package, including tests and docs) | 175 | 220 |
+| Lines (whole package) | 55,142 | 56,403 |
+| Non-test `src/*.rs` files | 72 | 122 |
+| Their production lines | 20,899 | 22,387 |
+| Files ≥ 500 production lines | 11 | **0** |
+| Files ≥ 1,000 production lines | 2 | **0** |
+| Production functions over 150 lines | 10 | 5 |
+
+**Production lines went up by 1,488.** The DRY rows removed 563. The moves added more:
+
+- `use` lines +286, because each new module file imports what it names;
+- blank lines +365;
+- `mod` declarations +50;
+- code +755. Every extract-method writes a signature, a call and a return, every module wraps its
+  methods in its own `impl` block, and 13 parameter structs were added (12 by Q fixes, plus
+  `ToolSpawnPlan` for DRY #2).
+
+Per commit, the engine applies since the merge-base added ≈ +2,050 `src` lines and the DRY rows
+−563. The restructure trades lines for size: no file is over 500, and no function over 150 except
+the five on the consent list.
+
+**The 15 largest files, before → after** (same path; the rest of a split file lives in its new
+modules):
+
+| File | Before | After |
+|---|---:|---:|
+| `connection_service.rs` | 1,601 | 434 |
+| `cli_session_manager.rs` | 1,371 | 173 |
+| `connection_service/svc_start_session_core.rs` | 911 | 455 |
+| `connection_service/session_coordinate_handlers.rs` | 818 | 414 |
+| `split_session.rs` | 674 | 409 |
+| `connection_service/svc_start_sandboxed_claude_cli_session.rs` | 661 | 493 |
+| `connection_service/svc_session_agent_ports.rs` | 644 | 113 |
+| `cursor_cli_spawn.rs` | 524 | 445 |
+| `connection_service/svc_spawn_split_agent.rs` | 505 | 445 |
+| `connection_service/svc_start_sandboxed_cursor_cli_session.rs` | 505 | 445 |
+| `connection_service/svc_session_files_ports.rs` | 503 | 200 |
+| `connection_service/svc_resolve_tddy_tools_path.rs` | 498 | 51 |
+| `connection_service/svc_split_context_from_codebase_host.rs` | 471 | 471 |
+| `session_deletion.rs` | 450 | 459 |
+| `connection_service/svc_resolve_listed_worktree.rs` | 444 | 443 |
+
+After, the largest is `svc_start_sandboxed_claude_cli_session.rs` at 493.
+
+**The 10 longest functions, before → after:**
+
+| Function | Before | After |
+|---|---:|---:|
+| `start_session_core` | 857 | 358 |
+| `start_sandboxed_claude_cli_session` | 615 | 342 |
+| `start_sandboxed_cursor_cli_session` | 465 | 414 |
+| `spawn_claude_cli_session_inner` | 407 | 255 |
+| `spawn_cursor_cli_session_inner` | 337 | 244 |
+| `relaunch_sandboxed_runner` | 282 | 149 |
+| `spawn_split_agent` | 254 | 110 |
+| `resume_session_at_session_coordinate` | 242 | 137 |
+| `delete_session_directory` | 168 | 98 |
+| `ensure_project_available_for_start` | 158 | 99 |
+
+**The rule, and how to re-run it.** Production lines are the lines outside every `#[cfg(test)]`
+item (a `mod`, a `use`, an inline test block), with test-only files (`#[cfg(test)] mod x;`,
+`*_tests.rs`, `tests.rs`, `test_util.rs`) excluded. This is the inline-test-block rule. The naive
+count to the first `#[cfg(test)]` is shown too, because `connection_service.rs` reads 18 by it.
+Function length runs from the `fn` line to its closing brace, and braces in strings, chars and
+comments are skipped. No script for this exists in `scripts/`, so it is inline:
+
+```bash
+git archive e72a0e97 packages/tddy-session-lifecycle | tar -x -C /tmp/before
+python3 loc.py /tmp/before/packages/tddy-session-lifecycle      # before
+python3 loc.py packages/tddy-session-lifecycle                   # after
+```
+
+<details><summary><code>loc.py</code></summary>
+
+```python
+import os, re, sys
+# Usage: python3 loc.py DIR  — DIR is packages/tddy-session-lifecycle of some tree.
+# Rust production lines = lines before a file's first `#[cfg(test)]` line (the plan's rule).
+FN = re.compile(r'^\s*(pub(\([^)]*\))?\s+)?(const\s+)?(async\s+)?(unsafe\s+)?fn\s+(\w+)')
+def code_of(line, st):
+    out = []; i = 0
+    while i < len(line):
+        if st == "block":
+            if line.startswith("*/", i): st = None; i += 2
+            else: i += 1
+            continue
+        if st == "str":
+            if line[i] == "\\": i += 2; continue
+            if line[i] == '"': st = None
+            i += 1; continue
+        if isinstance(st, str) and st.startswith("raw"):
+            end = line.find('"' + st[3:], i)
+            if end < 0: return "".join(out), st
+            i = end + 1 + len(st) - 3; st = None; continue
+        if line.startswith("//", i): break
+        if line.startswith("/*", i): st = "block"; i += 2; continue
+        m = re.match(r'b?r(#*)"', line[i:])
+        if m and (i == 0 or not (line[i-1].isalnum() or line[i-1] == "_")):
+            st = "raw" + m.group(1); i += len(m.group(0)); continue
+        if line[i] == '"': st = "str"; i += 1; continue
+        m = re.match(r"b?'(\\.|\\u\{[0-9a-fA-F]+\}|[^\\'])'", line[i:])
+        if m: i += len(m.group(0)); continue
+        out.append(line[i]); i += 1
+    return "".join(out), st
+def fns(lines, stop):
+    res = []
+    for i in range(stop):
+        m = FN.match(lines[i])
+        if not m: continue
+        depth = 0; opened = False; st = None; j = i; done = False
+        while j < len(lines) and not done:
+            code, st = code_of(lines[j], st)
+            for c in code:
+                if c == "{": depth += 1; opened = True
+                elif c == "}":
+                    depth -= 1
+                    if opened and depth == 0: done = True; break
+                elif c == ";" and not opened: done = True; break
+            if not done: j += 1
+        res.append((j - i + 1, m.group(6), i + 1))
+    return res
+def item_end(lines, i):
+    """Last line of the item starting at or after line i (skipping attributes and doc comments)."""
+    j = i
+    while j < len(lines) and (lines[j].strip().startswith("#[") or lines[j].strip().startswith("///") or not lines[j].strip()):
+        j += 1
+    depth = 0; opened = False; st = None
+    while j < len(lines):
+        code, st = code_of(lines[j], st)
+        for c in code:
+            if c == "{": depth += 1; opened = True
+            elif c == "}":
+                depth -= 1
+                if opened and depth == 0: return j
+            elif c == ";" and not opened and depth == 0: return j
+        j += 1
+    return len(lines) - 1
+def test_mask(lines):
+    mask = [False] * len(lines); test_mods = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip().startswith("#[cfg(test)]"):
+            end = item_end(lines, i + 1)
+            for k in range(i, end + 1): mask[k] = True
+            for k in range(i + 1, end + 1):
+                m = re.match(r"^\s*(pub(\([^)]*\))?\s+)?mod\s+(\w+)\s*;", lines[k])
+                if m: test_mods.append(m.group(3))
+            i = end + 1
+        else: i += 1
+    return mask, test_mods
+root = sys.argv[1]
+texts = {}
+for d, _, fs in os.walk(root):
+    for f in fs:
+        p = os.path.join(d, f)
+        try: lines = open(p).read().split("\n")
+        except UnicodeDecodeError: continue
+        if lines and lines[-1] == "": lines = lines[:-1]
+        texts[os.path.relpath(p, root)] = lines
+testfiles = set()
+for rel, lines in texts.items():
+    if not (rel.startswith("src/") and rel.endswith(".rs")): continue
+    _, mods = test_mask(lines)
+    base = os.path.dirname(rel) if os.path.basename(rel) in ("lib.rs", "mod.rs") else rel[:-3]
+    for m in mods:
+        testfiles.add(os.path.join(base, m + ".rs")); testfiles.add(os.path.join(base, m, "mod.rs"))
+src = []; allfns = []
+for rel, lines in texts.items():
+    if not (rel.startswith("src/") and rel.endswith(".rs")): continue
+    name = os.path.basename(rel)
+    if rel in testfiles or name.endswith("_tests.rs") or name in ("tests.rs", "test_util.rs"): continue
+    mask, _ = test_mask(lines)
+    naive = next((k for k, l in enumerate(lines) if l.strip().startswith("#[cfg(test)]")), len(lines))
+    prod = sum(1 for k in range(len(lines)) if not mask[k])
+    src.append((rel, len(lines), prod, naive))
+    for n, fname, ln in fns([("" if mask[k] else l) for k, l in enumerate(lines)], len(lines)):
+        allfns.append((n, fname, rel, ln))
+tot_lines = sum(len(l) for l in texts.values())
+print(f"files (whole package): {len(texts)}   lines (whole package): {tot_lines}")
+print(f"src non-test .rs files: {len(src)}   their lines: {sum(f[1] for f in src)}   production lines: {sum(f[2] for f in src)}   (naive, to first #[cfg(test)]: {sum(f[3] for f in src)})")
+print(f"test-only src files excluded: {sum(1 for r in texts if r.startswith('src/') and r.endswith('.rs')) - len(src)}")
+print(f"src files >= 500 production lines: {sum(1 for f in src if f[2] >= 500)}   >= 1000: {sum(1 for f in src if f[2] >= 1000)}")
+print("largest 15 src files by production lines (naive count in brackets where it differs):")
+for rel, n, p, nv in sorted(src, key=lambda f: -f[2])[:15]:
+    print(f"  {p:6d}  {rel}" + (f"  [{nv}]" if nv != p else ""))
+print("longest 10 production fns (fn line to closing brace):")
+for n, fname, rel, ln in sorted(allfns, key=lambda t: -t[0])[:10]: print(f"  {n:6d}  {fname}  {rel}:{ln}")
+print(f"production fns over 150 lines: {sum(1 for t in allfns if t[0] > 150)}")
+```
+
+</details>
 
 ## Decisions & trade-offs
 
@@ -523,7 +811,7 @@ pushed. The module's name now says what the banner said, so it was left as is.
 - [x] Restructure plans proven with `check --deep`: 8 of 14 clean, 3 engine defects
 - [ ] USER REVIEW — layout and DRY inventory
 - [x] Baseline (characterisation tests only where a seam needs one)
-- [ ] Implementation: plans `03`, `10a`, `04`, `08`, `06`, `07`, `02`, `09b`, `05` and `01` applied (`05`'s refusal fixed in the engine, `51211cd8`)
+- [ ] Implementation: plans `03`, `10a`, `04`, `08`, `06`, `07`, `02`, `09b`, `05`, `01`, `10b`, `09c`, `11`–`18`, `20` and `21` applied; DRY #2–#13 done; the consent list is open
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`)
@@ -532,10 +820,10 @@ pushed. The module's name now says what the banner said, so it was left as is.
 
 Executed at wrap:
 
-- [ ] Every non-test `src/` file in lifecycle < 500 production lines (inline-test-block rule)
+- [x] Every non-test `src/` file in lifecycle < 500 production lines (inline-test-block rule): largest 493
 - [ ] No function in lifecycle > 150 lines
 - [ ] Every DRY inventory row has one definition left; the per-seam sweep's additions are recorded
-- [ ] All 16 code-issue records deleted or narrowed, with final measurements in the change-history entry
+- [ ] All 16 code-issue records deleted or narrowed, with final measurements in the change-history entry. ✅ done (`3e05735c`); the change-history entry is written at wrap
 - [ ] The ✅ RESOLVED HERE backlog entry (2026-08-13 trim-to-option) deleted
 - [ ] Public `tddy_session_lifecycle::…` surface unchanged; consumer edits limited to the listed exceptions
-- [ ] Baseline numbers matched
+- [x] Baseline numbers matched: 61 / 622 / 22 / 1 after every milestone, the same 22

@@ -285,6 +285,61 @@ possible. One is to carry the parent's glob-visible bindings the child files use
 The other is to include out-of-line children of moved `mod x;` declarations in the unresolved-name
 scan. Also open: whether cfg(test)-only code is tokenised at all.
 
+### W — an apply right after a daemon start skips its warm-up and is refused with a wrong diagnosis
+
+#524, plan `12`, the first `apply` after `./run-index-daemon --stop` and a restart. The run logged
+
+```text
+   indexing (+0ms): warming crate index (until ready, or until you stop waiting)
+   indexing (+0ms): no indexable symbols in file; skipping warm-up
+```
+
+`svc_start_session_core.rs` holds 1,105 lines of symbols, so the check that decided to skip is wrong
+about the file. The assist then answered against a server that had loaded nothing, and the run was
+refused before anything was written:
+
+```text
+rust-analyzer's answer was unusable: rust-analyzer left `modname` behind in 1 place(s) its rename could
+not reach, so the extraction would report success over source that resolves nowhere — line(s) 478.
+That call sits inside an `impl`, and the module was written outside it, so no ordering of this plan
+makes the path resolve — an `impl` body cannot hold a `mod`. Either grow the seam to carry the whole
+`impl`, or cut it where nothing crosses.
+```
+
+The advice is about the plan, and the plan was fine. A `check --deep` of the same plan, which warms
+the index, followed by the same `apply`, moved 5 of 5. The warm-up should not be skipped on a server
+that has loaded no crate, whatever the file's symbol count reads as.
+
+### X — a moved `pub(super)` keeps its spelling one module deeper, which narrows it
+
+#524, plan `12`. The engine widens a moved **private** item to `pub(crate)` (and logs it), but moves a
+`pub(super)` item as written. One level deeper, `pub(super)` names a different module:
+
+```rust
+// before: connection_service/svc_start_session_core.rs, reachable from all of connection_service
+pub(super) struct ToolSpawnPlan { pub(super) purpose: ToolSpawnPurpose, … }
+    pub(super) async fn spawn_tddy_coder(&self, plan: ToolSpawnPlan) -> …
+
+// after: connection_service/svc_start_session_core/tool_spawn_plan.rs, now reachable only from
+// svc_start_session_core
+pub(super) struct ToolSpawnPlan { pub(super) purpose: ToolSpawnPurpose, … }
+```
+
+```text
+svc_resume_session.rs:5:57: error[E0603]: struct import `ToolSpawnPlan` is private: private struct import
+svc_spawn_split_agent.rs:61:14: error[E0624]: method `attached_initial_prompt` is private: private method
+svc_resume_session.rs:132:14: error[E0624]: method `spawn_tddy_coder` is private: private method
+```
+
+By hand (#524): `pub(in crate::connection_service)`, which is what `pub(super)` meant where the item
+was. The engine should rewrite a relative visibility the way H needs relative paths rewritten.
+
+**The widening itself is a second gap.** A private item widened to `pub(crate)` also exceeds a
+private type in its signature (`CliStart`, `JailSession`, `JailDirs`, …), which is
+`private_interfaces` under `-D warnings`. In every #524 apply the reach the item needed was
+`pub(super)` (the parent and its children, which is where private reached). The hand fix was
+`pub(super)` each time, in plans `12`, `13`, `17` and `21`.
+
 ## Design candidates, undecided
 
 - **Compiler-guided import repair.** After the gate fails, take rustc's own "not found in this scope"
