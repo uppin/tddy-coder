@@ -175,6 +175,15 @@ impl LspClient {
         self.notifications.drain()
     }
 
+    /// The last `experimental/serverStatus` the server sent, verbatim, if it has sent one.
+    ///
+    /// Not consumed by [`Self::drain_notifications`] and not lost to a backlog that overflowed: the
+    /// status is sent only on a transition, so a consumer arriving at a server that is already warm
+    /// has no other way to learn its health.
+    pub fn server_status(&self) -> Option<Value> {
+        self.notifications.latest_status()
+    }
+
     /// Watch this server's notifications without consuming them.
     ///
     /// Any number of subscribers may attach alongside each other and alongside

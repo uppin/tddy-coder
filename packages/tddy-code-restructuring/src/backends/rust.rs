@@ -733,7 +733,7 @@ impl RustBackend {
             // The self-spawned transport folds progress in as it reads the stream; a bridged one
             // never sees the stream, so it collects what arrived and folds it in here. Without
             // this the whole load is silent and a timeout cannot say where the server got to.
-            for notification in bridge.drain_notifications() {
+            for notification in bridge.notifications_to_fold() {
                 if let Some(line) = self.chatter.absorb(&notification) {
                     (self.progress)(&line);
                 }

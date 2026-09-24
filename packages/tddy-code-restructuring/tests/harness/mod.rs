@@ -237,6 +237,10 @@ pub enum ServerState {
     JustStarted,
     /// Handed over once the server has said it is quiescent, as `tddy-index-daemon` does.
     Settled,
+    /// Handed over settled, after an earlier run on the same server has already drained
+    /// everything it said — the daemon's second request against a warm root. The status
+    /// transitions that run read are not sent again.
+    ServedBefore,
 }
 
 /// Resolve one operation against a live rust-analyzer and apply what it produced.
@@ -286,8 +290,11 @@ async fn resolving_against(
     let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
     let root = fixture.path().to_path_buf();
     let client = a_rust_analyzer_rooted_at(&root).await;
-    if state == ServerState::Settled {
+    if state != ServerState::JustStarted {
         until_quiescent(&client).await;
+    }
+    if state == ServerState::ServedBefore {
+        client.drain_notifications();
     }
 
     let cancel = a_token_cancelled_after(A_WAIT_A_TEST_CAN_OUTLAST);
@@ -595,6 +602,14 @@ pub async fn refusal_once_settled_from(fixture: &AFixtureWorkspace, op: Refactor
     refusal_against(fixture, op, ServerState::Settled).await
 }
 
+/// [`refusal_from`], against a warm server an earlier run has already read everything from.
+pub async fn refusal_from_a_server_served_before(
+    fixture: &AFixtureWorkspace,
+    op: RefactorOp,
+) -> String {
+    refusal_against(fixture, op, ServerState::ServedBefore).await
+}
+
 async fn refusal_against(
     fixture: &AFixtureWorkspace,
     op: RefactorOp,
@@ -888,6 +903,41 @@ pub fn a_crate_whose_request_type_a_slow_build_script_generates() -> AFixtureWor
                 "    let session = req.session_id * 2;",
                 "    let resumed = session + req.session_id;",
                 "    resumed",
+                "}",
+            ]),
+        )
+}
+
+/// A crate whose build script fails, so rust-analyzer loads it without what the script generates.
+///
+/// The shape behind E2 on the real repository, reduced: a code generator that fails inside
+/// rust-analyzer's environment. The server still finishes loading and says `quiescent: true`, and
+/// reports the failure only through its health.
+///
+/// Lines 4–5 are statements an extract-method could take; nothing in them needs the build script,
+/// so an operation here would otherwise succeed.
+pub fn a_crate_whose_build_script_fails() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            "crates/origin/build.rs",
+            &source(&[
+                "//! A code generator that cannot run here.",
+                "",
+                "fn main() {",
+                "    panic!(\"protoc is not on PATH\");",
+                "}",
+            ]),
+        )
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A crate whose build script fails.",
+                "",
+                "pub fn doubled(level: u32) -> u32 {",
+                "    let twice = level * 2;",
+                "    let settled = twice + 1;",
+                "    settled",
                 "}",
             ]),
         )

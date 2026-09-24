@@ -38,9 +38,19 @@ pub struct ServerChatter {
     ///
     /// What turns a `false` in `quiescent` from "has not said" into "has said it is still
     /// loading". Only the second is a reason to wait: a server that never sends the extension must
-    /// still be usable, and one whose transition went to another reader of the same client has
-    /// nothing left to say.
+    /// still be usable. A shared client keeps the server's latest status for every reader
+    /// (`tddy_lsp`'s `LspClient::server_status`), so a transition another reader drained still
+    /// arrives here through the bridge.
     reported_status: bool,
+    /// What rust-analyzer last said about its own health (`ok`, `warning` or `error`), and the
+    /// message it gave for it, from the most recent `experimental/serverStatus`.
+    ///
+    /// Recorded because a quiescent server is not a trustworthy one. rust-analyzer finishes loading
+    /// — and says `quiescent: true` — even when a build script failed, and from then on it answers
+    /// every request as though the code that build script should have generated did not exist. An
+    /// extraction then writes `req: _`, and an import pass finds nothing to restore, with nothing in
+    /// either answer to say why. The health is the one place the server says so.
+    health: Option<(String, Option<String>)>,
     /// The furthest percentage any phase reported, and the phase it belonged to.
     ///
     /// Kept apart from `last` because the two answer different questions and the server routinely
@@ -60,10 +70,15 @@ impl ServerChatter {
         match message.get("method").and_then(Value::as_str)? {
             "$/progress" => self.progress(message.get("params")?),
             "experimental/serverStatus" => {
-                self.quiescent = message
-                    .get("params")?
-                    .get("quiescent")
-                    .and_then(Value::as_bool)?;
+                let params = message.get("params")?;
+                if let Some(health) = params.get("health").and_then(Value::as_str) {
+                    let said = params
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    self.health = Some((health.to_string(), said));
+                }
+                self.quiescent = params.get("quiescent").and_then(Value::as_bool)?;
                 self.reported_status = true;
                 None
             }
@@ -162,6 +177,42 @@ impl ServerChatter {
         self.reported_status && !self.quiescent
     }
 
+    /// Why the index cannot be trusted, when rust-analyzer last reported its health as anything
+    /// but `ok` — quoting the message it gave, which is the only account of the cause there is.
+    ///
+    /// **`warning` counts, not only `error`.** A failed build script comes through as `warning`
+    /// ("Failed to run build scripts of some packages"), and that is exactly the state in which an
+    /// extraction writes `_` for a type generated into `OUT_DIR` and the import pass has nothing to
+    /// act on. rust-analyzer's other warnings — a manifest change it has not reloaded, build
+    /// scripts or proc macros that changed and need rebuilding, a configuration it could not read,
+    /// no workspace discovered — each also mean the graph it answers from is not the tree on disk.
+    /// A run that went ahead would report success over answers nobody could vouch for, which is the
+    /// implicit failure this exists to make explicit.
+    ///
+    /// `None` for a server that has not reported its health: silence is not a degraded index, and
+    /// the extension is optional.
+    pub fn degraded(&self) -> Option<String> {
+        let (health, said) = self.health.as_ref()?;
+        if health == "ok" {
+            return None;
+        }
+        let quoted = match said
+            .as_deref()
+            .map(|message| message.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|message| !message.is_empty())
+        {
+            Some(message) => format!(": \"{message}\""),
+            None => " and gives no reason.".to_string(),
+        };
+        Some(format!(
+            "rust-analyzer reports its index as degraded (health `{health}`){quoted} An index in \
+             that state answers without the code it could not load — a type a failed build script \
+             should have generated does not exist for it — so no result it gives here can be \
+             trusted. Fix what it names (a `cargo check` of the workspace shows the underlying \
+             error) and run again."
+        ))
+    }
+
     /// The furthest percentage any phase has reported, and the phase it belonged to.
     ///
     /// Kept apart from the last line for the reason the field states: the server counts files
@@ -207,6 +258,98 @@ mod tests {
             "method": "experimental/serverStatus",
             "params": { "health": "ok", "quiescent": quiescent }
         })
+    }
+
+    /// A status carrying rust-analyzer's own health and the message it gives for it.
+    fn a_status_reporting(health: &str, message: Option<&str>) -> Value {
+        json!({
+            "jsonrpc": "2.0",
+            "method": "experimental/serverStatus",
+            "params": { "health": health, "quiescent": true, "message": message }
+        })
+    }
+
+    const BUILD_SCRIPTS_FAILED: &str =
+        "Failed to run build scripts of some packages.\n\nPlease refer to the logs for more details on the errors.";
+
+    #[test]
+    fn finds_nothing_degraded_in_a_server_that_reports_itself_healthy() {
+        // Given
+        let mut chatter = ServerChatter::default();
+
+        // When
+        chatter.absorb(&a_status_reporting("ok", None));
+
+        // Then
+        assert_eq!(chatter.degraded(), None);
+    }
+
+    #[test]
+    fn finds_nothing_degraded_in_a_server_that_has_not_reported_its_health() {
+        // Given
+        let chatter = ServerChatter::default();
+
+        // When
+        let degraded = chatter.degraded();
+
+        // Then
+        assert_eq!(degraded, None);
+    }
+
+    #[test]
+    fn reads_a_warning_as_a_degraded_index_quoting_what_the_server_said() {
+        // Given
+        let mut chatter = ServerChatter::default();
+
+        // When
+        chatter.absorb(&a_status_reporting("warning", Some(BUILD_SCRIPTS_FAILED)));
+
+        // Then
+        assert_eq!(
+            chatter.degraded().as_deref(),
+            Some(
+                "rust-analyzer reports its index as degraded (health `warning`): \"Failed to run \
+                 build scripts of some packages. Please refer to the logs for more details on the \
+                 errors.\" An index in that state answers without the code it could not load — a \
+                 type a failed build script should have generated does not exist for it — so no \
+                 result it gives here can be trusted. Fix what it names (a `cargo check` of the \
+                 workspace shows the underlying error) and run again."
+            )
+        );
+    }
+
+    #[test]
+    fn reads_an_error_as_a_degraded_index_even_when_the_server_gives_no_reason() {
+        // Given
+        let mut chatter = ServerChatter::default();
+
+        // When
+        chatter.absorb(&a_status_reporting("error", None));
+
+        // Then
+        assert_eq!(
+            chatter.degraded().as_deref(),
+            Some(
+                "rust-analyzer reports its index as degraded (health `error`) and gives no reason. \
+                 An index in that state answers without the code it could not load — a type a \
+                 failed build script should have generated does not exist for it — so no result it \
+                 gives here can be trusted. Fix what it names (a `cargo check` of the workspace \
+                 shows the underlying error) and run again."
+            )
+        );
+    }
+
+    #[test]
+    fn keeps_only_the_latest_health_a_server_reported() {
+        // Given
+        let mut chatter = ServerChatter::default();
+        chatter.absorb(&a_status_reporting("warning", Some(BUILD_SCRIPTS_FAILED)));
+
+        // When
+        chatter.absorb(&a_status_reporting("ok", None));
+
+        // Then
+        assert_eq!(chatter.degraded(), None);
     }
 
     #[test]

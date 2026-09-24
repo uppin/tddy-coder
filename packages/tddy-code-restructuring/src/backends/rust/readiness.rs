@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use serde_json::{json, Value};
 
-use super::{first_symbol_position, RustBackend, INDEXING_POLL};
+use super::{first_symbol_position, server_defect, RustBackend, INDEXING_POLL};
 use crate::Result;
 
 impl RustBackend {
@@ -28,7 +28,7 @@ impl RustBackend {
     /// wait doing the waiting instead.
     pub(super) fn ensure_indexed(&mut self, uri: &str) -> Result<()> {
         if self.indexed {
-            return Ok(());
+            return self.refuse_degraded_index();
         }
         (self.progress)("warming crate index (until ready, or until you stop waiting)");
         let symbols = self.request_settled(
@@ -50,7 +50,7 @@ impl RustBackend {
             if (!hover.is_null() || self.chatter.quiescent()) && !self.chatter.loading() {
                 self.indexed = true;
                 (self.progress)("crate index ready");
-                return Ok(());
+                return self.refuse_degraded_index();
             }
             if !self.keep_waiting(INDEXING_POLL) {
                 return Err(self.incomplete_index(started.elapsed()));
@@ -75,11 +75,27 @@ impl RustBackend {
 
             if !hover.is_null() && !self.chatter.loading() {
                 self.indexed = true;
-                return Ok(());
+                return self.refuse_degraded_index();
             }
             if !self.keep_waiting(INDEXING_POLL) {
                 return Err(self.incomplete_index(started.elapsed()));
             }
+        }
+    }
+
+    /// Refuse to go on once ready, when rust-analyzer has said its index is degraded.
+    ///
+    /// Ready is not trustworthy: a server whose build scripts failed still finishes loading, and
+    /// then answers as though what they generate did not exist — which is how an extraction came
+    /// to write `req: _` against an index everyone called warm. Checked at every point readiness is
+    /// declared, so it holds for the first wait of a run and for each later one, on a server this
+    /// backend started and on a warm one it was handed: the bridge folds in the server's latest
+    /// status even when another consumer drained the transition. The reasoning for refusing on
+    /// `warning` as well as `error` is at [`super::ServerChatter::degraded`].
+    fn refuse_degraded_index(&self) -> Result<()> {
+        match self.chatter.degraded() {
+            Some(reason) => Err(server_defect(reason)),
+            None => Ok(()),
         }
     }
 }
