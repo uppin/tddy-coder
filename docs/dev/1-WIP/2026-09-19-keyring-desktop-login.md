@@ -506,10 +506,14 @@ package, and the single web spec. Whole-workspace green comes from CI.
 `origin/master`), production lines counted to the first `#[cfg(test)]`. 94 non-test, non-generated
 source files changed; 25 are at or over 500.
 
-**⏸ Awaiting the developer's decision** — decompose now or defer (with consent, recorded here and in
-`docs/dev/todo/`) — for every file this PR grew. No file is split in this PR yet. `auth.rs` and
-`config.rs` are ruled out of a split by `## Boundaries`; four more are touched by open dependents,
-which the stack rule defers regardless.
+**Deferred, all thirteen, with the developer's consent** — the developer chose **"defer all,
+record"** (2026-09-24). No file is decomposed in this PR. Reasons: `auth.rs`, `runtime.rs`, `run.rs`
+and `config.rs` are touched by open dependents #510–#513, and `## Boundaries` rules out splitting
+`auth.rs` and `config.rs` in this stack; the other nine grew +1..+5 only from transport stamping. The
+follow-up runs after the `#keyring` stack lands, recorded in
+[2026-09-24-keyring-desktop-login-grew-thirteen-over-budget-files.md](../todo/2026-09-24-keyring-desktop-login-grew-thirteen-over-budget-files.md),
+which also records the gate's `cfg(any(feature, test))` undercount as a separate finding
+(`.agents/commands/pr-wrap.md` unchanged, by instruction).
 
 ### 🔴 Grown by this PR
 
