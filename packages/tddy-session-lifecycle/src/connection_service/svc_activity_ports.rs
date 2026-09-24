@@ -341,12 +341,7 @@ impl ActivityService for PeerRoutedActivity {
                 .forwarded::<_, tddy_service::proto::activity::GetAcpToolCallDetailResponse>(
                     "GetAcpToolCallDetail",
                     &peer,
-                    &tddy_service::proto::activity::GetAcpToolCallDetailRequest {
-                        session_token: req.session_token.clone(),
-                        session_id: req.session_id.clone(),
-                        daemon_instance_id: req.daemon_instance_id.clone(),
-                        tool_call_id: req.tool_call_id.clone(),
-                    },
+                    req,
                 )
                 .await?;
             return Ok(Response::new(GetAcpToolCallDetailResponse {
@@ -368,13 +363,7 @@ impl ActivityService for PeerRoutedActivity {
                 .forwarded::<_, tddy_service::proto::activity::GetAcpReplayPageResponse>(
                     "GetAcpReplayPage",
                     &peer,
-                    &tddy_service::proto::activity::GetAcpReplayPageRequest {
-                        session_token: req.session_token.clone(),
-                        session_id: req.session_id.clone(),
-                        daemon_instance_id: req.daemon_instance_id.clone(),
-                        before_seq: req.before_seq,
-                        page_size: req.page_size,
-                    },
+                    req,
                 )
                 .await?;
             return Ok(Response::new(GetAcpReplayPageResponse {

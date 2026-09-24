@@ -99,16 +99,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         self.record_activity();
         let req = request.get_ref();
         if let Some(roster) = self
-            .roster_from_peer(
-                "AttachSessionAgent",
-                &req.daemon_instance_id,
-                &tddy_service::proto::session_agents_svc::AttachSessionAgentRequest {
-                    session_token: req.session_token.clone(),
-                    session_id: req.session_id.clone(),
-                    daemon_instance_id: req.daemon_instance_id.clone(),
-                    agent_id: req.agent_id.clone(),
-                },
-            )
+            .roster_from_peer("AttachSessionAgent", &req.daemon_instance_id, req)
             .await?
         {
             return Ok(Response::new(roster));
@@ -125,16 +116,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         self.record_activity();
         let req = request.get_ref();
         if let Some(roster) = self
-            .roster_from_peer(
-                "DetachSessionAgent",
-                &req.daemon_instance_id,
-                &tddy_service::proto::session_agents_svc::DetachSessionAgentRequest {
-                    session_token: req.session_token.clone(),
-                    session_id: req.session_id.clone(),
-                    daemon_instance_id: req.daemon_instance_id.clone(),
-                    agent_id: req.agent_id.clone(),
-                },
-            )
+            .roster_from_peer("DetachSessionAgent", &req.daemon_instance_id, req)
             .await?
         {
             return Ok(Response::new(roster));
@@ -151,15 +133,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         self.record_activity();
         let req = request.get_ref();
         if let Some(roster) = self
-            .roster_from_peer(
-                "ListSessionAgents",
-                &req.daemon_instance_id,
-                &tddy_service::proto::session_agents_svc::ListSessionAgentsRequest {
-                    session_token: req.session_token.clone(),
-                    session_id: req.session_id.clone(),
-                    daemon_instance_id: req.daemon_instance_id.clone(),
-                },
-            )
+            .roster_from_peer("ListSessionAgents", &req.daemon_instance_id, req)
             .await?
         {
             return Ok(Response::new(roster));
@@ -183,11 +157,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
                 SESSION_AGENT_SERVICE,
                 "StreamSessionAgents",
                 &req.daemon_instance_id,
-                &tddy_service::proto::session_agents_svc::StreamSessionAgentsRequest {
-                    session_token: req.session_token.clone(),
-                    session_id: req.session_id.clone(),
-                    daemon_instance_id: req.daemon_instance_id.clone(),
-                },
+                req,
             )
             .await?
         {
@@ -211,13 +181,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
                 SESSION_AGENT_SERVICE,
                 "OpenAgentConversation",
                 &req.daemon_instance_id,
-                &tddy_service::proto::session_agents_svc::OpenAgentConversationRequest {
-                    session_token: req.session_token.clone(),
-                    session_id: req.session_id.clone(),
-                    daemon_instance_id: req.daemon_instance_id.clone(),
-                    agent_id: req.agent_id.clone(),
-                    conversation_id: req.conversation_id.clone(),
-                },
+                req,
             )
             .await?
         {
@@ -245,13 +209,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
                 SESSION_AGENT_SERVICE,
                 "PromptAgentConversation",
                 &req.daemon_instance_id,
-                &tddy_service::proto::session_agents_svc::PromptAgentConversationRequest {
-                    session_token: req.session_token.clone(),
-                    session_id: req.session_id.clone(),
-                    daemon_instance_id: req.daemon_instance_id.clone(),
-                    conversation_id: req.conversation_id.clone(),
-                    prompt: req.prompt.clone(),
-                },
+                req,
             )
             .await?
         {
@@ -274,12 +232,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
                 SESSION_AGENT_SERVICE,
                 "CancelAgentConversation",
                 &req.daemon_instance_id,
-                &tddy_service::proto::session_agents_svc::CancelAgentConversationRequest {
-                    session_token: req.session_token.clone(),
-                    session_id: req.session_id.clone(),
-                    daemon_instance_id: req.daemon_instance_id.clone(),
-                    conversation_id: req.conversation_id.clone(),
-                },
+                req,
             )
             .await?
             .is_some()
@@ -313,14 +266,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
                 SESSION_AGENT_SERVICE,
                 "ReportAgentConversationState",
                 &req.daemon_instance_id,
-                &tddy_service::proto::session_agents_svc::ReportAgentConversationStateRequest {
-                    session_token: req.session_token.clone(),
-                    session_id: req.session_id.clone(),
-                    daemon_instance_id: req.daemon_instance_id.clone(),
-                    agent_id: req.agent_id.clone(),
-                    status: req.status,
-                    summary: req.summary.clone(),
-                },
+                req,
             )
             .await?
             .is_some()
