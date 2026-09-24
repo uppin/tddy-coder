@@ -138,8 +138,22 @@ status) arrive later, with only a session token. For each user it answers `Vault
   login left pending** for the vault (`NoFreshLogin` otherwise) — only a login proves possession of
   the GitHub account — and a reset is refused while the vault is open (`AlreadyOpen`: nothing was
   forgotten). A pending record is consumed by the create or reset that seals it, so each reset needs
-  its own sign-in. ⚠ The gate is the pending record, not its age: a caller holding a copied access
-  token for a user who signed in to a closed vault and has not unlocked it yet can still reset it.
+  its own sign-in.
+- **A pending sign-in expires.** Each pending record carries the time its sign-in arrived, and
+  after `with_pending_lifetime` (default `PENDING_LOGIN_LIFETIME`, 600 s; the daemon sets it from
+  `github.pending_login_ttl_seconds`, where `0` means never) it is dropped — the token's
+  `SecretString` is wiped as the record drops — and with it the permission to choose a passphrase:
+  `create` and `reset` are then `NoFreshLogin`, whose message tells the operator to sign in to
+  GitHub again, and a later `unlock` seals nothing from it. The state reported is untouched
+  (`Locked` or `Uninitialized`, from the disk). Expiry is checked on every look at the pending set
+  (`retain`, `holds_pending`, `create`, `reset`, `unlock`) and by a sweep: `expire_pending`, which
+  `tddy-daemon-auth`'s `pending_logins::spawn_pending_login_sweep` runs every min(lifetime, 60 s)
+  on the daemon's runtime — and not at all when the lifetime is `0`. The age is read from an
+  injectable `Clock` (`with_clock`), so tests move time by hand. Logged at `tddy_credentials::sessions`:
+  a hold (`info`, the login and its expiry), an expiry (`info`, the login and its age), and a
+  refusal because the sign-in expired (`warn`); a record is logged by provider only, never its
+  secret. ⚠ Within the lifetime, a caller holding a copied access token for a user who signed in to
+  a closed vault can still reset it: the lifetime bounds that window, it does not close it.
 - **One lock for every change of state** (`transitions`). A login's look-up-then-retain and an
   unlock's seal-then-register happen under it, so a login racing an unlock is either sealed into the
   vault it opened (and told `Open`, with a key) or held pending and told the vault is closed — never

@@ -17,6 +17,10 @@
   with the unlock throttle in `src/auth_service/vault/backoff.rs`
 - **tddy-daemon-auth**: [auth-service.md](../../../packages/tddy-daemon-auth/docs/auth-service.md)
   - `src/github_token_store.rs` — **deleted**
+  - `src/pending_logins.rs` (added at wrap) — the vaults' construction with the pending-login
+    lifetime, its startup logs, and the expiry sweep
+- **tddy-daemon-kernel**: `src/pending_login_ttl.rs` (added at wrap) — `github.pending_login_ttl_seconds`;
+  `src/config.rs` gains only the field
   - `src/auth.rs:168-275` — vault construction; the half-login rule extended to "cannot open"
 - **tddy-daemon**: [daemon-endpoint.md](../../../packages/tddy-daemon/docs/daemon-endpoint.md)
   - `src/runtime.rs:1076` — construction and injection. **The file is not split**
@@ -483,6 +487,31 @@ dashboard is plain http). A logout removes the slot; the last one out drops the 
 trade-off — `U` or the passphrase plus the disk is the plaintext, both cross plain http, and an old
 backup keeps its old slots — is stated in `tddy-credentials/docs/credential-store.md`.
 
+#### pending sign-ins expire (developer decision at wrap, 2026-09-24)
+The S1 gate is the pending record; the developer closed its age gap by making that record expire.
+- **Config**: `github.pending_login_ttl_seconds` — absent → 600, `0` → never, at most 604,800
+  (seven days); a negative, non-numeric or larger value fails the config load naming the setting.
+  Its type, default and validation live in `tddy-daemon-kernel/src/pending_login_ttl.rs`;
+  `config.rs` carries only the field (+2 lines, 1,472 → 1,474 production lines). Written explicitly
+  in `desktop.yaml.production`, `dev.daemon.yaml` and `dev.desktop.yaml`, and in the commented
+  `github:` example of `daemon.yaml.production`.
+- **Behaviour**: `SessionVaults` stamps each pending record with its sign-in time (an injectable
+  `Clock`) and drops it past the lifetime, wiping the token and removing the create/reset
+  permission (`NoFreshLogin`, whose message says to sign in to GitHub again). The reported state
+  stays `LOCKED` / `UNINITIALIZED`. Checked on every access, and by
+  `tddy-daemon-auth/src/pending_logins.rs`'s sweep every min(ttl, 60 s) — no task when ttl is 0 —
+  spawned from `runtime.rs` (+1 line, 1,619 → 1,620). `auth.rs` builds the vaults through
+  `pending_logins::credential_vaults_in` (+3 lines, 619 → 622).
+- **Shape**: the pending set moved into `tddy-credentials/src/sessions/pending.rs`
+  (`PendingSignIns`) in its own behaviour-preserving commit, because the expiry work took
+  `sessions.rs` to 528 production lines; it is 420 after, `pending.rs` 170 (428 / 0 before and
+  after, `./test -p tddy-credentials -p tddy-daemon-auth -p tddy-github -p tddy-daemon-kernel`).
+- **Logs**: startup `info` with the lifetime (`tddy_daemon::auth`), and a `warn` when it is 0; a
+  hold (`info`, login and expiry), an expiry (`info`, login and age) and an expired-sign-in refusal
+  (`warn`) at `tddy_credentials::sessions`. `tddy-credentials` gains the `log` crate for them — a
+  workspace crate already, no new external dependency. No line carries a token or a passphrase
+  (`pending_login_expiry_acceptance.rs` asserts it).
+
 #### tddy-github
 - **API**: `token_store.rs` deleted. `auth_service.rs` retains a `CredentialRecord` through
   `SessionVaults::retain`, reports `vault_state` on every login, refresh and status response, and
@@ -541,6 +570,8 @@ backup keeps its old slots — is stated in `tddy-credentials/docs/credential-st
 *Measured state (replan)* for the scoped counts. Still owed at wrap, because `packages/*/docs/` moves only through this changeset:
 `tddy-daemon-auth/docs/auth-service.md` (lines 18, 236, 260 name `github_token_store`),
 `tddy-github/docs/device-flow.md:202`, `tddy-session-lifecycle/docs/session-service.md:60,100`,
+the `github:` config table in `tddy-daemon-auth/docs/auth-service.md` (:46, add
+`pending_login_ttl_seconds`) and `docs/ft/daemon/session-auth.md` (the same key, product side),
 `tddy-daemon-rpc/docs/architecture.md:52,94`,
 `tddy-host-service/docs/host-registry.md:41`, `tddy-model-registry/docs/model-registry.md:41`,
 `tddy-session-store/docs/architecture.md:68`, `tddy-github/docs/code-issues/missing-tests-real-exchange-code.md:53`,
@@ -627,6 +658,7 @@ touched Rust packages. Whole-workspace health is CI's.
 | N1 | `cargo test -p tddy-service --test auth_passphrase_redaction --test unbundle_service_split` | 2 / 0 and 28 / 0 |
 | Web | `bun test src/hooks src/lib src/rpc` | 594 / 0 |
 | Web | `cypress run --component --spec cypress/component/CredentialVaultPromptAcceptance.cy.tsx` | 12 / 0 |
+| Pending-login expiry | `./test -p tddy-credentials -p tddy-daemon-auth -p tddy-github -p tddy-daemon-kernel --no-fail-fast` | **428 passed / 0 failed** (kernel now in scope) |
 
 The final scoped numbers, after the documentation commit, are in the `/pr-wrap` report of this run.
 
@@ -693,6 +725,11 @@ for no signal.
       `credential_vault_guard_acceptance.rs`, `sessions.rs` tests)
 - [x] Wrong passphrases are throttled per user, and derivation never runs on an RPC worker (S2 —
       `past_the_free_wrong_passphrases_the_next_attempt_is_told_how_long_to_wait`, `backoff.rs` tests)
+- [x] A sign-in's pending token and its create/reset permission expire after
+      `github.pending_login_ttl_seconds` (default 600, `0` never), checked on access and by a
+      sweep, each step logged without the secret — `pending_login_ttl.rs` tests (config parsing),
+      `sessions.rs` expiry tests, `pending_login_expiry_acceptance.rs` (RPC refusals, the sweep,
+      no sweep at 0, the logs)
 - [x] A refresh that cannot read the vault keeps the browser's key (S3 —
       `a_refresh_that_cannot_read_the_vault_hands_back_the_presented_key_unrotated`,
       `sessionTokenStore.test.ts`)

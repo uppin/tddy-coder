@@ -182,6 +182,14 @@ token stored afresh. That is one re-login, and `#keyring` 1/9 already ends every
 **reported, never silent**: a closed vault is `LOCKED` or `UNINITIALIZED` in the response, the page
 asks for the passphrase, and PR status names the remedy. A failed write still fails the login.
 
+**Only a fresh sign-in may choose a vault's passphrase, and "fresh" has a lifetime.** Creating a
+vault or resetting one needs the GitHub token a sign-in left waiting for it; an access token alone
+is not enough, since it crosses plain http. That waiting token — and the permission — lasts
+`github.pending_login_ttl_seconds` (ten minutes when unset; `0` keeps it until an unlock, a logout
+or a restart, with a startup warning). Past it the token is dropped from memory, and choosing a
+passphrase asks the operator to sign in to GitHub again; the vault is reported as closed as it
+was. A sweep drops a token nobody touches, at least once a minute.
+
 ### What's Staying the Same
 
 - **The GitHub token never travels in the session token** and is never returned to the client. The
@@ -209,6 +217,7 @@ asks for the passphrase, and PR status names the remedy. A failed write still fa
 | `tddy-daemon-auth` | `github_token_store.rs` **deleted**; `auth.rs:168-275` constructs the vault registry; PR-status reads by vault state |
 | `tddy-daemon` | `runtime.rs:1076` — the store's construction and injection |
 | `tddy-session-lifecycle` | `handler_state.rs:68` — `DaemonSessionHost::credential_vaults()`, which hands the registry to the PR-stack handler |
+| `tddy-daemon-kernel` | `pending_login_ttl.rs` — `github.pending_login_ttl_seconds`; `config.rs` gains only the field |
 | `tddy-daemon-rpc` | `pr_stack/pr_status.rs:56` — the one external read, migrated; a path dependency on `tddy-credentials` |
 | `tddy-service` | `auth.proto` — additive `vault_unlock_key` fields on five messages, a `VaultState` enum on four, and **two new RPCs**, `UnlockVault` and `ResetVault` |
 | `tddy-web` | the unlock key stored beside the refresh token, presented on refresh, sent on logout; a passphrase prompt for a `LOCKED` or `UNINITIALIZED` vault |
@@ -299,6 +308,11 @@ claimed by 2/9). No other package this node touches is unanalyzed.
       vaults set aside are capped with nothing ever deleted (`credential_vault_guard_acceptance.rs`)
 - [x] Wrong passphrases are throttled per user and say when to retry, and no passphrase derivation
       runs on an RPC worker (`credential_vault_guard_acceptance.rs`, `auth_service/vault/backoff.rs`)
+- [x] A sign-in's pending GitHub token expires after `github.pending_login_ttl_seconds` (absent →
+      600 s, `0` → never), with the permission it grants to choose the vault's passphrase: past it,
+      a first passphrase or a reset is refused and says to sign in to GitHub again, and the vault
+      is reported as closed as before. A sweep drops a token nobody touches
+      (`pending_login_expiry_acceptance.rs`)
 - [x] A refresh that cannot read the vault keeps the browser's unlock key
       (`vault_unlock_across_restart_acceptance.rs`, `sessionTokenStore.test.ts`)
 
