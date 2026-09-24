@@ -45,6 +45,8 @@ use tddy_service::proto::session::StartSessionRequest;
 
 use super::DaemonSessionHost;
 
+use tddy_daemon_kernel::trim_to_option;
+
 /// What a CLI-agent start holds once its prelude has run: where the session lives, the id it was
 /// given, and the first prompt, with any attached changeset named in it.
 struct CliStart {
@@ -358,14 +360,7 @@ impl DaemonSessionHost {
                 req.initial_prompt.trim(),
                 &materialized,
             );
-            let stack_parent_for_claude_cli: Option<String> = {
-                let t = req.stack_parent.trim();
-                if t.is_empty() {
-                    None
-                } else {
-                    Some(t.to_string())
-                }
-            };
+            let stack_parent_for_claude_cli = trim_to_option(&req.stack_parent);
             // A managed-codebase claude-cli session with a recipe is launched workflow-aware. An
             // unknown recipe is a request error (never silently ignored). Non-managed sessions and
             // managed sessions without a recipe keep the plain launch (managed_recipe = None).
@@ -853,14 +848,7 @@ impl DaemonSessionHost {
         let repo_path = Path::new(&project.main_repo_path).to_path_buf();
         let livekit = livekit.clone();
         let pid_for_spawn = project.project_id.clone();
-        let agent_for_spawn: Option<String> = {
-            let t = req.agent.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
+        let agent_for_spawn = trim_to_option(&req.agent);
         // A spawned `tddy-coder` resolves `--agent` against the builtins and `<tddyhome>/agents`
         // only; this daemon's registry is a source it cannot read. So the def this daemon already
         // resolved travels with the spawn as `--agent-def`, and the child creates its backend from
@@ -870,50 +858,15 @@ impl DaemonSessionHost {
             .map(serde_json::to_string)
             .transpose()
             .map_err(|e| Status::internal(format!("failed to serialize agent def: {e}")))?;
-        let recipe_for_spawn: Option<String> = {
-            let t = req.recipe.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
-        let stack_parent_for_spawn: Option<String> = {
-            let t = req.stack_parent.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
+        let recipe_for_spawn = trim_to_option(&req.recipe);
+        let stack_parent_for_spawn = trim_to_option(&req.stack_parent);
         // The planned node the surface that rendered Start-session named. Carried to the child as
         // `--stack-node-id`, which is what puts the association in its participant metadata (D37).
-        let stack_node_id_for_spawn: Option<String> = {
-            let t = req.stack_node_id.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
+        let stack_node_id_for_spawn = trim_to_option(&req.stack_node_id);
         // Already validated above; the orchestrator's own process is what seeds the stack, because
         // the session that owns a `changeset.yaml` is the process that writes it.
-        let stack_seed_base_session_for_spawn: Option<String> = {
-            let t = req.pr_stack_base_session_id.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
-        let model_for_spawn: Option<String> = {
-            let t = req.model.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
+        let stack_seed_base_session_for_spawn = trim_to_option(&req.pr_stack_base_session_id);
+        let model_for_spawn = trim_to_option(&req.model);
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
         let startup_watch = spawner::StartupWatch::from_config(&self.config);
