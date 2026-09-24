@@ -29,8 +29,12 @@ Related, already on master:
 - **`tddy-code-restructuring`**: [README.md](../../../packages/tddy-code-restructuring/README.md).
   The import pass (`backends/rust.rs`, `next_import`, `choose_import` and the alias path), the
   extract-method signature handling, and the refusal check for `impl`-cutting seams.
-- **`tddy-tools`**: no change expected. If one proves necessary, it is only in how `restructure`
-  reports these refusals.
+- **`tddy-tools`**: no change. It renders the new refusals through the library's existing error
+  path.
+- **`tddy-lsp`** (added 2026-09-24): `LspClient::server_status`, the latest `experimental/serverStatus`
+  kept for every reader, so the health gate holds on a warm, already-drained client.
+- **`tddy-index-daemon`** (added 2026-09-24): its `apply_plan` calls the compile gate, and `status_of`
+  classifies the two new error variants.
 
 ## Related Feature Documentation
 
@@ -48,6 +52,15 @@ Fix the three defects so the destructure node's plans run through the engine, no
 | **E1** | The import pass loops forever and writes the same `use` 512 times. It collects unresolved names file-wide, not only in the new module. Its alias and parent-binding branches return an import without checking whether it makes progress, and never mark the name unimportable. It is triggered in files with a `use … as …` alias, even for a 24-line seam with no free names. | every `extract_module` in `connection_service.rs` (1,647) and `session_coordinate_handlers.rs` (818) |
 | **E2** | Extract-method writes `req: _` / `&_` for parameters whose type is generated into `OUT_DIR` (`StartSessionRequest`), even against a warm index. Suspected cause, unconfirmed: the generated `include!` module is not indexed (build scripts off?). | extract-methods in `start_session_core` (857) and `spawn_split_agent` (271), and probably `resume_session_at_session_coordinate` |
 | **E3** | A seam that cuts an `impl` is refused because same-file `self.method()` calls "would resolve nowhere". Method calls resolve wherever the type is in scope, so this is over-strict. | 5 of the 9 `cli_session_manager` seams; moving extracted helpers out of `svc_start_*` |
+
+Three explicit-failure guards were added on 2026-09-24, **approved by the developer** ("We must not
+have any implicit failures"). Each turns a silent success into a truthful failure:
+
+| | Guard | Replaces |
+|---|---|---|
+| **Health** | an index rust-analyzer reports as degraded (`health` other than `ok`) is refused as `ServerDefect`, quoting its message | a run over answers from an index whose build scripts failed |
+| **E4** | an `extract_method` whose range holds a `return` exiting the enclosing function is refused as `SeamRefused`, naming the lines | plan 10: "applied 6 of 6", then seven `E0308`s |
+| **Compile gate** | `apply` ends with `cargo check --all-targets` over the touched packages; a failure fails the run | "applied N of N" over a tree that does not compile |
 
 The same work also covers two smaller things:
 - the grouped-`use` ambiguity (`tokio::sync::{…, mpsc, …}` offered two ways);
@@ -79,6 +92,18 @@ keeps the destructure node engine-driven, and the fix outlives it.
   binding (the `choose_import` tier).
 - **Docs.** Plan-schema and skill: extract-methods in one plan compose only bottom-up (or the engine
   re-anchors, if that proves cheap; decide during green).
+- **Health gate** (2026-09-24). Once readiness is reached, a last-reported health other than `ok`
+  (including `warning`) fails the operation with a `ServerDefect` quoting rust-analyzer's message. It
+  must hold on the cold path and against a warm index daemon, including one whose status transitions
+  another reader already consumed.
+- **E4** (2026-09-24). An `extract_method` whose range contains a `return` targeting the enclosing
+  function is refused (`SeamRefused`) before the assist runs, in `check`, `check --deep` and `apply`.
+  A `return` inside a closure, an `async` block or a nested `fn` in the range does not count.
+- **Compile gate** (2026-09-24). `apply` runs `cargo check --all-targets -p …` for every package
+  owning a changed file, on both apply paths (CLI and index daemon). A failure is a non-zero, explicit
+  failure carrying the compiler's errors; the edits stay applied for inspection and the message says
+  how to roll back. A tree that did not compile before a fresh apply is refused, writing nothing. **No
+  opt-out flag** (none was consented to).
 - **Tests** for each fix, at the level the engine's existing suites use (fixture crates).
 
 ## Boundaries
@@ -128,6 +153,10 @@ it gets the fixed engine in its own tree.
 - [x] E3 fixed: `self.method()` on the same type is not a refusal, and the assist's `self.modname::method()` rewrite is undone
 - [x] Grouped-`use` binding recognised
 - [x] Skill and plan-schema corrected on extract-method ordering (and on the `impl`-cut table)
+- [x] Health gate: `ServerChatter` records `health`/`message`; readiness refuses a degraded index; `tddy-lsp` keeps the latest status for a warm client (developer-approved 2026-09-24)
+- [x] E4: early-return refusal for `extract_method`, static tier (developer-approved 2026-09-24)
+- [x] Compile gate on `apply`, with a baseline check, on the CLI and daemon paths (developer-approved 2026-09-24)
+- [x] Plan 10 re-checked on the real repo with `check --deep`: ops 1–5 refused by E4, op 0 clean (see Implementation)
 - [ ] Re-run the destructure node's refused plans with `check --deep` and record the results — on #524
 
 ## Testing plan
@@ -187,7 +216,9 @@ production lines (recorded in its code-issue).
 | `backends/rust/imports.rs` | `restore_imports`, `next_import`, the verified reconstruction, the seam-lost filter, `names_bound` |
 | `backends/rust/impl_seam.rs` | `refuse_impl_sibling_references`, `is_inherent_impl`, `with_method_calls_restored` |
 | `backends/rust/chatter.rs` | `ServerChatter`, re-exported at `backends::rust::ServerChatter` so `tddy-index-daemon` and the harness are untouched |
-| `backends/rust/readiness.rs` | `ensure_indexed`, `wait_until_resolved` |
+| `backends/rust/readiness.rs` | `ensure_indexed`, `wait_until_resolved`, `refuse_degraded_index` |
+| `backends/rust/early_return.rs` | `refuse_early_returns` (E4), and the lexical scan behind it |
+| `runner/compile_gate.rs` | `refuse_a_broken_baseline`, `refuse_a_broken_result` (both apply paths call them) |
 
 - **E1.** *Cause:* `already_bound` read `use a::B as C;` as binding `B`. The alias branch rebuilt the
   parent's declaration, wrote it into the module, and on the next pass did not see it, so it wrote it
@@ -229,14 +260,67 @@ production lines (recorded in its code-issue).
   through on hover alone. `client_capabilities()` already advertised `serverStatusNotification`.
   `server_settings()` needed no `cargo.buildScripts.enable` / `procMacro.enable`: the defaults are
   on, and the E2 fixture passes without them. `refuse_inferred_placeholder` is unchanged.
-- **E2 on the real repo: open.** This explains `req: _` for a **cold** `tddy-tools restructure`,
-  which asked before `tddy-service`'s `tonic-build`/`prost-build` output had loaded. It does not
-  explain the **warm-index** failures: `tddy-index-daemon` only reports warm after quiescence. The
-  remaining candidate is still unconfirmed: the build script failing inside rust-analyzer's
-  environment (for example `protoc` not on the server's `PATH`), which leaves the server quiescent
-  with no `OUT_DIR` output. If that holds, the placeholder guard still refuses, but for the wrong
-  reason. The next check is to re-run plans `05`/`10` on #524 against a warm index and read the
-  server's build-script diagnostics.
+- **E2 on the real repo: not reproduced; now caught explicitly.** Investigated by the developer on
+  2026-09-24. The readiness defect is real and fixed: the E2 fixture proves it. But it is **not**
+  shown to be the cause of the real-repo E2. Plans `05` (shifted), `10` and `10a` produce real types
+  (`req: &StartSessionRequest`) on today's tree with **both** the pre-fix engine (`origin/master`) and
+  the fixed one, cold and against the warm index daemon. The likely cause at the time was a degraded
+  index (build-script output missing or stale). The engine ignored rust-analyzer's own account of
+  that, the `health` and `message` of `experimental/serverStatus`, and the health gate below now
+  refuses on it. `refuse_inferred_placeholder` stays as the post-condition.
+- **Health gate.** `ServerChatter` records the latest `health` and `message`. `degraded()` returns a
+  refusal quoting the message (whitespace collapsed) for anything but `ok`. `readiness.rs` refuses
+  with a `ServerDefect` at every point it declares ready (`refuse_degraded_index`). **`warning` fails
+  too**, a deliberate choice: a failed build script arrives as `warning` ("Failed to run build scripts
+  of some packages"), which is exactly E2's hazard. rust-analyzer's other warnings (an unreloaded
+  manifest change, build scripts or proc macros needing a rebuild, a config error, no workspace
+  discovered) also mean the graph is not the tree on disk. Verified live: a fixture crate whose
+  `build.rs` panics is reported as `warning` with that message, and the operation is refused.
+  **Warm path:** a status is sent only on a transition, and `drain_notifications` is destructive and
+  capped at 256, so a second backend on a warm client (the daemon's second request) never saw it.
+  `tddy-lsp` now keeps the latest `serverStatus` (`LspClient::server_status`), and the bridge's
+  `notifications_to_fold` appends it after what it drained. The daemon builds its backends through
+  `runner::registry_for`, so the same readiness gate holds there. The daemon's own `Warm` RPC still
+  reports `ready` for a degraded root: it answers "is the graph loaded", and the gate refuses at the
+  first operation.
+- **E4, early returns in `extract_method`** (found on the real repo, 2026-09-24). `apply` of plan 10
+  (six `extract_method`s inside `start_session_core -> Result<Response<StartSessionResponse>,
+  Status>`) reported "applied 6 of 6", then `cargo check -p tddy-session-lifecycle` failed with seven
+  `E0308`s. The ranges held `return Ok(Response::new(inner));` / `return self.start_…().await;`, which
+  rust-analyzer's "extract into function" copied verbatim into functions returning `Result<(),
+  Status>` / `Result<(String, Vec<String>), Status>`. *Fix:* `backends/rust/early_return.rs`, run in
+  the static `check` tier and in `resolve` before a server is asked. **Detection is lexical, and
+  says what it relies on:** strings, raw strings, character literals and comments are masked by the
+  lexer the test-binary move already had (`readable_spans`, widened to `pub(crate)`; no new lexer).
+  Closures (block, `-> T` block and expression bodies, with `|` read as a closure only where an
+  expression may start), `async` blocks and nested `fn name` open a body whose `return` does not
+  count. Only the range is scanned, from depth zero, so statements lifted out of a closure body
+  cannot carry that closure's `return` either. **Not seen:** a `return` a macro expands to (`bail!`);
+  the compile gate catches what that leaves. **Real repo, plan 10, `check --deep` (fixed engine,
+  cold, daemon stopped):** ops 1–5 refused, naming lines 569/598, 479/507, 289/371/404/407/426, 239
+  and 104/133 (each checked against the source as a plain early exit of `start_session_core`). Op 0
+  (776–893, no `return`) resolved clean, against an index whose health was `ok`.
+- **Compile gate.** `runner/compile_gate.rs`: `refuse_a_broken_result` runs `cargo check
+  --all-targets --message-format short -p …` over the packages owning every file the journal records
+  a completed edit to (this run's, plus an earlier run's on resume). Packages are resolved by walking
+  up to the nearest manifest with a `[package]` name (`declared_package_name`, widened), because a
+  renamed-away file no longer exists for `cargo metadata` to place. **`--all-targets`**, because moves
+  re-point imports that test targets use and a moved test binary is a test target; a lib-only check
+  passes exactly the breakage these operations cause. A failure is
+  `RestructureError::AppliedTreeDoesNotCompile`, carrying the compiler's error lines, the touched
+  paths and the plan's journal directory. **Journal semantics:** the edits stay on disk and in the
+  journal for inspection, and nothing is rolled back automatically: no rollback command exists. The
+  message says to restore the touched paths from git and to remove the journal so the plan can run
+  again. **Baseline:** `refuse_a_broken_baseline` runs the same check first on a fresh, writing run,
+  over the packages owning the files the plan names (snapshot and anchors). A failure is
+  `BaselineDoesNotCompile`, and nothing is written, so a pre-broken tree is never blamed on the plan.
+  It is skipped for a dry run and for a run continuing a journal (that tree holds the earlier run's
+  edits, which the result gate covers), the same line `open_run` draws for the snapshot. **Two new
+  variants, deliberately:** none of the existing classes is true of either. The plan is not
+  malformed, nothing was refused, and no server answer was unusable. `status_of` maps the baseline
+  to `FailedPrecondition` and the applied tree to `Internal`. **Both paths:** `runner::apply` (CLI)
+  and the index daemon's `apply_plan`, which judges before emitting its outcome event, so a stream
+  never ends with "applied N of N" over a broken tree. **No opt-out flag**, as directed.
 - **Docs.** `plan-schema.md` now says that several `extract_method`s in one function compose only
   bottom-up. The engine does not re-anchor them: re-anchoring would mean re-deriving each later
   anchor from the produced text, which is not cheap, so it was not attempted. The `impl`-cut table
@@ -256,6 +340,16 @@ production lines (recorded in its code-issue).
 ## Refactoring needed
 
 ### From @green
+
+- (2026-09-24) E4's scan is lexical. It does not see a `return` a macro expands to (`bail!`,
+  `ensure!`). It also misreads a leading `|` in a match arm (`match x { | A => … }`) as a closure. The
+  first is caught by the compile gate on `apply`, but not by `check --deep`. `break`/`continue`
+  targeting a loop outside the range are the same hazard and are not refused.
+- (2026-09-24) `tddy-index-daemon`'s `Warm` reports `ready` for a degraded root; only the first
+  operation refuses. `GraphLoad` could carry the health, so `Warm` says so too.
+- (2026-09-24) The compile gate adds a `cargo check --all-targets` before and after every writing
+  apply. On a warm target directory that is incremental, but on a cold one it is the price of a
+  check. No opt-out exists, by direction. If one is ever wanted, it needs the developer's consent.
 
 - Three walkers read the same `use` tree: `expand_use` (paths), `collect_aliases` (alias pairs), and
   `collect_bound` (bound names). One leaf walker yielding `(path, alias)` would serve all three.
@@ -278,6 +372,19 @@ production lines (recorded in its code-issue).
   (`nested_module_move_acceptance`, `cluster_move_acceptance`, `facade_cycle_acceptance`, …).
 
 ## Validation results
+
+**2026-09-24, after the three guards.** Scoped to the packages touched; whole-workspace health is CI's.
+
+- `./test -p tddy-code-restructuring`: every binary green. Lib 369, `apply_compile_gate_acceptance` 5,
+  `index_health_acceptance` 2, `extract_method_control_flow_acceptance` 1,
+  `extract_method_signature_acceptance` 1, `library_returns_its_results` 6, `import_pass_acceptance` 6,
+  `impl_seam_acceptance` 4, and every other suite in the package.
+- `./test -p tddy-index-daemon -p tddy-lsp`: every binary green (`code_index_service_acceptance` 25,
+  `tddy-lsp` lib 17).
+- `cargo clippy -p tddy-code-restructuring -p tddy-index-daemon -p tddy-lsp --all-targets -- -D
+  warnings`: clean. `cargo fmt --check`: clean. `cargo check -p tddy-tools --all-targets`: clean.
+
+**2026-09-23, before the guards:**
 
 Scoped to the packages touched (2026-09-23). Whole-workspace health is CI's.
 

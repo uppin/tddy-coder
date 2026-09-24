@@ -37,7 +37,11 @@ tddy-tools restructure verify --against <git-ref>
    A plain `check` reads text; only `--deep` resolves each operation through the same path `apply`
    uses, so it is the only form that reports an assist or import refusal — and it writes nothing. A
    plain `check` returning `no findings` says nothing about whether the apply will run.
-9. **Apply** — `--dry-run` first, then apply; `verify --against HEAD` after.
+9. **Apply** — `--dry-run` first, then apply; `verify --against HEAD` after. An apply ends with
+   `cargo check --all-targets` over every package it touched, and **a tree that does not compile is a
+   failed run**, never "applied N of N": the edits are left on disk for inspection and the message says
+   how to roll them back. A fresh apply first checks the packages the plan names, and refuses to write
+   anything into a tree that already does not compile.
 
 **Prove before you pay.** Against a warm index a `--deep` check costs seconds and an apply costs
 seconds; against a cold one an apply costs six to ten minutes before it can refuse. Every refusal
@@ -50,9 +54,17 @@ seconds; against a cold one an apply costs six to ten minutes before it can refu
 - **Unsupported ops are hard errors** — never skip silently.
 - **Order `extract_method`s bottom-up.** Several in one function compose only last-range-first, so
   no anchor has to be translated through another extraction; see `references/plan-schema.md`.
+- **An `extract_method` range holds no early `return`.** A `return` that exits the function around
+  the range is refused (`check`, `check --deep` and `apply` alike): the assist would copy it into the
+  new function, which returns from itself instead. A `return` inside a closure, `async` block or nested
+  `fn` in the range is fine. End the range before the first early exit.
 - **Read the refusal's class before its text.** `plan is malformed:` means edit the plan. `this seam
   cannot be cut here:` means the plan is fine and the code will not permit this cut — move the seam or
-  change the code. `rust-analyzer's answer was unusable:` means retry against a warm server. Every
+  change the code. `rust-analyzer's answer was unusable:` means retry against a warm server — except when it says
+  the index is **degraded** (rust-analyzer's own health is `warning` or `error`, typically "Failed to
+  run build scripts"): then no retry helps, and the message quotes what to fix. `the tree does not
+  compile before the plan runs:` means repair the tree first; nothing was written. `… were applied, and
+  the tree no longer compiles:` means the edits are on disk and the compiler rejects them. Every
   refusal already ends with its own remedy.
 - **Waiting** — a run waits until the server is ready or until you stop it; there is no
   `--indexing-budget` any more (it derived a per-operation ceiling of a twentieth of itself, which

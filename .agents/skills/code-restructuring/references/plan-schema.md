@@ -110,6 +110,28 @@ not define is refused rather than ignored.
   no anchor is ever translated through another extraction. Taken top-down, every later anchor has to
   be, and on the lifecycle destructure's plans (2026-09-23) those plans did not apply. The engine
   does not re-anchor them for you.
+
+  **An `extract_method` range may not hold an early exit of the function around it.** rust-analyzer
+  copies a `return` in the range verbatim into the new function, whose return type is not the
+  caller's: plan 10 of the destructure applied six such extractions over `start_session_core` and left
+  seven `E0308`s (and where the types happen to agree, the caller's exit is silently skipped). The
+  backend refuses such a range as `this seam cannot be cut here:`, naming each line, before a server is
+  asked — so a plain `check` reports it too. A `return` inside a closure, an `async` block or a nested
+  `fn` within the range leaves that body, not the caller's, and is allowed. The check is lexical:
+  strings and comments are masked first, and a `return` a macro expands to (`bail!`) is not seen —
+  `apply`'s compile gate catches what that leaves.
+- **`apply` is judged by the compiler.** After its operations, `apply` runs `cargo check
+  --all-targets` over every package owning a file it changed (test targets included, because moves
+  re-point imports tests use). A failure fails the run with the compiler's errors; the edits stay on
+  disk and in the journal for inspection, and the message names the touched paths and the journal to
+  remove when rolling back. A fresh apply first checks the packages owning the files the plan names,
+  and refuses — writing nothing — when that baseline already fails, so a pre-broken tree is never
+  blamed on the plan. A dry run, and a run continuing a journal, skip the baseline.
+- **A degraded index is refused.** rust-analyzer finishes loading even when a build script failed,
+  and then answers as though the generated code did not exist (`req: _`, imports it cannot find). It
+  says so only through its `experimental/serverStatus` health; any health but `ok` — `warning`
+  included — refuses the run as `rust-analyzer's answer was unusable:`, quoting the server's message.
+  This holds against a warm `tddy-index-daemon` too.
 - **`extract_module` restores the imports its own assist loses, and refuses when it cannot.** The
   items move out of the scope of the file's `use` declarations, so the backend asks rust-analyzer for
   an import at each name left unresolved. Where the server offers several paths for one name, the
