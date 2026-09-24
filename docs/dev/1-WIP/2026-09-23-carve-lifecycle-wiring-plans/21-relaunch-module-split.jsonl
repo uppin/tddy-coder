@@ -1,0 +1,3 @@
+{"v": 1, "snapshot": {"packages/tddy-session-lifecycle/src/connection_service/svc_relaunch_sandboxed_runner.rs": "sha256:61f119d0ab6be9488f0714655ce5ea56c05c48a500f308e90fc999ff3e63b8a3"}}
+{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_relaunch_sandboxed_runner.rs","start":{"line":423,"col":1},"end":{"line":487,"col":2}},"name":"relaunch_jail_dirs","reexport":"glob","to_file":true}
+{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_relaunch_sandboxed_runner.rs","start":{"line":215,"col":5},"end":{"line":420,"col":6}},"name":"relaunch_jail_steps","reexport":"glob","to_file":true}
