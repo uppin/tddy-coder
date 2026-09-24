@@ -1,0 +1,3 @@
+{"v": 1, "snapshot": {"packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_claude_cli_session.rs": "sha256:f03dc727eebc83679e80e9192cfa92585921d91b370f68247b911426b41d0fee"}}
+{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_claude_cli_session.rs","start":{"line":381,"col":9},"end":{"line":397,"col":45}},"name":"jail_runner_env"}
+{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_claude_cli_session.rs","start":{"line":294,"col":9},"end":{"line":305,"col":101}},"name":"canonical_jail_exec_paths"}

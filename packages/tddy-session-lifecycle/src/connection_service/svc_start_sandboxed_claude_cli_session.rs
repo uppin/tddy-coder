@@ -78,6 +78,18 @@ type ManagedJailEnv = (
     Vec<(String, String)>,
 );
 
+/// What the sandbox runner's env is built from: the jail's paths, its subagents, and the semantic index.
+struct JailRunnerEnv<'a> {
+    session_id: &'a str,
+    semantic_index: bool,
+    specialized_defs: Vec<tddy_discovery::agent_def::SpecializedAgentDef>,
+    session_dir: &'a Path,
+    worktree_path: &'a Path,
+    jail_dirs: &'a JailDirs,
+    scratch_home: &'a Path,
+    tool_ipc_socket: &'a Path,
+}
+
 impl DaemonSessionHost {
     /// Handle `StartSession` for sandboxed `claude-cli` sessions (darwin Seatbelt, local gRPC).
     #[allow(clippy::too_many_arguments)]
@@ -291,18 +303,7 @@ impl DaemonSessionHost {
         // from the canonical (symlink-resolved) parent dirs, so a symlinked spelling (e.g. a
         // binary under /tmp -> /private/tmp) would be denied at exec time ("doesn't exist /
         // Operation not permitted"). A relative/PATH-resolved name (no '/') is left as-is.
-        let canonicalize_exec = |p: &str| -> String {
-            if p.contains('/') {
-                std::fs::canonicalize(p)
-                    .map(|c| c.to_string_lossy().into_owned())
-                    .unwrap_or_else(|_| p.to_string())
-            } else {
-                p.to_string()
-            }
-        };
-        let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
-        let sandbox_runner_path =
-            canonicalize_exec(&tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path());
+        let (tddy_tools_path, sandbox_runner_path) = canonical_jail_exec_paths(tddy_tools_path);
         // Resolve the real `claude` to an absolute path (skipping wrapper shims). Overridable via
         // TDDY_CLAUDE_BINARY or `claude_cli.binary_path`. A bare name would give binary_exec_reads
         // an empty parent → `(subpath "")` → macOS sandbox-exec rejects the profile.
@@ -378,23 +379,18 @@ impl DaemonSessionHost {
         // fallback), and inject `TDDY_SEMANTIC_INDEX_DB` into the jail env. Its presence both points
         // the in-jail `SemanticSearch` tool at the per-session index and signals the runner to keep
         // `SemanticSearch` in the tool set (it is otherwise folded into the replaced set).
-        let semantic_index_env_pair = self
-            .jail_semantic_index_env(session_id, semantic_index, &session_dir, &worktree_path)
+        let env = self
+            .jail_runner_env(JailRunnerEnv {
+                session_id,
+                semantic_index,
+                specialized_defs,
+                session_dir: &session_dir,
+                worktree_path: &worktree_path,
+                jail_dirs: &jail_dirs,
+                scratch_home: &scratch_home,
+                tool_ipc_socket: &tool_ipc_socket,
+            })
             .await?;
-
-        let mut env = tddy_daemon_sandbox::sandbox_session::build_sandbox_runner_env(
-            &scratch_home,
-            &jail_dirs.scratch_tmp,
-            session_id,
-            &tool_ipc_socket,
-            &jail_dirs.egress_dir,
-        );
-        if !specialized_defs.is_empty() {
-            env.extend(self.specialized_subagent_env(&specialized_defs)?);
-        }
-        env.extend(self.jail_daemon_identity_env());
-        env.extend(self.lsp_tools_env(&worktree_path));
-        env.extend(semantic_index_env_pair);
 
         let pid = self
             .launch_jail(
@@ -439,6 +435,55 @@ impl DaemonSessionHost {
             branch_conflict: None,
         }))
     }
+
+    async fn jail_runner_env(
+        &self,
+        launch: JailRunnerEnv<'_>,
+    ) -> Result<std::collections::BTreeMap<String, String>, Status> {
+        let JailRunnerEnv {
+            session_id,
+            semantic_index,
+            specialized_defs,
+            session_dir,
+            worktree_path,
+            jail_dirs,
+            scratch_home,
+            tool_ipc_socket,
+        } = launch;
+        let semantic_index_env_pair = self
+            .jail_semantic_index_env(session_id, semantic_index, session_dir, worktree_path)
+            .await?;
+        let mut env = tddy_daemon_sandbox::sandbox_session::build_sandbox_runner_env(
+            scratch_home,
+            &jail_dirs.scratch_tmp,
+            session_id,
+            tool_ipc_socket,
+            &jail_dirs.egress_dir,
+        );
+        if !specialized_defs.is_empty() {
+            env.extend(self.specialized_subagent_env(&specialized_defs)?);
+        }
+        env.extend(self.jail_daemon_identity_env());
+        env.extend(self.lsp_tools_env(worktree_path));
+        env.extend(semantic_index_env_pair);
+        Ok(env)
+    }
+}
+
+fn canonical_jail_exec_paths(tddy_tools_path: String) -> (String, String) {
+    let canonicalize_exec = |p: &str| -> String {
+        if p.contains('/') {
+            std::fs::canonicalize(p)
+                .map(|c| c.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| p.to_string())
+        } else {
+            p.to_string()
+        }
+    };
+    let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
+    let sandbox_runner_path =
+        canonicalize_exec(&tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path());
+    (tddy_tools_path, sandbox_runner_path)
 }
 
 mod jail_worktree;
