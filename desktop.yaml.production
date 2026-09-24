@@ -56,44 +56,40 @@ auth_storage: "__AUTH_STORAGE_DIR__/auth"
 # NO `web_bundle_path:` ON PURPOSE: the dashboard is embedded in the application at build time, so
 # there is no directory to serve it from.
 
-# The daemon binds NOTHING here, and `listen:` is not a contradiction of that. `web_port` is the
-# loopback port a GitHub sign-in comes back on: for the duration of a sign-in the application opens a
-# one-path `/auth/callback` listener on 127.0.0.1 and closes it again
-# (packages/tddy-desktop/src-tauri/src/oauth_callback.rs), and the same port is what the redirect URI
-# handed to the provider is built from. The block is REQUIRED — `tddy_daemon::runtime::build` refuses
-# to assemble a daemon without `listen.web_port`, whatever the deployment.
+# The daemon binds NOTHING here, and `listen:` is not a contradiction of that. The block is
+# REQUIRED — `tddy_daemon::runtime::build` refuses to assemble a daemon without `listen.web_port`,
+# whatever the deployment. `web_port` is the loopback port a *redirect-flow* sign-in comes back on
+# (a one-path `/auth/callback` listener on 127.0.0.1, packages/tddy-desktop/src-tauri/src/oauth_callback.rs);
+# the device-flow sign-in configured below never returns through it.
 listen:
   web_port: 8899
   web_host: 127.0.0.1
 
-# WHAT THIS INSTALL DOES NOT YET CONFIGURE: an identity.
+# WHO MAY SIGN IN: the Tddy Desktop GitHub OAuth App, as a PUBLIC client.
 #
-# With the two blocks below left as they are, the application starts and its dashboard reaches the
-# daemon's settings — and nothing else. No sessions, no hosts, no screen sharing. That is not a
-# degraded mode, it is the wiring: `github: None` makes `build_auth_entries` return no user resolver
-# (packages/tddy-daemon-auth/src/auth.rs), and every session service in `tddy_daemon::runtime` is
-# assembled inside `if let Some(user_resolver)`. Configuring sessions means both together:
+# A `client_id` with NO `client_secret` registers the GitHub **device flow**: the dashboard shows a
+# short code, the operator approves it on github.com, and the daemon polls GitHub until it does. A
+# client id is public by definition, so nothing confidential ships in this file or the application.
+# Adding a `client_secret` would make this a confidential client serving the redirect flow instead —
+# a served deployment's shape, not a desktop's. It is an OAuth App (not a GitHub App) because its
+# user token does not expire, so no refresh exchange ever needs a secret.
+github:
+  client_id: "Ov23lioH6CfiaZR8ESr5"
+
+# WHICH OS USER A LOGIN RUNS SESSIONS AS: nobody yet, on purpose.
 #
-#   1. `github:` — who may sign in. A real OAuth app, or `stub: true` for a single-operator machine
-#      where the login is an identity rather than a credential check. `redirect_uri` is deliberately
-#      omitted: the application derives it from `listen.web_port` so the callback reaches the
-#      listener it actually opened, and a value set here is overridden rather than honoured.
-#   2. `users:` — which OS user a login runs sessions as. A login with no entry is refused with
-#      `permission_denied: user not mapped to OS user` on every session RPC; there is deliberately no
-#      fallback to "whoever the daemon runs as". Peers in a common room must name the same login, so
-#      change `github_user` on every side together.
+# The FIRST GitHub login completed from this application's own window is enrolled here against the
+# OS user the application runs as, and persisted to this file (rewriting it drops these comments).
+# From then on that row is an ordinary mapping: a different GitHub login is refused
+# `permission_denied: user not mapped to OS user` on every session RPC, and there is deliberately no
+# fallback to "whoever the daemon runs as". A login arriving over any other transport — a LiveKit
+# common room, an agent's tool socket — is never enrolled. Peers in a common room must name the same
+# login, so change `github_user` on every side together.
 #
 # NO `livekit:` BLOCK IS NEEDED TO SIGN IN. The daemon signs session tokens with its own key (see
 # `auth_storage` above); `livekit.api_secret` signs LiveKit room JWTs only, and is configured when
 # the application should join a common room.
-#
-# github:
-#   client_id: "<your-github-oauth-app-client-id>"
-#   client_secret: "<secret>"
-#
 users: []
-# - github_user: "octocat"
-#   os_user: "<this machine's login name>"
 
 # Append `-<unix_ms>` to this daemon's LiveKit identity once per process, so the installed
 # application and a `./desktop-dev` run on the same machine do not collide with DuplicateIdentity.
