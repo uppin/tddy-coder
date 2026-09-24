@@ -31,10 +31,9 @@ use tddy_credentials::{
 };
 use tddy_daemon_auth::github_pr_credentials::PrLookup;
 use tddy_daemon_auth::vault_lifetimes::{
-    credential_vaults_in, spawn_credential_sweep, sweep_period,
+    credential_vaults_in, spawn_credential_sweep, sweep_period, VaultLifetimes,
 };
 use tddy_daemon_kernel::config::GitHubConfig;
-use tddy_daemon_kernel::open_vault_idle_ttl::OpenVaultIdleTtl;
 use tddy_service::proto::auth::VaultState;
 
 const AN_HOUR: Duration = Duration::from_secs(60 * 60);
@@ -136,7 +135,7 @@ async fn with_an_idle_lifetime_of_zero_an_open_vault_is_never_closed() {
     // who created their vault a year ago
     let storage = tempfile::tempdir().expect("a temporary directory");
     let clock = AHandDrivenClock::new();
-    let vaults = credential_vaults_in(storage.path(), &a_github_block_whose_vaults_idle_for(0))
+    let vaults = credential_vaults_in(storage.path(), &the_vault_lifetimes_when_vaults_idle_for(0))
         .with_clock(clock.as_clock());
     vaults
         .retain(THE_LOGIN, a_github_record("gho_a_year_old"))
@@ -217,7 +216,10 @@ async fn startup_logs_the_configured_idle_lifetime() {
     let storage = tempfile::tempdir().expect("a temporary directory");
 
     // When its vaults are built with an idle lifetime of an hour
-    credential_vaults_in(storage.path(), &a_github_block_whose_vaults_idle_for(3600));
+    credential_vaults_in(
+        storage.path(),
+        &the_vault_lifetimes_when_vaults_idle_for(3600),
+    );
 
     // Then the idle lifetime is announced
     assert!(
@@ -242,7 +244,7 @@ async fn startup_warns_when_open_vaults_never_close_for_idleness() {
     let storage = tempfile::tempdir().expect("a temporary directory");
 
     // When its vaults are built with an idle lifetime of 0
-    credential_vaults_in(storage.path(), &a_github_block_whose_vaults_idle_for(0));
+    credential_vaults_in(storage.path(), &the_vault_lifetimes_when_vaults_idle_for(0));
 
     // Then it warns that the data key stays in memory until a logout or a restart
     assert!(
@@ -296,12 +298,14 @@ fn is_unavailable_until_the_vault_reopens(lookup: &PrLookup) -> bool {
     matches!(lookup, PrLookup::Unavailable(reason) if reason.contains("next session refresh"))
 }
 
-/// A `github:` block whose open vaults close once unused for `seconds`, the rest at defaults.
-fn a_github_block_whose_vaults_idle_for(seconds: u64) -> GitHubConfig {
-    GitHubConfig {
-        open_vault_idle_ttl_seconds: OpenVaultIdleTtl::from_seconds(seconds).unwrap(),
+/// What a `github:` block whose open vaults close once unused for `seconds` resolves to, the rest
+/// at defaults.
+fn the_vault_lifetimes_when_vaults_idle_for(seconds: u64) -> VaultLifetimes {
+    VaultLifetimes::of(&GitHubConfig {
+        open_vault_idle_ttl_seconds: Some(seconds),
         ..GitHubConfig::default()
-    }
+    })
+    .expect("a lifetime within its ceiling")
 }
 
 /// A GitHub record for [`THE_LOGIN`] holding `token`.

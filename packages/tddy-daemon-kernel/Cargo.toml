@@ -26,10 +26,6 @@ tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
-# `open_vault_idle_ttl` and `pending_login_ttl` bound themselves by the refresh-token lifetime the
-# daemon's session tokens are minted with — `tddy_github::REFRESH_TOKEN_TTL`, read rather than
-# restated. `tddy-github` depends on no daemon crate, so this closes no cycle.
-tddy-github = { path = "../tddy-github" }
 livekit = "0.7"
 tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "net", "time", "process", "io-util"] }
 

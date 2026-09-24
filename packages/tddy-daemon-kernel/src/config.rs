@@ -1083,10 +1083,10 @@ pub struct GitHubConfig {
     pub stub: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stub_codes: Option<String>,
-    #[serde(default)] // how long a sign-in's token waits for its vault: `pending_login_ttl.rs`
-    pub pending_login_ttl_seconds: crate::pending_login_ttl::PendingLoginTtl,
-    #[serde(default)] // how long an open vault may go unused: `open_vault_idle_ttl.rs`
-    pub open_vault_idle_ttl_seconds: crate::open_vault_idle_ttl::OpenVaultIdleTtl,
+    #[serde(default, skip_serializing_if = "Option::is_none")] // `pending_login_ttl.rs`
+    pub pending_login_ttl_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] // `open_vault_idle_ttl.rs`
+    pub open_vault_idle_ttl_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]

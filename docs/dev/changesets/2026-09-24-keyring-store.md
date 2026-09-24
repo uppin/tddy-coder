@@ -45,7 +45,7 @@ Where the end state is documented:
   the login)
 - [`tddy-daemon-auth/docs/auth-service.md`](../../../packages/tddy-daemon-auth/docs/auth-service.md) — § Credential vaults: construction, `pending_login_ttl_seconds`, `open_vault_idle_ttl_seconds`, the sweep, `retained_github_token`
 - [`tddy-github/docs/device-flow.md`](../../../packages/tddy-github/docs/device-flow.md) — retention in `complete_login`, § The credential vault's half of `AuthServiceImpl`
-- [`tddy-daemon-kernel/docs/daemon-kernel.md`](../../../packages/tddy-daemon-kernel/docs/daemon-kernel.md) — `PendingLoginTtl`, `OpenVaultIdleTtl`
+- [`tddy-daemon-kernel/docs/daemon-kernel.md`](../../../packages/tddy-daemon-kernel/docs/daemon-kernel.md) — the two vault-lifetime settings, read as plain `Option<u64>`
 - [`tddy-daemon/docs/daemon-endpoint.md`](../../../packages/tddy-daemon/docs/daemon-endpoint.md) — the vaults' injection and the sweep in `runtime::build`
 - [`tddy-web/docs/daemon-sign-in.md`](../../../packages/tddy-web/docs/daemon-sign-in.md) — § The credential vault: the unlock key, `CredentialVaultPrompt`
 - `tddy-session-lifecycle/docs/session-service.md`, `tddy-daemon-rpc/docs/architecture.md` — `credential_vaults` on the host and the PR-stack handler
@@ -55,8 +55,8 @@ Where the end state is documented:
 |---|---|
 | `tddy-credentials` (new) | `ProviderId`, `AccountId`, `CredentialRecord`; `CredentialStore::{path_in, create, open_with_passphrase, open_with_unlock_key, reset}`; `SessionVault`; `UnlockKey`; `SessionVaults` + `VaultState`, `Retained`, `Reset`, `ROTATION_GRACE`, pending sign-ins (`sessions/pending.rs`), idle open vaults (`sessions/open.rs`); `SecretString`, `SecretBytes`, `MIN_PASSPHRASE_CHARS` / `MAX_PASSPHRASE_CHARS`; `VaultError`; `atomic.rs` |
 | `tddy-github` | `token_store.rs` deleted; `with_credential_vaults`; retention by vault state; `UnlockVault` / `ResetVault`; unlock-key rotation on refresh, slot removal on logout; `src/auth_service/vault.rs`, `vault/backoff.rs` |
-| `tddy-daemon-auth` | `github_token_store.rs` deleted; `vault_lifetimes.rs` (was `pending_logins.rs`); `AuthBuildResult::credential_vaults`; `retained_github_token` |
-| `tddy-daemon-kernel` | `pending_login_ttl.rs`, `open_vault_idle_ttl.rs`; `GitHubConfig.{pending_login_ttl_seconds, open_vault_idle_ttl_seconds}`; path dependency on `tddy-github` (for `REFRESH_TOKEN_TTL`) |
+| `tddy-daemon-auth` | `github_token_store.rs` deleted; `vault_lifetimes.rs` (was `pending_logins.rs`; `VaultLifetimes::of` applies both lifetimes' defaults and ceilings); `AuthBuildResult::credential_vaults`; `retained_github_token` |
+| `tddy-daemon-kernel` | `GitHubConfig.{pending_login_ttl_seconds, open_vault_idle_ttl_seconds}: Option<u64>`; `pending_login_ttl.rs`, `open_vault_idle_ttl.rs` (docs and parsing tests) |
 | `tddy-daemon` | `runtime::build` injects the vaults and spawns the sweep |
 | `tddy-session-lifecycle` | `DaemonSessionHost::{with_credential_vaults, credential_vaults}` |
 | `tddy-daemon-rpc` | `PrStackRpcHandler.credential_vaults`; `pr_stack/pr_status.rs` reads through `retained_github_token`; path dependency on `tddy-credentials` |
@@ -172,18 +172,28 @@ Two commits on #510 after its wrap (`0918ff8c`), each closing a backlog entry ab
   is `ZeroizeOnDrop` by bound — `SecretBytes`, `SecretString`, `ChaCha20Poly1305`, and the SHA-256
   core and block buffer an `Hmac<Sha256>` is made of — plus a live-value wipe of each secret type;
   none reads freed memory.
-- **An open vault nothing uses is closed** — `github.open_vault_idle_ttl_seconds`
-  (`tddy-daemon-kernel`'s `open_vault_idle_ttl.rs`; default and maximum
-  `tddy_github::REFRESH_TOKEN_TTL`, seven days; `0` never), built into `SessionVaults` by
-  `tddy-daemon-auth`'s `vault_lifetimes::credential_vaults_in` (renamed from `pending_logins`,
-  which now takes the `github:` block), held per handle by `tddy-credentials`' new
+- **An open vault nothing uses is closed** — `github.open_vault_idle_ttl_seconds` (default and
+  maximum `tddy_github::REFRESH_TOKEN_TTL`, seven days; `0` never), built into `SessionVaults` by
+  `tddy-daemon-auth`'s `vault_lifetimes::credential_vaults_in` (renamed from `pending_logins`),
+  held per handle by `tddy-credentials`' new
   `sessions/open.rs`, and swept by `spawn_credential_sweep` every min(pending, idle, 60 s), each
   kind skipped at `0`. A use is a login sealing into the vault, an unlock/create/reset, a refresh
   reopening or rotating through it, or `retained_github_token`'s read (`SessionVaults::use_open`);
   `get`/`state` — a status poll — are not. Logged: the value at startup (`info`, `warn` at `0`),
   each closing (`info`, login and idle seconds). New suite
-  `tddy-daemon-auth/tests/open_vault_idle_expiry_acceptance.rs`; eight new `sessions.rs` tests; six
-  kernel parsing tests. `MAX_PENDING_LOGIN_TTL_SECONDS` now reads the same constant.
+  `tddy-daemon-auth/tests/open_vault_idle_expiry_acceptance.rs`; eight new `sessions.rs` tests.
+- **The kernel depends on no `tddy-github`** (developer's decision: `tddy-daemon-kernel` has
+  seventeen dependents). The first cut of the idle setting put its default and ceiling in the
+  kernel over a new `tddy-github` edge, and moved the pending ceiling onto `REFRESH_TOKEN_TTL` too.
+  The edge is gone again: the kernel reads both settings as plain `Option<u64>` (a negative or
+  non-numeric value still fails the config load, naming the setting), and `tddy-daemon-auth`'s
+  `VaultLifetimes::of` — first in `build_auth_entries_admitting`, where the vaults are built —
+  applies the defaults (`PENDING_LOGIN_LIFETIME`, 600 s; `REFRESH_TOKEN_TTL`), `0` = never and the
+  `REFRESH_TOKEN_TTL` ceiling. A value past the ceiling is an error naming the setting and its
+  limit, so the daemon still does not start — with or without `auth_storage`. The kernel's
+  default/ceiling tests moved to `tddy-daemon-auth/tests/vault_lifetime_config_acceptance.rs`,
+  which drives a yaml config through `build_auth_entries`; its parsing tests stay in the kernel.
+  `Cargo.lock` and `cargo tree -p tddy-daemon-kernel` name no `tddy-github`.
 - **Slot-bound eviction was not added**, by the model: `MAX_UNLOCK_SLOTS` evicts only when a slot is
   added, and the added slot belongs to the lineage that just used the vault, so the bound can never
   evict a vault's last slot.
@@ -192,7 +202,7 @@ Two commits on #510 after its wrap (`0918ff8c`), each closing a backlog entry ab
 |---|---|
 | `tddy-daemon-kernel/src/config.rs` | 1,474 → 1,476 (the field and its pointer) — `oversized-file-config` regressed, deferred with consent |
 | `tddy-daemon/src/runtime.rs` | 1,620 → 1,620 (the sweep line renamed); `build` 880 → 880 |
-| `tddy-daemon-auth/src/auth.rs` | 622 → 621; `build_auth_entries_admitting` 110 → 109 |
+| `tddy-daemon-auth/src/auth.rs` | 622 → 622; `build_auth_entries_admitting` 110 → 110 (one more `?`) |
 | `tddy-credentials/src/sessions.rs` | 420 → 452 (`sessions/open.rs` new, 129) — under budget, not split |
 
 Verification, scoped: `./test -p tddy-credentials -p tddy-daemon-auth -p tddy-github -p

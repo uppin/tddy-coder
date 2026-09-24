@@ -163,42 +163,28 @@ second account deliberately is `#keyring` 8/9 ([#515](https://github.com/uppin/t
 `tests/first_login_enrolment_acceptance.rs` pins the first login written down, a second account
 refused, the rest of the config kept, and an unmapped login still resolving to nobody.
 
-## `pending_login_ttl` — `github.pending_login_ttl_seconds`
+## `pending_login_ttl`, `open_vault_idle_ttl` — two settings read here and meant elsewhere
 
-`GitHubConfig.pending_login_ttl_seconds: PendingLoginTtl` is how long a sign-in's GitHub token may
-wait in memory for its owner's credential vault, and so how long that sign-in may choose the
-vault's passphrase ([auth-service.md § Credential vaults](../../tddy-daemon-auth/docs/auth-service.md#credential-vaults)).
-The type, its default and its validation live in `pending_login_ttl.rs`, so `config.rs` — far over
-its size budget — carries the field and a one-line pointer.
+`GitHubConfig.pending_login_ttl_seconds` (how long a sign-in's GitHub token may wait in memory for
+its credential vault, and so how long that sign-in may choose the vault's passphrase) and
+`GitHubConfig.open_vault_idle_ttl_seconds` (how long an open vault may go unused before the daemon
+closes it) are both a plain **`Option<u64>`** of seconds, `#[serde(default)]`. This crate reads
+them and nothing more:
 
-- `#[serde(default)]` → `DEFAULT_PENDING_LOGIN_TTL_SECONDS`, **600**.
-- `0` → never; `PendingLoginTtl::lifetime()` is `None`.
-- At most `MAX_PENDING_LOGIN_TTL_SECONDS`, **604,800** (seven days, the session refresh window —
-  `tddy_github::REFRESH_TOKEN_TTL`, read rather than restated).
-- Validated as it is read: `from_seconds` refuses a larger value, and deserialisation refuses a
-  negative or non-numeric one, each naming the setting — the config load fails rather than
-  clamping. `Display` prints `"600 s"` or `"never (0)"`, as the startup log line uses it.
+- absent → `None`; a whole number → `Some(n)`, **including `0` and values past any limit**;
+- a negative or non-numeric value fails the config load, and serde_yaml names the field path
+  (`github.open_vault_idle_ttl_seconds: invalid type: …`).
 
-Inline tests pin the default, `0`, the ceiling, and each refusal's message.
+**What the numbers mean is `tddy-daemon-auth`'s** (`vault_lifetimes::VaultLifetimes::of`, where
+the credential vaults are built): the defaults (600 s; the refresh-token lifetime), the ceiling (the
+refresh-token lifetime, past which the **daemon does not start**) and `0` = never — see
+[auth-service.md § Credential vaults](../../tddy-daemon-auth/docs/auth-service.md#credential-vaults).
+The ceiling is `tddy_github::REFRESH_TOKEN_TTL`, and this crate, with seventeen dependents, does
+**not** depend on `tddy-github`; the meaning lives in a crate that already does.
 
-## `open_vault_idle_ttl` — `github.open_vault_idle_ttl_seconds`
-
-`GitHubConfig.open_vault_idle_ttl_seconds: OpenVaultIdleTtl` is how long an unlocked credential
-vault may go unused before the daemon closes it and drops its data key
-([auth-service.md § Credential vaults](../../tddy-daemon-auth/docs/auth-service.md#credential-vaults)).
-Its own module for the same reason as `pending_login_ttl`, and shaped the same way:
-
-- `#[serde(default)]` → `DEFAULT_OPEN_VAULT_IDLE_TTL_SECONDS`, **604,800** — the refresh-token
-  lifetime, `tddy_github::REFRESH_TOKEN_TTL`.
-- `0` → never; `OpenVaultIdleTtl::lifetime()` is `None`.
-- At most `MAX_OPEN_VAULT_IDLE_TTL_SECONDS`, the same **604,800**: past it no lineage that could
-  have used the vault can still refresh.
-- Validated as it is read, each refusal naming the setting; `Display` prints `"3600 s"` or
-  `"never (0)"`.
-
-Reading `REFRESH_TOKEN_TTL` is why this crate depends on `tddy-github` (which depends on no daemon
-crate, so the edge closes no cycle). Inline tests pin the default, `0`, the ceiling, and each
-refusal's message.
+`pending_login_ttl.rs` and `open_vault_idle_ttl.rs` now hold only their module doc and the parsing
+tests (absent, `0`, a value past the ceiling read as given, and the two refusals naming the
+setting), so `config.rs` — far over its size budget — carries each field and a one-line pointer.
 
 ## See also
 

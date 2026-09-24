@@ -28,10 +28,9 @@ use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SecretString, SessionVaults, VaultError,
 };
 use tddy_daemon_auth::vault_lifetimes::{
-    credential_vaults_in, spawn_credential_sweep, sweep_period,
+    credential_vaults_in, spawn_credential_sweep, sweep_period, VaultLifetimes,
 };
 use tddy_daemon_kernel::config::GitHubConfig;
-use tddy_daemon_kernel::pending_login_ttl::PendingLoginTtl;
 use tddy_rpc::Code;
 use tddy_service::proto::auth::VaultState;
 
@@ -124,7 +123,7 @@ async fn a_sign_in_on_a_daemon_whose_pending_logins_never_expire_still_creates_t
     let clock = AHandDrivenClock::new();
     let running = daemon.running_on(
         clock.as_clock(),
-        PendingLoginTtl::from_seconds(0).unwrap().lifetime(),
+        the_vault_lifetimes_when_sign_ins_wait(0).pending,
     );
     let signed_in = running.sign_in().await;
     clock.advance(Duration::from_secs(365 * 24 * 60 * 60));
@@ -208,7 +207,7 @@ async fn startup_logs_the_configured_lifetime() {
     let storage = tempfile::tempdir().expect("a temporary directory");
 
     // When its vaults are built with a two-minute lifetime
-    credential_vaults_in(storage.path(), &a_github_block_whose_sign_ins_wait(120));
+    credential_vaults_in(storage.path(), &the_vault_lifetimes_when_sign_ins_wait(120));
 
     // Then the lifetime is announced
     assert!(
@@ -225,7 +224,7 @@ async fn startup_warns_when_pending_tokens_never_expire() {
     let storage = tempfile::tempdir().expect("a temporary directory");
 
     // When its vaults are built with a lifetime of 0
-    credential_vaults_in(storage.path(), &a_github_block_whose_sign_ins_wait(0));
+    credential_vaults_in(storage.path(), &the_vault_lifetimes_when_sign_ins_wait(0));
 
     // Then it warns where the tokens stay, and for how long
     assert!(
@@ -277,12 +276,14 @@ async fn holding_expiring_and_refusing_are_each_logged_and_the_token_never_is() 
     );
 }
 
-/// A `github:` block whose pending sign-ins wait `seconds`, every other setting at its default.
-fn a_github_block_whose_sign_ins_wait(seconds: u64) -> GitHubConfig {
-    GitHubConfig {
-        pending_login_ttl_seconds: PendingLoginTtl::from_seconds(seconds).unwrap(),
+/// What a `github:` block whose pending sign-ins wait `seconds` resolves to, every other setting at
+/// its default.
+fn the_vault_lifetimes_when_sign_ins_wait(seconds: u64) -> VaultLifetimes {
+    VaultLifetimes::of(&GitHubConfig {
+        pending_login_ttl_seconds: Some(seconds),
         ..GitHubConfig::default()
-    }
+    })
+    .expect("a lifetime within its ceiling")
 }
 
 /// A GitHub record for [`THE_LOGIN`] holding `token`.

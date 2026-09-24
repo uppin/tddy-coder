@@ -176,6 +176,7 @@ pub fn build_auth_entries_admitting(
         Some(g) => g,
         None => return Ok(AuthBuildResult::unauthenticated()),
     };
+    let lifetimes = crate::vault_lifetimes::VaultLifetimes::of(github)?; // refused past its ceiling
 
     // Where each operator's credential vault lives — the GitHub access token a real login granted,
     // sealed under a key the operator's vault passphrase derives, so the daemon can later read that
@@ -204,7 +205,7 @@ pub fn build_auth_entries_admitting(
                 log::warn!(target: crate::AUTH_LOG_TARGET, "{warning}");
             }
             Some(Arc::new(crate::vault_lifetimes::credential_vaults_in(
-                dir, github,
+                dir, &lifetimes,
             )))
         }
         None => None,

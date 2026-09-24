@@ -5,12 +5,22 @@
 //!
 //! - **a pending sign-in's token** — a sign-in over a closed vault holds its GitHub token unsealed
 //!   until the passphrase opens the vault, and that waiting token is what permits a first
-//!   passphrase or a reset. It expires after `github.pending_login_ttl_seconds`
-//!   (`tddy_daemon_kernel::pending_login_ttl`);
+//!   passphrase or a reset. It expires after `github.pending_login_ttl_seconds`;
 //! - **an open vault's data key** — kept so PR-status reads can use the stored token, and closed
-//!   once nothing has used the vault for `github.open_vault_idle_ttl_seconds`
-//!   (`tddy_daemon_kernel::open_vault_idle_ttl`). The next refresh presenting an unlock key reopens
-//!   it, exactly as after a restart.
+//!   once nothing has used the vault for `github.open_vault_idle_ttl_seconds`. The next refresh
+//!   presenting an unlock key reopens it, exactly as after a restart.
+//!
+//! **What each setting means is decided here** ([`VaultLifetimes::of`]), not in the daemon's config,
+//! which reads both as plain optional seconds: this crate already depends on `tddy-github`, whose
+//! refresh-token lifetime is the default and the ceiling, and `tddy-daemon-kernel` must not.
+//!
+//! | Setting | absent | `0` | at most |
+//! |---|---|---|---|
+//! | `pending_login_ttl_seconds` | [`PENDING_LOGIN_LIFETIME`], ten minutes | never | [`REFRESH_TOKEN_TTL`] |
+//! | `open_vault_idle_ttl_seconds` | [`REFRESH_TOKEN_TTL`], seven days | never | [`REFRESH_TOKEN_TTL`] |
+//!
+//! A value past its ceiling stops the daemon at startup, naming the setting — a longer lifetime
+//! would outlive every session that could still refresh.
 //!
 //! `SessionVaults` drops either whenever it looks at it; the sweep here covers the one nobody looks
 //! at again. Kept out of `auth.rs` and `runtime.rs`, both over their size budget: each calls one
@@ -20,8 +30,9 @@ use std::path::Path;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use tddy_credentials::SessionVaults;
+use tddy_credentials::{SessionVaults, PENDING_LOGIN_LIFETIME};
 use tddy_daemon_kernel::config::GitHubConfig;
+use tddy_github::REFRESH_TOKEN_TTL;
 
 use crate::AUTH_LOG_TARGET;
 
@@ -29,19 +40,64 @@ use crate::AUTH_LOG_TARGET;
 /// outlives its lifetime by at most this much, even with nobody signing in.
 const LONGEST_SWEEP_PERIOD: Duration = Duration::from_secs(60);
 
-/// The vaults over `dir`, holding a pending sign-in's token and an unused open vault for as long as
-/// `github` says — and said so, once, at startup: an `info` naming each lifetime, and a `warn` for
-/// each that is `0`.
-pub fn credential_vaults_in(dir: &Path, github: &GitHubConfig) -> SessionVaults {
-    let (pending, idle) = (
-        github.pending_login_ttl_seconds,
-        github.open_vault_idle_ttl_seconds,
-    );
-    match pending.lifetime() {
-        Some(_) => log::info!(
+/// How long the credential vaults hold each thing, resolved from the `github:` block — `None` for
+/// never.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VaultLifetimes {
+    /// How long a sign-in's token waits for its vault (`github.pending_login_ttl_seconds`).
+    pub pending: Option<Duration>,
+    /// How long an open vault may go unused (`github.open_vault_idle_ttl_seconds`).
+    pub idle: Option<Duration>,
+}
+
+impl VaultLifetimes {
+    /// The lifetimes `github` configures, with the defaults for what it leaves out — or, for a
+    /// value past its ceiling, the error that stops the daemon, naming the setting.
+    pub fn of(github: &GitHubConfig) -> anyhow::Result<Self> {
+        Ok(Self {
+            pending: resolved(
+                "github.pending_login_ttl_seconds",
+                github.pending_login_ttl_seconds,
+                PENDING_LOGIN_LIFETIME,
+            )?,
+            idle: resolved(
+                "github.open_vault_idle_ttl_seconds",
+                github.open_vault_idle_ttl_seconds,
+                REFRESH_TOKEN_TTL,
+            )?,
+        })
+    }
+}
+
+/// `configured` seconds as a lifetime: `default` when absent, `None` for `0`, refused past
+/// [`REFRESH_TOKEN_TTL`].
+fn resolved(
+    setting: &str,
+    configured: Option<u64>,
+    default: Duration,
+) -> anyhow::Result<Option<Duration>> {
+    let ceiling = REFRESH_TOKEN_TTL.as_secs();
+    match configured {
+        None => Ok(Some(default)),
+        Some(0) => Ok(None),
+        Some(seconds) if seconds <= ceiling => Ok(Some(Duration::from_secs(seconds))),
+        Some(seconds) => Err(anyhow::anyhow!(
+            "{setting} is at most {ceiling} (seven days, the refresh-token lifetime); got \
+             {seconds}. 0 means never"
+        )),
+    }
+}
+
+/// The vaults over `dir`, holding a pending sign-in's token and an unused open vault for
+/// `lifetimes` — and said so, once, at startup: an `info` naming each lifetime, and a `warn` for
+/// each that is never.
+pub fn credential_vaults_in(dir: &Path, lifetimes: &VaultLifetimes) -> SessionVaults {
+    match lifetimes.pending {
+        Some(pending) => log::info!(
             target: AUTH_LOG_TARGET,
-            "a sign-in's GitHub token waits in memory for its credential vault for {pending} \
-             (github.pending_login_ttl_seconds) before it is dropped"
+            "a sign-in's GitHub token waits in memory for its credential vault for {} s \
+             (github.pending_login_ttl_seconds) before it is dropped",
+            pending.as_secs()
         ),
         None => log::warn!(
             target: AUTH_LOG_TARGET,
@@ -50,11 +106,12 @@ pub fn credential_vaults_in(dir: &Path, github: &GitHubConfig) -> SessionVaults 
              and it permits choosing the vault's passphrase as long"
         ),
     }
-    match idle.lifetime() {
-        Some(_) => log::info!(
+    match lifetimes.idle {
+        Some(idle) => log::info!(
             target: AUTH_LOG_TARGET,
-            "an open credential vault nothing uses is closed, and its data key dropped, after \
-             {idle} (github.open_vault_idle_ttl_seconds)"
+            "an open credential vault nothing uses is closed, and its data key dropped, after {} \
+             s (github.open_vault_idle_ttl_seconds)",
+            idle.as_secs()
         ),
         None => log::warn!(
             target: AUTH_LOG_TARGET,
@@ -64,8 +121,8 @@ pub fn credential_vaults_in(dir: &Path, github: &GitHubConfig) -> SessionVaults 
         ),
     }
     SessionVaults::new(dir)
-        .with_pending_lifetime(pending.lifetime())
-        .with_idle_lifetime(idle.lifetime())
+        .with_pending_lifetime(lifetimes.pending)
+        .with_idle_lifetime(lifetimes.idle)
 }
 
 /// How often the sweep looks: once per shortest lifetime, and at least once a minute — `None`

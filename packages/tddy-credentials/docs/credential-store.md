@@ -142,7 +142,8 @@ status) arrive later, with only a session token. For each user it answers `Vault
   its own sign-in.
 - **A pending sign-in expires.** Each pending record carries the time its sign-in arrived, and
   after `with_pending_lifetime` (default `PENDING_LOGIN_LIFETIME`, 600 s; the daemon sets it from
-  `github.pending_login_ttl_seconds`, where `0` means never) it is dropped — the token's
+  `github.pending_login_ttl_seconds` through `tddy-daemon-auth`'s `VaultLifetimes::of`, which also
+  takes its absent default from `PENDING_LOGIN_LIFETIME` and reads `0` as never) it is dropped — the token's
   `SecretString` is wiped as the record drops — and with it the permission to choose a passphrase:
   `create` and `reset` are then `NoFreshLogin`, whose message tells the operator to sign in to
   GitHub again, and a later `unlock` seals nothing from it. The state reported is untouched
@@ -192,7 +193,8 @@ status) arrive later, with only a session token. For each user it answers `Vault
 - **An open vault nothing uses is closed** (`sessions/open.rs`). A lineage that simply stops
   refreshing never logs out, so the handle also carries when it was last **used**, and after
   `with_idle_lifetime` (default `None` — held until the daemon exits; the daemon sets it from
-  `github.open_vault_idle_ttl_seconds`, seven days unless configured) unused, it is dropped and its
+  `github.open_vault_idle_ttl_seconds`, whose default of seven days and ceiling `tddy-daemon-auth`'s
+  `vault_lifetimes::VaultLifetimes::of` applies) unused, it is dropped and its
   data key wipes itself as the last `Arc` goes. A use is `retain` sealing into it, `unlock` /
   `create` / `reset` opening it, `reopen` reopening or rotating through it, and `use_open` — the
   credential read `retained_github_token` makes. `get` and `state` only ask, and are not a use: a

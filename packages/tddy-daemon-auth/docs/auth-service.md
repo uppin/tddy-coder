@@ -81,7 +81,7 @@ are `tddy-github`'s `AuthServiceImpl`. This crate builds the registry and reads 
 
 **Construction.** When `auth_storage` is set, `build_auth_entries_admitting` probes it (create the
 directory `0700`, write and remove `credentials.probe`), warns once about a directory looser than
-`0700`, and builds one `SessionVaults` through `vault_lifetimes::credential_vaults_in(dir, github)`. The
+`0700`, and builds one `SessionVaults` through `vault_lifetimes::credential_vaults_in(dir, &lifetimes)`. The
 same `Arc<SessionVaults>` goes to the `auth.AuthService` entry (`with_credential_vaults`) and back in
 `AuthBuildResult::credential_vaults`, which `tddy-daemon`'s runtime hands to the session host for
 PR-status reads. No `auth_storage` → `None`: logins succeed, report the vault `NONE`, and PR status
@@ -97,9 +97,15 @@ also what permits choosing a first passphrase or a reset. Both expire:
 | | `0` | never: held until an unlock, a logout or a restart; a startup `warn` says so |
 | | `1` … `604800` | that many seconds (at most the seven-day refresh window) |
 
-A negative, non-numeric or larger value fails the config load, naming the setting. The type, its
-default and its validation are `tddy-daemon-kernel`'s `pending_login_ttl.rs`
-(`PendingLoginTtl`); `GitHubConfig` carries only the field. At startup
+**Where the meaning is decided.** The daemon's config (`tddy-daemon-kernel`) reads both lifetimes
+as a plain `Option<u64>` — a negative or non-numeric value fails the config load, naming the
+setting — and nothing more. `vault_lifetimes::VaultLifetimes::of(github)`, the first thing
+`build_auth_entries_admitting` does once it has a `github:` block, applies the defaults, `0` =
+never, and the ceiling, `tddy_github::REFRESH_TOKEN_TTL`: a value past it is an `Err` naming the
+setting and its limit (`github.pending_login_ttl_seconds is at most 604800 …`), so **the daemon does
+not start** — with or without `auth_storage`. It lives here because this crate already depends on
+`tddy-github`, and the kernel must not. `tests/vault_lifetime_config_acceptance.rs` pins it from
+yaml through `build_auth_entries`. At startup
 `credential_vaults_in` logs the lifetime at `info` (target `tddy_daemon::auth`).
 `SessionVaults` checks the lifetime on every access.
 
@@ -115,8 +121,8 @@ through `retained_github_token` — is closed, and its data key dropped, after:
 | | `0` | never: held until its last lineage logs out or a restart; a startup `warn` says so |
 | | `1` … `604800` | that many seconds (at most the refresh-token lifetime) |
 
-The type is `tddy-daemon-kernel`'s `open_vault_idle_ttl.rs` (`OpenVaultIdleTtl`), validated like
-the pending lifetime; `credential_vaults_in` logs it at `info` at startup. A closed vault is exactly
+Resolved by `VaultLifetimes::of` like the pending lifetime; `credential_vaults_in` logs it at
+`info` at startup. A closed vault is exactly
 a restarted daemon's: `LOCKED`, PR status *unavailable* with the reopen reason below, and the next
 refresh presenting an unlock key reopens it. Each closing is logged at `info` by `tddy-credentials`
 (target `tddy_credentials::sessions`) with the login and how long the vault sat unused.
@@ -335,6 +341,7 @@ cargo test -p tddy-daemon-auth
 | `tests/credential_vault_guard_acceptance.rs` | a create or reset refused without a fresh sign-in's waiting token; a refresh token refused where an access token belongs; a passphrase outside the accepted lengths refused; a reset refused while open; a key-less logout dropping the waiting token; wrong passphrases throttled, with the retry-after named (the set-aside cap is `tddy-credentials`' `sessions.rs` tests) |
 | `tests/pending_login_expiry_acceptance.rs` | past `pending_login_ttl_seconds`, a first passphrase or a reset refused with *sign in to GitHub again* and the state unchanged; the sweep dropping an untouched token; no sweep at `0`; the startup, hold, expiry and refusal logs, none carrying a token or passphrase |
 | `tests/open_vault_idle_expiry_acceptance.rs` | past `open_vault_idle_ttl_seconds` unused, PR status unavailable exactly as after a restart, and a refresh with the unlock key reopening the vault; a PR-status read and a refresh each keeping it open; `0` never closing it; the sweep closing a vault nobody looked at, and its period across both lifetimes; the startup `info` / `warn` and the closing log (login and idle seconds, no secret). Log capture is `tests/support/captured_log.rs` |
+| `tests/vault_lifetime_config_acceptance.rs` | from a yaml config through `build_auth_entries`: both lifetimes' defaults (600 s, `REFRESH_TOKEN_TTL`), `0` as never, explicit values taken; a value past a week refusing to start naming the setting and `604800`, with and without `auth_storage`; a negative value refused by the config load, naming the setting |
 | `tests/pr_lookup_credentials_acceptance.rs` | `pr_lookup_for_caller`'s `Empty`, `Unavailable(reason)` and `Perform(token)` |
 
 ## Related
