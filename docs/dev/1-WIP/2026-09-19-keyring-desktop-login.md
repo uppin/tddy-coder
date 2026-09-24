@@ -251,7 +251,7 @@ open them, because its own `tddy-github` finding is the one in its path.
 - [~] **Decisions answered**: **OAuth App** (developer, during green) — ⚠ not yet verified against the live API; client id **rendered into `desktop.yaml.production`** — decided; the id itself and M8 are deferred to the developer — 'I'll configure and test production myself'
 - [~] **Testing**: acceptance + unit written for every item, V1's transport tests included; the `tddy-web` spec passed 22/22 at `bba454da` — ⚠ not re-run by the 2026-09-24 validation; the orchestrator's scoped `cargo check --all-targets` over the 34 touched packages is the build gate for this run, and CI is the test gate (see *Validation Results*)
 - [ ] **Package Documentation**: the six packages above
-- [ ] **Code Quality**: scoped clippy per package; CI green — ⚠ not run by the 2026-09-24 validation (see *Validation Results*)
+- [ ] **Code Quality**: scoped clippy per package; CI green — ⚠ not ticked. Scoped clippy is clean on the four Rust packages `/pr-wrap` step 4 touched, but the clean-code score is **C**, not B. `build_auth_entries_admitting` (106, recorded only) and `startDeviceLogin` (73) are still must-refactor; see *Validation Results → /analyze-clean-code*
 
 ## Technical Changes
 
@@ -501,6 +501,42 @@ package, and the single web spec. Whole-workspace green comes from CI.
 - ~~**Fix now (V2 debt):** extend `docs/dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md:11` to name `tddy-daemon-kernel/src/first_login_enrolment.rs` `enrol_first_login` as the second writer that loses comments — on every desktop's first sign-in, header included — and point the TODO at `first_login_enrolment.rs:84` to that entry.~~ **Done in pr-wrap step 3** — the backlog bullet now names both writers and one fix; the TODO is `TODO(docs/dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md)`. The comment loss itself is recorded, not fixed.
 - Recorded only: `first_login_enrolment.rs:61` `pub fn enrol_first_login` skips `LiveUsers`' file-write lock (production caller is `live_users.rs` only; narrowing it means moving `tddy-daemon-kernel/tests/first_login_enrolment_acceptance.rs` onto `LiveUsers::enrol_first_login`); `live_users.rs` `snapshot` and `From<Vec<UserMapping>>` are test-support API.
 
+### From /analyze-clean-code
+
+- ~~`real.rs`: extract `post_for_json` over `exchange_code` / `start_device_login` / `poll_device_login`
+  (POST + Accept + status + parse ×3); name `ACCESS_TOKEN_PATH`; build the authorize URL's scope from
+  `SCOPES`. Takes `poll_device_login` (62) under 40.~~ — done (step 4): `post_for_json` worded by a
+  `PostFailures` const per call, so every error string is byte-identical; `ACCESS_TOKEN_PATH` and
+  `DEVICE_CODE_PATH`; the scope is `SCOPES.replace(' ', "%20")`; `public_client_refusal(cannot)` for
+  the two refusals; the poll answer's match extracted to `device_poll_outcome`. 62 → 17 lines
+- ~~`first_login_admission.rs`: use `crate::AUTH_LOG_TARGET` for the four `"tddy_daemon::auth"`
+  literals; extract `is_this_desktops_window` (exhaustive) and `enrol` from `admit` (61).~~ — done
+  (step 4); `AUTH_LOG_TARGET` is `"tddy_daemon::auth"`, so no log target moved; the match has no
+  wildcard arm. 61 → 14 lines
+- ~~`stub.rs`: name `900` as `STUB_DEVICE_LOGIN_EXPIRES_IN_SECONDS`.~~ — done (step 4)
+- ~~`StubGitHubProvider::register_code_mappings` to replace the identical parsers in `run.rs` and
+  `auth.rs`; local `auth_service_entry_for<P>` in `run.rs`. Takes `build_auth_service_entry`
+  (61, nesting 6) under 40.~~ — done (step 4): the two copies were identical (split on `,`,
+  `splitn(2, ':')`, an entry without `:` skipped, nothing trimmed); `register_stub_codes` deleted;
+  plus a local `auth_callback_on` for the `{public_url}/auth/callback` both arms built. 61 → 36
+  lines, nesting 6 → 3
+- ~~`auth_service.rs`: rename `not_yet` → `without_session` (it also builds Denied/Expired).~~ — done
+  (step 4)
+- ~~`live_users.rs`: `lock_file_writes()` for the duplicated lock+expect.~~ — done (step 4)
+- ~~`useAuth.ts` `startDeviceLogin` (98): `intervalMsOf` + `MS_PER_SECOND`, hoist the poll-answer switch
+  to a pure module function, `signedInState(user, token)` for the duplicated signed-in literal.~~ —
+  done (step 4): `devicePollStep` returns a `DevicePollStep` (`poll` after N ms / `settle` on a
+  `DeviceLogin` / `adopt` a whole session). 98 → 73 lines, nesting 5 → 3 — ⚠ still over 60; the
+  rest is the attempt's own closure state (`isCurrent`, `poll`, `scheduleNextPoll`), and cutting it
+  further means restructuring the poll loop, which this step did not
+- ~~`DeviceLoginPanel.tsx`: reuse `GitHubLoginButton`'s class instead of the copied string.~~ — done
+  (step 4): `GITHUB_BUTTON_CLASS_NAME` exported from `GitHubLoginButton.tsx`
+- Recorded only: `build_auth_entries_admitting` (106) — extract `github_token_store` /
+  `github_auth_entry` after #keyring 3/9; move `GitHubAuthFlow` into `tddy-github` so `run.rs` stops
+  restating `"redirect"` (cross-crate move in files dependents touch); pre-existing CLI/config
+  defaults (`stub-client-id`, `127.0.0.1`, `8080`, callback URL) are backlog candidates under the
+  no-fallbacks rule, not this PR's.
+
 ## Restructuring — `/pr-wrap` step 3.5 file-length gate (2026-09-24)
 
 **Run:** the step 3.5 gate over the whole PR range `4e7157d2..d1923dfe` (merge-base with
@@ -598,6 +634,7 @@ touched packages, and CI is the whole-workspace gate.
 | the 34 touched Rust packages | see orchestrator | not run by this validation — CI |
 | tddy-web `DeviceLoginAcceptance.cy.tsx` | n/a | ✅ 22/22 at `bba454da`; ⚠ `55a44090` changed the spec and `clientConfig.test.ts` — not re-run here |
 | `/pr-wrap` step 1 refactor (V9, V10, V13): tddy-rpc, tddy-github, tddy-bsp, tddy-daemon-auth, tddy-coder | ✅ `cargo check --all-targets` and `cargo clippy --all-targets -- -D warnings` clean over all five | ✅ `./test -p tddy-rpc -p tddy-github -p tddy-bsp -p tddy-daemon-auth`: 237 passed, 0 failed (30 binaries); ✅ `./test -p tddy-coder --lib`: 107 passed, 0 failed (includes the 5 new `standalone_auth_flow_declaration_tests`); tddy-coder integration suites not run locally, so CI covers them |
+| `/pr-wrap` step 4 refactor (clean code): tddy-github, tddy-daemon-auth, tddy-daemon-kernel, tddy-coder, tddy-web | ✅ `cargo check -p tddy-daemon --all-targets` clean (consumes `auth.rs`); ✅ `cargo clippy -p <pkg> --all-targets -- -D warnings` clean on tddy-github, tddy-daemon-auth, tddy-daemon-kernel, tddy-coder | ✅ `./test -p tddy-github -p tddy-daemon-auth -p tddy-daemon-kernel`: 307 passed, 0 failed (22 binaries); ✅ `./test -p tddy-coder --lib`: 107 passed, 0 failed; ✅ Cypress component, each spec alone: `DeviceLoginAcceptance` 28/28, `RedirectLoginAcceptance` 4/4, `DurableSessionAcceptance` 6/6, `AuthProviderRefreshAcceptance` 4/4, `App` 4/4. No test modified. The authorize URL and both public-client refusals were also compared byte for byte with the pre-refactor literals by a throwaway test, deleted after the run. tddy-coder integration suites and the other tddy-daemon suites are left to CI |
 | `/pr-wrap` step 2 refactor (T1–T13, test-only): tddy-github, tddy-daemon-auth, tddy-rpc, tddy-daemon-livekit, tddy-daemon, tddy-web | ✅ `cargo clippy -p <pkg> --all-targets -- -D warnings` clean on all five Rust packages | ✅ `./test -p tddy-github -p tddy-daemon-auth`: 195 passed, 0 failed; ✅ `./test -p tddy-rpc`: 39 passed, 0 failed; ✅ `./test -p tddy-daemon-livekit --test forwarded_rpc_is_stamped_by_the_receiver`: 1 passed; ✅ `./test -p tddy-daemon --test first_login_enrolment_acceptance --test server_options_acceptance --test daemon_config_service`: 9 + 14 + 20 passed, 0 failed; ✅ `DeviceLoginAcceptance.cy.tsx` alone: 28/28 (25 before, plus the 3 T1 cases). Other tddy-daemon suites are left to CI |
 
 ### Fallback scan (production code added since `origin/master`)
@@ -669,6 +706,55 @@ No `println!` / `eprintln!` added. New `unwrap`/`expect` in production are lock-
 | TODO/FIXME | 2 | ⚠️ `run.rs` `TODO(#keyring 2/9)` — V9, fixed in step 1. `first_login_enrolment.rs:84` — V2, unreferenced → referenced to the backlog entry in step 3 |
 | Unused code | 3 | ⚠️ `stub.rs` `pub const STUB_DEVICE_LOGIN_*` referenced only in `stub.rs`; `live_users.rs` `snapshot` / `From<Vec<UserMapping>>` test-only support API; `first_login_enrolment.rs` `pub fn enrol_first_login` bypasses `LiveUsers`' file lock (one kernel acceptance test uses it). `new_public*`'s `redirect_uri` — V13, step 1 |
 | Debug output | 0 | ✅ No `println!`/`eprintln!`/`dbg!`/`console.*` added |
+
+### /analyze-clean-code (2026-09-24)
+
+**Run:** `/pr-wrap` step 4, `pr-509-green` @ `6779f7fc`, base `origin/master`. Scored the ~72 functions
+this PR added or substantially changed (tests and the ~590 mechanical `Request::direct` /
+`RequestMetadata::over` substitutions excluded). File length: settled at step 3.5 — 13 files deferred
+with consent.
+
+**Score: D** (5 must-refactor, 5 needs-attention) before the step 4 refactor.
+
+| Metric | Excellent | Acceptable | Needs Attention | Must Refactor |
+|---|---|---|---|---|
+| Function length | 52 | 10 | 5 | 5 |
+| Nesting depth | 64 | 6 | 1 | 1 |
+| Parameter count | 66 | 4 | 2 | 0 |
+
+Priority fixes:
+- `tddy-github/src/real.rs` `poll_device_login` — 62 lines; POST/status/parse triplet ×3 across the provider
+- `tddy-daemon-auth/src/first_login_admission.rs` `admit` — 61 lines
+- `tddy-coder/src/run.rs` `build_auth_service_entry` — 61 lines, nesting 6; stub-codes parser duplicated with `auth.rs` `register_stub_codes`
+- `tddy-web/src/hooks/useAuth.ts` `startDeviceLogin` — 98 lines, nesting 4
+- `tddy-daemon-auth/src/auth.rs` `build_auth_entries_admitting` — 106 lines (recorded, not fixed: pre-existing body, #keyring 3/9 territory)
+
+Magic values: the authorize URL's scope literal duplicates `SCOPES`; `stub.rs` `900`;
+`first_login_admission.rs` `"tddy_daemon::auth"` ×4 despite `crate::AUTH_LOG_TARGET`;
+`run.rs` `"redirect"` duplicates `GitHubAuthFlow::as_str`; `useAuth.ts` `* 1000` ×2.
+
+**After the step 4 refactor: Score C** (2 must-refactor, down from 5). They are the recorded-only
+`build_auth_entries_admitting`, which alone caps the grade at C whatever else is fixed, and
+`startDeviceLogin`, down to 73 lines but still over 60. Needs-attention: none of the priority
+functions; `device_poll_outcome` (new) is acceptable at 39. Measured
+with one brace-depth counter over `HEAD` (`6779f7fc`) and the working tree. It reproduces the
+analysis's `HEAD` lengths exactly, but reads `startDeviceLogin`'s nesting as 5 where the analysis
+said 4.
+
+| Function | Lines before → after | Nesting before → after |
+|---|---|---|
+| `real.rs` `poll_device_login` | 62 → **17** | 3 → 1 |
+| `real.rs` `device_poll_outcome` (new, the poll answer's match) | — → 39 | — → 3 |
+| `real.rs` `exchange_code` | 44 → 26 | 1 → 1 |
+| `real.rs` `start_device_login` | 42 → 29 | 1 → 1 |
+| `first_login_admission.rs` `admit` | 61 → **14** | 3 → 2 |
+| `run.rs` `build_auth_service_entry` | 61 → **36** | 6 → **3** |
+| `useAuth.ts` `startDeviceLogin` | 98 → **73** ⚠ | 5 → 3 |
+| `auth.rs` `build_auth_entries_admitting` (recorded only) | 106 → 106 | 4 → 4 |
+
+Magic values after: the scope is built from `SCOPES`, `900` is `STUB_DEVICE_LOGIN_EXPIRES_IN_SECONDS`,
+all four log targets are `crate::AUTH_LOG_TARGET`, `* 1000` is `intervalMsOf` / `MS_PER_SECOND`.
+`run.rs` `"redirect"` stays (recorded with the `GitHubAuthFlow` move).
 
 ### V1 options (green, 2026-09-23)
 

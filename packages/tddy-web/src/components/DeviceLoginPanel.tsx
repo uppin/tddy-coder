@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useAuthContext } from "../hooks/authProvider";
+import { GITHUB_BUTTON_CLASS_NAME } from "./GitHubLoginButton";
 
 /**
  * GitHub sign-in by device code, for a daemon that serves `StartDeviceLogin` / `PollDeviceLogin`
@@ -58,7 +59,7 @@ export function DeviceLoginPanel() {
         data-testid="device-login-start"
         disabled={deviceLogin.phase === "starting"}
         onClick={() => void startDeviceLogin()}
-        className="bg-[#24292f] text-white hover:bg-[#24292f]/90 dark:bg-[#24292f] dark:hover:bg-[#24292f]/90"
+        className={GITHUB_BUTTON_CLASS_NAME}
       >
         {deviceLogin.phase === "idle" || deviceLogin.phase === "starting"
           ? "Sign in with GitHub"

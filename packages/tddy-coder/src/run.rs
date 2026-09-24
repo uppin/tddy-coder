@@ -1169,7 +1169,7 @@ fn build_auth_service_entry(args: &Args) -> Option<tddy_rpc::ServiceEntry> {
             // so the browser stays on the same domain (no cross-origin redirect to github.com).
             // Use web_public_url if set, otherwise derive from host+port.
             let stub = if let Some(ref public_url) = args.web_public_url {
-                let callback_url = format!("{}/auth/callback", public_url.trim_end_matches('/'));
+                let callback_url = auth_callback_on(public_url);
                 tddy_github::StubGitHubProvider::new_with_callback(&callback_url, client_id)
             } else if let Some(port) = args.web_port {
                 let host = args.web_host.as_deref().unwrap_or("127.0.0.1");
@@ -1179,47 +1179,39 @@ fn build_auth_service_entry(args: &Args) -> Option<tddy_rpc::ServiceEntry> {
                 tddy_github::StubGitHubProvider::new("https://github.com", client_id)
             };
             if let Some(ref codes) = args.github_stub_codes {
-                for mapping in codes.split(',') {
-                    let parts: Vec<&str> = mapping.splitn(2, ':').collect();
-                    if parts.len() == 2 {
-                        stub.register_code(
-                            parts[0],
-                            tddy_github::GitHubUser {
-                                id: 1,
-                                login: parts[1].to_string(),
-                                avatar_url: format!("https://github.com/{}.png", parts[1]),
-                                name: parts[1].to_string(),
-                            },
-                        );
-                    }
-                }
+                stub.register_code_mappings(codes);
             }
-            let auth_service_impl = tddy_github::AuthServiceImpl::new(stub);
-            let auth_server = tddy_service::AuthServiceServer::new(auth_service_impl);
-            Some(tddy_rpc::ServiceEntry {
-                name: "auth.AuthService",
-                service: std::sync::Arc::new(auth_server)
-                    as std::sync::Arc<dyn tddy_rpc::RpcService>,
-            })
+            Some(auth_service_entry_for(stub))
         }
         StandaloneAuthProvider::Confidential { client_id, secret } => {
-            let redirect_uri = args.github_redirect_uri.clone().unwrap_or_else(|| {
-                if let Some(ref public_url) = args.web_public_url {
-                    format!("{}/auth/callback", public_url.trim_end_matches('/'))
-                } else {
-                    let port = args.web_port.unwrap_or(8080);
-                    format!("http://localhost:{}/auth/callback", port)
-                }
-            });
+            let redirect_uri = match (&args.github_redirect_uri, &args.web_public_url) {
+                (Some(redirect_uri), _) => redirect_uri.clone(),
+                (None, Some(public_url)) => auth_callback_on(public_url),
+                (None, None) => format!(
+                    "http://localhost:{}/auth/callback",
+                    args.web_port.unwrap_or(8080)
+                ),
+            };
             let real = tddy_github::RealGitHubProvider::new(client_id, secret, &redirect_uri);
-            let auth_service_impl = tddy_github::AuthServiceImpl::new(real);
-            let auth_server = tddy_service::AuthServiceServer::new(auth_service_impl);
-            Some(tddy_rpc::ServiceEntry {
-                name: "auth.AuthService",
-                service: std::sync::Arc::new(auth_server)
-                    as std::sync::Arc<dyn tddy_rpc::RpcService>,
-            })
+            Some(auth_service_entry_for(real))
         }
+    }
+}
+
+/// The OAuth callback on the web server published at `public_url`.
+fn auth_callback_on(public_url: &str) -> String {
+    format!("{}/auth/callback", public_url.trim_end_matches('/'))
+}
+
+/// `provider` served as this process's `auth.AuthService`.
+fn auth_service_entry_for<P: tddy_github::GitHubOAuthProvider>(
+    provider: P,
+) -> tddy_rpc::ServiceEntry {
+    let auth_service_impl = tddy_github::AuthServiceImpl::new(provider);
+    let auth_server = tddy_service::AuthServiceServer::new(auth_service_impl);
+    tddy_rpc::ServiceEntry {
+        name: "auth.AuthService",
+        service: std::sync::Arc::new(auth_server) as std::sync::Arc<dyn tddy_rpc::RpcService>,
     }
 }
 

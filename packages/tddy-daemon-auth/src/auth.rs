@@ -217,7 +217,7 @@ pub fn build_auth_entries_admitting(
             let client_id = github.client_id.as_deref().unwrap_or("stub-client-id");
             let stub = StubGitHubProvider::new_with_callback(&redirect_uri(), client_id);
             if let Some(ref codes) = github.stub_codes {
-                register_stub_codes(&stub, codes);
+                stub.register_code_mappings(codes);
             }
             auth_service_entry(stub, tokens, github_token_store.clone(), admission)
         }
@@ -541,26 +541,6 @@ impl LiveKitTokenServiceTrait for LiveKitTokenServiceImpl {
             room,
             ttl_seconds: MINTED_ROOM_TOKEN_TTL.as_secs(),
         }))
-    }
-}
-
-/// Register `code:login` mappings (from `github.stub_codes`, comma-separated) on the stub provider
-/// so tests/dev can complete the OAuth exchange without a real GitHub app. Malformed entries are
-/// skipped.
-fn register_stub_codes(stub: &StubGitHubProvider, codes: &str) {
-    for mapping in codes.split(',') {
-        let parts: Vec<&str> = mapping.splitn(2, ':').collect();
-        if parts.len() == 2 {
-            stub.register_code(
-                parts[0],
-                tddy_github::GitHubUser {
-                    id: 1,
-                    login: parts[1].to_string(),
-                    avatar_url: format!("https://github.com/{}.png", parts[1]),
-                    name: parts[1].to_string(),
-                },
-            );
-        }
     }
 }
 

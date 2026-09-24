@@ -14,7 +14,7 @@
 //! ever writes the *first* row — see [`crate::first_login_enrolment`].
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
 
 use crate::config::UserMapping;
 use crate::first_login_enrolment::{enrol_first_login, EnrolmentRefusal};
@@ -51,6 +51,15 @@ impl LiveUsers {
 
     fn rows(&self) -> RwLockReadGuard<'_, Vec<UserMapping>> {
         self.inner.rows.read().expect("live users lock poisoned")
+    }
+
+    /// Serialise a rewrite of the config file these rows are persisted in, for as long as the
+    /// guard is held.
+    fn lock_file_writes(&self) -> MutexGuard<'_, ()> {
+        self.inner
+            .file_writes
+            .lock()
+            .expect("live users file lock poisoned")
     }
 
     /// The OS user `github_user` is mapped to, or `None` when they are not mapped. No default arm.
@@ -95,11 +104,7 @@ impl LiveUsers {
         github_user: &str,
         os_user: &str,
     ) -> Result<UserMapping, EnrolmentRefusal> {
-        let _file = self
-            .inner
-            .file_writes
-            .lock()
-            .expect("live users file lock poisoned");
+        let _file = self.lock_file_writes();
         if let Some(enrolled) = self.first_github_user() {
             return Err(EnrolmentRefusal::AlreadyEnrolled {
                 github_user: enrolled,
@@ -117,11 +122,7 @@ impl LiveUsers {
     /// Run `rewrite` — a rewrite of the config file these rows are persisted in — serialised
     /// against enrolment, so neither write can lose the other's.
     pub fn while_rewriting_config_file<R>(&self, rewrite: impl FnOnce() -> R) -> R {
-        let _file = self
-            .inner
-            .file_writes
-            .lock()
-            .expect("live users file lock poisoned");
+        let _file = self.lock_file_writes();
         rewrite()
     }
 }

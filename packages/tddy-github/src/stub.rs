@@ -14,6 +14,9 @@ const STUB_DEVICE_LOGIN_PENDING_POLLS: u32 = 1;
 /// waiting, and non-zero, because zero is not an interval GitHub would ever send.
 const STUB_DEVICE_LOGIN_INTERVAL_SECONDS: u64 = 1;
 
+/// How long a stub device code stays valid — GitHub's own window, fifteen minutes.
+const STUB_DEVICE_LOGIN_EXPIRES_IN_SECONDS: u64 = 900;
+
 /// In-memory stub that mimics GitHub OAuth without HTTP calls.
 /// Pre-register code→user mappings via `register_code` before tests.
 ///
@@ -76,6 +79,27 @@ impl StubGitHubProvider {
             .unwrap()
             .insert(code.to_string(), user);
     }
+
+    /// Register every `code:login` mapping in `codes` — comma-separated, the shape the
+    /// `--github-stub-codes` flag and `github.stub_codes` config take — so tests and dev can
+    /// complete a sign-in without a real GitHub app. Each login is registered as a user of that
+    /// name. An entry with no `:` is skipped; nothing is trimmed.
+    pub fn register_code_mappings(&self, codes: &str) {
+        for mapping in codes.split(',') {
+            let parts: Vec<&str> = mapping.splitn(2, ':').collect();
+            if parts.len() == 2 {
+                self.register_code(
+                    parts[0],
+                    GitHubUser {
+                        id: 1,
+                        login: parts[1].to_string(),
+                        avatar_url: format!("https://github.com/{}.png", parts[1]),
+                        name: parts[1].to_string(),
+                    },
+                );
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -136,7 +160,7 @@ impl GitHubOAuthProvider for StubGitHubProvider {
             device_code,
             user_code: format!("STUB-{number:04}"),
             verification_uri: format!("{}/login/device", self.authorize_base_url),
-            expires_in_seconds: 900,
+            expires_in_seconds: STUB_DEVICE_LOGIN_EXPIRES_IN_SECONDS,
             interval_seconds: STUB_DEVICE_LOGIN_INTERVAL_SECONDS,
         })
     }

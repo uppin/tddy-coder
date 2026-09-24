@@ -335,18 +335,18 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
             .poll_device_login(&req.device_code)
             .await
             .map_err(Status::internal)?;
-        let not_yet = |state: DeviceLoginState| PollDeviceLoginResponse {
+        let without_session = |state: DeviceLoginState| PollDeviceLoginResponse {
             state: state as i32,
             ..Default::default()
         };
         Ok(Response::new(match polled {
-            DeviceLoginPoll::Pending => not_yet(DeviceLoginState::Pending),
+            DeviceLoginPoll::Pending => without_session(DeviceLoginState::Pending),
             DeviceLoginPoll::SlowDown { interval_seconds } => PollDeviceLoginResponse {
                 interval_seconds,
-                ..not_yet(DeviceLoginState::SlowDown)
+                ..without_session(DeviceLoginState::SlowDown)
             },
-            DeviceLoginPoll::Denied => not_yet(DeviceLoginState::Denied),
-            DeviceLoginPoll::Expired => not_yet(DeviceLoginState::Expired),
+            DeviceLoginPoll::Denied => without_session(DeviceLoginState::Denied),
+            DeviceLoginPoll::Expired => without_session(DeviceLoginState::Expired),
             DeviceLoginPoll::Complete { access_token, user } => {
                 let session = self.complete_login(&access_token, &user, transport)?;
                 PollDeviceLoginResponse {

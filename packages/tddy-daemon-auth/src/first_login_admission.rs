@@ -45,38 +45,17 @@ impl FirstLoginEnrolment {
             os_user,
         }
     }
-}
 
-impl LoginAdmission for FirstLoginEnrolment {
-    fn admit(&self, github_login: &str, transport: RequestTransport) -> Result<(), Status> {
-        if self.users.os_user_for_github(github_login).is_some() {
-            return Ok(());
-        }
-        // Exhaustive on purpose: a transport added later must be decided here, not inherit
-        // enrolment by falling into a wildcard.
-        match transport {
-            RequestTransport::InProcess => {}
-            RequestTransport::LiveKit
-            | RequestTransport::UnixSocket
-            | RequestTransport::Pipe
-            | RequestTransport::Http
-            | RequestTransport::Grpc
-            | RequestTransport::Direct => {
-                log::warn!(
-                    target: "tddy_daemon::auth",
-                    "GitHub user {github_login} signed in over {transport:?}, not this desktop's \
-                     own window; it is not enrolled, so its RPCs are refused"
-                );
-                return Ok(());
-            }
-        }
+    /// Map `github_login` — an unmapped login in this desktop's own window — to the account this
+    /// process runs as, persisting it first.
+    fn enrol(&self, github_login: &str) -> Result<(), Status> {
         match self
             .users
             .enrol_first_login(&self.config_path, github_login, &self.os_user)
         {
             Ok(mapping) => {
                 log::info!(
-                    target: "tddy_daemon::auth",
+                    target: crate::AUTH_LOG_TARGET,
                     "enrolled GitHub user {} as this desktop's operator (OS user {}) in {}",
                     mapping.github_user,
                     mapping.os_user,
@@ -88,7 +67,7 @@ impl LoginAdmission for FirstLoginEnrolment {
             // any daemon, and every RPC it makes is refused because the lookup does not map it.
             Err(EnrolmentRefusal::AlreadyEnrolled { github_user }) => {
                 log::warn!(
-                    target: "tddy_daemon::auth",
+                    target: crate::AUTH_LOG_TARGET,
                     "GitHub user {github_login} signed in to a desktop enrolled to {github_user}; \
                      it is not mapped, so its RPCs are refused"
                 );
@@ -99,7 +78,7 @@ impl LoginAdmission for FirstLoginEnrolment {
             // is named because on a desktop the person reading this is the one who can fix it.
             Err(refusal @ EnrolmentRefusal::ConfigNotWritable { .. }) => {
                 log::error!(
-                    target: "tddy_daemon::auth",
+                    target: crate::AUTH_LOG_TARGET,
                     "could not enrol GitHub user {github_login}: {refusal}"
                 );
                 Err(Status::failed_precondition(format!(
@@ -108,6 +87,40 @@ impl LoginAdmission for FirstLoginEnrolment {
                 )))
             }
         }
+    }
+}
+
+/// Whether a login that arrived over `transport` was completed in this desktop's own window — the
+/// only place a first login enrols from.
+///
+/// Exhaustive on purpose: a transport added later must be decided here, not inherit enrolment by
+/// falling into a wildcard.
+fn is_this_desktops_window(transport: RequestTransport) -> bool {
+    match transport {
+        RequestTransport::InProcess => true,
+        RequestTransport::LiveKit
+        | RequestTransport::UnixSocket
+        | RequestTransport::Pipe
+        | RequestTransport::Http
+        | RequestTransport::Grpc
+        | RequestTransport::Direct => false,
+    }
+}
+
+impl LoginAdmission for FirstLoginEnrolment {
+    fn admit(&self, github_login: &str, transport: RequestTransport) -> Result<(), Status> {
+        if self.users.os_user_for_github(github_login).is_some() {
+            return Ok(());
+        }
+        if !is_this_desktops_window(transport) {
+            log::warn!(
+                target: crate::AUTH_LOG_TARGET,
+                "GitHub user {github_login} signed in over {transport:?}, not this desktop's \
+                 own window; it is not enrolled, so its RPCs are refused"
+            );
+            return Ok(());
+        }
+        self.enrol(github_login)
     }
 }
 

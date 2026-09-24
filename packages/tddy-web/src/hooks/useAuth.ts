@@ -81,6 +81,59 @@ function noWholeSessionMessage(completed: string, missing: string[]): string {
   return `${completed} without a whole session (no ${missing.join(", no ")})`;
 }
 
+/** Milliseconds per second: the daemon names poll intervals in seconds, `setTimeout` takes ms. */
+const MS_PER_SECOND = 1000;
+
+/**
+ * `seconds` — an interval the daemon named — as a delay between polls, or `null` when it is not a
+ * positive interval. That is a protocol error, never a reason to poll with no delay.
+ */
+function intervalMsOf(seconds: bigint): number | null {
+  const n = Number(seconds);
+  return n > 0 ? n * MS_PER_SECOND : null;
+}
+
+/**
+ * What one poll's answer tells a device-flow attempt to do next: poll again after `afterMs` (every
+ * later poll keeps that delay), end on `deviceLogin`, or take up the whole session it carries.
+ */
+type DevicePollStep =
+  | { next: "poll"; afterMs: number }
+  | { next: "settle"; deviceLogin: DeviceLogin }
+  | { next: "adopt"; session: WholeSession };
+
+function deviceLoginFailed(error: string): DevicePollStep {
+  return { next: "settle", deviceLogin: { phase: "failed", error } };
+}
+
+/** The step `res` calls for, for an attempt currently polling every `intervalMs`. */
+function devicePollStep(res: PollDeviceLoginResponse, intervalMs: number): DevicePollStep {
+  switch (res.state) {
+    case DeviceLoginState.PENDING:
+      return { next: "poll", afterMs: intervalMs };
+    case DeviceLoginState.SLOW_DOWN: {
+      const widenedMs = intervalMsOf(res.intervalSeconds);
+      if (widenedMs === null) {
+        return deviceLoginFailed("The daemon asked to slow down device sign-in without naming an interval");
+      }
+      return { next: "poll", afterMs: widenedMs };
+    }
+    case DeviceLoginState.COMPLETE: {
+      const session = checkWholeSession(res);
+      if ("missing" in session) {
+        return deviceLoginFailed(noWholeSessionMessage("The daemon completed device sign-in", session.missing));
+      }
+      return { next: "adopt", session: session.whole };
+    }
+    case DeviceLoginState.DENIED:
+      return { next: "settle", deviceLogin: { phase: "denied" } };
+    case DeviceLoginState.EXPIRED:
+      return { next: "settle", deviceLogin: { phase: "expired" } };
+    default:
+      return deviceLoginFailed(`Unrecognised device sign-in state ${res.state}`);
+  }
+}
+
 const LOGGED_OUT: AuthState = {
   user: null,
   isAuthenticated: false,
@@ -103,6 +156,18 @@ function localStorageTokenStorage(): TokenStorage {
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
     },
+  };
+}
+
+/** Signed in as `user`, authenticating RPCs with `sessionToken`. */
+function signedInState(user: GitHubUser, sessionToken: string): AuthState {
+  return {
+    user,
+    isAuthenticated: true,
+    isLoading: false,
+    error: null,
+    sessionToken,
+    isRefreshing: false,
   };
 }
 
@@ -192,14 +257,7 @@ export function useAuth() {
         try {
           const { token, user } = await establishSession();
           if (cancelled) return;
-          setState({
-            user,
-            isAuthenticated: true,
-            isLoading: false,
-            error: null,
-            sessionToken: token,
-            isRefreshing: false,
-          });
+          setState(signedInState(user, token));
           return;
         } catch (err) {
           if (cancelled) return;
@@ -247,14 +305,7 @@ export function useAuth() {
   const adoptSession = useCallback(
     ({ sessionToken, refreshToken, user }: WholeSession) => {
       storage.set(sessionToken, refreshToken);
-      setState({
-        user,
-        isAuthenticated: true,
-        isLoading: false,
-        error: null,
-        sessionToken,
-        isRefreshing: false,
-      });
+      setState(signedInState(user, sessionToken));
     },
     [storage],
   );
@@ -346,55 +397,30 @@ export function useAuth() {
     const { deviceCode } = grant;
     // GitHub's floor between polls. A slow-down answer raises it for every later poll. An interval
     // that is not positive is a protocol error, never a reason to poll with no delay.
-    const grantedIntervalSeconds = Number(grant.intervalSeconds);
-    if (!(grantedIntervalSeconds > 0)) {
+    const grantedIntervalMs = intervalMsOf(grant.intervalSeconds);
+    if (grantedIntervalMs === null) {
       setDeviceLogin({
         phase: "failed",
         error: "The daemon issued a device sign-in code with no interval between polls",
       });
       return;
     }
-    let intervalMs = grantedIntervalSeconds * 1000;
+    let intervalMs = grantedIntervalMs;
 
     const answered = (res: PollDeviceLoginResponse) => {
-      switch (res.state) {
-        case DeviceLoginState.PENDING:
+      const step = devicePollStep(res, intervalMs);
+      switch (step.next) {
+        case "poll":
+          intervalMs = step.afterMs;
           scheduleNextPoll();
           return;
-        case DeviceLoginState.SLOW_DOWN: {
-          const widenedSeconds = Number(res.intervalSeconds);
-          if (!(widenedSeconds > 0)) {
-            setDeviceLogin({
-              phase: "failed",
-              error: "The daemon asked to slow down device sign-in without naming an interval",
-            });
-            return;
-          }
-          intervalMs = widenedSeconds * 1000;
-          scheduleNextPoll();
+        case "settle":
+          setDeviceLogin(step.deviceLogin);
           return;
-        }
-        case DeviceLoginState.COMPLETE: {
-          const session = checkWholeSession(res);
-          if ("missing" in session) {
-            setDeviceLogin({
-              phase: "failed",
-              error: noWholeSessionMessage("The daemon completed device sign-in", session.missing),
-            });
-            return;
-          }
+        case "adopt":
           setDeviceLogin(DEVICE_LOGIN_IDLE);
-          adoptSession(session.whole);
+          adoptSession(step.session);
           return;
-        }
-        case DeviceLoginState.DENIED:
-          setDeviceLogin({ phase: "denied" });
-          return;
-        case DeviceLoginState.EXPIRED:
-          setDeviceLogin({ phase: "expired" });
-          return;
-        default:
-          setDeviceLogin({ phase: "failed", error: `Unrecognised device sign-in state ${res.state}` });
       }
     };
 
