@@ -263,7 +263,7 @@ with). Dependent: 8/9 `link-github`, which adds the deliberate second account th
 
 ### Backlog
 
-- ✅ [2026-09-18 — a desktop install configures no identity](../../../dev/todo/2026-09-18-desktop-install-configures-no-identity.md) — this node is what closes it
+- ⚠ [2026-09-18 — a desktop install configures no identity](../../../dev/todo/2026-09-18-desktop-install-configures-no-identity.md) — this node closes its code side; kept, narrowed to the developer's rendered `client_id` and fresh-install check
 - ⚠ [2026-08-16 — models/agents open items at wrap](../../../dev/todo/2026-08-16-models-agents-open-items-at-wrap.md)
 - ⚠ [2026-09-05 — Tauri desktop single-process daemon](../../../dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md)
 

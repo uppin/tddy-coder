@@ -194,16 +194,17 @@ downstream changes, because both are wave 2 and neither depends on the other.
 
 ## Prerequisites
 
-### ✅ RESOLVED HERE — a desktop install configures no identity — [`2026-09-18-desktop-install-configures-no-identity.md`](../todo/2026-09-18-desktop-install-configures-no-identity.md)
+### ⚠ NARROWED, KEPT — a desktop install configures no identity — [`2026-09-18-desktop-install-configures-no-identity.md`](../todo/2026-09-18-desktop-install-configures-no-identity.md)
 
 The entry is this node's problem statement: `./install --desktop` renders `github:`, `livekit:` and
 `users:` unset, so the installed app opens on its settings screen with no sessions. `#keyring` 1/9
-closed the `livekit:` half; this node closes the other two — a public `client_id` in
-`desktop.yaml.production` with no secret, and first-login enrolment in place of a hand-written
-`users:` row.
+closed the `livekit:` half; this node closes the code side of the other two — a `client_id` alone
+serves the device flow, and first-login enrolment replaces a hand-written `users:` row.
 
-Closed when a fresh `./install --desktop` reaches a signed-in dashboard with no file edited by hand
-(deferred to the developer — 'I'll configure and test production myself'). This node's wrap deletes the entry.
+**Kept, narrowed (developer, 2026-09-24)** — not deleted by this node's wrap. What remains is
+"render the OAuth App `client_id` into `desktop.yaml.production` and verify a fresh
+`./install --desktop` signs in", which is **owned by the developer** ("I'll configure and test
+production myself", M8) and **deleted when they confirm**. The entry is edited down to exactly that.
 
 ### ⚠ DURING — models/agents open items at wrap — [`2026-08-16-models-agents-open-items-at-wrap.md`](../todo/2026-08-16-models-agents-open-items-at-wrap.md)
 
@@ -747,5 +748,5 @@ options, for the developer:
       sets it) and `tddy-stdio` (`from_duplex` now takes the transport its opener names — also
       worth a line where `packages/tddy-toolcall/docs/architecture.md` and
       `docs/ft/coder/rpc-multi-transport.md` describe `from_duplex`)
-- [ ] `/wrap-context-docs` — deletes `2026-09-18-desktop-install-configures-no-identity.md` and the
+- [ ] `/wrap-context-docs` — narrows (keeps) `2026-09-18-desktop-install-configures-no-identity.md`, deletes the
       `missing-tests-real-exchange-code` record this node claims
