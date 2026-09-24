@@ -187,22 +187,78 @@ meaning they had when the daemon ran as a child process.
 a GitHub sign-in comes back on — the application opens a one-path `/auth/callback` listener on
 127.0.0.1 for the duration of a sign-in and closes it again — and it is what the redirect URI handed
 to the provider is built from. `redirect_uri` in the configuration is ignored: the application
-derives it from this port so the callback reaches the listener it actually opened.
+derives it from this port so the callback reaches the listener it actually opened. Only the redirect
+flow comes back through that listener; the device flow a desktop signs in with returns to none.
 
 `web_bundle_path` is absent on purpose. The dashboard is embedded in the application at build time,
 so there is no directory to serve it from.
 
-An **identity** is two blocks that stand or fall together, and without them the application starts
-onto its settings and nothing else — no sessions, no hosts, no screen sharing:
+An **identity** is `github:` with the OAuth App's public `client_id` — no `client_secret` — and
+nothing more. Without `github:` the daemon builds no session-user resolver, and since every session
+service is assembled behind one, the application starts onto its settings and nothing else: no
+sessions, no hosts, no screen sharing. With it:
 
-| Block | Why it is required |
+| Block | What it does |
 |---|---|
-| `github:` | Absent, the daemon builds no session-user resolver, and every session service is assembled behind one. |
-| `users:` | Which OS user a login runs sessions as. A login with no entry is refused `permission_denied: user not mapped to OS user`; there is no fallback to whoever the daemon runs as. Peers sharing a common room must name the same login on every side. |
+| `github:` | A `client_id` alone makes the daemon serve **GitHub device-flow sign-in**, which needs no secret — nothing confidential ships in the application. A `client_id` with a `client_secret` serves the redirect flow instead, as a served deployment does |
+| `users:` | Which OS user a login runs sessions as. **Written by the first sign-in**, not by hand — see [Signing in](#signing-in). A login with no entry is refused `permission_denied: user not mapped to OS user` on every session RPC; there is no fallback to whoever the daemon runs as. Peers sharing a common room must name the same login on every side |
 
 No `livekit:` block is needed to sign in. The daemon signs session tokens with an Ed25519 key it
 generates for itself on first boot, `signing_key.pem` (mode `0600`) in `auth_storage`, and reuses it
 on every later boot; `livekit.api_secret` signs LiveKit room JWTs and nothing else.
+
+### What a fresh install still lacks
+
+Nothing in the code stands between a fresh `./install --desktop` and a signed-in dashboard: tokens
+are signed without LiveKit, a `client_id` alone serves the device flow, and the first sign-in writes
+`users:`. **The rendered configuration does**: `desktop.yaml.production` ships `github:` unset, so a
+freshly installed application reports that this daemon has no GitHub sign-in configured until the
+OAuth App's public `client_id` is rendered into the template. The template's `github:` / `users:`
+comments also still describe a `client_id` + `client_secret` pair and a hand-written `users:` row.
+Rendering the `client_id`, and confirming that a fresh install signs in with no file edited by hand,
+is owned by the developer and tracked in the backlog
+(`docs/dev/todo/2026-09-18-desktop-install-configures-no-identity.md`).
+
+## Signing in
+
+The desktop signs in with the **GitHub device flow** — the flow the GitHub CLI uses:
+
+1. The sign-in screen offers "Sign in with GitHub". The operator clicks it and is shown a short code
+   and a link to GitHub's verification page.
+2. They open the link, type the code and approve, in their browser, against GitHub. Nothing is typed
+   into the application.
+3. The dashboard polls the daemon until GitHub answers, and signs the operator in. A refusal and an
+   expiry are each named, and offer a fresh code.
+
+⚠ The verification link is an ordinary `target="_blank"` link, which relies on the webview handing it
+to the system browser (`tauri-plugin-opener`). That has not been confirmed on the desktop.
+
+The session that results is the same session a redirect sign-in produces — the same tokens, the same
+lifetimes — see [Cross-daemon session authentication](../daemon/session-auth.md).
+
+**The first account to sign in from the desktop's own window owns the install.** On a desktop whose
+`users:` is empty, that first login is enrolled against the OS user the application runs as, and the
+row is persisted to `~/.tddy/desktop.yaml`. Every later start finds it like a hand-written row. It is
+enrolment, not a fallback: it happens once, on a deployment that has never had an identity, and the
+lookup that maps a login to an OS user is otherwise unchanged.
+
+- **A second, different account is refused.** It signs in, and every RPC it makes is refused
+  `permission_denied`, exactly as on a server. Adding a second account deliberately is `#keyring` 8/9
+  ([#515](https://github.com/uppin/tddy-coder/pull/515)).
+- **Only the desktop's own window enrols.** The daemon also serves sign-in over the LiveKit common
+  room and its agent tool socket; a login completed there is from somebody not necessarily at this
+  machine, so on an unenrolled desktop it is signed in unmapped, writes nothing, and its RPCs are
+  refused. The window's own login still enrols afterwards. Which way a login arrived is decided by
+  the host that received it, never by anything the caller sent.
+- **A first login that cannot be written down is refused**, naming the file, rather than appearing to
+  work and vanishing on restart.
+- **Writing the row drops the file's comments**, the explanatory header `./install --desktop`
+  rendered included. Field values are preserved. This is a known limit shared with saving settings
+  ([daemon-settings.md](../daemon/daemon-settings.md)).
+
+The application hands the daemon the configuration file it loaded, which is where the enrolment is
+written. An embedded daemon serving sign-in to an empty `users:` with no file to write to refuses to
+start rather than assemble a desktop that could never enrol.
 
 ## Installing it
 
@@ -292,6 +348,13 @@ than as a fault of the directory.
 - **Application commands go through Tauri's ACL** like plugin commands — `build.rs` names them and
   `capabilities/default.json` grants them, scoped to the `main` window.
 - **A remote-origin page gets no capabilities**, so the dev page must be relative to `devUrl`.
+- **A strict Content Security Policy** on release builds (`tauri.conf.json`): no `unsafe-eval`, no
+  inline script, `'unsafe-inline'` only for runtime `<style>` elements, no frames, no objects, no form
+  targets. A login from the window is the one kind that enrols the install's owner, so script
+  injected into the dashboard before sign-in must not run. Development builds load Vite directly and
+  have no policy. ⚠ **Not yet verified in a launched production build** — the terminal's WASM, IPC
+  and LiveKit connections under the policy are unchecked there. Directives and their reasons:
+  [config-resolution-and-install.md § Content Security Policy](../../../packages/tddy-desktop/docs/config-resolution-and-install.md#content-security-policy).
 - The Codex OAuth loopback tunnel is unchanged and still lives in `tddy-daemon`.
 
 ## Platforms
@@ -306,5 +369,8 @@ for Finder. Linux bundles are unverified — the nix dev shell carries the WebKi
 - [The local host over IPC](../../../packages/tddy-web/docs/local-host-ipc.md) — the web side: the
   provider that reaches the app's own host, and why it uses the page's existing daemon transport
 - [Daemon settings](../daemon/daemon-settings.md)
+- [Cross-daemon session authentication](../daemon/session-auth.md) — the session a sign-in produces
+- [Configuration resolution and the local install](../../../packages/tddy-desktop/docs/config-resolution-and-install.md) — the template, the enrolment file, the Content Security Policy
+- [Daemon sign-in (web)](../../../packages/tddy-web/docs/daemon-sign-in.md) — the declared flow and the device-code screen
 - [Local web development](../web/local-web-dev.md)
 - [Codex OAuth relay (daemon)](../daemon/codex-oauth-relay.md)

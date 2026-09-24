@@ -34,17 +34,73 @@ things about it are not obvious:
   is required`), and in this deployment the value names the loopback port a GitHub sign-in comes back
   on: `src-tauri/src/oauth_callback.rs` opens a one-path `/auth/callback` listener on 127.0.0.1 for
   the duration of a sign-in and closes it again. `github.redirect_uri` is overridden from this port
-  rather than honoured, so the callback always reaches the listener that was actually opened.
+  rather than honoured, so the callback always reaches the listener that was actually opened. The
+  listener is opened whenever `github:` is set, but only a **redirect-flow** sign-in (a
+  `client_secret` configured) comes back through it; a device-flow sign-in returns to no callback.
 - **`web_bundle_path` is absent**, because `tauri.conf.json` points `frontendDist` at
   `packages/tddy-web/dist` and the bundle is baked into the binary at build time.
-- **An identity is two blocks at once.** `github:` decides whether the daemon loads a signing key
-  and returns a session-user resolver at all; `users:` maps a login to an OS user with no fallback.
-  Every session service in `tddy_daemon::runtime` is assembled inside `if let Some(user_resolver)`,
-  so missing either leaves an application that starts, shows its settings, and offers no sessions,
-  hosts or screen sharing. **No `livekit:` block is needed**: the daemon signs session tokens with
-  an Ed25519 key it generates on first boot (`signing_key.pem`, mode `0600`, in `auth_storage`) and
-  verifies them with the same key — a desktop has no peers, so its key directory is
-  `StandaloneKeyDirectory`. `livekit.api_secret`, when present, signs room JWTs only.
+- **Signing in needs `github:` with a public `client_id`, and nothing else.** `github:` decides
+  whether the daemon loads a signing key and returns a session-user resolver at all; every session
+  service in `tddy_daemon::runtime` is assembled inside `if let Some(user_resolver)`, so without it
+  the application starts, shows its settings, and offers no sessions, hosts or screen sharing. A
+  `client_id` with **no** `client_secret` is a public client: `tddy-daemon-auth` registers the GitHub
+  **device flow** for it, and the dashboard signs in by device code, so no secret ships in the
+  application. **`users:` is written by the first sign-in**, not by hand: an embedded host enrols
+  the first GitHub login completed from its own window against the OS user the application runs as,
+  and persists the row into this file ([auth-service.md](../../tddy-daemon-auth/docs/auth-service.md#first-login-enrolment)).
+  **No `livekit:` block is needed**: the daemon signs session tokens with an Ed25519 key it generates
+  on first boot (`signing_key.pem`, mode `0600`, in `auth_storage`) and verifies them with the same
+  key — a desktop has no peers, so its key directory is `StandaloneKeyDirectory`.
+  `livekit.api_secret`, when present, signs room JWTs only.
+- **The desktop passes the file it loaded to the runtime** (`RuntimeOptions::with_config_path`),
+  because that is where the first login is enrolled into. `runtime::build` refuses to assemble an
+  embedded host that serves GitHub sign-in to an empty `users:` and names no config file — its first
+  login could never be written down, so every sign-in would appear to work and then be refused by
+  every RPC.
+
+### What a fresh install still lacks
+
+The code side of all three requirements a fresh install once had to meet by hand is in place: a
+daemon with no `livekit:` block signs its own tokens, a `client_id` alone serves the device flow, and
+the first sign-in writes `users:`. **`desktop.yaml.production` still ships `github:` unset**, so a
+freshly installed application reports "no sign-in configured" until the OAuth App's public
+`client_id` is rendered into the template. Its `github:` / `users:` comments also still describe a
+`client_id` + `client_secret` pair and a hand-written `users:` row. Rendering that `client_id` and
+checking a fresh install end to end is owned by the developer, and tracked in the backlog
+(`docs/dev/todo/2026-09-18-desktop-install-configures-no-identity.md`).
+
+## Content Security Policy
+
+`src-tauri/tauri.conf.json` sets a strict policy under `app.security.csp`. A login from the
+desktop's own window is "the person at the machine" — the only kind that enrols — so script injected
+into the dashboard before sign-in must not be able to run.
+
+| Directive | Value | Why |
+|---|---|---|
+| `default-src` | `'self'` | |
+| `script-src` | `'self' 'wasm-unsafe-eval'` | no `unsafe-eval`, no inline script; `'wasm-unsafe-eval'` is for ghostty-web's inlined WASM |
+| `style-src` | `'self'` | also governs `style-src-attr`, so a `style="…"` attribute is blocked. `tddy-web` writes none; React's `style` prop goes through CSSOM and is unaffected |
+| `style-src-elem` | `'self' 'unsafe-inline'` | runtime `<style>` elements: the `ConnectionTerminalChrome` / `SessionDrawer` dot styles, react-remove-scroll-bar, react-resizable-panels |
+| `img-src` | `'self' https://avatars.githubusercontent.com` | the signed-in user's avatar |
+| `font-src` | `'self'` | |
+| `connect-src` | `'self' ipc: http://ipc.localhost data: ws: wss:` | Tauri IPC; `data:` for the inlined WASM; `ws:` / `wss:` to any host because the LiveKit URL is per-deployment and typed at runtime |
+| `frame-src`, `object-src` | `'none'` | |
+| `base-uri` | `'self'` | |
+| `form-action`, `frame-ancestors` | `'none'` | |
+
+Tauri delivers it as a response header on `tauri://` HTML, adding sha256 hashes for the bundled
+scripts and a nonce for `index.html`'s one `<style>`. **It applies only to `custom-protocol` (release)
+builds.** There is no `devCsp`: a development build loads Vite directly, and Tauri applies no policy
+there.
+
+⚠ **Not yet verified in a launched production build.** What has been checked: `cargo check -p
+tddy-desktop` with and without `tauri/custom-protocol`, the header Tauri serves for `index.html`
+(read through an asset-resolver probe), and the built bundle grepped for inline script and `eval`.
+What has not: a running `custom-protocol` build — the terminal's WASM, IPC, LiveKit `ws://` from
+`tauri://localhost`, and the console for CSP errors. The wdio e2e runs a development build, where no
+policy applies. Two narrowings are possible later: moving the two dot-style strings into bundled CSS
+and handing Tauri's nonce to `get-nonce` would drop `'unsafe-inline'`, and `connect-src` could be
+narrowed to the configured `livekit.url`.
 
 ## What `./install --desktop` installs
 

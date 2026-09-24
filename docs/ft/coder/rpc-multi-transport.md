@@ -46,9 +46,12 @@ both worse than reusing the existing envelope and dispatch machinery.
 Beyond the `tddy-livekit` refactor this feature originally proved the transport with, real consumers
 now exist: `tddy-coder`/`tddy-demo --stdio` and `tddy-sandbox-runner --stdio` both serve their
 existing remote-control surfaces over this transport, and `tddy-tools`' sandbox tool-IPC dispatch
-rides the same framing over a Unix socket (`StdioEndpoint::from_duplex`, added to wrap
+rides the same framing over a Unix socket (`StdioEndpoint::from_duplex`, which wraps
 already-open duplex streams a caller spawned itself — not just a `tokio::process::Command`
-`spawn_child_endpoint` owns). See [grpc-remote-control.md](grpc-remote-control.md#stdio-transport)
+`spawn_child_endpoint` owns). Because the endpoint cannot tell a socket from a pipe, `from_duplex`
+takes the transport its opener names (`RequestTransport::UnixSocket` for a socket, `Pipe` for a
+jail's piped stdio), and every request it hosts is stamped with it — see
+[`tddy-rpc` request transport](../../../packages/tddy-rpc/docs/request-transport.md). See [grpc-remote-control.md](grpc-remote-control.md#stdio-transport)
 and [tddy-sandbox architecture](../../../packages/tddy-sandbox/docs/architecture.md#control-channel-transport).
 
 ## Remaining IPC migration (in progress, source: `docs/dev/TODO.md`)

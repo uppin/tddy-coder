@@ -83,6 +83,86 @@ its one consumer goes through the port, `tddy-session-lifecycle` declares no `te
 exceeds 800 production lines. The suite parses manifests with `toml` (a dev-dependency) and checks
 every dependency table, so a comment naming a crate is not mistaken for a dependency on it.
 
+## Users, the live holder and first-login enrolment
+
+### `LiveUsers` — `users:` held once per running daemon
+
+`DaemonConfig.users` is a `LiveUsers` (`src/live_users.rs`), not a `Vec<UserMapping>`. It is a
+cheap-to-clone handle on one `Arc`'d set of rows, so **cloning a `DaemonConfig` shares `users:`
+rather than copying it**. The daemon hands each of its services a clone of one loaded config, and
+every one of them therefore reads the same rows: a row enrolled through any of them is seen by all of
+them at once, with no restart.
+
+It serialises and deserialises as the plain list it always was (`users:` in YAML, omitted when
+empty), so no config file changes shape.
+
+| Method | What it does |
+|---|---|
+| `os_user_for_github(login) -> Option<String>` | the mapped OS user, or `None`. **No default arm** |
+| `mapping_for_os_user(os_user)` | the row for the local peer-trust path that starts from a uid |
+| `first_github_user()`, `is_empty()` | whether, and to whom, the deployment is enrolled |
+| `enrol_first_login(config_path, github_user, os_user)` | the one mutation — below |
+| `while_rewriting_config_file(rewrite)` | runs another rewrite of the config file under the same lock as enrolment |
+
+`DaemonConfig::os_user_for_github` delegates to it. Its **behaviour is unchanged** — a linear
+search, `None` for an unmapped login, no default arm — and it returns `Option<String>` because a
+borrow cannot escape the rows' lock.
+
+⚠ **A sharp edge, documented rather than removed.** Because clones share the rows, code that clones
+a `DaemonConfig` to build a *different* configuration — a test fixture, a variant for a second
+daemon — shares `users:` with the original, and an enrolment through either is seen by both. Build
+an independent holder (`LiveUsers::new(rows)`) where independence is meant.
+
+Two locks, deliberately separate: `rows` (an `RwLock`) for lookups, and `file_writes` (a `Mutex`)
+held across every rewrite of the config file. A lookup never waits on file I/O. The two writers of
+that file — enrolment and `DaemonConfigService`'s `UpdateConfig`, which re-serialises the whole
+config, `users:` included — both take `file_writes`, so an update that read the rows before an
+enrolment and wrote after it cannot persist the file without the enrolled row.
+
+### `enrol_first_login` — the one-time write
+
+A desktop install has nobody to write `users:`. Its first login, from its own window, is written
+down instead (`tddy-daemon-auth`'s `FirstLoginEnrolment` decides *when* —
+[auth-service.md](../../tddy-daemon-auth/docs/auth-service.md#first-login-enrolment)). The kernel
+owns *how*:
+
+- **`LiveUsers::enrol_first_login`** takes `file_writes`, re-checks that no row exists inside it,
+  writes the file, and only then pushes the row into memory. Of two first logins racing, exactly one
+  is enrolled and the other is refused `AlreadyEnrolled`. When the write fails nothing is applied,
+  so a daemon never admits a login it could not record.
+- **`first_login_enrolment::enrol_first_login`** is the file half. It re-reads the config from disk
+  (the file, not the caller's snapshot, decides whether somebody is already enrolled), then edits the
+  document as a `serde_yaml::Value`, inserting only `users:` so every other key stays as the operator
+  wrote it, and writes it back atomically (`write_atomic_labelled`) — a half-written config is a
+  daemon that will not start.
+
+`EnrolmentRefusal`:
+
+| Variant | When |
+|---|---|
+| `AlreadyEnrolled { github_user }` | `users:` already names somebody. Enrolment is once per deployment; a second account is added deliberately, never by signing in |
+| `ConfigNotWritable { reason }` | the file cannot be read, parsed as a mapping, or rewritten — read-only, owned by another account, or gone |
+
+**Enrolment is not a fallback for the lookup, and must not become one.** A default arm in
+`os_user_for_github` would answer "no mapping" every time, for every GitHub account on earth.
+Enrolment writes the row *once*, on a deployment that has none, and the unchanged lookup then finds
+it; a second, different login on an enrolled deployment is refused exactly as on a server. Adding a
+second account deliberately is `#keyring` 8/9 ([#515](https://github.com/uppin/tddy-coder/pull/515)).
+
+**Known limits.**
+
+- **Comments are lost.** Serialising the `Value` back strips every YAML comment, so on a desktop's
+  first sign-in the explanatory header `./install --desktop` rendered is gone from
+  `~/.tddy/desktop.yaml`. `UpdateConfig` has the same loss. Both need one comment-aware YAML editor,
+  tracked in the backlog (`docs/dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md`),
+  with a `TODO` at the write.
+- The free function `first_login_enrolment::enrol_first_login` is public and does **not** take
+  `LiveUsers`' file lock. Its only production caller is `LiveUsers::enrol_first_login`; call that.
+- The file write is synchronous, on whatever task calls it. It happens once per deployment.
+
+`tests/first_login_enrolment_acceptance.rs` pins the first login written down, a second account
+refused, the rest of the config kept, and an unmapped login still resolving to nobody.
+
 ## See also
 
 - [`packages/tddy-daemon/docs/connection-service.md`](../../tddy-daemon/docs/connection-service.md)

@@ -23,7 +23,9 @@ in `daemon_settings.rs`.
 
 `GetClientConfig` is deliberately ungated: it is read *before* sign-in, because it is what tells a
 page there is a daemon to sign in to. It carries a LiveKit URL and room name, the agent allowlist,
-the debug mask and the instance id — no secrets. A gate there makes a desktop webview unable to
+the debug mask, the instance id and `auth_flow` — which GitHub sign-in this daemon serves
+(`"redirect"`, `"device"`, or absent for none; see [session-auth.md](session-auth.md#minting-login))
+— and no secrets. A gate there makes a desktop webview unable to
 bootstrap at all.
 
 ## What an update means
@@ -80,7 +82,9 @@ LiveKit off has not misconfigured anything, and the two must not read alike.
 
 - **Comments are lost.** Writing re-serializes the config, so an operator's YAML comments do not
   survive a save. Field values do — verified by round-tripping `dev.daemon.yaml`, `dev.desktop.yaml`
-  and `config.example.yaml`. Preserving comments needs a comment-aware YAML editor.
+  and `config.example.yaml`. Preserving comments needs a comment-aware YAML editor. The desktop's
+  first-login enrolment writes the same file and has the same loss; a save and an enrolment are
+  serialised against each other, so neither drops the other's `users:` row.
 - **Peer discovery does not follow a runtime reconnect.** A daemon that *gains* a common room at
   runtime serves its roster there but does not discover the other daemons in it until restarted.
 - **The UI edits the LiveKit block only.** Everything else is read-only and reported as

@@ -4,6 +4,7 @@
 - **Changeset history**: [changesets/](changesets/)
 - **Codex OAuth dialog**: [codex-oauth-dialog.md](codex-oauth-dialog.md)
 - **Cross-daemon fan-out**: [host-fan-out.md](host-fan-out.md)
+- **Daemon sign-in (the declared GitHub flow, device code, whole-session guard)**: [daemon-sign-in.md](daemon-sign-in.md)
 - **Host connections (transport-neutral daemon RPC)**: [host-connections.md](host-connections.md)
 - **Host directory (which hosts exist, merged from sources)**: [host-directory.md](host-directory.md)
 - **Hosts screen (every host the daemon has a record of)**: [hosts-screen.md](hosts-screen.md)

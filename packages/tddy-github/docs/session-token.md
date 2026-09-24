@@ -76,6 +76,10 @@ Verification is **two steps with a lookup between them**, and the lookup is not 
 `SessionTokenAuthority` is the one-method trait (`async fn verify(&self, token)`) that wraps all three
 for a caller that does not care how the key was found — `AuthServiceImpl` verifies through it.
 
+A token is minted the same way whichever GitHub sign-in flow completed — the redirect flow's
+`ExchangeCode` or the device flow's `PollDeviceLogin` — because both go through one
+`AuthServiceImpl::complete_login`. See [device-flow.md](./device-flow.md).
+
 ## Rejections
 
 `SessionTokenError`:

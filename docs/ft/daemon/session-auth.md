@@ -23,7 +23,19 @@ That stateless single-token design (below, unchanged) still had a client-side ga
 ## Behavior
 
 ### Minting (login)
-`ExchangeCode` completes the GitHub OAuth handshake and returns **both** a freshly signed access token and a freshly signed refresh token. Nothing is stored server-side.
+A sign-in completes by one of two GitHub flows, and both return **both** a freshly signed access token and a freshly signed refresh token, with the signed-in `GitHubUser`. Nothing is stored server-side. The session is the same whichever flow produced it — one implementation completes both, so they cannot drift into different tokens, lifetimes or retention rules.
+
+| Flow | RPCs | A deployment configures | Used by |
+|---|---|---|---|
+| **Redirect** | `GetAuthUrl` → GitHub → `/auth/callback` → `ExchangeCode` | `github.client_id` **and** `github.client_secret` | a served deployment behind a real callback URL; `redirect_uri` defaults to `http://{web_host}:{web_port}/auth/callback` |
+| **Device** | `StartDeviceLogin` → the operator approves a short code at GitHub → `PollDeviceLogin` until approved | `github.client_id` alone — **no secret is sent** | Tddy Desktop, and any public client |
+
+Neither is a fallback for the other: a deployment declares which it is by what it supplies. A daemon holding only a public `client_id` refuses `GetAuthUrl` and `ExchangeCode` with `failed_precondition`, naming the device flow. `PollDeviceLogin` answers pending, slow-down (with a wider interval to obey), denied, expired, or complete with the same triple `ExchangeCode` returns. `github.stub: true` serves both flows from an in-memory provider.
+
+**The flow is declared, never inferred.** A daemon tells its dashboard which flow it serves in `auth_flow`, at `GET /api/config` and in `GetClientConfig`: `"redirect"` or `"device"`, exactly the provider it registered. **Absent** means this daemon serves no GitHub sign-in, and the dashboard offers neither flow. An **unknown** value is an error the dashboard shows, not a flow it guesses at. A completed sign-in missing its user or either token is refused by the dashboard, which stores nothing.
+
+### Who a login is (the `users:` map)
+A login GitHub vouches for is minted a session whether or not it is mapped; each token-gated RPC resolves the caller's OS user through `users:` and refuses an unmapped login `permission_denied: user not mapped to OS user`. There is no default arm. On a **served** deployment `users:` is written by whoever installs it. On **Tddy Desktop**, the first login completed from the application's own window is enrolled once against the OS user the application runs as and persisted, and every different login afterwards is refused exactly as on a server — see [Tddy Desktop § Signing in](../desktop/tddy-desktop-tauri.md#signing-in). A login completed over the LiveKit common room or a local socket never enrols. Adding a second account deliberately is `#keyring` 8/9 ([#515](https://github.com/uppin/tddy-coder/pull/515)).
 
 ### Verification (every RPC)
 `ConnectionService` (and `ActionService` / `TaskService`) gate each call on the same `session_token`. The daemon's session-user resolver **verifies the signature and expiry, and requires `kind == access`** — rather than looking the token up in a local map. A daemon accepts a token another daemon minted once it has learned that daemon's public key from the common room; a token whose key it has not learned is refused, never tried against another key. A refresh token presented as an RPC token is rejected.
@@ -38,7 +50,7 @@ Client-side only (clear both stored tokens). Signed tokens are not tracked serve
 
 **Problem.** The web client's own periodic refresh (`setInterval`) is suspended by the browser/OS while a tab is backgrounded or the device sleeps. Once the 5-minute access token lapsed, `RefreshSession` had nothing but an already-expired token to work with and rejected it, forcing re-login on every sleep — a poor experience for a tool people leave open on a laptop or phone. The GitHub OAuth App in use issues non-expiring user tokens with no refresh token of its own, so "keep the session alive as long as GitHub is valid" has no GitHub-side signal to track; the durable session is instead represented entirely by our own refresh token.
 
-**Session invariant.** An access (RPC) token is never mintable from nothing — there are exactly two sources: a fresh GitHub login (`ExchangeCode`, which mints the first access token *and* the refresh token together), or a valid `refresh`-kind refresh token (`RefreshSession`). The refresh token **is** the durable user session. Two kind checks make this hold in both directions:
+**Session invariant.** An access (RPC) token is never mintable from nothing — there are exactly two sources: a fresh GitHub login (`ExchangeCode` or a completed `PollDeviceLogin`, either of which mints the first access token *and* the refresh token together), or a valid `refresh`-kind refresh token (`RefreshSession`). The refresh token **is** the durable user session. Two kind checks make this hold in both directions:
 - An **access** token cannot mint another access token — `RefreshSession` requires `kind == refresh`, so a stolen 5-minute token dies at its own expiry and cannot be used to extend a session.
 - A **refresh** token cannot authenticate an RPC — the per-RPC session resolver requires `kind == access`, so the long-lived credential is useless even if it leaks into a normal request.
 
@@ -61,8 +73,8 @@ systemd — so a live PR read as "no PR".
 
 - The OAuth authorize scope widened from **`read:user`** to **`read:user repo`** (`repo` is required to
   read PRs on a private repository).
-- `AuthServiceImpl::exchange_code` retains the access token in a `GitHubTokenStore` keyed by GitHub
-  login. The daemon's implementation is `FileGitHubTokenStore`, rooted at the `auth_storage` config
+- A completed sign-in — redirect or device flow — retains the access token in a `GitHubTokenStore`
+  keyed by GitHub login. The daemon's implementation is `FileGitHubTokenStore`, rooted at the `auth_storage` config
   path: `github-tokens.json` at mode `0600` in a `0700` directory, writes serialised on a process-wide
   mutex and published via `.tmp` + `fsync` + `rename` (an interrupted in-place write parsed as an empty
   map, i.e. lost *every* operator's token at once).
@@ -103,11 +115,13 @@ systemd — so a live PR read as "no PR".
 - **Sharing sessions across daemons means sharing a common room.** Peers learn each other's public keys from the `livekit.common_room` advertisement, so daemons that should accept each other's tokens must join the same room. A single daemon, or a desktop install, needs no room: it verifies its own tokens with its own key.
 - **Which participants' keys are believed** is decided by one rule both the mint and discovery read — see [LiveKit peer discovery § Trust model](livekit-peer-discovery.md#trust-model). A signed-in web user cannot be minted an identity discovery would read a key from.
 - **Revocation costs a restart.** A peer key, once learned, is remembered for the life of the verifying process — safe against forgery (an id names one key), and it keeps peers' tokens verifying through a common-room reconnect. The trade is that a peer that left the room, was removed, or had its key compromised keeps having new tokens accepted until each verifying daemon restarts. There is no revocation list or expiry on learned keys.
-- Out of scope: refreshing the GitHub OAuth token itself (the OAuth App's user tokens don't expire and have no refresh token), server-side session revocation, and moving RPC auth from the request body to an `Authorization` header (would touch every daemon service method and all web call sites).
+- Out of scope: refreshing the GitHub OAuth token itself (the OAuth App's user tokens don't expire and have no refresh token — for the device flow's token this is still to be confirmed against the live API), server-side session revocation, and moving RPC auth from the request body to an `Authorization` header (would touch every daemon service method and all web call sites).
 
 ## Related documentation
 
 - [The identity boundary and the LiveKit service](auth-livekit-services.md) — where the signing, verifying and credential-holding code lives, and how a peer's key reaches the verifier without the LiveKit crate reaching auth.
+- [Tddy Desktop § Signing in](../desktop/tddy-desktop-tauri.md#signing-in) — device-code sign-in and first-login enrolment on the desktop.
+- [`packages/tddy-github/docs/device-flow.md`](../../../packages/tddy-github/docs/device-flow.md) — both GitHub flows, the provider's polling state machine; [`packages/tddy-daemon-auth/docs/auth-service.md`](../../../packages/tddy-daemon-auth/docs/auth-service.md) — which flow `github:` registers, and first-login enrolment.
 - [docs/ft/web/daemon-selector-livekit-rpc.md](../web/daemon-selector-livekit-rpc.md) — daemon switching in the web UI (the surface where the original cross-daemon bug appeared).
 - [docs/ft/daemon/livekit-peer-discovery.md](livekit-peer-discovery.md) — peer fan-out that forwards `session_token` between daemons.
 - `packages/tddy-github/src/session_token_v2.rs` — the token format, signer and verifier (`KeyId`, `TokenKind`, `mint_access`/`mint_refresh`, `REFRESH_TOKEN_TTL`); `packages/tddy-daemon-auth/src/signing_key.rs` — the daemon's keypair and the `KeyDirectory` port.

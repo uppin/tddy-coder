@@ -47,7 +47,8 @@ handlers, and `BinaryLocalSocketServices` names `ProjectServiceImpl<ProjectRpcHa
    With no `github:` block nothing signs or verifies, and no key is loaded.
 3. The key directory is `CommonRoomKeyDirectory` over that registry when there is a room, else
    `StandaloneKeyDirectory`. One `SessionTokens` is built from key + directory and passed to
-   `build_auth_entries_with`; the local socket, `local_token.LocalTokenService` and the session
+   `build_auth_entries_admitting`, with the host's [first-login admission](#first-login-admission);
+   the local socket, `local_token.LocalTokenService` and the session
    host (`DaemonSessionHost::with_session_tokens`) all take their signer from
    `AuthBuildResult::session_tokens`, so every token this daemon mints carries the key it
    advertises.
@@ -56,6 +57,36 @@ handlers, and `BinaryLocalSocketServices` names `ProjectServiceImpl<ProjectRpcHa
 
 `tests/runtime_signing_identity_acceptance.rs` pins that the key `runtime::build` advertises is the
 key it signs with.
+
+### First-login admission
+
+`first_login_enrolment(config, options)` decides whether this deployment may enrol its first GitHub
+login, and hands `build_auth_entries_admitting` the `LoginAdmission` it answers with:
+
+| Host | Outcome |
+|---|---|
+| `RuntimeHost::Binary` (the `tddy-daemon` binary, under systemd or not) | no admission. `users:` is the installer's to write, and an empty one refuses every caller's RPCs |
+| `Embedded`, with a config path (`RuntimeOptions::with_config_path`) | `tddy_daemon_auth::FirstLoginEnrolment` over `config.users`, that path, and the OS user this process runs as (`this_process_os_user`, from `getuid`). Unresolvable, `build` fails |
+| `Embedded`, no config path, serving GitHub sign-in (`github_auth_flow` is `Some`) to an empty `users:` | **`build` refuses**: the operator's first login could never be written down, so every sign-in would appear to work and then be refused by every RPC |
+| `Embedded`, no config path, otherwise | no admission |
+
+`config.users` is the `LiveUsers` holder every service built from `config` authorizes through, so the
+row enrolled through the admission is the row they all see, with no restart
+([daemon-kernel.md](../../tddy-daemon-kernel/docs/daemon-kernel.md#users-the-live-holder-and-first-login-enrolment)).
+The enrolment rules themselves are
+[`tddy-daemon-auth`'s](../../tddy-daemon-auth/docs/auth-service.md#first-login-enrolment).
+
+`tests/first_login_enrolment_acceptance.rs` drives it end to end on an embedded host: a first device
+login from the window authorized at once and written as the only row; a second account refused and
+not enrolled; logins over the common room and the agent tool socket not enrolled, and the window's
+login still enrolled after each; a server mapping nobody enrolling no one; and the refusal above.
+
+### The declared sign-in flow
+
+`GET /api/config` (`server.rs`, set from `main.rs`) and `DaemonConfigService.GetClientConfig`
+(`daemon_config_service.rs`) both carry `auth_flow` from `tddy_daemon_auth::auth::github_auth_flow`:
+`"redirect"`, `"device"`, or absent for a daemon that serves no GitHub sign-in. One function feeds
+both paths, so a browser and the desktop's webview are told the same flow.
 
 ### `common_room_key_directory` — the fleet's `KeyDirectory`
 
