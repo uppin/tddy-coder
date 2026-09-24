@@ -4,9 +4,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures_util::stream::Stream;
-use tddy_rpc::Status;
-
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
@@ -50,37 +47,9 @@ pub(crate) use service_util::*;
 pub use service_util::{await_supervised_with_timeout, spawn_blocking_with_timeout};
 
 /// Stream adapter backed by an unbounded mpsc channel carrying `Result<T, Status>` items — used for
-/// server-streaming RPCs (e.g. `StreamExecuteTool`) whose frames may carry a mid-stream status.
-pub struct MpscResultStream<T> {
-    rx: tokio::sync::mpsc::UnboundedReceiver<Result<T, Status>>,
-}
-
-impl<T> Stream for MpscResultStream<T> {
-    type Item = Result<T, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        self.rx.poll_recv(cx)
-    }
-}
-
-impl<T> Unpin for MpscResultStream<T> {}
-
-impl<T> MpscResultStream<T> {
-    pub(crate) fn into_receiver(self) -> tokio::sync::mpsc::UnboundedReceiver<Result<T, Status>> {
-        self.rx
-    }
-}
-
-/// Opaque by design: a stream's pending items are not inspectable without consuming them, so this
-/// only names the adapter — enough for a `Result::expect_err` message on a handler that returns it.
-impl<T> std::fmt::Debug for MpscResultStream<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("MpscResultStream")
-    }
-}
+/// server-streaming RPCs (e.g. `StreamExecuteTool`) whose frames may carry a mid-stream status. The
+/// one definition is `tddy-worktree-service`'s; this path stays for the callers that name it here.
+pub use tddy_worktree_service::stream::MpscResultStream;
 
 /// Cadence at which a `StreamSessionAgents` subscription re-sends the roster it last sent, when
 /// nothing has been published in the meantime.

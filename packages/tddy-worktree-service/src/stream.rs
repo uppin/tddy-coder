@@ -65,6 +65,13 @@ impl<T> Stream for MpscResultStream<T> {
 
 impl<T> Unpin for MpscResultStream<T> {}
 
+impl<T> MpscResultStream<T> {
+    /// The channel behind the stream, for a caller that relays its items rather than polling them.
+    pub fn into_receiver(self) -> UnboundedReceiver<Result<T, Status>> {
+        self.rx
+    }
+}
+
 /// Opaque by design: a stream's pending items are not inspectable without consuming them, so this
 /// only names the adapter — enough for a `Result::expect_err` message on a handler that returns it.
 impl<T> std::fmt::Debug for MpscResultStream<T> {

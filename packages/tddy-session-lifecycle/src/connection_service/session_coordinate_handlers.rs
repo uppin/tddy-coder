@@ -368,7 +368,7 @@ impl DaemonSessionHost {
                     }
                 }
             });
-            return Ok(Response::new(MpscResultStream { rx: session_rx }));
+            return Ok(Response::new(MpscResultStream::from(session_rx)));
         }
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<StartSessionEvent, Status>>();
@@ -405,7 +405,7 @@ impl DaemonSessionHost {
             };
             let _ = tx.send(event);
         });
-        Ok(Response::new(MpscResultStream { rx }))
+        Ok(Response::new(MpscResultStream::from(rx)))
     }
 }
 
