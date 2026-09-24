@@ -2,7 +2,7 @@
 
 **Category:** Future enhancement
 **Source:** `#carve` 13/15 `/green`, [#527](https://github.com/uppin/tddy-coder/pull/527), changeset
-[`2026-09-23-restructure-engine-fixes`](../1-WIP/2026-09-23-restructure-engine-fixes.md)
+[`2026-09-23-restructure-engine-fixes`](../changesets/2026-09-23-restructure-engine-fixes.md)
 
 A plan pins each file it touches by `sha256`, and its anchors are line/column ranges into those
 files. When an unrelated change lands on the same files, the plan is refused with

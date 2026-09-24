@@ -2,7 +2,7 @@
 
 **Category:** Future enhancement
 **Source:** `#carve` 13/15 `/green`, [#527](https://github.com/uppin/tddy-coder/pull/527), changeset
-[`2026-09-23-restructure-engine-fixes`](../1-WIP/2026-09-23-restructure-engine-fixes.md)
+[`2026-09-23-restructure-engine-fixes`](../changesets/2026-09-23-restructure-engine-fixes.md)
 
 #527's engine was run for real against #524's plans
 (`docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/` on the `feature/carve/lifecycle-wiring`

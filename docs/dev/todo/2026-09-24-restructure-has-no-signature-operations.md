@@ -2,7 +2,7 @@
 
 **Category:** Future enhancement
 **Source:** `#carve` 13/15 wrap, [#527](https://github.com/uppin/tddy-coder/pull/527), changeset
-[`2026-09-23-restructure-engine-fixes`](../1-WIP/2026-09-23-restructure-engine-fixes.md)
+[`2026-09-23-restructure-engine-fixes`](../changesets/2026-09-23-restructure-engine-fixes.md)
 
 The Rust backend supports ten operations: `extract_method`, `extract_variable`, `extract_module`,
 `extract_module_to_file`, `extract_trait`, `inline_method`, `rename_symbol`,

@@ -1,0 +1,8 @@
+# 2026-09-23 — The daemon's apply is compile-gated and its index is health-gated
+
+**Type:** Fix · `#carve` 13/15, PR [#527](https://github.com/uppin/tddy-coder/pull/527)
+Cross-package entry: [`docs/dev/changesets/2026-09-23-restructure-engine-fixes.md`](../../../../docs/dev/changesets/2026-09-23-restructure-engine-fixes.md)
+
+`apply_plan` opens its run through `runner::open_run_after` with the library's baseline compile check as the `before_writing` gate, and runs `refuse_a_broken_result` before emitting its outcome event, so a stream never ends with "applied N of N" over a tree that does not compile. `status_of` maps `BaselineDoesNotCompile` to `FailedPrecondition` and `AppliedTreeDoesNotCompile` to `Internal`. Backends built through `runner::registry_for` read the client's retained `serverStatus`, so a degraded index is refused at the first operation even on a warm root whose transition another request already drained; `Warm` still reports `ready` for it.
+
+`run-index-daemon` launches the daemon with the dev shell's whole environment (a `PATH`-only one made rust-analyzer's `webrtc-sys` and `sqlx-macros` builds fail to link, degrading the index — the real-repo cause of `req: _` signatures), a durable `TMPDIR` in place of `nix develop`'s, `setsid` resolved in a subshell, and the log truncated before launch. New: `detached_daemon_production` asserts the environment and the restart announcement against the real script (`#[ignore]`d), and `code_index_service_acceptance` covers an `Apply` the compile gate fails. Code issue `stale-repo-scoped-restructure-state-apply`: unchanged at `apply.rs:45`, and hit live during the real run. See [code-index-service.md](../code-index-service.md).

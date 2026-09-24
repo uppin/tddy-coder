@@ -122,9 +122,19 @@ terminal tearing that group down takes the daemon with it — which is how sever
 shells and a wrapper in others; `--stop` reading the wrong one would kill the wrapper and orphan a
 multi-gigabyte rust-analyzer.
 
+**The daemon runs with the dev shell's whole environment**, not only its `PATH`. rust-analyzer runs
+every build script and proc macro in the workspace to load `OUT_DIR` code, and the linker the nix
+toolchain drives needs the shell's `NIX_*` flags and SDK: under a `PATH`-only environment those
+builds fail to link inside rust-analyzer while the same `cargo check` succeeds in the dev shell, and
+the index is degraded. The one part not taken is the temporary directories — `nix develop` points
+them at a directory it deletes when it exits — so the daemon gets a durable one instead (the per-user
+temporary directory on macOS, `/tmp` elsewhere). The log is truncated before the launch, so readiness
+can never be read from the previous daemon's `listening on` line.
+
 One daemon per checkout, keyed by a checksum of the resolved root — reusing another worktree's daemon
 would run *that* worktree's restructuring code against this tree's source. Its socket, pid file and
-log live under `TDDY_INDEX_RUNTIME_DIR` (default `$TMPDIR`), not in the checkout, because an AF_UNIX
+log live under `TDDY_INDEX_RUNTIME_DIR` (default `$TMPDIR`, or that durable directory when `$TMPDIR`
+is a `nix develop` one), not in the checkout, because an AF_UNIX
 path is about 104 bytes and a repo-local one does not fit.
 
 `tddy-tools restructure` uses the daemon when **`TDDY_INDEX_SOCKET`** is set and non-empty, and
@@ -172,7 +182,8 @@ path that exists without a daemon installed.
 ## Known limitations
 
 - **`Warm.ready` means a live server holds the root**, not that its graph is loaded. Read the log's
-  warm/cold line for the real answer.
+  warm/cold line for the real answer. It is also `ready` for a root whose index rust-analyzer reports
+  as degraded; the first operation on that root is refused, quoting the server's message.
 - **A capture stops between tests, not mid-test.** A client that hangs up is noticed within one
   test of a capture and one signature of a duplicate-test detection, and the instrumented build is
   a single unit that cannot be interrupted once it has begun — so a disconnect during the build
