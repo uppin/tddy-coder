@@ -45,6 +45,42 @@ export type DeviceLogin =
 
 const DEVICE_LOGIN_IDLE: DeviceLogin = { phase: "idle" };
 
+/** A session as the daemon mints it — by `ExchangeCode` or by an approved device login. */
+interface MintedSession {
+  sessionToken: string;
+  refreshToken: string;
+  user?: GitHubUser;
+}
+
+/** A minted session with every part present — the only kind the page takes up. */
+interface WholeSession {
+  sessionToken: string;
+  refreshToken: string;
+  user: GitHubUser;
+}
+
+type SessionCheck = { whole: WholeSession } | { missing: string[] };
+
+/**
+ * Whether `minted` is a whole session, or which of its parts the daemon left out. proto3 leaves a
+ * field the daemon never set as an absent message or an empty string; either is a missing part,
+ * never one to fill in with a default.
+ */
+function checkWholeSession({ sessionToken, refreshToken, user }: MintedSession): SessionCheck {
+  const missing = [
+    ...(user === undefined ? ["user"] : []),
+    ...(sessionToken === "" ? ["session token"] : []),
+    ...(refreshToken === "" ? ["refresh token"] : []),
+  ];
+  if (user === undefined || missing.length > 0) return { missing };
+  return { whole: { sessionToken, refreshToken, user } };
+}
+
+/** The error for a flow that `completed` without the session parts named in `missing`. */
+function noWholeSessionMessage(completed: string, missing: string[]): string {
+  return `${completed} without a whole session (no ${missing.join(", no ")})`;
+}
+
 const LOGGED_OUT: AuthState = {
   user: null,
   isAuthenticated: false,
@@ -209,7 +245,7 @@ export function useAuth() {
   // Take up a session the daemon minted — by `ExchangeCode` or by an approved device login, which
   // return the same triple. Both flows store it here, so both leave the operator signed in alike.
   const adoptSession = useCallback(
-    (sessionToken: string, refreshToken: string, user: GitHubUser | null) => {
+    ({ sessionToken, refreshToken, user }: WholeSession) => {
       storage.set(sessionToken, refreshToken);
       setState({
         user,
@@ -253,8 +289,11 @@ export function useAuth() {
       }
       sessionStorage.removeItem(OAUTH_STATE_KEY);
       try {
-        const res = await client.exchangeCode({ code, state });
-        adoptSession(res.sessionToken, res.refreshToken, res.user ?? null);
+        const session = checkWholeSession(await client.exchangeCode({ code, state }));
+        if ("missing" in session) {
+          throw new Error(noWholeSessionMessage("The daemon exchanged the sign-in code", session.missing));
+        }
+        adoptSession(session.whole);
       } catch (e) {
         storage.clear();
         setState({
@@ -335,17 +374,19 @@ export function useAuth() {
           scheduleNextPoll();
           return;
         }
-        case DeviceLoginState.COMPLETE:
-          if (res.user === undefined || res.sessionToken === "" || res.refreshToken === "") {
+        case DeviceLoginState.COMPLETE: {
+          const session = checkWholeSession(res);
+          if ("missing" in session) {
             setDeviceLogin({
               phase: "failed",
-              error: "The daemon completed device sign-in without a whole session",
+              error: noWholeSessionMessage("The daemon completed device sign-in", session.missing),
             });
             return;
           }
           setDeviceLogin(DEVICE_LOGIN_IDLE);
-          adoptSession(res.sessionToken, res.refreshToken, res.user);
+          adoptSession(session.whole);
           return;
+        }
         case DeviceLoginState.DENIED:
           setDeviceLogin({ phase: "denied" });
           return;

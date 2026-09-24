@@ -48,6 +48,8 @@ export const TEST_IDS = {
   daemonLoginUnrecognisedFlow: "daemon-login-unrecognised-flow",
   /** Probe: the shared auth context's view of the operator — `signed-in:<login>` or `signed-out`. */
   authProbeStatus: "auth-probe-status",
+  /** Probe: the error the shared auth context holds, empty when it holds none. */
+  authProbeError: "auth-probe-error",
 
   // App / Connection
   livekitUrl: "livekit-url",
