@@ -19,14 +19,17 @@ mod harness;
 
 use std::ops::RangeInclusive;
 
+use tddy_code_restructuring::{Reexport, RefactorOp};
+
 use harness::{
     a_crate_whose_alias_only_the_compiler_resolves, a_crate_whose_alias_the_server_resolves,
     a_crate_whose_module_aliases_its_parent_s_type_through_super,
+    a_crate_whose_module_imports_a_type_only_the_seam_names_through_super,
     a_crate_whose_module_imports_its_parent_s_type_through_super,
     a_crate_whose_parent_names_a_trait_the_seam_moves,
     a_workspace_whose_parent_binds_a_module_in_a_group, an_extract_module_of, assert_compiles,
-    performing, performing_once_settled, refusal_once_settled_from, the_module_named, HOST_MODULE,
-    ORIGIN_LIB,
+    assert_compiles_with_its_tests, performing, performing_once_settled, refusal_once_settled_from,
+    the_module_named, HOST_MODULE, ORIGIN_LIB, TALLYING_MODULE,
 };
 
 /// `fn constant() -> u32 { 7 }`: a seam that names nothing at all.
@@ -41,6 +44,10 @@ const A_SEAM_TAKING_THE_TRAIT: RangeInclusive<u32> = 3..=5;
 /// `fn tally(&self, failure: Failure)` in `host.rs`: a seam naming the type `host` imports through
 /// `super`.
 const A_SEAM_NAMING_THE_PARENT_S_TYPE: RangeInclusive<u32> = 12..=17;
+
+/// `fn tally(&self, level: u32, failure: Failure)` in `host.rs`: the file's only use of `Failure`,
+/// naming it three times.
+const A_SEAM_HOLDING_EVERY_USE_OF_THE_PARENT_S_TYPE: RangeInclusive<u32> = 14..=23;
 
 const THE_PARENT_S_ALIAS: &str = "use crate::proto::Event as StartSessionEventKind;";
 
@@ -228,6 +235,64 @@ async fn imports_the_parent_s_alias_of_a_type_it_reaches_through_super() {
         "the module was not given the parent's alias, one level deeper:\n{module}"
     );
     assert_compiles(&workspace);
+}
+
+/// The rebased `use` resolves where the seam holds the parent's only use of the type, which is the
+/// case the server offers no import for and the pass reconstructs the parent's declaration.
+///
+/// That is plan 05's teardown seam on `svc_spawn_split_agent.rs`, refused as "left 4 unresolved
+/// occurrence(s) of it, where there were 3" although `use super::super::SplitStartFailure;` is the
+/// right path from the module the seam becomes.
+#[tokio::test(flavor = "multi_thread")]
+async fn imports_the_parent_s_type_through_super_where_the_seam_holds_its_only_use() {
+    // Given
+    let workspace = a_crate_whose_module_imports_a_type_only_the_seam_names_through_super();
+    let seam = an_extract_module_of(
+        &workspace,
+        HOST_MODULE,
+        A_SEAM_HOLDING_EVERY_USE_OF_THE_PARENT_S_TYPE,
+        "tallying",
+    );
+
+    // When
+    performing_once_settled(&workspace, seam).await;
+
+    // Then
+    let module = the_module_named(&workspace.read(HOST_MODULE), "tallying");
+    assert!(
+        module.contains("use super::super::Failure;"),
+        "the module was not given the parent's `super::Failure`, one level deeper:\n{module}"
+    );
+    assert_compiles_with_its_tests(&workspace);
+}
+
+/// The same seam moved straight to a file of its own, as plan 05 asks: `to_file`, behind a glob
+/// facade.
+#[tokio::test(flavor = "multi_thread")]
+async fn moves_to_a_file_a_seam_holding_the_only_use_of_the_parent_s_type_through_super() {
+    // Given
+    let workspace = a_crate_whose_module_imports_a_type_only_the_seam_names_through_super();
+    let seam = RefactorOp {
+        reexport: Some(Reexport::Glob),
+        to_file: true,
+        ..an_extract_module_of(
+            &workspace,
+            HOST_MODULE,
+            A_SEAM_HOLDING_EVERY_USE_OF_THE_PARENT_S_TYPE,
+            "tallying",
+        )
+    };
+
+    // When
+    performing_once_settled(&workspace, seam).await;
+
+    // Then
+    let module = workspace.read(TALLYING_MODULE);
+    assert!(
+        module.contains("use super::super::Failure;"),
+        "the module was not given the parent's `super::Failure`, one level deeper:\n{module}"
+    );
+    assert_compiles_with_its_tests(&workspace);
 }
 
 /// The import pass runs against names the server can actually judge, even on a server that has

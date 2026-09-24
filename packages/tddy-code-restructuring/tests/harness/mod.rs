@@ -1305,6 +1305,9 @@ pub fn the_module_named(text: &str, name: &str) -> String {
 /// The non-root module file the relative-import fixtures split: a child of `service`.
 pub const HOST_MODULE: &str = "crates/origin/src/service/host.rs";
 
+/// Where `to_file` writes a module called `tallying` that [`HOST_MODULE`] declares.
+pub const TALLYING_MODULE: &str = "crates/origin/src/service/host/tallying.rs";
+
 /// A crate whose **non-root** module reaches its parent's type through `use super::Failure;`, where
 /// the seam at lines 12–17 of [`HOST_MODULE`] takes a method naming it.
 ///
@@ -1368,7 +1371,93 @@ pub fn a_crate_whose_module_aliases_its_parent_s_type_through_super() -> AFixtur
     ])
 }
 
+/// [`a_crate_whose_module_imports_its_parent_s_type_through_super`], where the seam holds the
+/// file's **only** use of `Failure`, and names it three times: once in a parameter type and twice in
+/// the arms of a `match` nested in another `match`'s guarded arm.
+///
+/// The shape of plan 05's teardown seam in `svc_spawn_split_agent.rs`, whose
+/// `tear_down_codebase_session` holds every use of `SplitStartFailure` that file has. The seam at
+/// lines 14–23 takes that method. `service.rs` calls it, so nothing is dead once it has moved.
+pub fn a_crate_whose_module_imports_a_type_only_the_seam_names_through_super() -> AFixtureWorkspace
+{
+    a_crate_whose_service_and_host_modules_read(
+        &[
+            "//! The module that owns the type its child module names, and calls the seam.",
+            "",
+            "mod host;",
+            "",
+            "#[derive(Clone, Copy)]",
+            "pub(crate) enum Failure {",
+            "    Refused,",
+            "    Timeout,",
+            "}",
+            "",
+            "pub(crate) fn settled(level: u32) -> bool {",
+            "    level > 1",
+            "}",
+            "",
+            "pub fn described() -> u32 {",
+            "    host::described() + host::Host.tally(2, Failure::Timeout)",
+            "}",
+        ],
+        &[
+            "//! A module whose only use of its parent's type is in the seam.",
+            "",
+            "use super::settled;",
+            "",
+            "use super::Failure;",
+            "",
+            "pub struct Host;",
+            "",
+            "impl Host {",
+            "    pub fn describe(&self) -> u32 {",
+            "        u32::from(settled(1)) + 1",
+            "    }",
+            "",
+            "    pub(crate) fn tally(&self, level: u32, failure: Failure) -> u32 {",
+            "        match level {",
+            "            0 => 0,",
+            "            n if settled(n) => match failure {",
+            "                Failure::Refused => 1,",
+            "                Failure::Timeout => 2,",
+            "            },",
+            "            _ => 3,",
+            "        }",
+            "    }",
+            "}",
+            "",
+            "pub fn described() -> u32 {",
+            "    Host.describe()",
+            "}",
+        ],
+    )
+}
+
 fn a_crate_whose_host_module_reads(host: &[&str]) -> AFixtureWorkspace {
+    a_crate_whose_service_and_host_modules_read(
+        &[
+            "//! The module that owns the type its child module names.",
+            "",
+            "mod host;",
+            "",
+            "#[derive(Clone, Copy)]",
+            "pub(crate) enum Failure {",
+            "    Refused,",
+            "    Timeout,",
+            "}",
+            "",
+            "pub fn described() -> u32 {",
+            "    host::described()",
+            "}",
+        ],
+        host,
+    )
+}
+
+fn a_crate_whose_service_and_host_modules_read(
+    service: &[&str],
+    host: &[&str],
+) -> AFixtureWorkspace {
     a_workspace_of(&["origin"])
         .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
         .writing(
@@ -1383,25 +1472,10 @@ fn a_crate_whose_host_module_reads(host: &[&str]) -> AFixtureWorkspace {
                 "}",
             ]),
         )
-        .writing(
-            "crates/origin/src/service.rs",
-            &source(&[
-                "//! The module that owns the type its child module names.",
-                "",
-                "mod host;",
-                "",
-                "#[derive(Clone, Copy)]",
-                "pub(crate) enum Failure {",
-                "    Refused,",
-                "    Timeout,",
-                "}",
-                "",
-                "pub fn described() -> u32 {",
-                "    host::described()",
-                "}",
-            ]),
-        )
+        .writing("crates/origin/src/service.rs", &source(service))
         .writing(HOST_MODULE, &source(host))
+        // `to_file` writes a new file, and `apply` adds it with `git add -N`.
+        .tracked_by_git()
 }
 
 /// A type whose `impl` a seam cuts in half, where a member left behind calls an **associated
