@@ -11,6 +11,7 @@
 extern crate self as tddy_service;
 
 pub mod acp_replay;
+mod auth_redacted_debug;
 pub mod codex_oauth_scan;
 pub mod codex_oauth_validate;
 pub mod convert;
