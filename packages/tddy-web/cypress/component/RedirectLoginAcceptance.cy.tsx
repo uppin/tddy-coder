@@ -8,7 +8,7 @@
  * This is the same rule an approved device login is held to (`DeviceLoginAcceptance.cy.tsx`); the
  * page never fills a missing part in with a default.
  *
- * PRD: docs/ft/desktop/1-WIP/PRD-2026-09-19-keyring-desktop-login.md
+ * Design: packages/tddy-web/docs/daemon-sign-in.md
  */
 
 import React, { useEffect } from "react";

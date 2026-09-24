@@ -17,8 +17,8 @@
  * Every poll-timing test runs under `cy.clock()`, so "waits the interval" is proven by the clock,
  * not by a real-time sleep.
  *
- * PRD: docs/ft/desktop/1-WIP/PRD-2026-09-19-keyring-desktop-login.md
- * Changeset: docs/dev/1-WIP/2026-09-19-keyring-desktop-login.md (M7)
+ * Feature: docs/ft/desktop/tddy-desktop-tauri.md § Signing in
+ * Design: packages/tddy-web/docs/daemon-sign-in.md
  */
 
 import React from "react";
