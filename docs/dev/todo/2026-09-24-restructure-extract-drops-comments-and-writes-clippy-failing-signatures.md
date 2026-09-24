@@ -2,7 +2,7 @@
 
 **Category:** Future enhancement
 **Source:** `#carve` 14/15, [#524](https://github.com/uppin/tddy-coder/pull/524), plans
-`09b` (plan `09` without op 6), `02-cli-session-manager-dir` and `10b`, changeset
+`09b` (plan `09` without op 6), `02-cli-session-manager-dir`, `10b` and `09c`, changeset
 [`2026-09-23-carve-lifecycle-destructure`](../1-WIP/2026-09-23-carve-lifecycle-destructure.md)
 
 Both of these showed up only **after** the compile gate was satisfied: `cargo check --all-targets`
@@ -260,6 +260,32 @@ contents in 425 ms. That run never answered (400 s timeout), and **every later r
 daemon queued behind it** until `./run-index-daemon --stop`. The wait needs a deadline, or a refusal for a range that starts on a block's `{`. The assist then left the
 braces around the call it wrote (`{ self.provision_project_for_start(&req, os_user).await?; }`).
 That builds and lints clean, so it was left as the engine wrote it.
+
+### Plan `09c` (#524): K, P, Q, and a field init written out in full
+
+Plan `09c` replaces plan `09`'s refused op 6 (`resolve_sandboxed_claude_worktree`, the whole
+`match` over the worktree source, holding three `return`s). It uses four ranges between the exits:
+the two halves of the `Project` arm (cut the worktree, then link its branch to the stack node), the
+changeset write, and the project's default-branch lookup. It applied 4 of 4. The compile gate failed
+on K alone: one `WorkflowRecipe`, qualified by hand.
+
+- **P:** 2 comment lines lost ("A failed link never fails the spawn (D36) …"), restored.
+- **Q:** `too_many_arguments` 13/7 and 14/7, `ptr_arg` ×3, and `unit_arg` in the link. Hand fix: a
+  file-local `JailBranch<'a>` holds the branch-and-stack half of the request, and both functions take
+  it (6 and 6 parameters).
+- **A new Q shape, `redundant_field_names`:** where the moved code wrote `sessions_base: &sessions_base`
+  and the extracted function receives `sessions_base` as a reference, the assist rewrote the field
+  as `sessions_base: sessions_base` rather than the shorthand:
+
+```rust
+// before, in the handler
+                    .resolve_chain_base_ref_status(&stack_parent::StackBaseLookup {
+                        sessions_base: &sessions_base,
+                        repo_root: &repo_root,
+// after, in `create_jail_project_worktree(…, sessions_base: &PathBuf, …, repo_root: &PathBuf)`
+                sessions_base: sessions_base,      // clippy::redundant_field_names
+                repo_root: repo_root,              // clippy::redundant_field_names
+```
 
 ## Candidates, undecided
 
