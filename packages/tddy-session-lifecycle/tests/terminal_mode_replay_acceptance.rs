@@ -169,7 +169,7 @@ async fn first_frame_seen_by_a_browser_client(
     service: &tddy_terminal_rpc::TerminalSessionServiceImpl,
 ) -> Vec<u8> {
     let response = service
-        .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
+        .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             terminal_id: MAIN_TERMINAL.to_string(),

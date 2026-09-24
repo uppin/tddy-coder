@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-connectrpc/src/router.rs:37` — `handle_rpc`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
-**Metrics:** **147 lines** · **nesting depth 9** · 2 parameters · 13 branch/match lines · 6 early exits
-**Thresholds breached:** length 147 > 60; nesting 9 > 4 (`/analyze-clean-code`)
+**Metrics:** **141 lines** (2026-09-24; 147 at detection) · **nesting depth 9** · 2 parameters · 13 branch/match lines · 6 early exits
+**Thresholds breached:** length 141 > 60; nesting 9 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — partially fixed (147 → 141 lines in #509; length 141 > 60 and nesting 9 > 4 remain) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 147 | 9 | 13 | 6 | first detection |
+| 2026-09-24 | 141 | 9 | 13 | 6 | 147 on the merge-base with `origin/master` (`4e7157d2`) → 141 after #509 (`#keyring` 2/9): the two `RpcMessage { payload, metadata: RequestMetadata::default() }` literals became `RpcMessage::new(payload, over_http())`, the HTTP transport stamp, with `over_http` a new 3-line helper outside the function. −6 lines; nesting, branches and exits unchanged. Hand structural scan, same method on base and HEAD |
 
 ## What the tool found
 
@@ -34,7 +35,7 @@ With no unit test in the file, nothing catches a behaviour change made while res
 
 ## What would close it
 
-Bring it under the `/analyze-clean-code` thresholds — length 147 > 60; nesting 9 > 4 — by `extract_method`
+What remains after #509 (147 → 141): bring it under the `/analyze-clean-code` thresholds — length 141 > 60; nesting 9 > 4 — by `extract_method`
 along the branch structure. Anchor with `tddy-tools restructure anchors`, never by hand, then prove
 the seam with `restructure check --deep` against a warm index (`./run-index-daemon`).
 

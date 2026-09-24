@@ -58,3 +58,6 @@ tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }
+# A room name of each run's own, so a LiveKit testkit container reused across runs never hands one
+# run a participant a previous run left behind. Already in the tree through `tddy-testing-commons`.
+uuid = { version = "1", features = ["v4"] }

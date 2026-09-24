@@ -12,7 +12,7 @@ pub mod types;
 pub use bridge::{
     BidiStreamOutput, MultiRpcService, ResponseBody, RpcBridge, RpcResult, RpcService, ServiceEntry,
 };
-pub use message::{RequestMetadata, RpcMessage};
+pub use message::{RequestMetadata, RequestTransport, RpcMessage};
 pub use status::{Code, Status};
 pub use transport::RpcClientTransport;
 pub use types::{Request, Response, Streaming};

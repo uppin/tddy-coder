@@ -229,7 +229,7 @@ pub fn resolved_os_user_for_telegram_workflow(
         telegram_user_id
     );
     let login = store.get_github_login(telegram_user_id)?;
-    let os = config.os_user_for_github(&login).map(str::to_string);
+    let os = config.os_user_for_github(&login);
     log::debug!(
         target: "tddy_daemon::telegram_github_link",
         "resolved_os_user_for_telegram_workflow: github_login={} os_user={:?}",
@@ -252,7 +252,9 @@ pub fn complete_telegram_link_via_stub_exchange(
         telegram_user_id,
         code.len()
     );
-    let (_url, state) = provider.authorize_url();
+    let (_url, state) = provider
+        .authorize_url()
+        .map_err(|e| anyhow::anyhow!("stub GitHub authorize: {e}"))?;
     log::debug!(
         target: "tddy_daemon::telegram_github_link",
         "stub OAuth: authorize state registered (state_len={})",

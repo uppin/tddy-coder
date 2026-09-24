@@ -73,11 +73,14 @@ fn telegram_link_persists_github_login_across_restart() {
 #[test]
 fn telegram_start_workflow_uses_os_user_from_github_mapping() {
     // Given
-    let mut config = DaemonConfig::default();
-    config.users.push(UserMapping {
-        github_user: "mapped-gh".to_string(),
-        os_user: "mapped-os".to_string(),
-    });
+    let config = DaemonConfig {
+        users: vec![UserMapping {
+            github_user: "mapped-gh".to_string(),
+            os_user: "mapped-os".to_string(),
+        }]
+        .into(),
+        ..DaemonConfig::default()
+    };
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("map.json");
@@ -170,11 +173,14 @@ fn stub_github_exchange_maps_stub_login_for_telegram() {
         Some(login)
     );
 
-    let mut config = DaemonConfig::default();
-    config.users.push(UserMapping {
-        github_user: login.to_string(),
-        os_user: "stub-os".to_string(),
-    });
+    let config = DaemonConfig {
+        users: vec![UserMapping {
+            github_user: login.to_string(),
+            os_user: "stub-os".to_string(),
+        }]
+        .into(),
+        ..DaemonConfig::default()
+    };
     assert_eq!(
         resolved_os_user_for_telegram_workflow(&config, &store, telegram_user_id).as_deref(),
         Some("stub-os")

@@ -494,7 +494,7 @@ async fn resume_a_split_session_whose_roster_holds(
     wait_until_discovered(&agent_service, CODEBASE_INSTANCE_ID).await;
 
     agent_service
-        .resume_session(Request::new(ResumeSessionRequest {
+        .resume_session(Request::direct(ResumeSessionRequest {
             session_token: a_caller_token().to_string(),
             session_id: AGENT_SESSION_ID.to_string(),
         }))
@@ -830,7 +830,7 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
     ));
 
     let status = service
-        .resume_session(Request::new(ResumeSessionRequest {
+        .resume_session(Request::direct(ResumeSessionRequest {
             session_token: a_caller_token().to_string(),
             session_id: AGENT_SESSION_ID.to_string(),
         }))

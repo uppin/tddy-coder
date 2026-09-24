@@ -76,7 +76,7 @@ async fn list_sessions_unit_returns_new_metadata_fields() {
 
     let service = make_unit_service(temp.path().to_path_buf());
     let result = service
-        .list_sessions(Request::new(ListSessionsRequest {
+        .list_sessions(Request::direct(ListSessionsRequest {
             session_token: "valid".to_string(),
         }))
         .await;

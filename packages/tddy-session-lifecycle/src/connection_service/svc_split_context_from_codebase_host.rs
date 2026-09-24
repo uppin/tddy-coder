@@ -213,7 +213,7 @@ impl DaemonSessionHost {
     ) -> Result<Vec<ContextManifestEntry>, Status> {
         let frames = self
             .session_files_of_this_daemon()
-            .stream_context_manifest(Request::new(req))
+            .stream_context_manifest(Request::direct(req))
             .await?
             .into_inner();
         every_frame_of(frames).await
@@ -232,7 +232,7 @@ impl DaemonSessionHost {
     ) -> Result<MpscResultStream<ContextFileBatchChunk>, Status> {
         Ok(self
             .session_files_of_this_daemon()
-            .stream_read_context_file_batch(Request::new(req))
+            .stream_read_context_file_batch(Request::direct(req))
             .await?
             .into_inner())
     }

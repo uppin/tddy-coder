@@ -109,7 +109,7 @@ impl ADaemonInTheCommonRoom {
         owning_host: &str,
     ) -> Result<String, tddy_rpc::Status> {
         self.service
-            .resolve_stack_base(Request::new(ResolveStackBaseRequest {
+            .resolve_stack_base(Request::direct(ResolveStackBaseRequest {
                 session_token: VALID_TOKEN.to_string(),
                 daemon_instance_id: owning_host.to_string(),
                 stack_parent: ORCHESTRATOR_SESSION.to_string(),
@@ -128,7 +128,7 @@ impl ADaemonInTheCommonRoom {
         owning_host: &str,
     ) -> Result<(), tddy_rpc::Status> {
         self.service
-            .start_session(Request::new(StartSessionRequest {
+            .start_session(Request::direct(StartSessionRequest {
                 session_token: VALID_TOKEN.to_string(),
                 project_id: PROJECT.to_string(),
                 session_type: "claude-cli".to_string(),

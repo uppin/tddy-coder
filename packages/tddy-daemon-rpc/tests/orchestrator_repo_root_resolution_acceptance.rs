@@ -179,7 +179,7 @@ fn an_orchestrator_dir(sessions_base: &Path) -> PathBuf {
 
 async fn query(service: &TestDaemon) -> BranchResolution {
     service
-        .query_branch(Request::new(QueryBranchRequest {
+        .query_branch(Request::direct(QueryBranchRequest {
             session_token: TOKEN.to_string(),
             session_id: ORCHESTRATOR.to_string(),
             branch: BRANCH.to_string(),
@@ -195,7 +195,7 @@ async fn query(service: &TestDaemon) -> BranchResolution {
 
 async fn pr_status(service: &TestDaemon) -> PrStatusView {
     service
-        .get_pr_status(Request::new(GetPrStatusRequest {
+        .get_pr_status(Request::direct(GetPrStatusRequest {
             session_token: TOKEN.to_string(),
             session_id: ORCHESTRATOR.to_string(),
             branch: BRANCH.to_string(),

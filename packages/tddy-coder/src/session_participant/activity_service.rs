@@ -449,7 +449,10 @@ mod tests {
             daemon_instance_id: String::new(),
             mode: StreamMode::SnapshotThenLive as i32,
         };
-        RpcMessage::new(req.encode_to_vec(), Default::default())
+        RpcMessage::new(
+            req.encode_to_vec(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        )
     }
 
     fn rpc_for(
@@ -573,7 +576,10 @@ mod tests {
             daemon_instance_id: String::new(),
             mode: tddy_service::proto::activity::StreamMode::LiveOnly as i32,
         };
-        RpcMessage::new(req.encode_to_vec(), Default::default())
+        RpcMessage::new(
+            req.encode_to_vec(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        )
     }
 
     #[tokio::test]
@@ -621,7 +627,10 @@ mod tests {
             mode: StreamMode::SnapshotThenLive as i32,
             page_size: 0,
         };
-        RpcMessage::new(req.encode_to_vec(), Default::default())
+        RpcMessage::new(
+            req.encode_to_vec(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        )
     }
 
     /// Receive one streamed replay byte-frame and decode its inner ACP `AcpAgentMessage`.
@@ -751,7 +760,10 @@ mod tests {
             mode: StreamMode::CountThenLive as i32,
             page_size: 0,
         };
-        let message = RpcMessage::new(req.encode_to_vec(), Default::default());
+        let message = RpcMessage::new(
+            req.encode_to_vec(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        );
         let result = rpc
             .handle_rpc(ACTIVITY_SERVICE, "StreamAcpReplay", &message)
             .await;
@@ -798,7 +810,10 @@ mod tests {
             mode: StreamMode::CountThenLive as i32,
             page_size: 0,
         };
-        let message = RpcMessage::new(req.encode_to_vec(), Default::default());
+        let message = RpcMessage::new(
+            req.encode_to_vec(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        );
         let mut rx = match rpc
             .handle_rpc(ACTIVITY_SERVICE, "StreamAcpReplay", &message)
             .await
@@ -891,7 +906,10 @@ mod tests {
             mode: StreamMode::CountThenLive as i32,
             page_size: 0,
         };
-        let message = RpcMessage::new(req.encode_to_vec(), Default::default());
+        let message = RpcMessage::new(
+            req.encode_to_vec(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        );
         let mut rx = match rpc
             .handle_rpc(ACTIVITY_SERVICE, "StreamAcpReplay", &message)
             .await
@@ -930,7 +948,10 @@ mod tests {
             daemon_instance_id: String::new(),
             tool_call_id: tool_call_id.to_string(),
         };
-        RpcMessage::new(req.encode_to_vec(), Default::default())
+        RpcMessage::new(
+            req.encode_to_vec(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        )
     }
 
     /// A `SNAPSHOT_THEN_LIVE` tool-call frame carries the call's id but not its bodies: the heavy

@@ -323,7 +323,7 @@ async fn start_terminal_session_returns_fresh_terminal_id() {
 
     // When
     let resp = service
-        .start_terminal_session(Request::new(StartTerminalSessionRequest {
+        .start_terminal_session(Request::direct(StartTerminalSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: String::new(),
@@ -351,7 +351,7 @@ async fn list_terminal_sessions_returns_main_and_started() {
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
     let started = service
-        .start_terminal_session(Request::new(StartTerminalSessionRequest {
+        .start_terminal_session(Request::direct(StartTerminalSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: String::new(),
@@ -363,7 +363,7 @@ async fn list_terminal_sessions_returns_main_and_started() {
 
     // When
     let terminals = service
-        .list_terminal_sessions(Request::new(ListTerminalSessionsRequest {
+        .list_terminal_sessions(Request::direct(ListTerminalSessionsRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
         }))
@@ -395,7 +395,7 @@ async fn stop_terminal_session_removes_from_list() {
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
     let started = service
-        .start_terminal_session(Request::new(StartTerminalSessionRequest {
+        .start_terminal_session(Request::direct(StartTerminalSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: String::new(),
@@ -407,7 +407,7 @@ async fn stop_terminal_session_removes_from_list() {
 
     // When
     let stop = service
-        .stop_terminal_session(Request::new(StopTerminalSessionRequest {
+        .stop_terminal_session(Request::direct(StopTerminalSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             terminal_id: started.clone(),
@@ -419,7 +419,7 @@ async fn stop_terminal_session_removes_from_list() {
 
     // Then
     let terminals = service
-        .list_terminal_sessions(Request::new(ListTerminalSessionsRequest {
+        .list_terminal_sessions(Request::direct(ListTerminalSessionsRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
         }))
@@ -445,7 +445,7 @@ async fn stop_terminal_session_rejecting_main_returns_invalid_argument() {
 
     // When
     let err = service
-        .stop_terminal_session(Request::new(StopTerminalSessionRequest {
+        .stop_terminal_session(Request::direct(StopTerminalSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             terminal_id: MAIN_TERMINAL_ID.to_string(),
@@ -472,7 +472,7 @@ async fn terminal_session_rpcs_require_valid_token() {
 
     // When / Then — start
     let e1 = service
-        .start_terminal_session(Request::new(StartTerminalSessionRequest {
+        .start_terminal_session(Request::direct(StartTerminalSessionRequest {
             session_token: "bad-token".to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: String::new(),
@@ -483,7 +483,7 @@ async fn terminal_session_rpcs_require_valid_token() {
 
     // list
     let e2 = service
-        .list_terminal_sessions(Request::new(ListTerminalSessionsRequest {
+        .list_terminal_sessions(Request::direct(ListTerminalSessionsRequest {
             session_token: "bad-token".to_string(),
             session_id: SESSION_ID.to_string(),
         }))
@@ -493,7 +493,7 @@ async fn terminal_session_rpcs_require_valid_token() {
 
     // stop
     let e3 = service
-        .stop_terminal_session(Request::new(StopTerminalSessionRequest {
+        .stop_terminal_session(Request::direct(StopTerminalSessionRequest {
             session_token: "bad-token".to_string(),
             session_id: SESSION_ID.to_string(),
             terminal_id: "anything".to_string(),
@@ -515,7 +515,7 @@ async fn stream_terminal_output_routes_by_terminal_id() {
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
     let started = service
-        .start_terminal_session(Request::new(StartTerminalSessionRequest {
+        .start_terminal_session(Request::direct(StartTerminalSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: String::new(),
@@ -527,7 +527,7 @@ async fn stream_terminal_output_routes_by_terminal_id() {
 
     // When / Then — unknown terminal id is NotFound.
     let err = service
-        .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
+        .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             terminal_id: "no-such-terminal".to_string(),
@@ -546,7 +546,7 @@ async fn stream_terminal_output_routes_by_terminal_id() {
 
     // The started terminal's id resolves and the stream is established.
     let ok = service
-        .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
+        .stream_terminal_output(Request::direct(StreamTerminalOutputRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             terminal_id: started.clone(),
@@ -573,7 +573,7 @@ async fn send_terminal_input_targets_identified_terminal() {
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
     let started = service
-        .start_terminal_session(Request::new(StartTerminalSessionRequest {
+        .start_terminal_session(Request::direct(StartTerminalSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: String::new(),
@@ -587,7 +587,7 @@ async fn send_terminal_input_targets_identified_terminal() {
 
     // When — send input addressed to the started terminal.
     service
-        .send_terminal_input(Request::new(SessionTerminalInput {
+        .send_terminal_input(Request::direct(SessionTerminalInput {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             data: format!("echo {marker}\n").into_bytes(),

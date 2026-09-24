@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use tddy_rpc::envelope::{self, RpcResponse};
 use tddy_rpc::server_engine::ServerEngine;
-use tddy_rpc::RpcService;
+use tddy_rpc::{RequestTransport, RpcService};
 use tokio::sync::{mpsc, Mutex};
 
 use crate::host::FrameSink;
@@ -115,7 +115,9 @@ impl<R: RosterResolver> MultiConnectionHost<R> {
 
         let id = self.next_connection_id.fetch_add(1, Ordering::Relaxed);
         let peer = peer_for(client_epoch);
-        let engine = Arc::new(ServerEngine::new(roster));
+        // Stamped by this host, not read from any frame: a request reaches it only through the
+        // application's own IPC bridge.
+        let engine = Arc::new(ServerEngine::new(roster, RequestTransport::InProcess));
         let (responses, response_rx) = mpsc::channel(RESPONSE_QUEUE_CAPACITY);
         tokio::spawn(drain_responses(
             engine.clone(),

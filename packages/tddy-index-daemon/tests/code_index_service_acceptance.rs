@@ -99,7 +99,7 @@ async fn unary_at<Req: Message, Res: Message + Default>(
 fn a_message_carrying<Req: Message>(request: Req) -> tddy_rpc::RpcMessage {
     tddy_rpc::RpcMessage::new(
         request.encode_to_vec(),
-        tddy_rpc::RequestMetadata::default(),
+        tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     )
 }
 

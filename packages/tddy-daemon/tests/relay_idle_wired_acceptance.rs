@@ -56,7 +56,9 @@ async fn rpc_call_bumps_idle_tracker_so_shutdown_is_not_triggered() {
 
     // When
     // Make any RPC — ListTools is the simplest (no auth required).
-    let _ = service.list_tools(Request::new(ListToolsRequest {})).await;
+    let _ = service
+        .list_tools(Request::direct(ListToolsRequest {}))
+        .await;
 
     // Then
     assert!(

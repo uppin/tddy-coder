@@ -269,7 +269,7 @@ async fn send_terminal_input_rejected_without_valid_control_token() {
 
     // When — send input with wrong/empty control token
     let err = service
-        .send_terminal_input(Request::new(SessionTerminalInput {
+        .send_terminal_input(Request::direct(SessionTerminalInput {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             data: vec![b'x'],
@@ -309,7 +309,7 @@ async fn send_terminal_input_succeeds_for_current_controller() {
 
     // When — send input with the correct control token
     let resp = service
-        .send_terminal_input(Request::new(SessionTerminalInput {
+        .send_terminal_input(Request::direct(SessionTerminalInput {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             data: vec![b'h', b'i'],
@@ -338,7 +338,7 @@ async fn claim_terminal_control_rpc_returns_granted_for_unheld_session() {
 
     // When
     let resp = service
-        .claim_terminal_control(Request::new(ClaimTerminalControlRequest {
+        .claim_terminal_control(Request::direct(ClaimTerminalControlRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             screen_id: SCREEN_A.to_string(),
@@ -370,7 +370,7 @@ async fn watch_terminal_control_emits_snapshot() {
 
     // When — screen A subscribes to watch
     let mut stream = service
-        .watch_terminal_control(Request::new(WatchTerminalControlRequest {
+        .watch_terminal_control(Request::direct(WatchTerminalControlRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: token.clone(),
@@ -407,7 +407,7 @@ async fn terminal_control_rpcs_require_valid_token() {
 
     // When — invalid session token
     let err = service
-        .claim_terminal_control(Request::new(ClaimTerminalControlRequest {
+        .claim_terminal_control(Request::direct(ClaimTerminalControlRequest {
             session_token: "bad-token".to_string(),
             session_id: SESSION_ID.to_string(),
             screen_id: SCREEN_A.to_string(),

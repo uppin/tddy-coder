@@ -36,7 +36,7 @@ async fn removes_inactive_session_directory() {
     let service = test_service(sessions_base);
 
     // When
-    let request = Request::new(DeleteSessionRequest {
+    let request = Request::direct(DeleteSessionRequest {
         session_token: TEST_TOKEN.to_string(),
         session_id: "inactive-delete-me".to_string(),
     });
@@ -53,7 +53,7 @@ async fn removes_inactive_session_directory() {
     );
 
     // Second delete should fail — session is gone from this daemon
-    let second = Request::new(DeleteSessionRequest {
+    let second = Request::direct(DeleteSessionRequest {
         session_token: TEST_TOKEN.to_string(),
         session_id: "inactive-delete-me".to_string(),
     });
@@ -96,7 +96,7 @@ async fn terminates_active_session_then_removes_directory() {
     let service = test_service(sessions_base);
 
     // When
-    let request = Request::new(DeleteSessionRequest {
+    let request = Request::direct(DeleteSessionRequest {
         session_token: TEST_TOKEN.to_string(),
         session_id: "active-delete-me".to_string(),
     });

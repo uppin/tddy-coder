@@ -189,7 +189,7 @@ async fn start_session_unknown_daemon_instance_id_returns_clear_error() {
     let service = test_service(sessions_base);
 
     // When
-    let request = Request::new(StartSessionRequest {
+    let request = Request::direct(StartSessionRequest {
         session_token: TEST_TOKEN.to_string(),
         tool_path: "/bin/true".to_string(),
         project_id: "not-consulted-before-daemon-routing".to_string(),
@@ -385,7 +385,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         loop {
             let daemons = tddy_service::proto::host::HostService::list_eligible_daemons(
                 &hosts_a,
-                Request::new(tddy_service::proto::host::ListEligibleDaemonsRequest {
+                Request::direct(tddy_service::proto::host::ListEligibleDaemonsRequest {
                     session_token: TEST_TOKEN.to_string(),
                 }),
             )
@@ -406,7 +406,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     .expect("timeout waiting for peer daemon in eligible list");
 
     // When — daemon A routes StartSession to the discovered peer
-    let request = Request::new(StartSessionRequest {
+    let request = Request::direct(StartSessionRequest {
         session_token: TEST_TOKEN.to_string(),
         tool_path: fake_tddy_coder_path.to_str().unwrap().to_string(),
         project_id: REMOTE_ROUTING_PROJECT_ID.to_string(),
@@ -461,7 +461,7 @@ async fn session_entry_includes_daemon_instance_id() {
 
     // When
     let response = service
-        .list_sessions(Request::new(ListSessionsRequest {
+        .list_sessions(Request::direct(ListSessionsRequest {
             session_token: TEST_TOKEN.to_string(),
         }))
         .await
@@ -503,7 +503,7 @@ async fn cross_daemon_session_operation_rejected() {
 
     // When — daemon B attempts to delete daemon A's session
     let err = service_b
-        .delete_session(Request::new(DeleteSessionRequest {
+        .delete_session(Request::direct(DeleteSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
         }))

@@ -196,7 +196,7 @@ async fn managed_claude_cli_session_seeds_changeset_with_recipe_start_goal() {
 
     // When
     let session_id = service
-        .start_session(Request::new(managed_request("tdd")))
+        .start_session(Request::direct(managed_request("tdd")))
         .await
         .expect("managed claude-cli StartSession must succeed")
         .into_inner()
@@ -230,7 +230,7 @@ async fn managed_claude_cli_session_with_unknown_recipe_is_rejected() {
 
     // When
     let err = service
-        .start_session(Request::new(managed_request("no-such-recipe")))
+        .start_session(Request::direct(managed_request("no-such-recipe")))
         .await
         .expect_err("managed claude-cli StartSession with an unknown recipe must fail");
 
@@ -262,7 +262,7 @@ async fn managed_claude_cli_session_launches_claude_with_orchestration_prompt_fi
 
     // When
     let session_id = service
-        .start_session(Request::new(managed_request("tdd")))
+        .start_session(Request::direct(managed_request("tdd")))
         .await
         .expect("managed claude-cli StartSession must succeed")
         .into_inner()
@@ -300,7 +300,7 @@ async fn managed_claude_cli_session_launches_claude_with_tddy_socket_in_env() {
 
     // When
     let session_id = service
-        .start_session(Request::new(managed_request("tdd")))
+        .start_session(Request::direct(managed_request("tdd")))
         .await
         .expect("managed claude-cli StartSession must succeed")
         .into_inner()
@@ -372,7 +372,7 @@ async fn resuming_a_managed_claude_cli_session_re_wires_orchestration_and_socket
 
     // When
     service
-        .resume_session(Request::new(ResumeSessionRequest {
+        .resume_session(Request::direct(ResumeSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: session_id.to_string(),
         }))

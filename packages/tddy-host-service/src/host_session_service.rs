@@ -102,7 +102,10 @@ mod tests {
     }
 
     fn request_bytes(json: serde_json::Value) -> RpcMessage {
-        RpcMessage::new(serde_json::to_vec(&json).unwrap(), Default::default())
+        RpcMessage::new(
+            serde_json::to_vec(&json).unwrap(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        )
     }
 
     #[tokio::test]

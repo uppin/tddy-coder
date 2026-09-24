@@ -263,12 +263,12 @@ impl FacilitatingDaemon {
     async fn a_session_being_connected_to(&self) -> StartSessionResponse {
         let started = self
             .service
-            .start_session(Request::new(an_agent_session_request()))
+            .start_session(Request::direct(an_agent_session_request()))
             .await
             .expect("an agent session must start")
             .into_inner();
         self.service
-            .connect_session(Request::new(ConnectSessionRequest {
+            .connect_session(Request::direct(ConnectSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: started.session_id.clone(),
             }))

@@ -641,7 +641,7 @@ async fn a_started_session(
     suffix: &str,
 ) -> String {
     let started = connections
-        .start_session(tddy_rpc::Request::new(StartSessionRequest {
+        .start_session(tddy_rpc::Request::direct(StartSessionRequest {
             session_token: an_access_token_for(tokens, GITHUB_USER),
             project_id: PROJECT_ID.to_string(),
             session_type: "claude-cli".to_string(),
@@ -663,7 +663,7 @@ async fn a_client_connects_to(
     session_id: &str,
 ) {
     connections
-        .connect_session(tddy_rpc::Request::new(ConnectSessionRequest {
+        .connect_session(tddy_rpc::Request::direct(ConnectSessionRequest {
             session_token: an_access_token_for(tokens, GITHUB_USER),
             session_id: session_id.to_string(),
         }))

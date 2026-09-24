@@ -770,8 +770,12 @@ pub async fn connect_sandbox_ipc(
         .await
         .map_err(|e| format!("tool ipc connect: {e}"))?;
     let (read_half, write_half) = tokio::io::split(stream);
-    let (client, endpoint) =
-        tddy_stdio::StdioEndpoint::from_duplex(read_half, write_half, NoCallbackToolService);
+    let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+        read_half,
+        write_half,
+        NoCallbackToolService,
+        tddy_rpc::RequestTransport::UnixSocket,
+    );
     tokio::spawn(endpoint.run());
     Ok(client)
 }

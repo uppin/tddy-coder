@@ -1,7 +1,8 @@
 # The identity boundary (tddy-daemon-auth)
 
 Who a session token belongs to, and every credential the daemon holds on that person's behalf —
-served as four gRPC services and one function.
+served as four gRPC services and one function, plus the admission a desktop enrols its first login
+through.
 
 `AuthBuildResult::user_resolver` is the daemon's single identity function. Every other service, in
 every other crate, authenticates with a clone of it. That is what makes this crate the identity
@@ -11,7 +12,8 @@ boundary in fact and not only in name.
 
 | Module | What is in it |
 |---|---|
-| `auth` | `build_auth_entries_with` (a daemon with a signing identity) and `build_auth_entries` (one without), the `auth.AuthService` and `auth.LiveKitTokenService` handlers, `session_token_authenticator`, `build_token_service_entry` |
+| `auth` | `build_auth_entries_with` (a daemon with a signing identity), `build_auth_entries_admitting` (the same, with a `LoginAdmission`) and `build_auth_entries` (one without); `GitHubAuthFlow` and `github_auth_flow`; the `auth.AuthService` and `auth.LiveKitTokenService` handlers, `session_token_authenticator`, `build_token_service_entry` |
+| `first_login_admission` | `FirstLoginEnrolment` — a desktop's first-login enrolment, the `LoginAdmission` an embedded host is built with |
 | `signing_key` | `DaemonSigningKey`, `load_signing_key` / `signing_key_path`, the `KeyDirectory` port and `StandaloneKeyDirectory`, `DirectorySessionTokenVerifier`, `SessionTokens`, `auth_storage_looser_than_owner_only` |
 | `github_token_store` | `FileGitHubTokenStore` — where a login's GitHub access token sits at rest |
 | `github_pr_credentials` | the credential shape `ConnectionServiceImpl` reads a PR list with |
@@ -24,7 +26,7 @@ boundary in fact and not only in name.
 
 | Service | Methods | Notes |
 |---|---|---|
-| `auth.AuthService` | 5 | the GitHub OAuth exchange and what it persists |
+| `auth.AuthService` | 7 | GitHub sign-in by the redirect flow (`GetAuthUrl`, `ExchangeCode`) or the device flow (`StartDeviceLogin`, `PollDeviceLogin`), `GetAuthStatus`, `RefreshSession`, `Logout`, and what a sign-in persists |
 | `auth.LiveKitTokenService` | 1 | `MintLiveKitToken` — a room JWT |
 | `token.TokenService` | 2 | session tokens |
 | `loopback_tunnel.LoopbackTunnelService` | 1 | `StreamBytes`, the session-host end of the OAuth tunnel |
@@ -32,6 +34,94 @@ boundary in fact and not only in name.
 **No wire coordinate changed when this crate was cut out of `tddy-daemon`.** All four were already
 their own protos, so no client migrated — which is why the identity boundary could be drawn early
 without a breaking change riding along.
+
+## Which sign-in `github:` registers
+
+`build_auth_entries_admitting` reads the `github:` block through one private decision,
+`github_provider_kind`, and registers at most one `auth.AuthService`:
+
+| `github:` holds | Provider | Flow it serves |
+|---|---|---|
+| `stub: true` | `StubGitHubProvider::new_with_callback`, with `stub_codes` registered through `register_code_mappings` | both; declared as `redirect` |
+| `client_id` **and** `client_secret` | `RealGitHubProvider::new(client_id, client_secret, redirect_uri)` — a confidential client | redirect (the device flow works too, and never sends the secret) |
+| `client_id` and **no** `client_secret` | `RealGitHubProvider::new_public(client_id)` — a public client | device |
+| neither a stub nor a `client_id`, or no `github:` block | none — `AuthBuildResult::unauthenticated()` | none |
+
+These are two configurations, not a fallback: a deployment declares which one it is by what it
+supplies. A secret inside a downloadable application is public the day it ships, so a desktop
+install is the public-client row. `redirect_uri` defaults to `http://{web_host}:{web_port}/auth/callback`
+and feeds only the stub and the confidential client; a public client holds no callback.
+
+**A public client refuses the redirect flow.** Its `GetAuthUrl` and `ExchangeCode` both answer
+`failed_precondition`, naming the device flow, so an operator is never sent to GitHub and back for an
+exchange that cannot complete.
+
+**The flow is declared, never inferred.** `GitHubAuthFlow { Redirect, Device }` (`as_str()`:
+`"redirect"` / `"device"`) is what `github_auth_flow(config)` returns, from the same
+`github_provider_kind` the builder reads, so the flow a dashboard is told can never differ from the
+provider serving it. `None` is a daemon that registers no `auth.AuthService`. `tddy-daemon` carries
+it as `auth_flow` on both client-config paths — `GET /api/config` (`server.rs`, from `main.rs`) and
+`GetClientConfigResponse.auth_flow` (`daemon_config_service.rs`) — and omits the field for `None`.
+
+**Device-flow handlers.** `StartDeviceLogin` returns GitHub's device code, user code, verification
+URI, expiry and interval, and remembers nothing. `PollDeviceLogin` answers `PENDING`, `SLOW_DOWN`
+(with the interval to adopt), `DENIED`, `EXPIRED`, or `COMPLETE` with the same `session_token`,
+`user` and `refresh_token` `ExchangeCode` returns. Both flows finish through
+`AuthServiceImpl::complete_login`, so a device login is admitted, retained and minted exactly as a
+redirect login is — see [`tddy-github` device-flow.md](../../tddy-github/docs/device-flow.md).
+
+## First-login enrolment
+
+A server's `users:` is written by whoever installs it. A login GitHub vouches for is minted a
+session whether or not it is mapped, and each token-gated RPC refuses an unmapped caller
+`permission_denied: user not mapped to OS user`. A desktop install has nobody to write `users:`, so
+its **first** login from its own window is written down as it completes.
+
+`FirstLoginEnrolment::new(users, config_path, os_user)` implements `tddy_github::LoginAdmission`,
+which `AuthServiceImpl` asks before it retains or mints anything:
+
+```rust
+fn admit(&self, github_login: &str, transport: RequestTransport) -> Result<(), Status>;
+```
+
+`transport` is how the completing call — `ExchangeCode` or a completing `PollDeviceLogin` — reached
+the daemon, as the host that received it stamped it
+([`tddy-rpc` request-transport.md](../../tddy-rpc/docs/request-transport.md)). `admit` decides, in
+order:
+
+| Situation | Outcome |
+|---|---|
+| `github_login` is already mapped | admitted |
+| unmapped, and `transport` is anything but `InProcess` | admitted **unmapped**, nothing written; logged. Its RPCs are refused `permission_denied` |
+| unmapped, `InProcess`, and `users:` is empty | **enrolled**: the row `github_login → os_user` is persisted to `config_path`, then applied to the shared `LiveUsers`, then the session is minted |
+| unmapped, `InProcess`, and `users:` already names somebody (`EnrolmentRefusal::AlreadyEnrolled`) | admitted **unmapped**, nothing written; logged. A second account is not added by signing in |
+| the config file cannot be rewritten (`EnrolmentRefusal::ConfigNotWritable`) | refused `failed_precondition`, naming the reason. Nobody is mapped, so the login does not appear to work and then vanish on restart |
+
+**Only `InProcess` enrols.** `is_this_desktops_window` is an **exhaustive** match with no wildcard
+arm: `InProcess => true`, and `LiveKit`, `UnixSocket`, `Pipe`, `Http`, `Grpc` and `Direct` all
+`=> false`. A transport added later must be decided there rather than inherit enrolment. The same
+`auth.AuthService` is served on the LiveKit common room and the agent tool socket too, and a login
+completed over either is somebody who is not necessarily at this machine — a room peer, a co-located
+process. On an unenrolled desktop such a login writes nothing, and the desktop can still enrol its
+own window's login afterwards.
+
+**Which deployments enrol** is decided where the daemon is assembled, not here: `tddy-daemon`'s
+`runtime::build` builds a `FirstLoginEnrolment` only for an embedded host started from a config file,
+mapped to the OS user the process runs as — see
+[daemon-endpoint.md](../../tddy-daemon/docs/daemon-endpoint.md#first-login-admission). A server
+never has an admission, and `build_auth_entries_with` is `build_auth_entries_admitting(.., None)`.
+
+The persistence — the file write, the in-memory row every service sees, and the lock that serialises
+it against `UpdateConfig` — is `tddy-daemon-kernel`'s
+([daemon-kernel.md](../../tddy-daemon-kernel/docs/daemon-kernel.md#users-the-live-holder-and-first-login-enrolment)).
+`os_user_for_github` is unchanged by all of it: an unmapped login is still `None`, with no default
+arm.
+
+**Known limits.** Enrolment is decided by the transport of the *completing* poll only; the
+`StartDeviceLogin` that issued the code is not bound to it. That is not exploitable — a device code is
+returned only to its starter — but binding an attempt to its starting transport would be defence in
+depth. `admit` does its one file write synchronously under a `std::sync::Mutex` on an async RPC task;
+it happens once per deployment, and `spawn_blocking` would be the tidier shape.
 
 ## One key signs one thing
 
@@ -85,7 +175,7 @@ from it; one that awaited inside `public_key_for` would refuse every peer token 
 warning naming the key id rather than a loud failure.
 
 **`SessionTokens`** is one signer plus one verifier, built **once per daemon** in `runtime::build`
-and handed to `build_auth_entries_with`, the local socket, `local_token.LocalTokenService` and the
+and handed to `build_auth_entries_admitting`, the local socket, `local_token.LocalTokenService` and the
 session host's split and jailed-codebase agent credentials. No path may construct a second key —
 that would be an identity no peer was told about. `build_auth_entries(config, …)` remains for a
 daemon with no signing identity (no `github:` block), and answers it with `user_resolver: None`, so
@@ -126,7 +216,7 @@ that has two consequences worth stating rather than discovering:
 
 1. An **existing** storage directory does not have `0o700` re-imposed on every write, so the
    daemon never overrules an operator's deliberate `chmod`. An `auth_storage` more permissive than
-   `0700` is instead **warned about once, at startup**, by `build_auth_entries_with`
+   `0700` is instead **warned about once, at startup**, by `build_auth_entries_admitting`
    (`auth_storage_looser_than_owner_only`), and left as it is. A directory's mode governs listing
    and traversal, not the contents of the `0600` files inside it, so the signing key and the token
    store are protected by their own modes even in a loose directory.
@@ -157,7 +247,9 @@ cargo test -p tddy-daemon-auth
 
 | Suite | Covers |
 |---|---|
-| `tests/auth_service_acceptance.rs` | all five `auth.AuthService` methods answering from this crate, plus a refusal of a token signed by a key this daemon does not know |
+| `tests/auth_service_acceptance.rs` | `GetAuthUrl`, `ExchangeCode`, `GetAuthStatus`, `RefreshSession` and `Logout` answering from this crate, plus a refusal of a token signed by a key this daemon does not know |
+| `tests/device_login_acceptance.rs` | a daemon holding only a public `client_id` registering `auth.AuthService`, refusing `GetAuthUrl` `failed_precondition` and declaring the `device` flow; a stub daemon declaring `redirect`; a started device login handing out the stub's code, verification URI, expiry and interval; an approved login yielding the session `ExchangeCode` would have, whose token then authenticates `GetAuthStatus` |
+| `first_login_admission.rs` (inline) | every non-`InProcess` transport admitting an unmapped first login and leaving the file byte-identical; `InProcess` enrolling, in memory and on reload; a config file that has gone refused `failed_precondition` with nobody mapped |
 | `tests/token_service_acceptance.rs` | `MintLiveKitToken` and `token.TokenService` minting room JWTs against `config.livekit.api_secret` (its only job), each verified with `livekit_api::access_token::TokenVerifier` — and a server holding a *different* secret refusing the same JWT, without which the positive cases assert nothing |
 | `tests/cross_crate_session_token_acceptance.rs` | a token signed here authenticating a call to a service in another crate. The far side is `tddy-service` deliberately: this crate cannot reach the daemon's own services, which is exactly the property below |
 | `tests/per_daemon_signing_identity_acceptance.rs` | daemon A's token verifying on daemon B once B's directory holds A's key — B's directory is asked for exactly A's key id — and an unseen key id refused with no fallback |
@@ -178,6 +270,8 @@ It is an honest guard against a *future* truncate-in-place, not evidence that th
 - [oauth-loopback-tunnel.md](./oauth-loopback-tunnel.md) — the operator TCP + `StreamBytes` bridge
 - [`tddy-daemon-livekit`](../../tddy-daemon-livekit/docs/livekit-service.md) — mints room JWTs through a port, and carries each daemon's advertised key as opaque strings
 - [`tddy-github` session tokens](../../tddy-github/docs/session-token.md) — the `v2` format these keys sign
+- [`tddy-github` device flow](../../tddy-github/docs/device-flow.md) — the provider seam, both sign-in flows and `LoginAdmission`
+- [`tddy-rpc` request transport](../../tddy-rpc/docs/request-transport.md) — the stamp `FirstLoginEnrolment` reads
 - [`daemon-endpoint.md`](../../tddy-daemon/docs/daemon-endpoint.md) — `CommonRoomKeyDirectory`, the fleet's `KeyDirectory`
 - [`tddy-daemon-kernel`](../../tddy-daemon-kernel/docs/daemon-kernel.md) — where `SessionUserResolver` is defined
 - [`connection-service.md`](../../tddy-daemon/docs/connection-service.md) — what authenticates with the resolver

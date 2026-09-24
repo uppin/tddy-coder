@@ -84,7 +84,7 @@ async fn call_action<Req: Message, Resp: Message + Default>(
     let payload = req.encode_to_vec();
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("actions.ActionService", method, &[msg])
@@ -104,7 +104,7 @@ async fn call_tasks<Req: Message, Resp: Message + Default>(
     let payload = req.encode_to_vec();
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("tasks.TaskService", method, &[msg])
@@ -191,7 +191,7 @@ async fn call_streaming<Req: Message, Resp: Message + Default>(
     let payload = req.encode_to_vec();
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("tasks.TaskService", method, &[msg])

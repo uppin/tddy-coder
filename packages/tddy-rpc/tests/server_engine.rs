@@ -14,6 +14,10 @@ use tddy_rpc::{BidiStreamOutput, ResponseBody, RpcMessage, RpcResult, RpcService
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
+/// These tests are about dispatch, not about where a request came from; the engine under test
+/// models a host reading a pipe.
+const A_PIPE: tddy_rpc::RequestTransport = tddy_rpc::RequestTransport::Pipe;
+
 /// The connection that opened these calls. Every response is attributed to it, so a frame
 /// left over from a different connection can never resolve one of them.
 const A_CLIENT_EPOCH: u32 = 0x5f3a_91c2;
@@ -36,6 +40,7 @@ impl RpcService for EchoStub {
         &self,
         _service: &str,
         _method: &str,
+        _metadata: tddy_rpc::RequestMetadata,
         mut input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, Status> {
         let (tx, rx) = mpsc::channel(8);
@@ -180,7 +185,7 @@ fn a_bidi_continuation_request(request_id: i32, payload: &[u8], end_of_stream: b
 #[tokio::test]
 async fn routes_a_unary_request_to_the_bridge_and_publishes_one_response() {
     // Given a server engine wrapping the echo stub
-    let engine = ServerEngine::new(EchoStub);
+    let engine = ServerEngine::new(EchoStub, A_PIPE);
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel(8);
 
     // When handling one unary request from a peer
@@ -204,7 +209,7 @@ async fn routes_a_unary_request_to_the_bridge_and_publishes_one_response() {
 async fn multiplexes_the_same_request_id_from_two_different_peers_independently() {
     // Given a server engine and two peers that happen to both use request_id 1 (request ids are
     // only unique per-peer, mirroring independent RpcClient instances)
-    let engine = ServerEngine::new(EchoStub);
+    let engine = ServerEngine::new(EchoStub, A_PIPE);
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel(8);
 
     // When each peer sends its own request with the same request_id but a distinct payload
@@ -229,7 +234,7 @@ async fn multiplexes_the_same_request_id_from_two_different_peers_independently(
 #[tokio::test]
 async fn pairs_a_bidi_continuation_message_without_call_metadata_to_its_live_session() {
     // Given a server engine hosting the bidi-capable echo stub
-    let engine = ServerEngine::new(EchoStub);
+    let engine = ServerEngine::new(EchoStub, A_PIPE);
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel(8);
 
     // When the first message opens the bidi session (carrying call_metadata)...
@@ -268,7 +273,7 @@ async fn pairs_a_bidi_continuation_message_without_call_metadata_to_its_live_ses
 async fn forwards_each_server_streaming_item_immediately_without_waiting_for_the_next_one() {
     // Given a server-streaming handler that sends one item and then never sends (or closes)
     // again — the next item genuinely isn't known yet
-    let engine = ServerEngine::new(StreamStub);
+    let engine = ServerEngine::new(StreamStub, A_PIPE);
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel(8);
 
     // When handling the streaming request
@@ -289,7 +294,7 @@ async fn forwards_each_server_streaming_item_immediately_without_waiting_for_the
 #[tokio::test]
 async fn collects_all_messages_of_a_multi_message_call_before_dispatching_once() {
     // Given a server engine hosting a stub that concatenates every message it's dispatched with
-    let engine = ServerEngine::new(ConcatStub);
+    let engine = ServerEngine::new(ConcatStub, A_PIPE);
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel(8);
 
     // When a client-streaming call arrives as two frames: the first carries call_metadata and is

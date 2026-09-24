@@ -168,6 +168,7 @@ macro_rules! against_both_hosts {
 /// | `StreamAndHold` | server stream   | the payload once, then the stream never completes      |
 /// | `Collect`       | client stream   | every request payload joined with a pipe byte          |
 /// | `EchoEach`      | bidi stream     | one upper-cased response per request message           |
+/// | `WhichTransport`| unary           | the name of the transport the host stamped the call as |
 struct EchoService;
 
 #[async_trait]
@@ -179,6 +180,9 @@ impl RpcService for EchoService {
     async fn handle_rpc(&self, _service: &str, method: &str, message: &RpcMessage) -> RpcResult {
         match method {
             "Echo" => RpcResult::Unary(Ok(message.payload.clone())),
+            "WhichTransport" => RpcResult::Unary(Ok(
+                format!("{:?}", message.metadata.transport()).into_bytes()
+            )),
             "EchoStream" => RpcResult::ServerStream(Ok(comma_separated_parts(&message.payload))),
             "StreamAndHold" => {
                 RpcResult::ServerStream(Ok(one_message_then_never_completes(&message.payload)))
@@ -210,6 +214,7 @@ impl RpcService for EchoService {
         &self,
         _service: &str,
         method: &str,
+        _metadata: tddy_rpc::RequestMetadata,
         mut input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, Status> {
         if method != "EchoEach" {
@@ -385,6 +390,7 @@ pub fn a_request_frame() -> RequestFrameBuilder {
         payload: b"hello".to_vec(),
         end_of_stream: true,
         names_the_call: true,
+        claimed_transport: None,
     }
 }
 
@@ -396,6 +402,7 @@ pub struct RequestFrameBuilder {
     payload: Vec<u8>,
     end_of_stream: bool,
     names_the_call: bool,
+    claimed_transport: Option<String>,
 }
 
 impl RequestFrameBuilder {
@@ -445,6 +452,12 @@ impl RequestFrameBuilder {
         self
     }
 
+    /// Claim, in every envelope field a sender writes, to have come over `transport`.
+    pub fn claiming_to_come_over(mut self, transport: &str) -> Self {
+        self.claimed_transport = Some(transport.to_string());
+        self
+    }
+
     pub fn build(self) -> Vec<u8> {
         let request = RpcRequest {
             request_id: self.request_id,
@@ -453,10 +466,15 @@ impl RequestFrameBuilder {
                 service: self.service,
                 method: self.method,
             }),
-            metadata: None,
+            metadata: self
+                .claimed_transport
+                .as_ref()
+                .map(|claimed| envelope::Metadata {
+                    values: [("transport".to_string(), claimed.clone())].into(),
+                }),
             end_of_stream: self.end_of_stream,
             abort: false,
-            sender_identity: None,
+            sender_identity: self.claimed_transport,
             client_epoch: self.client_epoch,
         };
         envelope::encode_request(request).expect("request frame did not encode")

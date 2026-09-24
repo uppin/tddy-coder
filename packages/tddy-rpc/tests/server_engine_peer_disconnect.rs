@@ -26,6 +26,10 @@ use tddy_rpc::{BidiStreamOutput, ResponseBody, RpcMessage, RpcResult, RpcService
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 
+/// These tests are about dispatch, not about where a request came from; the engine under test
+/// models a host reading a pipe.
+const A_PIPE: tddy_rpc::RequestTransport = tddy_rpc::RequestTransport::Pipe;
+
 const A_CLIENT_EPOCH: u32 = 0x5f3a_91c2;
 const THE_DEPARTING_PEER: &str = "web-alice";
 const A_STAYING_PEER: &str = "web-bob";
@@ -82,6 +86,7 @@ impl RpcService for TestDrivenStreams {
         &self,
         _service: &str,
         _method: &str,
+        _metadata: tddy_rpc::RequestMetadata,
         _input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, Status> {
         Err(Status::internal("not used by these tests"))
@@ -109,6 +114,7 @@ impl RpcService for InputClosedReporter {
         &self,
         _service: &str,
         _method: &str,
+        _metadata: tddy_rpc::RequestMetadata,
         mut input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, Status> {
         let closed_tx = self
@@ -222,7 +228,7 @@ async fn stops_forwarding_a_streaming_response_once_its_peer_disconnects() {
     // Given — a streaming call in flight for a peer, with one frame already forwarded
     let service = TestDrivenStreams::new();
     let frames = service.register(b"terminal-output");
-    let engine = ServerEngine::new(service);
+    let engine = ServerEngine::new(service, A_PIPE);
     let (tx, mut rx) = mpsc::channel(8);
     engine
         .on_request(
@@ -257,7 +263,7 @@ async fn leaves_another_peers_streaming_response_running() {
     // would reach the outgoing channel ahead of Bob's and make this test about frame ordering.
     let _departing_frames = service.register(b"alices-terminal");
     let staying_frames = service.register(b"bobs-terminal");
-    let engine = ServerEngine::new(service);
+    let engine = ServerEngine::new(service, A_PIPE);
     let (tx, mut rx) = mpsc::channel(8);
     engine
         .on_request(
@@ -293,10 +299,13 @@ async fn closes_the_input_of_a_departed_peers_bidi_handler() {
     // Given — a live bidi session for a peer, its handler up and reading its input
     let (started_tx, started) = oneshot::channel();
     let (closed_tx, closed) = oneshot::channel();
-    let engine = ServerEngine::new(InputClosedReporter {
-        started_tx: Mutex::new(Some(started_tx)),
-        closed_tx: Mutex::new(Some(closed_tx)),
-    });
+    let engine = ServerEngine::new(
+        InputClosedReporter {
+            started_tx: Mutex::new(Some(started_tx)),
+            closed_tx: Mutex::new(Some(closed_tx)),
+        },
+        A_PIPE,
+    );
     let (tx, _rx) = mpsc::channel(8);
     engine
         .on_request(
@@ -320,7 +329,7 @@ async fn closes_the_input_of_a_departed_peers_bidi_handler() {
 #[tokio::test]
 async fn discards_the_fragments_of_a_departed_peers_half_sent_call() {
     // Given — a client-streaming call that has sent two fragments and not yet terminated
-    let engine = ServerEngine::new(ConcatStub);
+    let engine = ServerEngine::new(ConcatStub, A_PIPE);
     let (tx, mut rx) = mpsc::channel(8);
     engine
         .on_request(

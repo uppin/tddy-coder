@@ -352,7 +352,7 @@ async fn mint_room_token(
     room: &str,
     identity: &str,
 ) -> Result<String, tddy_rpc::Status> {
-    mint.generate_token(Request::new(GenerateTokenRequest {
+    mint.generate_token(Request::direct(GenerateTokenRequest {
         room: room.to_string(),
         identity: identity.to_string(),
         session_token: "an-access-token".to_string(),

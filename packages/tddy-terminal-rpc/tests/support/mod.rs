@@ -579,7 +579,12 @@ impl TerminalServiceHost {
         match self
             .entry
             .service
-            .start_bidi_stream(SERVICE, "StreamSessionTerminalIO", input_rx)
+            .start_bidi_stream(
+                SERVICE,
+                "StreamSessionTerminalIO",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                input_rx,
+            )
             .await
         {
             Err(status) => status,
@@ -597,7 +602,12 @@ impl TerminalServiceHost {
         let started = self
             .entry
             .service
-            .start_bidi_stream(SERVICE, "StreamSessionTerminalIO", input_rx)
+            .start_bidi_stream(
+                SERVICE,
+                "StreamSessionTerminalIO",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                input_rx,
+            )
             .await
             .expect("the bidi stream opened");
         let output = match started.output {
@@ -676,7 +686,10 @@ impl BidiSession {
 
 /// One request as the transport hands it over: an encoded payload with no metadata.
 fn encoded<M: prost::Message>(message: &M) -> tddy_rpc::RpcMessage {
-    tddy_rpc::RpcMessage::new(message.encode_to_vec(), Default::default())
+    tddy_rpc::RpcMessage::new(
+        message.encode_to_vec(),
+        tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+    )
 }
 
 /// A `SessionTerminalInput` with every field at its zero value, for a test to override only the

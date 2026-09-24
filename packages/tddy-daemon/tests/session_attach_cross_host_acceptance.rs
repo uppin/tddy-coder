@@ -313,7 +313,7 @@ async fn two_daemons() -> TwoDaemons {
 async fn stage_on_peer(service_a: &Arc<DaemonSessionHost>, file_name: &str, data: &[u8]) {
     service_a
         .session_files_service()
-        .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
+        .upload_staged_attachment_chunk(Request::direct(UploadStagedAttachmentChunkRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: PEER_INSTANCE_ID.to_string(),
             staging_id: STAGING_ID.to_string(),
@@ -331,7 +331,7 @@ async fn stage_on_peer(service_a: &Arc<DaemonSessionHost>, file_name: &str, data
 async fn stage_on_local(env: &TwoDaemons, file_name: &str, data: &[u8]) -> PathBuf {
     env.service_a
         .session_files_service()
-        .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
+        .upload_staged_attachment_chunk(Request::direct(UploadStagedAttachmentChunkRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: String::new(),
             staging_id: STAGING_ID.to_string(),
@@ -451,7 +451,7 @@ async fn a_forwarded_rpc_to_a_peer_that_stopped_answering_fails_within_its_deadl
         Duration::from_secs(60),
         env.service_a
             .session_files_service()
-            .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
+            .upload_staged_attachment_chunk(Request::direct(UploadStagedAttachmentChunkRequest {
                 session_token: TEST_TOKEN.to_string(),
                 daemon_instance_id: PEER_INSTANCE_ID.to_string(),
                 staging_id: STAGING_ID.to_string(),
@@ -490,7 +490,7 @@ async fn a_staged_ref_naming_another_host_materializes_by_fetching_from_that_hos
     let session_id = tokio::time::timeout(
         Duration::from_secs(60),
         env.service_a
-            .start_session(Request::new(StartSessionRequest {
+            .start_session(Request::direct(StartSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_type: "workspace".to_string(),
                 project_id: TEST_PROJECT_ID.to_string(),
@@ -536,7 +536,7 @@ async fn a_cross_host_staged_ref_whose_upload_never_completed_is_refused_and_wri
     let env = two_daemons().await;
     env.service_a
         .session_files_service()
-        .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
+        .upload_staged_attachment_chunk(Request::direct(UploadStagedAttachmentChunkRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: PEER_INSTANCE_ID.to_string(),
             staging_id: STAGING_ID.to_string(),
@@ -553,7 +553,7 @@ async fn a_cross_host_staged_ref_whose_upload_never_completed_is_refused_and_wri
     let outcome = tokio::time::timeout(
         Duration::from_secs(60),
         env.service_a
-            .start_session(Request::new(StartSessionRequest {
+            .start_session(Request::direct(StartSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_type: "workspace".to_string(),
                 project_id: TEST_PROJECT_ID.to_string(),
@@ -605,7 +605,7 @@ async fn stream_read_host_document_forwards_to_the_peer_that_owns_the_document()
         Duration::from_secs(30),
         env.service_a
             .session_files_service()
-            .stream_read_host_document(Request::new(peer_staged_document_request(&format!(
+            .stream_read_host_document(Request::direct(peer_staged_document_request(&format!(
                 "{STAGING_ID}/big-remote.bin"
             )))),
     )
@@ -639,7 +639,7 @@ async fn stream_start_session_forwards_to_the_peer_that_runs_the_session() {
     let mut stream = tokio::time::timeout(
         Duration::from_secs(30),
         env.service_a
-            .stream_start_session(Request::new(StartSessionRequest {
+            .stream_start_session(Request::direct(StartSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_type: "workspace".to_string(),
                 project_id: TEST_PROJECT_ID.to_string(),
@@ -713,7 +713,7 @@ async fn a_cross_host_staged_attachment_larger_than_the_unary_cap_is_materialize
     let session_id = tokio::time::timeout(
         Duration::from_secs(120),
         env.service_a
-            .start_session(Request::new(StartSessionRequest {
+            .start_session(Request::direct(StartSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_type: "workspace".to_string(),
                 project_id: TEST_PROJECT_ID.to_string(),
@@ -779,7 +779,7 @@ async fn stream_start_session_on_the_peer_reports_progress_while_staged_bytes_cr
     let mut stream = tokio::time::timeout(
         Duration::from_secs(30),
         env.service_a
-            .stream_start_session(Request::new(StartSessionRequest {
+            .stream_start_session(Request::direct(StartSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_type: "workspace".to_string(),
                 project_id: TEST_PROJECT_ID.to_string(),

@@ -98,7 +98,7 @@ fn service_probing(tooling: HostTooling) -> (HostServiceImpl, Arc<FakeToolingPro
 
 async fn tooling_reported_by(service: &HostServiceImpl) -> GetHostToolingResponse {
     service
-        .get_host_tooling(Request::new(GetHostToolingRequest {
+        .get_host_tooling(Request::direct(GetHostToolingRequest {
             session_token: "valid".to_string(),
             // Empty means "the daemon serving the call", so nothing is routed to a peer.
             daemon_instance_id: String::new(),

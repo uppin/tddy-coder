@@ -110,7 +110,7 @@ async fn wait_until_peer_listed(service: &HostServiceImpl, instance_id: &str) {
 }
 
 async fn list_eligible(svc: &HostServiceImpl) -> Vec<EligibleDaemonEntry> {
-    let request = Request::new(ListEligibleDaemonsRequest {
+    let request = Request::direct(ListEligibleDaemonsRequest {
         session_token: "valid-token".to_string(),
     });
     svc.list_eligible_daemons(request)

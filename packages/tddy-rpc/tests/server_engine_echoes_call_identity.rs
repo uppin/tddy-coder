@@ -17,6 +17,10 @@ use tddy_rpc::{BidiStreamOutput, RpcMessage, RpcResult, RpcService, Status};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
+/// These tests are about dispatch, not about where a request came from; the engine under test
+/// models a host reading a pipe.
+const A_PIPE: tddy_rpc::RequestTransport = tddy_rpc::RequestTransport::Pipe;
+
 const A_CLIENT_EPOCH: u32 = 0x5f3a_91c2;
 const A_PEER: &str = "web-alice";
 
@@ -50,6 +54,7 @@ impl RpcService for EchoStub {
         &self,
         _service: &str,
         _method: &str,
+        _metadata: tddy_rpc::RequestMetadata,
         _input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, Status> {
         Err(Status::internal("not used by these tests"))
@@ -85,7 +90,7 @@ async fn next_response(
 #[tokio::test]
 async fn echoes_the_callers_client_epoch_on_a_unary_response() {
     // Given
-    let engine = ServerEngine::new(EchoStub);
+    let engine = ServerEngine::new(EchoStub, A_PIPE);
     let (tx, mut rx) = mpsc::channel(8);
 
     // When
@@ -104,7 +109,7 @@ async fn echoes_the_callers_client_epoch_on_a_unary_response() {
 #[tokio::test]
 async fn echoes_the_callers_call_metadata_on_a_unary_response() {
     // Given
-    let engine = ServerEngine::new(EchoStub);
+    let engine = ServerEngine::new(EchoStub, A_PIPE);
     let (tx, mut rx) = mpsc::channel(8);
 
     // When
@@ -127,7 +132,7 @@ async fn echoes_the_callers_call_metadata_on_a_unary_response() {
 #[tokio::test]
 async fn echoes_the_callers_client_epoch_on_every_streamed_frame() {
     // Given — a streaming call, whose frames are the ones that leak across connections
-    let engine = ServerEngine::new(EchoStub);
+    let engine = ServerEngine::new(EchoStub, A_PIPE);
     let (tx, mut rx) = mpsc::channel(8);
 
     // When
@@ -166,13 +171,14 @@ async fn echoes_the_callers_client_epoch_on_an_error_response() {
             &self,
             _service: &str,
             _method: &str,
+            _metadata: tddy_rpc::RequestMetadata,
             _input_rx: mpsc::Receiver<RpcMessage>,
         ) -> Result<BidiStreamOutput, Status> {
             Err(Status::internal("not used by this test"))
         }
     }
 
-    let engine = ServerEngine::new(FailingStub);
+    let engine = ServerEngine::new(FailingStub, A_PIPE);
     let (tx, mut rx) = mpsc::channel(8);
 
     // When

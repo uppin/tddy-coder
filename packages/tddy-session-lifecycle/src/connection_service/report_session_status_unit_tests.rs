@@ -95,7 +95,7 @@ async fn report_session_status_writes_activity_status_to_session_yaml() {
     write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
 
     let service = make_unit_service(sessions_base);
-    let request = Request::new(ReportSessionStatusRequest {
+    let request = Request::direct(ReportSessionStatusRequest {
         session_id: session_id.to_string(),
         hook_token: TEST_HOOK_TOKEN.to_string(),
         os_user: TEST_OS_USER.to_string(),
@@ -121,7 +121,7 @@ async fn report_session_status_writes_activity_status_to_session_yaml() {
 async fn report_session_status_rejects_unknown_session() {
     let temp = tempfile::tempdir().unwrap();
     let service = make_unit_service(temp.path().to_path_buf());
-    let request = Request::new(ReportSessionStatusRequest {
+    let request = Request::direct(ReportSessionStatusRequest {
         session_id: "no-such-session".to_string(),
         hook_token: TEST_HOOK_TOKEN.to_string(),
         os_user: TEST_OS_USER.to_string(),
@@ -146,7 +146,7 @@ async fn report_session_status_rejects_bad_hook_token() {
     write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
 
     let service = make_unit_service(sessions_base);
-    let request = Request::new(ReportSessionStatusRequest {
+    let request = Request::direct(ReportSessionStatusRequest {
         session_id: session_id.to_string(),
         hook_token: "wrong-token".to_string(),
         os_user: TEST_OS_USER.to_string(),
@@ -202,7 +202,7 @@ async fn report_session_status_rejects_non_claude_cli_session() {
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
     let service = make_unit_service(sessions_base);
-    let request = Request::new(ReportSessionStatusRequest {
+    let request = Request::direct(ReportSessionStatusRequest {
         session_id: session_id.to_string(),
         hook_token: TEST_HOOK_TOKEN.to_string(),
         os_user: TEST_OS_USER.to_string(),
@@ -227,7 +227,7 @@ async fn report_session_status_rejects_unknown_status_string() {
     write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
 
     let service = make_unit_service(sessions_base);
-    let request = Request::new(ReportSessionStatusRequest {
+    let request = Request::direct(ReportSessionStatusRequest {
         session_id: session_id.to_string(),
         hook_token: TEST_HOOK_TOKEN.to_string(),
         os_user: TEST_OS_USER.to_string(),
@@ -246,7 +246,7 @@ async fn report_session_status_rejects_unknown_status_string() {
 async fn report_session_status_rejects_session_id_path_traversal() {
     let temp = tempfile::tempdir().unwrap();
     let service = make_unit_service(temp.path().to_path_buf());
-    let request = Request::new(ReportSessionStatusRequest {
+    let request = Request::direct(ReportSessionStatusRequest {
         session_id: "../../etc/passwd".to_string(),
         hook_token: TEST_HOOK_TOKEN.to_string(),
         os_user: TEST_OS_USER.to_string(),

@@ -20,7 +20,7 @@ async fn listed(
 ) -> Result<ListSshConfigHostsResponse, Status> {
     tokio::time::timeout(
         LISTING_WINDOW,
-        service.list_ssh_config_hosts(Request::new(request)),
+        service.list_ssh_config_hosts(Request::direct(request)),
     )
     .await
     .expect("a listing reads one file and must not hang")

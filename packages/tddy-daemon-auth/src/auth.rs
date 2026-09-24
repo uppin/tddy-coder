@@ -6,7 +6,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tddy_github::token_store::GitHubTokenStore;
 use tddy_github::{
-    AuthServiceImpl, GitHubOAuthProvider, RealGitHubProvider, StubGitHubProvider, TokenKind,
+    AuthServiceImpl, GitHubOAuthProvider, LoginAdmission, RealGitHubProvider, StubGitHubProvider,
+    TokenKind,
 };
 use tddy_livekit::TokenGenerator;
 use tddy_rpc::{Request, Response, ServiceEntry, Status};
@@ -20,7 +21,7 @@ use tddy_service::proto::token::{
 };
 use tddy_service::{AuthServiceServer, LiveKitTokenServiceServer};
 
-use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig};
+use tddy_daemon_kernel::config::{DaemonConfig, GitHubConfig, LiveKitConfig};
 use tddy_daemon_kernel::SessionUserResolver;
 
 use crate::signing_key::{
@@ -39,6 +40,70 @@ pub struct AuthBuildResult {
     /// `user_resolver` is. Handed back so the rest of the daemon mints with the same key the
     /// resolver trusts.
     pub session_tokens: Option<SessionTokens>,
+}
+
+/// The GitHub sign-in flow a daemon's `auth.AuthService` serves, as its dashboard is told it at
+/// `GET /api/config` and `GetClientConfig` (`auth_flow`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitHubAuthFlow {
+    /// `GetAuthUrl` / `ExchangeCode`: a confidential client holding a `client_secret`.
+    Redirect,
+    /// `StartDeviceLogin` / `PollDeviceLogin`: a public client, `client_id` and no secret.
+    Device,
+}
+
+impl GitHubAuthFlow {
+    /// The wire value both client-config paths carry.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Redirect => "redirect",
+            Self::Device => "device",
+        }
+    }
+}
+
+/// Which GitHub provider `github:` makes this daemon register — the one decision both
+/// [`build_auth_entries_with`] and [`github_auth_flow`] read, so the flow a dashboard is told can
+/// never differ from the provider actually serving it.
+enum GitHubProviderKind<'a> {
+    /// `stub: true`. Serves both flows; declared as the redirect flow, which is what every
+    /// dashboard driving a stub daemon signs in with.
+    Stub,
+    /// `client_id` and `client_secret`.
+    Confidential { client_id: &'a str, secret: &'a str },
+    /// `client_id` with no `client_secret`.
+    Public { client_id: &'a str },
+}
+
+impl GitHubProviderKind<'_> {
+    fn auth_flow(&self) -> GitHubAuthFlow {
+        match self {
+            Self::Stub | Self::Confidential { .. } => GitHubAuthFlow::Redirect,
+            Self::Public { .. } => GitHubAuthFlow::Device,
+        }
+    }
+}
+
+/// `None` is a `github:` block that registers no auth service: neither a stub nor a `client_id`.
+fn github_provider_kind(github: &GitHubConfig) -> Option<GitHubProviderKind<'_>> {
+    if github.stub.unwrap_or(false) {
+        return Some(GitHubProviderKind::Stub);
+    }
+    let client_id = github.client_id.as_deref()?;
+    Some(match github.client_secret.as_deref() {
+        Some(secret) => GitHubProviderKind::Confidential { client_id, secret },
+        None => GitHubProviderKind::Public { client_id },
+    })
+}
+
+/// The sign-in flow `config` makes this daemon serve, or `None` when it registers no
+/// `auth.AuthService` at all (no `github:` block, or one naming neither a stub nor a client id).
+pub fn github_auth_flow(config: &DaemonConfig) -> Option<GitHubAuthFlow> {
+    config
+        .github
+        .as_ref()
+        .and_then(github_provider_kind)
+        .map(|kind| kind.auth_flow())
 }
 
 impl AuthBuildResult {
@@ -92,6 +157,20 @@ pub fn build_auth_entries_with(
     web_port: u16,
     tokens: &SessionTokens,
 ) -> anyhow::Result<AuthBuildResult> {
+    build_auth_entries_admitting(config, web_host, web_port, tokens, None)
+}
+
+/// [`build_auth_entries_with`], with `admission` asked about every completed login before a
+/// session is minted for it — how an embedded desktop enrols its first login (see
+/// [`crate::first_login_admission`]). `None` admits every login GitHub vouches for, exactly as
+/// [`build_auth_entries_with`] does.
+pub fn build_auth_entries_admitting(
+    config: &DaemonConfig,
+    web_host: &str,
+    web_port: u16,
+    tokens: &SessionTokens,
+    admission: Option<Arc<dyn LoginAdmission>>,
+) -> anyhow::Result<AuthBuildResult> {
     let github = match &config.github {
         Some(g) => g,
         None => return Ok(AuthBuildResult::unauthenticated()),
@@ -127,26 +206,39 @@ pub fn build_auth_entries_with(
         None => None,
     };
 
-    let auth_entry = if github.stub.unwrap_or(false) {
-        let client_id = github.client_id.as_deref().unwrap_or("stub-client-id");
-        let callback_url = github
+    let redirect_uri = || {
+        github
             .redirect_uri
             .clone()
-            .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port));
-        let stub = StubGitHubProvider::new_with_callback(&callback_url, client_id);
-        if let Some(ref codes) = github.stub_codes {
-            register_stub_codes(&stub, codes);
+            .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port))
+    };
+    let auth_entry = match github_provider_kind(github) {
+        Some(GitHubProviderKind::Stub) => {
+            let client_id = github.client_id.as_deref().unwrap_or("stub-client-id");
+            let stub = StubGitHubProvider::new_with_callback(&redirect_uri(), client_id);
+            if let Some(ref codes) = github.stub_codes {
+                stub.register_code_mappings(codes);
+            }
+            auth_service_entry(stub, tokens, github_token_store.clone(), admission)
         }
-        auth_service_entry(stub, tokens, github_token_store.clone())
-    } else if let (Some(id), Some(secret)) = (&github.client_id, &github.client_secret) {
-        let redirect_uri = github
-            .redirect_uri
-            .clone()
-            .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port));
-        let real = RealGitHubProvider::new(id, secret, &redirect_uri);
-        auth_service_entry(real, tokens, github_token_store.clone())
-    } else {
-        return Ok(AuthBuildResult::unauthenticated());
+        // Two configurations, neither a fallback for the other. With a secret this is a
+        // confidential client and serves the redirect flow exactly as it always has. Without one
+        // it is a public client — the shape a desktop install ships in, since a secret inside a
+        // downloadable application is public the day it ships — and signs in by the device flow,
+        // which authenticates with the client id alone.
+        Some(GitHubProviderKind::Confidential { client_id, secret }) => auth_service_entry(
+            RealGitHubProvider::new(client_id, secret, &redirect_uri()),
+            tokens,
+            github_token_store.clone(),
+            admission,
+        ),
+        Some(GitHubProviderKind::Public { client_id }) => auth_service_entry(
+            RealGitHubProvider::new_public(client_id),
+            tokens,
+            github_token_store.clone(),
+            admission,
+        ),
+        None => return Ok(AuthBuildResult::unauthenticated()),
     };
 
     // Verify the token's signature/expiry under the key it names and extract the login. Only
@@ -452,26 +544,6 @@ impl LiveKitTokenServiceTrait for LiveKitTokenServiceImpl {
     }
 }
 
-/// Register `code:login` mappings (from `github.stub_codes`, comma-separated) on the stub provider
-/// so tests/dev can complete the OAuth exchange without a real GitHub app. Malformed entries are
-/// skipped.
-fn register_stub_codes(stub: &StubGitHubProvider, codes: &str) {
-    for mapping in codes.split(',') {
-        let parts: Vec<&str> = mapping.splitn(2, ':').collect();
-        if parts.len() == 2 {
-            stub.register_code(
-                parts[0],
-                tddy_github::GitHubUser {
-                    id: 1,
-                    login: parts[1].to_string(),
-                    avatar_url: format!("https://github.com/{}.png", parts[1]),
-                    name: parts[1].to_string(),
-                },
-            );
-        }
-    }
-}
-
 /// Wrap an OAuth provider in an `auth.AuthService` RPC entry that mints with this daemon's key and
 /// verifies presented tokens through the same verifier the RPC gate uses.
 ///
@@ -481,12 +553,17 @@ fn auth_service_entry<P: GitHubOAuthProvider>(
     provider: P,
     tokens: &SessionTokens,
     token_store: Option<Arc<dyn GitHubTokenStore>>,
+    admission: Option<Arc<dyn LoginAdmission>>,
 ) -> ServiceEntry {
     let service = AuthServiceImpl::new_signed(
         provider,
         tokens.signer().clone(),
         Arc::clone(tokens.verifier()) as Arc<dyn tddy_github::SessionTokenAuthority>,
     );
+    let service = match admission {
+        Some(admission) => service.with_login_admission(admission),
+        None => service,
+    };
     let server = AuthServiceServer::new(match token_store {
         Some(store) => service.with_token_store(store),
         None => service,
@@ -775,7 +852,7 @@ mod tests {
         session_token: &str,
     ) -> Result<MintLiveKitTokenResponse, Status> {
         service
-            .mint_live_kit_token(Request::new(MintLiveKitTokenRequest {
+            .mint_live_kit_token(Request::direct(MintLiveKitTokenRequest {
                 session_token: session_token.to_string(),
             }))
             .await
@@ -990,7 +1067,7 @@ mod tests {
         let bridge = tddy_rpc::RpcBridge::new(tddy_rpc::MultiRpcService::new(vec![entry]));
         let message = tddy_rpc::RpcMessage {
             payload: request.encode_to_vec(),
-            metadata: tddy_rpc::RequestMetadata::default(),
+            metadata: tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
         let body = bridge
             .handle_messages("token.TokenService", "GenerateToken", &[message])

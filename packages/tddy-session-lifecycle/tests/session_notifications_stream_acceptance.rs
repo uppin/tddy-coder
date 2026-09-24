@@ -124,7 +124,8 @@ fn a_config_for_two_operators() -> DaemonConfig {
                 github_user: OTHER_USERS_GITHUB_USER.to_string(),
                 os_user: OTHER_USERS_OS_USER.to_string(),
             },
-        ],
+        ]
+        .into(),
         ..DaemonConfig::default()
     }
 }
@@ -168,7 +169,7 @@ type NotificationStream = <tddy_session_lifecycle::connection_service::PeerRoute
 async fn a_subscribed_client(service: &DaemonSessionHost) -> NotificationStream {
     service
         .activity_service()
-        .stream_session_notifications(Request::new(StreamSessionNotificationsRequest {
+        .stream_session_notifications(Request::direct(StreamSessionNotificationsRequest {
             session_token: SESSION_TOKEN.to_string(),
         }))
         .await
@@ -190,7 +191,7 @@ async fn report_status_owned_by(
 ) {
     service
         .activity_service()
-        .report_session_status(Request::new(ReportSessionStatusRequest {
+        .report_session_status(Request::direct(ReportSessionStatusRequest {
             session_id: session_id.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
             os_user: os_user.to_string(),
@@ -303,7 +304,7 @@ async fn rejects_a_notification_stream_opened_without_a_valid_session_token() {
     // When
     let result = service
         .activity_service()
-        .stream_session_notifications(Request::new(StreamSessionNotificationsRequest {
+        .stream_session_notifications(Request::direct(StreamSessionNotificationsRequest {
             session_token: "not-a-token".to_string(),
         }))
         .await;
@@ -437,7 +438,7 @@ async fn rejects_a_notification_stream_opened_by_a_user_mapped_to_no_os_user() {
     // When
     let result = service
         .activity_service()
-        .stream_session_notifications(Request::new(StreamSessionNotificationsRequest {
+        .stream_session_notifications(Request::direct(StreamSessionNotificationsRequest {
             session_token: UNMAPPED_SESSION_TOKEN.to_string(),
         }))
         .await;

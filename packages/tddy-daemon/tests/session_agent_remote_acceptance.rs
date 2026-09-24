@@ -106,7 +106,7 @@ impl Fleet {
     async fn attach(&self, agent_id: &str) -> Result<SessionAgentRoster, tddy_rpc::Status> {
         self.a
             .session_agents_service()
-            .attach_session_agent(Request::new(AttachSessionAgentRequest {
+            .attach_session_agent(Request::direct(AttachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -119,7 +119,7 @@ impl Fleet {
     async fn detach(&self, agent_id: &str) -> Result<SessionAgentRoster, tddy_rpc::Status> {
         self.a
             .session_agents_service()
-            .detach_session_agent(Request::new(DetachSessionAgentRequest {
+            .detach_session_agent(Request::direct(DetachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -132,7 +132,7 @@ impl Fleet {
     async fn roster(&self) -> SessionAgentRoster {
         self.a
             .session_agents_service()
-            .list_session_agents(Request::new(ListSessionAgentsRequest {
+            .list_session_agents(Request::direct(ListSessionAgentsRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -182,7 +182,7 @@ impl Fleet {
     async fn a_conversation_with(&self, agent_id: &str) -> String {
         self.a
             .session_agents_service()
-            .open_agent_conversation(Request::new(OpenAgentConversationRequest {
+            .open_agent_conversation(Request::direct(OpenAgentConversationRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -496,7 +496,7 @@ impl Fleet {
             loop {
                 let daemons = tddy_service::proto::host::HostService::list_eligible_daemons(
                     &hosts_a,
-                    Request::new(tddy_service::proto::host::ListEligibleDaemonsRequest {
+                    Request::direct(tddy_service::proto::host::ListEligibleDaemonsRequest {
                         session_token: TEST_TOKEN.to_string(),
                     }),
                 )
@@ -949,7 +949,7 @@ async fn seeds_a_peers_agent_onto_a_session_whose_codebase_is_here() {
     // When
     let started = fleet
         .a
-        .start_session(Request::new(a_co_located_start_seeding(
+        .start_session(Request::direct(a_co_located_start_seeding(
             &explorer,
             &fleet.authoritative_worktree(),
         )))
@@ -1089,7 +1089,7 @@ async fn cancels_a_remote_agents_conversation_on_the_daemon_that_owns_it() {
     fleet
         .a
         .session_agents_service()
-        .cancel_agent_conversation(Request::new(CancelAgentConversationRequest {
+        .cancel_agent_conversation(Request::direct(CancelAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
             daemon_instance_id: String::new(),
@@ -1103,7 +1103,7 @@ async fn cancels_a_remote_agents_conversation_on_the_daemon_that_owns_it() {
     let status = fleet
         .a
         .session_agents_service()
-        .prompt_agent_conversation(Request::new(PromptAgentConversationRequest {
+        .prompt_agent_conversation(Request::direct(PromptAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
             daemon_instance_id: String::new(),
@@ -1125,7 +1125,7 @@ async fn open_conversation_with(fleet: &Fleet, agent_id: &str) -> String {
     fleet
         .a
         .session_agents_service()
-        .open_agent_conversation(Request::new(OpenAgentConversationRequest {
+        .open_agent_conversation(Request::direct(OpenAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
             daemon_instance_id: String::new(),
@@ -1143,7 +1143,7 @@ async fn collect_prompt(fleet: &Fleet, conversation_id: &str, prompt: &str) -> P
     let mut stream = fleet
         .a
         .session_agents_service()
-        .prompt_agent_conversation(Request::new(PromptAgentConversationRequest {
+        .prompt_agent_conversation(Request::direct(PromptAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
             daemon_instance_id: String::new(),
@@ -1359,7 +1359,7 @@ async fn refuses_an_unauthenticated_tool_call_against_a_clone_it_hosts() {
     let result = fleet
         .peer(DAEMON_B)
         .service
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: String::new(),
             session_id: fleet.session_id.clone(),
             daemon_instance_id: String::new(),
@@ -1406,7 +1406,7 @@ async fn refuses_a_prompt_while_the_clone_is_still_being_built() {
     let result = fleet
         .a
         .session_agents_service()
-        .open_agent_conversation(Request::new(OpenAgentConversationRequest {
+        .open_agent_conversation(Request::direct(OpenAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
             daemon_instance_id: String::new(),
@@ -1490,7 +1490,7 @@ async fn fails_only_the_agents_of_a_daemon_that_goes_away() {
     let conversation = fleet
         .a
         .session_agents_service()
-        .open_agent_conversation(Request::new(OpenAgentConversationRequest {
+        .open_agent_conversation(Request::direct(OpenAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
             daemon_instance_id: String::new(),
@@ -1508,7 +1508,7 @@ async fn fails_only_the_agents_of_a_daemon_that_goes_away() {
     let status = fleet
         .a
         .session_agents_service()
-        .open_agent_conversation(Request::new(OpenAgentConversationRequest {
+        .open_agent_conversation(Request::direct(OpenAgentConversationRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
             daemon_instance_id: String::new(),
@@ -1786,7 +1786,7 @@ async fn removes_every_clone_when_the_session_is_deleted() {
     // When
     fleet
         .a
-        .delete_session(Request::new(DeleteSessionRequest {
+        .delete_session(Request::direct(DeleteSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
         }))
@@ -1798,7 +1798,7 @@ async fn removes_every_clone_when_the_session_is_deleted() {
     assert!(!peer_session_ids(&fleet, DAEMON_C).await.contains(&clone_c));
     let remaining = fleet
         .a
-        .list_sessions(Request::new(ListSessionsRequest {
+        .list_sessions(Request::direct(ListSessionsRequest {
             session_token: TEST_TOKEN.to_string(),
         }))
         .await
@@ -1855,7 +1855,7 @@ async fn keeps_the_facilitating_daemon_as_the_identity_file_reads_are_addressed_
     // When
     let result = fleet
         .a
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: fleet.session_id.clone(),
             daemon_instance_id: String::new(),

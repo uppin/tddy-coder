@@ -203,7 +203,7 @@ impl CodebaseHost {
 
     async fn start(&self, req: WorkspaceStartBuilder) -> Result<String, Status> {
         self.service
-            .start_session(Request::new(req.build()))
+            .start_session(Request::direct(req.build()))
             .await
             .map(|resp| resp.into_inner().session_id)
     }
@@ -214,7 +214,7 @@ impl CodebaseHost {
 
     async fn execute_tool(&self, session_id: &str, tool: &str, args: &str) -> ExecuteToolResponse {
         self.service
-            .execute_tool(Request::new(a_tool_request(session_id, tool, args)))
+            .execute_tool(Request::direct(a_tool_request(session_id, tool, args)))
             .await
             .expect("ExecuteTool must not fail at the RPC level")
             .into_inner()
@@ -229,7 +229,7 @@ impl CodebaseHost {
     ) -> ExecuteToolResponse {
         let stream = self
             .service
-            .stream_execute_tool(Request::new(a_tool_request(session_id, tool, args)))
+            .stream_execute_tool(Request::direct(a_tool_request(session_id, tool, args)))
             .await
             .expect("StreamExecuteTool must not fail at the RPC level")
             .into_inner();
@@ -673,7 +673,7 @@ async fn a_sandboxed_workspace_session_whose_jail_is_gone_is_refused_rather_than
 
     // When
     let response = restarted
-        .execute_tool(Request::new(a_tool_request(
+        .execute_tool(Request::direct(a_tool_request(
             &session_id,
             "Write",
             r#"{"path":"after-restart.txt","contents":"hello"}"#,
@@ -712,7 +712,7 @@ async fn an_unsandboxed_workspace_session_still_serves_its_tools_after_a_daemon_
 
     // When
     let response = restarted
-        .execute_tool(Request::new(a_tool_request(
+        .execute_tool(Request::direct(a_tool_request(
             &session_id,
             "Write",
             r#"{"path":"after-restart.txt","contents":"hello"}"#,
@@ -749,7 +749,7 @@ async fn deleting_a_sandboxed_workspace_session_stops_its_jail() {
 
     // When
     host.service
-        .delete_session(Request::new(DeleteSessionRequest {
+        .delete_session(Request::direct(DeleteSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.clone(),
         }))
@@ -772,7 +772,7 @@ async fn a_deleted_sandboxed_workspace_session_no_longer_serves_tools_from_its_j
         .await
         .expect("start must succeed");
     host.service
-        .delete_session(Request::new(DeleteSessionRequest {
+        .delete_session(Request::direct(DeleteSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.clone(),
         }))
@@ -782,7 +782,7 @@ async fn a_deleted_sandboxed_workspace_session_no_longer_serves_tools_from_its_j
     // When
     let answered = host
         .service
-        .execute_tool(Request::new(a_tool_request(
+        .execute_tool(Request::direct(a_tool_request(
             &session_id,
             "Write",
             r#"{"path":"after-delete.txt","contents":"hello"}"#,

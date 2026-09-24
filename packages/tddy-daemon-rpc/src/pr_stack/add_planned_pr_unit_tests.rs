@@ -65,7 +65,7 @@ fn write_unit_changeset(session_dir: &std::path::Path, recipe: Option<&str>) {
 }
 
 fn a_request(session_id: &str, title: &str) -> Request<AddPlannedPrRequest> {
-    Request::new(AddPlannedPrRequest {
+    Request::direct(AddPlannedPrRequest {
         session_token: "valid".to_string(),
         session_id: session_id.to_string(),
         title: title.to_string(),

@@ -11,7 +11,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::json;
 use tddy_coder::web_server::{ClientAllowedAgent, ClientSandboxedCodebaseSupport};
+use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::server::{run_server, serving_sandboxed_codebase_support, RunServerOptions};
+use tddy_daemon_auth::auth::github_auth_flow;
 use tddy_daemon_sandbox::workspace_tool_sandbox::workspace_sandbox_platform_support;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, ServiceEntry};
 use tddy_testing_commons::wait::eventually_awaiting;
@@ -54,6 +56,8 @@ fn options_serving(bundle: &Path, port: u16) -> RunServerOptions {
         // A host that holds no jail, so the exact-payload test below stays a statement about the
         // keys the options carry. The capability's own tests set it explicitly.
         sandboxed_codebase: None,
+        // A daemon with no `github:` block; the sign-in flow's own tests set it from a config.
+        auth_flow: None,
         allowed_agents: vec![ClientAllowedAgent {
             id: "codex-acp".to_string(),
             label: "Codex ACP".to_string(),
@@ -323,6 +327,70 @@ async fn omits_the_jail_capability_entirely_for_a_host_that_can_hold_no_jail() {
     // confines nothing" — absent is a host that does not serve the placement
     assert_eq!(config.get("sandboxed_codebase"), None);
     server.stop().await;
+}
+
+/// A daemon configuration whose `github:` block is `github`, loaded the way the daemon loads its
+/// own YAML. `None` leaves the block out.
+fn a_daemon_config_with_github(github: Option<&str>) -> DaemonConfig {
+    let dir = tempfile::tempdir().expect("no temp directory for the config");
+    let path = dir.path().join("daemon.yaml");
+    std::fs::write(&path, github.unwrap_or("")).expect("the config file was not written");
+    DaemonConfig::load(&path).expect("the config fixture did not load")
+}
+
+/// `/api/config` from a daemon started with `config`, its sign-in flow decided the way the daemon
+/// binary decides it.
+async fn api_config_of_a_daemon_configured_with(config: &DaemonConfig) -> serde_json::Value {
+    let bundle = a_web_bundle();
+    let port = a_free_tcp_port().await;
+    let server = a_server_running_with(RunServerOptions {
+        auth_flow: github_auth_flow(config),
+        ..options_serving(bundle.path(), port)
+    })
+    .await;
+    let served = serde_json::from_str(&body_of(server.url("/api/config")).await)
+        .expect("/api/config did not serve JSON");
+    server.stop().await;
+    served
+}
+
+#[tokio::test]
+async fn declares_the_device_flow_at_api_config_for_a_daemon_holding_only_a_client_id() {
+    // Given a daemon holding a public client id and no secret — the desktop deployment
+    let config =
+        a_daemon_config_with_github(Some("github:\n  client_id: \"Iv1.0123456789abcdef\"\n"));
+
+    // When the page it serves reads the configuration it starts up with
+    let served = api_config_of_a_daemon_configured_with(&config).await;
+
+    // Then it is told to sign in by the device flow, the only one a public client can complete
+    assert_eq!(served.get("auth_flow"), Some(&json!("device")));
+}
+
+#[tokio::test]
+async fn declares_the_redirect_flow_at_api_config_for_a_daemon_holding_a_client_secret() {
+    // Given a daemon holding a client id and its secret — a confidential client
+    let config = a_daemon_config_with_github(Some(
+        "github:\n  client_id: \"Iv1.0123456789abcdef\"\n  client_secret: \"the-secret\"\n",
+    ));
+
+    // When the page it serves reads the configuration it starts up with
+    let served = api_config_of_a_daemon_configured_with(&config).await;
+
+    // Then it is told to sign in by the redirect flow, as such a daemon always has served
+    assert_eq!(served.get("auth_flow"), Some(&json!("redirect")));
+}
+
+#[tokio::test]
+async fn omits_the_sign_in_flow_at_api_config_for_a_daemon_without_github() {
+    // Given a daemon with no `github:` block, so no auth service to sign in to
+    let config = a_daemon_config_with_github(None);
+
+    // When the page it serves reads the configuration it starts up with
+    let served = api_config_of_a_daemon_configured_with(&config).await;
+
+    // Then the key is off the wire: absent means this daemon serves no GitHub sign-in
+    assert_eq!(served.get("auth_flow"), None);
 }
 
 #[test]

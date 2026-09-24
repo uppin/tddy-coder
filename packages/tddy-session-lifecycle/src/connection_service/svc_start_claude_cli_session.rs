@@ -217,8 +217,12 @@ impl DaemonSessionHost {
                 }
             };
             let (reader, writer) = tokio::io::split(stream);
-            let (client, endpoint) =
-                tddy_stdio::StdioEndpoint::from_duplex(reader, writer, service);
+            let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+                reader,
+                writer,
+                service,
+                tddy_rpc::RequestTransport::UnixSocket,
+            );
             let task = tokio::spawn(endpoint.run());
             session_stdio.lock().await.insert(
                 sid.clone(),

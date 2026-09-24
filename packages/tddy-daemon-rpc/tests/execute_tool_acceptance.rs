@@ -34,7 +34,7 @@ async fn list_exec_tools_returns_non_empty_catalog_with_valid_schemas() {
 
     // When
     let resp = service
-        .list_exec_tools(Request::new(ListExecToolsRequest {
+        .list_exec_tools(Request::direct(ListExecToolsRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: String::new(),
         }))
@@ -106,7 +106,7 @@ async fn execute_tool_path_traversal_returns_permission_denied_status() {
 
     // When
     let result = service
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
             tool_name: "Read".to_string(),
@@ -138,7 +138,7 @@ async fn execute_tool_unknown_tool_name_returns_is_error_not_rpc_error() {
 
     // When
     let resp = service
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
             tool_name: "NonExistentTool".to_string(),
@@ -171,7 +171,7 @@ async fn execute_tool_background_shell_then_await_round_trips() {
 
     // When — launch a background shell: `echo hello` completes quickly
     let shell_resp = service
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
             tool_name: "Shell".to_string(),
@@ -200,7 +200,7 @@ async fn execute_tool_background_shell_then_await_round_trips() {
 
     // When — await the job; it finishes fast (echo), so this should complete without timing out
     let await_resp = service
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
             tool_name: "Await".to_string(),
@@ -280,7 +280,7 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
 
     // When
     let resp = service
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
             tool_name: "Read".to_string(),

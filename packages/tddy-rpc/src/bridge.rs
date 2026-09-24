@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use crate::message::RpcMessage;
+use crate::message::{RequestMetadata, RpcMessage};
 use crate::status::Status;
 
 /// Result of an RPC call - either unary or server stream.
@@ -58,10 +58,14 @@ pub trait RpcService: Send + Sync + 'static {
     /// Start a bidi stream session. The caller creates the mpsc channel and stores the sender
     /// before calling this. This method consumes the receiver, wires it to the handler, and
     /// returns the streaming output. The caller pushes subsequent messages via the sender.
+    ///
+    /// `metadata` is the session's, as the host that opened it stamped it: the handler is handed
+    /// its request before any message has arrived, so it cannot be read off the first one.
     async fn start_bidi_stream(
         &self,
         _service: &str,
         _method: &str,
+        _metadata: RequestMetadata,
         _input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, Status> {
         Err(Status::unimplemented("bidi streaming not supported"))
@@ -175,6 +179,7 @@ impl RpcService for MultiRpcService {
         &self,
         service: &str,
         method: &str,
+        metadata: RequestMetadata,
         input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, Status> {
         match self.find_service(service) {
@@ -184,7 +189,8 @@ impl RpcService for MultiRpcService {
                     service,
                     method
                 );
-                s.start_bidi_stream(service, method, input_rx).await
+                s.start_bidi_stream(service, method, metadata, input_rx)
+                    .await
             }
             None => {
                 log::warn!(
@@ -228,9 +234,12 @@ impl<S: RpcService + ?Sized> RpcService for Arc<S> {
         &self,
         service: &str,
         method: &str,
+        metadata: RequestMetadata,
         input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, Status> {
-        (**self).start_bidi_stream(service, method, input_rx).await
+        (**self)
+            .start_bidi_stream(service, method, metadata, input_rx)
+            .await
     }
 }
 
@@ -257,10 +266,11 @@ impl<S: RpcService> RpcBridge<S> {
         &self,
         service: &str,
         method: &str,
+        metadata: RequestMetadata,
         input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, Status> {
         self.service
-            .start_bidi_stream(service, method, input_rx)
+            .start_bidi_stream(service, method, metadata, input_rx)
             .await
     }
 

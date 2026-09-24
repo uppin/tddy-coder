@@ -318,7 +318,10 @@ impl Wiring {
     }
 
     async fn dispatch<Req: Message>(&self, service: &str, method: &str, request: Req) -> RpcResult {
-        let message = RpcMessage::new(request.encode_to_vec(), Default::default());
+        let message = RpcMessage::new(
+            request.encode_to_vec(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        );
         self.entry
             .service
             .handle_rpc(service, method, &message)

@@ -105,7 +105,7 @@ async fn workspace_session_creates_worktree_with_no_pty() {
 
     // When
     let resp = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             tool_path: String::new(),
             project_id: TEST_PROJECT_ID.to_string(),
@@ -186,7 +186,7 @@ async fn connect_session_workspace_returns_empty_livekit() {
 
     // When
     let start_resp = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_type: "workspace".to_string(),
             project_id: TEST_PROJECT_ID.to_string(),
@@ -198,7 +198,7 @@ async fn connect_session_workspace_returns_empty_livekit() {
 
     // When
     let connect_resp = service
-        .connect_session(Request::new(ConnectSessionRequest {
+        .connect_session(Request::direct(ConnectSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id,
         }))

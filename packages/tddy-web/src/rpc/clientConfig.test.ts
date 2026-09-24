@@ -111,6 +111,16 @@ function anHttpDaemonWhoseJailSharesTheFilesystemRoot(): HttpEndpoint {
   return { fetched: () => fetched };
 }
 
+/** A daemon whose `/api/config` declares `authFlow` as the sign-in flow it serves. */
+function anHttpDaemonDeclaringAuthFlow(authFlow: string): HttpEndpoint {
+  const fetched: string[] = [];
+  spyOn(globalThis, "fetch").mockImplementation(async (url: RequestInfo | URL) => {
+    fetched.push(String(url));
+    return Response.json({ daemon_mode: true, daemon_instance_id: "udoo", auth_flow: authFlow });
+  });
+  return { fetched: () => fetched };
+}
+
 /** A daemon whose web server has no configuration to serve. */
 function anHttpDaemonServingNoClientConfig(): HttpEndpoint {
   const fetched: string[] = [];
@@ -121,7 +131,10 @@ function anHttpDaemonServingNoClientConfig(): HttpEndpoint {
   return { fetched: () => fetched };
 }
 
-/** The configuration both sources are read into, so one assertion covers both paths. */
+/**
+ * The configuration both sources are read into, so one assertion covers both paths. Neither
+ * fixture daemon declares an `auth_flow`, which is read as a daemon serving no sign-in.
+ */
 const THE_DAEMONS_CLIENT_CONFIG = {
   livekitUrl: "ws://127.0.0.1:7880",
   livekitRoom: undefined,
@@ -130,7 +143,14 @@ const THE_DAEMONS_CLIENT_CONFIG = {
   daemonInstanceId: "udoo",
   allowedAgents: [{ id: "claude", label: "Claude" }],
   debug: "tddy:rpc:*",
+  authFlow: "none",
 };
+
+/** Read the startup configuration as a browser page served from a daemon would. */
+function whenABrowserPageReadsItsClientConfig() {
+  const host = aBrowserPageServedFrom("https://daemon.example");
+  return loadClientConfig(createDefaultDaemonTransport(undefined, undefined, host), host);
+}
 
 describe("the startup configuration the daemon hands its web bundle", () => {
   afterEach(() => {
@@ -229,6 +249,55 @@ describe("the startup configuration the daemon hands its web bundle", () => {
     // Then — absent stays absent, never a default the form could mistake for a capability
     expect(config?.sandboxedCodebase).toBeUndefined();
   });
+
+  it("reads a daemon that declares no auth_flow as serving no sign-in over HTTP", async () => {
+    // Given — a daemon with no GitHub sign-in configured
+    anHttpDaemonServingItsClientConfig();
+
+    // When
+    const config = await whenABrowserPageReadsItsClientConfig();
+
+    // Then — absence is its own answer, never read as either flow
+    expect(config?.authFlow).toEqual("none");
+  });
+
+  it("reads a daemon that declares no auth_flow as serving no sign-in over RPC", async () => {
+    // Given — a desktop page whose daemon has no GitHub sign-in configured
+    const daemon = aDaemonServingItsClientConfig();
+    const host = aTauriHostedPage(DaemonConfigService, daemon.transport());
+
+    // When
+    const config = await loadClientConfig(
+      createDefaultDaemonTransport(undefined, undefined, host),
+      host,
+    );
+
+    // Then
+    expect(config?.authFlow).toEqual("none");
+  });
+
+  it("reads the device flow a daemon declares", async () => {
+    // Given
+    anHttpDaemonDeclaringAuthFlow("device");
+
+    // When
+    const config = await whenABrowserPageReadsItsClientConfig();
+
+    // Then
+    expect(config?.authFlow).toEqual("device");
+  });
+
+  it("keeps an auth_flow it does not recognise as unrecognised rather than guessing a flow", async () => {
+    // Given — a daemon declaring a flow this page has never heard of
+    anHttpDaemonDeclaringAuthFlow("carrier-pigeon");
+
+    // When
+    const config = await whenABrowserPageReadsItsClientConfig();
+
+    // Then — the value is kept so the sign-in screen can name it
+    expect(config?.authFlow).toEqual({ unrecognised: "carrier-pigeon" });
+  });
+
   it("carries the auth gate's session token when it is asked for over RPC", async () => {
     // Given — a desktop page whose auth provider has installed a token resolver
     const daemon = aDaemonServingItsClientConfig();

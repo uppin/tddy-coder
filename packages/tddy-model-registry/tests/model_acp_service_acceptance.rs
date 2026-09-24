@@ -153,7 +153,7 @@ impl Harness {
         let inbound = Streaming::new(tokio_stream::iter(frames.into_iter().map(Ok)));
         let mut outbound = self
             .service
-            .session(Request::new(inbound))
+            .session(Request::direct(inbound))
             .await
             .expect("the daemon must serve an ACP session")
             .into_inner();
@@ -775,7 +775,7 @@ async fn a_stream_that_fails_mid_conversation_is_told_so_rather_than_ending_quie
     // When
     let mut outbound = harness
         .service
-        .session(Request::new(inbound))
+        .session(Request::direct(inbound))
         .await
         .expect("the daemon must serve an ACP session")
         .into_inner();

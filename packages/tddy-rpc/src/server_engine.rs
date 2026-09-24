@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 
 use crate::bridge::{BidiStreamOutput, ResponseBody, RpcBridge, RpcService};
 use crate::envelope::{CallMetadata, CallOrigin, RpcError, RpcRequest, RpcResponse};
-use crate::message::{RequestMetadata, RpcMessage};
+use crate::message::{RequestMetadata, RequestTransport, RpcMessage};
 use crate::status::Status;
 
 /// Composite key for multiplexing: request ids are only unique per-peer.
@@ -97,31 +97,39 @@ impl PeerForwards {
     }
 }
 
-fn to_rpc_message(request: &RpcRequest) -> RpcMessage {
-    RpcMessage {
-        payload: request.request_message.clone(),
-        metadata: RequestMetadata {
-            sender_identity: request.sender_identity.clone(),
-        },
-    }
-}
-
 /// Routes decoded `RpcRequest`s into an [`RpcBridge<S>`], transport-agnostically.
+///
+/// The engine does not know which transport it serves, so its host names it once, at
+/// construction, and every request the engine dispatches is stamped with it. Nothing in a
+/// request's own bytes can change that stamp.
 pub struct ServerEngine<S: RpcService> {
     bridge: Arc<RpcBridge<S>>,
+    transport: RequestTransport,
     active_bidi_sessions: Mutex<HashMap<SessionKey, BidiSession>>,
     pending_multi_message: Mutex<HashMap<SessionKey, PendingMultiMessage>>,
     peer_forwards: Arc<PeerForwards>,
 }
 
 impl<S: RpcService> ServerEngine<S> {
-    pub fn new(service: S) -> Self {
+    /// Serve `service` for a host that receives its requests over `transport`.
+    pub fn new(service: S, transport: RequestTransport) -> Self {
         Self {
             bridge: Arc::new(RpcBridge::new(service)),
+            transport,
             active_bidi_sessions: Mutex::new(HashMap::new()),
             pending_multi_message: Mutex::new(HashMap::new()),
             peer_forwards: Arc::new(PeerForwards::default()),
         }
+    }
+
+    /// The metadata a request this engine received carries: the transport its host named, and the
+    /// sender identity the envelope claims.
+    fn metadata_of(&self, request: &RpcRequest) -> RequestMetadata {
+        RequestMetadata::over(self.transport).with_sender_identity(request.sender_identity.clone())
+    }
+
+    fn to_rpc_message(&self, request: &RpcRequest) -> RpcMessage {
+        RpcMessage::new(request.request_message.clone(), self.metadata_of(request))
     }
 
     /// Handle one decoded incoming request from `peer`, publishing every resulting response
@@ -179,7 +187,7 @@ impl<S: RpcService> ServerEngine<S> {
             return;
         }
 
-        let message = to_rpc_message(&request);
+        let message = self.to_rpc_message(&request);
 
         if !request.end_of_stream {
             // First fragment of a non-bidi multi-message (client-streaming) call: start
@@ -245,7 +253,7 @@ impl<S: RpcService> ServerEngine<S> {
         let Some(session) = sessions.get(session_key) else {
             return false;
         };
-        let _ = session.input_tx.send(to_rpc_message(request)).await;
+        let _ = session.input_tx.send(self.to_rpc_message(request)).await;
         if request.end_of_stream {
             sessions.remove(session_key);
         }
@@ -265,7 +273,7 @@ impl<S: RpcService> ServerEngine<S> {
         let Some(entry) = pending.get_mut(session_key) else {
             return false;
         };
-        entry.messages.push(to_rpc_message(request));
+        entry.messages.push(self.to_rpc_message(request));
         if !request.end_of_stream {
             return true;
         }
@@ -348,8 +356,9 @@ impl<S: RpcService> ServerEngine<S> {
             .clone()
             .expect("opens_bidi_session requires call_metadata");
 
+        let metadata = self.metadata_of(&request);
         let (input_tx, input_rx) = mpsc::channel::<RpcMessage>(64);
-        let _ = input_tx.send(to_rpc_message(&request)).await;
+        let _ = input_tx.send(self.to_rpc_message(&request)).await;
 
         if request.end_of_stream {
             // Single-message call: no continuation will arrive. Don't register bookkeeping —
@@ -367,7 +376,7 @@ impl<S: RpcService> ServerEngine<S> {
         self.peer_forwards
             .spawn(peer.to_string(), async move {
                 match bridge
-                    .start_bidi_stream(&meta.service, &meta.method, input_rx)
+                    .start_bidi_stream(&meta.service, &meta.method, metadata, input_rx)
                     .await
                 {
                     Ok(BidiStreamOutput { output }) => {

@@ -1692,8 +1692,12 @@ async fn start_tool_ipc_server(path: PathBuf, relay: Arc<SandboxSessionRelay>) -
             tokio::spawn(async move {
                 let (read_half, write_half) = tokio::io::split(stream);
                 let service = ToolExecService { relay };
-                let (_client, endpoint) =
-                    tddy_stdio::StdioEndpoint::from_duplex(read_half, write_half, service);
+                let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+                    read_half,
+                    write_half,
+                    service,
+                    tddy_rpc::RequestTransport::UnixSocket,
+                );
                 endpoint.run().await;
             });
         }
@@ -3474,7 +3478,7 @@ mod tests {
                 "AttachSessionAgent",
                 &tddy_rpc::RpcMessage {
                     payload: Vec::new(),
-                    metadata: tddy_rpc::RequestMetadata::default(),
+                    metadata: tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
                 },
             )
             .await;
@@ -3516,7 +3520,7 @@ mod tests {
                 allowed_method,
                 &tddy_rpc::RpcMessage {
                     payload: Vec::new(),
-                    metadata: tddy_rpc::RequestMetadata::default(),
+                    metadata: tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
                 },
             )
             .await;

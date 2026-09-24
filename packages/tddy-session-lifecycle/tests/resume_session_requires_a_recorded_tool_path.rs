@@ -91,7 +91,7 @@ async fn resume_session_fails_with_a_specific_error_when_no_tool_is_recorded() {
 
     // When
     let result = service
-        .resume_session(Request::new(ResumeSessionRequest {
+        .resume_session(Request::direct(ResumeSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: "no-tool-recorded".to_string(),
         }))

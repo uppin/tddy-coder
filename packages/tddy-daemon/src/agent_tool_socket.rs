@@ -68,6 +68,7 @@ pub async fn serve_agent_tool_socket(
                         read_half,
                         write_half,
                         MultiRpcService::new(entries),
+                        tddy_rpc::RequestTransport::UnixSocket,
                     );
                     endpoint.run().await;
                 });

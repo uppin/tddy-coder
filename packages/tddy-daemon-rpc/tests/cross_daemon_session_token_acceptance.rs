@@ -116,7 +116,7 @@ async fn a_peer_daemon_accepts_a_token_minted_by_a_daemon_whose_key_it_has_learn
         .mint(&a_github_user("u"), tddy_github::SESSION_TOKEN_TTL);
 
     // When the peer lists projects with that token
-    let request = Request::new(ListProjectsRequest {
+    let request = Request::direct(ListProjectsRequest {
         session_token: token,
         local_only: true,
     });
@@ -146,7 +146,7 @@ async fn a_peer_daemon_rejects_a_token_signed_by_a_daemon_it_has_never_heard_of(
         .mint(&a_github_user("u"), tddy_github::SESSION_TOKEN_TTL);
 
     // When the peer lists projects with that token
-    let request = Request::new(ListProjectsRequest {
+    let request = Request::direct(ListProjectsRequest {
         session_token: token,
         local_only: true,
     });

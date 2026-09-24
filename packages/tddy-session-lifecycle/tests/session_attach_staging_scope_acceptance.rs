@@ -172,7 +172,7 @@ async fn stage_chunk(
 ) -> Result<(), Status> {
     service
         .session_files_service()
-        .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
+        .upload_staged_attachment_chunk(Request::direct(UploadStagedAttachmentChunkRequest {
             session_token: VALID_TOKEN.to_string(),
             daemon_instance_id: String::new(),
             staging_id: staging_id.to_string(),
@@ -359,7 +359,7 @@ async fn a_completed_staged_file_is_readable_through_the_staged_attachment_scope
     let response = fixture
         .service
         .session_files_service()
-        .read_host_document(Request::new(staged_document_request(&format!(
+        .read_host_document(Request::direct(staged_document_request(&format!(
             "{STAGING_ID_A}/notes.md"
         ))))
         .await
@@ -392,7 +392,7 @@ async fn the_staged_attachment_scope_refuses_a_file_whose_upload_never_completed
     let err = fixture
         .service
         .session_files_service()
-        .read_host_document(Request::new(staged_document_request(&format!(
+        .read_host_document(Request::direct(staged_document_request(&format!(
             "{STAGING_ID_A}/partial.md"
         ))))
         .await
@@ -419,7 +419,7 @@ async fn the_staged_attachment_scope_refuses_a_relative_path_that_is_not_two_seg
     let err = fixture
         .service
         .session_files_service()
-        .read_host_document(Request::new(staged_document_request("notes.md")))
+        .read_host_document(Request::direct(staged_document_request("notes.md")))
         .await
         .expect_err("a one-segment relative_path must be refused");
 
@@ -444,7 +444,7 @@ async fn the_staged_attachment_scope_refuses_a_relative_path_that_escapes_its_ba
     let err = fixture
         .service
         .session_files_service()
-        .read_host_document(Request::new(staged_document_request(&format!(
+        .read_host_document(Request::direct(staged_document_request(&format!(
             "{STAGING_ID_A}/../{STAGING_ID_A}/notes.md"
         ))))
         .await
@@ -473,7 +473,7 @@ async fn stream_read_host_document_delivers_a_document_larger_than_the_unary_cap
     let mut stream = fixture
         .service
         .session_files_service()
-        .stream_read_host_document(Request::new(staged_document_request(&format!(
+        .stream_read_host_document(Request::direct(staged_document_request(&format!(
             "{STAGING_ID_A}/big.bin"
         ))))
         .await
@@ -510,7 +510,7 @@ async fn stream_read_host_document_refuses_a_document_over_the_hosts_configured_
     let err = fixture
         .service
         .session_files_service()
-        .stream_read_host_document(Request::new(staged_document_request(&format!(
+        .stream_read_host_document(Request::direct(staged_document_request(&format!(
             "{STAGING_ID_A}/over.bin"
         ))))
         .await
@@ -542,7 +542,7 @@ async fn stream_start_session_reports_progress_for_each_attachment_then_one_term
     // When — the session is started over the streaming RPC
     let mut stream = fixture
         .service
-        .stream_start_session(Request::new(a_start_session_request(vec![
+        .stream_start_session(Request::direct(a_start_session_request(vec![
             staged_ref(STAGING_ID_A, "spec.md", "spec.md"),
             staged_ref(STAGING_ID_B, "log.txt", "log.txt"),
         ])))
@@ -601,7 +601,7 @@ async fn a_materialization_failure_terminates_the_stream_and_leaves_no_partial_a
     // When — the session is started over the streaming RPC
     let mut stream = fixture
         .service
-        .stream_start_session(Request::new(a_start_session_request(vec![
+        .stream_start_session(Request::direct(a_start_session_request(vec![
             staged_ref(STAGING_ID_A, "good.md", "good.md"),
             staged_ref(STAGING_ID_B, "missing.md", "missing.md"),
         ])))
@@ -657,13 +657,15 @@ async fn stream_start_session_refuses_an_invalid_token_before_it_classifies_the_
     };
 
     // When — the session is started over the streaming RPC
-    let err =
-        match SessionServiceTrait::stream_start_session(&*fixture.service, Request::new(request))
-            .await
-        {
-            Err(status) => status,
-            Ok(_) => panic!("an invalid token must be refused at call time, not mid-stream"),
-        };
+    let err = match SessionServiceTrait::stream_start_session(
+        &*fixture.service,
+        Request::direct(request),
+    )
+    .await
+    {
+        Err(status) => status,
+        Ok(_) => panic!("an invalid token must be refused at call time, not mid-stream"),
+    };
 
     // Then — UNAUTHENTICATED, at call time
     assert_eq!(err.code, Code::Unauthenticated, "got {err:?}");

@@ -27,7 +27,10 @@ where
     ) -> Result<tonic::Response<ExecuteToolResponse>, tonic::Status> {
         let resp = ExecToolService::execute_tool(
             &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
+            tddy_rpc::Request::with_metadata(
+                request.into_inner(),
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Grpc),
+            ),
         )
         .await
         .map_err(to_tonic_status)?;
@@ -47,7 +50,10 @@ where
     ) -> Result<tonic::Response<Self::StreamExecuteToolStream>, tonic::Status> {
         let resp = ExecToolService::stream_execute_tool(
             &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
+            tddy_rpc::Request::with_metadata(
+                request.into_inner(),
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Grpc),
+            ),
         )
         .await
         .map_err(to_tonic_status)?;
@@ -61,7 +67,10 @@ where
     ) -> Result<tonic::Response<ListExecToolsResponse>, tonic::Status> {
         let resp = ExecToolService::list_exec_tools(
             &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
+            tddy_rpc::Request::with_metadata(
+                request.into_inner(),
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Grpc),
+            ),
         )
         .await
         .map_err(to_tonic_status)?;
@@ -74,7 +83,10 @@ where
     ) -> Result<tonic::Response<ListSessionToolCallsResponse>, tonic::Status> {
         let resp = ExecToolService::list_session_tool_calls(
             &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
+            tddy_rpc::Request::with_metadata(
+                request.into_inner(),
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Grpc),
+            ),
         )
         .await
         .map_err(to_tonic_status)?;

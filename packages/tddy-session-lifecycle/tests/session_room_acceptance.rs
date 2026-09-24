@@ -416,7 +416,7 @@ impl FacilitatingDaemon {
     /// agent, and a workspace session has none — it is a checkout with nobody to serve.
     async fn start_agent_session(&self) -> StartSessionResponse {
         self.service
-            .start_session(Request::new(an_agent_session_request()))
+            .start_session(Request::direct(an_agent_session_request()))
             .await
             .expect("an agent session must start")
             .into_inner()
@@ -425,7 +425,7 @@ impl FacilitatingDaemon {
     /// A checkout with no agent, for the case that must *not* get a room.
     async fn start_workspace_session(&self) -> StartSessionResponse {
         self.service
-            .start_session(Request::new(StartSessionRequest {
+            .start_session(Request::direct(StartSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 project_id: TEST_PROJECT_ID.to_string(),
                 session_type: "workspace".to_string(),
@@ -462,7 +462,7 @@ impl FacilitatingDaemon {
         .expect("staging an attachment must succeed");
 
         self.service
-            .start_session(Request::new(StartSessionRequest {
+            .start_session(Request::direct(StartSessionRequest {
                 attachments: vec![SessionAttachment {
                     basename: basename.to_string(),
                     source: Some(AttachmentSource::Staged(StagedAttachmentRef {
@@ -1240,7 +1240,7 @@ impl FacilitatingDaemon {
         session_id: &str,
     ) -> Result<tddy_service::proto::session::ConnectSessionResponse, tddy_rpc::Status> {
         self.service
-            .connect_session(Request::new(ConnectSessionRequest {
+            .connect_session(Request::direct(ConnectSessionRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: session_id.to_string(),
             }))

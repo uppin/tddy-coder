@@ -308,7 +308,7 @@ async fn start_session_with_a_codebase_daemon_but_without_managed_codebase_is_re
 
     // When
     let status = service
-        .start_session(Request::new(request))
+        .start_session(Request::direct(request))
         .await
         .expect_err("split placement without managed_codebase must be refused");
 
@@ -339,7 +339,7 @@ async fn start_session_with_a_codebase_daemon_on_a_cursor_cli_session_is_refused
 
     // When
     let status = service
-        .start_session(Request::new(request))
+        .start_session(Request::direct(request))
         .await
         .expect_err("cursor-cli split placement must be refused in v1");
 
@@ -366,7 +366,7 @@ async fn start_session_with_an_unknown_codebase_daemon_is_refused() {
 
     // When
     let status = service
-        .start_session(Request::new(a_split_claude_cli_request(UNKNOWN_PEER_ID)))
+        .start_session(Request::direct(a_split_claude_cli_request(UNKNOWN_PEER_ID)))
         .await
         .expect_err("an unreachable codebase daemon must be refused");
 
@@ -417,7 +417,7 @@ async fn a_split_start_seeding_an_agent_of_this_host_is_not_refused_over_the_see
 
     // When
     let status = service
-        .start_session(Request::new(request))
+        .start_session(Request::direct(request))
         .await
         .expect_err("no room is connected here, so even an admissible split start cannot complete");
 
@@ -450,7 +450,7 @@ async fn a_split_start_seeding_an_agent_no_host_defines_is_refused_naming_that_a
 
     // When
     let status = service
-        .start_session(Request::new(request))
+        .start_session(Request::direct(request))
         .await
         .expect_err("a seed that resolves to nothing must fail the start, not be dropped");
 
@@ -482,7 +482,7 @@ async fn a_split_start_asking_for_a_semantic_index_is_not_refused_over_the_index
 
     // When
     let status = service
-        .start_session(Request::new(request))
+        .start_session(Request::direct(request))
         .await
         .expect_err("no room is connected here, so even an admissible split start cannot complete");
 
@@ -514,7 +514,7 @@ async fn a_split_start_carrying_a_workflow_recipe_is_still_refused_naming_the_fi
 
     // When
     let status = service
-        .start_session(Request::new(request))
+        .start_session(Request::direct(request))
         .await
         .expect_err("a recipe needs a repository beside the agent, which a split session lacks");
 
@@ -550,7 +550,7 @@ async fn a_split_start_asking_for_a_sandbox_is_admitted_and_fails_over_the_missi
 
     // When
     let status = service
-        .start_session(Request::new(request))
+        .start_session(Request::direct(request))
         .await
         .expect_err("no room is connected here, so even an admissible split start cannot complete");
 
@@ -579,7 +579,9 @@ async fn start_session_with_a_known_codebase_daemon_and_no_livekit_room_fails_pr
 
     // When
     let status = service
-        .start_session(Request::new(a_split_claude_cli_request(CODEBASE_PEER_ID)))
+        .start_session(Request::direct(a_split_claude_cli_request(
+            CODEBASE_PEER_ID,
+        )))
         .await
         .expect_err("a split start with no LiveKit room must fail");
 
@@ -662,7 +664,7 @@ async fn deleting_a_split_session_refuses_while_this_daemon_cannot_reach_the_com
 
     // When the session is deleted
     let status = service
-        .delete_session(Request::new(DeleteSessionRequest {
+        .delete_session(Request::direct(DeleteSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
         }))

@@ -66,8 +66,12 @@ pub async fn dispatch_toolcall(
         .await
         .map_err(|e| format!("failed to connect to TDDY_SOCKET: {e}"))?;
     let (read_half, write_half) = tokio::io::split(stream);
-    let (client, endpoint) =
-        tddy_stdio::StdioEndpoint::from_duplex(read_half, write_half, NoCallbackToolcallService);
+    let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+        read_half,
+        write_half,
+        NoCallbackToolcallService,
+        tddy_rpc::RequestTransport::UnixSocket,
+    );
     tokio::spawn(endpoint.run());
 
     let payload = serde_json::to_vec(&request).map_err(|e| e.to_string())?;

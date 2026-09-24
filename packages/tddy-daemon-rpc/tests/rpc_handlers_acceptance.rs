@@ -180,7 +180,7 @@ async fn a_project_handler_lists_the_projects_registered_for_the_caller() {
     // When
     let listed = daemon
         .project_service()
-        .list_projects(Request::new(ListProjectsRequest {
+        .list_projects(Request::direct(ListProjectsRequest {
             session_token: A_KNOWN_TOKEN.to_string(),
             local_only: true,
         }))
@@ -201,7 +201,7 @@ async fn a_project_handler_refuses_a_caller_whose_session_token_is_unknown() {
     // When
     let refusal = daemon
         .project_service()
-        .list_projects(Request::new(ListProjectsRequest {
+        .list_projects(Request::direct(ListProjectsRequest {
             session_token: AN_UNKNOWN_TOKEN.to_string(),
             local_only: true,
         }))
@@ -226,7 +226,7 @@ async fn a_catalog_handler_lists_the_tools_the_daemon_allows() {
     // When
     let listed = daemon
         .catalog_service()
-        .list_tools(Request::new(ListToolsRequest {}))
+        .list_tools(Request::direct(ListToolsRequest {}))
         .await
         .expect("the allowed tools were not listed")
         .into_inner();
@@ -247,7 +247,7 @@ async fn a_catalog_handler_records_rpc_activity_on_the_hosts_own_idle_tracker() 
     // When
     daemon
         .catalog_service()
-        .list_tools(Request::new(ListToolsRequest {}))
+        .list_tools(Request::direct(ListToolsRequest {}))
         .await
         .expect("the tools were not listed");
 
@@ -270,7 +270,7 @@ async fn an_exec_tool_handler_refuses_a_caller_whose_session_token_is_unknown() 
     // When
     let refusal = daemon
         .exec_tool_service()
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: AN_UNKNOWN_TOKEN.to_string(),
             session_id: "a-session".to_string(),
             tool_name: "Read".to_string(),
@@ -296,7 +296,7 @@ async fn a_pr_stack_handler_refuses_a_caller_whose_session_token_is_unknown() {
     // When
     let refusal = daemon
         .pr_stack_service()
-        .query_branch(Request::new(QueryBranchRequest {
+        .query_branch(Request::direct(QueryBranchRequest {
             session_token: AN_UNKNOWN_TOKEN.to_string(),
             branch: "feature/widgets".to_string(),
             ..Default::default()

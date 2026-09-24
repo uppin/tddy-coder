@@ -86,7 +86,7 @@ impl BspHarness {
     async fn call<Req: Message, Resp: Message + Default>(&self, method: &str, req: Req) -> Resp {
         let msg = RpcMessage {
             payload: req.encode_to_vec(),
-            metadata: RequestMetadata::default(),
+            metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         };
         let body = self
             .bridge

@@ -32,9 +32,10 @@ allowed_tools:
     let config = DaemonConfig::load(&path).expect("config should load");
 
     // Then
-    assert_eq!(config.users.len(), 2);
-    assert_eq!(config.users[0].github_user, "octocat");
-    assert_eq!(config.users[0].os_user, "dev1");
+    let users = config.users.snapshot();
+    assert_eq!(users.len(), 2);
+    assert_eq!(users[0].github_user, "octocat");
+    assert_eq!(users[0].os_user, "dev1");
     assert_eq!(config.allowed_tools.len(), 2);
     assert_eq!(config.allowed_tools[0].path, "target/debug/tddy-coder");
     assert!(
@@ -126,7 +127,10 @@ users:
     let config = DaemonConfig::load(&path).unwrap();
 
     // When / Then
-    assert_eq!(config.os_user_for_github("octocat"), Some("dev1"));
+    assert_eq!(
+        config.os_user_for_github("octocat").as_deref(),
+        Some("dev1")
+    );
     assert_eq!(config.os_user_for_github("unknown"), None);
 }
 

@@ -1183,6 +1183,7 @@ impl RpcService for PtyLiveKitService {
         &self,
         service: &str,
         method: &str,
+        _metadata: tddy_rpc::RequestMetadata,
         mut input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, tddy_rpc::Status> {
         if service != "terminal.TerminalService" || method != "StreamTerminalIO" {

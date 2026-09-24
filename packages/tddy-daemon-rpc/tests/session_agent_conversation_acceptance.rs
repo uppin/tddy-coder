@@ -42,7 +42,7 @@ impl ConversingSession {
     async fn open_conversation(&self) -> String {
         self.service
             .session_agents_service()
-            .open_agent_conversation(Request::new(OpenAgentConversationRequest {
+            .open_agent_conversation(Request::direct(OpenAgentConversationRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -62,7 +62,7 @@ impl ConversingSession {
     {
         self.service
             .session_agents_service()
-            .prompt_agent_conversation(Request::new(PromptAgentConversationRequest {
+            .prompt_agent_conversation(Request::direct(PromptAgentConversationRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -77,7 +77,7 @@ impl ConversingSession {
     async fn cancel(&self, conversation_id: &str) -> Result<(), tddy_rpc::Status> {
         self.service
             .session_agents_service()
-            .cancel_agent_conversation(Request::new(CancelAgentConversationRequest {
+            .cancel_agent_conversation(Request::direct(CancelAgentConversationRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -104,7 +104,7 @@ async fn a_session_conversing_with_a_local_agent(model: StubModel) -> Conversing
     // Read the way a client reads it: a hand-spelled "explorer@some-host" would pass while the
     // daemon stamped something else entirely.
     let agent_id = service
-        .list_subagents(Request::new(ListSubagentsRequest {}))
+        .list_subagents(Request::direct(ListSubagentsRequest {}))
         .await
         .expect("listing subagents must succeed")
         .into_inner()
@@ -115,7 +115,7 @@ async fn a_session_conversing_with_a_local_agent(model: StubModel) -> Conversing
         .agent_id;
     service
         .session_agents_service()
-        .attach_session_agent(Request::new(AttachSessionAgentRequest {
+        .attach_session_agent(Request::direct(AttachSessionAgentRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.clone(),
             daemon_instance_id: String::new(),

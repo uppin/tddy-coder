@@ -216,7 +216,7 @@ async fn refuses_to_list_providers_for_an_unrecognised_session_token() {
     // When
     let result = harness
         .service
-        .list_providers(Request::new(ListProvidersRequest {
+        .list_providers(Request::direct(ListProvidersRequest {
             session_token: AN_UNRECOGNISED_TOKEN.to_string(),
         }))
         .await;
@@ -239,7 +239,7 @@ async fn refuses_to_create_a_provider_for_an_unrecognised_session_token() {
     // When
     let result = harness
         .service
-        .create_provider(Request::new(CreateProviderRequest {
+        .create_provider(Request::direct(CreateProviderRequest {
             session_token: AN_UNRECOGNISED_TOKEN.to_string(),
             kind: ProviderKind::Ollama as i32,
             label: "Local Ollama".to_string(),
@@ -277,7 +277,7 @@ async fn refuses_to_create_an_assistant_for_an_unrecognised_session_token() {
     // When
     let result = harness
         .service
-        .create_assistant(Request::new(CreateAssistantRequest {
+        .create_assistant(Request::direct(CreateAssistantRequest {
             session_token: AN_UNRECOGNISED_TOKEN.to_string(),
             name: "repo-reader".to_string(),
             label: "Repo Reader".to_string(),
@@ -322,7 +322,7 @@ async fn refuses_to_load_a_model_for_an_unrecognised_session_token() {
     // When
     let result = harness
         .service
-        .load_model(Request::new(LoadModelRequest {
+        .load_model(Request::direct(LoadModelRequest {
             session_token: AN_UNRECOGNISED_TOKEN.to_string(),
             provider_id: provider.provider_id.clone(),
             model_id: "qwen3:32b".to_string(),
@@ -361,7 +361,7 @@ async fn caches_the_models_a_refresh_enumerated() {
     // When
     harness
         .service
-        .refresh_provider_models(Request::new(RefreshProviderModelsRequest {
+        .refresh_provider_models(Request::direct(RefreshProviderModelsRequest {
             session_token: VALID_TOKEN.to_string(),
             provider_id: provider.provider_id.clone(),
         }))
@@ -371,7 +371,7 @@ async fn caches_the_models_a_refresh_enumerated() {
     // Then
     let listed = harness
         .service
-        .list_models(Request::new(ListModelsRequest {
+        .list_models(Request::direct(ListModelsRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -401,7 +401,7 @@ async fn fails_a_refresh_that_could_not_reach_the_provider_instead_of_returning_
     // When
     let result = harness
         .service
-        .refresh_provider_models(Request::new(RefreshProviderModelsRequest {
+        .refresh_provider_models(Request::direct(RefreshProviderModelsRequest {
             session_token: VALID_TOKEN.to_string(),
             provider_id: provider.provider_id.clone(),
         }))
@@ -434,7 +434,7 @@ async fn records_a_failed_refresh_against_the_provider_so_the_screen_can_show_it
     // When
     harness
         .service
-        .refresh_provider_models(Request::new(RefreshProviderModelsRequest {
+        .refresh_provider_models(Request::direct(RefreshProviderModelsRequest {
             session_token: VALID_TOKEN.to_string(),
             provider_id: provider.provider_id.clone(),
         }))
@@ -444,7 +444,7 @@ async fn records_a_failed_refresh_against_the_provider_so_the_screen_can_show_it
     // Then
     let providers = harness
         .service
-        .list_providers(Request::new(ListProvidersRequest {
+        .list_providers(Request::direct(ListProvidersRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -479,7 +479,7 @@ async fn refuses_to_unload_a_model_whose_provider_has_no_notion_of_residency() {
     // When
     let result = harness
         .service
-        .unload_model(Request::new(UnloadModelRequest {
+        .unload_model(Request::direct(UnloadModelRequest {
             session_token: VALID_TOKEN.to_string(),
             provider_id: provider.provider_id.clone(),
             model_id: "kimi-k2".to_string(),
@@ -504,7 +504,7 @@ async fn advertises_the_exec_catalog_as_the_tools_an_assistant_may_be_given() {
     // When
     let tools = harness
         .service
-        .list_assignable_tools(Request::new(ListAssignableToolsRequest {
+        .list_assignable_tools(Request::direct(ListAssignableToolsRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -541,7 +541,7 @@ async fn marks_the_worktree_changing_tools_as_mutating_in_the_assignable_catalog
     // When
     let tools = harness
         .service
-        .list_assignable_tools(Request::new(ListAssignableToolsRequest {
+        .list_assignable_tools(Request::direct(ListAssignableToolsRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -580,7 +580,7 @@ async fn lists_a_created_assistant_among_the_daemons_selectable_agents() {
     // When an assistant is created
     harness
         .service
-        .create_assistant(Request::new(CreateAssistantRequest {
+        .create_assistant(Request::direct(CreateAssistantRequest {
             session_token: VALID_TOKEN.to_string(),
             name: "repo-reader".to_string(),
             label: "Repo Reader".to_string(),
@@ -649,7 +649,7 @@ async fn refuses_to_delete_a_provider_another_operator_added() {
     // When a colleague on the same daemon deletes it
     let result = harness
         .service
-        .delete_provider(Request::new(
+        .delete_provider(Request::direct(
             tddy_service::proto::models::DeleteProviderRequest {
                 session_token: ANOTHER_OPERATORS_TOKEN.to_string(),
                 provider_id: provider.provider_id.clone(),
@@ -690,7 +690,7 @@ async fn refuses_to_refresh_a_provider_another_operator_added() {
     // When a colleague refreshes it
     let result = harness
         .service
-        .refresh_provider_models(Request::new(RefreshProviderModelsRequest {
+        .refresh_provider_models(Request::direct(RefreshProviderModelsRequest {
             session_token: ANOTHER_OPERATORS_TOKEN.to_string(),
             provider_id: provider.provider_id.clone(),
         }))
@@ -729,7 +729,7 @@ async fn lists_every_operators_providers_to_whoever_asks() {
     // When either of them opens the screen
     let providers = harness
         .service
-        .list_providers(Request::new(ListProvidersRequest {
+        .list_providers(Request::direct(ListProvidersRequest {
             session_token: ANOTHER_OPERATORS_TOKEN.to_string(),
         }))
         .await
@@ -767,7 +767,7 @@ async fn reports_the_providers_failure_even_when_recording_it_could_not_be_done(
     // When
     let result = harness
         .service
-        .refresh_provider_models(Request::new(RefreshProviderModelsRequest {
+        .refresh_provider_models(Request::direct(RefreshProviderModelsRequest {
             session_token: VALID_TOKEN.to_string(),
             provider_id: provider.provider_id.clone(),
         }))
@@ -801,7 +801,7 @@ async fn labels_a_model_outside_the_cached_catalog_as_unknown_rather_than_unlabe
     // When a model nobody has enumerated is loaded by name
     let model = harness
         .service
-        .load_model(Request::new(LoadModelRequest {
+        .load_model(Request::direct(LoadModelRequest {
             session_token: VALID_TOKEN.to_string(),
             provider_id: provider.provider_id.clone(),
             model_id: "qwen3:32b".to_string(),

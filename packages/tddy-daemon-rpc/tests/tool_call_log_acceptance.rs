@@ -57,7 +57,7 @@ async fn execute_tool_writes_durable_record_with_args_json() {
 
     // When
     service
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
             tool_name: "Read".to_string(),
@@ -114,7 +114,7 @@ async fn durable_record_readable_independently_of_task_registry() {
         ("Glob", r#"{"pattern":"*.txt"}"#),
     ] {
         service
-            .execute_tool(Request::new(ExecuteToolRequest {
+            .execute_tool(Request::direct(ExecuteToolRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: session_id.to_string(),
                 tool_name: tool_name.to_string(),
@@ -156,7 +156,7 @@ async fn list_session_tool_calls_is_scoped_to_session_id() {
     // Call a tool in session A twice and session B once.
     for args in [r#"{"path":"a.txt"}"#, r#"{"path":"a.txt"}"#] {
         service
-            .execute_tool(Request::new(ExecuteToolRequest {
+            .execute_tool(Request::direct(ExecuteToolRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: session_a.to_string(),
                 tool_name: "Read".to_string(),
@@ -167,7 +167,7 @@ async fn list_session_tool_calls_is_scoped_to_session_id() {
             .expect("ExecuteTool must succeed in session A");
     }
     service
-        .execute_tool(Request::new(ExecuteToolRequest {
+        .execute_tool(Request::direct(ExecuteToolRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_b.to_string(),
             tool_name: "Glob".to_string(),
@@ -179,7 +179,7 @@ async fn list_session_tool_calls_is_scoped_to_session_id() {
 
     // When — list tool calls for session A only.
     let resp = service
-        .list_session_tool_calls(Request::new(ListSessionToolCallsRequest {
+        .list_session_tool_calls(Request::direct(ListSessionToolCallsRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_a.to_string(),
             daemon_instance_id: String::new(),
@@ -225,7 +225,7 @@ async fn list_session_tool_calls_returns_records_chronologically_with_args_json(
     ];
     for (tool, args) in &calls_in {
         service
-            .execute_tool(Request::new(ExecuteToolRequest {
+            .execute_tool(Request::direct(ExecuteToolRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: session_id.to_string(),
                 tool_name: tool.to_string(),
@@ -238,7 +238,7 @@ async fn list_session_tool_calls_returns_records_chronologically_with_args_json(
 
     // When
     let resp = service
-        .list_session_tool_calls(Request::new(ListSessionToolCallsRequest {
+        .list_session_tool_calls(Request::direct(ListSessionToolCallsRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
             daemon_instance_id: String::new(),
@@ -273,7 +273,7 @@ async fn list_session_tool_calls_rejects_invalid_token() {
 
     // When
     let result = service
-        .list_session_tool_calls(Request::new(ListSessionToolCallsRequest {
+        .list_session_tool_calls(Request::direct(ListSessionToolCallsRequest {
             session_token: "not-a-valid-token".to_string(),
             session_id: "any-session".to_string(),
             daemon_instance_id: String::new(),
@@ -314,7 +314,7 @@ async fn list_session_tool_calls_for_session_with_no_calls_returns_empty() {
 
     // When
     let resp = service
-        .list_session_tool_calls(Request::new(ListSessionToolCallsRequest {
+        .list_session_tool_calls(Request::direct(ListSessionToolCallsRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
             daemon_instance_id: String::new(),

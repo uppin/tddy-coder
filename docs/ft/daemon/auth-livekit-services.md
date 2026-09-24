@@ -10,7 +10,7 @@ Two of the daemon's subsystems are crates of their own, each serving its gRPC se
 
 | Service | Methods | Served from |
 |---|---|---|
-| `auth.AuthService` | 5 | [`packages/tddy-daemon-auth`](../../../packages/tddy-daemon-auth/docs/auth-service.md) |
+| `auth.AuthService` | 7 — the redirect flow, the device flow, status, refresh, logout | [`packages/tddy-daemon-auth`](../../../packages/tddy-daemon-auth/docs/auth-service.md) |
 | `auth.LiveKitTokenService` | `MintLiveKitToken` | the same crate |
 | `token.TokenService` | 2 | the same crate |
 | `loopback_tunnel.LoopbackTunnelService` | `StreamBytes` | the same crate |

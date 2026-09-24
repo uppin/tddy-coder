@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Code, ConnectError } from "@connectrpc/connect";
-import { AuthService } from "../gen/auth_pb";
-import type { GitHubUser } from "../gen/auth_pb";
+import { Code, ConnectError, type Client } from "@connectrpc/connect";
+import { AuthService, DeviceLoginState } from "../gen/auth_pb";
+import type { GitHubUser, PollDeviceLoginResponse } from "../gen/auth_pb";
 import { useHttpClient, useAuthTokenGate } from "../rpc/transportProvider";
 import { createSessionTokenStore, type TokenStorage } from "../rpc/sessionTokenStore";
 
@@ -27,6 +27,171 @@ export interface AuthState {
   isRefreshing: boolean;
 }
 
+/**
+ * Where a device-flow sign-in (`StartDeviceLogin` / `PollDeviceLogin`) stands.
+ *
+ * `awaiting-approval` carries what the operator needs to approve the attempt at GitHub. `denied`
+ * and `expired` are distinct because the operator's next move differs — a refusal was theirs, an
+ * expiry was the clock's — though both end the attempt and are left by starting a fresh one.
+ * `failed` is an attempt that ended on an error the daemon returned rather than on GitHub's answer.
+ */
+export type DeviceLogin =
+  | { phase: "idle" }
+  | { phase: "starting" }
+  | { phase: "awaiting-approval"; userCode: string; verificationUri: string }
+  | { phase: "denied" }
+  | { phase: "expired" }
+  | { phase: "failed"; error: string };
+
+const DEVICE_LOGIN_IDLE: DeviceLogin = { phase: "idle" };
+
+/** A session as the daemon mints it — by `ExchangeCode` or by an approved device login. */
+interface MintedSession {
+  sessionToken: string;
+  refreshToken: string;
+  user?: GitHubUser;
+}
+
+/** A minted session with every part present — the only kind the page takes up. */
+interface WholeSession {
+  sessionToken: string;
+  refreshToken: string;
+  user: GitHubUser;
+}
+
+type SessionCheck = { whole: WholeSession } | { missing: string[] };
+
+/**
+ * Whether `minted` is a whole session, or which of its parts the daemon left out. proto3 leaves a
+ * field the daemon never set as an absent message or an empty string; either is a missing part,
+ * never one to fill in with a default.
+ */
+function checkWholeSession({ sessionToken, refreshToken, user }: MintedSession): SessionCheck {
+  const missing = [
+    ...(user === undefined ? ["user"] : []),
+    ...(sessionToken === "" ? ["session token"] : []),
+    ...(refreshToken === "" ? ["refresh token"] : []),
+  ];
+  if (user === undefined || missing.length > 0) return { missing };
+  return { whole: { sessionToken, refreshToken, user } };
+}
+
+/** The error for a flow that `completed` without the session parts named in `missing`. */
+function noWholeSessionMessage(completed: string, missing: string[]): string {
+  return `${completed} without a whole session (no ${missing.join(", no ")})`;
+}
+
+/** Milliseconds per second: the daemon names poll intervals in seconds, `setTimeout` takes ms. */
+const MS_PER_SECOND = 1000;
+
+/**
+ * `seconds` — an interval the daemon named — as a delay between polls, or `null` when it is not a
+ * positive interval. That is a protocol error, never a reason to poll with no delay.
+ */
+function intervalMsOf(seconds: bigint): number | null {
+  const n = Number(seconds);
+  return n > 0 ? n * MS_PER_SECOND : null;
+}
+
+/**
+ * What one poll's answer tells a device-flow attempt to do next: poll again after `afterMs` (every
+ * later poll keeps that delay), end on `deviceLogin`, or take up the whole session it carries.
+ */
+type DevicePollStep =
+  | { next: "poll"; afterMs: number }
+  | { next: "settle"; deviceLogin: DeviceLogin }
+  | { next: "adopt"; session: WholeSession };
+
+function deviceLoginFailed(error: string): DevicePollStep {
+  return { next: "settle", deviceLogin: { phase: "failed", error } };
+}
+
+/** The step `res` calls for, for an attempt currently polling every `intervalMs`. */
+function devicePollStep(res: PollDeviceLoginResponse, intervalMs: number): DevicePollStep {
+  switch (res.state) {
+    case DeviceLoginState.PENDING:
+      return { next: "poll", afterMs: intervalMs };
+    case DeviceLoginState.SLOW_DOWN: {
+      const widenedMs = intervalMsOf(res.intervalSeconds);
+      if (widenedMs === null) {
+        return deviceLoginFailed("The daemon asked to slow down device sign-in without naming an interval");
+      }
+      return { next: "poll", afterMs: widenedMs };
+    }
+    case DeviceLoginState.COMPLETE: {
+      const session = checkWholeSession(res);
+      if ("missing" in session) {
+        return deviceLoginFailed(noWholeSessionMessage("The daemon completed device sign-in", session.missing));
+      }
+      return { next: "adopt", session: session.whole };
+    }
+    case DeviceLoginState.DENIED:
+      return { next: "settle", deviceLogin: { phase: "denied" } };
+    case DeviceLoginState.EXPIRED:
+      return { next: "settle", deviceLogin: { phase: "expired" } };
+    default:
+      return deviceLoginFailed(`Unrecognised device sign-in state ${res.state}`);
+  }
+}
+
+/** An attempt that ended on `e`, worded by `e` itself when it is an `Error`, else `defaultMessage`. */
+function deviceLoginError(e: unknown, defaultMessage: string): DeviceLogin {
+  return { phase: "failed", error: e instanceof Error ? e.message : defaultMessage };
+}
+
+/** The device-flow attempt in progress: its generation, and the timer of its next poll. */
+interface DeviceAttemptSlot {
+  generation: number;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+/**
+ * What one device-flow attempt's poll loop needs: the code it polls for, the slot that holds its
+ * timer, whether it is still the latest attempt, and where its answers land.
+ */
+interface DevicePollLoop {
+  client: Client<typeof AuthService>;
+  deviceCode: string;
+  attempt: DeviceAttemptSlot;
+  isCurrent: () => boolean;
+  setDeviceLogin: (deviceLogin: DeviceLogin) => void;
+  adoptSession: (session: WholeSession) => void;
+}
+
+/** Poll again after `intervalMs` — the delay every later poll keeps until a slow-down widens it. */
+function scheduleDevicePoll(loop: DevicePollLoop, intervalMs: number): void {
+  loop.attempt.timer = setTimeout(() => void pollDeviceOnce(loop, intervalMs), intervalMs);
+}
+
+/** One poll; its answer acts only while the attempt is still the latest. */
+async function pollDeviceOnce(loop: DevicePollLoop, intervalMs: number): Promise<void> {
+  loop.attempt.timer = null;
+  let res;
+  try {
+    res = await loop.client.pollDeviceLogin({ deviceCode: loop.deviceCode });
+  } catch (e) {
+    if (loop.isCurrent()) loop.setDeviceLogin(deviceLoginError(e, "Device sign-in failed"));
+    return;
+  }
+  if (loop.isCurrent()) actOnDevicePollStep(loop, devicePollStep(res, intervalMs));
+}
+
+/** Carry out `step`: schedule the next poll, end the attempt, or take up its session. */
+function actOnDevicePollStep(loop: DevicePollLoop, step: DevicePollStep): void {
+  switch (step.next) {
+    case "poll":
+      scheduleDevicePoll(loop, step.afterMs);
+      return;
+    case "settle":
+      loop.setDeviceLogin(step.deviceLogin);
+      return;
+    case "adopt":
+      loop.setDeviceLogin(DEVICE_LOGIN_IDLE);
+      loop.adoptSession(step.session);
+      return;
+  }
+}
+
 const LOGGED_OUT: AuthState = {
   user: null,
   isAuthenticated: false,
@@ -49,6 +214,18 @@ function localStorageTokenStorage(): TokenStorage {
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
     },
+  };
+}
+
+/** Signed in as `user`, authenticating RPCs with `sessionToken`. */
+function signedInState(user: GitHubUser, sessionToken: string): AuthState {
+  return {
+    user,
+    isAuthenticated: true,
+    isLoading: false,
+    error: null,
+    sessionToken,
+    isRefreshing: false,
   };
 }
 
@@ -138,14 +315,7 @@ export function useAuth() {
         try {
           const { token, user } = await establishSession();
           if (cancelled) return;
-          setState({
-            user,
-            isAuthenticated: true,
-            isLoading: false,
-            error: null,
-            sessionToken: token,
-            isRefreshing: false,
-          });
+          setState(signedInState(user, token));
           return;
         } catch (err) {
           if (cancelled) return;
@@ -188,6 +358,16 @@ export function useAuth() {
     };
   }, [store]);
 
+  // Take up a session the daemon minted — by `ExchangeCode` or by an approved device login, which
+  // return the same triple. Both flows store it here, so both leave the operator signed in alike.
+  const adoptSession = useCallback(
+    ({ sessionToken, refreshToken, user }: WholeSession) => {
+      storage.set(sessionToken, refreshToken);
+      setState(signedInState(user, sessionToken));
+    },
+    [storage],
+  );
+
   const login = useCallback(
     async (returnTo?: string) => {
       try {
@@ -218,16 +398,11 @@ export function useAuth() {
       }
       sessionStorage.removeItem(OAUTH_STATE_KEY);
       try {
-        const res = await client.exchangeCode({ code, state });
-        storage.set(res.sessionToken, res.refreshToken);
-        setState({
-          user: res.user ?? null,
-          isAuthenticated: true,
-          isLoading: false,
-          error: null,
-          sessionToken: res.sessionToken,
-          isRefreshing: false,
-        });
+        const session = checkWholeSession(await client.exchangeCode({ code, state }));
+        if ("missing" in session) {
+          throw new Error(noWholeSessionMessage("The daemon exchanged the sign-in code", session.missing));
+        }
+        adoptSession(session.whole);
       } catch (e) {
         storage.clear();
         setState({
@@ -236,8 +411,59 @@ export function useAuth() {
         });
       }
     },
-    [client, storage],
+    [client, storage, adoptSession],
   );
+
+  // The device-flow attempt in progress. Only the latest attempt may act on an answer: starting
+  // again (or unmounting) bumps `generation`, so a poll still in flight for the old device code
+  // lands on a dead attempt and schedules nothing.
+  const [deviceLogin, setDeviceLogin] = useState<DeviceLogin>(DEVICE_LOGIN_IDLE);
+  const deviceAttemptRef = useRef<DeviceAttemptSlot>({ generation: 0, timer: null });
+
+  const endDeviceAttempt = useCallback(() => {
+    const attempt = deviceAttemptRef.current;
+    attempt.generation += 1;
+    if (attempt.timer !== null) clearTimeout(attempt.timer);
+    attempt.timer = null;
+  }, []);
+
+  useEffect(() => endDeviceAttempt, [endDeviceAttempt]);
+
+  const startDeviceLogin = useCallback(async () => {
+    endDeviceAttempt();
+    const attempt = deviceAttemptRef.current;
+    const generation = attempt.generation;
+    const isCurrent = () => attempt.generation === generation;
+
+    setDeviceLogin({ phase: "starting" });
+    let grant;
+    try {
+      grant = await client.startDeviceLogin({});
+    } catch (e) {
+      if (isCurrent()) setDeviceLogin(deviceLoginError(e, "Failed to start device sign-in"));
+      return;
+    }
+    if (!isCurrent()) return;
+
+    // GitHub's floor between polls. A slow-down answer raises it for every later poll. An interval
+    // that is not positive is a protocol error, never a reason to poll with no delay.
+    const grantedIntervalMs = intervalMsOf(grant.intervalSeconds);
+    if (grantedIntervalMs === null) {
+      setDeviceLogin({
+        phase: "failed",
+        error: "The daemon issued a device sign-in code with no interval between polls",
+      });
+      return;
+    }
+
+    setDeviceLogin({
+      phase: "awaiting-approval",
+      userCode: grant.userCode,
+      verificationUri: grant.verificationUri,
+    });
+    const { deviceCode } = grant;
+    scheduleDevicePoll({ client, deviceCode, attempt, isCurrent, setDeviceLogin, adoptSession }, grantedIntervalMs);
+  }, [client, adoptSession, endDeviceAttempt]);
 
   const logout = useCallback(async () => {
     const token = storage.getAccess();
@@ -252,5 +478,5 @@ export function useAuth() {
     setState(LOGGED_OUT);
   }, [client, storage]);
 
-  return { ...state, login, handleCallback, logout };
+  return { ...state, login, handleCallback, logout, deviceLogin, startDeviceLogin };
 }

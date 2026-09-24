@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use base64::Engine;
 
-use tddy_github::provider::{GitHubOAuthProvider, GitHubUser};
+use tddy_github::provider::{DeviceLoginPoll, DeviceLoginStart, GitHubOAuthProvider, GitHubUser};
 use tddy_github::token_store::GitHubTokenStore;
 use tddy_github::{
     AuthServiceImpl, RealGitHubProvider, SessionClaims, SessionTokenAuthority, SessionTokenError,
@@ -81,11 +81,11 @@ struct ProviderWithARealCredential;
 
 #[async_trait]
 impl GitHubOAuthProvider for ProviderWithARealCredential {
-    fn authorize_url(&self) -> (String, String) {
-        (
+    fn authorize_url(&self) -> Result<(String, String), String> {
+        Ok((
             "https://github.com/login/oauth/authorize".to_string(),
             "s".to_string(),
-        )
+        ))
     }
 
     async fn exchange_code(
@@ -102,6 +102,14 @@ impl GitHubOAuthProvider for ProviderWithARealCredential {
                 name: "Operator".to_string(),
             },
         ))
+    }
+
+    async fn start_device_login(&self) -> Result<DeviceLoginStart, String> {
+        unimplemented!("this fake authenticates by code exchange, never by device code")
+    }
+
+    async fn poll_device_login(&self, _device_code: &str) -> Result<DeviceLoginPoll, String> {
+        unimplemented!("this fake authenticates by code exchange, never by device code")
     }
 
     fn issues_usable_access_token(&self) -> bool {
@@ -152,7 +160,7 @@ async fn exchange(
     state: &str,
 ) -> ExchangeCodeResponse {
     service
-        .exchange_code(Request::new(ExchangeCodeRequest {
+        .exchange_code(Request::direct(ExchangeCodeRequest {
             code: code.to_string(),
             state: state.to_string(),
         }))
@@ -182,7 +190,7 @@ async fn fails_the_login_when_the_access_token_cannot_be_retained() {
 
     // When
     let err = service
-        .exchange_code(Request::new(ExchangeCodeRequest {
+        .exchange_code(Request::direct(ExchangeCodeRequest {
             code: "login-code".to_string(),
             state: "s".to_string(),
         }))
@@ -207,7 +215,7 @@ async fn keeps_the_servers_storage_path_out_of_the_failure_the_client_is_shown()
 
     // When
     let err = service
-        .exchange_code(Request::new(ExchangeCodeRequest {
+        .exchange_code(Request::direct(ExchangeCodeRequest {
             code: "login-code".to_string(),
             state: "s".to_string(),
         }))
@@ -237,7 +245,9 @@ async fn retains_nothing_for_a_stub_login() {
             name: "Demo".to_string(),
         },
     );
-    let state = stub.authorize_url().1;
+    let (_, state) = stub
+        .authorize_url()
+        .expect("the stub issues an authorize URL");
     let service = a_signed_service(stub).with_token_store(store.clone());
 
     // When
@@ -278,7 +288,9 @@ fn asks_github_for_the_repo_scope_as_well_as_the_users_identity() {
         RealGitHubProvider::new("client-id", "client-secret", "http://host/auth/callback");
 
     // When
-    let (authorize_url, _state) = provider.authorize_url();
+    let (authorize_url, _state) = provider
+        .authorize_url()
+        .expect("a confidential client issues an authorize URL");
 
     // Then — `read:user` alone cannot read pull requests on a private repository
     assert!(

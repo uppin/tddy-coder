@@ -13,6 +13,7 @@
 | Run | Lines | Nesting | Note |
 |---|---|---|---|
 | 2026-09-19 | 147 | 8 | 143 → 147 in PR #518 (the `Weak` upgrade for the `Arc` cycle) |
+| 2026-09-24 | 147 | 8 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: five `Request::new` → `Request::direct` (in-process calls stamped as such), same line count and nesting. Hand structural scan (fn line to closing brace; nesting by indentation; `return`/`?` count), identical method on the merge-base with `origin/master` (`4e7157d2`) and HEAD |
 
 ## What the tool found
 

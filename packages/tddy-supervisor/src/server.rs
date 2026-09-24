@@ -589,7 +589,12 @@ pub async fn serve(listener: UnixListener, surface: Arc<PrivilegedSurface>) {
             SupervisorServiceServer::new(SupervisorServiceImpl::new(Arc::clone(&surface), peer));
         // The supervisor never calls back into a caller, so the client half of the endpoint is
         // dropped; the connection is request/response in one direction only.
-        let (_client, endpoint) = StdioEndpoint::from_duplex(reader, writer, service);
+        let (_client, endpoint) = StdioEndpoint::from_duplex(
+            reader,
+            writer,
+            service,
+            tddy_rpc::RequestTransport::UnixSocket,
+        );
         tokio::spawn(async move {
             endpoint.run().await;
             // Held until the connection is finished with, which is what makes the cap a cap on

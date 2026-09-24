@@ -348,6 +348,7 @@ async fn submit_relay_error_with_message_surfaces_detail() {
             FixedErrorRelay {
                 message: "presenter did not respond to submit relay in time — poll_tool_calls",
             },
+            tddy_rpc::RequestTransport::UnixSocket,
         );
         endpoint.run().await;
     });

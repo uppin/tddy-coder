@@ -62,7 +62,7 @@ async fn call<Req: Message, Resp: Message + Default>(
     let payload = req.encode_to_vec();
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("vm.VmService", method, &[msg])
@@ -84,7 +84,7 @@ async fn assert_unauthenticated(
 ) {
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge.handle_messages("vm.VmService", method, &[msg]).await;
     match result {
@@ -262,7 +262,7 @@ async fn call_stream<Req: Message, Resp: Message + Default>(
     let payload = req.encode_to_vec();
     let msg = RpcMessage {
         payload,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let result = bridge
         .handle_messages("vm.VmService", method, &[msg])

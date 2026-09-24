@@ -156,7 +156,7 @@ mod tests {
         let streaming = Streaming::new(ReceiverStream::new(in_rx));
         let svc = LoopbackTunnelServiceImpl;
         let resp = svc
-            .stream_bytes(Request::new(streaming))
+            .stream_bytes(Request::direct(streaming))
             .await
             .expect("stream_bytes");
         let out = resp.into_inner();

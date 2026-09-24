@@ -84,7 +84,7 @@ fn a_rooms_subscription() -> RpcMessage {
             session_token: "not-a-real-token".to_string(),
         }
         .encode_to_vec(),
-        Default::default(),
+        tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     )
 }
 

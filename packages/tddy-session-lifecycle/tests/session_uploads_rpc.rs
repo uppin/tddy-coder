@@ -264,7 +264,7 @@ async fn list_session_uploads_returns_previously_uploaded_files() {
 
     // When
     let resp = service
-        .list_session_uploads(Request::new(ListSessionUploadsRequest {
+        .list_session_uploads(Request::direct(ListSessionUploadsRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
         }))
@@ -286,7 +286,7 @@ async fn list_session_uploads_rejects_an_invalid_session_token() {
 
     // When
     let err = service
-        .list_session_uploads(Request::new(ListSessionUploadsRequest {
+        .list_session_uploads(Request::direct(ListSessionUploadsRequest {
             session_token: "bad".to_string(),
             session_id: SESSION_ID.to_string(),
         }))
@@ -305,7 +305,7 @@ async fn delete_session_upload_rejects_an_invalid_session_token() {
 
     // When
     let err = service
-        .delete_session_upload(Request::new(DeleteSessionUploadRequest {
+        .delete_session_upload(Request::direct(DeleteSessionUploadRequest {
             session_token: "bad".to_string(),
             session_id: SESSION_ID.to_string(),
             upload_id: UPLOAD_A.to_string(),

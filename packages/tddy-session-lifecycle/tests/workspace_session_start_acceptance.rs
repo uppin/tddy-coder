@@ -145,7 +145,7 @@ async fn agent_ids_on_the_roster_of(
 ) -> Vec<String> {
     service
         .session_agents_service()
-        .list_session_agents(Request::new(ListSessionAgentsRequest {
+        .list_session_agents(Request::direct(ListSessionAgentsRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.to_string(),
             daemon_instance_id: String::new(),
@@ -196,7 +196,7 @@ async fn a_workspace_session_is_created_under_the_session_id_the_caller_chose() 
 
     // When
     let started = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             requested_session_id: chosen.to_string(),
             ..a_workspace_request()
         }))
@@ -225,7 +225,7 @@ async fn a_caller_chosen_session_id_that_is_already_taken_is_refused() {
     let service = test_service(sessions_tmp.path().to_path_buf());
     let chosen = "019d105b-ac0f-78d3-9a89-409731145abb";
     service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             requested_session_id: chosen.to_string(),
             ..a_workspace_request()
         }))
@@ -235,7 +235,7 @@ async fn a_caller_chosen_session_id_that_is_already_taken_is_refused() {
 
     // When the same id is asked for again
     let status = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             requested_session_id: chosen.to_string(),
             ..a_workspace_request()
         }))
@@ -267,7 +267,7 @@ async fn a_caller_chosen_session_id_is_refused_for_a_session_type_that_does_not_
 
     // When a claude-cli session asks to be created under a chosen id
     let status = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_type: "claude-cli".to_string(),
             model: "claude-opus-5".to_string(),
             requested_session_id: "019d105b-ac0f-78d3-9a89-409731145acc".to_string(),
@@ -302,7 +302,7 @@ async fn a_caller_chosen_session_id_that_is_not_a_safe_path_segment_is_refused()
 
     // When
     let status = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             requested_session_id: "../escape".to_string(),
             ..a_workspace_request()
         }))
@@ -334,7 +334,7 @@ async fn a_workspace_session_asking_for_a_new_branch_without_a_name_is_refused()
 
     // When
     let status = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             branch_worktree_intent: "new_branch_from_base".to_string(),
             new_branch_name: String::new(),
             ..a_workspace_request()
@@ -368,7 +368,7 @@ async fn a_workspace_session_with_an_unrecognized_branch_intent_is_refused() {
 
     // When
     let status = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             branch_worktree_intent: "work_on_selected_brnach".to_string(),
             selected_branch_to_work_on: "release".to_string(),
             ..a_workspace_request()
@@ -402,7 +402,7 @@ async fn a_workspace_session_with_no_branch_intent_still_gets_a_generated_branch
 
     // When
     let started = service
-        .start_session(Request::new(a_workspace_request()))
+        .start_session(Request::direct(a_workspace_request()))
         .await
         .expect("a workspace session with no branch intent must start")
         .into_inner();
@@ -431,7 +431,7 @@ async fn a_workspace_session_cuts_its_new_branch_from_the_projects_configured_de
 
     // When a session is started without naming a base ref
     let started = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             branch_worktree_intent: "new_branch_from_base".to_string(),
             new_branch_name: "workspace-from-default".to_string(),
             ..a_workspace_request()
@@ -465,7 +465,7 @@ async fn a_workspace_session_records_the_agent_session_it_holds_the_worktree_for
 
     // When the daemon placing a split session's worktree here names the agent half
     let started = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             split_agent: Some(agent.clone()),
             ..a_workspace_request()
         }))
@@ -492,7 +492,7 @@ async fn a_workspace_session_nobody_named_an_agent_for_is_paired_with_none() {
 
     // When a checkout is asked for with no agent half named, as an operator's own workspace is
     let started = service
-        .start_session(Request::new(a_workspace_request()))
+        .start_session(Request::direct(a_workspace_request()))
         .await
         .expect("a standalone workspace session must start")
         .into_inner();
@@ -516,7 +516,7 @@ async fn a_split_agent_placement_is_refused_for_a_session_type_that_does_not_sup
 
     // When a claude-cli session claims an agent works in its worktree
     let status = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_type: "claude-cli".to_string(),
             model: "claude-opus-5".to_string(),
             split_agent: Some(an_agent_on_another_daemon()),
@@ -551,7 +551,7 @@ async fn a_split_agent_placement_naming_a_daemon_but_no_session_is_refused() {
 
     // When the placement names a host but nothing on it
     let status = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             split_agent: Some(SplitAgentPlacement {
                 session_id: String::new(),
                 ..an_agent_on_another_daemon()
@@ -595,7 +595,7 @@ async fn a_workspace_start_that_fails_after_seeding_leaves_no_agent_on_the_roste
 
     // When the start is refused
     service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             requested_session_id: chosen.to_string(),
             split_agent: Some(an_agent_on_another_daemon()),
             specialized_agents: vec!["fastcontext".to_string()],

@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-daemon/src/runtime.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate, independently on #498 and #518
-**Metrics:** **1,562 production lines** (2026-09-23; 1,513 before #508) · budget 500 · **~3× over** · residue function `build` is **878 lines** (833 before #508)
-**Thresholds breached:** length 1562 > 500; `build` 878 > 60
+**Metrics:** **1,619 production lines** (2026-09-24; 1,562 before #509, 1,513 before #508) · budget 500 · **~3.2× over** · residue function `build` is **879 lines** (878 before #509)
+**Thresholds breached:** length 1619 > 500; `build` 879 > 60
 **Restructure:** required — three `extract_module --to_file` seams **plus** function splitting
-**Status:** Open — pre-existing; #498, #518 and #494 grew it and deferred with explicit developer consent; #508 grew it and deferred the split because dependents #509–#513 touch this file
+**Status:** Open — regressed 2026-09-24 (1,562 → 1,619 in #509, `#keyring` 2/9). Pre-existing; #498, #518 and #494 grew it and deferred with explicit developer consent; #508 and #509 grew it and deferred the split because dependents #510–#513 touch this file
 
 ## Measurement history
 
@@ -20,6 +20,7 @@
 | 2026-09-22 | 1,521 | after #494 (`#carve` 8/11) — two lines |
 | 2026-09-23 | 1,513 | after #520 (`#carve` 11/12) — −8: `BinaryLocalSocketServices` names the four handler types in fewer lines, and the families' construction moved to `tddy-daemon-rpc`'s `RpcHandlers`; `build` itself unchanged at 833 |
 | 2026-09-23 | 1,562 | master 1,513 → 1,562 after #508 (`#keyring` 1/9: the signing identity and key directory in `build`) — grown by #508; split deferred to a follow-up after #keyring lands because dependents #509–#513 touch it |
+| 2026-09-24 | 1,619 | 1,562 on the merge-base with `origin/master` (`4e7157d2`) → 1,619 after #509 (`#keyring` 2/9): `first_login_enrolment` (first-login admission for an embedded desktop, and the refusal of an embedding host that names no config file) and `this_process_os_user` (+56, above `build`), plus `build_auth_entries_admitting` taking the admission (+1 inside `build`). Grown; the split is deferred with the developer's consent to a follow-up after `#keyring` lands, because #510, #511 and #512 touch this file (`docs/dev/todo/2026-09-24-keyring-desktop-login-grew-thirteen-over-budget-files.md`) |
 
 ## What the gate found
 

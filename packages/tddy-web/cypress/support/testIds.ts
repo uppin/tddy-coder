@@ -29,6 +29,27 @@ export const TEST_IDS = {
   // Auth
   githubLoginButton: "github-login-button",
   userLogin: "user-login",
+  /** Device-flow sign-in: the button that asks the daemon for a device code (and, once an attempt
+   * has ended in denial or expiry, the one that asks for a fresh one). */
+  deviceLoginStart: "device-login-start",
+  /** Device-flow sign-in: the short code the operator types at GitHub. */
+  deviceLoginUserCode: "device-login-user-code",
+  /** Device-flow sign-in: the link to GitHub's verification page. */
+  deviceLoginVerificationLink: "device-login-verification-link",
+  /** Device-flow sign-in: the attempt ended because the operator refused it at GitHub. */
+  deviceLoginDenied: "device-login-denied",
+  /** Device-flow sign-in: the attempt ended because the codes outlived their window. */
+  deviceLoginExpired: "device-login-expired",
+  /** Device-flow sign-in: the attempt ended on an error rather than on GitHub's answer. */
+  deviceLoginError: "device-login-error",
+  /** Sign-in screen: the daemon declared no GitHub sign-in flow at all. */
+  daemonLoginNoSignIn: "daemon-login-no-sign-in",
+  /** Sign-in screen: the daemon declared a sign-in flow this dashboard does not know. */
+  daemonLoginUnrecognisedFlow: "daemon-login-unrecognised-flow",
+  /** Probe: the shared auth context's view of the operator — `signed-in:<login>` or `signed-out`. */
+  authProbeStatus: "auth-probe-status",
+  /** Probe: the error the shared auth context holds, empty when it holds none. */
+  authProbeError: "auth-probe-error",
 
   // App / Connection
   livekitUrl: "livekit-url",

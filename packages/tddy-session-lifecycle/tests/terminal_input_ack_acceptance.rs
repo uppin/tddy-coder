@@ -151,14 +151,14 @@ async fn acks_the_applied_input_offset_on_the_output_stream() {
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
     let stream = service
-        .stream_terminal_output(Request::new(a_stream_request()))
+        .stream_terminal_output(Request::direct(a_stream_request()))
         .await
         .expect("StreamTerminalOutput must succeed")
         .into_inner();
 
     // When — input is sent tagged with cumulative offset 42
     service
-        .send_terminal_input(Request::new(an_input("echo hi\n", 42)))
+        .send_terminal_input(Request::direct(an_input("echo hi\n", 42)))
         .await
         .expect("SendTerminalInput must succeed");
 
@@ -181,18 +181,18 @@ async fn never_lowers_the_acked_offset_for_a_later_smaller_offset() {
     let (service, _cfg, _sb) = make_service(Arc::clone(&manager));
 
     let stream = service
-        .stream_terminal_output(Request::new(a_stream_request()))
+        .stream_terminal_output(Request::direct(a_stream_request()))
         .await
         .expect("StreamTerminalOutput must succeed")
         .into_inner();
 
     // When — a higher offset is applied, then a lower one arrives
     service
-        .send_terminal_input(Request::new(an_input("a", 100)))
+        .send_terminal_input(Request::direct(an_input("a", 100)))
         .await
         .expect("first SendTerminalInput must succeed");
     service
-        .send_terminal_input(Request::new(an_input("b", 50)))
+        .send_terminal_input(Request::direct(an_input("b", 50)))
         .await
         .expect("second SendTerminalInput must succeed");
 

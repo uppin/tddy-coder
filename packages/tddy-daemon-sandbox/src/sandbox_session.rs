@@ -203,7 +203,12 @@ pub async fn bridge_sandbox_stdio<S: tddy_rpc::RpcService>(
         .map_err(|e| format!("wrap sandbox stdin as async pipe: {e}"))?;
     let receiver = tokio::net::unix::pipe::Receiver::from_owned_fd(OwnedFd::from(stdout))
         .map_err(|e| format!("wrap sandbox stdout as async pipe: {e}"))?;
-    let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(receiver, sender, service);
+    let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+        receiver,
+        sender,
+        service,
+        tddy_rpc::RequestTransport::Pipe,
+    );
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     let endpoint = endpoint.signal_start_ready(ready_tx);
     let run_handle = tokio::spawn(async move { endpoint.run().await });

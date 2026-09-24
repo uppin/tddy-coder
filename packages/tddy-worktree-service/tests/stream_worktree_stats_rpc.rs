@@ -185,7 +185,7 @@ async fn cached_list_row(
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     loop {
         let resp = service
-            .list_worktrees_for_project(Request::new(ListWorktreesForProjectRequest {
+            .list_worktrees_for_project(Request::direct(ListWorktreesForProjectRequest {
                 session_token: TEST_TOKEN.to_string(),
                 project_id: project_id.to_string(),
                 refresh: true,
@@ -216,7 +216,7 @@ async fn stream_worktree_stats_rejects_an_invalid_token() {
     // When an unauthenticated caller subscribes to the worktree-stats stream
     let err = fixture
         .service
-        .stream_worktree_stats(Request::new(StreamWorktreeStatsRequest {
+        .stream_worktree_stats(Request::direct(StreamWorktreeStatsRequest {
             session_token: "bad-token".to_string(),
             project_id: fixture.project_id.clone(),
             recalculate_all: false,
@@ -238,7 +238,7 @@ async fn stream_worktree_stats_emits_a_snapshot_then_a_cached_increment() {
     // When an authenticated caller subscribes
     let mut stream = fixture
         .service
-        .stream_worktree_stats(Request::new(StreamWorktreeStatsRequest {
+        .stream_worktree_stats(Request::direct(StreamWorktreeStatsRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: fixture.project_id.clone(),
             recalculate_all: false,
@@ -282,7 +282,7 @@ async fn calculate_worktree_size_enqueues_a_listed_worktree() {
     // When the secondary worktree's size is (re)triggered
     let resp = fixture
         .service
-        .calculate_worktree_size(Request::new(CalculateWorktreeSizeRequest {
+        .calculate_worktree_size(Request::direct(CalculateWorktreeSizeRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: fixture.project_id.clone(),
             worktree_path: fixture.secondary_wt.display().to_string(),
@@ -306,7 +306,7 @@ async fn calculate_worktree_size_rejects_a_path_not_in_the_worktree_list() {
     // When a bogus path (not a registered worktree) is (re)triggered
     let err = fixture
         .service
-        .calculate_worktree_size(Request::new(CalculateWorktreeSizeRequest {
+        .calculate_worktree_size(Request::direct(CalculateWorktreeSizeRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: fixture.project_id.clone(),
             worktree_path: "/definitely/not/a/worktree".to_string(),

@@ -183,7 +183,10 @@ fn a_terminal_entry(tool_calls_path: &std::path::Path) -> tddy_rpc::ServiceEntry
 
 /// Dispatch `method` at `entry`'s own registered coordinate, the way a transport does.
 async fn call(entry: &tddy_rpc::ServiceEntry, method: &str, payload: Vec<u8>) -> RpcResult {
-    let msg = RpcMessage::new(payload, RequestMetadata::default());
+    let msg = RpcMessage::new(
+        payload,
+        RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+    );
     entry.service.handle_rpc(entry.name, method, &msg).await
 }
 

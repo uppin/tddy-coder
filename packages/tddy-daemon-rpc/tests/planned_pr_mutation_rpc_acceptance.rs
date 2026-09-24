@@ -303,7 +303,7 @@ async fn reorder(
     direction: &str,
 ) -> Result<ReorderPlannedPrResponse, Status> {
     service
-        .reorder_planned_pr(Request::new(ReorderPlannedPrRequest {
+        .reorder_planned_pr(Request::direct(ReorderPlannedPrRequest {
             session_token: TOKEN.to_string(),
             session_id: session_id.to_string(),
             node_id: node_id.to_string(),
@@ -322,7 +322,7 @@ async fn pull(
     base_branch: &str,
 ) -> Result<PullBaseIntoBranchResponse, Status> {
     service
-        .pull_base_into_branch(Request::new(PullBaseIntoBranchRequest {
+        .pull_base_into_branch(Request::direct(PullBaseIntoBranchRequest {
             session_token: TOKEN.to_string(),
             session_id: session_id.to_string(),
             node_id: node_id.to_string(),

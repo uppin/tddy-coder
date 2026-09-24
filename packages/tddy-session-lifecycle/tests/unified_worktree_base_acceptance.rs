@@ -286,7 +286,7 @@ async fn cursor_cli_pr_stack_child_bases_off_planned_node_parent() {
 
     // When — start a cursor-cli session chaining onto the orchestrator.
     let resp = service
-        .start_session(Request::new(start_session_request(
+        .start_session(Request::direct(start_session_request(
             "cursor-cli",
             ORCHESTRATOR_SESSION_ID,
             child_branch,
@@ -330,7 +330,7 @@ async fn claude_cli_pr_stack_child_bases_off_planned_node_parent() {
 
     // When
     let resp = service
-        .start_session(Request::new(start_session_request(
+        .start_session(Request::direct(start_session_request(
             "claude-cli",
             ORCHESTRATOR_SESSION_ID,
             child_branch,
@@ -366,7 +366,7 @@ async fn cursor_cli_session_without_stack_parent_uses_default_base() {
 
     // When — no stack_parent.
     let resp = service
-        .start_session(Request::new(start_session_request(
+        .start_session(Request::direct(start_session_request(
             "cursor-cli",
             "",
             "feature/no-stack/child",
@@ -471,7 +471,7 @@ async fn explicit_base_override_bypasses_the_gate_for_an_externally_merged_paren
     // When — the operator starts `child` naming the planned node and choosing `origin/main` as the
     // base, the deliberate escape from a stack whose parent has nothing left to offer.
     let resp = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             tool_path: String::new(),
             project_id: TEST_PROJECT_ID.to_string(),
@@ -527,7 +527,7 @@ async fn empty_base_override_still_refuses_when_the_parent_is_branchless_and_non
 
     // When — the operator names the planned node but sends no base override (the default path).
     let err = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             tool_path: String::new(),
             project_id: TEST_PROJECT_ID.to_string(),

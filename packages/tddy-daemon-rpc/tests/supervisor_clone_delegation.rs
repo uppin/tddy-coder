@@ -91,7 +91,7 @@ async fn refuses_to_clone_a_project_when_the_declared_supervisor_is_unreachable(
 
     // When
     let error = service
-        .add_project_to_host(Request::new(AddProjectToHostRequest {
+        .add_project_to_host(Request::direct(AddProjectToHostRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: PROJECT_ID.to_string(),
             name: "alpha".to_string(),

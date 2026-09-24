@@ -193,7 +193,12 @@ async fn accept_loop(
         )
         .with_conversation_spawn_handler((*conversation_spawn_handler).clone());
         let (reader, writer) = stream.into_split();
-        let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(reader, writer, service);
+        let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+            reader,
+            writer,
+            service,
+            tddy_rpc::RequestTransport::UnixSocket,
+        );
         tokio::spawn(endpoint.run());
     }
 }
@@ -715,7 +720,7 @@ mod tests {
                 "data": {"prd": "# minimal"},
             }))
             .unwrap(),
-            Default::default(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         );
 
         // When dispatching a Submit call
@@ -741,7 +746,7 @@ mod tests {
         let (service, _rx, _repo_root) = a_toolcall_service();
         let request = RpcMessage::new(
             serde_json::to_vec(&json!({"type": "list-actions"})).unwrap(),
-            Default::default(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         );
 
         // When dispatching a ListActions call
@@ -788,7 +793,7 @@ mod tests {
         clear_transition_handler();
         let req = RpcMessage::new(
             serde_json::to_vec(&json!({"type":"transition","to":"plan"})).unwrap(),
-            Default::default(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         );
         let RpcResult::Unary(Ok(bytes)) = service
             .handle_rpc("tddy.toolcall.ToolcallService", "Transition", &req)
@@ -803,7 +808,7 @@ mod tests {
         register_transition_handler(Arc::new(FakeHandler));
         let req = RpcMessage::new(
             serde_json::to_vec(&json!({"type":"transition","to":"plan"})).unwrap(),
-            Default::default(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         );
         let RpcResult::Unary(Ok(bytes)) = service
             .handle_rpc("tddy.toolcall.ToolcallService", "Transition", &req)
@@ -821,7 +826,7 @@ mod tests {
                 &json!({"type":"transition","to":"red","parent_tool_use_id":"toolu_123"}),
             )
             .unwrap(),
-            Default::default(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         );
         let RpcResult::Unary(Ok(bytes)) = service
             .handle_rpc("tddy.toolcall.ToolcallService", "Transition", &req)
@@ -873,7 +878,7 @@ mod tests {
         // When dispatching a transition
         let req = RpcMessage::new(
             serde_json::to_vec(&json!({"type":"transition","to":"plan"})).unwrap(),
-            Default::default(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         );
         let RpcResult::Unary(Ok(bytes)) = service
             .handle_rpc("tddy.toolcall.ToolcallService", "Transition", &req)
@@ -898,7 +903,10 @@ mod tests {
     async fn toolcall_rpc_service_returns_an_error_for_an_unknown_method() {
         // Given a toolcall RPC service
         let (service, _rx, _repo_root) = a_toolcall_service();
-        let request = RpcMessage::new(Vec::new(), Default::default());
+        let request = RpcMessage::new(
+            Vec::new(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        );
 
         // When dispatching an unrecognized method
         let result = service
@@ -945,7 +953,7 @@ mod tests {
                 &json!({"type":"spawn-conversation","prompt":"Implement plans/foo.md"}),
             )
             .unwrap(),
-            Default::default(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         );
 
         // When dispatching a SpawnConversation call
@@ -970,7 +978,7 @@ mod tests {
         let (service, _rx, _repo_root) = a_toolcall_service();
         let req = RpcMessage::new(
             serde_json::to_vec(&json!({"type":"spawn-conversation","prompt":"anything"})).unwrap(),
-            Default::default(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
         );
 
         // When dispatching a SpawnConversation call
@@ -1030,8 +1038,12 @@ mod tests {
         let (read_half, write_half) = tokio::io::split(stream);
         // The client end hosts a throwaway service — it never receives inbound requests here.
         let (client_service, _crx, _crepo) = a_toolcall_service();
-        let (client, endpoint) =
-            tddy_stdio::StdioEndpoint::from_duplex(read_half, write_half, client_service);
+        let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+            read_half,
+            write_half,
+            client_service,
+            tddy_rpc::RequestTransport::UnixSocket,
+        );
         tokio::spawn(endpoint.run());
 
         let payload = serde_json::to_vec(

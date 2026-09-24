@@ -44,7 +44,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 };
                 match conn
                     .session_agents_service()
-                    .stream_session_agents(Request::new(req))
+                    .stream_session_agents(Request::direct(req))
                     .await
                 {
                     Ok(resp) => {
@@ -78,7 +78,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 };
                 match conn
                     .session_agents_service()
-                    .open_agent_conversation(Request::new(req))
+                    .open_agent_conversation(Request::direct(req))
                     .await
                 {
                     Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
@@ -98,7 +98,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 };
                 match conn
                     .session_agents_service()
-                    .prompt_agent_conversation(Request::new(req))
+                    .prompt_agent_conversation(Request::direct(req))
                     .await
                 {
                     Ok(resp) => {
@@ -130,7 +130,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 };
                 match conn
                     .session_agents_service()
-                    .cancel_agent_conversation(Request::new(req))
+                    .cancel_agent_conversation(Request::direct(req))
                     .await
                 {
                     Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
@@ -150,7 +150,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 };
                 match conn
                     .session_agents_service()
-                    .report_agent_conversation_state(Request::new(req))
+                    .report_agent_conversation_state(Request::direct(req))
                     .await
                 {
                     Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),

@@ -31,6 +31,7 @@
 pub mod auth;
 mod codex_oauth_participant_metadata;
 pub mod codex_oauth_relay;
+pub mod first_login_admission;
 pub mod github_pr_credentials;
 pub mod github_token_store;
 mod local_token;
@@ -46,9 +47,11 @@ pub mod token_provider;
 /// GitHub configuration has no way to resolve a token — and in that state `runtime.rs` registers
 /// **no session services at all**, which is a deliberate refusal rather than an oversight.
 pub use auth::{
-    build_auth_entries, build_auth_entries_with, build_token_service_entry,
-    session_token_authenticator, AuthBuildResult, LiveKitTokenServiceImpl,
+    build_auth_entries, build_auth_entries_admitting, build_auth_entries_with,
+    build_token_service_entry, session_token_authenticator, AuthBuildResult,
+    LiveKitTokenServiceImpl,
 };
+pub use first_login_admission::FirstLoginEnrolment;
 pub use local_token::{build_local_token_entry, mint_local_token, LocalTokenError};
 
 /// The daemon's own signing identity and the port that resolves peers' keys.

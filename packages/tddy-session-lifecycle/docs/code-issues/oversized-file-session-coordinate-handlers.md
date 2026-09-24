@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-19 | 818 | 817 → 818 in this PR — a **one-line** change; the file was already 1.6× over |
+| 2026-09-24 | 818 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: 818 on the merge-base with `origin/master` (`4e7157d2`) and HEAD. Five `let os_user = self` → `&self` edits (`os_user_for_github` now borrows from the live `users:` holder), no lines added. The file has no `#[cfg(test)]`, so the count is its whole length |
 
 ## What would close it — designed seam
 

@@ -59,63 +59,77 @@ impl BspService for DaemonBspService {
         &self,
         request: Request<WorkspaceBuildTargetsRequest>,
     ) -> Result<Response<WorkspaceBuildTargetsResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.workspace_build_targets(Request::new(req)).await
+        svc.workspace_build_targets(Request::with_metadata(req, metadata))
+            .await
     }
 
     async fn workspace_reload(
         &self,
         request: Request<WorkspaceReloadRequest>,
     ) -> Result<Response<WorkspaceReloadResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.workspace_reload(Request::new(req)).await
+        svc.workspace_reload(Request::with_metadata(req, metadata))
+            .await
     }
 
     async fn build_target_sources(
         &self,
         request: Request<BuildTargetSourcesRequest>,
     ) -> Result<Response<BuildTargetSourcesResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.build_target_sources(Request::new(req)).await
+        svc.build_target_sources(Request::with_metadata(req, metadata))
+            .await
     }
 
     async fn build_target_output_paths(
         &self,
         request: Request<BuildTargetOutputPathsRequest>,
     ) -> Result<Response<BuildTargetOutputPathsResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.build_target_output_paths(Request::new(req)).await
+        svc.build_target_output_paths(Request::with_metadata(req, metadata))
+            .await
     }
 
     async fn build_target_compile(
         &self,
         request: Request<BuildTargetActionRequest>,
     ) -> Result<Response<BuildTargetActionResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.build_target_compile(Request::new(req)).await
+        svc.build_target_compile(Request::with_metadata(req, metadata))
+            .await
     }
 
     async fn build_target_test(
         &self,
         request: Request<BuildTargetActionRequest>,
     ) -> Result<Response<BuildTargetActionResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.build_target_test(Request::new(req)).await
+        svc.build_target_test(Request::with_metadata(req, metadata))
+            .await
     }
 
     async fn build_target_run(
         &self,
         request: Request<BuildTargetActionRequest>,
     ) -> Result<Response<BuildTargetActionResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
         let svc = self.session_impl(&req.session_token, &req.session_id)?;
-        svc.build_target_run(Request::new(req)).await
+        svc.build_target_run(Request::with_metadata(req, metadata))
+            .await
     }
 }
 
@@ -159,7 +173,7 @@ targets:
 
         // When
         let resp = svc
-            .workspace_build_targets(Request::new(WorkspaceBuildTargetsRequest {
+            .workspace_build_targets(Request::direct(WorkspaceBuildTargetsRequest {
                 session_token: "good".to_string(),
                 session_id: "s1".to_string(),
             }))
@@ -186,7 +200,7 @@ targets:
 
         // When
         let err = svc
-            .workspace_build_targets(Request::new(WorkspaceBuildTargetsRequest {
+            .workspace_build_targets(Request::direct(WorkspaceBuildTargetsRequest {
                 session_token: "bad".to_string(),
                 session_id: "s1".to_string(),
             }))

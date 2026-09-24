@@ -54,7 +54,7 @@ impl RosteredSession {
     async fn attach(&self, agent_id: &str) -> Result<SessionAgentRoster, tddy_rpc::Status> {
         self.service
             .session_agents_service()
-            .attach_session_agent(Request::new(AttachSessionAgentRequest {
+            .attach_session_agent(Request::direct(AttachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -67,7 +67,7 @@ impl RosteredSession {
     async fn detach(&self, agent_id: &str) -> Result<SessionAgentRoster, tddy_rpc::Status> {
         self.service
             .session_agents_service()
-            .detach_session_agent(Request::new(DetachSessionAgentRequest {
+            .detach_session_agent(Request::direct(DetachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -80,7 +80,7 @@ impl RosteredSession {
     async fn list(&self) -> SessionAgentRoster {
         self.service
             .session_agents_service()
-            .list_session_agents(Request::new(ListSessionAgentsRequest {
+            .list_session_agents(Request::direct(ListSessionAgentsRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -95,7 +95,7 @@ impl RosteredSession {
     async fn agent_id_for(&self, name: &str) -> String {
         let subagents = self
             .service
-            .list_subagents(Request::new(ListSubagentsRequest {}))
+            .list_subagents(Request::direct(ListSubagentsRequest {}))
             .await
             .expect("listing subagents must succeed")
             .into_inner()
@@ -111,7 +111,7 @@ impl RosteredSession {
     async fn local_daemon_instance_id(&self) -> String {
         let subagents = self
             .service
-            .list_subagents(Request::new(ListSubagentsRequest {}))
+            .list_subagents(Request::direct(ListSubagentsRequest {}))
             .await
             .expect("listing subagents must succeed")
             .into_inner()
@@ -630,7 +630,7 @@ async fn restores_the_roster_and_its_revision_after_the_daemon_restarts() {
     let restarted = session.after_restart();
     let roster = restarted
         .session_agents_service()
-        .list_session_agents(Request::new(ListSessionAgentsRequest {
+        .list_session_agents(Request::direct(ListSessionAgentsRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session.session_id.clone(),
             daemon_instance_id: String::new(),
@@ -670,7 +670,7 @@ async fn reads_a_session_written_before_rosters_existed_as_having_no_agents() {
     // When
     let roster = service
         .session_agents_service()
-        .list_session_agents(Request::new(ListSessionAgentsRequest {
+        .list_session_agents(Request::direct(ListSessionAgentsRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.clone(),
             daemon_instance_id: String::new(),
@@ -700,7 +700,7 @@ async fn refuses_an_unauthenticated_roster_call_before_contacting_any_peer() {
     let result = session
         .service
         .session_agents_service()
-        .attach_session_agent(Request::new(AttachSessionAgentRequest {
+        .attach_session_agent(Request::direct(AttachSessionAgentRequest {
             session_token: "not-a-valid-token".to_string(),
             session_id: session.session_id.clone(),
             daemon_instance_id: String::new(),
@@ -726,7 +726,7 @@ async fn refuses_an_unauthenticated_read_of_the_roster() {
     let result = session
         .service
         .session_agents_service()
-        .list_session_agents(Request::new(ListSessionAgentsRequest {
+        .list_session_agents(Request::direct(ListSessionAgentsRequest {
             session_token: "not-a-valid-token".to_string(),
             session_id: session.session_id.clone(),
             daemon_instance_id: String::new(),
@@ -756,7 +756,7 @@ async fn refuses_a_session_id_that_climbs_out_of_the_sessions_directory() {
     let result = session
         .service
         .session_agents_service()
-        .attach_session_agent(Request::new(AttachSessionAgentRequest {
+        .attach_session_agent(Request::direct(AttachSessionAgentRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: "../victim".to_string(),
             daemon_instance_id: String::new(),
@@ -789,7 +789,7 @@ async fn refuses_an_unauthenticated_clone_state_report() {
     let result = session
         .service
         .session_agents_service()
-        .report_agent_clone_state(Request::new(ReportAgentCloneStateRequest {
+        .report_agent_clone_state(Request::direct(ReportAgentCloneStateRequest {
             session_token: "not-a-valid-token".to_string(),
             session_id: session.session_id.clone(),
             daemon_instance_id: "some-peer".to_string(),
@@ -817,7 +817,7 @@ async fn roster_stream(
     session
         .service
         .session_agents_service()
-        .stream_session_agents(Request::new(StreamSessionAgentsRequest {
+        .stream_session_agents(Request::direct(StreamSessionAgentsRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session.session_id.clone(),
             daemon_instance_id: String::new(),

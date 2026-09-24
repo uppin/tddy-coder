@@ -37,11 +37,13 @@ impl tddy_daemon_livekit::session_room::RemoteSnapshotSource for DaemonSessionHo
         codebase_instance_id: &str,
     ) -> Result<tddy_daemon_livekit::session_room::WorktreeSnapshot, Status> {
         let answered = self
-            .get_worktree_snapshot_at_session_coordinate(Request::new(GetWorktreeSnapshotRequest {
-                session_token: session_token.to_string(),
-                session_id: codebase_session_id.to_string(),
-                daemon_instance_id: codebase_instance_id.to_string(),
-            }))
+            .get_worktree_snapshot_at_session_coordinate(Request::direct(
+                GetWorktreeSnapshotRequest {
+                    session_token: session_token.to_string(),
+                    session_id: codebase_session_id.to_string(),
+                    daemon_instance_id: codebase_instance_id.to_string(),
+                },
+            ))
             .await?
             .into_inner();
         Ok(tddy_daemon_livekit::session_room::WorktreeSnapshot {

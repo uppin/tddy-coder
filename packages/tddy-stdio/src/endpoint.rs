@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tddy_rpc::envelope::{self, RpcResponse};
 use tddy_rpc::server_engine::ServerEngine;
 use tddy_rpc::transport::{encode_frame, FrameDecoder, FrameKind};
-use tddy_rpc::RpcService;
+use tddy_rpc::{RequestTransport, RpcService};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::mpsc;
@@ -43,10 +43,14 @@ pub struct StdioEndpoint<S: RpcService> {
 }
 
 impl<S: RpcService> StdioEndpoint<S> {
+    /// `transport` is what the byte channel is — the endpoint cannot tell a socket from a pipe,
+    /// so whoever opened the channel names it, and every request the endpoint hosts is stamped
+    /// with it.
     fn new(
         reader: Box<dyn AsyncRead + Unpin + Send>,
         writer: Box<dyn AsyncWrite + Unpin + Send>,
         service: S,
+        transport: RequestTransport,
     ) -> (Arc<StdioRpcClient>, Self) {
         let (frame_tx, frame_rx) = mpsc::channel(OUTGOING_QUEUE_CAPACITY);
         let (response_tx, response_rx) = mpsc::channel(OUTGOING_QUEUE_CAPACITY);
@@ -58,7 +62,7 @@ impl<S: RpcService> StdioEndpoint<S> {
             frame_tx,
             response_rx,
             response_tx,
-            server: Arc::new(ServerEngine::new(service)),
+            server: Arc::new(ServerEngine::new(service, transport)),
             client: client.clone(),
             start_ready: None,
         };
@@ -73,11 +77,14 @@ impl<S: RpcService> StdioEndpoint<S> {
 
     /// Wrap this process's own stdin/stdout, hosting `service` for inbound requests from the
     /// peer that spawned this process. Returns a client for calling back into that peer.
+    ///
+    /// Requests are stamped [`RequestTransport::Pipe`].
     pub fn from_process_stdio(service: S) -> (Arc<StdioRpcClient>, Self) {
         Self::new(
             Box::new(tokio::io::stdin()),
             Box::new(tokio::io::stdout()),
             service,
+            RequestTransport::Pipe,
         )
     }
 
@@ -88,20 +95,30 @@ impl<S: RpcService> StdioEndpoint<S> {
     /// `AsyncRead`/`AsyncWrite` handles (e.g. via `tokio::net::unix::pipe` wrapping raw fds from a
     /// blocking `std::process::Child`); this just hosts `service` over them like any other
     /// transport. Returns a client for calling into that peer.
+    ///
+    /// `transport` names what the channel is — a Unix socket, a pipe pair — and every request
+    /// hosted over it is stamped with it.
     pub fn from_duplex(
         reader: impl AsyncRead + Unpin + Send + 'static,
         writer: impl AsyncWrite + Unpin + Send + 'static,
         service: S,
+        transport: RequestTransport,
     ) -> (Arc<StdioRpcClient>, Self) {
-        Self::new(Box::new(reader), Box::new(writer), service)
+        Self::new(Box::new(reader), Box::new(writer), service, transport)
     }
 
+    /// Requests from a spawned child are stamped [`RequestTransport::Pipe`].
     pub(crate) fn from_child_stdio(
         stdin: ChildStdin,
         stdout: ChildStdout,
         service: S,
     ) -> (Arc<StdioRpcClient>, Self) {
-        Self::new(Box::new(stdout), Box::new(stdin), service)
+        Self::new(
+            Box::new(stdout),
+            Box::new(stdin),
+            service,
+            RequestTransport::Pipe,
+        )
     }
 
     /// Run the endpoint's read/dispatch/write loop. Returns once the channel closes (EOF or a

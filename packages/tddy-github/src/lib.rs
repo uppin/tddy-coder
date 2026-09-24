@@ -8,7 +8,7 @@ pub mod session_token_v2;
 pub mod stub;
 pub mod token_store;
 
-pub use auth_service::AuthServiceImpl;
+pub use auth_service::{AuthServiceImpl, LoginAdmission};
 pub use provider::{GitHubOAuthProvider, GitHubUser};
 pub use real::RealGitHubProvider;
 pub use session_token_v2::{

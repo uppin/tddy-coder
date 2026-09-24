@@ -256,7 +256,7 @@ async fn deleting_a_sandboxed_codebase_session_tears_its_jail_down() {
     let sessions_tmp = tempfile::tempdir().unwrap();
     let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
     let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
+        .start_session(Request::direct(a_sandboxed_codebase_request()))
         .await
         .expect("a jailed-codebase session must start")
         .into_inner();
@@ -269,7 +269,7 @@ async fn deleting_a_sandboxed_codebase_session_tears_its_jail_down() {
 
     // When the operator deletes the session
     service
-        .delete_session(Request::new(a_deletion_of(&started.session_id)))
+        .delete_session(Request::direct(a_deletion_of(&started.session_id)))
         .await
         .expect("deleting a jailed-codebase session must succeed");
 
@@ -294,7 +294,7 @@ async fn deleting_a_sandboxed_codebase_session_removes_its_paired_checkout_sessi
     let sessions_tmp = tempfile::tempdir().unwrap();
     let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
     let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
+        .start_session(Request::direct(a_sandboxed_codebase_request()))
         .await
         .expect("a jailed-codebase session must start")
         .into_inner();
@@ -302,7 +302,7 @@ async fn deleting_a_sandboxed_codebase_session_removes_its_paired_checkout_sessi
 
     // When the operator deletes the agent half
     service
-        .delete_session(Request::new(a_deletion_of(&started.session_id)))
+        .delete_session(Request::direct(a_deletion_of(&started.session_id)))
         .await
         .expect("deleting a jailed-codebase session must succeed");
 
@@ -328,19 +328,19 @@ async fn deleting_a_sandboxed_codebase_session_whose_checkout_is_already_gone_su
     let sessions_tmp = tempfile::tempdir().unwrap();
     let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
     let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
+        .start_session(Request::direct(a_sandboxed_codebase_request()))
         .await
         .expect("a jailed-codebase session must start")
         .into_inner();
     let checkout = checkout_session_of(sessions_tmp.path(), &started.session_id);
     service
-        .delete_session(Request::new(a_deletion_of(&checkout)))
+        .delete_session(Request::direct(a_deletion_of(&checkout)))
         .await
         .expect("the checkout session must be deletable on its own");
 
     // When the operator deletes the agent half
     let deleted = service
-        .delete_session(Request::new(a_deletion_of(&started.session_id)))
+        .delete_session(Request::direct(a_deletion_of(&started.session_id)))
         .await;
 
     // Then it succeeds. A checkout that is provably gone is the state this teardown exists to
@@ -384,7 +384,7 @@ async fn a_daemon_shutdown_leaves_no_sandbox_runner_behind() {
     let sessions_tmp = tempfile::tempdir().unwrap();
     let service = a_daemon_with_no_common_room(sessions_tmp.path().to_path_buf());
     let started = service
-        .start_session(Request::new(a_sandboxed_codebase_request()))
+        .start_session(Request::direct(a_sandboxed_codebase_request()))
         .await
         .expect("a jailed-codebase session must start")
         .into_inner();

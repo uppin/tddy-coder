@@ -35,7 +35,7 @@ async fn mints_a_room_jwt_that_verifies_against_the_configured_livekit_api_secre
 
     // When they ask for admission to the room
     let minted = mint
-        .mint_live_kit_token(Request::new(MintLiveKitTokenRequest {
+        .mint_live_kit_token(Request::direct(MintLiveKitTokenRequest {
             session_token: an_access_token_for(&config, THE_LOGIN),
         }))
         .await
@@ -106,7 +106,7 @@ async fn mints_no_room_jwt_for_a_caller_whose_session_token_cannot_be_resolved()
 
     // When admission to the room is asked for with it
     let refusal = mint
-        .mint_live_kit_token(Request::new(MintLiveKitTokenRequest {
+        .mint_live_kit_token(Request::direct(MintLiveKitTokenRequest {
             session_token: "not-a-token-any-signer-produced".to_string(),
         }))
         .await;
@@ -190,7 +190,7 @@ async fn generate_through(
     let bridge = RpcBridge::new(MultiRpcService::new(vec![entry]));
     let message = RpcMessage {
         payload: request.encode_to_vec(),
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
     };
     let body = bridge
         .handle_messages("token.TokenService", "GenerateToken", &[message])

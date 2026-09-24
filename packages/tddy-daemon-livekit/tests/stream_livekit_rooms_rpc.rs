@@ -150,7 +150,7 @@ impl WatchingDaemon {
         &self,
     ) -> impl futures_util::Stream<Item = Result<LiveKitRoomsEvent, Status>> + Unpin {
         self.service
-            .stream_live_kit_rooms(Request::new(StreamLiveKitRoomsRequest {
+            .stream_live_kit_rooms(Request::direct(StreamLiveKitRoomsRequest {
                 session_token: TEST_TOKEN.to_string(),
             }))
             .await
@@ -221,7 +221,7 @@ async fn stream_livekit_rooms_rejects_an_invalid_session_token() {
 
     // When a caller subscribes with it
     let result = service
-        .stream_live_kit_rooms(Request::new(StreamLiveKitRoomsRequest {
+        .stream_live_kit_rooms(Request::direct(StreamLiveKitRoomsRequest {
             session_token: "not-a-real-token".to_string(),
         }))
         .await;

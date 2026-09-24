@@ -305,7 +305,10 @@ async fn staging_rpcs_addressed_to_a_peer_daemon_forward_and_operate_on_the_peer
         .handle_rpc(
             staging_on_a.name,
             "UploadStagedAttachmentChunk",
-            &RpcMessage::new(request.encode_to_vec(), Default::default()),
+            &RpcMessage::new(
+                request.encode_to_vec(),
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+            ),
         )
         .await;
     match answer {
@@ -347,7 +350,7 @@ async fn a_host_document_ref_naming_a_peer_daemon_is_forwarded_via_read_host_doc
 
     // Start a session on the peer so it owns an artifact. (Routed to the peer via daemon_instance_id.)
     let peer_session = service_a
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_type: "workspace".to_string(),
             project_id: TEST_PROJECT_ID.to_string(),
@@ -364,7 +367,7 @@ async fn a_host_document_ref_naming_a_peer_daemon_is_forwarded_via_read_host_doc
 
     // When — A starts a local session referencing the peer's PRD.md as a host document
     let local_session = service_a
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_type: "workspace".to_string(),
             project_id: TEST_PROJECT_ID.to_string(),

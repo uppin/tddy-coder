@@ -159,7 +159,7 @@ async fn list_worktree_directory_lists_the_projects_primary_worktree() {
     // When — the primary worktree is listed by its `main_repo_path`
     let entries = fixture
         .service
-        .list_worktree_directory(Request::new(ListWorktreeDirectoryRequest {
+        .list_worktree_directory(Request::direct(ListWorktreeDirectoryRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: fixture.project_id.clone(),
             worktree_path: fixture.main_repo_path.clone(),
@@ -189,7 +189,7 @@ async fn list_worktree_directory_rejects_invalid_session() {
 
     // When
     let err = service
-        .list_worktree_directory(Request::new(ListWorktreeDirectoryRequest {
+        .list_worktree_directory(Request::direct(ListWorktreeDirectoryRequest {
             session_token: "bad".to_string(),
             project_id: "p1".to_string(),
             worktree_path: "/tmp".to_string(),
@@ -212,7 +212,7 @@ async fn list_worktree_directory_unknown_project_not_found() {
 
     // When
     let err = service
-        .list_worktree_directory(Request::new(ListWorktreeDirectoryRequest {
+        .list_worktree_directory(Request::direct(ListWorktreeDirectoryRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: "00000000-0000-0000-0000-000000000099".to_string(),
             worktree_path: "/tmp".to_string(),
@@ -236,7 +236,7 @@ async fn list_worktree_directory_rejects_worktree_not_in_git_list() {
     // When
     let err = fixture
         .service
-        .list_worktree_directory(Request::new(ListWorktreeDirectoryRequest {
+        .list_worktree_directory(Request::direct(ListWorktreeDirectoryRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: fixture.project_id.clone(),
             worktree_path: "/tmp/not-a-worktree".to_string(),
@@ -272,7 +272,7 @@ async fn list_worktree_directory_returns_root_entries_excluding_ignored() {
     // When
     let entries = fixture
         .service
-        .list_worktree_directory(Request::new(ListWorktreeDirectoryRequest {
+        .list_worktree_directory(Request::direct(ListWorktreeDirectoryRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: fixture.project_id.clone(),
             worktree_path: fixture.worktree_path.clone(),
@@ -308,7 +308,7 @@ async fn list_worktree_directory_reports_a_files_size_in_bytes() {
     // When
     let entries = fixture
         .service
-        .list_worktree_directory(Request::new(ListWorktreeDirectoryRequest {
+        .list_worktree_directory(Request::direct(ListWorktreeDirectoryRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: fixture.project_id.clone(),
             worktree_path: fixture.worktree_path.clone(),
@@ -345,7 +345,7 @@ async fn read_worktree_file_returns_utf8_content() {
     // When
     let resp = fixture
         .service
-        .read_worktree_file(Request::new(ReadWorktreeFileRequest {
+        .read_worktree_file(Request::direct(ReadWorktreeFileRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: fixture.project_id.clone(),
             worktree_path: fixture.worktree_path.clone(),
@@ -373,7 +373,7 @@ async fn read_worktree_file_rejects_traversal() {
     for malicious in ["../../etc/passwd", "..\\secret.txt", "src/../../secret.txt"] {
         let err = fixture
             .service
-            .read_worktree_file(Request::new(ReadWorktreeFileRequest {
+            .read_worktree_file(Request::direct(ReadWorktreeFileRequest {
                 session_token: TEST_TOKEN.to_string(),
                 project_id: fixture.project_id.clone(),
                 worktree_path: fixture.worktree_path.clone(),

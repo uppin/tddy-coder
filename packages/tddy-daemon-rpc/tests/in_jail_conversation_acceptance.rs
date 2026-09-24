@@ -509,18 +509,19 @@ async fn a_daemon_with_one_agent_attached(model_base_url: &str) -> DaemonServing
 
     // Read the agent id the way a client reads it: a hand-spelled "explorer@some-host" would pass
     // while the daemon stamped something else entirely.
-    let agent_id = CatalogService::list_subagents(&daemon, Request::new(ListSubagentsRequest {}))
-        .await
-        .expect("listing subagents must succeed")
-        .into_inner()
-        .subagents
-        .into_iter()
-        .find(|s| s.name == "explorer")
-        .expect("the fixture must advertise a def named 'explorer'")
-        .agent_id;
+    let agent_id =
+        CatalogService::list_subagents(&daemon, Request::direct(ListSubagentsRequest {}))
+            .await
+            .expect("listing subagents must succeed")
+            .into_inner()
+            .subagents
+            .into_iter()
+            .find(|s| s.name == "explorer")
+            .expect("the fixture must advertise a def named 'explorer'")
+            .agent_id;
     service
         .session_agents_service()
-        .attach_session_agent(Request::new(AttachSessionAgentRequest {
+        .attach_session_agent(Request::direct(AttachSessionAgentRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: session_id.clone(),
             daemon_instance_id: String::new(),

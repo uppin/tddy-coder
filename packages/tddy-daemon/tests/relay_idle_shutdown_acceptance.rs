@@ -25,6 +25,8 @@ fn relay_server_options(
         daemon_instance_id: "test-instance".to_string(),
         // Relay mode serves no page and provisions no jail, so it advertises no placement.
         sandboxed_codebase: None,
+        // …and a relay registers no auth service, so it declares no sign-in flow.
+        auth_flow: None,
         allowed_agents: vec![],
         debug: None,
         lifecycle_telegram: None,

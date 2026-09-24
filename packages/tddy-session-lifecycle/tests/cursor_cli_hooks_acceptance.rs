@@ -101,7 +101,7 @@ async fn cursor_cli_report_session_status_writes_activity_status() {
     // When
     let response = service
         .activity_service()
-        .report_session_status(Request::new(ReportSessionStatusRequest {
+        .report_session_status(Request::direct(ReportSessionStatusRequest {
             session_id: session_id.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
             os_user: TEST_OS_USER.to_string(),
@@ -130,7 +130,7 @@ async fn cursor_cli_report_session_status_rejects_bad_hook_token() {
     // When
     let err = service
         .activity_service()
-        .report_session_status(Request::new(ReportSessionStatusRequest {
+        .report_session_status(Request::direct(ReportSessionStatusRequest {
             session_id: session_id.to_string(),
             hook_token: "wrong-token".to_string(),
             os_user: TEST_OS_USER.to_string(),
@@ -186,7 +186,7 @@ async fn cursor_cli_report_session_status_rejects_tool_session_type() {
     // When
     let err = service
         .activity_service()
-        .report_session_status(Request::new(ReportSessionStatusRequest {
+        .report_session_status(Request::direct(ReportSessionStatusRequest {
             session_id: session_id.to_string(),
             hook_token: TEST_HOOK_TOKEN.to_string(),
             os_user: TEST_OS_USER.to_string(),

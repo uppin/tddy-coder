@@ -218,7 +218,7 @@ async fn cursor_cli_start_with_empty_branch_name_uses_default_branch() {
     req.new_branch_name = String::new();
 
     let resp = service
-        .start_session(Request::new(req))
+        .start_session(Request::direct(req))
         .await
         .expect("StartSession must succeed with web-form branch defaults");
 
@@ -243,7 +243,7 @@ async fn cursor_cli_session_metadata_fields_persisted() {
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let resp = service
-        .start_session(Request::new(start_cursor_cli_request()))
+        .start_session(Request::direct(start_cursor_cli_request()))
         .await
         .expect("StartSession cursor-cli must succeed");
 
@@ -270,7 +270,7 @@ async fn cursor_cli_session_writes_hooks_json() {
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let resp = service
-        .start_session(Request::new(start_cursor_cli_request()))
+        .start_session(Request::direct(start_cursor_cli_request()))
         .await
         .expect("StartSession must succeed");
 
@@ -309,7 +309,7 @@ async fn cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available() {
     let mut req = start_cursor_cli_request();
     req.sandbox = true;
     let resp = service
-        .start_session(Request::new(req))
+        .start_session(Request::direct(req))
         .await
         .expect("sandbox cursor-cli must start when sandbox backend is available");
 
@@ -363,7 +363,7 @@ async fn cursor_cli_session_enrichment_reads_from_metadata() {
     let service = minimal_service(config, sessions_base);
 
     let list = service
-        .list_sessions(Request::new(ListSessionsRequest {
+        .list_sessions(Request::direct(ListSessionsRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -440,7 +440,7 @@ async fn cursor_cli_peer_spawn_reuses_the_orchestrator_worktree_when_repo_path_i
 
     // When — a peer "Add agent" spawn pointing at the orchestrator's worktree
     let resp = service
-        .start_session(Request::new(peer_cursor_cli_request(
+        .start_session(Request::direct(peer_cursor_cli_request(
             orchestrator_worktree.path().to_str().unwrap(),
             orchestrator_session_id,
         )))
@@ -528,7 +528,7 @@ async fn cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_p
     req.stack_parent = orchestrator_session_id.to_string();
     req.branch_worktree_intent = "new_branch_from_base".to_string();
     let resp = service
-        .start_session(Request::new(req))
+        .start_session(Request::direct(req))
         .await
         .expect("cursor-cli StartSession with stack_parent must succeed");
 
@@ -557,7 +557,7 @@ async fn cursor_cli_peer_spawn_with_repo_path_creates_no_new_branch_in_the_proje
 
     // When — a peer spawn reusing the orchestrator's worktree
     let resp = service
-        .start_session(Request::new(peer_cursor_cli_request(
+        .start_session(Request::direct(peer_cursor_cli_request(
             orchestrator_worktree.path().to_str().unwrap(),
             "orchestrator-branch-test",
         )))
@@ -590,7 +590,7 @@ async fn cursor_cli_peer_spawn_rejects_a_repo_path_that_is_not_a_directory() {
 
     // When / Then — StartSession rejects the file-as-repo_path with INVALID_ARGUMENT
     let err = service
-        .start_session(Request::new(peer_cursor_cli_request(
+        .start_session(Request::direct(peer_cursor_cli_request(
             file_path.to_str().unwrap(),
             "orchestrator-file-repo-path",
         )))
@@ -773,7 +773,7 @@ async fn cursor_cli_peer_spawn_rejects_a_missing_repo_path() {
 
     // When / Then — StartSession rejects the missing repo_path with INVALID_ARGUMENT
     let err = service
-        .start_session(Request::new(peer_cursor_cli_request(
+        .start_session(Request::direct(peer_cursor_cli_request(
             missing_path.to_str().unwrap(),
             "orchestrator-missing-repo-path",
         )))

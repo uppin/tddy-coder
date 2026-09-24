@@ -99,7 +99,7 @@ async fn deleting_a_workspace_session_removes_its_git_worktree() {
     let service = test_service(sessions_tmp.path().to_path_buf());
 
     let started = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: PROJECT_ID.to_string(),
             session_type: "workspace".to_string(),
@@ -117,7 +117,7 @@ async fn deleting_a_workspace_session_removes_its_git_worktree() {
 
     // When
     service
-        .delete_session(Request::new(DeleteSessionRequest {
+        .delete_session(Request::direct(DeleteSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: started.session_id.clone(),
         }))
@@ -140,7 +140,7 @@ async fn deleting_a_workspace_session_deregisters_the_worktree_from_git() {
     let service = test_service(sessions_tmp.path().to_path_buf());
 
     let started = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             project_id: PROJECT_ID.to_string(),
             session_type: "workspace".to_string(),
@@ -155,7 +155,7 @@ async fn deleting_a_workspace_session_deregisters_the_worktree_from_git() {
 
     // When
     service
-        .delete_session(Request::new(DeleteSessionRequest {
+        .delete_session(Request::direct(DeleteSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: started.session_id.clone(),
         }))

@@ -47,6 +47,31 @@ export interface ClientConfig {
    * exactly what the disabled state exists to prevent.
    */
   sandboxedCodebase?: { confinesFilesystem: boolean };
+  /**
+   * What the serving daemon declared about its GitHub sign-in (`auth_flow`). Always stated, so the
+   * sign-in screen never has to guess — see {@link AuthFlowDeclaration}.
+   */
+  authFlow: AuthFlowDeclaration;
+}
+
+/** The GitHub sign-in flows a daemon can serve. */
+export type AuthFlow = "redirect" | "device";
+
+/**
+ * What a daemon declared about its GitHub sign-in.
+ *
+ * - `"redirect"` — `GetAuthUrl` / `ExchangeCode`, a deployment holding a client secret.
+ * - `"device"` — `StartDeviceLogin` / `PollDeviceLogin`, a public client id and no secret.
+ * - `"none"` — no `auth_flow` at all: the daemon serves no GitHub sign-in. Never read as a flow.
+ * - `{ unrecognised }` — a value this page does not know, kept so the screen can name it rather
+ *   than guess a flow the daemon may not serve.
+ */
+export type AuthFlowDeclaration = AuthFlow | "none" | { unrecognised: string };
+
+/** What a payload's `auth_flow` declares, with absence and unknown values each stated as such. */
+function authFlowOf(declared: string | undefined): AuthFlowDeclaration {
+  if (declared === undefined) return "none";
+  return declared === "redirect" || declared === "device" ? declared : { unrecognised: declared };
 }
 
 /** The JSON `GET /api/config` serves — snake_case, as `tddy_coder::web_server::ClientConfig`. */
@@ -60,6 +85,7 @@ interface ClientConfigJson {
   allowed_agents?: ClientAllowedAgent[];
   debug?: string;
   sandboxed_codebase?: { confines_filesystem?: boolean };
+  auth_flow?: string;
 }
 
 /**
@@ -92,6 +118,7 @@ function fromJson(json: ClientConfigJson): ClientConfig {
       json.sandboxed_codebase !== undefined && json.sandboxed_codebase !== null,
       json.sandboxed_codebase?.confines_filesystem,
     ),
+    authFlow: authFlowOf(json.auth_flow),
   };
 }
 
@@ -132,5 +159,6 @@ export async function loadClientConfig(
       response.sandboxedCodebase !== undefined,
       response.sandboxedCodebase?.confinesFilesystem,
     ),
+    authFlow: authFlowOf(response.authFlow),
   };
 }

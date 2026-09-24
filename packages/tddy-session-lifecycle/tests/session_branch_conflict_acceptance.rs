@@ -233,7 +233,7 @@ fn a_world() -> World {
 async fn start(world: &World, req: StartSessionRequest) -> StartSessionResponse {
     world
         .service
-        .start_session(Request::new(req))
+        .start_session(Request::direct(req))
         .await
         .expect("StartSession must answer, not error")
         .into_inner()

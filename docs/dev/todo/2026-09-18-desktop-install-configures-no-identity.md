@@ -1,47 +1,37 @@
 # 2026-09-18 — A desktop install configures no identity, so it has no sessions
 
-**Category:** Defect / deferred scope
+**Category:** Defect / deferred scope — **narrowed 2026-09-24** by `#keyring` 2/9 (#509) to a verification
+**Owner:** the developer ("I'll configure and test production myself") — **delete this entry when
+they confirm** a fresh install signs in.
 
 Source: `./install --desktop` ([2026-09-18-install-desktop.md](../changesets/2026-09-18-install-desktop.md)).
 Features [tddy-desktop-tauri.md](../../ft/desktop/tddy-desktop-tauri.md),
 [daemon-settings.md](../../ft/daemon/daemon-settings.md).
 
-`desktop.yaml.production` renders a configuration with `github:` unset, `livekit:` unset and
-`users: []`. The installed application starts and its dashboard reaches the daemon's settings — and
-nothing else. No sessions, no hosts, no screen sharing. The template documents this and says what to
-add; nothing automates it.
+## What remains
 
-**Three requirements, and all three must be met together**
+**Verify a fresh `./install --desktop` reaches a signed-in dashboard with no file edited by hand**
+— open the app, approve the device code on github.com, see sessions. While there, confirm against the
+live API that the OAuth App's device-flow token arrives with no expiring `refresh_token` (#509 risk
+V8): a GitHub App's would need a secret to refresh.
 
-- `github:` absent ⇒ `build_auth_entries` returns `user_resolver: None`
-  (`packages/tddy-daemon-auth/src/auth.rs`), and **every** session service in
-  `tddy_daemon::runtime::build` is assembled inside `if let Some(user_resolver)` — the host registry,
-  LiveKit peer discovery, `DaemonSessionHost`, the BSP session resolver, chat workspace roots and
-  screen sharing. `DaemonConfigService` is registered outside that block, which is the only reason a
-  misconfigured daemon is repairable from its own UI.
-- `livekit.api_secret` is the **only** source of the session-token signer, required even with no
-  common room. Without it the resolver is `Arc::new(|_| None)` and every token-gated RPC refuses.
-  `livekit.enabled` governs the common room alone.
-- `users:` maps a login to an OS user with no fallback (`DaemonConfig::os_user_for_github`). An
-  unmapped login is refused `permission_denied: user not mapped to OS user` on every session RPC.
+The client id itself is done: `desktop.yaml.production` renders `github: { client_id:
+"Ov23lioH6CfiaZR8ESr5" }` with no secret (2026-09-24, #509). This check needs the real application
+and a GitHub approval, so it is the developer's.
 
-**Why it was not fixed with the installer.** Closing it means deciding what identity a
-single-operator desktop install has. A stub provider (`github: { stub: true }` plus a `users:` entry
-for the installing OS user and a generated `api_secret`) makes the application work on first launch,
-at the cost of a sign-in that is an identity rather than a credential check. Requiring a real GitHub
-OAuth app keeps the credential check and makes `./install --desktop` produce something unusable until
-an operator registers one. That is a posture decision, not an implementation detail, and it is not
-the installer's to make silently. `daemon.yaml.production` ships the same three blocks unset for the
-served deployment, so whatever is decided should probably be decided for both.
+## What is no longer in the way
 
-**Worth knowing while deciding**
+The entry originally recorded three requirements that all had to be met together. The code side of
+each is done:
 
-- The same mismatch is what makes a *peer* unreachable over a common room. A daemon whose `users:`
-  does not name the login a peer's token resolves to answers `PERMISSION_DENIED: user not mapped to
-  OS user` to a forwarded `ListProjects`, which surfaces in the dashboard as a peer that is present
-  in the room and refuses every call.
-- Session tokens are stateless HMACs over the shared `api_secret`, so a generated per-install secret
-  is correct for a standalone machine and wrong the moment that machine joins a deployment — the
-  whole common room shares one secret.
-- `github.redirect_uri` is overridden by the application from `listen.web_port`, so whatever is
-  chosen must not depend on the operator setting it.
+- **`livekit.api_secret` as the only signer source** — gone with `#keyring` 1/9 (#508): a daemon with
+  no `livekit:` block signs session tokens with its own per-daemon Ed25519 key.
+- **`github:` needing `client_id` + `client_secret`** — gone with `#keyring` 2/9 (#509): a
+  `client_id` alone registers `auth.AuthService` with the **GitHub device flow**
+  (`StartDeviceLogin` / `PollDeviceLogin`), and the dashboard signs in by device code.
+- **`users: []` refusing every login** — gone with #509: a desktop's **first** sign-in from its own
+  window enrols that GitHub login against the OS user the app runs as and persists the row to
+  `~/.tddy/desktop.yaml`. `os_user_for_github` is unchanged; a second, different login is refused.
+
+So nothing is known to stand between a fresh install and a signed-in dashboard; the check above is
+what confirms it.

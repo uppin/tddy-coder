@@ -145,7 +145,7 @@ async fn start_workspace(
     attachments: Vec<SessionAttachment>,
 ) -> Result<String, (Code, String)> {
     let resp = service
-        .start_session(Request::new(StartSessionRequest {
+        .start_session(Request::direct(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_type: "workspace".to_string(),
             project_id: TEST_PROJECT_ID.to_string(),
@@ -169,7 +169,7 @@ async fn stage_one_file(
 ) -> Result<(), (Code, String)> {
     let resp = service
         .session_files_service()
-        .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
+        .upload_staged_attachment_chunk(Request::direct(UploadStagedAttachmentChunkRequest {
             session_token: VALID_TOKEN.to_string(),
             daemon_instance_id: daemon_instance_id.to_string(),
             staging_id: staging_id.to_string(),
@@ -476,7 +476,7 @@ async fn start_session_refuses_a_staged_attachment_whose_upload_is_not_complete(
     let (_repo, sessions_tmp, _staging, service) = a_workspace_service();
     let resp = service
         .session_files_service()
-        .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
+        .upload_staged_attachment_chunk(Request::direct(UploadStagedAttachmentChunkRequest {
             session_token: VALID_TOKEN.to_string(),
             daemon_instance_id: String::new(),
             staging_id: STAGING_ID_A.to_string(),

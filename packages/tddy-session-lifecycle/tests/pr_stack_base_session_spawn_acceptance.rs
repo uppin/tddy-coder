@@ -661,7 +661,9 @@ async fn start_session_refuses_a_branchless_base_session_and_creates_no_session(
 
     // When the form asks for an orchestrator based on it
     let result = service
-        .start_session(Request::new(a_pr_stack_start_request("session-unstarted")))
+        .start_session(Request::direct(a_pr_stack_start_request(
+            "session-unstarted",
+        )))
         .await;
 
     // Then the RPC carries the reason the form shows, and nothing was created
@@ -701,7 +703,7 @@ async fn start_session_refuses_a_base_session_from_another_repository_and_create
 
     // When the form asks for an orchestrator based on it
     let result = service
-        .start_session(Request::new(a_pr_stack_start_request(BASE_SESSION)))
+        .start_session(Request::direct(a_pr_stack_start_request(BASE_SESSION)))
         .await;
 
     // Then the RPC carries the reason, and nothing was created — the alternative is an orchestrator

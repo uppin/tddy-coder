@@ -12,7 +12,8 @@ use tddy_daemon::server::serving_sandboxed_codebase_support;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::daemon_config::{
     ClientAllowedAgent, DaemonConfigService as DaemonConfigServiceTrait, DaemonSettings,
-    GetClientConfigRequest, GetConfigRequest, ListenSettings, LiveKitSettings, UpdateConfigRequest,
+    GetClientConfigRequest, GetClientConfigResponse, GetConfigRequest, ListenSettings,
+    LiveKitSettings, UpdateConfigRequest,
 };
 use tokio::sync::Mutex;
 
@@ -56,9 +57,18 @@ struct ADaemonConfigService {
 }
 
 fn a_daemon_config_service() -> ADaemonConfigService {
+    a_daemon_config_service_started_with(&a_daemon_config_file())
+}
+
+/// The fixture service, started with `github` appended to the fixture configuration.
+fn a_daemon_config_service_with_github(github: &str) -> ADaemonConfigService {
+    a_daemon_config_service_started_with(&format!("{}{github}", a_daemon_config_file()))
+}
+
+fn a_daemon_config_service_started_with(config_file: &str) -> ADaemonConfigService {
     let dir = tempfile::tempdir().expect("no temp dir");
     let config_path = dir.path().join("daemon.yaml");
-    std::fs::write(&config_path, a_daemon_config_file()).expect("the config file was not written");
+    std::fs::write(&config_path, config_file).expect("the config file was not written");
     let config = DaemonConfig::load(&config_path).expect("the config fixture did not load");
     let common_room = Arc::new(RecordingCommonRoom::default());
 
@@ -175,7 +185,7 @@ impl SettingsBuilder {
 }
 
 fn an_update_of(settings: DaemonSettings) -> Request<UpdateConfigRequest> {
-    Request::new(UpdateConfigRequest {
+    Request::direct(UpdateConfigRequest {
         session_token: VALID_TOKEN.to_string(),
         settings: Some(settings),
     })
@@ -193,7 +203,7 @@ async fn returns_the_effective_configuration_with_the_livekit_api_secret_redacte
     // When its configuration is read
     let response = daemon
         .service
-        .get_config(Request::new(GetConfigRequest {
+        .get_config(Request::direct(GetConfigRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -223,7 +233,7 @@ async fn reports_the_path_of_the_file_an_update_will_be_written_to() {
     // When its configuration is read
     let response = daemon
         .service
-        .get_config(Request::new(GetConfigRequest {
+        .get_config(Request::direct(GetConfigRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -365,7 +375,7 @@ async fn returns_the_client_config_the_web_bundle_otherwise_fetches_over_http() 
     // When the client config is requested over RPC
     let response = daemon
         .service
-        .get_client_config(Request::new(GetClientConfigRequest {
+        .get_client_config(Request::direct(GetClientConfigRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -394,7 +404,7 @@ async fn returns_the_jail_capability_the_web_bundle_otherwise_reads_from_api_con
     // When that page asks for the configuration it starts up with
     let response = daemon
         .service
-        .get_client_config(Request::new(GetClientConfigRequest {
+        .get_client_config(Request::direct(GetClientConfigRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -411,6 +421,57 @@ async fn returns_the_jail_capability_the_web_bundle_otherwise_reads_from_api_con
     );
 }
 
+/// `GetClientConfig` as a page that has not signed in yet asks for it.
+async fn the_client_config_of(daemon: &ADaemonConfigService) -> GetClientConfigResponse {
+    daemon
+        .service
+        .get_client_config(Request::direct(GetClientConfigRequest {
+            session_token: String::new(),
+        }))
+        .await
+        .expect("the client config was not served")
+        .into_inner()
+}
+
+#[tokio::test]
+async fn declares_the_device_flow_for_a_daemon_holding_only_a_client_id() {
+    // Given a desktop daemon holding a public client id and no secret
+    let daemon =
+        a_daemon_config_service_with_github("github:\n  client_id: \"Iv1.0123456789abcdef\"\n");
+
+    // When the page it hosts asks for the configuration it starts up with
+    let response = the_client_config_of(&daemon).await;
+
+    // Then it is told to sign in by the device flow, the same value `/api/config` carries
+    assert_eq!(response.auth_flow.as_deref(), Some("device"));
+}
+
+#[tokio::test]
+async fn declares_the_redirect_flow_for_a_daemon_holding_a_client_secret() {
+    // Given a daemon holding a client id and its secret — a confidential client
+    let daemon = a_daemon_config_service_with_github(
+        "github:\n  client_id: \"Iv1.0123456789abcdef\"\n  client_secret: \"the-secret\"\n",
+    );
+
+    // When the page it hosts asks for the configuration it starts up with
+    let response = the_client_config_of(&daemon).await;
+
+    // Then it is told to sign in by the redirect flow
+    assert_eq!(response.auth_flow.as_deref(), Some("redirect"));
+}
+
+#[tokio::test]
+async fn declares_no_sign_in_flow_for_a_daemon_without_github() {
+    // Given a daemon with no `github:` block, so no auth service to sign in to
+    let daemon = a_daemon_config_service();
+
+    // When the page it hosts asks for the configuration it starts up with
+    let response = the_client_config_of(&daemon).await;
+
+    // Then no flow is declared: absent means this daemon serves no GitHub sign-in
+    assert_eq!(response.auth_flow, None);
+}
+
 #[tokio::test]
 async fn serves_the_client_config_to_a_caller_that_has_not_signed_in_yet() {
     // Given a daemon a page has just been loaded from, before any sign-in
@@ -419,7 +480,7 @@ async fn serves_the_client_config_to_a_caller_that_has_not_signed_in_yet() {
     // When that page asks for the config that tells it there is a daemon to sign in to
     let response = daemon
         .service
-        .get_client_config(Request::new(GetClientConfigRequest {
+        .get_client_config(Request::direct(GetClientConfigRequest {
             session_token: String::new(),
         }))
         .await
@@ -439,7 +500,7 @@ async fn refuses_to_return_the_configuration_to_a_caller_without_a_valid_session
     // When a caller presents a token the daemon does not accept
     let status = daemon
         .service
-        .get_config(Request::new(GetConfigRequest {
+        .get_config(Request::direct(GetConfigRequest {
             session_token: "not-a-token".to_string(),
         }))
         .await
@@ -458,7 +519,7 @@ async fn refuses_to_write_the_configuration_for_a_caller_without_a_valid_session
     // When a caller presents a token the daemon does not accept
     let status = daemon
         .service
-        .update_config(Request::new(UpdateConfigRequest {
+        .update_config(Request::direct(UpdateConfigRequest {
             session_token: "not-a-token".to_string(),
             settings: Some(the_current_settings().with_web_port(9911).build()),
         }))
@@ -576,7 +637,7 @@ async fn reports_the_common_room_as_switched_off_to_the_page_the_daemon_serves()
     // When a page asks for the configuration it starts up with
     let response = daemon
         .service
-        .get_client_config(Request::new(GetClientConfigRequest {
+        .get_client_config(Request::direct(GetClientConfigRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await
@@ -596,7 +657,7 @@ async fn reports_the_common_room_as_switched_on_to_the_page_the_daemon_serves() 
     // When a page asks for the configuration it starts up with
     let response = daemon
         .service
-        .get_client_config(Request::new(GetClientConfigRequest {
+        .get_client_config(Request::direct(GetClientConfigRequest {
             session_token: VALID_TOKEN.to_string(),
         }))
         .await

@@ -53,7 +53,7 @@ impl RosteredSession {
     async fn attach(&self, agent_id: &str) -> Result<SessionAgentRoster, tddy_rpc::Status> {
         self.service
             .session_agents_service()
-            .attach_session_agent(Request::new(AttachSessionAgentRequest {
+            .attach_session_agent(Request::direct(AttachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -66,7 +66,7 @@ impl RosteredSession {
     async fn detach(&self, agent_id: &str) -> SessionAgentRoster {
         self.service
             .session_agents_service()
-            .detach_session_agent(Request::new(DetachSessionAgentRequest {
+            .detach_session_agent(Request::direct(DetachSessionAgentRequest {
                 session_token: TEST_TOKEN.to_string(),
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
@@ -79,7 +79,7 @@ impl RosteredSession {
 
     async fn agent_id_for(&self, name: &str) -> String {
         self.service
-            .list_subagents(Request::new(ListSubagentsRequest {}))
+            .list_subagents(Request::direct(ListSubagentsRequest {}))
             .await
             .expect("listing subagents must succeed")
             .into_inner()

@@ -106,7 +106,7 @@ fn a_read_of_main(call_id: &str, status: &str) -> AgentActivityRecord {
 async fn listed_sessions(sessions_base: std::path::PathBuf) -> Vec<ProtoSessionEntry> {
     let service = test_service(sessions_base);
     service
-        .list_sessions(Request::new(ListSessionsRequest {
+        .list_sessions(Request::direct(ListSessionsRequest {
             session_token: TEST_TOKEN.to_string(),
         }))
         .await
