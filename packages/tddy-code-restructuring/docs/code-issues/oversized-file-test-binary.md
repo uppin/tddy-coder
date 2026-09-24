@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-09-19 | 950 | first detection — the file is new in #498 |
 | 2026-09-19 | 966 | after `/pr-wrap`'s function-level refactor: two oversized functions split, +16 lines of doc comment. Function sizes improved, file size did not — which is why the decomposition below still stands |
+| 2026-09-24 | 966 | unchanged by #527, which touched the file: `Prose` and `readable_spans` widened to `pub(crate)` because `backends/rust/early_return.rs` masks strings and comments with the same scanner. That is a second consumer of the scanner outside this file, which strengthens the case for extracting it below |
 
 ## What the gate found
 

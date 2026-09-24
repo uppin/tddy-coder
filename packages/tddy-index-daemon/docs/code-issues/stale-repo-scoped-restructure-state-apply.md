@@ -20,6 +20,13 @@ entry points — `restructure apply` and `restructure status` — use it.
 
 on a plan that has never run, because a *different* plan completed under that root.
 
+## Measurement history
+
+| Run | Call site | Note |
+|---|---|---|
+| 2026-09-18 | `apply.rs:45` | first detection |
+| 2026-09-24 | `apply.rs:45` | unchanged. #527 touched `apply_plan` (the compile gate's `refuse_a_broken_baseline` / `refuse_a_broken_result` calls around this line) and left the call alone. **Hit live** in #527's real run of #524's plans: after one plan was applied through the daemon, the next plan was refused with `a journal already exists for this plan — pass --resume to continue it` until `.restructure/` was deleted by hand |
+
 ## What would close it
 
 One line, and the plan path needs no threading — `options.plan()?` is already read on the line above:

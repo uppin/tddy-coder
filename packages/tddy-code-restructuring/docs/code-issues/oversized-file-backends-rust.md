@@ -3,9 +3,9 @@
 **Location:** `packages/tddy-code-restructuring/src/backends/rust.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate on #498
-**Metrics:** **4,307 production lines** (4,788 before #527) · budget 500
+**Metrics:** **4,316 production lines** (4,788 before #527) · budget 500
 **Restructure:** required
-**Status:** Open — pre-existing; #498 added 16 lines and deferred, blocked by stack overlap; #527 narrowed it by 481 lines net
+**Status:** Open — pre-existing; #498 added 16 lines and deferred, blocked by stack overlap; **partially fixed** by #527 (−472 net); the decomposition below still stands
 
 ## Measurement history
 
@@ -14,6 +14,7 @@
 | 2026-09-19 | 4,788 | first detection; 4,772 before #498 |
 | 2026-09-23 | 4,294 | #527 (engine fixes) changed the import pass, the `impl`-seam refusal and the readiness waits, and moved each into a sibling under `backends/rust/` rather than growing this file: `imports.rs`, `impl_seam.rs`, `chatter.rs` (`ServerChatter`, re-exported at its old path), `readiness.rs`. Still 8.6× the budget |
 | 2026-09-24 | 4,307 | #527's three explicit-failure guards. The logic went to siblings (`early_return.rs`, `chatter.rs`, `readiness.rs`, and `runner/compile_gate.rs` outside this file); the +13 here is wiring only: the `mod`/`use` lines and the two `refuse_early_returns` call sites in `check` and `resolve` |
+| 2026-09-24 | 4,316 | #527 wrap re-measure, after gaps A–C: the repairs went to `imports.rs`, `impl_seam.rs` and a new `nested_modules.rs`; the +9 here is the `nested_modules` wiring and one reworded refusal. 8.6× the budget — `rust.rs` shrank only because new logic went elsewhere, and none of its own seams were cut |
 
 ## What the gate found
 
