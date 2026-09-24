@@ -162,7 +162,9 @@ it gets the fixed engine in its own tree.
 - [x] Gap A (2026-09-24): a relative `use` the parent wrote is rebased for the child module (`super::X` → `super::super::X`, `self::X` → `super::X`) in both reconstructions
 - [x] Gap B (2026-09-24): the assist's `Self::modname::f` / `Type::modname::f` rewrite of a moved associated function's call is undone
 - [x] Gap C (2026-09-24): a call inside a module the file already had, beside that module's own import of the moved item, is put back; the refusal's module wording names that case
-- [ ] Re-run the destructure node's refused plans with `check --deep` and record the results — on #524
+- [x] Index daemon given the dev shell's whole environment — the real-repo cause of E2 (PATH-only made rust-analyzer's `webrtc-sys` / `sqlx-macros` builds fail to link, so the index was degraded); durable TMPDIR; log truncated before launch
+- [x] Destructure plans re-run for real (2026-09-24, local branch off #524): every plan `check --deep` clean or truthfully refused; `apply` moved the code in all ten, four compile, six are failed by the compile gate with compiler-named errors
+- [ ] ⏭️ Deferred by the developer (2026-09-24: "it's important that it moves the code and the compilation can be fixed manually"): gaps G–M → [2026-09-24-restructure-apply-gaps-from-the-lifecycle-destructure-run](../todo/2026-09-24-restructure-apply-gaps-from-the-lifecycle-destructure-run.md); stale-plan re-anchoring → [2026-09-24-restructure-snapshot-cannot-rebase-a-stale-plan](../todo/2026-09-24-restructure-snapshot-cannot-rebase-a-stale-plan.md)
 
 ## Testing plan
 
