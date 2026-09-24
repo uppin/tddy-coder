@@ -1127,8 +1127,21 @@ fn validate_web_args(args: &Args) -> anyhow::Result<()> {
     }
 }
 
-/// Build an optional AuthService RPC entry based on CLI args.
-fn build_auth_service_entry(args: &Args) -> Option<tddy_rpc::ServiceEntry> {
+/// Which GitHub provider these CLI args make the standalone web server register — the one
+/// decision both [`build_auth_service_entry`] and [`build_client_config`] read, so the `auth_flow`
+/// served at `/api/config` can never differ from the provider actually serving sign-in.
+///
+/// Both kinds serve the redirect flow: this server has no public (device-flow) provider — a client
+/// id without a secret registers nothing.
+enum StandaloneAuthProvider<'a> {
+    /// `--github-stub`, or non-empty `--github-stub-codes`.
+    Stub,
+    /// `--github-client-id` and `--github-client-secret`.
+    Confidential { client_id: &'a str, secret: &'a str },
+}
+
+/// `None` is a set of args that registers no `auth.AuthService`.
+fn standalone_auth_provider(args: &Args) -> Option<StandaloneAuthProvider<'_>> {
     // `--github-stub-codes` only makes sense with the stub provider; treat non-empty codes as stub
     // mode so test harnesses still get AuthService if the boolean flag is omitted or dropped.
     let stub_mode = args.github_stub
@@ -1137,60 +1150,76 @@ fn build_auth_service_entry(args: &Args) -> Option<tddy_rpc::ServiceEntry> {
             .as_ref()
             .is_some_and(|s| !s.trim().is_empty());
     if stub_mode {
-        let client_id = args.github_client_id.as_deref().unwrap_or("stub-client-id");
-        // In stub mode with a web server, return a callback URL on the same origin
-        // so the browser stays on the same domain (no cross-origin redirect to github.com).
-        // Use web_public_url if set, otherwise derive from host+port.
-        let stub = if let Some(ref public_url) = args.web_public_url {
-            let callback_url = format!("{}/auth/callback", public_url.trim_end_matches('/'));
-            tddy_github::StubGitHubProvider::new_with_callback(&callback_url, client_id)
-        } else if let Some(port) = args.web_port {
-            let host = args.web_host.as_deref().unwrap_or("127.0.0.1");
-            let callback_url = format!("http://{}:{}/auth/callback", host, port);
-            tddy_github::StubGitHubProvider::new_with_callback(&callback_url, client_id)
-        } else {
-            tddy_github::StubGitHubProvider::new("https://github.com", client_id)
-        };
-        if let Some(ref codes) = args.github_stub_codes {
-            for mapping in codes.split(',') {
-                let parts: Vec<&str> = mapping.splitn(2, ':').collect();
-                if parts.len() == 2 {
-                    stub.register_code(
-                        parts[0],
-                        tddy_github::GitHubUser {
-                            id: 1,
-                            login: parts[1].to_string(),
-                            avatar_url: format!("https://github.com/{}.png", parts[1]),
-                            name: parts[1].to_string(),
-                        },
-                    );
+        return Some(StandaloneAuthProvider::Stub);
+    }
+    match (&args.github_client_id, &args.github_client_secret) {
+        (Some(client_id), Some(secret)) => {
+            Some(StandaloneAuthProvider::Confidential { client_id, secret })
+        }
+        _ => None,
+    }
+}
+
+/// Build an optional AuthService RPC entry based on CLI args.
+fn build_auth_service_entry(args: &Args) -> Option<tddy_rpc::ServiceEntry> {
+    match standalone_auth_provider(args)? {
+        StandaloneAuthProvider::Stub => {
+            let client_id = args.github_client_id.as_deref().unwrap_or("stub-client-id");
+            // In stub mode with a web server, return a callback URL on the same origin
+            // so the browser stays on the same domain (no cross-origin redirect to github.com).
+            // Use web_public_url if set, otherwise derive from host+port.
+            let stub = if let Some(ref public_url) = args.web_public_url {
+                let callback_url = format!("{}/auth/callback", public_url.trim_end_matches('/'));
+                tddy_github::StubGitHubProvider::new_with_callback(&callback_url, client_id)
+            } else if let Some(port) = args.web_port {
+                let host = args.web_host.as_deref().unwrap_or("127.0.0.1");
+                let callback_url = format!("http://{}:{}/auth/callback", host, port);
+                tddy_github::StubGitHubProvider::new_with_callback(&callback_url, client_id)
+            } else {
+                tddy_github::StubGitHubProvider::new("https://github.com", client_id)
+            };
+            if let Some(ref codes) = args.github_stub_codes {
+                for mapping in codes.split(',') {
+                    let parts: Vec<&str> = mapping.splitn(2, ':').collect();
+                    if parts.len() == 2 {
+                        stub.register_code(
+                            parts[0],
+                            tddy_github::GitHubUser {
+                                id: 1,
+                                login: parts[1].to_string(),
+                                avatar_url: format!("https://github.com/{}.png", parts[1]),
+                                name: parts[1].to_string(),
+                            },
+                        );
+                    }
                 }
             }
+            let auth_service_impl = tddy_github::AuthServiceImpl::new(stub);
+            let auth_server = tddy_service::AuthServiceServer::new(auth_service_impl);
+            Some(tddy_rpc::ServiceEntry {
+                name: "auth.AuthService",
+                service: std::sync::Arc::new(auth_server)
+                    as std::sync::Arc<dyn tddy_rpc::RpcService>,
+            })
         }
-        let auth_service_impl = tddy_github::AuthServiceImpl::new(stub);
-        let auth_server = tddy_service::AuthServiceServer::new(auth_service_impl);
-        Some(tddy_rpc::ServiceEntry {
-            name: "auth.AuthService",
-            service: std::sync::Arc::new(auth_server) as std::sync::Arc<dyn tddy_rpc::RpcService>,
-        })
-    } else if let (Some(id), Some(secret)) = (&args.github_client_id, &args.github_client_secret) {
-        let redirect_uri = args.github_redirect_uri.clone().unwrap_or_else(|| {
-            if let Some(ref public_url) = args.web_public_url {
-                format!("{}/auth/callback", public_url.trim_end_matches('/'))
-            } else {
-                let port = args.web_port.unwrap_or(8080);
-                format!("http://localhost:{}/auth/callback", port)
-            }
-        });
-        let real = tddy_github::RealGitHubProvider::new(id, secret, &redirect_uri);
-        let auth_service_impl = tddy_github::AuthServiceImpl::new(real);
-        let auth_server = tddy_service::AuthServiceServer::new(auth_service_impl);
-        Some(tddy_rpc::ServiceEntry {
-            name: "auth.AuthService",
-            service: std::sync::Arc::new(auth_server) as std::sync::Arc<dyn tddy_rpc::RpcService>,
-        })
-    } else {
-        None
+        StandaloneAuthProvider::Confidential { client_id, secret } => {
+            let redirect_uri = args.github_redirect_uri.clone().unwrap_or_else(|| {
+                if let Some(ref public_url) = args.web_public_url {
+                    format!("{}/auth/callback", public_url.trim_end_matches('/'))
+                } else {
+                    let port = args.web_port.unwrap_or(8080);
+                    format!("http://localhost:{}/auth/callback", port)
+                }
+            });
+            let real = tddy_github::RealGitHubProvider::new(client_id, secret, &redirect_uri);
+            let auth_service_impl = tddy_github::AuthServiceImpl::new(real);
+            let auth_server = tddy_service::AuthServiceServer::new(auth_service_impl);
+            Some(tddy_rpc::ServiceEntry {
+                name: "auth.AuthService",
+                service: std::sync::Arc::new(auth_server)
+                    as std::sync::Arc<dyn tddy_rpc::RpcService>,
+            })
+        }
     }
 }
 
@@ -1214,12 +1243,9 @@ fn build_client_config(args: &Args) -> crate::web_server::ClientConfig {
         // The standalone web server provisions no `--workspace-tools` jail, so it advertises no
         // sandboxed-codebase placement: the key is left off the wire entirely.
         sandboxed_codebase: None,
-        // TODO(#keyring 2/9): this server *does* register the redirect flow when `--github-stub` or
-        // a client id and secret are given (`build_auth_service_entry`), so declaring none here
-        // misstates it. Unread today — `daemon_mode` is unset, so its page shows the standalone
-        // form and never the daemon sign-in screen that reads `auth_flow` — but it should declare
-        // `"redirect"` exactly when that entry is registered.
-        auth_flow: None,
+        // Exactly the flow `build_auth_service_entry` registers: both of this server's providers
+        // serve the redirect flow, and no provider means no sign-in configured.
+        auth_flow: standalone_auth_provider(args).map(|_| "redirect".to_string()),
     }
 }
 
@@ -5086,5 +5112,121 @@ mod waiting_for_input_pending_questions_tests {
             !waiting_for_input_has_pending_questions(&context),
             "an empty pending_questions vec must not be treated as clarification-pending"
         );
+    }
+}
+
+#[cfg(test)]
+mod standalone_auth_flow_declaration_tests {
+    //! The standalone web server's `/api/config` declares exactly the sign-in flow
+    //! `build_auth_service_entry` registers — never one it does not serve.
+    use super::*;
+
+    fn an_empty_args() -> Args {
+        // `Args` has no `Default`; clap's own default parse is the one place that produces a
+        // complete value without naming every field.
+        use clap::Parser;
+        Args::from(super::CoderArgs::parse_from(["tddy-coder"]))
+    }
+
+    fn args_with_a_stub_provider() -> Args {
+        Args {
+            github_stub: true,
+            ..an_empty_args()
+        }
+    }
+
+    fn args_with_only_stub_codes() -> Args {
+        Args {
+            github_stub_codes: Some("test-code:octocat".to_string()),
+            ..an_empty_args()
+        }
+    }
+
+    fn args_with_a_confidential_client() -> Args {
+        Args {
+            github_client_id: Some("Iv1.confidential".to_string()),
+            github_client_secret: Some("shh".to_string()),
+            ..an_empty_args()
+        }
+    }
+
+    fn args_with_a_client_id_and_no_secret() -> Args {
+        Args {
+            github_client_id: Some("Iv1.public".to_string()),
+            ..an_empty_args()
+        }
+    }
+
+    fn declared_auth_flow(args: &Args) -> Option<String> {
+        build_client_config(args).auth_flow
+    }
+
+    fn registers_an_auth_service(args: &Args) -> bool {
+        build_auth_service_entry(args).is_some()
+    }
+
+    #[test]
+    fn a_stub_provider_is_declared_as_the_redirect_flow() {
+        // Given
+        let args = args_with_a_stub_provider();
+
+        // When
+        let declared = declared_auth_flow(&args);
+
+        // Then
+        assert!(registers_an_auth_service(&args));
+        assert_eq!(declared.as_deref(), Some("redirect"));
+    }
+
+    #[test]
+    fn stub_codes_alone_are_declared_as_the_redirect_flow() {
+        // Given
+        let args = args_with_only_stub_codes();
+
+        // When
+        let declared = declared_auth_flow(&args);
+
+        // Then
+        assert!(registers_an_auth_service(&args));
+        assert_eq!(declared.as_deref(), Some("redirect"));
+    }
+
+    #[test]
+    fn a_confidential_client_is_declared_as_the_redirect_flow() {
+        // Given
+        let args = args_with_a_confidential_client();
+
+        // When
+        let declared = declared_auth_flow(&args);
+
+        // Then
+        assert!(registers_an_auth_service(&args));
+        assert_eq!(declared.as_deref(), Some("redirect"));
+    }
+
+    #[test]
+    fn a_client_id_without_a_secret_registers_and_declares_no_sign_in() {
+        // Given
+        let args = args_with_a_client_id_and_no_secret();
+
+        // When
+        let declared = declared_auth_flow(&args);
+
+        // Then
+        assert!(!registers_an_auth_service(&args));
+        assert_eq!(declared, None);
+    }
+
+    #[test]
+    fn no_github_args_register_and_declare_no_sign_in() {
+        // Given
+        let args = an_empty_args();
+
+        // When
+        let declared = declared_auth_flow(&args);
+
+        // Then
+        assert!(!registers_an_auth_service(&args));
+        assert_eq!(declared, None);
     }
 }

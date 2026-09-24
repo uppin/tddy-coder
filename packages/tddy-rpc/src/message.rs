@@ -28,7 +28,16 @@ pub enum RequestTransport {
     /// gRPC through a tonic server (the daemon's local Unix-domain socket, the index daemon).
     Grpc,
     /// Received over no transport at all: a call one component of this process makes on another
-    /// in code, carrying no claim from any caller.
+    /// in code, carrying no transport claim. That includes a payload re-dispatched in code after
+    /// the request it arrived in was decoded and its metadata is no longer in scope (the sandbox
+    /// host bridge that receives only a method name and raw bytes), and a request the process
+    /// builds from its own state.
+    ///
+    /// It is never what a relay stamps on a request whose original metadata it still holds: a
+    /// service forwarding an inbound [`crate::Request`] to an inner one passes that request's
+    /// metadata through (`Request::with_metadata`), so the inner service sees the stamp the
+    /// receiving host gave it. `Direct` is not a stand-in for an unknown transport, and nothing
+    /// may treat it as [`Self::InProcess`].
     Direct,
 }
 

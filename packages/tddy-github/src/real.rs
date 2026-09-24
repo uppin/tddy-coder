@@ -11,11 +11,11 @@ use crate::provider::{DeviceLoginPoll, DeviceLoginStart, GitHubOAuthProvider, Gi
 /// Real GitHub OAuth provider that calls GitHub's API endpoints.
 pub struct RealGitHubProvider {
     client_id: String,
-    /// `None` for a **public client** (RFC 6749 §2.1): one that cannot keep a secret — a desktop
-    /// application anyone can download — and so signs in by the device flow alone. The redirect
-    /// flow's code exchange posts this secret, so without one it refuses rather than trying.
-    client_secret: Option<String>,
-    redirect_uri: String,
+    /// What only the redirect flow needs. `None` for a **public client** (RFC 6749 §2.1): one
+    /// that cannot keep a secret — a desktop application anyone can download — and so signs in by
+    /// the device flow alone, with no callback to return to. Without it the redirect flow refuses
+    /// rather than trying.
+    redirect_client: Option<RedirectClient>,
     /// Where the OAuth endpoints live — `https://github.com` in production.
     oauth_base_url: String,
     /// Where the REST API lives — `https://api.github.com` in production.
@@ -28,6 +28,13 @@ pub struct RealGitHubProvider {
     /// whose `expires_in` window has closed, so an attempt the operator abandoned does not stay.
     device_attempts: Mutex<HashMap<String, DeviceAttempt>>,
     http_client: reqwest::Client,
+}
+
+/// A confidential client's redirect-flow half: the secret its code exchange posts and the callback
+/// its authorize URL names. Held together because neither means anything without the other.
+struct RedirectClient {
+    client_secret: String,
+    redirect_uri: String,
 }
 
 /// What this provider remembers about a device code it started, for as long as GitHub could still
@@ -118,8 +125,10 @@ impl RealGitHubProvider {
     ) -> Self {
         Self::build(
             client_id,
-            Some(client_secret),
-            redirect_uri,
+            Some(RedirectClient {
+                client_secret: client_secret.to_string(),
+                redirect_uri: redirect_uri.to_string(),
+            }),
             oauth_base_url,
             api_base_url,
         )
@@ -127,37 +136,30 @@ impl RealGitHubProvider {
 
     /// A **public client** — a `client_id` and no secret, the shape a desktop application ships
     /// in. It signs in by the device flow; its redirect-flow code exchange is refused, because
-    /// that exchange cannot be made without a secret.
-    pub fn new_public(client_id: &str, redirect_uri: &str) -> Self {
-        Self::new_public_with_base_urls(
-            client_id,
-            redirect_uri,
-            GITHUB_OAUTH_BASE_URL,
-            GITHUB_API_BASE_URL,
-        )
+    /// that exchange cannot be made without a secret. It names no redirect URI, since the device
+    /// flow returns to no callback.
+    pub fn new_public(client_id: &str) -> Self {
+        Self::new_public_with_base_urls(client_id, GITHUB_OAUTH_BASE_URL, GITHUB_API_BASE_URL)
     }
 
     /// [`Self::new_public`] pointed at other hosts — see [`Self::new_with_base_urls`].
     pub fn new_public_with_base_urls(
         client_id: &str,
-        redirect_uri: &str,
         oauth_base_url: &str,
         api_base_url: &str,
     ) -> Self {
-        Self::build(client_id, None, redirect_uri, oauth_base_url, api_base_url)
+        Self::build(client_id, None, oauth_base_url, api_base_url)
     }
 
     fn build(
         client_id: &str,
-        client_secret: Option<&str>,
-        redirect_uri: &str,
+        redirect_client: Option<RedirectClient>,
         oauth_base_url: &str,
         api_base_url: &str,
     ) -> Self {
         Self {
             client_id: client_id.to_string(),
-            client_secret: client_secret.map(str::to_string),
-            redirect_uri: redirect_uri.to_string(),
+            redirect_client,
             oauth_base_url: oauth_base_url.trim_end_matches('/').to_string(),
             api_base_url: api_base_url.trim_end_matches('/').to_string(),
             pending_states: Mutex::new(HashSet::new()),
@@ -246,13 +248,13 @@ impl RealGitHubProvider {
 #[async_trait]
 impl GitHubOAuthProvider for RealGitHubProvider {
     fn authorize_url(&self) -> Result<(String, String), String> {
-        if self.client_secret.is_none() {
+        let Some(redirect_client) = self.redirect_client.as_ref() else {
             return Err(
                 "this daemon holds a public client id and no client secret, so it cannot complete \
                  the redirect flow; sign in with the device flow"
                     .to_string(),
             );
-        }
+        };
         let state = Uuid::new_v4().to_string();
         self.pending_states.lock().unwrap().insert(state.clone());
         // `read:user` identifies the operator; `repo` is what lets the granted token read (and later
@@ -260,7 +262,7 @@ impl GitHubOAuthProvider for RealGitHubProvider {
         // Space-separated per OAuth, URL-encoded as `%20`.
         let url = format!(
             "{}/login/oauth/authorize?client_id={}&redirect_uri={}&state={}&scope=read:user%20repo",
-            self.oauth_base_url, self.client_id, self.redirect_uri, state
+            self.oauth_base_url, self.client_id, redirect_client.redirect_uri, state
         );
         Ok((url, state))
     }
@@ -268,7 +270,7 @@ impl GitHubOAuthProvider for RealGitHubProvider {
     async fn exchange_code(&self, code: &str, state: &str) -> Result<(String, GitHubUser), String> {
         // Before the state check: a public client issues no state, so every exchange it is asked
         // for would otherwise fail as a forged state rather than for the reason it really fails.
-        let Some(client_secret) = self.client_secret.as_deref() else {
+        let Some(RedirectClient { client_secret, .. }) = self.redirect_client.as_ref() else {
             return Err(
                 "this daemon holds a public client id and no client secret, so it cannot exchange \
                  an authorization code; sign in with the device flow"

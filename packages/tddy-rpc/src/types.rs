@@ -18,7 +18,8 @@ pub struct Request<T> {
 
 impl<T> Request<T> {
     /// A request one component of this process makes on another in code — received over no
-    /// transport ([`RequestTransport::Direct`]).
+    /// transport ([`RequestTransport::Direct`]). A relay forwarding an inbound request whose
+    /// metadata it still holds uses [`Self::with_metadata`] with that metadata instead.
     pub fn direct(inner: T) -> Self {
         Self::with_metadata(inner, RequestMetadata::over(RequestTransport::Direct))
     }

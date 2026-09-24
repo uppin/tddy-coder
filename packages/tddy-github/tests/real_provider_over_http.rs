@@ -499,12 +499,7 @@ fn a_provider_split_across(oauth: &AGitHub, api: &AGitHub) -> RealGitHubProvider
 /// A public client — the desktop shape: a client id and no secret at all.
 fn a_public_client(github: &AGitHub) -> RealGitHubProvider {
     let base = format!("http://{}", github.address);
-    RealGitHubProvider::new_public_with_base_urls(
-        THE_CLIENT_ID,
-        "http://127.0.0.1/auth/callback",
-        &base,
-        &base,
-    )
+    RealGitHubProvider::new_public_with_base_urls(THE_CLIENT_ID, &base, &base)
 }
 
 /// One canned reply, in the order the provider will ask for them.

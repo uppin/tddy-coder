@@ -100,6 +100,24 @@ exactly as it is today**.
 > then a configured fact that behaves like a hand-written one. `os_user_for_github` is not changed
 > and gains no default arm; the enrolment writes the row the lookup then finds.
 
+**Only a login completed from the desktop's own window enrols** (decided during green). Whether a
+completing login is "the person at the machine" is decided by the transport the call arrived on, as
+stamped by the host that received it (`tddy_rpc::RequestTransport`), never by anything the caller
+wrote. Only `InProcess` (the desktop's Tauri IPC bridge) enrols. A login completed over any other
+transport on an unenrolled desktop (the LiveKit common room, a session room, the agent tool socket)
+is minted **unmapped** and writes nothing. Every token-gated RPC it calls is refused
+`permission_denied`, and the desktop can still enrol its own window's login afterwards. A server
+deployment has no admission at all and is unaffected.
+
+**The sign-in flow is declared, never inferred** (decided during green). A daemon declares its flow
+in `auth_flow`, at `GET /api/config` and in `GetClientConfig`: `"redirect"` or `"device"`, exactly
+the provider it registered. An **absent** `auth_flow` means "this daemon has no GitHub sign-in
+configured", and the dashboard offers neither flow. It does not offer the redirect button. An
+**unknown** value is an error, not a guess. A public client (`client_id` with no secret) refuses
+`GetAuthUrl` with `failed_precondition`, naming the device flow, just as it refuses `ExchangeCode`.
+There is no compatibility path for an older daemon or dashboard, because every desktop is rolled out
+together.
+
 **The base-URL seam in `RealGitHubProvider`, opened before the device flow is written.**
 [`missing-tests-real-exchange-code`](../../../../packages/tddy-github/docs/code-issues/missing-tests-real-exchange-code.md)
 records that `exchange_code` is untestable by construction: two hardcoded absolute hosts, no
@@ -188,22 +206,47 @@ specs). Whole-workspace green comes from CI.
 
 ## Acceptance Criteria
 
-- [ ] A daemon configured with **`client_id` only** registers `auth.AuthService` and serves
+- [x] A daemon configured with **`client_id` only** registers `auth.AuthService` and serves
       `StartDeviceLogin`
-- [ ] `StartDeviceLogin` returns a `user_code` and a `verification_uri`, and **no client secret is
+- [x] `StartDeviceLogin` returns a `user_code` and a `verification_uri`, and **no client secret is
       sent** on the wire
-- [ ] `PollDeviceLogin` returns `pending` until approval, then a `v2` session token and a refresh
+- [x] `PollDeviceLogin` returns `pending` until approval, then a `v2` session token and a refresh
       token identical in shape to `ExchangeCode`'s
-- [ ] `PollDeviceLogin` honours `slow_down` by widening its interval, and surfaces `expired_token`
+- [x] `PollDeviceLogin` honours `slow_down` by widening its interval, and surfaces `expired_token`
       and `access_denied` as distinct, actionable states
-- [ ] On a deployment with an empty `users:`, the **first** successful login is enrolled against the
+- [x] On a deployment with an empty `users:`, the **first** successful login is enrolled against the
       running OS user and persisted
-- [ ] A **second, different** GitHub login on an enrolled deployment is refused
+- [x] A **second, different** GitHub login on an enrolled deployment is refused
       `permission_denied: user not mapped to OS user` — no fallback, no second enrolment
-- [ ] `os_user_for_github` is unchanged and has no default arm
-- [ ] A deployment with `client_id` **and** `client_secret` still serves the redirect flow unchanged
-- [ ] `RealGitHubProvider` takes a base URL, and `exchange_code`'s six error returns are covered
-- [ ] A fresh `./install --desktop` reaches a signed-in dashboard with **no file edited by hand**
+- [x] `os_user_for_github` is unchanged and has no default arm
+- [x] A deployment with `client_id` **and** `client_secret` still serves the redirect flow unchanged
+- [x] `RealGitHubProvider` takes a base URL, and `exchange_code`'s six error returns are covered
+- [x] Only a login completed over the desktop's own window (`InProcess`) enrols. A login completed
+      over any other transport on an unenrolled desktop is minted unmapped and writes nothing
+      (`tddy-daemon/tests/first_login_enrolment_acceptance.rs`:
+      `a_device_login_over_the_common_room_is_not_enrolled_on_an_unenrolled_desktop`,
+      `a_device_login_over_the_agent_tool_socket_is_not_enrolled_on_an_unenrolled_desktop`,
+      `a_desktop_still_enrols_its_window_login_after_a_common_room_login_was_not`,
+      `a_desktop_still_enrols_its_window_login_after_an_agent_tool_socket_login_was_not`; the
+      stamps are pinned by `tddy-tauri-rpc/tests/stamps_the_in_process_transport.rs` and
+      `tddy-daemon-livekit/tests/forwarded_rpc_is_stamped_by_the_receiver.rs`)
+- [x] An absent `auth_flow` means "no sign-in configured", an unknown value is an error, and a public
+      client refuses `GetAuthUrl` with `failed_precondition`
+      (`tddy-daemon-auth/tests/device_login_acceptance.rs`:
+      `a_daemon_holding_only_a_public_client_id_refuses_to_begin_the_redirect_flow`,
+      `a_daemon_holding_only_a_public_client_id_declares_the_device_flow`;
+      `tddy-github/tests/real_provider_over_http.rs`:
+      `a_public_client_hands_out_no_authorize_url_it_could_never_complete`;
+      `tddy-daemon/tests/daemon_config_service.rs`: `declares_no_sign_in_flow_for_a_daemon_without_github`;
+      `tddy-daemon/tests/server_options_acceptance.rs`:
+      `omits_the_sign_in_flow_at_api_config_for_a_daemon_without_github`;
+      `tddy-web/src/rpc/clientConfig.test.ts`: "reads a daemon that declares no auth_flow as serving
+      no sign-in over HTTP" / "… over RPC", "keeps an auth_flow it does not recognise as
+      unrecognised rather than guessing a flow"; `tddy-web/cypress/component/DeviceLoginAcceptance.cy.tsx`:
+      "says the daemon has no GitHub sign-in configured, and offers neither flow, when it declares
+      none", "names a sign-in flow it does not recognise as an error, and offers neither flow")
+- [ ] A fresh `./install --desktop` reaches a signed-in dashboard with **no file edited by hand** —
+      ⏸ deferred to the developer — 'I'll configure and test production myself'
 
 ## References
 

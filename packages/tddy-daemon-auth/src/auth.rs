@@ -233,7 +233,7 @@ pub fn build_auth_entries_admitting(
             admission,
         ),
         Some(GitHubProviderKind::Public { client_id }) => auth_service_entry(
-            RealGitHubProvider::new_public(client_id, &redirect_uri()),
+            RealGitHubProvider::new_public(client_id),
             tokens,
             github_token_store.clone(),
             admission,
