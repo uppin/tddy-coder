@@ -345,21 +345,14 @@ impl DaemonSessionHost {
         // `SemanticSearch` tool resolves against the per-session index.
         let mut semantic_index_env_pair: Option<(String, String)> = None;
         if semantic_index {
-            let embedder =
-                tddy_semantic_index::production_embedder(&self.tddy_data_dir).map_err(|e| {
-                    Status::failed_precondition(format!(
-                        "semantic index requested but no embedder is available: {e}"
-                    ))
-                })?;
-            tddy_semantic_index::semantic_index::run_semantic_index_blocking(
-                &worktree_path,
-                &session_dir,
-                embedder,
+            service_util::index_session_worktree(
+                &self.tddy_data_dir,
                 &self.task_registry,
                 session_id,
+                &worktree_path,
+                &session_dir,
             )
-            .await
-            .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
+            .await?;
             semantic_index_env_pair = Some(
                 tddy_semantic_index::semantic_index::semantic_index_env(&session_dir),
             );

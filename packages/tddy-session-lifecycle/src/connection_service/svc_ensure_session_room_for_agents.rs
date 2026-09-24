@@ -206,21 +206,14 @@ impl DaemonSessionHost {
         let worktree_path =
             workspace_session::resolve_worktree_root_for_session(sessions_base, session_id)?;
         let session_dir = unified_session_dir_path(sessions_base, session_id);
-        let embedder =
-            tddy_semantic_index::production_embedder(&self.tddy_data_dir).map_err(|e| {
-                Status::failed_precondition(format!(
-                    "semantic index requested but no embedder is available: {e}"
-                ))
-            })?;
-        tddy_semantic_index::semantic_index::run_semantic_index_blocking(
-            &worktree_path,
-            &session_dir,
-            embedder,
+        super::service_util::index_session_worktree(
+            &self.tddy_data_dir,
             &self.task_registry,
             session_id,
+            &worktree_path,
+            &session_dir,
         )
-        .await
-        .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
+        .await?;
         log::info!(
             "StartSession: indexed workspace session {session_id}'s worktree at {}",
             worktree_path.display()

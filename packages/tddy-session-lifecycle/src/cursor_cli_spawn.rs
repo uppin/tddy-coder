@@ -265,20 +265,14 @@ pub async fn spawn_cursor_cli_session_inner(
     // `SemanticSearch` tool at the per-session index DB via the process env.
     let mut session_env: Vec<(String, String)> = Vec::new();
     if semantic_index {
-        let embedder = tddy_semantic_index::production_embedder(tddy_data_dir).map_err(|e| {
-            Status::failed_precondition(format!(
-                "semantic index requested but no embedder is available: {e}"
-            ))
-        })?;
-        tddy_semantic_index::semantic_index::run_semantic_index_blocking(
-            &worktree_path,
-            &session_dir,
-            embedder,
+        crate::connection_service::index_session_worktree(
+            tddy_data_dir,
             task_registry,
             session_id,
+            &worktree_path,
+            &session_dir,
         )
-        .await
-        .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
+        .await?;
         session_env.push(tddy_semantic_index::semantic_index::semantic_index_env(
             &session_dir,
         ));

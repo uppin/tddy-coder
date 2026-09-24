@@ -304,20 +304,14 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // agent (blocking until terminal). A missing embedder or a failed index aborts the start — no
     // unindexed fallback. On success, point the `SemanticSearch` tool at the session's index DB.
     if semantic_index {
-        let embedder = tddy_semantic_index::production_embedder(tddy_data_dir).map_err(|e| {
-            Status::failed_precondition(format!(
-                "semantic index requested but no embedder is available: {e}"
-            ))
-        })?;
-        tddy_semantic_index::semantic_index::run_semantic_index_blocking(
-            &worktree_path,
-            &session_dir,
-            embedder,
+        service_util::index_session_worktree(
+            tddy_data_dir,
             task_registry,
             session_id,
+            &worktree_path,
+            &session_dir,
         )
-        .await
-        .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
+        .await?;
         let (key, value) = tddy_semantic_index::semantic_index::semantic_index_env(&session_dir);
         env_extra.push((key, value));
     }

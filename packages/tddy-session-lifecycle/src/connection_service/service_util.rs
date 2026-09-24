@@ -8,6 +8,36 @@ use tddy_rpc::Status;
 
 use std::time::Duration;
 
+/// Build a session's semantic index over its worktree into its session dir, blocking until the
+/// index is terminal.
+///
+/// A missing embedder or a failed index is an error — no unindexed fallback — so a start that asked
+/// for the index fails rather than coming up without it. The index's env pair, when a caller needs
+/// one, is `tddy_semantic_index::semantic_index::semantic_index_env(session_dir)`.
+pub(crate) async fn index_session_worktree(
+    tddy_data_dir: &Path,
+    task_registry: &tddy_task::TaskRegistry,
+    session_id: &str,
+    worktree_path: &Path,
+    session_dir: &Path,
+) -> Result<(), Status> {
+    let embedder = tddy_semantic_index::production_embedder(tddy_data_dir).map_err(|e| {
+        Status::failed_precondition(format!(
+            "semantic index requested but no embedder is available: {e}"
+        ))
+    })?;
+    tddy_semantic_index::semantic_index::run_semantic_index_blocking(
+        worktree_path,
+        session_dir,
+        embedder,
+        task_registry,
+        session_id,
+    )
+    .await
+    .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
+    Ok(())
+}
+
 /// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
 pub async fn spawn_blocking_with_timeout<T: Send + 'static>(
     timeout: Duration,
