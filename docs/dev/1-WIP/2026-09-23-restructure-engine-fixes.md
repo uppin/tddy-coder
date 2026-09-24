@@ -37,6 +37,9 @@ Related, already on master:
   kept for every reader, so the health gate holds on a warm, already-drained client.
 - **`tddy-index-daemon`** (added 2026-09-24): its `apply_plan` calls the compile gate, and `status_of`
   classifies the two new error variants.
+- **Root script `run-index-daemon`** (added 2026-09-24): the daemon gets the dev shell's whole
+  environment and a durable TMPDIR, and the log is truncated before launch. **`.config/nextest.toml`**:
+  the six new live suites have joined the `rust-analyzer` test group.
 
 ## Related Feature Documentation
 
@@ -214,9 +217,9 @@ Each finding was reproduced against the live server (rust-analyzer 2026-03-30) i
 
 ## Implementation
 
-Six commits on top of the two test commits, one per milestone. `backends/rust.rs` was not grown:
-every changed piece moved to a sibling under `backends/rust/`, and the file went from 4,788 to 4,294
-production lines (recorded in its code-issue).
+Built one commit per milestone on top of the test commits (21 commits in all, gaps A–C and the
+docs included). `backends/rust.rs` was not grown: every changed piece moved to a sibling under
+`backends/rust/`, and the file went from 4,788 to 4,316 production lines (recorded in its code-issue).
 
 | Module | Holds |
 |---|---|
@@ -430,6 +433,85 @@ fixture's residual-placeholder refusal showed, and matches the real plan's refus
 - `ServerChatter::quiescent`'s doc links to the private `RustBackend::ensure_indexed`, now in
   another module.
 
+### From /validate-changes (2026-09-24)
+
+- ⚠️ `run-index-daemon:636`: `"$(env PATH="$DEV_SHELL_PATH" command -v setsid)"` runs `command`
+  as an external binary. macOS ships `/usr/bin/command`, but Debian, Ubuntu and NixOS do not. There
+  the substitution is empty and `env -i … ""` fails, so the script cannot start a daemon on those
+  Linux hosts. The old `env PATH=… setsid` form worked. Fix: resolve it in a subshell,
+  `(PATH="$DEV_SHELL_PATH"; command -v setsid)`, and refuse when that is empty.
+- ⚠️ `run-index-daemon:592-595`: a docs claim the code contradicts. The comment says "The caller's
+  own environment is not inherited either: a host `LDFLAGS`/`CPPFLAGS`…". But
+  `nix develop -c env -0` without `--ignore-environment` keeps the caller's environment, so a host
+  `LDFLAGS` the dev shell does not override lands in `DEV_SHELL_ENV` and reaches the daemon. Fix:
+  either run `nix develop -i` (keeping `HOME`/`USER` explicitly), or reword the comment.
+- ⚠️ `runner/compile_gate.rs:274-307`: `failing_check` runs `cargo check` synchronously and ignores
+  the run's `CancellationToken`. On the daemon path (`spawn_blocking` in `operations.rs:178`), a
+  caller that stops waiting cannot cancel a cold `cargo check --all-targets`. It also contends for
+  the checkout's `target/` lock with the developer's own builds. Fix: spawn it, poll the child
+  against `cancel`, and kill it when cancelled.
+- ℹ️ `runner/compile_gate.rs:299`: `line.contains("error")` also keeps warning lines whose text
+  says "error". Match `error:` / `error[` prefixes instead.
+- ℹ️ `runner/entry_points.rs:329`: the baseline runs after `open_run`, which has already called
+  `ensure_self_ignoring()`. The message's "Nothing was written" is true of the tree but not of
+  `.restructure/`. The baseline also runs before the static tier, so a plan `check` would refuse
+  still pays a full `cargo check` first.
+- ℹ️ `backends/rust/nested_modules.rs:71`: `raw.split("//")` truncates a line at any `//`, including
+  one inside a string (`"http://…"`), and can then misread brace depth. `readable_spans` is already
+  `pub(crate)` and could mask it the way `early_return.rs` does.
+- ℹ️ `backends/rust/chatter.rs:207-215`: the library's degraded-index refusal names this repo's
+  `./run-index-daemon` script. That is fine while the engine is repo-internal, but it is host
+  knowledge inside a library.
+- ℹ️ `.agents/skills/code-restructuring/references/plan-schema.md` (the `impl` table): it documents
+  only the `self.modname::doubled()` undo. Gap B (`Self::`/`Type::modname::f`) and Gap C (the
+  nested-module call) are not in the skill docs.
+- ℹ️ `backends/rust.rs:3067`: a comment line over 100 columns, from a hand-edit of the wrapped
+  paragraph.
+
+### From /validate-tests (2026-09-24)
+
+- ⚠️ `tests/apply_compile_gate_acceptance.rs:49` `leaves_the_edits_of_a_failed_apply_on_disk_for_inspection`:
+  it discards the result (`let _refusal`) and asserts only that the moved file exists. That also
+  holds if the gate were removed and the apply "succeeded", so the test does not discriminate.
+  Assert that the apply failed as `AppliedTreeDoesNotCompile` first, or fold this assertion into
+  the failure test.
+- ⚠️ `tests/harness/mod.rs` `until_quiescent`: it subscribes after the handshake and waits for a
+  `quiescent: true` *transition*. If the server settles before the subscription attaches, the wait
+  runs out its 180 s and panics. That window is small on a fixture, but it is a real race, and
+  `LspClient::server_status()` (added in this PR) closes it. Fix: check
+  `client.server_status()` first, then subscribe.
+- ⚠️ `packages/tddy-index-daemon/tests/detached_daemon_production.rs`
+  `a_restart_announces_the_daemon_it_started_not_the_previous_ones_log`: it guards a scheduling
+  race it cannot force, so it passes most of the time with the bug present. `assert!(first.status.success())`
+  has no message. A panic before `stop_the_daemon` (for example in `recorded_pid`) leaks a detached
+  daemon. Both tests are `#[ignore]`d with a justification.
+- ℹ️ Mystery-guest line ranges: `extract_method_control_flow_acceptance.rs:141` (`4..=7`),
+  `index_health_acceptance.rs:671,692` (`4..=5`) and `extract_method_signature_acceptance.rs:188`
+  (`10..=11`) are bare numbers into harness fixtures. `impl_seam`/`import_pass`/`test_module_reference`
+  name theirs as constants; do the same here.
+- ℹ️ `extract_method_signature_acceptance.rs`: correctness rests on a 15 s `sleep` in the fixture's
+  build script outlasting the first hover. It is justified in the fixture doc, but it is a timing
+  race by design, and it costs at least 15 s per run.
+- ℹ️ Two-assertion tests (content plus `assert_compiles`) in `impl_seam`, `import_pass` and
+  `test_module_reference`. This is acceptable as one behaviour, "moved and still compiles". The
+  compile assertion is the one the suites exist for.
+- ℹ️ `backends/rust.rs` unit test `names_a_module_the_file_already_had_when_the_leftover_sits_in_a_module`
+  has no Given/When/Then; every sibling test has it.
+- ℹ️ The same `include_str!` test-binary fixture is written twice, in the restructuring harness and
+  in `code_index_service_acceptance.rs`. Crate boundaries force that, so it is noted, not a defect.
+
+### From /validate-prod-ready (2026-09-24)
+
+- ⚠️ `run-index-daemon:559`: `getconf DARWIN_USER_TEMP_DIR 2>/dev/null || printf '/tmp'` is a
+  silent platform fallback. It is the same shape as the old `${TMPDIR:-/tmp}`, so it is not new
+  debt in kind. It is recorded because the rule is to name every fallback.
+- ℹ️ `backends/rust.rs:2602`: `bound_names` is now a one-line pass-through to `names_bound`. Inline
+  it at its two call sites.
+- ℹ️ `runner/compile_gate.rs:302-306`: when no stderr line names an error, the whole stderr is
+  returned. That is deliberate and commented. It is a failure reported in full, not one masked.
+- No mock or fake code, no test-only production branches, no `println!`/`eprintln!`/`dbg!`, and
+  no TODO/FIXME in the production diff. The `#[cfg(rust_analyzer)]` trick lives only in fixture text.
+
 ### From @red (TDD Red Phase)
 
 - `tests/harness/mod.rs` now has fixture builders for single-crate seams and a lexical
@@ -439,6 +521,83 @@ fixture's residual-placeholder refusal showed, and matches the real plan's refus
   (`nested_module_move_acceptance`, `cluster_move_acceptance`, `facade_cycle_acceptance`, …).
 
 ## Validation results
+
+**2026-09-24, `/pr-wrap` validation (validate-changes, validate-tests, validate-prod-ready).** These
+steps only report. The fixes go to the refactor pass. Scoped to `tddy-code-restructuring`,
+`tddy-index-daemon` and `tddy-lsp`; whole-workspace health is CI's.
+
+- **Stack gate:** the base is `master` and the branch is on its tip. `origin/master..HEAD` holds only
+  this PR's 21 commits, so there is no leak. The diff has 37 files, all claimed by this changeset.
+  Nothing is implemented from `## Dependencies`, and `tddy-session-lifecycle` is untouched.
+- **Build:** `cargo clippy -p tddy-code-restructuring -p tddy-index-daemon -p tddy-lsp --all-targets
+  -- -D warnings` is clean.
+- **Tests:** `./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-lsp` exited 0. All 44
+  result lines are `ok`: 637 passed, 0 failed, 9 ignored. The 9 are `#[ignore]`d tests, the
+  real-script `detached_daemon_production` suite among them.
+- **Risk summary:** 0 critical, 6 warnings, and several info items. They are listed under
+  "Refactoring needed", in the `/validate-changes`, `/validate-tests` and `/validate-prod-ready`
+  subsections.
+- **Changeset sync, corrected here:**
+  - The `## TODO` "Re-run the destructure plans" item was unticked while Scope said it was done.
+  - The Implementation's "4,788 to 4,294" figure is stale; the code issue now records 4,316.
+  - "Six commits on top of the two test commits" is stale; there are 21 commits.
+  - `run-index-daemon` and `.config/nextest.toml` were missing from Affected Packages.
+- **Production readiness:** ⚠️ gaps, no blockers. No mock code, no `println!`/`eprintln!`/`dbg!`,
+  and no TODO/FIXME in production code. There is one platform fallback in `run-index-daemon`
+  (pre-existing in form), and one pass-through wrapper (`bound_names`).
+
+**2026-09-24, `/pr-wrap` refactor pass.** Each validation finding above, and what became of it.
+
+- **Fixed:** `run-index-daemon` resolves `setsid` in a subshell, `SETSID="$(PATH="$DEV_SHELL_PATH";
+  command -v setsid)"`. It refuses when that is empty, and it launches `"$SETSID"`. `env … command`
+  is gone.
+- **Fixed (comment only):** the environment comment now says the daemon gets what `./dev` gets,
+  the caller's environment included. `nix develop` is impure, and that is intended.
+  `durable_tmpdir`'s comment now names its choice: the per-user temp dir on macOS, `/tmp` elsewhere,
+  which is the script's old default.
+- **Fixed:** `failing_check` spawns `cargo check`, drains stderr on a thread, and polls `try_wait`
+  against the run's token. On cancel it kills the child and returns `CallerStopped`, which the daemon
+  already maps to `Status::cancelled`. A cancel during the result check first tells the progress
+  sink that the applied edits are on disk and unchecked. The error filter keeps `error…` lines and
+  `: error` lines (the short format's `path:l:c: error[E…]`), and it falls back to the whole stderr.
+  Both paths are unit-tested. `rustc` children cargo already started are not killed; they only
+  write into `target/`.
+- **Fixed, by reordering:** `open_run_after` takes a `before_writing` gate. It runs after the
+  cheap, read-only refusals (git worktree, repo-scoped journal, `JournalExists`, snapshot) and before
+  `.restructure/` is created. Both `runner::apply` and the daemon's `apply_plan` pass the baseline
+  check as that gate. `open_run` is `open_run_after` with no gate. Resume and dry-run behave as before:
+  the baseline still skips them, and adopting a repository-scoped journal still happens only when a
+  run is continuing. `writes_nothing_to_a_tree_that_did_not_compile_before_the_plan` now also asserts
+  that `.restructure/` is absent. The per-op static backend checks still run after the baseline,
+  inside the apply loop, because they belong to each operation's resolve. That is unchanged.
+- **Fixed:** `leaves_the_edits_of_a_failed_apply_on_disk_for_inspection` asserts the refusal is
+  the applied-tree-does-not-compile failure before it checks the file.
+- **Fixed:** `until_quiescent` folds in `client.server_status()` before it waits. It reads that
+  *after* subscribing, not before: a status read first could be superseded before the subscription
+  attached. Read after, any newer status arrives on the stream.
+- **Fixed:** `detached_daemon_production` has a drop guard (`ASuiteRuntime`) that owns the
+  runtime dir and runs `--stop` when a test ends, pass or panic. Every start asserts with its
+  stderr. The restart test's doc comment says it cannot force the race it guards: a pass is
+  evidence, not proof. The tests are still `#[ignore]`d.
+- **Fixed:** `nested_modules::module_blocks` reads brace depth over `early_return::masked_to_code`
+  (built on `readable_spans`, now `pub(super)`) instead of `split("//")`. `bound_names` is inlined
+  into `names_bound`. The comment at `rust.rs:3065` is rewrapped. The unit test
+  `names_a_module_the_file_already_had_…` has Given/When/Then comments. The bare fixture ranges are
+  now named constants (`A_RANGE_THAT_RETURNS_EARLY`, `STATEMENTS_NEEDING_NO_BUILD_SCRIPT`,
+  `STATEMENTS_READING_THE_REQUEST`). Gaps B and C are documented in
+  `references/plan-schema.md`, in the inherent-`impl` row and the placeholder-leftover paragraph.
+- **Left, by decision:** the degraded-index refusal still names `./run-index-daemon`. The library
+  lives in this repo, and the advice is actionable where it is read.
+- **Left, by design:** the E2 fixture's 15 s build-script sleep. The fixture doc justifies it.
+- **Left:** the restart test's timing race cannot be forced from outside the script. It is now
+  documented in the test's doc comment.
+
+Verification of the refactor pass is scoped to the three packages. Whole-workspace health is CI's.
+`./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-lsp` gave 44 result lines, all
+`ok`: 639 passed (the 637 before, plus 2 new filter unit tests), 0 failed, 9 ignored. Scoped
+`cargo clippy --all-targets -D warnings` is clean, `cargo fmt --check` is clean, and
+`bash -n run-index-daemon` passes. `detached_daemon_production -- --ignored --test-threads=1` ran
+4 tests against the real script, and all 4 passed in 54 s.
 
 **2026-09-24, after gaps A–C.** Scoped to `tddy-code-restructuring`; whole-workspace health is CI's.
 
@@ -483,5 +642,6 @@ Scoped to the packages touched (2026-09-23). Whole-workspace health is CI's.
 - [x] Changeset: this document
 - [x] Failing tests (red)
 - [x] Green
-- [ ] Re-run the destructure plans
-- [ ] `/validate-changes`, `/pr-wrap`, `/wrap-context-docs`
+- [x] Re-run the destructure plans (see Scope; 2026-09-24)
+- [x] `/validate-changes`, `/validate-tests`, `/validate-prod-ready` (2026-09-24, report only; refactor pending)
+- [ ] `/pr-wrap` refactor pass, `/wrap-context-docs`
