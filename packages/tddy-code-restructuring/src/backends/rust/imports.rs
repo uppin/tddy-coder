@@ -151,8 +151,14 @@ impl RustBackend {
             //
             // Both reconstructions write into the module, so they answer only for an occurrence
             // inside it. One the parent lost is left to what the server offers there.
+            //
+            // The declaration is the parent's, and the module is the parent's *child*: a relative
+            // path in it is rebased one level down first (see [`rebased_for_child`]).
             let inside = within(&block, name);
-            if let Some(path) = alias_target(text, module, &name.text).filter(|_| inside) {
+            if let Some(path) = alias_target(text, module, &name.text)
+                .filter(|_| inside)
+                .map(|path| rebased_for_child(&path))
+            {
                 let declaration = format!("use {path} as {};", name.text);
                 return self
                     .reconstructed(uri, text, seam, &name.text, before, &declaration)
@@ -183,7 +189,10 @@ impl RustBackend {
                 // code with nothing on offer for it — and skipping silently is how three modules
                 // landed referencing an unlinked crate. The parent's own declaration says what it
                 // meant, exactly as for an alias.
-                if let Some(path) = parent_binding(text, module, &name.text).filter(|_| inside) {
+                if let Some(path) = parent_binding(text, module, &name.text)
+                    .filter(|_| inside)
+                    .map(|path| rebased_for_child(&path))
+                {
                     let declaration = format!("use {path};");
                     return self
                         .reconstructed(uri, text, seam, &name.text, before, &declaration)
@@ -327,6 +336,25 @@ impl Seam<'_> {
     }
 }
 
+/// A path the parent's `use` declaration names, as the module the seam becomes has to write it.
+///
+/// That module is a **child** of the file's own, so a path relative to the file's module starts one
+/// level too high there: the parent's `super::X` is `super::super::X` in the child, and its `self::X`
+/// is `super::X`. Written verbatim, `use super::SplitStartFailure;` in a module under
+/// `svc_spawn_split_agent` named `svc_spawn_split_agent::SplitStartFailure`, which does not exist.
+///
+/// A path from the crate root (`crate::`), an absolute one (`::`) and one through an extern crate
+/// mean the same thing from any module, and are left alone. So is a bare path through an item the
+/// parent declares (`sibling::X`, reached through 2018's uniform paths): it cannot be told from an
+/// extern crate by reading, and the verification behind every reconstruction refuses it by name.
+pub(super) fn rebased_for_child(path: &str) -> String {
+    match path.split("::").next() {
+        Some("super") => format!("super::{path}"),
+        Some("self") => format!("super{}", &path["self".len()..]),
+        _ => path.to_string(),
+    }
+}
+
 /// Every name the text's `use` declarations bind, read the way the compiler reads a binding.
 ///
 /// Not the last segment of each path, which is what [`super::imported_paths`] gives: `use a::B as
@@ -374,5 +402,102 @@ fn collect_bound(tree: &str, prefix: &str, names: &mut Vec<String>) {
 
     for member in group_members(&tree[open + 1..close]) {
         collect_bound(member, &head, names);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rebases_a_path_through_super_one_level_further_up() {
+        // When
+        let rebased = rebased_for_child("super::SplitStartFailure");
+
+        // Then
+        assert_eq!(rebased, "super::super::SplitStartFailure");
+    }
+
+    #[test]
+    fn rebases_a_path_already_climbing_several_levels() {
+        // When
+        let rebased = rebased_for_child("super::super::config::Setting");
+
+        // Then
+        assert_eq!(rebased, "super::super::super::config::Setting");
+    }
+
+    #[test]
+    fn rebases_a_path_through_self_onto_the_parent() {
+        // When
+        let rebased = rebased_for_child("self::proto::Event");
+
+        // Then
+        assert_eq!(rebased, "super::proto::Event");
+    }
+
+    #[test]
+    fn leaves_a_path_from_the_crate_root_alone() {
+        // When
+        let rebased = rebased_for_child("crate::connection_service::hooks_and_urls");
+
+        // Then
+        assert_eq!(rebased, "crate::connection_service::hooks_and_urls");
+    }
+
+    #[test]
+    fn leaves_an_absolute_path_alone() {
+        // When
+        let rebased = rebased_for_child("::std::sync::Arc");
+
+        // Then
+        assert_eq!(rebased, "::std::sync::Arc");
+    }
+
+    #[test]
+    fn leaves_a_path_through_an_extern_crate_alone() {
+        // When
+        let rebased = rebased_for_child("tddy_rpc::Status");
+
+        // Then
+        assert_eq!(rebased, "tddy_rpc::Status");
+    }
+
+    #[test]
+    fn leaves_a_segment_that_only_starts_with_super_alone() {
+        // When
+        let rebased = rebased_for_child("superset::Thing");
+
+        // Then
+        assert_eq!(rebased, "superset::Thing");
+    }
+
+    /// The reconstruction reads a grouped declaration as one flat path per member, so rebasing the
+    /// flat path rebases the member.
+    #[test]
+    fn rebases_a_member_of_a_group_through_super() {
+        // Given
+        let text =
+            "use super::{AttachmentMaterialization, SplitStartFailure};\n\nmod teardown {\n}\n";
+
+        // When
+        let rebased = parent_binding(text, "teardown", "SplitStartFailure")
+            .map(|path| rebased_for_child(&path));
+
+        // Then
+        assert_eq!(rebased.as_deref(), Some("super::super::SplitStartFailure"));
+    }
+
+    #[test]
+    fn rebases_an_aliased_member_of_a_group_through_self() {
+        // Given
+        let text = "use self::{proto::Event as StartSessionEventKind, other::Thing};\n\nmod readings {\n}\n";
+
+        // When
+        let rebased = alias_target(text, "readings", "StartSessionEventKind")
+            .map(|path| rebased_for_child(&path));
+
+        // Then
+        assert_eq!(rebased.as_deref(), Some("super::proto::Event"));
     }
 }

@@ -1,10 +1,11 @@
 //! The import pass behind `extract_module`, against a live rust-analyzer.
 //!
-//! These cover five things: defect E1, the D8 alias restoration E1 sits in the path of, the
+//! These cover six things: defect E1, the D8 alias restoration E1 sits in the path of, the
 //! restoration of a name the parent lost to the seam, which E1's fix must not scope away, the
-//! grouped-`use` ambiguity, and what the pass does on a server that has only just started. Each
-//! seam is judged by what `cargo check` says of the tree afterwards. The engine can report success
-//! over a `use` line that resolves nothing, so the compiler is the only check it cannot fool.
+//! grouped-`use` ambiguity, the rebasing of a relative `use` for the deeper module, and what the
+//! pass does on a server that has only just started. Each seam is judged by what `cargo check` says
+//! of the tree afterwards. The engine can report success over a `use` line that resolves nothing, so
+//! the compiler is the only check it cannot fool.
 //!
 //! Most of these run against a **settled** server, the warm index the destructure plans were
 //! checked against. A server that has only just started reports no unresolved names for a few
@@ -20,9 +21,12 @@ use std::ops::RangeInclusive;
 
 use harness::{
     a_crate_whose_alias_only_the_compiler_resolves, a_crate_whose_alias_the_server_resolves,
+    a_crate_whose_module_aliases_its_parent_s_type_through_super,
+    a_crate_whose_module_imports_its_parent_s_type_through_super,
     a_crate_whose_parent_names_a_trait_the_seam_moves,
     a_workspace_whose_parent_binds_a_module_in_a_group, an_extract_module_of, assert_compiles,
-    performing, performing_once_settled, refusal_once_settled_from, the_module_named, ORIGIN_LIB,
+    performing, performing_once_settled, refusal_once_settled_from, the_module_named, HOST_MODULE,
+    ORIGIN_LIB,
 };
 
 /// `fn constant() -> u32 { 7 }`: a seam that names nothing at all.
@@ -33,6 +37,10 @@ const A_SEAM_NAMING_THE_ALIAS: RangeInclusive<u32> = 21..=23;
 const A_SEAM_HOLDING_THE_ONLY_USE_OF_MPSC: RangeInclusive<u32> = 11..=13;
 /// `pub trait Named { … }`, which the parent goes on naming in an `impl` and a `&dyn`.
 const A_SEAM_TAKING_THE_TRAIT: RangeInclusive<u32> = 3..=5;
+
+/// `fn tally(&self, failure: Failure)` in `host.rs`: a seam naming the type `host` imports through
+/// `super`.
+const A_SEAM_NAMING_THE_PARENT_S_TYPE: RangeInclusive<u32> = 12..=17;
 
 const THE_PARENT_S_ALIAS: &str = "use crate::proto::Event as StartSessionEventKind;";
 
@@ -160,6 +168,64 @@ async fn imports_into_the_parent_a_trait_the_seam_moved_out_from_under_it() {
     assert!(
         lib.contains("use crate::naming::Named;"),
         "the parent was not given back the trait it still names:\n{lib}"
+    );
+    assert_compiles(&workspace);
+}
+
+/// A relative `use` the parent wrote is rebased for the module the seam becomes, which is one level
+/// deeper.
+///
+/// `host.rs` binds `use super::Failure;`. Written verbatim into `mod tallying` inside `host`, that
+/// `super` is `host`, not `service`. That is plan 05a on `svc_spawn_split_agent.rs` and its
+/// `use super::SplitStartFailure;`.
+///
+/// A guard, not a reproduction: here rust-analyzer offers `super::super::Failure` itself, so the
+/// pass never falls back to the parent's declaration. The alias test below is the one that goes
+/// through a reconstruction.
+#[tokio::test(flavor = "multi_thread")]
+async fn imports_the_parent_s_type_the_moved_code_names_through_super() {
+    // Given
+    let workspace = a_crate_whose_module_imports_its_parent_s_type_through_super();
+    let seam = an_extract_module_of(
+        &workspace,
+        HOST_MODULE,
+        A_SEAM_NAMING_THE_PARENT_S_TYPE,
+        "tallying",
+    );
+
+    // When
+    performing_once_settled(&workspace, seam).await;
+
+    // Then
+    let module = the_module_named(&workspace.read(HOST_MODULE), "tallying");
+    assert!(
+        module.contains("use super::super::Failure;"),
+        "the module was not given the parent's `super::Failure`, one level deeper:\n{module}"
+    );
+    assert_compiles(&workspace);
+}
+
+/// The same, where the parent binds its parent's type under an alias:
+/// `use super::Failure as HostFailure;`. The alias reconstruction is rebased the same way.
+#[tokio::test(flavor = "multi_thread")]
+async fn imports_the_parent_s_alias_of_a_type_it_reaches_through_super() {
+    // Given
+    let workspace = a_crate_whose_module_aliases_its_parent_s_type_through_super();
+    let seam = an_extract_module_of(
+        &workspace,
+        HOST_MODULE,
+        A_SEAM_NAMING_THE_PARENT_S_TYPE,
+        "tallying",
+    );
+
+    // When
+    performing_once_settled(&workspace, seam).await;
+
+    // Then
+    let module = the_module_named(&workspace.read(HOST_MODULE), "tallying");
+    assert!(
+        module.contains("use super::super::Failure as HostFailure;"),
+        "the module was not given the parent's alias, one level deeper:\n{module}"
     );
     assert_compiles(&workspace);
 }

@@ -1277,3 +1277,105 @@ pub fn the_module_named(text: &str, name: &str) -> String {
 
     lines[opened..=closed].join("\n")
 }
+
+/// The non-root module file the relative-import fixtures split: a child of `service`.
+pub const HOST_MODULE: &str = "crates/origin/src/service/host.rs";
+
+/// A crate whose **non-root** module reaches its parent's type through `use super::Failure;`, where
+/// the seam at lines 12–17 of [`HOST_MODULE`] takes a method naming it.
+///
+/// The shape of `connection_service/svc_spawn_split_agent.rs`, whose `use super::SplitStartFailure;`
+/// names a `pub(crate)` enum `connection_service.rs` declares, and whose seam takes a method of an
+/// inherent `impl`. The module the seam becomes is a **child** of `host`, so the parent's
+/// `super::Failure` is `super::super::Failure` there.
+pub fn a_crate_whose_module_imports_its_parent_s_type_through_super() -> AFixtureWorkspace {
+    a_crate_whose_host_module_reads(&[
+        "//! A module that names its parent's type through `super`.",
+        "",
+        "use super::Failure;",
+        "",
+        "pub struct Host;",
+        "",
+        "impl Host {",
+        "    pub fn describe(&self, failure: Failure) -> u32 {",
+        "        self.tally(failure) + 1",
+        "    }",
+        "",
+        "    pub(crate) fn tally(&self, failure: Failure) -> u32 {",
+        "        match failure {",
+        "            Failure::Refused => 1,",
+        "            Failure::Timeout => 2,",
+        "        }",
+        "    }",
+        "}",
+        "",
+        "pub fn described() -> u32 {",
+        "    Host.describe(Failure::Timeout)",
+        "}",
+    ])
+}
+
+/// [`a_crate_whose_module_imports_its_parent_s_type_through_super`], where the parent's type is
+/// bound under an **alias**: `use super::Failure as HostFailure;`.
+pub fn a_crate_whose_module_aliases_its_parent_s_type_through_super() -> AFixtureWorkspace {
+    a_crate_whose_host_module_reads(&[
+        "//! A module that names its parent's type through `super`, under an alias.",
+        "",
+        "use super::Failure as HostFailure;",
+        "",
+        "pub struct Host;",
+        "",
+        "impl Host {",
+        "    pub fn describe(&self, failure: HostFailure) -> u32 {",
+        "        self.tally(failure) + 1",
+        "    }",
+        "",
+        "    pub(crate) fn tally(&self, failure: HostFailure) -> u32 {",
+        "        match failure {",
+        "            HostFailure::Refused => 1,",
+        "            HostFailure::Timeout => 2,",
+        "        }",
+        "    }",
+        "}",
+        "",
+        "pub fn described() -> u32 {",
+        "    Host.describe(HostFailure::Timeout)",
+        "}",
+    ])
+}
+
+fn a_crate_whose_host_module_reads(host: &[&str]) -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! The crate root.",
+                "",
+                "mod service;",
+                "",
+                "pub fn described() -> u32 {",
+                "    service::described()",
+                "}",
+            ]),
+        )
+        .writing(
+            "crates/origin/src/service.rs",
+            &source(&[
+                "//! The module that owns the type its child module names.",
+                "",
+                "mod host;",
+                "",
+                "#[derive(Clone, Copy)]",
+                "pub(crate) enum Failure {",
+                "    Refused,",
+                "    Timeout,",
+                "}",
+                "",
+                "pub fn described() -> u32 {",
+                "    host::described()",
+                "}",
+            ]),
+        )
+        .writing(HOST_MODULE, &source(host))
+}
