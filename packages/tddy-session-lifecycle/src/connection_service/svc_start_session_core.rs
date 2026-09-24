@@ -773,6 +773,26 @@ impl DaemonSessionHost {
             .await?;
             pre_session_id = Some(tool_session_id);
         }
+        let result = self.spawn_tddy_coder(spawn_client, spawn_mouse, os_user, tool_path, tddy_data_dir_for_spawn, repo_path, livekit, pid_for_spawn, agent_for_spawn, agent_def_for_spawn, recipe_for_spawn, stack_parent_for_spawn, stack_node_id_for_spawn, stack_seed_base_session_for_spawn, model_for_spawn, timeout, daemon_log, startup_watch, coder_config_path, pre_session_id, host_session_socket).await?;
+        log::debug!(
+            "StartSession: spawn returned, session_id={}",
+            result.session_id
+        );
+        self.maybe_spawn_presenter_observer(
+            &observer_os_user,
+            &result.session_id,
+            result.grpc_port,
+        );
+        Ok(Response::new(StartSessionResponse {
+            session_id: result.session_id,
+            livekit_room: result.livekit_room,
+            livekit_url: result.livekit_url,
+            livekit_server_identity: result.livekit_server_identity,
+            branch_conflict: None,
+        }))
+    }
+
+    async fn spawn_tddy_coder(&self, spawn_client: Option<Arc<spawn_worker::SpawnClient>>, spawn_mouse: bool, os_user: String, tool_path: String, tddy_data_dir_for_spawn: std::path::PathBuf, repo_path: std::path::PathBuf, livekit: spawner::LiveKitCreds, pid_for_spawn: String, agent_for_spawn: Option<String>, agent_def_for_spawn: Option<String>, recipe_for_spawn: Option<String>, stack_parent_for_spawn: Option<String>, stack_node_id_for_spawn: Option<String>, stack_seed_base_session_for_spawn: Option<String>, model_for_spawn: Option<String>, timeout: std::time::Duration, daemon_log: Option<tddy_core::LogConfig>, startup_watch: spawner::StartupWatch, coder_config_path: Option<std::path::PathBuf>, pre_session_id: Option<String>, host_session_socket: Option<String>) -> Result<spawner::SpawnResult, Status> {
         let result = match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
             tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
@@ -891,21 +911,6 @@ impl DaemonSessionHost {
                 .await?
             }
         };
-        log::debug!(
-            "StartSession: spawn returned, session_id={}",
-            result.session_id
-        );
-        self.maybe_spawn_presenter_observer(
-            &observer_os_user,
-            &result.session_id,
-            result.grpc_port,
-        );
-        Ok(Response::new(StartSessionResponse {
-            session_id: result.session_id,
-            livekit_room: result.livekit_room,
-            livekit_url: result.livekit_url,
-            livekit_server_identity: result.livekit_server_identity,
-            branch_conflict: None,
-        }))
+        Ok(result)
     }
 }
