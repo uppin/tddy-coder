@@ -38,8 +38,8 @@ Feature doc: [Models & Agents](../../../docs/ft/web/models-and-agents.md).
 **File mode.** The database is created `0600` via `OpenOptions::create_new().mode()` *before* sqlx
 opens it, so SQLite derives `-wal`/`-shm` from it; all three are re-`chmod`ded after `ensure_schema`,
 which also repairs a `0644` database an older build left behind. The **parent is deliberately not
-`0700`** — unlike `github_token_store.rs`, which owns a dedicated directory, this lives in the shared
-`tddy-data-dir` that session processes under other uids legitimately read.
+`0700`** — unlike the credential vaults, which own a dedicated `auth_storage` directory, this
+lives in the shared `tddy-data-dir` that session processes under other uids legitimately read.
 
 **Migration** is `ALTER TABLE` guarded by `PRAGMA table_info`, so it is idempotent; a database written
 before ownership existed is pinned by a test that builds one with raw sqlx.

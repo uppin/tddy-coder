@@ -16,7 +16,7 @@
 //! by choosing that passphrase and then reading the vault.
 //!
 //! PRD: docs/ft/coder/pr-stack-live-status.md (C3, D7, D12);
-//! docs/ft/daemon/1-WIP/PRD-2026-09-19-keyring-store.md.
+//! docs/ft/daemon/session-auth.md (§ GitHub access-token retention).
 
 use std::sync::Arc;
 

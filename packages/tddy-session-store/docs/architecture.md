@@ -67,7 +67,9 @@ process is still running and healthy.
   permission bits fixed by the caller and applied when the swap file is created. `write_atomic`
   can only carry over bits that already exist, so a **first** write lands at the process umask.
   Secrets use this variant so their bytes are never on disk at a wider mode, not even briefly.
-  `tddy-daemon-auth`'s `github_token_store` and `tddy-screen-sharing`'s vault write through it.
+  `tddy-daemon-auth`'s signing key and `tddy-screen-sharing`'s vault write through it; the
+  credential vaults use `tddy-credentials`' own copy of the same writer (`atomic.rs`), so that crate
+  does not depend on `tddy-core`.
   On platforms without Unix permissions it behaves as `write_atomic`.
 - **write_atomic_labelled(path, contents)**: `write_atomic` with the target path folded into the
   error string, since a bare `ENOSPC` names no file.

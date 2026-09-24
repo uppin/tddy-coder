@@ -1,7 +1,7 @@
 # `sandboxed_bash_pty_action_streams_output` does not finish locally
 
 **Category:** Flaky / hanging test
-**Source:** `#keyring` 3/9 wave-2 baseline measurement (`docs/dev/1-WIP/2026-09-19-keyring-store.md`)
+**Source:** `#keyring` 3/9 wave-2 baseline measurement (recorded in `docs/dev/changesets/2026-09-24-keyring-store.md`)
 **Package:** `tddy-session-lifecycle`
 **File:** `packages/tddy-session-lifecycle/tests/action_sandbox_acceptance.rs`
 

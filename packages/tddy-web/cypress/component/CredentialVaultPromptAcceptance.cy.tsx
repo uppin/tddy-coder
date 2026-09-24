@@ -15,8 +15,8 @@
  * Opening the vault hands this browser an unlock key, kept beside the refresh token, so a later
  * restart of the daemon is recovered by the next session refresh without asking again.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-09-19-keyring-store.md
- * Changeset: docs/dev/1-WIP/2026-09-19-keyring-store.md
+ * Feature: docs/ft/daemon/session-auth.md (§ GitHub access-token retention);
+ * packages/tddy-web/docs/daemon-sign-in.md (§ The credential vault)
  */
 
 import React from "react";

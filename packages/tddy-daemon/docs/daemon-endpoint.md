@@ -31,6 +31,15 @@ handlers, and `BinaryLocalSocketServices` names `ProjectServiceImpl<ProjectRpcHa
 `PrStackServiceImpl<PrStackRpcHandler>`. See
 [tddy-daemon-rpc](../../tddy-daemon-rpc/docs/architecture.md).
 
+**The credential vaults** are one of those `with_*`. `AuthBuildResult::credential_vaults` — the
+one `SessionVaults` registry `build_auth_entries_admitting` built over `auth_storage`, shared with
+`auth.AuthService` — is handed to the host (`with_credential_vaults`), where the PR-stack handler
+reads a caller's GitHub token from it. At the same point `build` starts the pending-login expiry
+sweep, `tddy_daemon_auth::pending_logins::spawn_pending_login_sweep(&vaults)`, which drops a
+sign-in's waiting GitHub token once `github.pending_login_ttl_seconds` has passed (no task when it
+is `0`). No `auth_storage` means neither — see
+[auth-service.md § Credential vaults](../../tddy-daemon-auth/docs/auth-service.md#credential-vaults).
+
 `tests/` holds only the suites that exercise this composition — see
 [test-placement.md](./test-placement.md).
 

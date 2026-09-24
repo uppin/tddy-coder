@@ -1,7 +1,7 @@
 # Two copies of "replace a secret without truncating it"
 
 **Category:** Duplication / crate boundary
-**Source:** `#keyring` 3/9 validation finding V7 (`docs/dev/1-WIP/2026-09-19-keyring-store.md`)
+**Source:** `#keyring` 3/9 validation finding V7 (recorded in `docs/dev/changesets/2026-09-24-keyring-store.md`)
 **Packages:** `tddy-credentials`, `tddy-session-store`
 **Files:** `packages/tddy-credentials/src/atomic.rs`, `packages/tddy-session-store/src/atomic_file.rs`
 

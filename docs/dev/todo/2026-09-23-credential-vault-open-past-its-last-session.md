@@ -1,7 +1,7 @@
 # A credential vault stays open after its last session lapses without a logout
 
 **Category:** Key lifetime
-**Source:** `#keyring` 3/9 validation finding V3 (`docs/dev/1-WIP/2026-09-19-keyring-store.md`)
+**Source:** `#keyring` 3/9 validation finding V3 (recorded in `docs/dev/changesets/2026-09-24-keyring-store.md`)
 **Package:** `tddy-credentials`
 **File:** `packages/tddy-credentials/src/sessions.rs`
 

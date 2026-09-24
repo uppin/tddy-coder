@@ -220,9 +220,18 @@ systemd — and `get_pr_by_head` returned `Ok(None)`, indistinguishable from "no
 was therefore invisible. The token the operator had already granted was discarded at the end of
 `ExchangeCode`.
 
-- The GitHub OAuth authorize scope is **`read:user repo`**, and `AuthServiceImpl::exchange_code`
-  retains the access token in a `GitHubTokenStore` (`put(login, token)` / `get(login)`). The daemon's
-  `FileGitHubTokenStore` is rooted at the (previously unread) `auth_storage` config path.
+- The GitHub OAuth authorize scope is **`read:user repo`**, and a completed sign-in retains the
+  access token in **the operator's own encrypted credential vault** under `auth_storage`, opened by
+  their vault passphrase or by the unlock key their browser holds — see
+  [Cross-daemon session authentication § GitHub access-token retention](../daemon/session-auth.md#github-access-token-retention-added-2026-07-26).
+  Nothing about PR status depends on the vault's format; it reads the caller's token by the vault's
+  state.
+- **While the caller's vault is closed, PR status is *unavailable* with a reason that names the
+  remedy** — never "no PR" and never "sign in again". A `LOCKED` vault (a file exists and has not
+  been opened since this daemon started) says to unlock the credential vault with its passphrase, or
+  that it reopens at the next session refresh; a sign-in whose token is waiting for a first
+  passphrase says to unlock the credential vault by choosing one. Once the vault opens, lookups
+  perform with the sealed token, with no new login.
 - `ConnectionServiceImpl` resolves the **caller's own** token from their session-token login for
   `query_branch` / `get_pr_status`, and `RealGithubPrApi::with_token` takes it explicitly — it never
   falls back to the process environment, which would be a silent credential swap.
@@ -449,7 +458,11 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   `FileGitHubTokenStore` (rooted at `auth_storage`; `github-tokens.json` at mode `0600`, dir `0700`;
   `put` serialised on a process-wide mutex and published via `.tmp` + `fsync` + `rename`), a boot-time
   `probe_writable` in `build_auth_entries`, and `pr_status_for_caller`, which resolves the caller's
-  token by login and returns a `PrStatusView` value rather than a `Status`.
+  token by login and returns a `PrStatusView` value rather than a `Status`. *(Superseded 2026-09-24
+  by `#keyring` 3/9, [#510](https://github.com/uppin/tddy-coder/pull/510): the trait, the file
+  store and `github-tokens.json` are deleted; the token lives in `tddy-credentials`' per-user
+  encrypted vault, and the PR-status read is `tddy-daemon-rpc`'s `pr_stack/pr_status.rs` through
+  `tddy-daemon-auth`'s `github_pr_credentials::retained_github_token`.)*
   `tddy-workflow-recipes` adds `RealGithubPrApi::with_token` (never falling back to the process
   environment — an explicit-token instance authenticating as the host's ambient token would be a silent
   credential swap), `qualified_head`, and `PrLookupOutcome { Found | NotFound | Unavailable(reason) }`;

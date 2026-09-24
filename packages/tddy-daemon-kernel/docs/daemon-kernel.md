@@ -163,6 +163,23 @@ second account deliberately is `#keyring` 8/9 ([#515](https://github.com/uppin/t
 `tests/first_login_enrolment_acceptance.rs` pins the first login written down, a second account
 refused, the rest of the config kept, and an unmapped login still resolving to nobody.
 
+## `pending_login_ttl` — `github.pending_login_ttl_seconds`
+
+`GitHubConfig.pending_login_ttl_seconds: PendingLoginTtl` is how long a sign-in's GitHub token may
+wait in memory for its owner's credential vault, and so how long that sign-in may choose the
+vault's passphrase ([auth-service.md § Credential vaults](../../tddy-daemon-auth/docs/auth-service.md#credential-vaults)).
+The type, its default and its validation live in `pending_login_ttl.rs`, so `config.rs` — far over
+its size budget — carries the field and a one-line pointer.
+
+- `#[serde(default)]` → `DEFAULT_PENDING_LOGIN_TTL_SECONDS`, **600**.
+- `0` → never; `PendingLoginTtl::lifetime()` is `None`.
+- At most `MAX_PENDING_LOGIN_TTL_SECONDS`, **604,800** (seven days, the session refresh window).
+- Validated as it is read: `from_seconds` refuses a larger value, and deserialisation refuses a
+  negative or non-numeric one, each naming the setting — the config load fails rather than
+  clamping. `Display` prints `"600 s"` or `"never (0)"`, as the startup log line uses it.
+
+Inline tests pin the default, `0`, the ceiling, and each refusal's message.
+
 ## See also
 
 - [`packages/tddy-daemon/docs/connection-service.md`](../../tddy-daemon/docs/connection-service.md)
