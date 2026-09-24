@@ -29,6 +29,7 @@ mod chatter;
 mod early_return;
 mod impl_seam;
 mod imports;
+mod nested_modules;
 mod readiness;
 
 pub use chatter::ServerChatter;
@@ -37,6 +38,7 @@ use early_return::refuse_early_returns;
 
 use impl_seam::{refuse_impl_sibling_references, with_method_calls_restored};
 use imports::names_bound;
+use nested_modules::with_nested_references_restored;
 
 /// LSP `SymbolKind::Object` — how rust-analyzer reports an `impl` block. Its members are reached
 /// through the type, never through a module path, which is why a seam may move a whole `impl` freely
@@ -1335,6 +1337,7 @@ impl RustBackend {
             .and_then(|assist| assist.placeholder)
             .ok_or_else(|| failure(format!("{:?} introduces nothing to name", op.op)))?;
         let extracted = with_method_calls_restored(&extracted, placeholder.name, &impl_members);
+        let extracted = with_nested_references_restored(&extracted, placeholder.name, &moved);
 
         let named = self.rename_placeholder(uri, &extracted, placeholder, &name)?;
         refuse_residual_placeholder(original, &named, placeholder.name)?;
@@ -3059,9 +3062,12 @@ fn refuse_residual_placeholder(original: &str, produced: &str, name: &str) -> Re
 
     // Two causes, and they want opposite advice. A leftover inside an already-extracted *module* is
     // an ordering mistake: extract the definition first and no reference to it is sitting in a scope
-    // the rewritten path cannot reach. A leftover inside an `impl` is not, and reordering the plan
-    // provably does not help — one real split was reordered in full and produced byte-identical
-    // refusals at identical offsets. An `impl` body cannot hold a `mod`, so the sibling can be moved
+    // the rewritten path cannot reach. A module the file already had (its `mod tests`) reads the
+    // same lexically and wants no reordering, so that wording names it too; the one such leftover
+    // known, a call beside the module's own import of the item, is repaired before this runs
+    // (`with_nested_references_restored`). A leftover inside an `impl` is not an ordering mistake
+    // either, and reordering the plan provably does not help — one real split was reordered in full
+    // and produced byte-identical refusals at identical offsets. An `impl` body cannot hold a `mod`, so the sibling can be moved
     // neither first nor second; only a wider seam removes the reference.
     //
     // Where both occur the `impl` wording wins, because it is the one no ordering can satisfy.
@@ -3074,8 +3080,11 @@ fn refuse_residual_placeholder(original: &str, produced: &str, name: &str) -> Re
          this plan makes the path resolve — an `impl` body cannot hold a `mod`. Either grow the \
          seam to carry the whole `impl`, or cut it where nothing crosses."
     } else {
-        "Extract a definition before the items that reference it, so no reference to it is sitting \
-         inside an already-extracted module when it moves."
+        "That reference sits inside another module of this file. If an earlier operation of this \
+         plan extracted that module, extract a definition before the items that reference it, so \
+         no reference to it is sitting inside an already-extracted module when it moves. If the \
+         file already had that module, such as its `mod tests`, no ordering helps: reach the item \
+         there through `use super::*;`, or cut the seam where that module does not name it."
     };
 
     Err(server_defect(format!(
@@ -6494,6 +6503,27 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
 
         assert!(
             message.contains("before the items that reference it"),
+            "{message}"
+        );
+    }
+
+    /// The leftover can equally sit inside a module the file already had, such as its `mod tests`,
+    /// which no ordering of the plan changes; lexically the two look alike, so the advice names both.
+    #[test]
+    fn names_a_module_the_file_already_had_when_the_leftover_sits_in_a_module() {
+        let original = "mod tests {\n    fn a() -> u32 { base() }\n}\n";
+        let produced = "mod tests {\n    fn a() -> u32 { modname::base() }\n}\n";
+
+        let message = refuse_residual_placeholder(original, produced, "modname")
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            message.contains(
+                "If the file already had that module, such as its `mod tests`, no ordering helps: \
+                 reach the item there through `use super::*;`, or cut the seam where that module \
+                 does not name it."
+            ),
             "{message}"
         );
     }

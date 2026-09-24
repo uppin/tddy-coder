@@ -1503,3 +1503,47 @@ fn a_crate_whose_gauge_reads_then(members: &[&str], after: &[&str]) -> AFixtureW
         .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
         .writing(ORIGIN_LIB, &source(&lines))
 }
+
+/// A file whose own `#[cfg(test)]` module imports, **by name**, a function the seam at lines 7–9
+/// moves: `mod tests { use super::base; … }`.
+///
+/// The shape of `split_session.rs`, whose `mod withdrawal_contract_tests` opens with
+/// `use super::split_claude_extra_args;` and whose plan 04 moves that function into `agent_argv`.
+pub fn a_crate_whose_test_module_imports_a_function_the_seam_moves() -> AFixtureWorkspace {
+    a_crate_whose_tests_reach_base_through("    use super::base;")
+}
+
+/// The same, where the test module reaches the function through `use super::*;`.
+pub fn a_crate_whose_test_module_globs_a_function_the_seam_moves() -> AFixtureWorkspace {
+    a_crate_whose_tests_reach_base_through("    use super::*;")
+}
+
+fn a_crate_whose_tests_reach_base_through(import: &str) -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A file whose tests call a function a seam moves.",
+                "",
+                "pub fn level() -> u32 {",
+                "    base() + 1",
+                "}",
+                "",
+                "pub fn base() -> u32 {",
+                "    2",
+                "}",
+                "",
+                "#[cfg(test)]",
+                "mod tests {",
+                import,
+                "",
+                "    #[test]",
+                "    fn reads_the_base() {",
+                "        let read = base();",
+                "        assert_eq!(read, 2);",
+                "    }",
+                "}",
+            ]),
+        )
+}
