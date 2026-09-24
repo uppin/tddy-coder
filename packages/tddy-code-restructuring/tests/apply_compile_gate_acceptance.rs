@@ -49,9 +49,15 @@ async fn leaves_the_edits_of_a_failed_apply_on_disk_for_inspection() {
     let workspace = a_workspace_whose_test_binary_reads_a_file_beside_it();
 
     // When
-    let _refusal = applying_a_move_of_the_test_binary(&workspace).await;
+    let refusal = applying_a_move_of_the_test_binary(&workspace)
+        .await
+        .expect_err("an apply whose result does not compile is a failed run");
 
     // Then
+    assert!(
+        refusal.starts_with("1 of 1 operation(s) were applied, and the tree no longer compiles"),
+        "the apply failed, but not because the tree it left does not compile:\n{refusal}"
+    );
     assert!(
         workspace.holds("crates/destination/tests/golden.rs"),
         "the edits of the failed apply were not left on disk"
@@ -112,5 +118,9 @@ async fn writes_nothing_to_a_tree_that_did_not_compile_before_the_plan() {
     assert!(
         workspace.holds("crates/origin/tests/golden.rs"),
         "the plan was applied to a tree that did not compile"
+    );
+    assert!(
+        !workspace.holds(".restructure"),
+        "the refusal says nothing was written, but the run's state directory was"
     );
 }

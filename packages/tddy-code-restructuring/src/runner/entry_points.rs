@@ -21,9 +21,9 @@ use super::comparison::verify;
 use super::options::usage;
 use super::rehearsal::{survey_lines, Rehearsal};
 use super::{
-    commit_operation, open_run, parse_options, refuse_a_broken_baseline, refuse_a_broken_result,
-    refuse_repo_scoped_state, restore_ledger, Command, Finding, Options, Outcome, PlanProgress,
-    RunSummary, SnapshotRewrite, StatePaths,
+    commit_operation, open_run_after, parse_options, refuse_a_broken_baseline,
+    refuse_a_broken_result, refuse_repo_scoped_state, restore_ledger, Command, Finding, Options,
+    Outcome, PlanProgress, RunSummary, SnapshotRewrite, StatePaths,
 };
 
 /// Dispatch a restructuring subcommand given a raw command line.
@@ -129,10 +129,19 @@ pub fn apply(
     let plan = read_plan(&plan_path)?;
     let paths = StatePaths::for_plan(root, &plan_path)?;
 
-    let mut journal = open_run(&plan, root, &paths, &options)?;
+    // The baseline compile check is the last refusal before anything is written: after the cheap
+    // ones (a plan they turn away is not worth minutes of `cargo check`), and before
+    // `.restructure/` exists, so its "Nothing was written" is true.
+    let mut journal = open_run_after(&plan, root, &paths, &options, || {
+        refuse_a_broken_baseline(root, &plan, &options, &cancel)
+    })?;
     let mut ledger = restore_ledger(&journal, &paths)?;
-    refuse_a_broken_baseline(root, &plan, &options)?;
-    let mut registry = registry_for(client, cancel, Arc::clone(&options.progress), options.trace);
+    let mut registry = registry_for(
+        client,
+        cancel.clone(),
+        Arc::clone(&options.progress),
+        options.trace,
+    );
     let start = options.from.unwrap_or_else(|| journal.next_op());
     let total = plan.ops.len();
     (options.progress)(&format!(
@@ -217,7 +226,7 @@ pub fn apply(
         done += 1;
     }
 
-    refuse_a_broken_result(root, &options, &journal, &paths, done, total)?;
+    refuse_a_broken_result(root, &options, &journal, &paths, done, total, &cancel)?;
     Ok(RunSummary {
         applied: done,
         total: plan.ops.len(),
