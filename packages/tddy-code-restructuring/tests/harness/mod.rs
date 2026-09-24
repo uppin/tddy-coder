@@ -943,6 +943,29 @@ pub fn a_crate_whose_build_script_fails() -> AFixtureWorkspace {
         )
 }
 
+/// A crate whose function returns early from inside the statements an extract-method would take.
+///
+/// The shape of `start_session_core` in the destructure's plan 10: a `return Ok(…)` that exits the
+/// enclosing function. Lines 4–7 are the range; line 6 is the early return.
+pub fn a_crate_whose_function_returns_early() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A function with an early exit in the middle of its body.",
+                "",
+                "pub fn level(x: bool) -> Result<u32, String> {",
+                "    let base = 2;",
+                "    if x {",
+                "        return Ok(1);",
+                "    }",
+                "    Ok(base)",
+                "}",
+            ]),
+        )
+}
+
 /// A type whose `impl` a seam cuts in half, where a member **left behind** calls one that moves.
 ///
 /// The seam at lines 12–14 takes `doubled`. The assist writes it as

@@ -80,6 +80,40 @@ fn a_check_returns_the_findings_it_made() {
     );
 }
 
+/// An extract-method over lines 3–5 of [`A_FUNCTION_THAT_RETURNS_EARLY`], which hold its `return`.
+const AN_EXTRACTION_OVER_AN_EARLY_RETURN: &str = r#"{"op":"extract_method","anchor":{"kind":"range","file":"src/lib.rs","start":{"line":3,"col":5},"end":{"line":5,"col":6}},"name":"base_or_early"}"#;
+
+/// A function whose body exits early from inside the statements an extraction would take.
+const A_FUNCTION_THAT_RETURNS_EARLY: &str = "pub fn level(x: bool) -> Result<u32, String> {\n    let base = 2;\n    if x {\n        return Ok(1);\n    }\n    Ok(base)\n}\n";
+
+#[test]
+fn a_check_finds_an_extraction_that_would_carry_an_early_return() {
+    // Given a plan extracting statements that return early from the function around them
+    let workspace = a_workspace_holding(A_FUNCTION_THAT_RETURNS_EARLY);
+    let plan = a_plan_under(workspace.path(), &[AN_EXTRACTION_OVER_AN_EARLY_RETURN]);
+
+    // When it is checked, without a language server
+    let findings = runner::check(
+        workspace.path(),
+        a_check_of(&plan),
+        None,
+        CancellationToken::new(),
+    )
+    .expect("a check with findings is not itself a failure");
+
+    // Then the early return is the one finding, naming the line that holds it
+    assert_eq!(findings.len(), 1, "expected one finding, got {findings:?}");
+    assert_eq!(findings[0].operation, 0);
+    assert!(
+        findings[0].detail.starts_with(
+            "this seam cannot be cut here: the range returns early from the function around it, \
+             on line 4 (`return Ok(1);`)."
+        ),
+        "{}",
+        findings[0].detail
+    );
+}
+
 #[test]
 fn a_check_of_a_sound_plan_returns_no_findings() {
     // Given a plan with nothing wrong in it

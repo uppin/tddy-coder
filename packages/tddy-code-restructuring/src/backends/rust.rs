@@ -26,11 +26,14 @@ use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
 
 mod chatter;
+mod early_return;
 mod impl_seam;
 mod imports;
 mod readiness;
 
 pub use chatter::ServerChatter;
+
+use early_return::refuse_early_returns;
 
 use impl_seam::{refuse_impl_sibling_references, with_method_calls_restored};
 use imports::names_bound;
@@ -1005,6 +1008,13 @@ impl LanguageBackend for RustBackend {
         if let Err(refusal) = refuse_split_attribute_paths(&text, planned) {
             findings.push(refusal.to_string());
         }
+        if op.op == RefactorKind::ExtractMethod {
+            findings.extend(
+                refuse_early_returns(&text, planned)
+                    .err()
+                    .map(|e| e.to_string()),
+            );
+        }
 
         if op.op == RefactorKind::ExtractModule {
             if let Some(name) = op.name.as_deref() {
@@ -1094,6 +1104,9 @@ impl LanguageBackend for RustBackend {
                 end: *end,
             };
             refuse_split_attribute_paths(&original, planned)?;
+            if op.op == RefactorKind::ExtractMethod {
+                refuse_early_returns(&original, planned)?;
+            }
             if op.op == RefactorKind::ExtractModule {
                 if let Some(name) = op.name.as_deref() {
                     refuse_module_name_taken(&original, name, planned)?;
