@@ -1,6 +1,6 @@
 # 2026-09-18 — A desktop install configures no identity, so it has no sessions
 
-**Category:** Defect / deferred scope — **narrowed 2026-09-24** by `#keyring` 2/9 (#509)
+**Category:** Defect / deferred scope — **narrowed 2026-09-24** by `#keyring` 2/9 (#509) to a verification
 **Owner:** the developer ("I'll configure and test production myself") — **delete this entry when
 they confirm** a fresh install signs in.
 
@@ -10,16 +10,14 @@ Features [tddy-desktop-tauri.md](../../ft/desktop/tddy-desktop-tauri.md),
 
 ## What remains
 
-1. **Render the OAuth App's public `client_id` into `desktop.yaml.production` (repo root)**
-   (`github: { client_id: … }`, **no** `client_secret`), and rewrite the template's barrier notes
-   (`desktop.yaml.production`, the `github:` / `users:` comments), which still tell an operator to add
-   a `client_secret` and a `users:` row.
-2. **Verify a fresh `./install --desktop` reaches a signed-in dashboard with no file edited by hand**
-   — open the app, approve the device code on github.com, see sessions. While there, confirm against
-   the live API that the OAuth App's device-flow token arrives with no expiring `refresh_token`
-   (#509 risk V8): a GitHub App's would need a secret to refresh.
+**Verify a fresh `./install --desktop` reaches a signed-in dashboard with no file edited by hand**
+— open the app, approve the device code on github.com, see sessions. While there, confirm against the
+live API that the OAuth App's device-flow token arrives with no expiring `refresh_token` (#509 risk
+V8): a GitHub App's would need a secret to refresh.
 
-Both need the registered OAuth App, which is the developer's.
+The client id itself is done: `desktop.yaml.production` renders `github: { client_id:
+"Ov23lioH6CfiaZR8ESr5" }` with no secret (2026-09-24, #509). This check needs the real application
+and a GitHub approval, so it is the developer's.
 
 ## What is no longer in the way
 
@@ -35,6 +33,5 @@ each is done:
   window enrols that GitHub login against the OS user the app runs as and persists the row to
   `~/.tddy/desktop.yaml`. `os_user_for_github` is unchanged; a second, different login is refused.
 
-So the only thing between a fresh install and a signed-in dashboard is the rendered `client_id`
-above — the file ships with `github:` unset, which a running daemon reports as "no sign-in
-configured".
+So nothing is known to stand between a fresh install and a signed-in dashboard; the check above is
+what confirms it.

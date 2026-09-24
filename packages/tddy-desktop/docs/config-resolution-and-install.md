@@ -58,16 +58,19 @@ things about it are not obvious:
   login could never be written down, so every sign-in would appear to work and then be refused by
   every RPC.
 
-### What a fresh install still lacks
+### What a fresh install signs in with
 
-The code side of all three requirements a fresh install once had to meet by hand is in place: a
-daemon with no `livekit:` block signs its own tokens, a `client_id` alone serves the device flow, and
-the first sign-in writes `users:`. **`desktop.yaml.production` still ships `github:` unset**, so a
-freshly installed application reports "no sign-in configured" until the OAuth App's public
-`client_id` is rendered into the template. Its `github:` / `users:` comments also still describe a
-`client_id` + `client_secret` pair and a hand-written `users:` row. Rendering that `client_id` and
-checking a fresh install end to end is owned by the developer, and tracked in the backlog
-(`docs/dev/todo/2026-09-18-desktop-install-configures-no-identity.md`).
+A daemon with no `livekit:` block signs its own tokens, a `client_id` alone serves the device flow,
+and the first sign-in writes `users:`. `desktop.yaml.production` renders the Tddy Desktop OAuth App's
+public client id — `github: { client_id: "Ov23lioH6CfiaZR8ESr5" }`, **no** `client_secret` — so
+`github_auth_flow` is `Device` for every fresh install, and its identity comments describe the device
+flow and first-login enrolment. `users: []` stays in the template: enrolment writes its row there
+(and, rewriting the file, drops the template's comments). `listen.web_port` is still required by
+`runtime::build`; the device flow never returns through its `/auth/callback` listener.
+
+Coverage: `tddy-e2e` `install_script` pins the template's shape (no `web_bundle_path`, a `web_port`,
+no unsubstituted placeholder). A fresh install signing in end to end is not automated; it is the
+developer's check, tracked in `docs/dev/todo/2026-09-18-desktop-install-configures-no-identity.md`.
 
 ## Content Security Policy
 

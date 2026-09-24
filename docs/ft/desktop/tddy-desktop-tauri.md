@@ -207,17 +207,15 @@ No `livekit:` block is needed to sign in. The daemon signs session tokens with a
 generates for itself on first boot, `signing_key.pem` (mode `0600`) in `auth_storage`, and reuses it
 on every later boot; `livekit.api_secret` signs LiveKit room JWTs and nothing else.
 
-### What a fresh install still lacks
+### What a fresh install signs in with
 
-Nothing in the code stands between a fresh `./install --desktop` and a signed-in dashboard: tokens
-are signed without LiveKit, a `client_id` alone serves the device flow, and the first sign-in writes
-`users:`. **The rendered configuration does**: `desktop.yaml.production` ships `github:` unset, so a
-freshly installed application reports that this daemon has no GitHub sign-in configured until the
-OAuth App's public `client_id` is rendered into the template. The template's `github:` / `users:`
-comments also still describe a `client_id` + `client_secret` pair and a hand-written `users:` row.
-Rendering the `client_id`, and confirming that a fresh install signs in with no file edited by hand,
-is owned by the developer and tracked in the backlog
-(`docs/dev/todo/2026-09-18-desktop-install-configures-no-identity.md`).
+Nothing stands between a fresh `./install --desktop` and a signed-in dashboard: tokens are signed
+without LiveKit, and the rendered configuration carries the Tddy Desktop OAuth App's **public**
+`client_id` (`desktop.yaml.production`, `github: { client_id: "Ov23lioH6CfiaZR8ESr5" }`) with no
+`client_secret`, so the daemon serves the device flow and the first sign-in from the window writes
+`users:`. Nothing confidential ships. An end-to-end check of a fresh install against github.com —
+and of the OAuth App's device-flow token carrying no expiring `refresh_token` — is the developer's,
+tracked in `docs/dev/todo/2026-09-18-desktop-install-configures-no-identity.md`.
 
 ## Signing in
 
