@@ -2,7 +2,8 @@
 
 **Category:** Future enhancement
 **Source:** `#carve` 14/15, [#524](https://github.com/uppin/tddy-coder/pull/524), plans
-`09b` (plan `09` without op 6), `02-cli-session-manager-dir`, `10b` and `09c`, changeset
+`09b` (plan `09` without op 6), `02-cli-session-manager-dir`, `10b`, `09c` and `11`–`16`,
+changeset
 [`2026-09-23-carve-lifecycle-destructure`](../1-WIP/2026-09-23-carve-lifecycle-destructure.md)
 
 Both of these showed up only **after** the compile gate was satisfied: `cargo check --all-targets`
@@ -286,6 +287,48 @@ on K alone: one `WorkflowRecipe`, qualified by hand.
                 sessions_base: sessions_base,      // clippy::redundant_field_names
                 repo_root: repo_root,              // clippy::redundant_field_names
 ```
+
+### Item 4 of the 2026-09-24 run (#524): three more refusals, and a stale index
+
+**R also hangs on a comment.** Plan `16`'s op 5 started its range on the line comment above the
+statement (`// Re-wire managed-workflow orchestration …`). The check stopped at "waiting for type
+inference at the anchor" and the daemon answered nothing more until it was restarted. Starting the
+range on the `let` below passed. `extract_module` ranges that start on a doc comment or a section
+banner (plans `11` and `12`) are unaffected, so the wait is `extract_method`'s alone. The same fix
+applies to both shapes: a deadline, or a refusal for an anchor whose first token has no type.
+
+**T — an anonymous lifetime reads as the `_` placeholder.** Plan `14`, three ops on
+`spawn_claude_cli_session_inner`, refused at `check --deep` on a fresh daemon. Each signature is
+fully typed. The one `_` in it is the `'_` of `SpawnStackParent<'_>`, which the check reads as the
+E0121 placeholder:
+
+```text
+7: rust-analyzer's answer was unusable: rust-analyzer wrote `async fn chain_worktree_base_ref(sessions_base: &PathBuf, new_branch_name: &str, selected_integration_base_ref: &str, stack_parent: &super::SpawnStackParent<'_>, project_id: &str, repo_root: &PathBuf) -> Result<Option<String>, Status> {` — it produced the extraction before it could infer the types the signature needs, and `_` is not legal there (E0121). The crate graph was most likely still loading; retrying the operation against a warm server resolves it.
+```
+
+Ops 1 and 5 have the same shape. Every range that names `stack_parent` is refused this way, so
+nothing that touches the spawn's PR-stack parent can be extracted from either CLI spawn
+(`chain_base_ref`, `link_spawned_branch_without_failing_the_spawn`, the participant metadata). The
+check should look for a type that *is* `_`, not for the character.
+
+**U — rust-analyzer panics on one range.** Plan `16`'s op 3, `relaunch_sandboxed_runner`'s
+`let mut runner_argv = vec![…];` plus the `if … { runner_argv.push(…) }` lines after it:
+
+```text
+3: plan is malformed: lsp: lsp server error -32603: request handler panicked: called `Option::unwrap()` on a `None` value
+```
+
+The panic is the server's. The engine reports it as a malformed plan, which it is not. It was
+dropped from the plan.
+
+**V — the warm daemon does not see a file edited outside a run.** After the DRY rows (hand edits),
+plan `14` was refused with `project: _` and `projects_dir: Path` (unsized, by value). Both names come
+from `find_registered_project`, a function DRY #3 had just added to `service_util.rs`. After
+`./run-index-daemon --stop` and a cold start, the same plan got `project: ProjectData`, and op 6
+passed. The server had answered from the tree as it was at its start. Plans `11`–`13` had passed
+against the same stale server; they were re-checked on the fresh one before applying. Until the
+daemon watches the tree, **restart it after any hand edit**, or its checks are about a tree that no
+longer exists.
 
 ## Candidates, undecided
 
