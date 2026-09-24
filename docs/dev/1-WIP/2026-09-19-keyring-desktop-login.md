@@ -500,6 +500,61 @@ package, and the single web spec. Whole-workspace green comes from CI.
 - ~~**Fix now (V2 debt):** extend `docs/dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md:11` to name `tddy-daemon-kernel/src/first_login_enrolment.rs` `enrol_first_login` as the second writer that loses comments — on every desktop's first sign-in, header included — and point the TODO at `first_login_enrolment.rs:84` to that entry.~~ **Done in pr-wrap step 3** — the backlog bullet now names both writers and one fix; the TODO is `TODO(docs/dev/todo/2026-09-05-from-2026-09-05-tauri-desktop-single-process-daemon.md)`. The comment loss itself is recorded, not fixed.
 - Recorded only: `first_login_enrolment.rs:61` `pub fn enrol_first_login` skips `LiveUsers`' file-write lock (production caller is `live_users.rs` only; narrowing it means moving `tddy-daemon-kernel/tests/first_login_enrolment_acceptance.rs` onto `LiveUsers::enrol_first_login`); `live_users.rs` `snapshot` and `From<Vec<UserMapping>>` are test-support API.
 
+## Restructuring — `/pr-wrap` step 3.5 file-length gate (2026-09-24)
+
+**Run:** the step 3.5 gate over the whole PR range `4e7157d2..d1923dfe` (merge-base with
+`origin/master`), production lines counted to the first `#[cfg(test)]`. 94 non-test, non-generated
+source files changed; 25 are at or over 500.
+
+**⏸ Awaiting the developer's decision** — decompose now or defer (with consent, recorded here and in
+`docs/dev/todo/`) — for every file this PR grew. No file is split in this PR yet. `auth.rs` and
+`config.rs` are ruled out of a split by `## Boundaries`; four more are touched by open dependents,
+which the stack rule defers regardless.
+
+### 🔴 Grown by this PR
+
+| File | Production lines (base → HEAD) | What grew it | Open dependents touching it | Record |
+|---|---|---|---|---|
+| `tddy-daemon-auth/src/auth.rs` | **499 → 596** (crossed) | the device-flow gate, `GitHubProviderKind` / `github_auth_flow`, the public provider | #510, #511 | none (split ruled out by `## Boundaries`) |
+| `tddy-daemon/src/runtime.rs` | 1,562 → 1,619 (+57) | first-login enrolment wiring, `this_process_os_user`, the embedded-host refusal, transport stamping | #510, #511, #512 | `oversized-file-runtime.md` |
+| `tddy-coder/src/run.rs` | 2,682 → 2,715 (+33) | the `auth_flow` declaration (`standalone_auth_provider`, step 1 V9) and transport stamping | #510, #511 | `oversized-file-run.md` |
+| `tddy-session-tool-client/src/lib.rs` | 1,043 → 1,047 (+4)¹ | transport argument to `from_duplex` | none | `oversized-file-lib.md` (new) |
+| `tddy-daemon-sandbox/src/sandbox_session.rs` | 911 → 916 (+5) | `Pipe` stamp on the jail's stdio | none | `oversized-file-sandbox-session.md` |
+| `tddy-supervisor/src/server.rs` | 703 → 708 (+5) | `UnixSocket` stamp | none | none |
+| `tddy-toolcall/src/toolcall/listener.rs` | 671 → 676 (+5) | `UnixSocket` stamp | none | `oversized-file-listener.md` |
+| `tddy-sandbox-runner/src/runner.rs` | 2,650 → 2,654 (+4) | `UnixSocket` stamp | none | none |
+| `tddy-codegen/src/generator.rs` | 1,116 → 1,119 (+3) | generated bidi handler takes the session metadata; `Grpc` stamp | none | none |
+| `tddy-daemon-kernel/src/config.rs` | 1,470 → 1,472 (+2) | `users:` becomes `LiveUsers` | #510, #511, #512, #513 | `oversized-file-config.md` (split ruled out by `## Boundaries`) |
+| `tddy-livekit/src/participant.rs` | 954 → 956 (+2) | `LiveKit` stamp | none | none |
+| `tddy-sandbox-app/src/sandboxed_session.rs` | 735 → 736 (+1) | `UnixSocket` stamp | none | none |
+| `tddy-session-lifecycle/src/cli_session_manager.rs` | 1,371 → 1,372 (+1) | bidi `metadata` parameter | none | none |
+
+¹ The gate's awk stops at `#[cfg(any(feature = "livekit", test))]` (L603), which guards one
+production function, and reports 602 → 602. The real test module starts at L1048. Re-measured with
+a `#[cfg(test)]`-only stop; it is the only file in the range the gate's pattern undercounts.
+
+### ⚠️ Over budget, not grown — alert-only records
+
+| File | Production lines | Record |
+|---|---|---|
+| `tddy-screen-sharing/src/screen_sharing_service.rs` | 967 → 967 | `oversized-file-screen-sharing-service.md` (new) |
+| `tddy-host-service/src/service.rs` | 939 → 939 | `oversized-file-service.md` (new) |
+| `tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs` | 911 → 911 | `oversized-file-svc-start-session-core.md` (existing) |
+| `tddy-session-lifecycle/src/connection_service/session_coordinate_handlers.rs` | 818 → 818 | `oversized-file-session-coordinate-handlers.md` (existing) |
+| `tddy-daemon-rpc/src/pr_stack/ports.rs` | 775 → 775 | `oversized-file-pr-stack-ports.md` (new) |
+| `tddy-worktree-service/src/service.rs` | 753 → 752 | `oversized-file-service.md` (new) |
+| `tddy-daemon-rpc/src/project/coordinate_handlers.rs` | 528 → 528 | `oversized-file-project-coordinate-handlers.md` (new) |
+| `tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent.rs` | 505 → 505 | `oversized-file-svc-spawn-split-agent.md` (existing) |
+
+### Exempt by kind (reported, not budgeted)
+
+- `tddy-rust-typescript-tests/gen/auth_pb.ts` 385 → 576 — `protoc-gen-es` output under
+  `scripts/generated-code.manifest`.
+- Whole-file test modules the gate's path patterns do not exclude:
+  `tddy-host-service/src/host_add_key_handler_tests.rs` 1,260 → 1,262,
+  `tddy-coder/src/session_participant/connection_service_participant/tests.rs` 508 → 511,
+  `tddy-session-lifecycle/src/connection_service/agent_activity_unit_tests.rs` 1,269 → 1,269.
+
 ## Validation Results
 
 **Run:** `/validate-changes`, 2026-09-24, `pr-509-green` @ `09ca3eb3`, base `origin/master`. Supersedes
