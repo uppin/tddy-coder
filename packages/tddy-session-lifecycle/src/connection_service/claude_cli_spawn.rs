@@ -219,22 +219,8 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     let binary_owned = hooks_and_urls::resolve_start_session_claude_binary(config);
     let worktree_clone = worktree_path.clone();
 
-    let initial_prompt_opt = {
-        let p = initial_prompt.trim();
-        if p.is_empty() {
-            None
-        } else {
-            Some(p.to_string())
-        }
-    };
-    let permission_mode_opt = {
-        let m = permission_mode.trim();
-        if m.is_empty() {
-            None
-        } else {
-            Some(m.to_string())
-        }
-    };
+    let initial_prompt_opt = tddy_daemon_kernel::trim_to_option(initial_prompt);
+    let permission_mode_opt = tddy_daemon_kernel::trim_to_option(permission_mode);
 
     // Managed-workflow wiring: build the per-session controller + toolcall listener, write the
     // recipe's orchestration prompt to a file `claude` appends to its system prompt, and inject

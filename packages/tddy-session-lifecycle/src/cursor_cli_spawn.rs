@@ -207,14 +207,7 @@ pub async fn spawn_cursor_cli_session_inner(
         chat::install_cursor_hooks_in_worktree(config, &worktree_path, session_id, os_user);
 
     let binary_path = resolve_cursor_binary_path(config);
-    let initial_prompt_opt = {
-        let p = initial_prompt.trim();
-        if p.is_empty() {
-            None
-        } else {
-            Some(p.to_string())
-        }
-    };
+    let initial_prompt_opt = tddy_daemon_kernel::trim_to_option(initial_prompt);
     if managed_recipe.is_some() {
         let rules_dir = worktree_path.join(".cursor").join("rules");
         let _ = std::fs::create_dir_all(&rules_dir);
