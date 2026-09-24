@@ -8,7 +8,8 @@ pub mod session_token_v2;
 pub mod stub;
 
 pub use auth_service::{
-    AuthServiceImpl, LoginAdmission, AVATAR_URL_METADATA, GITHUB_ID_METADATA, GITHUB_PROVIDER,
+    AuthServiceImpl, LoginAdmission, AVATAR_URL_METADATA, FREE_WRONG_PASSPHRASES,
+    GITHUB_ID_METADATA, GITHUB_PROVIDER,
 };
 pub use provider::{GitHubOAuthProvider, GitHubUser};
 pub use real::RealGitHubProvider;

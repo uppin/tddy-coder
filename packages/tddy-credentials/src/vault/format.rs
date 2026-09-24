@@ -6,7 +6,7 @@ use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
-use super::VaultError;
+use super::{VaultError, MAX_SET_ASIDE_VAULTS};
 
 /// The one format version this build reads and writes. Version 1 derived its key from a login
 /// token and was never deployed outside tests, so it is not migrated — it is refused by name.
@@ -173,7 +173,8 @@ fn describe(value: Option<&serde_json::Value>) -> String {
 
 /// Rename the vault at `path` aside, beside it, as `<stem>.locked-<unix seconds>.vault` — with a
 /// `-<n>` suffix when that name is taken — and return where it went. **Never deletes**: whoever
-/// still knows the old passphrase can open the file there.
+/// still knows the old passphrase can open the file there. With [`MAX_SET_ASIDE_VAULTS`] of this
+/// vault's already set aside, it is [`VaultError::TooManySetAside`] and nothing is renamed.
 ///
 /// Called under [`serialised`], so no write of this process lands between the rename and the fresh
 /// vault that replaces it.
@@ -182,6 +183,10 @@ pub(super) fn set_aside(path: &Path) -> Result<PathBuf, VaultError> {
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .ok_or_else(|| VaultError::Io(format!("{} names no vault file", path.display())))?;
+    let kept = count_set_aside(path, &stem)?;
+    if kept >= MAX_SET_ASIDE_VAULTS {
+        return Err(VaultError::TooManySetAside { kept });
+    }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| VaultError::Io(format!("the clock reads before the Unix epoch: {e}")))?
@@ -205,6 +210,28 @@ pub(super) fn set_aside(path: &Path) -> Result<PathBuf, VaultError> {
         ))
     })?;
     Ok(aside)
+}
+
+/// How many vaults named `<stem>.locked-….vault` sit beside `path`. A subject's hex stem holds no
+/// `.`, so no other subject's live or set-aside vault can match another's prefix.
+fn count_set_aside(path: &Path, stem: &str) -> Result<usize, VaultError> {
+    let dir = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let prefix = format!("{stem}.locked-");
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| VaultError::Io(format!("listing {}: {e}", dir.display())))?;
+    let mut kept = 0;
+    for entry in entries {
+        let entry = entry.map_err(|e| VaultError::Io(format!("listing {}: {e}", dir.display())))?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(&prefix) && name.ends_with(".vault") {
+            kept += 1;
+        }
+    }
+    Ok(kept)
 }
 
 pub(super) fn write_vault_file(path: &Path, file: &VaultFile) -> Result<(), VaultError> {

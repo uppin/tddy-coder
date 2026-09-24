@@ -3,15 +3,102 @@
 //! `ResetVault`. Split out of `auth_service.rs` so the session-token half and the vault half can
 //! each be read on their own; the public surface is unchanged and re-exported from there.
 
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use tokio::sync::{Semaphore, SemaphorePermit};
+
 use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SecretString, SessionVaults, UnlockKey, VaultError,
-    VaultState, MIN_PASSPHRASE_CHARS,
+    VaultState, MAX_PASSPHRASE_CHARS, MIN_PASSPHRASE_CHARS,
 };
-use tddy_rpc::Status;
+use tddy_rpc::{Code, Status};
 use tddy_service::proto::auth::{
     LogoutRequest, ResetVaultRequest, ResetVaultResponse, UnlockVaultRequest, UnlockVaultResponse,
     VaultState as ProtoVaultState,
 };
+
+mod backoff;
+
+use backoff::PassphraseBackoff;
+pub use backoff::FREE_WRONG_PASSPHRASES;
+
+/// How many passphrase key derivations this service runs at once, whoever asked for them.
+///
+/// Each is Argon2id over 19 MiB, tens of milliseconds of one core. They run on tokio's blocking
+/// pool rather than on an RPC worker, and no more than this many at a time, so a flood of unlock
+/// attempts — from one user or many — queues behind them instead of starving every other RPC.
+const CONCURRENT_KEY_DERIVATIONS: usize = 2;
+
+/// What vault passphrases may cost this daemon: a bound on concurrent key derivations, and each
+/// user's backoff after wrong passphrases. One per auth service, which a daemon builds once.
+pub(super) struct UnlockThrottle {
+    derivations: Semaphore,
+    backoff: PassphraseBackoff,
+}
+
+impl Default for UnlockThrottle {
+    fn default() -> Self {
+        Self {
+            derivations: Semaphore::new(CONCURRENT_KEY_DERIVATIONS),
+            backoff: PassphraseBackoff::default(),
+        }
+    }
+}
+
+impl UnlockThrottle {
+    /// A turn to derive a key; waits while [`CONCURRENT_KEY_DERIVATIONS`] others are running.
+    async fn turn(&self) -> Result<SemaphorePermit<'_>, Status> {
+        self.derivations
+            .acquire()
+            .await
+            .map_err(|_| Status::internal("the credential vault's key derivations have stopped"))
+    }
+
+    /// Refused, naming the wait, while `login` is still owed one for wrong passphrases. Asked once
+    /// a turn is held, so attempts that queued behind a derivation are judged by its outcome.
+    fn allow(&self, login: &str) -> Result<(), Status> {
+        match self.backoff.retry_after(login, Instant::now()) {
+            None => Ok(()),
+            Some(wait) => Err(Status {
+                code: Code::ResourceExhausted,
+                message: format!(
+                    "too many wrong passphrases for the credential vault of '{login}'; retry \
+                     after {} s",
+                    whole_seconds(wait)
+                ),
+            }),
+        }
+    }
+
+    /// Count what an unlock attempt by `login` came to: a wrong passphrase extends their wait, a
+    /// right one ends it.
+    fn record<T>(&self, login: &str, outcome: &Result<T, VaultError>) {
+        match outcome {
+            Ok(_) => self.backoff.right(login),
+            Err(VaultError::Locked) => self.backoff.wrong(login, Instant::now()),
+            Err(_) => {}
+        }
+    }
+}
+
+/// `wait` rounded up to whole seconds, so a retry after the stated time is never still refused.
+fn whole_seconds(wait: Duration) -> u64 {
+    wait.as_secs() + u64::from(wait.subsec_nanos() > 0)
+}
+
+/// Run a vault operation that derives a key from a passphrase on tokio's blocking pool.
+async fn derive_off_the_executor<T: Send + 'static>(
+    derive: impl FnOnce() -> Result<T, VaultError> + Send + 'static,
+) -> Result<Result<T, VaultError>, Status> {
+    tokio::task::spawn_blocking(derive).await.map_err(|e| {
+        log::error!(
+            target: "tddy_github::auth_service",
+            "a credential vault key derivation did not finish: {e}"
+        );
+        Status::internal("the credential vault operation did not finish")
+    })
+}
 
 use super::{AuthServiceImpl, GITHUB_PROVIDER};
 use crate::provider::{GitHubOAuthProvider, GitHubUser};
@@ -74,12 +161,17 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
     }
 
     /// Reopen the refreshing user's vault through the unlock key their lineage presented, and
-    /// return the rotated key with the vault's state — or `""` and whatever state the vault is in
-    /// when none was presented or it no longer opens its slot.
+    /// return the rotated key with the vault's state.
+    ///
+    /// `""` is returned only when no key was presented, or the presented one can never open this
+    /// user's vault again: another user's, malformed, or [`VaultError::Locked`] — its slot was
+    /// rotated, removed or evicted. Any other failure (the file could not be read, say) says
+    /// nothing about the key, so the presented key is handed back **unrotated**: an empty one
+    /// would make the browser throw away its only way back into the vault over a passing I/O error.
     ///
     /// Never fails the refresh. The session token and the vault are separate things: refusing
     /// the refresh would sign the operator out of everything for a credential-store problem.
-    /// A key that does not open its slot is logged, and the state says what opens the vault now.
+    /// Every key that does not reopen the vault is logged, and the state says what opens it now.
     pub(super) fn reopen_the_vault(
         &self,
         login: &str,
@@ -97,14 +189,22 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
             .and_then(|unlock| vaults.reopen(&unlock));
         match reopened {
             Ok(rotated) => (rotated.to_wire(), ProtoVaultState::Open),
-            Err(e) => {
+            Err(VaultError::Locked) => {
                 log::warn!(
                     target: "tddy_github::auth_service",
-                    "the vault unlock key presented at session refresh for login '{login}' did not \
-                     reopen its credential vault ({e}); it stays as it is until its passphrase is \
+                    "the vault unlock key presented at session refresh for login '{login}' opens \
+                     no slot of its credential vault; it stays as it is until its passphrase is \
                      given"
                 );
                 (String::new(), to_proto_state(vaults.state(login)))
+            }
+            Err(e) => {
+                log::error!(
+                    target: "tddy_github::auth_service",
+                    "could not reopen the credential vault of '{login}' at session refresh ({e}); \
+                     handing the presented unlock key back unrotated"
+                );
+                (presented.to_string(), to_proto_state(vaults.state(login)))
             }
         }
     }
@@ -130,10 +230,14 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
     }
 
     /// The vaults an unlock or a reset acts on, or why there is nothing to act on.
-    pub(super) fn vaults_to_unlock(&self) -> Result<&SessionVaults, Status> {
-        self.retaining_vaults().ok_or_else(|| {
-            Status::failed_precondition("this daemon keeps no credential vault for this login")
-        })
+    pub(super) fn vaults_to_unlock(&self) -> Result<Arc<SessionVaults>, Status> {
+        self.credential_vaults
+            .as_ref()
+            .filter(|_| self.provider.issues_usable_access_token())
+            .map(Arc::clone)
+            .ok_or_else(|| {
+                Status::failed_precondition("this daemon keeps no credential vault for this login")
+            })
     }
 
     /// `UnlockVault`: open the caller's vault with its passphrase, or create it under a first one.
@@ -144,12 +248,22 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         let passphrase = SecretString::new(req.passphrase);
         let login = self.caller_login(&req.session_token).await?;
         let vaults = self.vaults_to_unlock()?;
-        let opened = if req.create {
+        check_passphrase_length(&passphrase)?;
+        if req.create {
             check_new_passphrase(&passphrase)?;
-            vaults.create(&login, &passphrase)
-        } else {
-            vaults.unlock(&login, &passphrase)
-        };
+        }
+        let _turn = self.unlock_throttle.turn().await?;
+        self.unlock_throttle.allow(&login)?;
+        let (create, subject) = (req.create, login.clone());
+        let opened = derive_off_the_executor(move || {
+            if create {
+                vaults.create(&subject, &passphrase)
+            } else {
+                vaults.unlock(&subject, &passphrase)
+            }
+        })
+        .await?;
+        self.unlock_throttle.record(&login, &opened);
         let unlock =
             opened.map_err(|e| refused_by_the_vault(&login, "open the credential vault", e))?;
         Ok(UnlockVaultResponse {
@@ -166,9 +280,12 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         let new_passphrase = SecretString::new(req.new_passphrase);
         let login = self.caller_login(&req.session_token).await?;
         let vaults = self.vaults_to_unlock()?;
+        check_passphrase_length(&new_passphrase)?;
         check_new_passphrase(&new_passphrase)?;
-        let reset = vaults
-            .reset(&login, &new_passphrase)
+        let _turn = self.unlock_throttle.turn().await?;
+        let subject = login.clone();
+        let reset = derive_off_the_executor(move || vaults.reset(&subject, &new_passphrase))
+            .await?
             .map_err(|e| refused_by_the_vault(&login, "reset the credential vault", e))?;
         if let Some(ref aside) = reset.set_aside {
             log::warn!(
@@ -183,25 +300,51 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         })
     }
 
-    /// What a logout does to the vault: remove the signing-out lineage's unlock slot.
-    pub(super) fn forget_the_lineage(&self, req: &LogoutRequest) {
+    /// What a logout does to the vault: remove the signing-out lineage's unlock slot — or, for a
+    /// lineage that never opened the vault, drop the GitHub token its login left waiting for it.
+    pub(super) async fn forget_the_lineage(&self, req: &LogoutRequest) {
         // Signed session tokens are stateless — logout is client-side (the client discards its
         // token). What the daemon does hold is this lineage's unlock slot in the vault, and that
         // is removed. The key itself proves the lineage, so an expired access token does not keep
         // the slot alive.
-        if let (Some(vaults), Some(unlock)) = (
-            self.credential_vaults.as_ref(),
-            UnlockKey::from_wire(&req.vault_unlock_key),
-        ) {
-            if let Err(e) = vaults.forget(&unlock) {
-                log::warn!(
-                    target: "tddy_github::auth_service",
-                    "logout of '{}' left its vault unlock slot in place: {e}",
-                    unlock.subject()
-                );
+        let Some(vaults) = self.credential_vaults.as_ref() else {
+            return;
+        };
+        match UnlockKey::from_wire(&req.vault_unlock_key) {
+            Some(unlock) => {
+                if let Err(e) = vaults.forget(&unlock) {
+                    log::warn!(
+                        target: "tddy_github::auth_service",
+                        "logout of '{}' left its vault unlock slot in place: {e}",
+                        unlock.subject()
+                    );
+                }
             }
+            // No key: the vault was closed when this lineage signed in, so its login's live token
+            // may still be waiting in memory. The access token says whose; without a valid one
+            // there is nobody to drop it for, and it waits for the next unlock or restart.
+            None => match self.caller_login(&req.session_token).await {
+                Ok(login) => vaults.discard_pending(&login),
+                Err(e) => log::debug!(
+                    target: "tddy_github::auth_service",
+                    "logout presented no unlock key and no valid access token ({}); nothing \
+                     waiting for a vault is dropped",
+                    e.message()
+                ),
+            },
         }
     }
+}
+
+/// A passphrase short enough to be worth deriving a key from: no person types more than
+/// [`MAX_PASSPHRASE_CHARS`], and nobody gets to make the daemon hash a megabyte per guess.
+fn check_passphrase_length(passphrase: &SecretString) -> Result<(), Status> {
+    if passphrase.expose().chars().count() > MAX_PASSPHRASE_CHARS {
+        return Err(Status::invalid_argument(format!(
+            "a credential vault passphrase is at most {MAX_PASSPHRASE_CHARS} characters"
+        )));
+    }
+    Ok(())
 }
 
 /// A passphrase a vault may be created under — long enough that Argon2id's cost means something.

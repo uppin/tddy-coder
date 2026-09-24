@@ -20,8 +20,13 @@ const OWNER_ONLY: u32 = 0o600;
 
 /// Atomically replace `path` with `contents`, at mode `0o600` from the moment the bytes exist.
 ///
-/// On failure `path` is untouched — it keeps its previous contents, or stays absent — and the
-/// swap file is removed.
+/// Returns `Ok` only once the new contents and the rename that published them are both on disk:
+/// the directory is synced after the rename, and a failure to sync it is an error too.
+///
+/// On a failure before the rename `path` is untouched — it keeps its previous contents, or stays
+/// absent — and the swap file is removed. A failure to sync the directory comes **after** the
+/// rename: `path` already holds the new contents, but a crash could still bring the old ones back,
+/// so the caller is told the write is not durable rather than that it is.
 pub(crate) fn write_owner_only(path: &Path, contents: &[u8]) -> io::Result<()> {
     let dir = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
@@ -67,10 +72,18 @@ fn write_then_rename(
         let _ = fs::remove_file(final_path);
     }
     fs::rename(swap, final_path)?;
-    // Best-effort: persists the rename itself.
-    if let Ok(handle) = File::open(dir) {
-        let _ = handle.sync_all();
-    }
+    sync_dir(dir)
+}
+
+/// Persist the rename itself: without it, a crash can leave the directory naming the old file.
+#[cfg(unix)]
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    File::open(dir)?.sync_all()
+}
+
+/// Windows cannot open a directory as a file to sync it; the rename is as durable as it gets there.
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 

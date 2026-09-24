@@ -232,6 +232,94 @@ async fn a_refresh_whose_key_no_longer_opens_still_refreshes_the_session_and_rep
 }
 
 #[tokio::test]
+async fn a_refresh_that_cannot_read_the_vault_hands_back_the_presented_key_unrotated() {
+    // Given a lineage holding a key to its vault, and a restart after which the vault file cannot
+    // be read — a directory stands where it was, as a failing disk would leave it
+    let daemon = a_daemon();
+    let (signed_in, created) = daemon.running().sign_in_and_create_the_vault().await;
+    let after_restart = daemon.running();
+    let vault_file = CredentialStore::path_in(daemon.storage(), THE_LOGIN);
+    let kept_safe = daemon.storage().join("the-vault-while-the-disk-fails");
+    std::fs::rename(&vault_file, &kept_safe).expect("the vault file is moved out of the way");
+    std::fs::create_dir(&vault_file).expect("a directory takes its place");
+
+    // When the browser refreshes, presenting its key
+    let refreshed = after_restart
+        .refresh(&signed_in.refresh_token, &created.vault_unlock_key)
+        .await;
+
+    // Then the session is refreshed, and the browser is handed back the very key it presented —
+    // not an empty one, which would make it throw away its only way back into the vault
+    assert_eq!(
+        (
+            refreshed.session_token.is_empty(),
+            refreshed.vault_unlock_key,
+            state(refreshed.vault_state)
+        ),
+        (false, created.vault_unlock_key.clone(), VaultState::Locked)
+    );
+}
+
+#[tokio::test]
+async fn a_key_handed_back_across_a_failed_read_opens_the_vault_once_the_disk_recovers() {
+    // Given a refresh that could not read the vault and handed the presented key back
+    let daemon = a_daemon();
+    let (signed_in, created) = daemon.running().sign_in_and_create_the_vault().await;
+    let after_restart = daemon.running();
+    let vault_file = CredentialStore::path_in(daemon.storage(), THE_LOGIN);
+    let kept_safe = daemon.storage().join("the-vault-while-the-disk-fails");
+    std::fs::rename(&vault_file, &kept_safe).expect("the vault file is moved out of the way");
+    std::fs::create_dir(&vault_file).expect("a directory takes its place");
+    let handed_back = after_restart
+        .refresh(&signed_in.refresh_token, &created.vault_unlock_key)
+        .await;
+    std::fs::remove_dir(&vault_file).expect("the directory is removed");
+    std::fs::rename(&kept_safe, &vault_file).expect("the vault file is back");
+
+    // When the next refresh presents that key
+    let refreshed = after_restart
+        .refresh(&signed_in.refresh_token, &handed_back.vault_unlock_key)
+        .await;
+
+    // Then the vault reopens with no passphrase, and PR status reads with the stored token
+    assert_eq!(
+        (
+            state(refreshed.vault_state),
+            after_restart.pr_lookup_for(THE_LOGIN)
+        ),
+        (
+            VaultState::Open,
+            PrLookup::Perform(the_token_granted_at_exchange(1))
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_retired_key_replayed_inside_the_grace_window_after_logout_opens_nothing() {
+    // Given a lineage that refreshed once, then signed out with the key that refresh handed it
+    let daemon = a_daemon();
+    let running = daemon.running();
+    let (signed_in, created) = running.sign_in_and_create_the_vault().await;
+    let refreshed = running
+        .refresh(&signed_in.refresh_token, &created.vault_unlock_key)
+        .await;
+    running
+        .logout(&refreshed.session_token, &refreshed.vault_unlock_key)
+        .await;
+
+    // When somebody replays the key that refresh retired, moments later
+    let replayed = running
+        .refresh(&signed_in.refresh_token, &created.vault_unlock_key)
+        .await;
+
+    // Then the logout ended the lineage: no key comes back, and the vault stays closed
+    assert_eq!(
+        (replayed.vault_unlock_key, state(replayed.vault_state)),
+        (String::new(), VaultState::Locked)
+    );
+}
+
+#[tokio::test]
 async fn the_vault_file_never_holds_the_unlock_key_it_handed_out() {
     // Given a lineage holding a key to its vault
     let daemon = a_daemon();

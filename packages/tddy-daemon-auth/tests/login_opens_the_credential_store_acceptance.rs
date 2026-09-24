@@ -278,12 +278,14 @@ async fn a_reset_sets_the_old_vault_aside_and_seals_the_logins_token_into_a_fres
 
 #[tokio::test]
 async fn after_a_reset_only_the_new_passphrase_unlocks_the_vault() {
-    // Given a vault reset under a new passphrase, and a restart
+    // Given a vault reset under a new passphrase at a fresh sign-in after a restart, and then
+    // another restart
     let daemon = a_daemon();
-    let running = daemon.running();
-    let (signed_in, _) = running.sign_in_and_create_the_vault().await;
-    running
-        .reset_vault(&signed_in.session_token, A_NEW_PASSPHRASE)
+    daemon.running().sign_in_and_create_the_vault().await;
+    let resetting = daemon.running();
+    let forgot = resetting.sign_in().await;
+    resetting
+        .reset_vault(&forgot.session_token, A_NEW_PASSPHRASE)
         .await
         .expect("a reset succeeds");
     let after_restart = daemon.running();
@@ -350,7 +352,8 @@ async fn no_passphrase_reaches_the_log_the_vault_file_or_any_response() {
     let daemon = a_daemon();
     let running = daemon.running();
 
-    // When an operator creates, fails to unlock, unlocks and resets their vault
+    // When an operator creates, fails to unlock, unlocks and — after another restart — resets
+    // their vault
     let (signed_in, created) = running.sign_in_and_create_the_vault().await;
     let after_restart = daemon.running();
     let again = after_restart.sign_in().await;
@@ -360,12 +363,15 @@ async fn no_passphrase_reaches_the_log_the_vault_file_or_any_response() {
     let unlocked = after_restart
         .unlock_vault(&again.session_token, THE_PASSPHRASE, false)
         .await;
-    let reset = after_restart
-        .reset_vault(&again.session_token, A_NEW_PASSPHRASE)
+    let resetting = daemon.running();
+    let forgot = resetting.sign_in().await;
+    let reset = resetting
+        .reset_vault(&forgot.session_token, A_NEW_PASSPHRASE)
         .await;
 
     // Then none of the three passphrases is in any line logged, byte stored or field answered
-    let answered = format!("{signed_in:?} {created:?} {again:?} {wrong:?} {unlocked:?} {reset:?}");
+    let answered =
+        format!("{signed_in:?} {created:?} {again:?} {wrong:?} {unlocked:?} {forgot:?} {reset:?}");
     let on_disk: String = daemon
         .files_in_storage()
         .into_iter()

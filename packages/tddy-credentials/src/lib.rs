@@ -44,5 +44,6 @@ pub use record::{AccountId, CredentialRecord, ProviderId};
 pub use secret::{SecretBytes, SecretString};
 pub use sessions::{Reset, Retained, SessionVaults, VaultState, ROTATION_GRACE};
 pub use vault::{
-    CredentialStore, SessionVault, UnlockKey, VaultError, MAX_UNLOCK_SLOTS, MIN_PASSPHRASE_CHARS,
+    CredentialStore, SessionVault, UnlockKey, VaultError, MAX_PASSPHRASE_CHARS,
+    MAX_SET_ASIDE_VAULTS, MAX_UNLOCK_SLOTS, MIN_PASSPHRASE_CHARS,
 };

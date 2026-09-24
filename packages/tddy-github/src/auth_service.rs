@@ -21,7 +21,7 @@ use tddy_service::proto::auth::{
 
 mod vault;
 
-pub use vault::{AVATAR_URL_METADATA, GITHUB_ID_METADATA};
+pub use vault::{AVATAR_URL_METADATA, FREE_WRONG_PASSPHRASES, GITHUB_ID_METADATA};
 
 fn to_proto_user(user: &GitHubUser) -> ProtoGitHubUser {
     ProtoGitHubUser {
@@ -75,6 +75,9 @@ pub struct AuthServiceImpl<P: GitHubOAuthProvider> {
     /// Unset admits every login GitHub vouches for, and leaves authorization to the RPCs that
     /// resolve the caller's OS user.
     admission: Option<Arc<dyn LoginAdmission>>,
+    /// Bounds what `UnlockVault` / `ResetVault` passphrases cost this daemon: concurrent key
+    /// derivations, and each user's backoff after wrong passphrases.
+    unlock_throttle: vault::UnlockThrottle,
 }
 
 /// The provider a GitHub login's access token is filed under in the credential vault.
@@ -99,6 +102,7 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
             signing: None,
             credential_vaults: None,
             admission: None,
+            unlock_throttle: vault::UnlockThrottle::default(),
         }
     }
 
@@ -116,6 +120,7 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
             signing: Some(Signing { signer, authority }),
             credential_vaults: None,
             admission: None,
+            unlock_throttle: vault::UnlockThrottle::default(),
         }
     }
 
@@ -297,7 +302,7 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
         request: Request<LogoutRequest>,
     ) -> Result<Response<LogoutResponse>, Status> {
         let req = request.into_inner();
-        self.forget_the_lineage(&req);
+        self.forget_the_lineage(&req).await;
         Ok(Response::new(LogoutResponse {}))
     }
 

@@ -86,6 +86,19 @@ pub use unlock::{UnlockKey, MAX_UNLOCK_SLOTS};
 /// Argon2id only slows guessing down; it cannot make a four-letter word safe.
 pub const MIN_PASSPHRASE_CHARS: usize = 8;
 
+/// The longest passphrase a vault is created, reset or unlocked with, in characters.
+///
+/// Far beyond any passphrase a person types, and small enough that nobody can make the daemon
+/// hash a megabyte for every guess.
+pub const MAX_PASSPHRASE_CHARS: usize = 1024;
+
+/// How many of one subject's old vaults a reset keeps set aside beside the live one.
+///
+/// A reset **never deletes**: past this many, it is refused, and the operator removes an old
+/// vault on the daemon's disk by hand before resetting again. Without a cap, every reset — each
+/// one needing a fresh sign-in — would leave one more file behind for good.
+pub const MAX_SET_ASIDE_VAULTS: usize = 5;
+
 /// Why a vault operation did not happen.
 ///
 /// `Locked` is deliberately distinct from `Crypto`. A wrong key is an ordinary event — a mistyped
@@ -110,6 +123,27 @@ pub enum VaultError {
     /// A vault already exists where one was to be created. Replacing it is a reset.
     #[error("a credential vault already exists; unlock it with its passphrase, or reset it")]
     AlreadyInitialized,
+
+    /// A first passphrase or a reset was asked for with no credential from a fresh sign-in
+    /// waiting for the vault. Only a login proves possession of the account a vault is for, so a
+    /// session token alone can neither create a vault nor replace one.
+    #[error(
+        "choosing a credential vault passphrase needs a fresh sign-in on this daemon; sign in \
+         again, then choose it"
+    )]
+    NoFreshLogin,
+
+    /// A reset was asked for while the vault is open on this daemon — nothing was forgotten.
+    #[error("the credential vault is open on this daemon; it is not reset while it is open")]
+    AlreadyOpen,
+
+    /// A reset would set aside one vault more than [`MAX_SET_ASIDE_VAULTS`]. Nothing is deleted
+    /// to make room: an old vault is removed from the daemon's disk by hand first.
+    #[error(
+        "{kept} earlier credential vaults are already set aside on this daemon; remove one before \
+         resetting again"
+    )]
+    TooManySetAside { kept: usize },
 
     /// Reading or replacing the file failed. Names server-side detail — for the log, not the client.
     #[error("{0}")]
