@@ -128,8 +128,8 @@ pub enum VaultError {
     /// waiting for the vault. Only a login proves possession of the account a vault is for, so a
     /// session token alone can neither create a vault nor replace one.
     #[error(
-        "choosing a credential vault passphrase needs a fresh sign-in on this daemon; sign in \
-         again, then choose it"
+        "choosing a credential vault passphrase needs a fresh GitHub sign-in on this daemon, and \
+         the last one has expired or was never made; sign in to GitHub again, then choose it"
     )]
     NoFreshLogin,
 

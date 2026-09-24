@@ -73,6 +73,10 @@ livekit:
 github:
   stub: true
   stub_codes: "test-code:testuser"
+  # How long a sign-in's token waits in memory for its credential vault (and permits choosing its
+  # passphrase). 0 = never; absent = 600. A stub login holds no token, so this matters only with a
+  # real provider.
+  pending_login_ttl_seconds: 600
 
 users:
   - github_user: "testuser"

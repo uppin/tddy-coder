@@ -12088,6 +12088,7 @@ dependencies = [
  "argon2",
  "chacha20poly1305",
  "hmac 0.12.1",
+ "log",
  "rand 0.8.6",
  "serde",
  "serde_json",

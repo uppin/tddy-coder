@@ -65,6 +65,7 @@ pub mod daemon_identity;
 pub mod first_login_enrolment;
 pub mod live_users;
 pub mod peer_forwarding;
+pub mod pending_login_ttl;
 pub mod presenter_observer;
 pub mod privilege_drop;
 pub mod spawn_as_user;

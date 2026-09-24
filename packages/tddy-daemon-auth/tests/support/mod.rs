@@ -64,10 +64,28 @@ impl ADaemon {
 
     /// A fresh daemon process over the same disk: its own, empty set of open vaults.
     pub fn running(&self) -> ARunningDaemon {
+        self.running_with(SessionVaults::new(self.storage()))
+    }
+
+    /// A fresh daemon process whose pending sign-ins wait `lifetime`, reading the time from
+    /// `clock` — so a test moves time by hand rather than sleeping.
+    pub fn running_on(
+        &self,
+        clock: tddy_credentials::Clock,
+        lifetime: Option<std::time::Duration>,
+    ) -> ARunningDaemon {
+        self.running_with(
+            SessionVaults::new(self.storage())
+                .with_clock(clock)
+                .with_pending_lifetime(lifetime),
+        )
+    }
+
+    fn running_with(&self, vaults: SessionVaults) -> ARunningDaemon {
         let key = DaemonSigningKey::load_or_generate(&self.home.path().join("signing.key"))
             .expect("the daemon's signing key loads");
         let tokens = SessionTokens::new(&key, Arc::new(StandaloneKeyDirectory));
-        let vaults = Arc::new(SessionVaults::new(self.storage()));
+        let vaults = Arc::new(vaults);
         let service = AuthServiceImpl::new_signed(
             GitHubMintingATokenPerExchange {
                 exchanges: Arc::clone(&self.exchanges),
@@ -343,5 +361,23 @@ pub async fn call<Req: prost::Message, Res: prost::Message + Default>(
             Ok(Res::decode(&chunks[0][..]).expect("a unary response decodes"))
         }
         _ => panic!("{method} is unary"),
+    }
+}
+
+/// A clock that moves only when the test moves it.
+pub struct AHandDrivenClock(std::sync::Mutex<std::time::Instant>);
+
+impl AHandDrivenClock {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self(std::sync::Mutex::new(std::time::Instant::now())))
+    }
+
+    pub fn advance(&self, by: std::time::Duration) {
+        *self.0.lock().unwrap() += by;
+    }
+
+    pub fn as_clock(self: &Arc<Self>) -> tddy_credentials::Clock {
+        let clock = Arc::clone(self);
+        Arc::new(move || *clock.0.lock().unwrap())
     }
 }

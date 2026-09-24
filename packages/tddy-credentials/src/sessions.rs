@@ -20,7 +20,7 @@
 //! days) never signs out, so its vault stays open until the daemon exits — see
 //! docs/dev/todo/2026-09-23-credential-vault-open-past-its-last-session.md.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -28,6 +28,21 @@ use std::time::{Duration, Instant};
 use crate::record::CredentialRecord;
 use crate::secret::SecretString;
 use crate::vault::{CredentialStore, SessionVault, UnlockKey, VaultError};
+
+/// Where this module logs: the credentials a sign-in left waiting, and when they expire.
+const LOG_TARGET: &str = "tddy_credentials::sessions";
+
+/// How long a sign-in's credential waits in memory for its vault to open, unless the daemon
+/// configures otherwise ([`SessionVaults::with_pending_lifetime`]).
+///
+/// The waiting credential is a live GitHub token, unsealed, and it is also what permits a first
+/// passphrase or a reset (see [`SessionVaults::create`]); neither should outlive the moment the
+/// operator could reasonably be choosing a passphrase.
+pub const PENDING_LOGIN_LIFETIME: Duration = Duration::from_secs(600);
+
+/// Where [`SessionVaults`] reads the time from when deciding a pending credential's age —
+/// `Instant::now` in a daemon, a clock the test moves by hand in a test.
+pub type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
 
 /// How long the key a refresh just rotated away from still answers, with the key it was rotated to.
 ///
@@ -73,8 +88,14 @@ pub struct SessionVaults {
     auth_storage_dir: PathBuf,
     rotation_grace: Duration,
     open: Mutex<HashMap<String, Arc<SessionVault>>>,
-    /// Credentials logins produced while their vault was closed, by subject.
-    pending: Mutex<HashMap<String, Vec<CredentialRecord>>>,
+    /// Credentials logins produced while their vault was closed, by subject, with when each was
+    /// held. Each expires after `pending_lifetime`; its secret is wiped as the record drops.
+    pending: Mutex<HashMap<String, Vec<Pending>>>,
+    /// How long a pending credential waits — `None` for never.
+    pending_lifetime: Option<Duration>,
+    /// Subjects whose last pending credential expired unused, so a refusal can say so.
+    expired: Mutex<HashSet<String>>,
+    clock: Clock,
     /// The latest rotation of each `(subject, slot id)`, for the grace window. Also what serialises
     /// refreshes: a rotation and the answer to a refresh racing it happen under this lock.
     rotations: Mutex<HashMap<(String, String), Rotation>>,
@@ -86,6 +107,12 @@ pub struct SessionVaults {
     ///
     /// Lock order: `rotations` before `transitions`, never the other way round.
     transitions: Mutex<()>,
+}
+
+/// A credential waiting for its vault, and when the sign-in that produced it arrived.
+struct Pending {
+    record: CredentialRecord,
+    since: Instant,
 }
 
 /// One rotation of one slot: the key it retired, the key it handed out, and when.
@@ -111,6 +138,9 @@ impl SessionVaults {
             rotation_grace: ROTATION_GRACE,
             open: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
+            pending_lifetime: Some(PENDING_LOGIN_LIFETIME),
+            expired: Mutex::new(HashSet::new()),
+            clock: Arc::new(Instant::now),
             rotations: Mutex::new(HashMap::new()),
             transitions: Mutex::new(()),
         }
@@ -121,6 +151,34 @@ impl SessionVaults {
     pub fn with_rotation_grace(mut self, grace: Duration) -> Self {
         self.rotation_grace = grace;
         self
+    }
+
+    /// Let a pending credential wait `lifetime` for its vault rather than
+    /// [`PENDING_LOGIN_LIFETIME`] — `None` for as long as the daemon runs (builder).
+    #[must_use]
+    pub fn with_pending_lifetime(mut self, lifetime: Option<Duration>) -> Self {
+        self.pending_lifetime = lifetime;
+        self
+    }
+
+    /// Read the time from `clock` rather than [`Instant::now`] (builder).
+    #[must_use]
+    pub fn with_clock(mut self, clock: Clock) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// How long a pending credential waits for its vault — `None` when it never expires.
+    #[must_use]
+    pub fn pending_lifetime(&self) -> Option<Duration> {
+        self.pending_lifetime
+    }
+
+    /// Drop every pending credential older than its lifetime — the periodic sweep, so a token
+    /// nobody touches does not wait in memory past its time — and say how many were dropped.
+    /// Each lookup that consults the pending set expires what is due as well.
+    pub fn expire_pending(&self) -> usize {
+        self.drop_expired(&mut held(&self.pending))
     }
 
     /// Where `subject`'s vault lives.
@@ -150,7 +208,9 @@ impl SessionVaults {
     /// Whether a credential for `subject` is waiting in memory for their vault to open.
     #[must_use]
     pub fn holds_pending(&self, subject: &str) -> bool {
-        held(&self.pending)
+        let mut pending = held(&self.pending);
+        self.drop_expired(&mut pending);
+        pending
             .get(subject)
             .is_some_and(|records| !records.is_empty())
     }
@@ -164,6 +224,7 @@ impl SessionVaults {
     pub fn discard_pending(&self, subject: &str) {
         let _transition = held(&self.transitions);
         held(&self.pending).remove(subject);
+        held(&self.expired).remove(subject);
     }
 
     /// Retain a credential a login produced for `subject`.
@@ -337,10 +398,47 @@ impl SessionVaults {
     /// [`VaultError::NoFreshLogin`] unless a login's credential is waiting for `subject`'s vault.
     fn require_a_fresh_login(&self, subject: &str) -> Result<(), VaultError> {
         if self.holds_pending(subject) {
-            Ok(())
-        } else {
-            Err(VaultError::NoFreshLogin)
+            return Ok(());
         }
+        if held(&self.expired).contains(subject) {
+            log::warn!(
+                target: LOG_TARGET,
+                "refused to choose a credential vault passphrase for '{subject}': the GitHub \
+                 sign-in that allowed it expired; they must sign in to GitHub again"
+            );
+        }
+        Err(VaultError::NoFreshLogin)
+    }
+
+    /// Drop from `pending` every credential older than the lifetime, logging each; its secret is
+    /// wiped as it drops. Returns how many went.
+    fn drop_expired(&self, pending: &mut HashMap<String, Vec<Pending>>) -> usize {
+        let Some(lifetime) = self.pending_lifetime else {
+            return 0;
+        };
+        let now = (self.clock)();
+        let mut dropped = 0;
+        pending.retain(|subject, records| {
+            records.retain(|waiting| {
+                let age = now.saturating_duration_since(waiting.since);
+                if age < lifetime {
+                    return true;
+                }
+                log::info!(
+                    target: LOG_TARGET,
+                    "dropped the {} credential a sign-in of '{subject}' left waiting for their \
+                     vault: it waited {} s, its lifetime is {} s",
+                    waiting.record.provider.as_str(),
+                    age.as_secs(),
+                    lifetime.as_secs()
+                );
+                held(&self.expired).insert(subject.clone());
+                dropped += 1;
+                false
+            });
+            !records.is_empty()
+        });
+        dropped
     }
 
     /// Seal what was waiting for `subject`'s newly opened `vault`, hand the lineage that opened it
@@ -370,17 +468,43 @@ impl SessionVaults {
     /// Keep `record` until `subject`'s vault opens, replacing one held for the same account.
     fn hold_pending(&self, subject: &str, record: CredentialRecord) {
         let mut pending = held(&self.pending);
+        self.drop_expired(&mut pending);
+        held(&self.expired).remove(subject);
+        match self.pending_lifetime {
+            Some(lifetime) => log::info!(
+                target: LOG_TARGET,
+                "holding the {} credential of a sign-in of '{subject}' in memory until their vault \
+                 opens; it expires in {} s (at unix {})",
+                record.provider.as_str(),
+                lifetime.as_secs(),
+                unix_seconds_in(lifetime)
+            ),
+            None => log::info!(
+                target: LOG_TARGET,
+                "holding the {} credential of a sign-in of '{subject}' in memory until their vault \
+                 opens; it never expires",
+                record.provider.as_str()
+            ),
+        }
         let records = pending.entry(subject.to_string()).or_default();
-        records
-            .retain(|held| (&held.provider, &held.account) != (&record.provider, &record.account));
-        records.push(record);
+        records.retain(|held| {
+            (&held.record.provider, &held.record.account) != (&record.provider, &record.account)
+        });
+        records.push(Pending {
+            record,
+            since: (self.clock)(),
+        });
     }
 
     /// Seal every credential waiting for `subject` into `vault`. What fails to seal is kept
     /// waiting, and the failure reported — nothing held in memory is dropped by a failed write.
     fn seal_pending(&self, subject: &str, vault: &SessionVault) -> Result<(), VaultError> {
-        let mut waiting = held(&self.pending).remove(subject).unwrap_or_default();
-        while let Some(record) = waiting.first() {
+        let mut waiting = {
+            let mut pending = held(&self.pending);
+            self.drop_expired(&mut pending);
+            pending.remove(subject).unwrap_or_default()
+        };
+        while let Some(Pending { record, .. }) = waiting.first() {
             if let Err(failed) = vault.put(record.clone()) {
                 held(&self.pending)
                     .entry(subject.to_string())
@@ -392,6 +516,14 @@ impl SessionVaults {
         }
         Ok(())
     }
+}
+
+/// The Unix time `after` from now, for a log line; `0` on a clock before the epoch.
+fn unix_seconds_in(after: Duration) -> u64 {
+    std::time::SystemTime::now()
+        .checked_add(after)
+        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |since| since.as_secs())
 }
 
 #[cfg(test)]
@@ -1000,5 +1132,180 @@ mod tests {
             (answered, vaults.state(THE_OPERATOR)),
             (Some(VaultError::Locked), VaultState::Locked)
         );
+    }
+
+    /// A clock that moves only when the test moves it.
+    struct AHandDrivenClock(Mutex<Instant>);
+
+    impl AHandDrivenClock {
+        fn new() -> Arc<Self> {
+            Arc::new(Self(Mutex::new(Instant::now())))
+        }
+
+        fn advance(&self, by: Duration) {
+            *self.0.lock().unwrap() += by;
+        }
+
+        fn as_clock(self: &Arc<Self>) -> Clock {
+            let clock = Arc::clone(self);
+            Arc::new(move || *clock.0.lock().unwrap())
+        }
+    }
+
+    const A_TEN_MINUTE_LIFETIME: Duration = Duration::from_secs(600);
+
+    /// A daemon whose pending sign-ins wait `lifetime`, reading the time from `clock`.
+    fn a_daemon_on(
+        dir: &Path,
+        clock: &Arc<AHandDrivenClock>,
+        lifetime: Option<Duration>,
+    ) -> SessionVaults {
+        SessionVaults::new(dir)
+            .with_clock(clock.as_clock())
+            .with_pending_lifetime(lifetime)
+    }
+
+    #[test]
+    fn a_sign_in_past_its_lifetime_no_longer_allows_a_first_passphrase() {
+        // Given a first sign-in whose token has waited longer than a pending sign-in may
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let vaults = a_daemon_on(dir.path(), &clock, Some(A_TEN_MINUTE_LIFETIME));
+        vaults
+            .retain(THE_OPERATOR, a_github_record(THE_FIRST_TOKEN))
+            .unwrap();
+        clock.advance(A_TEN_MINUTE_LIFETIME + Duration::from_secs(1));
+
+        // When the operator chooses a first passphrase
+        let refused = vaults.create(THE_OPERATOR, &the_passphrase()).err();
+
+        // Then only a new sign-in may, nothing waits in memory, and the vault is still uncreated
+        assert_eq!(
+            (
+                refused,
+                vaults.holds_pending(THE_OPERATOR),
+                vaults.state(THE_OPERATOR)
+            ),
+            (
+                Some(VaultError::NoFreshLogin),
+                false,
+                VaultState::Uninitialized
+            )
+        );
+    }
+
+    #[test]
+    fn a_sign_in_within_its_lifetime_still_allows_a_first_passphrase() {
+        // Given a first sign-in a moment short of its lifetime
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let vaults = a_daemon_on(dir.path(), &clock, Some(A_TEN_MINUTE_LIFETIME));
+        vaults
+            .retain(THE_OPERATOR, a_github_record(THE_FIRST_TOKEN))
+            .unwrap();
+        clock.advance(A_TEN_MINUTE_LIFETIME - Duration::from_secs(1));
+
+        // When the operator chooses a first passphrase
+        vaults.create(THE_OPERATOR, &the_passphrase()).unwrap();
+
+        // Then the waiting token is sealed
+        assert_eq!(the_stored_token(&vaults), Some(THE_FIRST_TOKEN.to_string()));
+    }
+
+    #[test]
+    fn an_expired_sign_ins_token_is_not_sealed_by_a_later_unlock() {
+        // Given a locked vault after a restart, and a sign-in whose token then waited too long
+        let dir = tempfile::tempdir().unwrap();
+        a_daemon_with_a_created_vault(dir.path());
+        let clock = AHandDrivenClock::new();
+        let vaults = a_daemon_on(dir.path(), &clock, Some(A_TEN_MINUTE_LIFETIME));
+        vaults
+            .retain(THE_OPERATOR, a_github_record(A_LATER_TOKEN))
+            .unwrap();
+        clock.advance(A_TEN_MINUTE_LIFETIME + Duration::from_secs(1));
+
+        // When the passphrase opens the vault
+        vaults.unlock(THE_OPERATOR, &the_passphrase()).unwrap();
+
+        // Then the expired token was dropped, not sealed: the vault still holds the first one
+        assert_eq!(the_stored_token(&vaults), Some(THE_FIRST_TOKEN.to_string()));
+    }
+
+    #[test]
+    fn a_reset_after_the_sign_in_expired_is_refused_and_the_vault_stays_locked() {
+        // Given a locked vault after a restart, and a sign-in whose token then waited too long
+        let dir = tempfile::tempdir().unwrap();
+        a_daemon_with_a_created_vault(dir.path());
+        let clock = AHandDrivenClock::new();
+        let vaults = a_daemon_on(dir.path(), &clock, Some(A_TEN_MINUTE_LIFETIME));
+        vaults
+            .retain(THE_OPERATOR, a_github_record(A_LATER_TOKEN))
+            .unwrap();
+        clock.advance(A_TEN_MINUTE_LIFETIME + Duration::from_secs(1));
+
+        // When a reset is asked for
+        let refused = vaults
+            .reset(THE_OPERATOR, &SecretString::new(A_NEW_PASSPHRASE))
+            .err();
+
+        // Then
+        assert_eq!(
+            (refused, vaults.state(THE_OPERATOR)),
+            (Some(VaultError::NoFreshLogin), VaultState::Locked)
+        );
+    }
+
+    #[test]
+    fn with_no_lifetime_a_pending_sign_in_never_expires() {
+        // Given a daemon whose pending sign-ins never expire, and a sign-in a year ago
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let vaults = a_daemon_on(dir.path(), &clock, None);
+        vaults
+            .retain(THE_OPERATOR, a_github_record(THE_FIRST_TOKEN))
+            .unwrap();
+        clock.advance(Duration::from_secs(365 * 24 * 60 * 60));
+
+        // When the operator chooses a first passphrase
+        vaults.create(THE_OPERATOR, &the_passphrase()).unwrap();
+
+        // Then the token is sealed
+        assert_eq!(the_stored_token(&vaults), Some(THE_FIRST_TOKEN.to_string()));
+    }
+
+    #[test]
+    fn a_sweep_removes_an_expired_sign_in_nobody_touched() {
+        // Given a sign-in whose token nobody has touched since its lifetime ran out
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let vaults = a_daemon_on(dir.path(), &clock, Some(A_TEN_MINUTE_LIFETIME));
+        vaults
+            .retain(THE_OPERATOR, a_github_record(THE_FIRST_TOKEN))
+            .unwrap();
+        clock.advance(A_TEN_MINUTE_LIFETIME + Duration::from_secs(1));
+
+        // When the sweep runs, twice
+        let swept = (vaults.expire_pending(), vaults.expire_pending());
+
+        // Then the first sweep dropped it, and there was nothing left for the second
+        assert_eq!(swept, (1, 0));
+    }
+
+    #[test]
+    fn a_sweep_leaves_a_sign_in_within_its_lifetime() {
+        // Given a sign-in still within its lifetime
+        let dir = tempfile::tempdir().unwrap();
+        let clock = AHandDrivenClock::new();
+        let vaults = a_daemon_on(dir.path(), &clock, Some(A_TEN_MINUTE_LIFETIME));
+        vaults
+            .retain(THE_OPERATOR, a_github_record(THE_FIRST_TOKEN))
+            .unwrap();
+        clock.advance(A_TEN_MINUTE_LIFETIME / 2);
+
+        // When the sweep runs
+        let swept = vaults.expire_pending();
+
+        // Then
+        assert_eq!((swept, vaults.holds_pending(THE_OPERATOR)), (0, true));
     }
 }

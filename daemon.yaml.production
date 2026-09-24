@@ -99,6 +99,12 @@ local:
 #   client_id: "<your-github-oauth-app-client-id>"
 #   client_secret: "<secret>"
 #   redirect_uri: "https://your-host:8899/auth/callback"
+#   # How long a sign-in's GitHub token waits in the daemon's memory, unsealed, for the operator to
+#   # unlock (or first create) their credential vault — and how long that sign-in permits choosing
+#   # the vault's passphrase or resetting it. Past it both are dropped: the operator signs in to
+#   # GitHub again. 0 means never: held until an unlock, a logout or a daemon restart (warned at
+#   # startup). Absent means 600; at most 604800 (seven days).
+#   pending_login_ttl_seconds: 600
 
 # Max seconds for git clone / session spawn (hung worker fails with DEADLINE_EXCEEDED). Default: 300.
 # spawn_worker_request_timeout_secs: 300

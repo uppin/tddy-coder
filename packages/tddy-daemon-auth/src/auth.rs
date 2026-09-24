@@ -203,7 +203,10 @@ pub fn build_auth_entries_admitting(
             if let Some(warning) = auth_storage_looser_than_owner_only(dir) {
                 log::warn!(target: crate::AUTH_LOG_TARGET, "{warning}");
             }
-            Some(Arc::new(SessionVaults::new(dir)))
+            let ttl = github.pending_login_ttl_seconds;
+            Some(Arc::new(crate::pending_logins::credential_vaults_in(
+                dir, ttl,
+            )))
         }
         None => None,
     };

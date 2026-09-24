@@ -35,6 +35,7 @@ pub mod first_login_admission;
 pub mod github_pr_credentials;
 mod local_token;
 pub mod oauth_loopback_tunnel;
+pub mod pending_logins;
 pub mod signing_key;
 pub mod token_provider;
 

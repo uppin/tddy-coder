@@ -38,6 +38,8 @@ url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
+# `test-util` pauses tokio's clock, so the pending-login sweep's ticks are driven by hand.
+tokio = { version = "1", features = ["test-util"] }
 base64 = "0.22"
 # LiveKit's own JWT verifier. Already in the tree through `tddy-livekit`, which mints with the
 # matching `AccessToken` — so `token_service_acceptance.rs` checks the signature the way a LiveKit

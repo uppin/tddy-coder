@@ -1083,6 +1083,8 @@ pub struct GitHubConfig {
     pub stub: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stub_codes: Option<String>,
+    #[serde(default)] // how long a sign-in's token waits for its vault: `pending_login_ttl.rs`
+    pub pending_login_ttl_seconds: crate::pending_login_ttl::PendingLoginTtl,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
