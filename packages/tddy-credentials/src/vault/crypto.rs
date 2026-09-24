@@ -5,11 +5,12 @@ use chacha20poly1305::aead::{Aead, OsRng, Payload};
 use chacha20poly1305::{AeadCore, ChaCha20Poly1305, KeyInit};
 use rand::RngCore;
 use subtle::ConstantTimeEq;
+use zeroize::{Zeroize, Zeroizing};
 
 use super::format::{header_aad, Header, Sealed, FORMAT_VERSION};
 use super::VaultError;
 use crate::kdf::{from_hex, hkdf_expand, hkdf_sha256, to_hex};
-use crate::secret::{wipe, SecretBytes, SecretString};
+use crate::secret::{SecretBytes, SecretString};
 
 /// What the verifier seals.
 pub(super) const VERIFIER_PLAINTEXT: &[u8] = b"tddy-credentials/v2/verifier";
@@ -43,7 +44,7 @@ pub(super) fn random_bytes<const N: usize>() -> [u8; N] {
 pub(super) fn random_key() -> SecretBytes {
     let mut fresh = random_bytes::<32>();
     let key = SecretBytes::new(fresh);
-    wipe(&mut fresh);
+    fresh.zeroize();
     key
 }
 
@@ -79,14 +80,11 @@ pub(super) fn unwrap_data_key(
 ) -> Result<SecretBytes, VaultError> {
     // A key that does not unwrap the data key is the wrong key — a wrong passphrase, a slot
     // re-wrapped since, or another subject's file — never corruption to be "repaired".
-    let mut unwrapped = open(kek, nonce, ciphertext, aad).map_err(|_| VaultError::Locked)?;
-    let Ok(mut bytes) = <[u8; 32]>::try_from(unwrapped.as_slice()) else {
-        wipe(&mut unwrapped);
-        return Err(VaultError::Crypto);
-    };
-    wipe(&mut unwrapped);
+    let unwrapped =
+        Zeroizing::new(open(kek, nonce, ciphertext, aad).map_err(|_| VaultError::Locked)?);
+    let mut bytes = <[u8; 32]>::try_from(unwrapped.as_slice()).map_err(|_| VaultError::Crypto)?;
     let data_key = SecretBytes::new(bytes);
-    wipe(&mut bytes);
+    bytes.zeroize();
     Ok(data_key)
 }
 
@@ -107,7 +105,7 @@ pub(super) fn passphrase_kek(
     let mut stretched = [0u8; 32];
     let derived = argon2.hash_password_into(passphrase.expose().as_bytes(), &salt, &mut stretched);
     let prk = SecretBytes::new(stretched);
-    wipe(&mut stretched);
+    stretched.zeroize();
     derived.map_err(|_| VaultError::Crypto)?;
     Ok(hkdf_expand(
         &prk,
@@ -126,10 +124,9 @@ pub(super) fn wrap_under_passphrase(
     seal(&kek, data_key.expose(), &header_aad(header)?)
 }
 
+/// The cipher for one seal or open. It holds its own copy of `key`, which it wipes as it drops —
+/// and so does the one-time Poly1305 key it derives per message (`poly1305`'s `zeroize`).
 fn cipher(key: &SecretBytes) -> ChaCha20Poly1305 {
-    // TODO(keyring): the cipher holds its own copy of the key schedule, which is not wiped when it
-    // drops; that needs `chacha20poly1305`'s `zeroize` feature, a CLAUDE.md § ASK decision —
-    // docs/dev/todo/2026-09-24-credential-vault-cipher-key-schedule-not-wiped.md.
     ChaCha20Poly1305::new(key.expose().into())
 }
 

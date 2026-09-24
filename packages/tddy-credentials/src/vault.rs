@@ -65,10 +65,11 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
+use zeroize::Zeroizing;
 
 use crate::kdf::{hkdf_expand, keyed_name, to_hex};
 use crate::record::{AccountId, CredentialRecord, ProviderId};
-use crate::secret::{wipe, SecretBytes, SecretString};
+use crate::secret::{SecretBytes, SecretString};
 use crypto::{
     check_verifier, open, passphrase_kek, random_bytes, random_key, record_aad, seal,
     unwrap_data_key, wrap_under_passphrase, VERIFIER_AAD, VERIFIER_PLAINTEXT,
@@ -363,11 +364,10 @@ impl SessionVault {
 
     fn seal_record(&self, record: &CredentialRecord) -> Result<SealedRecord, VaultError> {
         let id = self.record_id(&record.provider, &record.account);
-        let mut plaintext =
-            serde_json::to_vec(&RecordToSeal::from(record)).map_err(|_| VaultError::Crypto)?;
-        let sealed = seal(&self.data_key, &plaintext, &record_aad(&id));
-        wipe(&mut plaintext);
-        let sealed = sealed?;
+        let plaintext = Zeroizing::new(
+            serde_json::to_vec(&RecordToSeal::from(record)).map_err(|_| VaultError::Crypto)?,
+        );
+        let sealed = seal(&self.data_key, &plaintext, &record_aad(&id))?;
         Ok(SealedRecord {
             id,
             nonce: sealed.nonce,
@@ -376,14 +376,13 @@ impl SessionVault {
     }
 
     fn open_record(&self, sealed: &SealedRecord) -> Result<CredentialRecord, VaultError> {
-        let mut plaintext = open(
+        let plaintext = Zeroizing::new(open(
             &self.data_key,
             &sealed.nonce,
             &sealed.ciphertext,
             &record_aad(&sealed.id),
-        )?;
+        )?);
         let record = serde_json::from_slice::<OpenedRecord>(&plaintext);
-        wipe(&mut plaintext);
         let record = CredentialRecord::from(record.map_err(|_| VaultError::Crypto)?);
         // The identity inside the seal must name the slot it was found in.
         let expected = self.record_id(&record.provider, &record.account);

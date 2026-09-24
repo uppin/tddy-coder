@@ -1,8 +1,11 @@
 //! Key material that does not outlive its owner.
 //!
-//! Hand-rolled rather than taken from `zeroize`, which would be tidier and needs CLAUDE.md § ASK
-//! approval before it is added. The mechanism is the same one that crate uses: a volatile write the
-//! optimiser is not allowed to elide, followed by a fence so it is not reordered past the drop.
+//! Wiped with `zeroize`, the same crate the RustCrypto ciphers and MACs this crate builds from wipe
+//! their own key schedules with: a volatile write the optimiser is not allowed to elide, followed by
+//! a fence so it is not reordered past the drop. Both types here are [`ZeroizeOnDrop`], so a bound
+//! can ask for — and a test can prove — that a value wipes itself.
+
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Thirty-two bytes of key material, zeroed when it is dropped.
 ///
@@ -33,11 +36,19 @@ impl std::fmt::Debug for SecretBytes {
     }
 }
 
-impl Drop for SecretBytes {
-    fn drop(&mut self) {
-        wipe(&mut self.0);
+impl Zeroize for SecretBytes {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
     }
 }
+
+impl Drop for SecretBytes {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for SecretBytes {}
 
 /// A secret that is text — a stored credential, a vault passphrase — zeroed when it is dropped.
 ///
@@ -79,48 +90,66 @@ impl std::fmt::Debug for SecretString {
     }
 }
 
+impl Zeroize for SecretString {
+    /// Zero the text's whole buffer — its spare capacity too — and leave it empty.
+    fn zeroize(&mut self) {
+        self.0.zeroize();
+    }
+}
+
 impl Drop for SecretString {
     fn drop(&mut self) {
-        wipe_text(&mut self.0);
+        self.zeroize();
     }
 }
 
-/// Zero `text` in place, leaving it the same length.
-fn wipe_text(text: &mut str) {
-    // SAFETY: zero bytes are valid UTF-8, so the string stays well-formed for its last moment.
-    wipe(unsafe { text.as_bytes_mut() });
-}
-
-/// Overwrite `bytes` with zeroes in a way the optimiser may not elide.
-///
-/// A plain `fill(0)` on memory that is about to be freed is a dead store, and removing dead stores
-/// is exactly what an optimiser is for. Each byte is written volatile, and the fence stops the
-/// writes being reordered past whatever releases the memory afterwards.
-///
-/// Also used on the transient plaintext buffers a seal or open produces — an unwrapped data key,
-/// a serialised record — which live in a `Vec` rather than a [`SecretBytes`].
-pub(crate) fn wipe(bytes: &mut [u8]) {
-    for byte in bytes.iter_mut() {
-        // SAFETY: `byte` is a valid, aligned, exclusive reference for the whole write.
-        unsafe { std::ptr::write_volatile(byte, 0) };
-    }
-    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
-}
+impl ZeroizeOnDrop for SecretString {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_secret_strings_text_is_zeroed_in_place_before_its_buffer_is_released() {
-        // Given secret text
-        let mut text = String::from("correct horse battery staple");
+    /// Compiles only for a type that wipes itself when it is dropped.
+    fn wipes_itself_on_drop<T: ZeroizeOnDrop>() {}
 
-        // When the wipe a `SecretString` runs on drop is applied to it — to a live buffer, since
-        // reading one after it is freed would prove nothing an allocator did not decide
-        wipe_text(&mut text);
+    #[test]
+    fn every_holder_of_key_material_wipes_itself_on_drop() {
+        // Given / When / Then — the bound is the proof: a type that dropped its bytes unwiped
+        // would not compile here. The cipher is the one every seal and open builds from a key; the
+        // MAC is the one every HKDF step keys.
+        wipes_itself_on_drop::<SecretBytes>();
+        wipes_itself_on_drop::<SecretString>();
+        wipes_itself_on_drop::<chacha20poly1305::ChaCha20Poly1305>();
+        // `hmac` marks no `Hmac` as wiping itself, but everything one holds does: the two keyed
+        // SHA-256 states (inner and outer pad) and the block buffer beside them.
+        wipes_itself_on_drop::<<sha2::Sha256 as hmac::EagerHash>::Core>();
+        wipes_itself_on_drop::<
+            hmac::digest::block_api::Buffer<hmac::block_api::HmacCore<sha2::Sha256>>,
+        >();
+    }
+
+    #[test]
+    fn a_secret_keys_bytes_are_zeroed_by_the_wipe_its_drop_runs() {
+        // Given key material
+        let mut key = SecretBytes::new([0x5a; 32]);
+
+        // When the wipe its drop runs is applied to it — to a live value, since reading one after
+        // it is freed would prove nothing an allocator did not decide
+        key.zeroize();
 
         // Then every byte is zero
-        assert_eq!(text.into_bytes(), vec![0u8; 28]);
+        assert_eq!(key.expose(), &[0u8; 32]);
+    }
+
+    #[test]
+    fn a_secret_strings_text_is_gone_after_the_wipe_its_drop_runs() {
+        // Given secret text
+        let mut text = SecretString::new("correct horse battery staple");
+
+        // When the wipe its drop runs is applied to it, while it is still alive
+        text.zeroize();
+
+        // Then no text is left to expose
+        assert_eq!(text.expose(), "");
     }
 }

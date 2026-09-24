@@ -64,9 +64,13 @@ Where the end state is documented:
 | `tddy-host-service`, `tddy-rust-typescript-tests` | a doc comment naming the deleted store; regenerated `auth_pb.ts` |
 | config | `daemon.yaml.production` (commented example, wording), `desktop.yaml.production`, `dev.daemon.yaml`, `dev.desktop.yaml` (`pending_login_ttl_seconds: 600`); `install` |
 
-**Dependencies.** No new external crate: `argon2 0.5` was already in the workspace. `hkdf` and
-`zeroize` would be tidier and need CLAUDE.md § ASK approval; neither was taken (HKDF is a dozen lines
-over `hmac` + `sha2`; `SecretBytes` wipes by hand). `tddy-credentials` gains the workspace's `log`.
+**Dependencies.** `argon2 0.5` was already in the workspace. **`zeroize` 1.9** — approved by the
+developer after the wrap, and already in `Cargo.lock` — replaces the hand-rolled volatile-write
+wipe in `SecretBytes`, `SecretString` and the transient buffers, and turns on the RustCrypto wipes:
+`poly1305` (named only for its `zeroize` feature), `argon2` with `zeroize`, and `hmac` / `sha2`
+moved to 0.13 / 0.11 with `zeroize` — the releases whose HMAC state wipes on drop, both already in
+the tree. `hkdf` was not taken (HKDF is a dozen lines over `hmac` + `sha2`). `tddy-credentials`
+gains the workspace's `log`.
 
 ## Decisions
 
@@ -142,7 +146,11 @@ alone.
   `2026-09-19-action-sandbox-acceptance-pty-test-does-not-finish` (found by this node's baseline).
 - **Kept, not resolved here**: `2026-07-26-pr-stack-status-polling-and-stack-hygiene` — the
   PR-status read path changed, its polling did not.
-- **Resolved here**: none.
+- **Resolved here**: `2026-09-24-credential-vault-cipher-key-schedule-not-wiped` — closed after the
+  wrap, with the developer's approval of `zeroize`: every key-holding type in `tddy-credentials`
+  and every RustCrypto instance it builds is `ZeroizeOnDrop` (or, for `Hmac`, made only of parts
+  that are), proven by bound in `secret.rs`'s tests; the `TODO(keyring)` in `vault/crypto.rs` is
+  gone. Entry deleted.
 
 ## Verification
 

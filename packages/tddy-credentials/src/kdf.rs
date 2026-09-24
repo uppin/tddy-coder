@@ -4,26 +4,26 @@
 //! CLAUDE.md § ASK approval before it is added. Only a single 32-byte output block is ever needed
 //! here, so Expand is one HMAC invocation: `T(1) = HMAC(PRK, info || 0x01)`.
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
+use zeroize::Zeroize;
 
-use crate::secret::{wipe, SecretBytes};
+use crate::secret::SecretBytes;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// `HMAC-SHA256(key, parts[0] || parts[1] || …)`, as key material.
+/// `HMAC-SHA256(key, parts[0] || parts[1] || …)`, as key material. The keyed MAC state and the
+/// digest it finalises to both wipe themselves as they drop.
 fn hmac_sha256(key: &[u8], parts: &[&[u8]]) -> SecretBytes {
     // HMAC accepts a key of any length, so construction cannot fail.
     let mut mac = HmacSha256::new_from_slice(key).expect("HMAC-SHA256 takes a key of any length");
     for part in parts {
         mac.update(part);
     }
-    let mut digest = mac.finalize().into_bytes();
     let mut out = [0u8; 32];
-    out.copy_from_slice(&digest);
-    wipe(&mut digest);
+    out.copy_from_slice(&mac.finalize().into_bytes());
     let key = SecretBytes::new(out);
-    wipe(&mut out);
+    out.zeroize();
     key
 }
 

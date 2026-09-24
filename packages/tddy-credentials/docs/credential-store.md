@@ -98,15 +98,16 @@ CLAUDE.md § ASK approval.
   kept: past that a reset is `TooManySetAside` and **nothing is deleted to make room** — an operator
   removes an old vault from the daemon's disk by hand first. Refusing was chosen over keeping the
   newest five because deleting an old vault destroys credentials its old passphrase still opens.
-- **Zeroization.** Key material lives in `SecretBytes`, secret text in `SecretString`; both wipe
-  themselves on drop with a volatile write plus a compiler fence. Transient plaintext buffers — an
-  unwrapped key, a serialised record, Argon2's output — are wiped the same way. `zeroize` would be
-  tidier and needs approval. ⚠ The cipher and HMAC instances hold their own copies of the key
-  schedule, which are not wiped without `chacha20poly1305`'s `zeroize` feature (a TODO in
-  `vault/crypto.rs`, recorded in
-  [`2026-09-24-credential-vault-cipher-key-schedule-not-wiped.md`](../../../docs/dev/todo/2026-09-24-credential-vault-cipher-key-schedule-not-wiped.md)),
-  and a passphrase that arrived in an RPC request also sits in that request's decode buffer, which
-  this crate never sees. The two `auth` requests that carry one print it redacted (`tddy-service`
+- **Zeroization** (`zeroize`). Key material lives in `SecretBytes`, secret text in `SecretString`;
+  both are `ZeroizeOnDrop` — a `SecretString` wipes its whole buffer, spare capacity included.
+  Transient plaintext buffers — an unwrapped key, a serialised record, a decoded unlock key — are
+  `Zeroizing`, so they are wiped on every path out, an early `?` included. The RustCrypto instances
+  built from a key wipe their own copies: `ChaCha20Poly1305` its key (always), the per-message
+  Poly1305 key through `poly1305`'s `zeroize` feature, Argon2's working blocks through `argon2`'s,
+  and the keyed HMAC-SHA256 state through `hmac` 0.13 / `sha2` 0.11 with `zeroize` (0.12 / 0.10
+  cannot). `secret.rs`'s tests prove each type wipes itself by bound (`ZeroizeOnDrop`), never by
+  reading freed memory. ⚠ A passphrase that arrived in an RPC request also sits in that request's
+  decode buffer, which this crate never sees. The two `auth` requests that carry one print it redacted (`tddy-service`
   generates them without prost's `Debug` derive).
 
 **There is no daemon-held key.** A second way in that needs no user would let the daemon read

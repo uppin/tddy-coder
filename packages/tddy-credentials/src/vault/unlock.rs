@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use subtle::ConstantTimeEq;
+use zeroize::{Zeroize, Zeroizing};
 
 use super::crypto::{
     check_verifier, random_bytes, random_key, seal, unlock_aad, unlock_kek, unwrap_data_key,
@@ -11,7 +12,7 @@ use super::crypto::{
 use super::format::{read_vault_file, serialised, write_vault_file, UnlockSlot};
 use super::{session, CredentialStore, SessionVault, VaultError};
 use crate::kdf::{from_hex, to_hex};
-use crate::secret::{wipe, SecretBytes};
+use crate::secret::SecretBytes;
 
 /// How many browser session lineages may hold an unlock slot on one vault at once.
 ///
@@ -88,12 +89,10 @@ impl UnlockKey {
             return None;
         }
         let subject = String::from_utf8(from_hex(subject)?).ok()?;
-        let mut key = from_hex(key)?;
-        let bytes = <[u8; 32]>::try_from(key.as_slice()).ok();
-        wipe(&mut key);
-        let mut bytes = bytes?;
+        let key = Zeroizing::new(from_hex(key)?);
+        let mut bytes = <[u8; 32]>::try_from(key.as_slice()).ok()?;
         let key = SecretBytes::new(bytes);
-        wipe(&mut bytes);
+        bytes.zeroize();
         Some(Self {
             subject,
             slot_id: slot_id.to_string(),
@@ -123,7 +122,7 @@ impl UnlockKey {
     pub(crate) fn duplicate(&self) -> Self {
         let mut bytes = *self.key.expose();
         let key = SecretBytes::new(bytes);
-        wipe(&mut bytes);
+        bytes.zeroize();
         Self {
             subject: self.subject.clone(),
             slot_id: self.slot_id.clone(),
