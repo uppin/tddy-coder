@@ -336,12 +336,17 @@ async fn resolving_against(
 /// Folded through the library's own [`ServerChatter`] rather than by picking `quiescent` out of the
 /// JSON here: that fold is published so that there is exactly one reading of the notification.
 ///
-/// The subscription is taken after the handshake, and the server reports quiescence only on the
-/// transition. Nothing is lost by that: loading a crate graph takes seconds, and the transition
-/// comes after it.
+/// The server reports quiescence only on the transition, and a subscription sees only what arrives
+/// after it — so a server that settled before this was called would never be heard to. The last
+/// status the client kept is folded in first, and it is read *after* subscribing: a status read
+/// first could be superseded in the moment before the subscription starts, and that one would be
+/// lost; read after, anything newer arrives on the subscription.
 async fn until_quiescent(client: &tddy_lsp::client::LspClient) {
     let mut notifications = client.subscribe_notifications();
     let mut chatter = ServerChatter::default();
+    if let Some(status) = client.server_status() {
+        chatter.absorb(&status);
+    }
 
     let settled = tokio::time::timeout(A_WAIT_A_TEST_CAN_OUTLAST, async {
         while !chatter.quiescent() {
