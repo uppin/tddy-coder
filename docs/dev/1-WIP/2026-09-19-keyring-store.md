@@ -51,7 +51,7 @@
 - Backlog entries added at the replan: `docs/dev/todo/2026-09-23-atomic-file-leaf-crate.md`,
   `docs/dev/todo/2026-09-23-credential-vault-open-past-its-last-session.md` (narrowed at wrap, S5)
 - Added at wrap: `docs/dev/todo/2026-09-24-credential-vault-cipher-key-schedule-not-wiped.md`,
-  `docs/dev/todo/2026-09-24-keyring-store-deferred-auth-and-attach-splits.md`, and the code-issue
+  `docs/dev/todo/2026-09-24-keyring-store-deferred-oversized-file-splits.md`, and the code-issue
   records `packages/tddy-daemon-auth/docs/code-issues/oversized-file-auth.md` and
   `packages/tddy-session-sync/docs/code-issues/oversized-file-attach.md`
 
@@ -423,8 +423,9 @@ analyzed.
 - [ ] **Package Documentation**: ✅ `tddy-credentials/docs/credential-store.md`; ⚠ the other
       packages' docs are owed at wrap
 - [ ] **Code Quality**: ✅ scoped clippy clean on every touched Rust package, and the file-length
-      gate met for `auth_service.rs` (621 → 379, `## Restructuring`); `auth.rs` and `attach.rs`
-      deferred with consent (`docs/dev/todo/2026-09-24-keyring-store-deferred-auth-and-attach-splits.md`);
+      gate met for `auth_service.rs` (621 → 379) and `useAuth.ts` (520 → 413, `## Restructuring`);
+      `auth.rs`, `attach.rs`, `config.rs`, `runtime.rs` and `build.rs` deferred with consent
+      (`docs/dev/todo/2026-09-24-keyring-store-deferred-oversized-file-splits.md`);
       ⚠ CI on the wrap commits not yet read
 
 ## Technical Changes
@@ -766,6 +767,37 @@ behaviour-preserving commit `20cc938a` (`refactor(github): …`).
 - The wrap's behaviour fixes then grew `vault.rs` (S2, S3, S5, N3), not `auth_service.rs`: after
   them `auth_service.rs` is 384 production lines and `vault.rs` 433 (no tests), with the throttle's
   backoff in `vault/backoff.rs` (75 production lines, plus its unit tests).
+
+**Second developer-approved decomposition at wrap**: `packages/tddy-web/src/hooks/useAuth.ts` was
+482 lines on `origin/master` and 520 after this PR, past the 500 budget. Its pure half moved into
+`src/hooks/authSession.ts`, by hand, in its own behaviour-preserving commit `e7ba03dc`
+(`refactor(web): …`).
+
+| File | Lines before → after |
+|---|---|
+| `tddy-web/src/hooks/useAuth.ts` | **520 → 413** |
+| `tddy-web/src/hooks/authSession.ts` (new) | — → 124 |
+
+- **Moved**: `MintedSession`, `WholeSession`, `SessionCheck`, `checkWholeSession`,
+  `noWholeSessionMessage`, `MS_PER_SECOND`, `intervalMsOf`, `DevicePollStep`, `deviceLoginFailed`,
+  `devicePollStep`, and the `DeviceLogin` type they return (moved rather than imported back, so the
+  two modules have no cycle). `signedInState` stays: it builds an `AuthState`, the hook's own type.
+- **Public API unchanged**: `useAuth.ts` re-exports `DeviceLogin`; `OAUTH_RETURN_TO_KEY`,
+  `AuthState` and `useAuth` are where they were. No importer changed.
+- **Green baseline**: `bun test src/hooks src/lib src/rpc` 594 / 0 and Cypress
+  CredentialVaultPrompt, DeviceLogin, AuthProviderRefresh, DurableSession 50 / 50, before and after.
+
+**Deferred with consent at wrap** — five files this PR grew stay over budget, each with a
+code-issue record and one backlog entry,
+`docs/dev/todo/2026-09-24-keyring-store-deferred-oversized-file-splits.md`:
+
+| File | Production lines `origin/master` → #510 | Why it grew |
+|---|---|---|
+| `tddy-daemon-auth/src/auth.rs` | 576 → 622 | vault construction, `pending_logins::credential_vaults_in` |
+| `tddy-session-sync/src/attach.rs` | 517 → 520 | `vault_unlock_key: String::new()` |
+| `tddy-daemon-kernel/src/config.rs` | 1,472 → 1,474 | the `pending_login_ttl_seconds` field |
+| `tddy-daemon/src/runtime.rs` | 1,619 → 1,620 | the expiry sweep's spawn |
+| `tddy-service/build.rs` | 692 → 695 | `skip_debug` for the passphrase requests (N1) |
 
 ## Validation Results
 

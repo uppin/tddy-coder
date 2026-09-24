@@ -6,7 +6,7 @@
 **Metrics:** **520 production lines** (2026-09-24, HEAD of #510; 517 on `origin/master` `35cf2913`) — the file has no `#[cfg(test)]` module, so every line counts · budget 500 · ~1.04× over
 **Thresholds breached:** length 520 > 500
 **Restructure:** required — one module seam
-**Status:** Open. Already over budget on `origin/master`; #510 adds three lines. Split deferred with the developer's consent during #510's wrap, to a follow-up after the `#keyring` stack lands — `docs/dev/todo/2026-09-24-keyring-store-deferred-auth-and-attach-splits.md`
+**Status:** Open. Already over budget on `origin/master`; #510 adds three lines. Split deferred with the developer's consent during #510's wrap, to a follow-up after the `#keyring` stack lands — `docs/dev/todo/2026-09-24-keyring-store-deferred-oversized-file-splits.md`
 
 ## Measurement history
 
