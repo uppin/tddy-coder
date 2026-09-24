@@ -20,7 +20,7 @@ mod outcome;
 mod rehearsal;
 
 pub use comparison::verify;
-pub use compile_gate::{refuse_a_broken_baseline, refuse_a_broken_result};
+pub use compile_gate::{refuse_a_broken_baseline, refuse_a_broken_result, AppliedRun};
 pub use entry_points::{anchors, apply, check, dispatch, registry_for, run, snapshot, status};
 pub use options::{command_of, parse_options, Command, Options};
 pub use outcome::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
@@ -128,7 +128,7 @@ pub fn open_run_after(
 ) -> Result<Journal> {
     ensure_git_worktree(root)?;
 
-    let continuing = options.resume || options.from.is_some();
+    let continuing = options.continues_a_journal();
     // A fresh run's refusals read and never write, so they all come before `.restructure/` exists.
     // A continuing run may adopt a repository-scoped journal, which moves it into the directory.
     if !continuing {

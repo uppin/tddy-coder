@@ -189,91 +189,102 @@ impl Scan {
     fn run(&mut self, code: &[u8]) {
         let mut at = 0usize;
         while at < code.len() {
-            let byte = code[at];
-            if byte.is_ascii_whitespace() {
+            if code[at].is_ascii_whitespace() {
                 at += 1;
                 continue;
             }
             let after_async = std::mem::take(&mut self.after_async);
-
-            if byte.is_ascii_alphabetic() || byte == b'_' || byte >= 0x80 {
-                let end = word_end(code, at);
-                let word = std::str::from_utf8(&code[at..end]).unwrap_or_default();
-                at = end;
-                // A raw identifier, `r#return`, is an identifier and never the keyword.
-                if word == "r" && code.get(at) == Some(&b'#') {
-                    at = word_end(code, at + 1);
-                    self.previous = Previous::ExpressionEnded;
-                    continue;
-                }
-                self.word(word, code, at, after_async);
-                continue;
-            }
-            if byte.is_ascii_digit() {
-                at = word_end(code, at);
-                self.previous = Previous::ExpressionEnded;
-                continue;
-            }
-
-            match byte {
-                // A lifetime or a label; character literals were masked to `0`.
-                b'\'' => {
-                    at = word_end(code, at + 1);
-                    self.previous = Previous::ExpressionEnded;
-                    continue;
-                }
-                b'{' => {
-                    let depth = self.frames.len();
-                    let boundary = after_async
-                        || self.function_at == Some(depth)
-                        || self.closure_at == Some(depth);
-                    if boundary {
-                        self.function_at = None;
-                        self.closure_at = None;
-                    }
-                    self.frames.push(Frame::Delimiter { boundary });
-                    self.previous = Previous::ExpressionMayStart;
-                }
-                b'(' | b'[' => {
-                    self.frames.push(Frame::Delimiter { boundary: false });
-                    self.previous = Previous::ExpressionMayStart;
-                }
-                b')' | b']' | b'}' => {
-                    self.end_closure_expressions();
-                    self.frames.pop();
-                    self.previous = Previous::ExpressionEnded;
-                }
-                b';' => {
-                    self.end_closure_expressions();
-                    // A function declared without a body — a trait method's signature.
-                    if self.function_at == Some(self.frames.len()) {
-                        self.function_at = None;
-                    }
-                    self.previous = Previous::ExpressionMayStart;
-                }
-                b',' => {
-                    self.end_closure_expressions();
-                    self.previous = Previous::ExpressionMayStart;
-                }
-                b'?' => self.previous = Previous::ExpressionEnded,
-                b'|' if self.previous == Previous::ExpressionMayStart => {
-                    at = if code.get(at + 1) == Some(&b'|') {
-                        at + 2
-                    } else {
-                        closure_parameters_end(code, at + 1)
-                    };
-                    self.closure_body(code, at);
-                    continue;
-                }
-                b'|' if code.get(at + 1) == Some(&b'|') => {
-                    at += 2;
-                    self.previous = Previous::ExpressionMayStart;
-                    continue;
-                }
-                _ => self.previous = Previous::ExpressionMayStart,
-            }
-            at += 1;
+            at = self.token(code, at, after_async);
         }
+    }
+
+    /// Read the token that starts at `at`, and return where the next one may start.
+    fn token(&mut self, code: &[u8], at: usize, after_async: bool) -> usize {
+        let byte = code[at];
+        if byte.is_ascii_alphabetic() || byte == b'_' || byte >= 0x80 {
+            return self.identifier(code, at, after_async);
+        }
+        if byte.is_ascii_digit() {
+            self.previous = Previous::ExpressionEnded;
+            return word_end(code, at);
+        }
+        self.punctuation(code, at, after_async)
+    }
+
+    /// Read an identifier or keyword that starts at `at`, and return where it ends.
+    fn identifier(&mut self, code: &[u8], at: usize, after_async: bool) -> usize {
+        let end = word_end(code, at);
+        let word = std::str::from_utf8(&code[at..end]).unwrap_or_default();
+        // A raw identifier, `r#return`, is an identifier and never the keyword.
+        if word == "r" && code.get(end) == Some(&b'#') {
+            self.previous = Previous::ExpressionEnded;
+            return word_end(code, end + 1);
+        }
+        self.word(word, code, end, after_async);
+        end
+    }
+
+    /// Read the punctuation that starts at `at`, and return where the next token may start.
+    fn punctuation(&mut self, code: &[u8], at: usize, after_async: bool) -> usize {
+        match code[at] {
+            // A lifetime or a label; character literals were masked to `0`.
+            b'\'' => {
+                self.previous = Previous::ExpressionEnded;
+                return word_end(code, at + 1);
+            }
+            b'{' => self.open_brace(after_async),
+            b'(' | b'[' => {
+                self.frames.push(Frame::Delimiter { boundary: false });
+                self.previous = Previous::ExpressionMayStart;
+            }
+            b')' | b']' | b'}' => {
+                self.end_closure_expressions();
+                self.frames.pop();
+                self.previous = Previous::ExpressionEnded;
+            }
+            b';' => {
+                self.end_closure_expressions();
+                // A function declared without a body — a trait method's signature.
+                if self.function_at == Some(self.frames.len()) {
+                    self.function_at = None;
+                }
+                self.previous = Previous::ExpressionMayStart;
+            }
+            b',' => {
+                self.end_closure_expressions();
+                self.previous = Previous::ExpressionMayStart;
+            }
+            b'?' => self.previous = Previous::ExpressionEnded,
+            b'|' if self.previous == Previous::ExpressionMayStart => {
+                let after = if code.get(at + 1) == Some(&b'|') {
+                    at + 2
+                } else {
+                    closure_parameters_end(code, at + 1)
+                };
+                self.closure_body(code, after);
+                return after;
+            }
+            b'|' if code.get(at + 1) == Some(&b'|') => {
+                self.previous = Previous::ExpressionMayStart;
+                return at + 2;
+            }
+            _ => self.previous = Previous::ExpressionMayStart,
+        }
+        at + 1
+    }
+
+    /// Open a `{`, which is a body of its own when a closure, an `async` block or a nested `fn`
+    /// was waiting for it at this depth.
+    fn open_brace(&mut self, after_async: bool) {
+        let depth = self.frames.len();
+        let boundary =
+            after_async || self.function_at == Some(depth) || self.closure_at == Some(depth);
+        if boundary {
+            self.function_at = None;
+            self.closure_at = None;
+        }
+        self.frames.push(Frame::Delimiter { boundary });
+        self.previous = Previous::ExpressionMayStart;
     }
 
     /// Read one identifier or keyword.

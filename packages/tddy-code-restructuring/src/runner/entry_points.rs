@@ -22,8 +22,8 @@ use super::options::usage;
 use super::rehearsal::{survey_lines, Rehearsal};
 use super::{
     commit_operation, open_run_after, parse_options, refuse_a_broken_baseline,
-    refuse_a_broken_result, refuse_repo_scoped_state, restore_ledger, Command, Finding, Options,
-    Outcome, PlanProgress, RunSummary, SnapshotRewrite, StatePaths,
+    refuse_a_broken_result, refuse_repo_scoped_state, restore_ledger, AppliedRun, Command, Finding,
+    Options, Outcome, PlanProgress, RunSummary, SnapshotRewrite, StatePaths,
 };
 
 /// Dispatch a restructuring subcommand given a raw command line.
@@ -226,7 +226,13 @@ pub fn apply(
         done += 1;
     }
 
-    refuse_a_broken_result(root, &options, &journal, &paths, done, total, &cancel)?;
+    let run = AppliedRun {
+        journal: &journal,
+        paths: &paths,
+        applied: done,
+        total,
+    };
+    refuse_a_broken_result(root, &options, run, &cancel)?;
     Ok(RunSummary {
         applied: done,
         total: plan.ops.len(),

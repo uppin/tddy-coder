@@ -6,6 +6,9 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+/// What a progress line calls a phase the server never gave a title.
+const UNTITLED_PHASE: &str = "working";
+
 /// What the server has said about its own progress while a request was in flight.
 ///
 /// `request` used to drop every message it was not waiting for, which is why a run that spent two
@@ -111,22 +114,16 @@ impl ServerChatter {
             _ => {}
         }
 
-        let title = self.titles.get(&token).map(String::as_str);
-        let line = progress_line(title, value);
+        let title = self.titles.get(&token).cloned();
+        let line = progress_line(title.as_deref(), value);
         self.last = Some(line.clone());
 
-        if let Some(percentage) = value.get("percentage").and_then(Value::as_u64) {
-            let phase = title.unwrap_or("working").to_string();
-            if self
-                .furthest
-                .as_ref()
-                .is_none_or(|(seen, _)| percentage >= *seen)
-            {
-                self.furthest = Some((percentage, phase));
-            }
+        let percentage = value.get("percentage").and_then(Value::as_u64);
+        if let Some(percentage) = percentage {
+            self.reached(percentage, title.as_deref().unwrap_or(UNTITLED_PHASE));
         }
 
-        let key = match value.get("percentage").and_then(Value::as_u64) {
+        let key = match percentage {
             Some(percentage) => percentage.to_string(),
             None => line.clone(),
         };
@@ -135,6 +132,17 @@ impl ServerChatter {
         }
         self.shown.insert(token, key);
         Some(line)
+    }
+
+    /// Keep `percentage` of `phase` as the furthest the index got, unless it has been further.
+    fn reached(&mut self, percentage: u64, phase: &str) {
+        if self
+            .furthest
+            .as_ref()
+            .is_none_or(|(seen, _)| percentage >= *seen)
+        {
+            self.furthest = Some((percentage, phase.to_string()));
+        }
     }
 }
 
@@ -238,7 +246,7 @@ fn token_key(token: &Value) -> String {
 
 /// One progress notification as a line: what the server is doing, where it has got to, and how far.
 fn progress_line(title: Option<&str>, value: &Value) -> String {
-    let mut line = title.unwrap_or("working").to_string();
+    let mut line = title.unwrap_or(UNTITLED_PHASE).to_string();
     if let Some(message) = value.get("message").and_then(Value::as_str) {
         line.push_str(": ");
         line.push_str(message);

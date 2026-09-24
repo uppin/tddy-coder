@@ -60,6 +60,7 @@ impl RustBackend {
             .map(|found| found.text)
             .collect();
         let seam = Seam {
+            uri,
             original,
             module,
             moved,
@@ -70,7 +71,7 @@ impl RustBackend {
         for _ in 0..IMPORT_PASSES {
             self.did_change(uri, &text)?;
 
-            match self.next_import(uri, &text, &seam, &mut unimportable)? {
+            match self.next_import(&text, &seam, &mut unimportable)? {
                 Some(imported) => text = imported,
                 None => return Ok(text),
             }
@@ -91,18 +92,23 @@ impl RustBackend {
     /// the parent could not resolve before the cut is not one, and no `use` written into the module
     /// can resolve it there: asking about one is how a file whose alias the server could not see had
     /// the same line written into a module that named nothing, once a pass, until the backstop.
+    ///
+    /// A name the parent binds under an alias — `ProbeOutcome as ProtoProbeOutcome`, which is how
+    /// every generated proto type in this workspace is referred to — is reconstructed from the
+    /// parent's own declaration before the server is asked: rust-analyzer offers the *unaliased*
+    /// path, which does not bind the alias, so its offer could only produce a `use` that resolves
+    /// nothing. A name the server offers nothing for, reached through a bare module path, is
+    /// reconstructed the same way. Both reconstructions write into the module, so they answer only
+    /// for an occurrence inside it; one the parent lost is left to what the server offers there.
     fn next_import(
         &mut self,
-        uri: &str,
         text: &str,
         seam: &Seam<'_>,
         unimportable: &mut Vec<String>,
     ) -> Result<Option<String>> {
-        let module = seam.module;
         let mut asked: Vec<String> = Vec::new();
-        let unresolved = self.unresolved_the_seam_lost(uri, text, seam)?;
-        let source: Vec<String> = text.split('\n').map(str::to_string).collect();
-        let block = module_bounds(&source, module)?;
+        let unresolved = self.unresolved_the_seam_lost(text, seam)?;
+        let block = module_block(text, seam.module)?;
 
         for name in &unresolved {
             // One import serves every occurrence of a name, and a name that offered none here will
@@ -112,136 +118,117 @@ impl RustBackend {
             }
             asked.push(name.text.clone());
 
-            // A name reached through a qualifier is an associated item or a field, and no `use`
-            // binds either. rust-analyzer offers one anyway — `use super::new_with_config;` for a
-            // constructor called as `NativePDFContextManager::new_with_config` — and that import
-            // resolves nothing while looking exactly like a good one.
-            if reached_through_qualifier(text, &name.position) {
+            if no_use_can_bind(text, name, seam)? {
                 unimportable.push(name.text.clone());
                 continue;
             }
 
-            // Already bound in this module and still unresolved: the binding that exists is the
-            // broken one, and a second is `E0252` however well its path reads.
-            if super::already_bound(text, module, &name.text)? {
-                unimportable.push(name.text.clone());
-                continue;
-            }
-
-            // A name this seam's own facade will re-export. The facade is written *after* this
-            // pass, so the server sees the name as unresolved and offers a path through the new
-            // module — and the named import it writes is private, which then *shadows* the
-            // `pub use module::*;` added moments later. The facade is left present and inert, and
-            // an outside caller gets `E0603` on a symbol the facade was asked to keep reachable.
-            if facade_will_bind(&name.text, seam.moved, seam.reexport) {
-                unimportable.push(name.text.clone());
-                continue;
-            }
-
-            // How many occurrences the import has to account for. Counted rather than asked as a
-            // yes/no, because one name is routinely unresolved in several places and only the
-            // occurrence this import was offered for is the one it can answer for.
-            let before = occurrences_of(&unresolved, &name.text);
-
-            // A name the parent binds under an alias — `ProbeOutcome as ProtoProbeOutcome`, which
-            // is how every generated proto type in this workspace is referred to. rust-analyzer
-            // offers the *unaliased* path, which does not bind the alias, so asking the server can
-            // only produce a `use` that resolves nothing and the run then refuses. The parent's own
-            // declaration already says what the moved code meant, so reconstruct it from there.
-            //
-            // Both reconstructions write into the module, so they answer only for an occurrence
-            // inside it. One the parent lost is left to what the server offers there.
-            //
-            // The declaration is the parent's, and the module is the parent's *child*: a relative
-            // path in it is rebased one level down first (see [`rebased_for_child`]).
+            let lost = Lost {
+                name: &name.text,
+                before: occurrences_of(&unresolved, &name.text),
+            };
             let inside = within(&block, name);
-            if let Some(path) = alias_target(text, module, &name.text)
-                .filter(|_| inside)
-                .map(|path| rebased_for_child(&path))
+
+            if let Some(declaration) = inside
+                .then(|| aliased_declaration(text, seam.module, &name.text))
+                .flatten()
             {
-                let declaration = format!("use {path} as {};", name.text);
                 return self
-                    .reconstructed(uri, text, seam, &name.text, before, &declaration)
+                    .reconstructed(text, seam, &lost, &declaration)
                     .map(Some);
             }
 
-            let actions = self.request_settled(
-                "textDocument/codeAction",
-                json!({
-                    "textDocument": { "uri": uri },
-                    "range": { "start": name.position, "end": name.position },
-                    "context": { "diagnostics": [], "only": ["quickfix"] }
-                }),
-            )?;
+            let offers = self.offered_imports(seam.uri, &name.position)?;
+            if !offers.titles.is_empty() {
+                return self
+                    .first_offer_that_resolves(text, seam, &lost, &offers)
+                    .map(Some);
+            }
 
-            let offered: Vec<String> = actions
-                .as_array()
-                .into_iter()
+            // rust-analyzer offers `Import` for items, not for a bare module path, so a name the
+            // parent reached through `use crate::tool_engine;` is unresolved in the moved code with
+            // nothing on offer for it — and skipping silently is how three modules landed
+            // referencing an unlinked crate. The parent's own declaration says what it meant,
+            // exactly as for an alias.
+            if let Some(declaration) = inside
+                .then(|| bound_declaration(text, seam.module, &name.text))
                 .flatten()
-                .filter_map(|action| action.get("title").and_then(Value::as_str))
-                .filter(|title| title.starts_with(IMPORT_TITLE))
-                .map(str::to_string)
-                .collect();
-
-            if offered.is_empty() {
-                // rust-analyzer offers `Import` for items, not for a bare module path, so a name
-                // the parent reached through `use crate::tool_engine;` is unresolved in the moved
-                // code with nothing on offer for it — and skipping silently is how three modules
-                // landed referencing an unlinked crate. The parent's own declaration says what it
-                // meant, exactly as for an alias.
-                if let Some(path) = parent_binding(text, module, &name.text)
-                    .filter(|_| inside)
-                    .map(|path| rebased_for_child(&path))
-                {
-                    let declaration = format!("use {path};");
-                    return self
-                        .reconstructed(uri, text, seam, &name.text, before, &declaration)
-                        .map(Some);
-                }
-                continue;
+            {
+                return self
+                    .reconstructed(text, seam, &lost, &declaration)
+                    .map(Some);
             }
-
-            let ordered = import_order(&seam.evidence_with(text), &offered).ok_or_else(|| {
-                seam_refusal(format!(
-                    "`{}` could be imported {} ways and neither rust-analyzer nor this file's own \
-                     imports say which the moved code meant: {}",
-                    name.text,
-                    offered.len(),
-                    offered.join(", ")
-                ))
-            })?;
-
-            for title in &ordered {
-                let action = titled(&actions, &title.to_lowercase())
-                    .ok_or_else(|| server_defect("the import offered could not be read back"))?;
-                let resolved = self.request_settled("codeAction/resolve", action)?;
-                let trial = apply_lsp_edit(text, edits_for(&resolved, uri)?);
-
-                self.did_change(uri, &trial)?;
-
-                let after = occurrences_of(
-                    &self.unresolved_the_seam_lost(uri, &trial, seam)?,
-                    &name.text,
-                );
-                if after < before {
-                    return Ok(Some(trial));
-                }
-            }
-
-            // Every path the server offered leaves the name unresolved. Writing one anyway is how a
-            // successful run lands source that does not compile, so the operation says which name it
-            // could not import and what it tried.
-            return Err(seam_refusal(format!(
-                "no import rust-analyzer offered for `{}` left fewer of its {} unresolved \
-                 occurrence(s) — tried {}. Writing one anyway is how a run reports success over a \
-                 `use` that resolves nothing.",
-                name.text,
-                before,
-                ordered.join(", ")
-            )));
         }
 
         Ok(None)
+    }
+
+    /// The quick-fix imports rust-analyzer offers for the unresolved name at `position`.
+    fn offered_imports(&mut self, uri: &str, position: &Value) -> Result<Offers> {
+        let actions = self.request_settled(
+            "textDocument/codeAction",
+            json!({
+                "textDocument": { "uri": uri },
+                "range": { "start": position, "end": position },
+                "context": { "diagnostics": [], "only": ["quickfix"] }
+            }),
+        )?;
+
+        let titles = actions
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|action| action.get("title").and_then(Value::as_str))
+            .filter(|title| title.starts_with(IMPORT_TITLE))
+            .map(str::to_string)
+            .collect();
+
+        Ok(Offers { actions, titles })
+    }
+
+    /// The text with the first offered import that leaves fewer of the lost name's occurrences
+    /// unresolved, tried in the order the file's own imports make most likely.
+    ///
+    /// Refused when the file's imports cannot order the offers, and when none of them helps.
+    fn first_offer_that_resolves(
+        &mut self,
+        text: &str,
+        seam: &Seam<'_>,
+        lost: &Lost<'_>,
+        offers: &Offers,
+    ) -> Result<String> {
+        let ordered = import_order(&seam.evidence_with(text), &offers.titles).ok_or_else(|| {
+            seam_refusal(format!(
+                "`{}` could be imported {} ways and neither rust-analyzer nor this file's own \
+                 imports say which the moved code meant: {}",
+                lost.name,
+                offers.titles.len(),
+                offers.titles.join(", ")
+            ))
+        })?;
+
+        for title in &ordered {
+            let action = titled(&offers.actions, &title.to_lowercase())
+                .ok_or_else(|| server_defect("the import offered could not be read back"))?;
+            let resolved = self.request_settled("codeAction/resolve", action)?;
+            let trial = apply_lsp_edit(text, edits_for(&resolved, seam.uri)?);
+
+            if self.unresolved_after(&trial, seam, lost)? < lost.before {
+                return Ok(trial);
+            }
+        }
+
+        // Every path the server offered leaves the name unresolved. Writing one anyway is how a
+        // successful run lands source that does not compile, so the operation says which name it
+        // could not import and what it tried.
+        Err(seam_refusal(format!(
+            "no import rust-analyzer offered for `{}` left fewer of its {} unresolved \
+             occurrence(s) — tried {}. Writing one anyway is how a run reports success over a \
+             `use` that resolves nothing.",
+            lost.name,
+            lost.before,
+            ordered.join(", ")
+        )))
     }
 
     /// The text with the parent's own declaration of `name` written into the module, verified the
@@ -254,21 +241,19 @@ impl RustBackend {
     /// once the server resolves what the moved code names.
     fn reconstructed(
         &mut self,
-        uri: &str,
         text: &str,
         seam: &Seam<'_>,
-        name: &str,
-        before: usize,
+        lost: &Lost<'_>,
         declaration: &str,
     ) -> Result<String> {
         let trial = with_module_import(text, seam.module, declaration)?;
-        self.did_change(uri, &trial)?;
 
-        let after = occurrences_of(&self.unresolved_the_seam_lost(uri, &trial, seam)?, name);
-        if after < before {
+        let after = self.unresolved_after(&trial, seam, lost)?;
+        if after < lost.before {
             return Ok(trial);
         }
 
+        let (name, before) = (lost.name, lost.before);
         Err(seam_refusal(format!(
             "the moved code names `{name}`, and writing the parent's own `{declaration}` into the \
              module left {after} unresolved occurrence(s) of it, where there were {before}: \
@@ -276,6 +261,16 @@ impl RustBackend {
              way until the server has loaded the script's output. Cut the seam where the moved code \
              does not name `{name}`, or make its path resolve first."
         )))
+    }
+
+    /// How many of the lost name's occurrences the server still cannot resolve in `trial` — the
+    /// count every import is verified against, and kept only when it is below `lost.before`.
+    fn unresolved_after(&mut self, trial: &str, seam: &Seam<'_>, lost: &Lost<'_>) -> Result<usize> {
+        self.did_change(seam.uri, trial)?;
+        Ok(occurrences_of(
+            &self.unresolved_the_seam_lost(trial, seam)?,
+            lost.name,
+        ))
     }
 
     /// The names the server cannot resolve that the seam lost, in source order.
@@ -287,19 +282,57 @@ impl RustBackend {
     /// and is not this pass's to answer for.
     fn unresolved_the_seam_lost(
         &mut self,
-        uri: &str,
         text: &str,
         seam: &Seam<'_>,
     ) -> Result<Vec<UnresolvedName>> {
-        let source: Vec<String> = text.split('\n').map(str::to_string).collect();
-        let block = module_bounds(&source, seam.module)?;
+        let block = module_block(text, seam.module)?;
 
         Ok(self
-            .unresolved_names(uri, text)?
+            .unresolved_names(seam.uri, text)?
             .into_iter()
             .filter(|found| within(&block, found) || !seam.already_unresolved.contains(&found.text))
             .collect())
     }
+}
+
+/// Whether `name` is one no `use` written into the module can bind, so asking the server for an
+/// import would only be offered one that looks right and resolves nothing.
+///
+/// - Reached through a qualifier: an associated item or a field, and no `use` binds either.
+///   rust-analyzer offers one anyway — `use super::new_with_config;` for a constructor called as
+///   `NativePDFContextManager::new_with_config`.
+/// - Already bound in this module and still unresolved: the binding that exists is the broken one,
+///   and a second is `E0252` however well its path reads.
+/// - Re-exported by this seam's own facade. The facade is written *after* this pass, so the server
+///   sees the name as unresolved and offers a path through the new module — and the named import it
+///   writes is private, which then *shadows* the `pub use module::*;` added moments later. The
+///   facade is left present and inert, and an outside caller gets `E0603` on a symbol the facade
+///   was asked to keep reachable.
+fn no_use_can_bind(text: &str, name: &UnresolvedName, seam: &Seam<'_>) -> Result<bool> {
+    Ok(reached_through_qualifier(text, &name.position)
+        || super::already_bound(text, seam.module, &name.text)?
+        || facade_will_bind(&name.text, seam.moved, seam.reexport))
+}
+
+/// The parent's declaration binding `alias` under that alias, rewritten for the module.
+///
+/// The declaration is the parent's, and the module is the parent's *child*: a relative path in it
+/// is rebased one level down first (see [`rebased_for_child`]).
+fn aliased_declaration(text: &str, module: &str, alias: &str) -> Option<String> {
+    alias_target(text, module, alias)
+        .map(|path| format!("use {} as {alias};", rebased_for_child(&path)))
+}
+
+/// The parent's declaration binding `name` without an alias, rewritten for the module the same way
+/// as [`aliased_declaration`].
+fn bound_declaration(text: &str, module: &str, name: &str) -> Option<String> {
+    parent_binding(text, module, name).map(|path| format!("use {};", rebased_for_child(&path)))
+}
+
+/// The bounds of `module`'s inline block in `text`.
+fn module_block(text: &str, module: &str) -> Result<ModuleBlock> {
+    let source: Vec<String> = text.split('\n').map(str::to_string).collect();
+    module_bounds(&source, module)
 }
 
 /// Whether an unresolved name sits inside the module block, between its header and closing brace.
@@ -311,8 +344,25 @@ fn within(block: &ModuleBlock, found: &UnresolvedName) -> bool {
         .is_some_and(|line| line > block.opened as u64 && line < block.closed as u64)
 }
 
+/// A name the seam lost, and how many of its occurrences were unresolved before an import was tried.
+///
+/// Counted rather than asked as a yes/no, because one name is routinely unresolved in several places
+/// and only the occurrence an import was offered for is the one it can answer for.
+struct Lost<'a> {
+    name: &'a str,
+    before: usize,
+}
+
+/// The code actions the server answered for one name, and the titles of the imports among them.
+struct Offers {
+    actions: Value,
+    titles: Vec<String>,
+}
+
 /// What the import pass knows about the seam it is restoring names for.
 struct Seam<'a> {
+    /// The document the seam is cut in, as the server knows it.
+    uri: &'a str,
     /// The file before the assist ran.
     original: &'a str,
     /// The name of the module the assist wrote.

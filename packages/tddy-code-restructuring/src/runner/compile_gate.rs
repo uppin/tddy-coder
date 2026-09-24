@@ -23,7 +23,7 @@
 use std::collections::BTreeSet;
 use std::io::Read;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -51,7 +51,7 @@ pub fn refuse_a_broken_baseline(
     options: &Options,
     cancel: &CancellationToken,
 ) -> Result<()> {
-    if options.dry_run || options.resume || options.from.is_some() {
+    if options.dry_run || options.continues_a_journal() {
         return Ok(());
     }
     let named = plan
@@ -81,22 +81,19 @@ pub fn refuse_a_broken_baseline(
 pub fn refuse_a_broken_result(
     root: &Path,
     options: &Options,
-    journal: &Journal,
-    paths: &StatePaths,
-    applied: usize,
-    total: usize,
+    run: AppliedRun<'_>,
     cancel: &CancellationToken,
 ) -> Result<()> {
+    let AppliedRun {
+        journal,
+        paths,
+        applied,
+        total,
+    } = run;
     if options.dry_run || applied == 0 {
         return Ok(());
     }
-    let touched: BTreeSet<String> = journal
-        .records
-        .iter()
-        .filter(|record| record.status == OpStatus::Completed)
-        .filter_map(|record| record.edit.as_ref())
-        .flat_map(touched_paths)
-        .collect();
+    let touched = completed_edit_paths(journal);
     let packages = owning_packages(root, touched.iter().cloned())?;
 
     let checked = failing_check(root, &packages, cancel);
@@ -122,6 +119,28 @@ pub fn refuse_a_broken_result(
             errors,
         }),
     }
+}
+
+/// Every file a completed edit in the journal touched.
+fn completed_edit_paths(journal: &Journal) -> BTreeSet<String> {
+    journal
+        .records
+        .iter()
+        .filter(|record| record.status == OpStatus::Completed)
+        .filter_map(|record| record.edit.as_ref())
+        .flat_map(touched_paths)
+        .collect()
+}
+
+/// What a writing run leaves for [`refuse_a_broken_result`] to judge: the journal of its edits,
+/// where that journal lives, and how far through the plan it got.
+pub struct AppliedRun<'a> {
+    pub journal: &'a Journal,
+    pub paths: &'a StatePaths,
+    /// Operations applied, this run's and any earlier run's it continued.
+    pub applied: usize,
+    /// Operations in the plan.
+    pub total: usize,
 }
 
 /// The `[package] name` of the nearest manifest above each file, within `root`.
@@ -177,9 +196,20 @@ fn failing_check(
     // Drained on a thread of its own while the check runs: a check that fails writes more than a
     // pipe holds, and a cargo blocked writing stderr would never exit for `try_wait` to see.
     let stderr = drain(&mut child);
-    let status = loop {
+    let status = exit_or_kill(&mut child, cancel)?;
+    let said = stderr.join().unwrap_or_default();
+    if status.success() {
+        return Ok(None);
+    }
+    Ok(Some((described_check(packages), compiler_errors(&said))))
+}
+
+/// The status `child` exits with, or [`RestructureError::CallerStopped`] once `cancel` fires first
+/// and the child has been killed.
+fn exit_or_kill(child: &mut Child, cancel: &CancellationToken) -> Result<ExitStatus> {
+    loop {
         if let Some(status) = child.try_wait()? {
-            break status;
+            return Ok(status);
         }
         if cancel.is_cancelled() {
             // Cargo's own `rustc` children are not killed with it; they finish the unit they are
@@ -189,21 +219,16 @@ fn failing_check(
             return Err(RestructureError::CallerStopped);
         }
         std::thread::sleep(CANCEL_CHECK);
-    };
-    let said = stderr.join().unwrap_or_default();
-    if status.success() {
-        return Ok(None);
     }
+}
 
-    let checked = format!(
-        "cargo check --all-targets {}",
-        packages
-            .iter()
-            .map(|package| format!("-p {package}"))
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
-    Ok(Some((checked, compiler_errors(&said))))
+/// The check as a refusal names it, for a reader to run again.
+fn described_check(packages: &BTreeSet<String>) -> String {
+    let selected: Vec<String> = packages
+        .iter()
+        .map(|package| format!("-p {package}"))
+        .collect();
+    format!("cargo check --all-targets {}", selected.join(" "))
 }
 
 /// Everything `child` writes to stderr, read to the end on a thread of its own.

@@ -114,15 +114,13 @@ pub(crate) fn apply_plan(
     // Judged before the outcome is sent, so a tree that does not compile ends the stream with the
     // refusal and never with "applied N of N" — the same gate, from the same library, as the cold
     // path's `runner::apply`.
-    runner::refuse_a_broken_result(
-        root,
-        options,
-        &journal,
-        &paths,
-        done,
-        plan.ops.len(),
-        &cancel,
-    )?;
+    let run = runner::AppliedRun {
+        journal: &journal,
+        paths: &paths,
+        applied: done,
+        total: plan.ops.len(),
+    };
+    runner::refuse_a_broken_result(root, options, run, &cancel)?;
     emit(
         events,
         &cancel,

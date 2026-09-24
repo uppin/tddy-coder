@@ -76,27 +76,23 @@ fn module_blocks<'a>(lines: &[&'a str]) -> Vec<ModuleBlock<'a>> {
     let mut stack: Vec<Option<(&'a str, usize)>> = Vec::new();
 
     for (index, code) in lines.iter().copied().enumerate() {
+        // Where the declaration head of the next `{` starts: after the last delimiter read.
         let mut declaration = 0usize;
+        let delimiters = code
+            .char_indices()
+            .filter(|(_, character)| matches!(character, '{' | '}' | ';'));
 
-        for (at, character) in code.char_indices() {
+        for (at, character) in delimiters {
             match character {
-                '{' => {
-                    stack.push(module_named(&code[declaration..at]).map(|name| (name, index)));
-                    declaration = at + 1;
-                }
-                '}' => {
-                    if let Some(Some((name, opened))) = stack.pop() {
-                        blocks.push(ModuleBlock {
-                            name,
-                            opened,
-                            closed: index,
-                        });
-                    }
-                    declaration = at + 1;
-                }
-                ';' => declaration = at + 1,
+                '{' => stack.push(module_named(&code[declaration..at]).map(|name| (name, index))),
+                '}' => blocks.extend(stack.pop().flatten().map(|(name, opened)| ModuleBlock {
+                    name,
+                    opened,
+                    closed: index,
+                })),
                 _ => {}
             }
+            declaration = at + 1;
         }
     }
 

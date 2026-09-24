@@ -135,6 +135,12 @@ pub fn command_of(args: &[String]) -> Command {
 }
 
 impl Options {
+    /// Whether this run continues a journal an earlier run left (`--resume`, or `--from`), rather
+    /// than starting the plan fresh.
+    pub fn continues_a_journal(&self) -> bool {
+        self.resume || self.from.is_some()
+    }
+
     /// Absorb one argument, taking a value from `rest` for the flags that carry one.
     fn absorb<'a>(
         &mut self,
