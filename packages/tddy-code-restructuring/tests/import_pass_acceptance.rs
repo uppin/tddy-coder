@@ -1,9 +1,9 @@
 //! The import pass behind `extract_module`, against a live rust-analyzer.
 //!
-//! These cover six things: defect E1, the D8 alias restoration E1 sits in the path of, the
+//! These cover seven things: defect E1, the D8 alias restoration E1 sits in the path of, the
 //! restoration of a name the parent lost to the seam, which E1's fix must not scope away, the
-//! grouped-`use` ambiguity, the rebasing of a relative `use` for the deeper module, and what the
-//! pass does on a server that has only just started. Each seam is judged by what `cargo check` says
+//! grouped-`use` ambiguity, the rebasing of a relative `use` for the deeper module, what the pass
+//! does on a server that has only just started, and what it does on one an earlier run has used. Each seam is judged by what `cargo check` says
 //! of the tree afterwards. The engine can report success over a `use` line that resolves nothing, so
 //! the compiler is the only check it cannot fool.
 //!
@@ -25,9 +25,11 @@ use harness::{
     a_crate_whose_module_imports_its_parent_s_type_through_super,
     a_crate_whose_parent_names_a_trait_the_seam_moves,
     a_workspace_whose_parent_binds_a_module_in_a_group, an_extract_module_of, assert_compiles,
-    performing, performing_once_settled, refusal_once_settled_from, the_module_named, HOST_MODULE,
-    ORIGIN_LIB,
+    performing, performing_once_settled, refusal_once_settled_from, resolving_after_a_check_of,
+    the_module_named, HOST_MODULE, ORIGIN_LIB, SERVICE_MODULE,
 };
+use tddy_code_restructuring::apply::apply_workspace_edit;
+use tddy_code_restructuring::Reexport;
 
 /// `fn constant() -> u32 { 7 }`: a seam that names nothing at all.
 const A_SEAM_NAMING_NOTHING: RangeInclusive<u32> = 17..=19;
@@ -41,6 +43,11 @@ const A_SEAM_TAKING_THE_TRAIT: RangeInclusive<u32> = 3..=5;
 /// `fn tally(&self, failure: Failure)` in `host.rs`: a seam naming the type `host` imports through
 /// `super`.
 const A_SEAM_NAMING_THE_PARENT_S_TYPE: RangeInclusive<u32> = 12..=17;
+
+/// `pub(crate) enum Failure { … }` in `service.rs`, with its derive: the type `host.rs` names.
+const THE_TYPE_HOST_NAMES_THROUGH_SUPER: RangeInclusive<u32> = 5..=9;
+/// `pub fn described() -> u32 { … }` in `service.rs`, below that type.
+const THE_FUNCTION_BELOW_IT: RangeInclusive<u32> = 11..=13;
 
 const THE_PARENT_S_ALIAS: &str = "use crate::proto::Event as StartSessionEventKind;";
 
@@ -197,6 +204,58 @@ async fn imports_the_parent_s_type_the_moved_code_names_through_super() {
     performing_once_settled(&workspace, seam).await;
 
     // Then
+    let module = the_module_named(&workspace.read(HOST_MODULE), "tallying");
+    assert!(
+        module.contains("use super::super::Failure;"),
+        "the module was not given the parent's `super::Failure`, one level deeper:\n{module}"
+    );
+    assert_compiles(&workspace);
+}
+
+/// The pass judges the seam against the tree, not against a text an earlier run left the server
+/// holding.
+///
+/// `tddy-index-daemon` keeps one server per root and a backend per request. A `check --deep`
+/// rehearses its plan through an overlay, so every operation after its first opens its file with
+/// text only the overlay holds. Here that text moves `Failure` out to a `mod failures;` whose file
+/// exists only in the overlay. The check writes nothing and closes nothing, so the server goes on
+/// holding that text as `service.rs`, and there `Failure` is declared nowhere. The next request's
+/// seam names it through `use super::super::Failure;`, a path that is right for the tree, and the
+/// pass refuses it: "left 4 unresolved occurrence(s) of it, where there were 3". That is plan 05 on
+/// `svc_spawn_split_agent.rs` after a check of plan 01 on `connection_service.rs`.
+#[tokio::test(flavor = "multi_thread")]
+async fn imports_the_parent_s_type_on_a_server_an_earlier_check_rehearsed_its_parent_on() {
+    // Given
+    let workspace = a_crate_whose_module_imports_its_parent_s_type_through_super();
+    let mut failures_to_a_file = an_extract_module_of(
+        &workspace,
+        SERVICE_MODULE,
+        THE_TYPE_HOST_NAMES_THROUGH_SUPER,
+        "failures",
+    );
+    failures_to_a_file.reexport = Some(Reexport::Glob);
+    failures_to_a_file.to_file = true;
+    let mut describing = an_extract_module_of(
+        &workspace,
+        SERVICE_MODULE,
+        THE_FUNCTION_BELOW_IT,
+        "describing",
+    );
+    describing.reexport = Some(Reexport::Glob);
+    let seam = an_extract_module_of(
+        &workspace,
+        HOST_MODULE,
+        A_SEAM_NAMING_THE_PARENT_S_TYPE,
+        "tallying",
+    );
+
+    // When
+    let edit = resolving_after_a_check_of(&workspace, &[failures_to_a_file, describing], seam)
+        .await
+        .unwrap_or_else(|refusal| panic!("the seam was refused: {refusal}"));
+
+    // Then
+    apply_workspace_edit(workspace.path(), &edit).expect("the resolved edit applies");
     let module = the_module_named(&workspace.read(HOST_MODULE), "tallying");
     assert!(
         module.contains("use super::super::Failure;"),
