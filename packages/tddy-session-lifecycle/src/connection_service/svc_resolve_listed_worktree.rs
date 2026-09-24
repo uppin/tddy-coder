@@ -105,76 +105,17 @@ impl DaemonSessionHost {
             .as_ref()
             .map(|(instance_id, _)| format!("{instance_id}:{project_id_owned}"));
 
-        let handle = tokio::task::spawn_blocking(move || {
-            let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
-                match &spawn_backend {
-                    tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor {
-                        socket_path,
-                    } => {
-                        let mut env = std::collections::BTreeMap::new();
-                        if let Some(ref ssh) = ssh_command {
-                            env.insert("GIT_SSH_COMMAND".to_string(), ssh.clone());
-                        }
-                        runtime
-                            .block_on(
-                                tddy_spawn::supervisor_spawn::clone_repo_via_supervisor_with_env(
-                                    socket_path,
-                                    &os_user_owned,
-                                    git_url,
-                                    dest,
-                                    env,
-                                ),
-                            )
-                            .map_err(|e| format!("{e:#}"))
-                    }
-                    tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                        if let Some(ref client) = spawn_client {
-                            if ssh_command.is_none() {
-                                // No transport env var to carry: the forked worker's `clone_repo` is
-                                // the original path (it has no env-var channel).
-                                return client
-                                    .clone_repo(spawn_worker::CloneRequest {
-                                        os_user: os_user_owned.clone(),
-                                        git_url: git_url.to_string(),
-                                        destination: dest.display().to_string(),
-                                    })
-                                    .map_err(|e| e.to_string());
-                            }
-                        }
-                        // Facilitator clone (carries `GIT_SSH_COMMAND`) or no forked worker at all:
-                        // the in-process `clone_as_user_with_env` carries the transport env var directly.
-                        let extra: Vec<(&str, &str)> = ssh_command
-                            .as_ref()
-                            .map(|ssh| vec![("GIT_SSH_COMMAND", ssh.as_str())])
-                            .unwrap_or_default();
-                        spawner::clone_as_user_with_env(&os_user_owned, git_url, dest, &extra)
-                            .map_err(|e| e.to_string())
-                    }
-                }
-            };
-            if let Some(remote_url) = facilitating_remote_url {
-                crate::project_provision::ensure_project_available_from_facilitator(
-                    &projects_dir_owned,
-                    &project_id_owned,
-                    repos_base_dir.as_deref(),
-                    &remote_url,
-                    cloner,
-                )
-            } else {
-                let peer_lookup = |id: &str| {
-                    peer_entries
-                        .iter()
-                        .find(|p| p.project_id == id)
-                        .map(|p| (p.name.clone(), p.git_url.clone()))
-                };
-                crate::project_provision::ensure_project_available_locally(
-                    &projects_dir_owned,
-                    &project_id_owned,
-                    repos_base_dir.as_deref(),
-                    cloner,
-                    peer_lookup,
-                )
-            }
+        let handle = spawn_project_clone(ProjectClone {
+            repos_base_dir,
+            spawn_client,
+            os_user_owned,
+            projects_dir_owned,
+            project_id_owned,
+            peer_entries,
+            spawn_backend,
+            runtime,
+            ssh_command,
+            facilitating_remote_url,
         });
 
         match tokio::time::timeout(timeout, handle).await {
@@ -355,6 +296,108 @@ impl DaemonSessionHost {
     // ── Remote agents: room admission, clones, tool split ────────────────────────────────────
     //
     // docs/ft/daemon/session-agent-roster.md § Remote agents, § Clones.
+}
+
+/// What provisioning a project's working copy on the blocking pool needs: the clone backend, and
+/// where the project comes from.
+struct ProjectClone {
+    repos_base_dir: Option<PathBuf>,
+    spawn_client: Option<std::sync::Arc<spawn_worker::SpawnClient>>,
+    os_user_owned: String,
+    projects_dir_owned: PathBuf,
+    project_id_owned: String,
+    peer_entries: Vec<tddy_service::proto::project::ProjectEntry>,
+    spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice,
+    runtime: tokio::runtime::Handle,
+    ssh_command: Option<String>,
+    facilitating_remote_url: Option<String>,
+}
+
+fn spawn_project_clone(
+    launch: ProjectClone,
+) -> tokio::task::JoinHandle<Result<project_storage::ProjectData, Status>> {
+    let ProjectClone {
+        repos_base_dir,
+        spawn_client,
+        os_user_owned,
+        projects_dir_owned,
+        project_id_owned,
+        peer_entries,
+        spawn_backend,
+        runtime,
+        ssh_command,
+        facilitating_remote_url,
+    } = launch;
+    let handle = tokio::task::spawn_blocking(move || {
+        let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
+            match &spawn_backend {
+                tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                    let mut env = std::collections::BTreeMap::new();
+                    if let Some(ref ssh) = ssh_command {
+                        env.insert("GIT_SSH_COMMAND".to_string(), ssh.clone());
+                    }
+                    runtime
+                        .block_on(
+                            tddy_spawn::supervisor_spawn::clone_repo_via_supervisor_with_env(
+                                socket_path,
+                                &os_user_owned,
+                                git_url,
+                                dest,
+                                env,
+                            ),
+                        )
+                        .map_err(|e| format!("{e:#}"))
+                }
+                tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+                    if let Some(ref client) = spawn_client {
+                        if ssh_command.is_none() {
+                            // No transport env var to carry: the forked worker's `clone_repo` is
+                            // the original path (it has no env-var channel).
+                            return client
+                                .clone_repo(spawn_worker::CloneRequest {
+                                    os_user: os_user_owned.clone(),
+                                    git_url: git_url.to_string(),
+                                    destination: dest.display().to_string(),
+                                })
+                                .map_err(|e| e.to_string());
+                        }
+                    }
+                    // Facilitator clone (carries `GIT_SSH_COMMAND`) or no forked worker at all:
+                    // the in-process `clone_as_user_with_env` carries the transport env var directly.
+                    let extra: Vec<(&str, &str)> = ssh_command
+                        .as_ref()
+                        .map(|ssh| vec![("GIT_SSH_COMMAND", ssh.as_str())])
+                        .unwrap_or_default();
+                    spawner::clone_as_user_with_env(&os_user_owned, git_url, dest, &extra)
+                        .map_err(|e| e.to_string())
+                }
+            }
+        };
+        if let Some(remote_url) = facilitating_remote_url {
+            crate::project_provision::ensure_project_available_from_facilitator(
+                &projects_dir_owned,
+                &project_id_owned,
+                repos_base_dir.as_deref(),
+                &remote_url,
+                cloner,
+            )
+        } else {
+            let peer_lookup = |id: &str| {
+                peer_entries
+                    .iter()
+                    .find(|p| p.project_id == id)
+                    .map(|p| (p.name.clone(), p.git_url.clone()))
+            };
+            crate::project_provision::ensure_project_available_locally(
+                &projects_dir_owned,
+                &project_id_owned,
+                repos_base_dir.as_deref(),
+                cloner,
+                peer_lookup,
+            )
+        }
+    });
+    handle
 }
 
 mod session_dir_lookup;

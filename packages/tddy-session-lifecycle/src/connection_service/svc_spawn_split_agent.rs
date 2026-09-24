@@ -24,6 +24,19 @@ use std::path::Path;
 
 use super::DaemonSessionHost;
 
+/// What the split agent's claude-cli process is spawned with: its context dir, its tools' route
+/// back, and the request's model and prompt.
+struct SplitAgentProcess<'a> {
+    os_user: &'a str,
+    session_id: &'a str,
+    req: &'a StartSessionRequest,
+    initial_prompt: String,
+    tddy_tools_path: std::path::PathBuf,
+    remote: tddy_core::RemoteToolEnv,
+    context_dir: std::path::PathBuf,
+    extra_args: Vec<String>,
+}
+
 impl DaemonSessionHost {
     /// Spawn the agent half of a session whose checkout it does not hold, and record the pairing.
     ///
@@ -61,46 +74,13 @@ impl DaemonSessionHost {
             .attached_initial_prompt(req, os_user, sessions_base, session_id, progress)
             .await?;
 
-        let tddy_tools_path = self.resolve_tddy_tools_path()?;
-        let remote = match livekit {
-            Some(livekit) => crate::split_session::split_remote_tool_env(
-                livekit,
-                self.session_tokens()?,
-                &crate::split_session::SplitSpawnTarget {
-                    session_id,
-                    codebase_instance_id,
-                    codebase_session_id,
-                    session_token: &req.session_token,
-                },
-            )?,
-            // The checkout is a jailed `workspace` session on this daemon, so this daemon's own
-            // URL is the route to it and no LiveKit field is set at all — see
-            // [`crate::split_session::colocated_jail_tool_env`], which inverts the split builder's
-            // reasoning field by field.
-            None => crate::split_session::colocated_jail_tool_env(
-                &hooks_and_urls::local_daemon_hook_url(&self.config),
-                codebase_session_id,
-                &self.agent_session_token_for(&req.session_token)?,
-                self.agent_tool_socket_for_embedded_host(),
-            ),
-        };
-        // What this agent was actually wired to, on one line, on the path *every* placement takes.
-        // None of it used to be logged: a session started and the only record of which binaries it
-        // got — or which route its tools would take back — was the process table, after the fact.
-        // Both bit us. The tools path was written relative and resolved against the agent's own
-        // context dir, so its MCP server never launched; and the relay was an HTTP URL on a host
-        // that serves no HTTP, so every tool call returned `relay parse error`.
-        log::info!(
-            "agent tool wiring: session={} codebase_session={} tddy_tools={} relay={}",
+        let (tddy_tools_path, remote) = self.split_agent_tool_wiring(
             session_id,
+            codebase_instance_id,
             codebase_session_id,
-            tddy_tools_path.display(),
-            match (&remote.daemon_socket, remote.daemon_url.is_empty()) {
-                (Some(sock), _) => format!("uds {sock}"),
-                (None, false) => format!("http {}", remote.daemon_url),
-                (None, true) => "livekit".to_string(),
-            },
-        );
+            livekit,
+            req,
+        )?;
         self.join_split_livekit_room(
             session_id,
             codebase_instance_id,
@@ -142,36 +122,18 @@ impl DaemonSessionHost {
         // Claude Code reads `.claude/settings.local.json` from its working directory, which for a
         // split session is the context dir rather than a worktree. Best-effort, as elsewhere: a
         // missing hook file costs status reporting, not the session.
-        let hook_token = Uuid::new_v4().to_string();
-        hooks_and_urls::write_claude_hooks_settings(
-            &context_dir,
-            &tddy_core::HookCommandParams {
-                tddy_tools_path: &tddy_tools_path.to_string_lossy(),
-                daemon_url: &hooks_and_urls::claude_hook_daemon_url(&self.config),
-                session_id,
+        let (hook_token, handle) = self
+            .spawn_split_agent_process(SplitAgentProcess {
                 os_user,
-                hook_token: &hook_token,
-            },
-        );
-
-        let handle = self
-            .claude_cli_manager
-            .start_with_options(
                 session_id,
+                req,
+                initial_prompt,
+                tddy_tools_path,
+                remote,
                 context_dir,
-                req.model.trim(),
-                &hooks_and_urls::resolve_start_session_claude_binary(&self.config),
-                Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
-                Some(req.permission_mode.trim()).filter(|m| !m.is_empty()),
-                req.dangerously_skip_permissions,
-                false,
-                None,
                 extra_args,
-                remote.env_pairs(),
-                Some(os_user),
-            )
-            .await
-            .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {e}")))?;
+            })
+            .await?;
 
         write_split_agent_metadata(
             session_id,
@@ -200,6 +162,103 @@ impl DaemonSessionHost {
             livekit_server_identity: String::new(),
             branch_conflict: None,
         }))
+    }
+
+    fn split_agent_tool_wiring(
+        &self,
+        session_id: &str,
+        codebase_instance_id: &str,
+        codebase_session_id: &str,
+        livekit: Option<&crate::split_session::SplitLiveKitRoom>,
+        req: &StartSessionRequest,
+    ) -> Result<(std::path::PathBuf, tddy_core::RemoteToolEnv), Status> {
+        let tddy_tools_path = self.resolve_tddy_tools_path()?;
+        let remote = match livekit {
+            Some(livekit) => crate::split_session::split_remote_tool_env(
+                livekit,
+                self.session_tokens()?,
+                &crate::split_session::SplitSpawnTarget {
+                    session_id,
+                    codebase_instance_id,
+                    codebase_session_id,
+                    session_token: &req.session_token,
+                },
+            )?,
+            // The checkout is a jailed `workspace` session on this daemon, so this daemon's own
+            // URL is the route to it and no LiveKit field is set at all — see
+            // [`crate::split_session::colocated_jail_tool_env`], which inverts the split builder's
+            // reasoning field by field.
+            None => crate::split_session::colocated_jail_tool_env(
+                &hooks_and_urls::local_daemon_hook_url(&self.config),
+                codebase_session_id,
+                &self.agent_session_token_for(&req.session_token)?,
+                self.agent_tool_socket_for_embedded_host(),
+            ),
+        };
+        // What this agent was actually wired to, on one line, on the path *every* placement takes.
+        // None of it used to be logged: a session started and the only record of which binaries it
+        // got — or which route its tools would take back — was the process table, after the fact.
+        // Both bit us. The tools path was written relative and resolved against the agent's own
+        // context dir, so its MCP server never launched; and the relay was an HTTP URL on a host
+        // that serves no HTTP, so every tool call returned `relay parse error`.
+        log::info!(
+            "agent tool wiring: session={} codebase_session={} tddy_tools={} relay={}",
+            session_id,
+            codebase_session_id,
+            tddy_tools_path.display(),
+            match (&remote.daemon_socket, remote.daemon_url.is_empty()) {
+                (Some(sock), _) => format!("uds {sock}"),
+                (None, false) => format!("http {}", remote.daemon_url),
+                (None, true) => "livekit".to_string(),
+            },
+        );
+        Ok((tddy_tools_path, remote))
+    }
+
+    async fn spawn_split_agent_process(
+        &self,
+        launch: SplitAgentProcess<'_>,
+    ) -> Result<(String, Arc<crate::claude_cli_session::PtyHandle>), Status> {
+        let SplitAgentProcess {
+            os_user,
+            session_id,
+            req,
+            initial_prompt,
+            tddy_tools_path,
+            remote,
+            context_dir,
+            extra_args,
+        } = launch;
+        let hook_token = Uuid::new_v4().to_string();
+        hooks_and_urls::write_claude_hooks_settings(
+            &context_dir,
+            &tddy_core::HookCommandParams {
+                tddy_tools_path: &tddy_tools_path.to_string_lossy(),
+                daemon_url: &hooks_and_urls::claude_hook_daemon_url(&self.config),
+                session_id,
+                os_user,
+                hook_token: &hook_token,
+            },
+        );
+        let handle = self
+            .claude_cli_manager
+            .start_with_options(
+                session_id,
+                context_dir,
+                req.model.trim(),
+                &hooks_and_urls::resolve_start_session_claude_binary(&self.config),
+                Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
+                Some(req.permission_mode.trim()).filter(|m| !m.is_empty()),
+                req.dangerously_skip_permissions,
+                false,
+                None,
+                extra_args,
+                remote.env_pairs(),
+                Some(os_user),
+            )
+            .await
+            .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {e}")))?;
+        Ok((hook_token, handle))
     }
 
     async fn join_split_livekit_room(
