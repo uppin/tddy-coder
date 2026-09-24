@@ -10,8 +10,6 @@ use super::WorktreeSource;
 
 use super::session_worktree_source;
 
-use tddy_core::Changeset;
-
 use crate::{
     branch_intent::BranchIntentPolicy,
     connection_service::{agent_roster, hooks_and_urls, seed_codebase, service_util, stack_parent},
@@ -19,10 +17,6 @@ use crate::{
 };
 
 use crate::branch_intent::BranchIntentRequest;
-
-use crate::branch_intent::resolve_branch_workflow;
-
-use crate::branch_intent::ResolvedBranchWorkflow;
 
 use crate::user_sessions_path::projects_path_for_user;
 
@@ -167,10 +161,7 @@ impl DaemonSessionHost {
         let project_default_branch_ref =
             self.project_default_branch_ref(os_user, project_id, repo_path);
 
-        let ResolvedBranchWorkflow {
-            intent,
-            workflow: cs_workflow,
-        } = resolve_branch_workflow(
+        let intent = service_util::write_initial_changeset(
             session_id,
             &BranchIntentRequest {
                 branch_worktree_intent,
@@ -180,8 +171,10 @@ impl DaemonSessionHost {
             },
             BranchIntentPolicy::claude_cli(),
             project_default_branch_ref.as_deref(),
+            &session_dir,
+            stack_parent,
+            managed_recipe.as_deref(),
         )?;
-        write_jail_changeset(stack_parent, &managed_recipe, &session_dir, cs_workflow)?;
 
         // Resolve the session's worktree. A client-supplied `repo_path` is used directly (arbitrary
         // local checkout, edited via the host-side tool relay as the caller's mapped OS user); it is
@@ -769,29 +762,6 @@ impl DaemonSessionHost {
             .await;
         Ok(pid)
     }
-}
-
-fn write_jail_changeset(
-    stack_parent: Option<&str>,
-    managed_recipe: &Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
-    session_dir: &Path,
-    cs_workflow: tddy_core::ChangesetWorkflow,
-) -> Result<(), Status> {
-    let mut cs = Changeset {
-        workflow: Some(cs_workflow),
-        orchestrator_session_id: stack_parent.map(str::to_string),
-        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-        ..Changeset::default()
-    };
-    if let Some(recipe) = managed_recipe {
-        tddy_core::changeset::update_state(
-            &mut cs,
-            tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
-        );
-    }
-    tddy_core::write_changeset(session_dir, &cs)
-        .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
-    Ok(())
 }
 
 fn prepare_jail_dirs(session_dir: &Path) -> Result<JailDirs, Status> {

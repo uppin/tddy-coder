@@ -38,6 +38,45 @@ pub(crate) async fn index_session_worktree(
     Ok(())
 }
 
+/// Resolve a starting session's branch intent and write the changeset its worktree setup reads.
+///
+/// The changeset names the orchestrator a stack child was spawned by, and a managed session's
+/// recipe. A managed session also seeds the recipe's start goal, so `changeset.yaml` reflects the
+/// workflow position immediately; the per-session controller advances it from there on
+/// `transition`. Returns the intent, which decides whether the new branch is pushed.
+pub(crate) fn write_initial_changeset(
+    session_id: &str,
+    branch: &crate::branch_intent::BranchIntentRequest<'_>,
+    policy: crate::branch_intent::BranchIntentPolicy,
+    project_main_branch_ref: Option<&str>,
+    session_dir: &Path,
+    orchestrator_session_id: Option<&str>,
+    managed_recipe: Option<&dyn tddy_core::workflow::recipe::WorkflowRecipe>,
+) -> Result<BranchWorktreeIntent, Status> {
+    let crate::branch_intent::ResolvedBranchWorkflow { intent, workflow } =
+        crate::branch_intent::resolve_branch_workflow(
+            session_id,
+            branch,
+            policy,
+            project_main_branch_ref,
+        )?;
+    let mut cs = tddy_core::Changeset {
+        workflow: Some(workflow),
+        orchestrator_session_id: orchestrator_session_id.map(str::to_string),
+        recipe: managed_recipe.map(|r| r.name().to_string()),
+        ..tddy_core::Changeset::default()
+    };
+    if let Some(recipe) = managed_recipe {
+        tddy_core::changeset::update_state(
+            &mut cs,
+            tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
+        );
+    }
+    tddy_core::write_changeset(session_dir, &cs)
+        .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
+    Ok(intent)
+}
+
 /// Cut a session's git worktree from `repo_root` into `session_dir` (blocking: a fetch plus
 /// `git worktree add`), based on `base_ref` when there is one, under the spawn deadline.
 pub(crate) async fn create_session_worktree(

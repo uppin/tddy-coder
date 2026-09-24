@@ -4,18 +4,12 @@ use tddy_projects::project_storage;
 use tddy_spawn::spawner;
 use uuid::Uuid;
 
-use tddy_core::Changeset;
-
 use crate::{
     branch_intent::BranchIntentPolicy,
     connection_service::{hooks_and_urls, service_util, stack_parent},
 };
 
 use crate::branch_intent::BranchIntentRequest;
-
-use crate::branch_intent::resolve_branch_workflow;
-
-use crate::branch_intent::ResolvedBranchWorkflow;
 
 use tddy_core::output::SESSIONS_SUBDIR;
 
@@ -103,10 +97,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // legacy project (no stored default branch) leaves the base `None` so worktree setup resolves
     // the default live (`origin/master` → `origin/main` → `origin/HEAD`) — the same order the
     // project resolver uses.
-    let ResolvedBranchWorkflow {
-        intent,
-        workflow: cs_workflow,
-    } = resolve_branch_workflow(
+    let intent = service_util::write_initial_changeset(
         session_id,
         &BranchIntentRequest {
             branch_worktree_intent,
@@ -116,23 +107,10 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         },
         BranchIntentPolicy::claude_cli(),
         project.main_branch_ref.as_deref(),
+        &session_dir,
+        stack_parent.session_id(),
+        managed_recipe.as_deref(),
     )?;
-    let mut cs = Changeset {
-        workflow: Some(cs_workflow),
-        orchestrator_session_id: stack_parent.session_id().map(str::to_string),
-        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-        ..Changeset::default()
-    };
-    // A managed session seeds the recipe's start goal so `changeset.yaml` reflects the workflow
-    // position immediately; the per-session controller advances it from there on `transition`.
-    if let Some(recipe) = &managed_recipe {
-        tddy_core::changeset::update_state(
-            &mut cs,
-            tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
-        );
-    }
-    tddy_core::write_changeset(&session_dir, &cs)
-        .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
     let chain_base_ref = stack_parent
         .chain_base_ref(

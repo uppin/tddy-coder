@@ -4,13 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::{write_session_metadata, Changeset, SessionMetadata};
+use tddy_core::{write_session_metadata, SessionMetadata};
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::StartSessionResponse;
 
-use crate::branch_intent::{
-    resolve_branch_workflow, BranchIntentPolicy, BranchIntentRequest, ResolvedBranchWorkflow,
-};
+use crate::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::{resolve_cursor_binary_path, DaemonConfig};
 use crate::connection_service::{
@@ -81,10 +79,7 @@ pub async fn spawn_cursor_cli_session_inner(
 
     // No project default branch is consulted here: this path may run against a client-supplied
     // `repo_path` with no registered project at all, and it never read one before the extraction.
-    let ResolvedBranchWorkflow {
-        intent,
-        workflow: cs_workflow,
-    } = resolve_branch_workflow(
+    let intent = crate::connection_service::write_initial_changeset(
         session_id,
         &BranchIntentRequest {
             branch_worktree_intent,
@@ -94,21 +89,10 @@ pub async fn spawn_cursor_cli_session_inner(
         },
         BranchIntentPolicy::cursor_cli(),
         None,
+        &session_dir,
+        stack_parent.session_id(),
+        managed_recipe.as_deref(),
     )?;
-    let mut cs = Changeset {
-        workflow: Some(cs_workflow),
-        orchestrator_session_id: stack_parent.session_id().map(str::to_string),
-        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-        ..Changeset::default()
-    };
-    if let Some(recipe) = &managed_recipe {
-        tddy_core::changeset::update_state(
-            &mut cs,
-            tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
-        );
-    }
-    tddy_core::write_changeset(&session_dir, &cs)
-        .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
     let timeout = config.spawn_worker_request_timeout();
     let worktree_path = match session_worktree_source(repo_path, project_id) {

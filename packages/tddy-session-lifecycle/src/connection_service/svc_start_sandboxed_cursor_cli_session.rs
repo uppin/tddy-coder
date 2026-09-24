@@ -4,8 +4,6 @@ use tddy_task::TerminalCapture;
 
 use super::roster_replacement_pairs;
 
-use tddy_core::Changeset;
-
 use crate::{
     branch_intent::BranchIntentPolicy,
     connection_service::{agent_roster, seed_codebase, service_util, stack_parent},
@@ -13,10 +11,6 @@ use crate::{
 };
 
 use crate::branch_intent::BranchIntentRequest;
-
-use crate::branch_intent::resolve_branch_workflow;
-
-use crate::branch_intent::ResolvedBranchWorkflow;
 
 use tddy_core::output::SESSIONS_SUBDIR;
 
@@ -112,10 +106,7 @@ impl DaemonSessionHost {
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
 
-        let ResolvedBranchWorkflow {
-            intent,
-            workflow: cs_workflow,
-        } = resolve_branch_workflow(
+        let intent = service_util::write_initial_changeset(
             session_id,
             &BranchIntentRequest {
                 branch_worktree_intent,
@@ -125,21 +116,10 @@ impl DaemonSessionHost {
             },
             BranchIntentPolicy::cursor_cli(),
             project.main_branch_ref.as_deref(),
+            &session_dir,
+            stack_parent,
+            managed_recipe.as_deref(),
         )?;
-        let mut cs = Changeset {
-            workflow: Some(cs_workflow),
-            orchestrator_session_id: stack_parent.map(str::to_string),
-            recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-            ..Changeset::default()
-        };
-        if let Some(recipe) = &managed_recipe {
-            tddy_core::changeset::update_state(
-                &mut cs,
-                tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
-            );
-        }
-        tddy_core::write_changeset(&session_dir, &cs)
-            .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
         let chain_base_ref = self
             .resolve_chain_base_ref_status(&stack_parent::StackBaseLookup {
