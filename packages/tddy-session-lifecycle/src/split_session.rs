@@ -43,10 +43,6 @@ const NATIVE_FILESYSTEM_TOOLS: &[&str] = &[
     "LS",
 ];
 
-/// The MCP tool Claude asks before running anything not pre-approved. Served by the agent's own
-/// `tddy-tools --mcp` child, the same one that carries the exec tools to the codebase daemon.
-const PERMISSION_PROMPT_TOOL: &str = "mcp__tddy-tools__approval_prompt";
-
 /// Everything a split session's agent process needs to reach a worktree on another daemon.
 pub struct SplitAgentWiring {
     /// Directory the agent runs in, standing in for the repository it does not have.

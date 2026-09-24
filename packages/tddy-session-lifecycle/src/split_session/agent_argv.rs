@@ -1,4 +1,6 @@
-use super::PERMISSION_PROMPT_TOOL;
+// Served by the agent's own `tddy-tools --mcp` child, the same one that carries the exec tools to
+// the codebase daemon.
+use tddy_sandbox_recipes::PERMISSION_PROMPT_TOOL;
 
 use super::NATIVE_FILESYSTEM_TOOLS;
 

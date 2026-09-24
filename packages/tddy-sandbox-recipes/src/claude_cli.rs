@@ -159,7 +159,9 @@ pub fn claude_runner_env_overlay(scratch_tmp: &Path) -> BTreeMap<String, String>
     env
 }
 
-const PERMISSION_PROMPT_TOOL: &str = "mcp__tddy-tools__approval_prompt";
+/// The MCP tool Claude asks before running anything not pre-approved (`--permission-prompt-tool`),
+/// served by the agent's own `tddy-tools --mcp` child.
+pub const PERMISSION_PROMPT_TOOL: &str = "mcp__tddy-tools__approval_prompt";
 const MCP_CONFIG_FILENAME: &str = "claude-mcp-config.json";
 
 /// ACP-shaped subagent tools (see docs/ft/coder/managed-codebase-subagents.md) that a sandboxed
