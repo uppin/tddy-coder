@@ -108,7 +108,7 @@ fn byte_offset(text: &str, at: Position) -> Option<usize> {
 /// Byte for byte, so an offset into the result is an offset into `text`. A literal becomes `0`
 /// rather than blank because it ends an expression: `'a' | 'b'` in a pattern is an operator, and a
 /// blank would leave `|` reading as the start of a closure. Newlines are kept everywhere.
-fn masked_to_code(text: &str) -> String {
+pub(super) fn masked_to_code(text: &str) -> String {
     let mut masked: Vec<u8> = text
         .bytes()
         .map(|byte| if byte == b'\n' { b'\n' } else { b' ' })

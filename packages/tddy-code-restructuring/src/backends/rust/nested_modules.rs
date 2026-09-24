@@ -2,6 +2,7 @@
 //!
 //! Split out of `backends/rust.rs`, which is past its size budget.
 
+use super::early_return::masked_to_code;
 use super::imports::names_bound;
 use super::{is_identifier_char, MovedItem};
 
@@ -22,15 +23,21 @@ use super::{is_identifier_char, MovedItem};
 /// reference resolved through. A nested module that reaches the item through `use super::*;`
 /// gets `modname` from the same glob, so its rewritten call resolves and the rename finishes it.
 ///
-/// The module blocks are read lexically: a brace inside a string literal would mislead the read,
-/// and the compile gate on `apply` is what catches a repair that followed it.
+/// The module blocks are read by brace depth over the code alone — comments and literals masked
+/// by [`masked_to_code`], so a `{` in a string or a `//` inside `"http://…"` does not move the
+/// depth. The read is still lexical, not a parse, and the compile gate on `apply` is what catches a
+/// repair that followed a misread.
 pub(super) fn with_nested_references_restored(
     text: &str,
     placeholder: &str,
     moved: &[MovedItem],
 ) -> String {
     let lines: Vec<&str> = text.split('\n').collect();
-    let blocks = module_blocks(&lines);
+    // Byte for byte and newline for newline, so a line index into one is a line index into the
+    // other.
+    let code = masked_to_code(text);
+    let code_lines: Vec<&str> = code.split('\n').collect();
+    let blocks = module_blocks(&code_lines);
 
     let restored: Vec<String> = lines
         .iter()
@@ -62,13 +69,13 @@ struct ModuleBlock<'a> {
     closed: usize,
 }
 
-/// Every inline module block in the text, read by brace depth.
+/// Every inline module block in the text, read by brace depth. `lines` are code only, with
+/// comments and literals already masked.
 fn module_blocks<'a>(lines: &[&'a str]) -> Vec<ModuleBlock<'a>> {
     let mut blocks = Vec::new();
     let mut stack: Vec<Option<(&'a str, usize)>> = Vec::new();
 
-    for (index, raw) in lines.iter().enumerate() {
-        let code = raw.split("//").next().unwrap_or(raw);
+    for (index, code) in lines.iter().copied().enumerate() {
         let mut declaration = 0usize;
 
         for (at, character) in code.char_indices() {

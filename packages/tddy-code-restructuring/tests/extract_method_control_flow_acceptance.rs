@@ -10,15 +10,25 @@
 
 mod harness;
 
+use std::ops::RangeInclusive;
+
 use harness::{
     a_crate_whose_function_returns_early, an_extract_method_of, refusal_from, ORIGIN_LIB,
 };
+
+/// `let base = 2;` through the `if x { return Ok(1); }` block: a range whose line 6 returns early.
+const A_RANGE_THAT_RETURNS_EARLY: RangeInclusive<u32> = 4..=7;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_range_that_returns_early_from_the_enclosing_function() {
     // Given
     let workspace = a_crate_whose_function_returns_early();
-    let statements = an_extract_method_of(&workspace, ORIGIN_LIB, 4..=7, "base_or_early");
+    let statements = an_extract_method_of(
+        &workspace,
+        ORIGIN_LIB,
+        A_RANGE_THAT_RETURNS_EARLY,
+        "base_or_early",
+    );
 
     // When
     let refusal = refusal_from(&workspace, statements).await;

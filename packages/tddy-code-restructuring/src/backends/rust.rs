@@ -2563,7 +2563,7 @@ fn without_dead_imports(
         .iter()
         .enumerate()
         .filter(|(index, line)| inside(*index) && simple_import(line).is_none())
-        .flat_map(|(_, line)| bound_names(line))
+        .flat_map(|(_, line)| names_bound(line))
         .collect();
 
     let mut kept = Vec::with_capacity(source.len());
@@ -2591,16 +2591,11 @@ fn simple_import(line: &str) -> Option<String> {
         return None;
     }
 
-    let names = bound_names(line);
+    let names = names_bound(line);
     let [only] = names.as_slice() else {
         return None;
     };
     Some(only.clone())
-}
-
-/// Every name a line's `use` declaration binds — an alias where it carries one.
-fn bound_names(line: &str) -> Vec<String> {
-    names_bound(line)
 }
 
 /// Whether the server reports any unresolved name on the given zero-based line.
@@ -3067,8 +3062,9 @@ fn refuse_residual_placeholder(original: &str, produced: &str, name: &str) -> Re
     // known, a call beside the module's own import of the item, is repaired before this runs
     // (`with_nested_references_restored`). A leftover inside an `impl` is not an ordering mistake
     // either, and reordering the plan provably does not help — one real split was reordered in full
-    // and produced byte-identical refusals at identical offsets. An `impl` body cannot hold a `mod`, so the sibling can be moved
-    // neither first nor second; only a wider seam removes the reference.
+    // and produced byte-identical refusals at identical offsets. An `impl` body cannot hold a
+    // `mod`, so the sibling can be moved neither first nor second; only a wider seam removes the
+    // reference.
     //
     // Where both occur the `impl` wording wins, because it is the one no ordering can satisfy.
     let inside_an_impl = sites
@@ -6511,13 +6507,16 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     /// which no ordering of the plan changes; lexically the two look alike, so the advice names both.
     #[test]
     fn names_a_module_the_file_already_had_when_the_leftover_sits_in_a_module() {
+        // Given a file whose own `mod tests` the assist left calling through the placeholder
         let original = "mod tests {\n    fn a() -> u32 { base() }\n}\n";
         let produced = "mod tests {\n    fn a() -> u32 { modname::base() }\n}\n";
 
+        // When the leftover is refused
         let message = refuse_residual_placeholder(original, produced, "modname")
             .unwrap_err()
             .to_string();
 
+        // Then the refusal names a module the file already had, for which no ordering helps
         assert!(
             message.contains(
                 "If the file already had that module, such as its `mod tests`, no ordering helps: \

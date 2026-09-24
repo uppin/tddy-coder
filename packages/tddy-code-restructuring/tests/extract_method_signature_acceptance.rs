@@ -14,10 +14,15 @@
 
 mod harness;
 
+use std::ops::RangeInclusive;
+
 use harness::{
     a_crate_whose_request_type_a_slow_build_script_generates, an_extract_method_of,
     assert_compiles, performing, ORIGIN_LIB,
 };
+
+/// `let session = req.session_id * 2; let resumed = …;`: statements reading the generated request.
+const STATEMENTS_READING_THE_REQUEST: RangeInclusive<u32> = 10..=11;
 
 /// The request type is named in the signature, not left as `_`.
 ///
@@ -29,7 +34,12 @@ use harness::{
 async fn names_a_parameter_whose_type_a_build_script_generates() {
     // Given
     let workspace = a_crate_whose_request_type_a_slow_build_script_generates();
-    let statements = an_extract_method_of(&workspace, ORIGIN_LIB, 10..=11, "resumed_session");
+    let statements = an_extract_method_of(
+        &workspace,
+        ORIGIN_LIB,
+        STATEMENTS_READING_THE_REQUEST,
+        "resumed_session",
+    );
 
     // When
     performing(&workspace, statements).await;

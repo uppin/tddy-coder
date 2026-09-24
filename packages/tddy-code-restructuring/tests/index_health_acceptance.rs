@@ -11,17 +11,27 @@
 
 mod harness;
 
+use std::ops::RangeInclusive;
+
 use harness::{
     a_crate_whose_build_script_fails, an_extract_method_of, refusal_from,
     refusal_from_a_server_served_before, ORIGIN_LIB,
 };
+
+/// `let twice = …; let settled = …;`: statements that need nothing the failed build script makes.
+const STATEMENTS_NEEDING_NO_BUILD_SCRIPT: RangeInclusive<u32> = 4..=5;
 
 /// Handed over as `tddy-tools restructure` hands it over cold.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_an_operation_against_an_index_whose_build_script_failed() {
     // Given
     let workspace = a_crate_whose_build_script_fails();
-    let statements = an_extract_method_of(&workspace, ORIGIN_LIB, 4..=5, "settled_from");
+    let statements = an_extract_method_of(
+        &workspace,
+        ORIGIN_LIB,
+        STATEMENTS_NEEDING_NO_BUILD_SCRIPT,
+        "settled_from",
+    );
 
     // When
     let refusal = refusal_from(&workspace, statements).await;
@@ -42,7 +52,12 @@ async fn refuses_an_operation_against_an_index_whose_build_script_failed() {
 async fn refuses_an_operation_against_a_warm_index_whose_build_script_failed() {
     // Given
     let workspace = a_crate_whose_build_script_fails();
-    let statements = an_extract_method_of(&workspace, ORIGIN_LIB, 4..=5, "settled_from");
+    let statements = an_extract_method_of(
+        &workspace,
+        ORIGIN_LIB,
+        STATEMENTS_NEEDING_NO_BUILD_SCRIPT,
+        "settled_from",
+    );
 
     // When
     let refusal = refusal_from_a_server_served_before(&workspace, statements).await;

@@ -185,7 +185,7 @@ not define is refused rather than ignored.
   |---|---|
   | A whole `impl` moves; the parent calls its methods | **Succeeds.** A method is reached through its type, so there is nothing to rewrite |
   | A path-reached item moves; the parent still names it | **Succeeds.** The assist rewrites the reference and the import pass restores the binding — which is why an in-file reference "costs nothing" |
-  | Some members of an **inherent** `impl` move while a sibling left behind calls them | **Succeeds.** The assist writes `mod … { use super::Gauge; impl Gauge { … } }`, so they stay methods of the same type. It also rewrites the call left behind as `self.modname::doubled()`, which is not Rust; the backend undoes exactly that rewrite. A private member comes out `pub(crate)` (below) |
+  | Some members of an **inherent** `impl` move while a sibling left behind calls them | **Succeeds.** The assist writes `mod … { use super::Gauge; impl Gauge { … } }`, so they stay methods of the same type. It also inserts `modname::` before the moved member's name in every call to it, none of which is Rust: `self.modname::doubled()` and `Self::modname::doubled(…)` from a member left behind, `Gauge::modname::doubled(2)` (or through a type alias) from the file's `mod tests`. The backend undoes exactly those rewrites — the placeholder after a `.` or after a type qualifier, never after `super`/`self`/`crate`, which reach a moved *free* item and are the rename's. A private member comes out `pub(crate)` (below) |
   | **Some members of a trait `impl` move while a sibling left behind calls them** | **Refused.** The new module would hold a second `impl Meter for Gauge` (`E0119`) and each half would lack the other's items (`E0046`) |
 
   Only the last is a blocker, and no ordering fixes it: an `impl` body cannot hold a `mod`, so the
@@ -244,6 +244,16 @@ not define is refused rather than ignored.
   **extract a definition before anything that references it.** Line order and dependency order are
   different axes and dependency order wins — build a small DAG of which seams define symbols other
   seams use, topologically sort it definitions-first, and use line order only to break ties.
+
+  A module the file **already had** — its `mod tests` — reads the same lexically and is not an
+  ordering mistake either. The one such leftover known is repaired before the check runs: in
+  `mod tests { use super::base; … base() }` the assist repoints the import to
+  `use super::modname::base;` *and* rewrites the call to `modname::base()`, which names nothing from
+  inside `tests`. The backend puts the call back where the placeholder starts its path, the reference
+  sits in a module other than the placeholder's, and that module's own `use` binds the moved name.
+  With `use super::*;` the rewritten call resolves through the glob and the rename finishes it, so it
+  is left alone. Any other leftover in such a module is refused with wording that names this case:
+  reach the item through `use super::*;`, or cut the seam where that module does not name it.
 
   A leftover inside an **`impl`** is not an ordering mistake and reordering cannot fix it. One real
   split was reordered in full and produced byte-identical refusals at identical offsets, because the
