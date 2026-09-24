@@ -279,35 +279,16 @@ pub async fn spawn_cursor_cli_session_inner(
         .map_err(|e| Status::internal(format!("failed to spawn cursor-cli: {}", e)))?;
 
     let pid = handle.pid;
-    let now = chrono::Utc::now().to_rfc3339();
     let meta = SessionMetadata {
-        session_id: session_id.to_string(),
-        project_id: project_id.to_string(),
-        created_at: now.clone(),
-        updated_at: now,
-        status: "active".to_string(),
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
         pid: Some(pid),
-        tool: None,
-        livekit_room: None,
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: Some("cursor-cli".to_string()),
         model: Some(model.to_string()),
         cursor_chat_id: Some(cursor_chat_id),
-        activity_status: None,
         hook_token: Some(hook_token),
-        sandbox: None,
-        agent: None,
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
         agents_rev: crate::connection_service::started_roster_rev(agents),
         agents: agents.to_vec(),
-        legacy_specialized_agents: Vec::new(),
-        codebase_daemon_instance_id: None,
-        codebase_session_id: None,
-        agent_daemon_instance_id: None,
-        agent_session_id: None,
-        ssh_config_host: None,
+        ..crate::connection_service::starting_session_metadata(session_id, project_id, "cursor-cli")
     };
     write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;

@@ -312,39 +312,18 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     let pid = handle.pid;
 
     // Write .session.yaml.
-    let now = chrono::Utc::now().to_rfc3339();
     let meta = tddy_core::SessionMetadata {
-        session_id: session_id.to_string(),
-        project_id: project_id.to_string(),
-        created_at: now.clone(),
-        updated_at: now,
-        status: "active".to_string(),
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
         pid: Some(pid),
-        tool: None,
-        livekit_room: None,
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: Some("claude-cli".to_string()),
         model: Some(model.to_string()),
-        cursor_chat_id: None,
-        activity_status: None,
         hook_token: Some(hook_token),
-        sandbox: None,
-        agent: None,
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-        agents: Vec::new(),
-        agents_rev: 0,
-        legacy_specialized_agents: Vec::new(),
-        codebase_daemon_instance_id: None,
-        codebase_session_id: None,
-        agent_daemon_instance_id: None,
-        agent_session_id: None,
         ssh_config_host: if ssh_alias.is_empty() {
             None
         } else {
             Some(ssh_alias.to_string())
         },
+        ..crate::connection_service::starting_session_metadata(session_id, project_id, "claude-cli")
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;

@@ -364,36 +364,19 @@ fn write_split_agent_metadata(
     hook_token: String,
     handle: &Arc<crate::claude_cli_session::PtyHandle>,
 ) -> Result<(), Status> {
-    let now = chrono::Utc::now().to_rfc3339();
     let meta = tddy_core::SessionMetadata {
-        session_id: session_id.to_string(),
-        project_id: req.project_id.trim().to_string(),
-        created_at: now.clone(),
-        updated_at: now,
-        status: "active".to_string(),
         // No repository on this host — the pairing below is how the worktree is found.
         repo_path: None,
         pid: Some(handle.pid),
-        tool: None,
-        livekit_room: None,
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: Some("claude-cli".to_string()),
         model: Some(req.model.trim().to_string()),
-        cursor_chat_id: None,
-        activity_status: None,
         hook_token: Some(hook_token),
-        sandbox: None,
-        agent: None,
-        recipe: None,
-        agents: Vec::new(),
-        agents_rev: 0,
-        legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: Some(codebase_instance_id.to_string()),
         codebase_session_id: Some(codebase_session_id.to_string()),
-        agent_daemon_instance_id: None,
-        agent_session_id: None,
-        ssh_config_host: None,
+        ..crate::connection_service::starting_session_metadata(
+            session_id,
+            req.project_id.trim(),
+            "claude-cli",
+        )
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;

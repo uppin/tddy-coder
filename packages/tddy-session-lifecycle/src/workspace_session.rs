@@ -138,41 +138,18 @@ pub async fn start_workspace_session(
     .map_err(|e: anyhow::Error| Status::internal(e.to_string()))?;
 
     // Write .session.yaml — no PID (no agent process for workspace sessions).
-    let now = chrono::Utc::now().to_rfc3339();
     let meta = tddy_core::SessionMetadata {
-        session_id: session_id.to_string(),
-        project_id: project_id.to_string(),
-        created_at: now.clone(),
-        updated_at: now,
-        status: "active".to_string(),
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
-        pid: None,
-        tool: None,
-        livekit_room: None,
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: Some("workspace".to_string()),
-        model: None,
-        cursor_chat_id: None,
-        activity_status: None,
-        hook_token: None,
         // `Some(true)` or nothing: an unsandboxed session is written the way every workspace
         // session was written before jails existed, so "no jail" reads the same whether the flag
         // was declined or predates it.
         sandbox: sandbox.then_some(true),
-        agent: None,
-        recipe: None,
-        agents: Vec::new(),
-        agents_rev: 0,
-        legacy_specialized_agents: Vec::new(),
-        codebase_daemon_instance_id: None,
-        codebase_session_id: None,
         // The back-pointer is written with the session, not stamped on later: an attach that lands
         // between the worktree being cut and a second write would read a session no agent is paired
         // with and refuse the very withdrawal this placement exists to enforce.
         agent_daemon_instance_id: paired_agent.map(|a| a.daemon_instance_id.clone()),
         agent_session_id: paired_agent.map(|a| a.session_id.clone()),
-        ssh_config_host: None,
+        ..crate::connection_service::starting_session_metadata(session_id, project_id, "workspace")
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -282,35 +259,9 @@ pub async fn start_agent_clone_session(
     .map_err(|join_err| Status::internal(join_err.to_string()))?
     .map_err(Status::internal)?;
 
-    let now = chrono::Utc::now().to_rfc3339();
     let meta = tddy_core::SessionMetadata {
-        session_id: session_id.to_string(),
-        project_id: project_id.to_string(),
-        created_at: now.clone(),
-        updated_at: now,
-        status: "active".to_string(),
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
-        pid: None,
-        tool: None,
-        livekit_room: None,
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: Some("workspace".to_string()),
-        model: None,
-        cursor_chat_id: None,
-        activity_status: None,
-        hook_token: None,
-        sandbox: None,
-        agent: None,
-        recipe: None,
-        agents: Vec::new(),
-        agents_rev: 0,
-        legacy_specialized_agents: Vec::new(),
-        codebase_daemon_instance_id: None,
-        codebase_session_id: None,
-        agent_daemon_instance_id: None,
-        agent_session_id: None,
-        ssh_config_host: None,
+        ..crate::connection_service::starting_session_metadata(session_id, project_id, "workspace")
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;

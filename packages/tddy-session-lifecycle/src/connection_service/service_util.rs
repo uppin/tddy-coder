@@ -38,6 +38,46 @@ pub(crate) async fn index_session_worktree(
     Ok(())
 }
 
+/// The `.session.yaml` of a session that is starting now: active, created and updated this instant,
+/// and every optional field unset. A caller names what its session type records on top, with struct
+/// update syntax, so the fields that differ between session types are the only ones it spells out.
+pub(crate) fn starting_session_metadata(
+    session_id: &str,
+    project_id: &str,
+    session_type: &str,
+) -> tddy_core::SessionMetadata {
+    let now = chrono::Utc::now().to_rfc3339();
+    tddy_core::SessionMetadata {
+        session_id: session_id.to_string(),
+        project_id: project_id.to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+        status: "active".to_string(),
+        repo_path: None,
+        pid: None,
+        tool: None,
+        livekit_room: None,
+        pending_elicitation: false,
+        previous_session_id: None,
+        session_type: Some(session_type.to_string()),
+        model: None,
+        cursor_chat_id: None,
+        activity_status: None,
+        hook_token: None,
+        sandbox: None,
+        agent: None,
+        recipe: None,
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
+        ssh_config_host: None,
+    }
+}
+
 /// Resolve a starting session's branch intent and write the changeset its worktree setup reads.
 ///
 /// The changeset names the orchestrator a stack child was spawned by, and a managed session's
