@@ -32,6 +32,7 @@ pub mod conversation_open_forward;
 pub mod departed_daemon;
 pub mod exec_tool_caller;
 pub mod ports;
+pub mod roster_broadcast;
 pub mod service;
 pub mod session_agent_clone;
 pub mod session_agent_inference;

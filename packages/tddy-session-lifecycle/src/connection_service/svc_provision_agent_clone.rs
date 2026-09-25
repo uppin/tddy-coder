@@ -1,6 +1,3 @@
-// `encode_to_vec` is a `prost::Message` method; the trait is imported anonymously because
-// only its methods are used.
-use prost::Message as _;
 use tddy_service::proto::exec_tools::ExecuteToolResponse;
 
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
@@ -297,13 +294,7 @@ impl DaemonSessionHost {
         let Some(publisher) = self.session_rooms.agents_publisher(session_id) else {
             return;
         };
-        if let Err(e) = publisher.publish(&roster.encode_to_vec()).await {
-            log::warn!(
-                "could not broadcast session {session_id}'s roster on \
-                 {}: {e}",
-                crate::session_room::SESSION_AGENTS_TOPIC
-            );
-        }
+        roster_broadcast::broadcast_roster(session_id, roster, publisher).await;
     }
 
     /// The identities currently joined to a session's room, as the LiveKit server reports them.
@@ -381,6 +372,8 @@ impl DaemonSessionHost {
             .await
     }
 }
+
+use tddy_session_agents::roster_broadcast;
 
 use tddy_session_agents::session_room_participants;
 

@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_provision_agent_clone.rs","start":{"line":298,"col":9},"end":{"line":307,"col":10}},"name":"broadcast_roster"}
