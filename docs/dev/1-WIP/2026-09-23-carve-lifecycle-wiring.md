@@ -1,7 +1,7 @@
 # Changeset: tddy-session-lifecycle becomes a wiring crate
 
 **Date**: 2026-09-23
-**Status**: 🚧 In Progress — green
+**Status**: 🚧 In Progress — green (rescoped 2026-09-26: leaf moves only; wiring target moves to follow-up nodes)
 **Type**: Refactor (crate extraction; no behaviour change)
 **Stack**: `#carve` 15/15, on top of `lifecycle-wiring` (#524, the destructure node)
 
@@ -240,6 +240,11 @@ delegation and port impls. The size target is **the developer's to choose** from
   - fix the engine first, test-first, one commit each: `'_` refused as an untyped placeholder; `extract_variable` expecting a `var_name` placeholder; a `return` refused where the range runs to the end of the method; the warm `check --deep` hang on a module an earlier apply created. Then re-run the T3 pilot;
   - `tddy-model-registry` edge on `tddy-session-agents` approved (agent-def resolution);
   - widening `AgentHostCallbacks` with the seven further host methods is **not** approved yet.
+- **After the second T3 pilot run: #526 is rescoped** (developer, 2026-09-26):
+  - the pilot moved 11 methods for a net −185 lifecycle lines: engine extraction moves only the `self`-free tails of host methods, and T4/T1 are almost entirely methods that call other host methods or hand `self.clone()` to tasks;
+  - turning host methods into receiver-shaped functions is a **restructure**, which this node's Boundaries forbid. It becomes its own node, #524-style: the host methods are converted **in place** into functions over per-topic state and callback ports, reviewed as a restructure and guarded by the baseline, with no crate moves;
+  - a later node then moves each converted topic with the engine as plain module moves, and carries the wiring-only target (~3.4k);
+  - **#526 wraps at ~20.0k** with what it delivered: the leaf moves (1a, 2a, 2b, T5a+T5b, the host-free parts of T7, T8 and T3), eight engine fixes, and the engine-defect todos. Deferred to the new nodes: demo VM, T10, the host-bound remainders of T3/T7/T8, T4, T1, and the `test_util`/`service_util` extras.
 - **Receivers were chosen by the dependency graph, not by topic name.** Four first-draft placements
   were cycles or layering breaks:
   - routing → kernel is a cycle;
@@ -933,7 +938,7 @@ design call. A T4 pilot without both would move T4's leaves only.
 
 Executed at wrap:
 
-- [ ] `tddy-session-lifecycle` meets the wiring definition at the chosen size
+- [ ] ~~`tddy-session-lifecycle` meets the wiring definition at the chosen size~~ — moved to the follow-up nodes (2026-09-26); this node records the size it reached
 - [ ] Every receiver ≤ 10k production lines; none depends on `tddy-session-lifecycle`; no file ≥ 500 in any receiver
 - [ ] Every public `tddy_session_lifecycle::…` path resolves; consumers unedited apart from listed exceptions
 - [ ] Baseline numbers matched
