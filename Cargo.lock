@@ -12224,13 +12224,16 @@ dependencies = [
  "serde_yaml",
  "tddy-core",
  "tddy-discovery",
+ "tddy-github",
  "tddy-livekit",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-service",
+ "tddy-task",
  "tempfile",
  "tokio",
  "toml 0.9.12+spec-1.1.0",
+ "tonic 0.12.3",
 ]
 
 [[package]]

@@ -286,6 +286,33 @@ tree (after 2b) returned the same refusals, word for word.
 `claude_cli_session::ClaudeCliSessionManager` (lifecycle's `CliSessionManager`, T6c, which stays),
 so moving it would make the receiver dev-depend on lifecycle.
 
+### Second move run (2026-09-25, after the engine fixes)
+
+Every restructure command ran against this worktree's own warm index daemon, restarted on a binary
+built after `5446cec6` and `ebeb8282` (the one that was running predated them). Line counts here come
+from a re-implementation of the discovery doc's definition, which reads HEAD's lifecycle as 22,116
+rather than 22,237. The before and after figures use that one counter throughout.
+
+**Receiver baselines on HEAD `ebeb8282`:** `tddy-daemon-kernel` 122 passed; `tddy-terminal-rpc` 55
+passed; `tddy-session-activity` has no tests. Lifecycle: 615 passed, 22 failed, 1 ignored, with the
+same 22 by name.
+
+#### Move 1a: `relay_idle`, `local_token_tonic_adapter` → `tddy-daemon-kernel`
+
+| Measure | Result |
+|---|---|
+| Plan | `01a-relay-idle-local-token-to-kernel.jsonl`, two `move_module_to_crate` with `reexport: glob` |
+| Engine | plain `check`: no findings. `check --deep`: no findings (6m27s, cold index). Dry run: 2 of 2 resolved. `apply`: 2 of 2 applied, then **the tree no longer compiles** (`tddy-daemon-kernel` depends on itself) |
+| Hand fixes | `use tddy_daemon_kernel::config::DaemonConfig;` → `use crate::config::DaemonConfig;` in the moved adapter, and the kernel's `tddy-daemon-kernel = { path = "" }` self-edge removed ([new cause: facade followed back to the destination](../todo/2026-09-25-restructure-move-to-crate-follows-a-facade-back-to-the-destination.md)). The second, identical `pub use tddy_daemon_kernel::*;` in lifecycle's `lib.rs` removed (cause already recorded) |
+| Facade | `pub use tddy_daemon_kernel::*;` in lifecycle's `lib.rs`. `tddy_session_lifecycle::relay_idle::…` and `…::local_token_tonic_adapter::…` resolve through it |
+| New edges | kernel → `tddy-task`, `tddy-github`, `tonic` (approved). No receiver depends on lifecycle |
+| Consumers edited | none |
+| Production lines | lifecycle 22,116 → 21,998; kernel 3,290 → 3,409 |
+| `restructure verify --against HEAD` | 397,648 statements before and after, every one accounted for |
+| `cargo check --all-targets` | clean on kernel, lifecycle, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control` |
+| Clippy `-D warnings`, `cargo fmt` | clean on kernel and lifecycle |
+| Tests | kernel 122 passed; lifecycle 615 passed, 22 failed, 1 ignored, the same 22 by name. Neither file had tests of its own, and no lifecycle integration test exercises them, so none moved |
+
 ## TODO
 
 - [x] Phase 2 design checked against the dependency graph

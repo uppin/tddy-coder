@@ -1,0 +1,3 @@
+{"v":1,"snapshot":{}}
+{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/relay_idle.rs","path":"relay_idle"},"to":"packages/tddy-daemon-kernel","reexport":"glob"}
+{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/local_token_tonic_adapter.rs","path":"local_token_tonic_adapter"},"to":"packages/tddy-daemon-kernel","reexport":"glob"}

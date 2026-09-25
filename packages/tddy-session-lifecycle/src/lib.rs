@@ -51,7 +51,7 @@ pub mod claude_cli_session;
 pub mod cli_session_manager;
 pub use tddy_daemon_kernel::config;
 pub mod connection_service;
-pub mod local_token_tonic_adapter;
+pub use tddy_daemon_kernel::*;
 /// The ten session-file-I/O modules, which now live in `tddy-session-files`.
 ///
 /// Named one by one rather than globbed, for the reason the worktree, host and LiveKit facades
@@ -117,7 +117,6 @@ pub mod session_agent_clone;
 pub use tddy_session_agents::{
     session_agent_inference, session_agent_roster, session_agent_status,
 };
-pub mod relay_idle;
 pub mod remote_git_pack_execution;
 pub mod session_deletion;
 pub mod session_list_enrichment;
