@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_provision_agent_clone.rs","start":{"line":382,"col":1},"end":{"line":400,"col":2}},"name":"session_room_participants","reexport":"glob","to_file":true}

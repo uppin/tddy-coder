@@ -315,23 +315,13 @@ impl DaemonSessionHost {
         session_id: &str,
     ) -> Result<Vec<String>, Status> {
         let room_name = tddy_daemon_livekit::session_room::session_room_name(session_id);
-        let rooms = self.room_roster.list_rooms().await.map_err(Status::from)?;
-        let room = rooms
-            .into_iter()
-            .find(|room| room.name == room_name)
-            .ok_or_else(|| {
-                Status::not_found(format!(
-                    "the LiveKit server has no room called {room_name}; session {session_id} is \
-                     not being facilitated in one"
-                ))
-            })?;
-        let mut identities: Vec<String> = room
-            .participants
-            .into_iter()
-            .map(|participant| participant.identity)
-            .collect();
-        identities.sort();
-        Ok(identities)
+        let room_roster = &self.room_roster;
+        session_room_participants::session_room_participant_identities(
+            session_id,
+            room_name,
+            room_roster,
+        )
+        .await
     }
 
     /// Where the checkout serving `agent_id` is, on the daemon that owns it.
@@ -391,6 +381,8 @@ impl DaemonSessionHost {
             .await
     }
 }
+
+use tddy_session_agents::session_room_participants;
 
 use tddy_session_agents::agent_clone_worktree;
 

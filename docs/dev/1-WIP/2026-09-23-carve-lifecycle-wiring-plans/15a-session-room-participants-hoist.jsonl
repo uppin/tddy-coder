@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"extract_variable","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_provision_agent_clone.rs","start":{"line":318,"col":21},"end":{"line":318,"col":37}},"name":"room_roster"}

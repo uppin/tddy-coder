@@ -37,6 +37,7 @@ pub mod session_agent_clone;
 pub mod session_agent_inference;
 pub mod session_agent_roster;
 pub mod session_agent_status;
+pub mod session_room_participants;
 pub mod status_reporting;
 
 pub use agent_conversations::{AgentConversation, OpenAgentConversations, PromptRouting};
