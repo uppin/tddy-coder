@@ -227,6 +227,10 @@ delegation and port impls. The size target is **the developer's to choose** from
   - `workspace_session` stays until the host-port moves (it calls private host fns);
   - edges approved for T5b: `tddy-session-files`, `tddy-projects`, `chrono`;
   - `tonic` approved on `tddy-session-activity` for T10.
+- **After the third move run** (developer, 2026-09-25):
+  - T5a goes to `tddy-session-activity`, not `tddy-session-catalog`: into catalog it would pull kernel, worktree-service and core in (`tddy-bsp` +85 packages), and every caller is daemon-side. It moves as one cluster with `session_deletion`; the edges T5a brings (`tddy-daemon-kernel`, `tddy-worktree-service`, `tddy-core`, `anyhow`, `libc`) come with that choice;
+  - T5b's edges approved: `libc`, `tddy-daemon-sandbox`, `tddy-daemon-livekit`; dev `tddy-workflow`, `tempfile`;
+  - T10 is deferred to the port moves (7–9): `SessionNotificationPublishing` lives only in lifecycle's staying `session_notifications`.
 - **Receivers were chosen by the dependency graph, not by topic name.** Four first-draft placements
   were cycles or layering breaks:
   - routing → kernel is a cycle;
