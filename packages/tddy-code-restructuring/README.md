@@ -41,6 +41,10 @@ Two properties make that possible, and both are load-bearing:
   `restructure_cli` writes to a console, and a test reads this crate's sources to keep that true: a
   host speaking a protocol on its own stdout would otherwise have its frames corrupted by a finding.
 
+A backend closes every document it opens before an entry point returns, so a server shared across
+requests reads the tree on disk again after each one. See
+[docs/readiness-and-gates.md](docs/readiness-and-gates.md#documents-are-closed-when-an-operation-ends).
+
 `tddy-index-daemon` is that host. See
 [warm-code-intelligence-daemon.md](../../docs/ft/coder/warm-code-intelligence-daemon.md).
 

@@ -7,8 +7,10 @@
 //! notion of an `os_user`.
 
 pub mod registry;
+pub mod resize;
 pub mod runtime;
 
 pub use bytes::{self, Bytes};
 pub use registry::{PtyControl, PtyRegistry};
+pub use resize::strip_resize;
 pub use runtime::{PtyReady, PtyRuntime, PtySpawnSpec, DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS};

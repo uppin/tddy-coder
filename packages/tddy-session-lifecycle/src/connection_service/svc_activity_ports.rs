@@ -147,13 +147,7 @@ impl SessionDeltaStores for RoomsHostedByThisDaemon {
             store.delta_for_call(call_id, room_scope)
         };
         Ok(match looked_up {
-            Ok(delta) => DeltaLookup::Found(MeasuredDelta {
-                seq: delta.seq,
-                prev_seq: delta.prev_seq,
-                base_commit: delta.base_commit,
-                patch: delta.patch,
-                scoped_paths: delta.scoped_paths,
-            }),
+            Ok(delta) => DeltaLookup::Found(measured_delta(delta)),
             Err(tddy_daemon_livekit::session_room::DeltaLookupError::UnknownCall { .. }) => {
                 DeltaLookup::UnknownCall
             }
@@ -161,6 +155,19 @@ impl SessionDeltaStores for RoomsHostedByThisDaemon {
                 DeltaLookup::AgedOut { seq }
             }
         })
+    }
+}
+
+/// A session room's delta, as the activity service describes one: the same five fields.
+pub(super) fn measured_delta(
+    delta: tddy_daemon_livekit::session_room::ActivityDelta,
+) -> MeasuredDelta {
+    MeasuredDelta {
+        seq: delta.seq,
+        prev_seq: delta.prev_seq,
+        base_commit: delta.base_commit,
+        patch: delta.patch,
+        scoped_paths: delta.scoped_paths,
     }
 }
 
@@ -341,12 +348,7 @@ impl ActivityService for PeerRoutedActivity {
                 .forwarded::<_, tddy_service::proto::activity::GetAcpToolCallDetailResponse>(
                     "GetAcpToolCallDetail",
                     &peer,
-                    &tddy_service::proto::activity::GetAcpToolCallDetailRequest {
-                        session_token: req.session_token.clone(),
-                        session_id: req.session_id.clone(),
-                        daemon_instance_id: req.daemon_instance_id.clone(),
-                        tool_call_id: req.tool_call_id.clone(),
-                    },
+                    req,
                 )
                 .await?;
             return Ok(Response::new(GetAcpToolCallDetailResponse {
@@ -368,13 +370,7 @@ impl ActivityService for PeerRoutedActivity {
                 .forwarded::<_, tddy_service::proto::activity::GetAcpReplayPageResponse>(
                     "GetAcpReplayPage",
                     &peer,
-                    &tddy_service::proto::activity::GetAcpReplayPageRequest {
-                        session_token: req.session_token.clone(),
-                        session_id: req.session_id.clone(),
-                        daemon_instance_id: req.daemon_instance_id.clone(),
-                        before_seq: req.before_seq,
-                        page_size: req.page_size,
-                    },
+                    req,
                 )
                 .await?;
             return Ok(Response::new(GetAcpReplayPageResponse {

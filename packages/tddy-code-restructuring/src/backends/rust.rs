@@ -26,6 +26,7 @@ use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
 
 mod chatter;
+mod documents;
 mod early_return;
 mod impl_seam;
 mod imports;
@@ -420,6 +421,8 @@ pub struct RustBackend {
     /// collision *within one namespace* — two files may each declare `mod shared` perfectly legally,
     /// and reporting that as a collision would refuse a plan Rust accepts.
     claimed: Vec<(String, String)>,
+    /// The documents this backend has opened and not yet closed. See [`documents`].
+    opened: Vec<String>,
 }
 
 /// The default progress sink: a library that was not asked to report says nothing.
@@ -540,6 +543,7 @@ impl RustBackend {
             unresolved_token: None,
             doc_version: 1,
             claimed: Vec::new(),
+            opened: Vec::new(),
         }
     }
 
@@ -607,6 +611,7 @@ impl RustBackend {
             unresolved_token: None,
             doc_version: 1,
             claimed: Vec::new(),
+            opened: Vec::new(),
         }
     }
 
@@ -867,13 +872,6 @@ impl RustBackend {
         serde_json::from_slice(&body).map_err(|error| failure(error.to_string()))
     }
 
-    fn did_open(&mut self, uri: &str, text: &str) -> Result<()> {
-        self.notify(
-            "textDocument/didOpen",
-            json!({ "textDocument": { "uri": uri, "languageId": "rust", "version": 1, "text": text } }),
-        )
-    }
-
     fn did_change(&mut self, uri: &str, text: &str) -> Result<()> {
         self.doc_version += 1;
         let version = self.doc_version;
@@ -1054,38 +1052,44 @@ impl LanguageBackend for RustBackend {
         items: &[String],
         workspace: &Workspace<'_>,
     ) -> Result<Range> {
-        if items.is_empty() {
-            return Err(failure("`--items` named nothing to cover"));
-        }
-
-        let text = workspace.read(file)?;
-        let uri = uri_of(&workspace.root.join(file));
-
-        self.start(workspace.root)?;
-        self.did_open(&uri, &text)?;
-        self.ensure_indexed(&uri)?;
-
-        (self.progress)("building anchor from module outline");
-        let outline = self.module_outline(&uri)?;
-        let places = places_of(&outline, items, file)?;
-        refuse_non_adjacent(&outline, &places)?;
-
-        let first = &outline[places[0]];
-        let last = &outline[places[places.len() - 1]];
-
-        Ok(Range {
-            start: Position {
-                line: attached_trivia_starts_at(&text, first.start_line + 1),
-                col: 1,
-            },
-            end: Position {
-                line: last.end_line + 1,
-                col: last.end_column + 1,
-            },
-        })
+        self.closing_what_it_opens(|backend| backend.anchor_opening(file, items, workspace))
     }
 
     fn resolve(&mut self, op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Resolution> {
+        self.closing_what_it_opens(|backend| backend.resolve_opening(op, workspace))
+    }
+
+    /// This backend *is* the reference engine a cross-crate move surveys through — the same
+    /// `documentSymbol` + `textDocument/references` implementation the move itself resolves with, so
+    /// a `check --deep` rehearsal reports the blast radius an apply would act on and not a second
+    /// approximation of it.
+    fn module_references(&mut self) -> Option<&mut dyn ModuleReferences> {
+        Some(self)
+    }
+}
+
+/// The engine half of a cross-crate move.
+///
+/// `move_module_to_crate` decides what to write; this decides what is out there to be written to.
+/// Both halves of the answer are the server's own: `documentSymbol` for the items a module path can
+/// name, and `textDocument/references` for every place outside the file that names one.
+impl ModuleReferences for RustBackend {
+    fn outside_references(
+        &mut self,
+        workspace: &Workspace<'_>,
+        file: &str,
+    ) -> Result<Vec<ItemReferences>> {
+        self.closing_what_it_opens(|backend| backend.outside_references_opening(workspace, file))
+    }
+}
+
+impl RustBackend {
+    /// [`LanguageBackend::resolve`], with the documents it opens left for the caller to close.
+    fn resolve_opening(
+        &mut self,
+        op: &RefactorOp,
+        workspace: &Workspace<'_>,
+    ) -> Result<Resolution> {
         if !self.supports(op.op) {
             return Err(RestructureError::UnsupportedOp {
                 backend: "Rust".to_string(),
@@ -1188,22 +1192,47 @@ impl LanguageBackend for RustBackend {
         })
     }
 
-    /// This backend *is* the reference engine a cross-crate move surveys through — the same
-    /// `documentSymbol` + `textDocument/references` implementation the move itself resolves with, so
-    /// a `check --deep` rehearsal reports the blast radius an apply would act on and not a second
-    /// approximation of it.
-    fn module_references(&mut self) -> Option<&mut dyn ModuleReferences> {
-        Some(self)
-    }
-}
+    /// [`LanguageBackend::anchor_for`], with the documents it opens left for the caller to close.
+    fn anchor_opening(
+        &mut self,
+        file: &str,
+        items: &[String],
+        workspace: &Workspace<'_>,
+    ) -> Result<Range> {
+        if items.is_empty() {
+            return Err(failure("`--items` named nothing to cover"));
+        }
 
-/// The engine half of a cross-crate move.
-///
-/// `move_module_to_crate` decides what to write; this decides what is out there to be written to.
-/// Both halves of the answer are the server's own: `documentSymbol` for the items a module path can
-/// name, and `textDocument/references` for every place outside the file that names one.
-impl ModuleReferences for RustBackend {
-    fn outside_references(
+        let text = workspace.read(file)?;
+        let uri = uri_of(&workspace.root.join(file));
+
+        self.start(workspace.root)?;
+        self.did_open(&uri, &text)?;
+        self.ensure_indexed(&uri)?;
+
+        (self.progress)("building anchor from module outline");
+        let outline = self.module_outline(&uri)?;
+        let places = places_of(&outline, items, file)?;
+        refuse_non_adjacent(&outline, &places)?;
+
+        let first = &outline[places[0]];
+        let last = &outline[places[places.len() - 1]];
+
+        Ok(Range {
+            start: Position {
+                line: attached_trivia_starts_at(&text, first.start_line + 1),
+                col: 1,
+            },
+            end: Position {
+                line: last.end_line + 1,
+                col: last.end_column + 1,
+            },
+        })
+    }
+
+    /// [`ModuleReferences::outside_references`], with the documents it opens left for the caller
+    /// to close.
+    fn outside_references_opening(
         &mut self,
         workspace: &Workspace<'_>,
         file: &str,

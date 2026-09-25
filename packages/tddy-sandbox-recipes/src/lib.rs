@@ -16,7 +16,7 @@ pub use claude_cli::{
     build_claude_disallowlist, build_host_agent_disallowlist, claude_credentials_copies,
     claude_interactive_policy, claude_runner_env_overlay, claude_scratch_mcp_dir,
     effective_replaced_tools, process_claude_exec_reads, seed_claude_credentials,
-    write_claude_mcp_config,
+    write_claude_mcp_config, PERMISSION_PROMPT_TOOL,
 };
 #[cfg(unix)]
 pub use cursor_cli::seed_cursor_local_install;

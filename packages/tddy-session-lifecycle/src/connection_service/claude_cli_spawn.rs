@@ -1,0 +1,285 @@
+use crate::{
+    branch_intent::BranchIntentPolicy,
+    connection_service::{hooks_and_urls, service_util, stack_parent},
+};
+
+use crate::branch_intent::BranchIntentRequest;
+
+use tddy_core::output::SESSIONS_SUBDIR;
+
+use tddy_rpc::Status;
+
+use tddy_service::proto::session::StartSessionResponse;
+
+use tddy_rpc::Response;
+
+use tddy_task::TaskRegistry;
+
+use std::path::PathBuf;
+
+use crate::cli_session_manager::CliSessionManager;
+
+use std::sync::Arc;
+
+use std::path::Path;
+
+use crate::config::DaemonConfig;
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn spawn_claude_cli_session_inner(
+    config: &DaemonConfig,
+    tddy_data_dir: &Path,
+    claude_cli_manager: &Arc<CliSessionManager>,
+    os_user: &str,
+    session_id: &str,
+    sessions_base: PathBuf,
+    model: &str,
+    project_id: &str,
+    branch_worktree_intent: &str,
+    new_branch_name: &str,
+    selected_integration_base_ref: &str,
+    selected_branch_to_work_on: &str,
+    initial_prompt: &str,
+    permission_mode: &str,
+    dangerously_skip_permissions: bool,
+    stack_parent: stack_parent::SpawnStackParent<'_>,
+    managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
+    child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
+    conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
+    // When true, index the worktree into the session dir before launch (blocking; aborts the start
+    // on failure) and point the `SemanticSearch` tool at that per-session index DB.
+    semantic_index: bool,
+    // When true (and the intent is new_branch_from_base), push the freshly created branch to origin
+    // at session start; a push failure fails the start.
+    create_remote_branch: bool,
+    ssh_config_host: &str,
+    task_registry: &TaskRegistry,
+) -> Result<Response<StartSessionResponse>, Status> {
+    if model.trim().is_empty() {
+        return Err(Status::invalid_argument(
+            "model is required for claude-cli sessions",
+        ));
+    }
+
+    // Require a valid, registered project — claude-cli always runs in a real worktree.
+    let project_id = project_id.trim();
+    if project_id.is_empty() {
+        return Err(Status::invalid_argument(
+            "project_id is required for claude-cli sessions",
+        ));
+    }
+    let (projects_dir, project) =
+        service_util::find_registered_project(tddy_data_dir, os_user, project_id)?;
+    let repo_root = service_util::project_repo_root(&project)?;
+
+    // Create session directory under sessions_base/sessions/<id>/.
+    let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+    std::fs::create_dir_all(&session_dir)
+        .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
+
+    // Build branch intent and write a minimal changeset so the worktree setup fn can read it. A
+    // legacy project (no stored default branch) leaves the base `None` so worktree setup resolves
+    // the default live (`origin/master` → `origin/main` → `origin/HEAD`) — the same order the
+    // project resolver uses.
+    let intent = service_util::write_initial_changeset(
+        session_id,
+        &BranchIntentRequest {
+            branch_worktree_intent,
+            new_branch_name,
+            selected_integration_base_ref,
+            selected_branch_to_work_on,
+        },
+        BranchIntentPolicy::claude_cli(),
+        project.main_branch_ref.as_deref(),
+        &session_dir,
+        stack_parent.session_id(),
+        managed_recipe.as_deref(),
+    )?;
+
+    let chain_base_ref = stack_parent
+        .chain_base_ref(
+            project_id,
+            &sessions_base,
+            &repo_root,
+            new_branch_name,
+            selected_integration_base_ref,
+        )
+        .await?;
+    let worktree_base_ref =
+        tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
+
+    // Create the real git worktree (blocking: involves git fetch + git worktree add), or materialize
+    // on an SSH target when `ssh_config_host` is set.
+    let ssh_alias = ssh_config_host.trim();
+    let worktree_path = claude_cli_spawn_steps::cut_claude_cli_worktree(
+        claude_cli_spawn_steps::ClaudeCliWorktreeCut {
+            config,
+            session_id,
+            create_remote_branch,
+            project,
+            repo_root: &repo_root,
+            session_dir: &session_dir,
+            intent,
+            worktree_base_ref,
+            ssh_alias,
+        },
+    )
+    .await?;
+
+    // The child's branch now exists (and, when requested, is on origin), so a pr-stack
+    // orchestrator's planned node can record it — which is what lets this node's descendants be
+    // spawned at all, since they base onto `<remote>/<branch>`. A spawn naming a node links that
+    // node on whichever daemon owns the orchestrator; one naming none keeps the branch-derived
+    // local write, so a session resuming the branch a node already owns re-links to that node.
+    let spawned_branch = claude_cli_spawn_steps::spawned_claude_cli_branch(
+        branch_worktree_intent,
+        new_branch_name,
+        selected_branch_to_work_on,
+        project_id,
+        projects_dir,
+        repo_root,
+        &session_dir,
+    )?;
+    // A link that fails does **not** fail the spawn (D36): it lands after the worktree, the branch
+    // and the session already exist, so failing here would leave an orphan session on this host and
+    // still no branch on the orchestrator's — strictly worse than a node the operator can re-link by
+    // restarting it. The live association still travels in participant metadata (D37).
+    stack_parent
+        .link_spawned_branch_without_failing_the_spawn(&sessions_base, &spawned_branch, session_id)
+        .await;
+
+    let (tddy_tools_path, hook_token) = claude_cli_spawn_steps::install_claude_cli_hooks(
+        config,
+        os_user,
+        session_id,
+        &worktree_path,
+    );
+
+    // Spawn the claude CLI process in a PTY inside the real worktree. Resolve `claude` through the
+    // shared host resolver — the same one the sandboxed path uses — so an explicit config path is
+    // honored and a bare name is resolved to a real host install instead of relying on the daemon's
+    // minimal systemd `PATH`.
+    let manager = Arc::clone(claude_cli_manager);
+    let session_id_owned = session_id.to_string();
+    let model_owned = model.to_string();
+    let binary_owned = hooks_and_urls::resolve_start_session_claude_binary(config);
+    let worktree_clone = worktree_path.clone();
+
+    let initial_prompt_opt = tddy_daemon_kernel::trim_to_option(initial_prompt);
+    let permission_mode_opt = tddy_daemon_kernel::trim_to_option(permission_mode);
+
+    // Managed-workflow wiring: build the per-session controller + toolcall listener, write the
+    // recipe's orchestration prompt to a file `claude` appends to its system prompt, and inject
+    // a per-session TDDY_SOCKET (+ a PATH that resolves tddy-tools) so the agent's host-side
+    // `tddy-tools transition` reaches this session's controller.
+    let (managed, append_system_prompt_file, env_extra) =
+        claude_cli_spawn_steps::managed_claude_cli_launch(
+            claude_cli_spawn_steps::ManagedClaudeCliLaunch {
+                tddy_data_dir,
+                session_id,
+                managed_recipe: &managed_recipe,
+                child_spawn_handler,
+                conversation_spawn_handler,
+                semantic_index,
+                task_registry,
+                session_dir: &session_dir,
+                worktree_path: &worktree_path,
+                tddy_tools_path,
+            },
+        )
+        .await?;
+
+    let handle = claude_cli_spawn_steps::spawn_claude_cli_process(
+        claude_cli_spawn_steps::ClaudeCliProcess {
+            os_user,
+            session_id,
+            dangerously_skip_permissions,
+            manager,
+            session_id_owned,
+            model_owned,
+            binary_owned,
+            worktree_clone,
+            initial_prompt_opt,
+            permission_mode_opt,
+            managed,
+            append_system_prompt_file,
+            env_extra,
+        },
+    )
+    .await?;
+
+    let pid = handle.pid;
+
+    // Write .session.yaml.
+    let meta = tddy_core::SessionMetadata {
+        repo_path: Some(worktree_path.to_string_lossy().to_string()),
+        pid: Some(pid),
+        model: Some(model.to_string()),
+        hook_token: Some(hook_token),
+        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
+        ssh_config_host: if ssh_alias.is_empty() {
+            None
+        } else {
+            Some(ssh_alias.to_string())
+        },
+        ..crate::connection_service::starting_session_metadata(session_id, project_id, "claude-cli")
+    };
+    tddy_core::write_session_metadata(&session_dir, &meta)
+        .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
+
+    // What this session tells the fleet about itself, recorded now and published when its terminal
+    // is first bridged into LiveKit. The stack association is the load-bearing part: a PR-Stack view
+    // on another host has no other way to learn that this session is the planned node's child
+    // (D37), and it is knowledge this call has and a later reader does not — no session directory
+    // records which planned node was materialized — so it is kept rather than re-derived.
+    //
+    // Recording it is local work over values already in hand. Putting a participant in the room is
+    // not: it is a network round-trip to a server this daemon does not control, and a session is
+    // made of a checkout and a process, both of which already exist by now. That join belongs to
+    // the moment a LiveKit consumer arrives, which is the same moment the session's room is opened
+    // — see `SessionRoomRegistry::ensure_open`. The desktop reaches its own host over IPC and
+    // drives this terminal without a bridge at all.
+    claude_cli_manager
+        .expose_terminal_to_livekit(
+            session_id,
+            hooks_and_urls::claude_cli_participant_metadata(
+                &hooks_and_urls::StartingClaudeCliSession {
+                    session_id,
+                    model,
+                    recipe: managed_recipe
+                        .as_ref()
+                        .map(|r| r.name())
+                        .unwrap_or_default(),
+                    worktree_path: &worktree_path,
+                    branch: &spawned_branch,
+                    stack_parent: &stack_parent,
+                },
+            ),
+        )
+        .await;
+
+    // Where that terminal will be served once it is bridged. Derived from the session id and the
+    // deployment config rather than read off a connection, so it is the same answer whether a
+    // consumer has arrived yet or not — and deriving it contacts nothing.
+    let (lk_room, lk_url, lk_server_identity) =
+        claude_cli_spawn_steps::claude_cli_livekit_room(config, session_id);
+
+    log::info!(
+        target: "tddy_daemon::connection_service",
+        "started claude-cli session {} pid={} worktree={} user={}",
+        session_id,
+        pid,
+        worktree_path.display(),
+        os_user
+    );
+
+    Ok(Response::new(StartSessionResponse {
+        session_id: session_id.to_string(),
+        livekit_room: lk_room,
+        livekit_url: lk_url,
+        livekit_server_identity: lk_server_identity,
+        branch_conflict: None,
+    }))
+}
+
+mod claude_cli_spawn_steps;

@@ -8,6 +8,7 @@ explicit failure, with its class and the reason, instead of a run that reports s
 | Mechanism | Where | Refuses as |
 |---|---|---|
 | Readiness waits on quiescence | `backends/rust/readiness.rs`, `backends/rust/chatter.rs` | (waits; `ServerNotSettled` / `CallerStopped` if it ends early) |
+| Documents closed after each entry point | `backends/rust/documents.rs` (`closing_what_it_opens`) | (refuses nothing; stops a shared server answering from a finished run's text) |
 | Health gate | `readiness.rs` (`refuse_degraded_index`), `ServerChatter::degraded` | `ServerDefect` |
 | Early-return refusal | `backends/rust/early_return.rs` (`refuse_early_returns`) | `SeamRefused` |
 | Inferred-placeholder post-condition | `backends/rust.rs` (`refuse_inferred_placeholder`) | `ServerDefect` |
@@ -33,6 +34,30 @@ second backend on a warm, already-drained client would never see one. `tddy-lsp`
 latest status on the client (`LspClient::server_status`), and `LspClientBridge::notifications_to_fold`
 appends it after whatever it drained. The same readiness and health rules hold on the cold path and
 against a warm index daemon, because the daemon builds its backends through `runner::registry_for`.
+
+## Documents are closed when an operation ends
+
+An open document is the server's authority on its file: rust-analyzer stops reading that file from
+disk until the document is closed. The server is often shared. `tddy-index-daemon` keeps one per
+root for as long as it runs and serves a fresh backend per request, so a document left open would
+outlive the run that opened it and go on answering for its file with the last text that run sent: a
+trial import, or a rehearsed text whose new module files exist only in that run's overlay. Every
+later request on that server would then read names as unresolved that resolve on disk, and refuse
+correct seams.
+
+So `backends/rust/documents.rs` owns `did_open`, records each document a backend opens, and closes
+all of them when an entry point ends, whatever it ended with. `resolve`, `anchor_for` and
+`outside_references` each run their body through `closing_what_it_opens`. When the entry point and
+the close both fail, the entry point's error is the one returned. The live test is
+`import_pass_acceptance::imports_the_parent_s_type_on_a_server_an_earlier_check_rehearsed_its_parent_on`:
+a real `check --deep` of two seams on a settled server, then a seam naming the parent's type through
+`super`, resolved on a fresh backend on the same server.
+
+**What this does not change.** Within one `check --deep`, an operation after the first is still
+resolved against overlay text whose new files the server cannot see. The server forgets that text
+when the operation ends, so it does not reach the next run. A hand edit made **outside** any run is a
+different case: a warm daemon answers from the tree as it was when it started until it is restarted
+(recorded as V in `docs/dev/todo/2026-09-24-restructure-extract-drops-comments-and-writes-clippy-failing-signatures.md`).
 
 ## The health gate
 

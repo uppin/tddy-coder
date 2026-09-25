@@ -4,23 +4,14 @@ use tddy_task::TerminalCapture;
 
 use super::roster_replacement_pairs;
 
-use tddy_core::Changeset;
-
 use crate::{
     branch_intent::BranchIntentPolicy,
     connection_service::{agent_roster, seed_codebase, service_util, stack_parent},
-    project_storage,
 };
 
 use crate::branch_intent::BranchIntentRequest;
 
-use crate::branch_intent::resolve_branch_workflow;
-
-use crate::branch_intent::ResolvedBranchWorkflow;
-
 use tddy_core::output::SESSIONS_SUBDIR;
-
-use crate::user_sessions_path::projects_path_for_user;
 
 use tddy_rpc::Status;
 
@@ -96,26 +87,15 @@ impl DaemonSessionHost {
         .await
         .map_err(|e| Status::failed_precondition(e.to_string()))?;
 
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        let project = project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-        let repo_root = PathBuf::from(&project.main_repo_path);
-        if !repo_root.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
+        let (_, project) =
+            service_util::find_registered_project(&self.tddy_data_dir, os_user, project_id)?;
+        let repo_root = service_util::project_repo_root(&project)?;
 
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
 
-        let ResolvedBranchWorkflow {
-            intent,
-            workflow: cs_workflow,
-        } = resolve_branch_workflow(
+        let intent = service_util::write_initial_changeset(
             session_id,
             &BranchIntentRequest {
                 branch_worktree_intent,
@@ -125,21 +105,10 @@ impl DaemonSessionHost {
             },
             BranchIntentPolicy::cursor_cli(),
             project.main_branch_ref.as_deref(),
+            &session_dir,
+            stack_parent,
+            managed_recipe.as_deref(),
         )?;
-        let mut cs = Changeset {
-            workflow: Some(cs_workflow),
-            orchestrator_session_id: stack_parent.map(str::to_string),
-            recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-            ..Changeset::default()
-        };
-        if let Some(recipe) = &managed_recipe {
-            tddy_core::changeset::update_state(
-                &mut cs,
-                tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
-            );
-        }
-        tddy_core::write_changeset(&session_dir, &cs)
-            .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
         let chain_base_ref = self
             .resolve_chain_base_ref_status(&stack_parent::StackBaseLookup {
@@ -156,20 +125,13 @@ impl DaemonSessionHost {
             .await?;
         let worktree_base_ref =
             tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
-        let repo_root_clone = repo_root.clone();
-        let session_dir_clone = session_dir.clone();
         let timeout = self.config.spawn_worker_request_timeout();
-        let worktree_path = service_util::spawn_blocking_with_timeout(
+        let worktree_path = service_util::create_session_worktree(
             timeout,
             "start_sandboxed_cursor_cli_session: create worktree",
-            move || {
-                tddy_core::setup_worktree_for_session_with_optional_chain_base(
-                    &repo_root_clone,
-                    &session_dir_clone,
-                    worktree_base_ref.as_deref(),
-                )
-                .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
-            },
+            &repo_root,
+            &session_dir,
+            worktree_base_ref,
         )
         .await?;
 
@@ -345,21 +307,14 @@ impl DaemonSessionHost {
         // `SemanticSearch` tool resolves against the per-session index.
         let mut semantic_index_env_pair: Option<(String, String)> = None;
         if semantic_index {
-            let embedder =
-                tddy_semantic_index::production_embedder(&self.tddy_data_dir).map_err(|e| {
-                    Status::failed_precondition(format!(
-                        "semantic index requested but no embedder is available: {e}"
-                    ))
-                })?;
-            tddy_semantic_index::semantic_index::run_semantic_index_blocking(
-                &worktree_path,
-                &session_dir,
-                embedder,
+            service_util::index_session_worktree(
+                &self.tddy_data_dir,
                 &self.task_registry,
                 session_id,
+                &worktree_path,
+                &session_dir,
             )
-            .await
-            .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
+            .await?;
             semantic_index_env_pair = Some(
                 tddy_semantic_index::semantic_index::semantic_index_env(&session_dir),
             );
@@ -452,35 +407,20 @@ impl DaemonSessionHost {
             .insert(session_id.to_string(), state)
             .await;
 
-        let now = chrono::Utc::now().to_rfc3339();
         let meta = tddy_core::SessionMetadata {
-            session_id: session_id.to_string(),
-            project_id: project_id.to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-            status: "active".to_string(),
             repo_path: Some(worktree_path.to_string_lossy().to_string()),
             pid: Some(pid),
-            tool: None,
-            livekit_room: None,
-            pending_elicitation: false,
-            previous_session_id: None,
-            session_type: Some("cursor-cli".to_string()),
             model: Some(model.to_string()),
-            cursor_chat_id: None,
-            activity_status: None,
             hook_token: Some(hook_token),
             sandbox: Some(true),
-            agent: None,
             recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
             agents_rev: agent_roster::started_roster_rev(&started_agents),
             agents: started_agents,
-            legacy_specialized_agents: Vec::new(),
-            codebase_daemon_instance_id: None,
-            codebase_session_id: None,
-            agent_daemon_instance_id: None,
-            agent_session_id: None,
-            ssh_config_host: None,
+            ..crate::connection_service::starting_session_metadata(
+                session_id,
+                project_id,
+                "cursor-cli",
+            )
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;

@@ -22,9 +22,10 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tddy_code_restructuring::apply::apply_workspace_edit;
+use tddy_code_restructuring::apply::{apply_workspace_edit, hash_file};
 use tddy_code_restructuring::backends::rust::{discard, ServerChatter};
 use tddy_code_restructuring::registry::{LanguageBackend, Workspace};
+use tddy_code_restructuring::runner;
 use tddy_code_restructuring::{
     client_capabilities, server_settings, Anchor, Overlay, Position, Reexport, RefactorKind,
     RefactorOp, WorkspaceEdit,
@@ -190,6 +191,28 @@ impl AFixtureWorkspace {
     }
 
     /// Delete a file, for a test about what happens when it is absent.
+    /// A plan of `ops` written at the workspace root, its snapshot hashing every file they anchor in.
+    ///
+    /// At the root rather than in a crate, so it is never a file the server indexes or the plan hashes.
+    pub fn a_plan_of(&self, ops: &[RefactorOp]) -> PathBuf {
+        let mut snapshot = serde_json::Map::new();
+        for op in ops {
+            let file = op.anchor.file();
+            let hash = hash_file(&self.root.join(file)).expect("the anchored file hashes");
+            snapshot.insert(file.to_string(), serde_json::Value::String(hash));
+        }
+
+        let mut lines = vec![serde_json::json!({ "v": 1, "snapshot": snapshot }).to_string()];
+        lines.extend(
+            ops.iter()
+                .map(|op| serde_json::to_string(op).expect("the operation serialises")),
+        );
+
+        let plan = self.root.join("earlier-plan.jsonl");
+        std::fs::write(&plan, lines.join("\n") + "\n").expect("the plan is written");
+        plan
+    }
+
     pub fn removing(&self, relative: &str) {
         std::fs::remove_file(self.root.join(relative))
             .unwrap_or_else(|error| panic!("removing {relative}: {error}"));
@@ -311,6 +334,57 @@ async fn resolving_against(
     let cancel = a_token_cancelled_after(A_WAIT_A_TEST_CAN_OUTLAST);
 
     tokio::task::spawn_blocking(move || {
+        let mut backend = tddy_code_restructuring::backends::rust::RustBackend::from_lsp_client(
+            client,
+            Some(cancel),
+            discard(),
+        );
+        let overlay = Overlay::default();
+        let workspace = Workspace {
+            root: &root,
+            overlay: &overlay,
+        };
+
+        backend
+            .resolve(&op, &workspace)
+            .map(|resolution| resolution.edit)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .expect("the blocking half of the operation joins")
+}
+
+/// Resolve one operation on a server that a `check --deep` of `earlier` has already run against.
+///
+/// This is the daemon's shape across requests: one warm server for the root, a backend per run,
+/// and nothing between runs but whatever the earlier one left behind. The earlier plan is checked
+/// the way `tddy-tools restructure check --deep` checks one, through the runner and its overlay, so
+/// each of its operations after the first is resolved against text the tree does not hold. The
+/// check writes nothing, and its findings are its own business: what matters is the server it
+/// hands on.
+pub async fn resolving_after_a_check_of(
+    fixture: &AFixtureWorkspace,
+    earlier: &[RefactorOp],
+    op: RefactorOp,
+) -> Result<WorkspaceEdit, String> {
+    let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
+    let root = fixture.path().to_path_buf();
+    let plan = fixture.a_plan_of(earlier);
+    let client = a_rust_analyzer_rooted_at(&root).await;
+    until_quiescent(&client).await;
+
+    let cancel = a_token_cancelled_after(A_WAIT_A_TEST_CAN_OUTLAST);
+
+    tokio::task::spawn_blocking(move || {
+        let options = runner::Options {
+            command: runner::Command::Check,
+            target: Some(plan),
+            deep: true,
+            ..runner::Options::default()
+        };
+        runner::check(&root, options, Some(Arc::clone(&client)), cancel.clone())
+            .map_err(|error| format!("the earlier check did not run: {error}"))?;
+
         let mut backend = tddy_code_restructuring::backends::rust::RustBackend::from_lsp_client(
             client,
             Some(cancel),
@@ -1305,6 +1379,9 @@ pub fn the_module_named(text: &str, name: &str) -> String {
 /// The non-root module file the relative-import fixtures split: a child of `service`.
 pub const HOST_MODULE: &str = "crates/origin/src/service/host.rs";
 
+/// The module that declares the type [`HOST_MODULE`] reaches through `super`.
+pub const SERVICE_MODULE: &str = "crates/origin/src/service.rs";
+
 /// A crate whose **non-root** module reaches its parent's type through `use super::Failure;`, where
 /// the seam at lines 12–17 of [`HOST_MODULE`] takes a method naming it.
 ///
@@ -1384,7 +1461,7 @@ fn a_crate_whose_host_module_reads(host: &[&str]) -> AFixtureWorkspace {
             ]),
         )
         .writing(
-            "crates/origin/src/service.rs",
+            SERVICE_MODULE,
             &source(&[
                 "//! The module that owns the type its child module names.",
                 "",

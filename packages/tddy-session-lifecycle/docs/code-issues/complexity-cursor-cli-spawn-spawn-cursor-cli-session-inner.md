@@ -1,13 +1,13 @@
 # complexity: spawn_cursor_cli_session_inner
 
-**Location:** `packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs:113` — `spawn_cursor_cli_session_inner`
+**Location:** `packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs:23` — `spawn_cursor_cli_session_inner`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **337 lines** · **nesting depth 4** · 9 parameters · 10 branch/match lines · 20 early exits
 **CRAP:** **CRAP 930** · complexity 30 · rank 6/50 in this crate · **never executed by any test**
 **Thresholds breached:** length 337 > 60; parameters 9 > 5 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — narrowed 2026-09-24 by #524 (337 → 244 lines); the remaining seams are refused by the engine (T: `SpawnStackParent<'_>`; E4: early returns) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -15,6 +15,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 337 | 4 | 10 | 20 | first detection |
+| 2026-09-24 | 244 | — | — | — | #524: plans `03` (chat and resume out), `15` (6 extract-methods) and DRY #5–#8. What is left: the worktree-source `match` and its two early returns, the `stack_parent` calls the engine refuses (T), and the call sites. Nesting, branches and exits not re-derived; lines by the plan's fn-line-to-closing-brace count (337 at the merge-base) |
 
 ## What the tool found
 

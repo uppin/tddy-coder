@@ -1,7 +1,3 @@
-use tddy_core::output::SESSIONS_SUBDIR;
-
-use tddy_core::session_lifecycle::validate_session_id_segment;
-
 use std::path::Path;
 
 use crate::{
@@ -109,76 +105,17 @@ impl DaemonSessionHost {
             .as_ref()
             .map(|(instance_id, _)| format!("{instance_id}:{project_id_owned}"));
 
-        let handle = tokio::task::spawn_blocking(move || {
-            let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
-                match &spawn_backend {
-                    tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor {
-                        socket_path,
-                    } => {
-                        let mut env = std::collections::BTreeMap::new();
-                        if let Some(ref ssh) = ssh_command {
-                            env.insert("GIT_SSH_COMMAND".to_string(), ssh.clone());
-                        }
-                        runtime
-                            .block_on(
-                                tddy_spawn::supervisor_spawn::clone_repo_via_supervisor_with_env(
-                                    socket_path,
-                                    &os_user_owned,
-                                    git_url,
-                                    dest,
-                                    env,
-                                ),
-                            )
-                            .map_err(|e| format!("{e:#}"))
-                    }
-                    tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                        if let Some(ref client) = spawn_client {
-                            if ssh_command.is_none() {
-                                // No transport env var to carry: the forked worker's `clone_repo` is
-                                // the original path (it has no env-var channel).
-                                return client
-                                    .clone_repo(spawn_worker::CloneRequest {
-                                        os_user: os_user_owned.clone(),
-                                        git_url: git_url.to_string(),
-                                        destination: dest.display().to_string(),
-                                    })
-                                    .map_err(|e| e.to_string());
-                            }
-                        }
-                        // Facilitator clone (carries `GIT_SSH_COMMAND`) or no forked worker at all:
-                        // the in-process `clone_as_user_with_env` carries the transport env var directly.
-                        let extra: Vec<(&str, &str)> = ssh_command
-                            .as_ref()
-                            .map(|ssh| vec![("GIT_SSH_COMMAND", ssh.as_str())])
-                            .unwrap_or_default();
-                        spawner::clone_as_user_with_env(&os_user_owned, git_url, dest, &extra)
-                            .map_err(|e| e.to_string())
-                    }
-                }
-            };
-            if let Some(remote_url) = facilitating_remote_url {
-                crate::project_provision::ensure_project_available_from_facilitator(
-                    &projects_dir_owned,
-                    &project_id_owned,
-                    repos_base_dir.as_deref(),
-                    &remote_url,
-                    cloner,
-                )
-            } else {
-                let peer_lookup = |id: &str| {
-                    peer_entries
-                        .iter()
-                        .find(|p| p.project_id == id)
-                        .map(|p| (p.name.clone(), p.git_url.clone()))
-                };
-                crate::project_provision::ensure_project_available_locally(
-                    &projects_dir_owned,
-                    &project_id_owned,
-                    repos_base_dir.as_deref(),
-                    cloner,
-                    peer_lookup,
-                )
-            }
+        let handle = spawn_project_clone(ProjectClone {
+            repos_base_dir,
+            spawn_client,
+            os_user_owned,
+            projects_dir_owned,
+            project_id_owned,
+            peer_entries,
+            spawn_backend,
+            runtime,
+            ssh_command,
+            facilitating_remote_url,
         });
 
         match tokio::time::timeout(timeout, handle).await {
@@ -356,54 +293,116 @@ impl DaemonSessionHost {
         self.session_dir_for(session_id)
     }
 
-    /// Where a session this daemon serves keeps its `.session.yaml`.
-    ///
-    /// The id is validated as a single path segment before it is joined, because every roster call
-    /// takes it from the caller and the directory it names is read-modify-written: an id carrying
-    /// `../` would have an attach rewrite another user's `.session.yaml` outside this daemon's
-    /// sessions base entirely.
-    pub(crate) fn session_dir_for(&self, session_id: &str) -> Result<PathBuf, Status> {
-        validate_session_id_segment(session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-        Ok(self.tddy_data_dir.join(SESSIONS_SUBDIR).join(session_id))
-    }
-
     // ── Remote agents: room admission, clones, tool split ────────────────────────────────────
     //
     // docs/ft/daemon/session-agent-roster.md § Remote agents, § Clones.
-
-    /// Open the session's room over a checkout this daemon holds, unless it is open already.
-    ///
-    /// The one place a room is opened outside a split start, and the reason session *creation* no
-    /// longer opens one: a room is what a session is reached through, so it is created when
-    /// something first reaches for it. Every caller here is such a reach — a client connecting to
-    /// the session, an owning daemon being admitted to it — and each of them is already waiting on
-    /// a LiveKit round trip by asking.
-    ///
-    /// `Ok(None)` means this daemon has no LiveKit credentials at all and hosts no rooms; each
-    /// caller decides what that means for it.
-    pub(crate) async fn ensure_session_room(
-        &self,
-        session_id: &str,
-        session_dir: &Path,
-        worktree_root: &Path,
-    ) -> Result<Option<tddy_daemon_livekit::session_room::OpenedSessionRoom>, Status> {
-        let local_instance_id = local_instance_id_for_config(&self.config);
-        let hosting = tddy_daemon_livekit::session_room::DaemonRoomHosting {
-            config: &self.config,
-            instance_id: &local_instance_id,
-            rooms: &self.session_rooms,
-        }
-        .for_worktree(session_id, worktree_root, session_dir);
-        self.session_rooms
-            .ensure_open(
-                &hosting,
-                || std::sync::Arc::new(self.clone()).session_room_roster(),
-                self,
-            )
-            .await
-    }
 }
+
+/// What provisioning a project's working copy on the blocking pool needs: the clone backend, and
+/// where the project comes from.
+struct ProjectClone {
+    repos_base_dir: Option<PathBuf>,
+    spawn_client: Option<std::sync::Arc<spawn_worker::SpawnClient>>,
+    os_user_owned: String,
+    projects_dir_owned: PathBuf,
+    project_id_owned: String,
+    peer_entries: Vec<tddy_service::proto::project::ProjectEntry>,
+    spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice,
+    runtime: tokio::runtime::Handle,
+    ssh_command: Option<String>,
+    facilitating_remote_url: Option<String>,
+}
+
+fn spawn_project_clone(
+    launch: ProjectClone,
+) -> tokio::task::JoinHandle<Result<project_storage::ProjectData, Status>> {
+    let ProjectClone {
+        repos_base_dir,
+        spawn_client,
+        os_user_owned,
+        projects_dir_owned,
+        project_id_owned,
+        peer_entries,
+        spawn_backend,
+        runtime,
+        ssh_command,
+        facilitating_remote_url,
+    } = launch;
+    let handle = tokio::task::spawn_blocking(move || {
+        let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
+            match &spawn_backend {
+                tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                    let mut env = std::collections::BTreeMap::new();
+                    if let Some(ref ssh) = ssh_command {
+                        env.insert("GIT_SSH_COMMAND".to_string(), ssh.clone());
+                    }
+                    runtime
+                        .block_on(
+                            tddy_spawn::supervisor_spawn::clone_repo_via_supervisor_with_env(
+                                socket_path,
+                                &os_user_owned,
+                                git_url,
+                                dest,
+                                env,
+                            ),
+                        )
+                        .map_err(|e| format!("{e:#}"))
+                }
+                tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+                    if let Some(ref client) = spawn_client {
+                        if ssh_command.is_none() {
+                            // No transport env var to carry: the forked worker's `clone_repo` is
+                            // the original path (it has no env-var channel).
+                            return client
+                                .clone_repo(spawn_worker::CloneRequest {
+                                    os_user: os_user_owned.clone(),
+                                    git_url: git_url.to_string(),
+                                    destination: dest.display().to_string(),
+                                })
+                                .map_err(|e| e.to_string());
+                        }
+                    }
+                    // Facilitator clone (carries `GIT_SSH_COMMAND`) or no forked worker at all:
+                    // the in-process `clone_as_user_with_env` carries the transport env var directly.
+                    let extra: Vec<(&str, &str)> = ssh_command
+                        .as_ref()
+                        .map(|ssh| vec![("GIT_SSH_COMMAND", ssh.as_str())])
+                        .unwrap_or_default();
+                    spawner::clone_as_user_with_env(&os_user_owned, git_url, dest, &extra)
+                        .map_err(|e| e.to_string())
+                }
+            }
+        };
+        if let Some(remote_url) = facilitating_remote_url {
+            crate::project_provision::ensure_project_available_from_facilitator(
+                &projects_dir_owned,
+                &project_id_owned,
+                repos_base_dir.as_deref(),
+                &remote_url,
+                cloner,
+            )
+        } else {
+            let peer_lookup = |id: &str| {
+                peer_entries
+                    .iter()
+                    .find(|p| p.project_id == id)
+                    .map(|p| (p.name.clone(), p.git_url.clone()))
+            };
+            crate::project_provision::ensure_project_available_locally(
+                &projects_dir_owned,
+                &project_id_owned,
+                repos_base_dir.as_deref(),
+                cloner,
+                peer_lookup,
+            )
+        }
+    });
+    handle
+}
+
+mod session_dir_lookup;
+
+mod session_room_opening;
 
 /// [`DaemonSessionHost::resolvable_agent_defs`] over the two fields it reads: the YAML defs under
 /// `<tddy_data_dir>/agents` and `model_registry`'s assistants, the registry winning a name tie.

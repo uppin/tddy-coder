@@ -4,9 +4,10 @@
 **Source:** `#carve` 13/15 `/green`, [#527](https://github.com/uppin/tddy-coder/pull/527), changeset
 [`2026-09-23-restructure-engine-fixes`](../changesets/2026-09-23-restructure-engine-fixes.md)
 
-#527's engine was run for real against #524's plans
-(`docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/` on the `feature/carve/lifecycle-wiring`
-branch). Every plan passed `restructure check --deep` against a healthy warm index, and then `apply`
+#527's engine was run for real against #524's plans (the destructure's restructure plans, listed in
+[its change history](../changesets/2026-09-23-carve-lifecycle-destructure.md) and kept in git at
+`52e621a3:docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/`). Every plan passed
+`restructure check --deep` against a healthy warm index, and then `apply`
 went like this:
 
 | Plan | Result | Gap |
@@ -208,6 +209,12 @@ async fn split_agent_withdrawals(&self, codebase_instance_id: &str, codebase_ses
 So this is composition. Either the server had not re-analysed op 0's edit when the next assist ran
 (stale inference), or the `PositionLedger` mis-mapped the ranges. The two are not yet told apart.
 
+**Not seen again after `51211cd8`** (#524, 2026-09-24). That commit makes the backend close every
+document an operation opens. Before it, a shared server went on answering for a file with the last
+text an earlier run had sent. The same plan, applied once through the warm daemon, applied 5 of 5
+with real signatures and passed the compile gate. One clean run does not establish that stale
+documents caused L, so the gap stays open until it is reproduced or explained.
+
 ### M — a moved `mod x;` declaration changes what the test file's `use super::*` means
 
 Plan `01`, test build only.
@@ -235,11 +242,104 @@ workspace_start_request_unit_tests.rs:182  error[E0422]: cannot find struct `Ses
 workspace_sandbox_roster_dispatch_unit_tests.rs:58  error[E0425]: cannot find type `Path`
 ```
 
+**Re-run on #524 (2026-09-24, after `51211cd8`)**: the same 10 of 10, and the same 9 errors. No seam
+of plan `01` carries a `mod x;` declaration, so the shape above is not the mechanism. What happened is
+that the **parent's own `use` groups** lost every name that only the moved code used outside tests.
+The assist drops a name from a group when the seam held its last use, and it does not count the
+test children that reach the name through `use super::*`:
+
+```rust
+// before: connection_service.rs
+use std::path::{Path, PathBuf};
+use tddy_core::Changeset;
+use tddy_service::proto::session::{SplitAgentPlacement, StartSessionResponse};
+…
+pub use service_util::{await_supervised_with_timeout, spawn_blocking_with_timeout};
+
+// after the apply
+use std::path::{PathBuf};
+use tddy_core::Changeset;                    // kept, but unused in the lib build (N1)
+…
+pub use service_util::{await_supervised_with_timeout};   // a `pub` re-export narrowed
+
+// by hand (#524): into the parent's existing block "Bound for the extracted test modules, which
+// reach the code under test through `use super::*`"
+#[cfg(test)]
+use std::path::Path;
+#[cfg(test)]
+use tddy_core::Changeset;                    // moved here when N1 removed the lib-level line
+#[cfg(test)]
+use tddy_service::proto::session::{SessionAttachment, SplitAgentPlacement};
+…
+pub use service_util::{await_supervised_with_timeout, spawn_blocking_with_timeout};   // restored
+```
+
+The dropped **`pub use`** member is worse than a build error. The build stays green, since in-crate
+callers still reach the name through the `pub(crate) use service_util::*;` glob, but
+`tddy_session_lifecycle::connection_service::spawn_blocking_with_timeout` stops being public. Nothing
+outside the crate names it today, which is why no dependent crate failed. The engine should never
+narrow a `pub use` it did not write.
+
 The import pass sees only the text it produced. The names that go unresolved are in **other files**,
 the out-of-line child modules whose `super` just changed, and nothing opens those. Two fixes are
 possible. One is to carry the parent's glob-visible bindings the child files use into the new module.
 The other is to include out-of-line children of moved `mod x;` declarations in the unresolved-name
 scan. Also open: whether cfg(test)-only code is tokenised at all.
+
+### W — an apply right after a daemon start skips its warm-up and is refused with a wrong diagnosis
+
+#524, plan `12`, the first `apply` after `./run-index-daemon --stop` and a restart. The run logged
+
+```text
+   indexing (+0ms): warming crate index (until ready, or until you stop waiting)
+   indexing (+0ms): no indexable symbols in file; skipping warm-up
+```
+
+`svc_start_session_core.rs` holds 1,105 lines of symbols, so the check that decided to skip is wrong
+about the file. The assist then answered against a server that had loaded nothing, and the run was
+refused before anything was written:
+
+```text
+rust-analyzer's answer was unusable: rust-analyzer left `modname` behind in 1 place(s) its rename could
+not reach, so the extraction would report success over source that resolves nowhere — line(s) 478.
+That call sits inside an `impl`, and the module was written outside it, so no ordering of this plan
+makes the path resolve — an `impl` body cannot hold a `mod`. Either grow the seam to carry the whole
+`impl`, or cut it where nothing crosses.
+```
+
+The advice is about the plan, and the plan was fine. A `check --deep` of the same plan, which warms
+the index, followed by the same `apply`, moved 5 of 5. The warm-up should not be skipped on a server
+that has loaded no crate, whatever the file's symbol count reads as.
+
+### X — a moved `pub(super)` keeps its spelling one module deeper, which narrows it
+
+#524, plan `12`. The engine widens a moved **private** item to `pub(crate)` (and logs it), but moves a
+`pub(super)` item as written. One level deeper, `pub(super)` names a different module:
+
+```rust
+// before: connection_service/svc_start_session_core.rs, reachable from all of connection_service
+pub(super) struct ToolSpawnPlan { pub(super) purpose: ToolSpawnPurpose, … }
+    pub(super) async fn spawn_tddy_coder(&self, plan: ToolSpawnPlan) -> …
+
+// after: connection_service/svc_start_session_core/tool_spawn_plan.rs, now reachable only from
+// svc_start_session_core
+pub(super) struct ToolSpawnPlan { pub(super) purpose: ToolSpawnPurpose, … }
+```
+
+```text
+svc_resume_session.rs:5:57: error[E0603]: struct import `ToolSpawnPlan` is private: private struct import
+svc_spawn_split_agent.rs:61:14: error[E0624]: method `attached_initial_prompt` is private: private method
+svc_resume_session.rs:132:14: error[E0624]: method `spawn_tddy_coder` is private: private method
+```
+
+By hand (#524): `pub(in crate::connection_service)`, which is what `pub(super)` meant where the item
+was. The engine should rewrite a relative visibility the way H needs relative paths rewritten.
+
+**The widening itself is a second gap.** A private item widened to `pub(crate)` also exceeds a
+private type in its signature (`CliStart`, `JailSession`, `JailDirs`, …), which is
+`private_interfaces` under `-D warnings`. In every #524 apply the reach the item needed was
+`pub(super)` (the parent and its children, which is where private reached). The hand fix was
+`pub(super)` each time, in plans `12`, `13`, `17` and `21`.
 
 ## Design candidates, undecided
 

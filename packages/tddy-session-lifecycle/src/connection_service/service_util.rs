@@ -8,6 +8,171 @@ use tddy_rpc::Status;
 
 use std::time::Duration;
 
+/// Build a session's semantic index over its worktree into its session dir, blocking until the
+/// index is terminal.
+///
+/// A missing embedder or a failed index is an error — no unindexed fallback — so a start that asked
+/// for the index fails rather than coming up without it. The index's env pair, when a caller needs
+/// one, is `tddy_semantic_index::semantic_index::semantic_index_env(session_dir)`.
+pub(crate) async fn index_session_worktree(
+    tddy_data_dir: &Path,
+    task_registry: &tddy_task::TaskRegistry,
+    session_id: &str,
+    worktree_path: &Path,
+    session_dir: &Path,
+) -> Result<(), Status> {
+    let embedder = tddy_semantic_index::production_embedder(tddy_data_dir).map_err(|e| {
+        Status::failed_precondition(format!(
+            "semantic index requested but no embedder is available: {e}"
+        ))
+    })?;
+    tddy_semantic_index::semantic_index::run_semantic_index_blocking(
+        worktree_path,
+        session_dir,
+        embedder,
+        task_registry,
+        session_id,
+    )
+    .await
+    .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
+    Ok(())
+}
+
+/// A project registered for `os_user`, and the projects directory it was found in.
+pub(crate) fn find_registered_project(
+    tddy_data_dir: &Path,
+    os_user: &str,
+    project_id: &str,
+) -> Result<
+    (
+        std::path::PathBuf,
+        tddy_projects::project_storage::ProjectData,
+    ),
+    Status,
+> {
+    let projects_dir =
+        crate::user_sessions_path::projects_path_for_user(os_user, Some(tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+    let project = tddy_projects::project_storage::find_project(&projects_dir, project_id)
+        .map_err(|e| Status::internal(e.to_string()))?
+        .ok_or_else(|| Status::not_found("project not found"))?;
+    Ok((projects_dir, project))
+}
+
+/// A registered project's main checkout, which must exist on this host.
+pub(crate) fn project_repo_root(
+    project: &tddy_projects::project_storage::ProjectData,
+) -> Result<std::path::PathBuf, Status> {
+    let repo_root = std::path::PathBuf::from(&project.main_repo_path);
+    if !repo_root.exists() {
+        return Err(Status::invalid_argument(
+            "project main repo path does not exist",
+        ));
+    }
+    Ok(repo_root)
+}
+
+/// The `.session.yaml` of a session that is starting now: active, created and updated this instant,
+/// and every optional field unset. A caller names what its session type records on top, with struct
+/// update syntax, so the fields that differ between session types are the only ones it spells out.
+pub(crate) fn starting_session_metadata(
+    session_id: &str,
+    project_id: &str,
+    session_type: &str,
+) -> tddy_core::SessionMetadata {
+    let now = chrono::Utc::now().to_rfc3339();
+    tddy_core::SessionMetadata {
+        session_id: session_id.to_string(),
+        project_id: project_id.to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+        status: "active".to_string(),
+        repo_path: None,
+        pid: None,
+        tool: None,
+        livekit_room: None,
+        pending_elicitation: false,
+        previous_session_id: None,
+        session_type: Some(session_type.to_string()),
+        model: None,
+        cursor_chat_id: None,
+        activity_status: None,
+        hook_token: None,
+        sandbox: None,
+        agent: None,
+        recipe: None,
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
+        ssh_config_host: None,
+    }
+}
+
+/// Resolve a starting session's branch intent and write the changeset its worktree setup reads.
+///
+/// The changeset names the orchestrator a stack child was spawned by, and a managed session's
+/// recipe. A managed session also seeds the recipe's start goal, so `changeset.yaml` reflects the
+/// workflow position immediately; the per-session controller advances it from there on
+/// `transition`. Returns the intent, which decides whether the new branch is pushed.
+pub(crate) fn write_initial_changeset(
+    session_id: &str,
+    branch: &crate::branch_intent::BranchIntentRequest<'_>,
+    policy: crate::branch_intent::BranchIntentPolicy,
+    project_main_branch_ref: Option<&str>,
+    session_dir: &Path,
+    orchestrator_session_id: Option<&str>,
+    managed_recipe: Option<&dyn tddy_core::workflow::recipe::WorkflowRecipe>,
+) -> Result<BranchWorktreeIntent, Status> {
+    let crate::branch_intent::ResolvedBranchWorkflow { intent, workflow } =
+        crate::branch_intent::resolve_branch_workflow(
+            session_id,
+            branch,
+            policy,
+            project_main_branch_ref,
+        )?;
+    let mut cs = tddy_core::Changeset {
+        workflow: Some(workflow),
+        orchestrator_session_id: orchestrator_session_id.map(str::to_string),
+        recipe: managed_recipe.map(|r| r.name().to_string()),
+        ..tddy_core::Changeset::default()
+    };
+    if let Some(recipe) = managed_recipe {
+        tddy_core::changeset::update_state(
+            &mut cs,
+            tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
+        );
+    }
+    tddy_core::write_changeset(session_dir, &cs)
+        .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
+    Ok(intent)
+}
+
+/// Cut a session's git worktree from `repo_root` into `session_dir` (blocking: a fetch plus
+/// `git worktree add`), based on `base_ref` when there is one, under the spawn deadline.
+pub(crate) async fn create_session_worktree(
+    timeout: Duration,
+    op_label: &'static str,
+    repo_root: &Path,
+    session_dir: &Path,
+    base_ref: Option<String>,
+) -> Result<std::path::PathBuf, Status> {
+    let repo_root = repo_root.to_path_buf();
+    let session_dir = session_dir.to_path_buf();
+    spawn_blocking_with_timeout(timeout, op_label, move || {
+        tddy_core::setup_worktree_for_session_with_optional_chain_base(
+            &repo_root,
+            &session_dir,
+            base_ref.as_deref(),
+        )
+        .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
+    })
+    .await
+}
+
 /// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
 pub async fn spawn_blocking_with_timeout<T: Send + 'static>(
     timeout: Duration,

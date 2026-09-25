@@ -294,7 +294,53 @@ pub fn delete_session_directory(
     let _ = metadata;
 
     // For session types that own their worktree, remove the linked git worktree.
-    if let Some(ref worktree_str) = session_worktree {
+    remove_session_worktree(projects_dir, session_id, &metadata, &session_worktree);
+
+    if let Some(ref m) = metadata {
+        teardown_workspace_sandbox(&session_dir, m);
+    }
+
+    std::fs::remove_dir_all(&session_dir).map_err(|e| {
+        log::error!(
+            "delete_session_directory: remove_dir_all failed for session_id={}: {}",
+            session_id,
+            e
+        );
+        Status::internal("failed to remove session directory")
+    })?;
+    log::info!(
+        "delete_session_directory: removed session directory for {}",
+        session_id
+    );
+
+    // A checkout that lived *inside* the session directory has just gone with it, but its
+    // registration is in the project's repository and would survive as a stale `git worktree list`
+    // row naming a directory that no longer exists — and, worse, holding the name so a later
+    // checkout cannot reuse it.
+    //
+    // An agent clone's checkout is exactly that shape (docs/ft/daemon/session-agent-roster.md
+    // § Clones). It is a one-way mirror, so it always carries the uncommitted work it exists to
+    // hold, and `git worktree remove` refuses any checkout with modified or untracked files — the
+    // git-aware removal above declines every time. `prune` is the operation for a checkout that is
+    // already gone, and it does nothing for every other session, whose worktree lives outside the
+    // session directory and is either removed above or deliberately left intact.
+    if let Some(worktree) = session_worktree
+        .as_deref()
+        .map(PathBuf::from)
+        .filter(|w| w.starts_with(&session_dir) && !w.exists())
+    {
+        prune_worktree_registration(projects_dir, metadata.as_ref(), &worktree, session_id);
+    }
+    Ok(())
+}
+
+fn remove_session_worktree(
+    projects_dir: Option<&Path>,
+    session_id: &str,
+    metadata: &Option<tddy_core::SessionMetadata>,
+    session_worktree: &Option<String>,
+) {
+    if let Some(ref worktree_str) = *session_worktree {
         let worktree = PathBuf::from(worktree_str);
         // Attempt git-aware removal when we have a projects_dir and a project_id.
         let removed_git_aware = if let (Some(pd), Some(ref project_id)) = (
@@ -365,43 +411,6 @@ pub fn delete_session_directory(
             }
         }
     }
-
-    if let Some(ref m) = metadata {
-        teardown_workspace_sandbox(&session_dir, m);
-    }
-
-    std::fs::remove_dir_all(&session_dir).map_err(|e| {
-        log::error!(
-            "delete_session_directory: remove_dir_all failed for session_id={}: {}",
-            session_id,
-            e
-        );
-        Status::internal("failed to remove session directory")
-    })?;
-    log::info!(
-        "delete_session_directory: removed session directory for {}",
-        session_id
-    );
-
-    // A checkout that lived *inside* the session directory has just gone with it, but its
-    // registration is in the project's repository and would survive as a stale `git worktree list`
-    // row naming a directory that no longer exists — and, worse, holding the name so a later
-    // checkout cannot reuse it.
-    //
-    // An agent clone's checkout is exactly that shape (docs/ft/daemon/session-agent-roster.md
-    // § Clones). It is a one-way mirror, so it always carries the uncommitted work it exists to
-    // hold, and `git worktree remove` refuses any checkout with modified or untracked files — the
-    // git-aware removal above declines every time. `prune` is the operation for a checkout that is
-    // already gone, and it does nothing for every other session, whose worktree lives outside the
-    // session directory and is either removed above or deliberately left intact.
-    if let Some(worktree) = session_worktree
-        .as_deref()
-        .map(PathBuf::from)
-        .filter(|w| w.starts_with(&session_dir) && !w.exists())
-    {
-        prune_worktree_registration(projects_dir, metadata.as_ref(), &worktree, session_id);
-    }
-    Ok(())
 }
 
 /// Drop the project repository's registration of a checkout that no longer exists.

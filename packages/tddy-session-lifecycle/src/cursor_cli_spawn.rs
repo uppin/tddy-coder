@@ -4,110 +4,20 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::{
-    build_cursor_hooks_settings, write_session_metadata, Changeset, HookCommandParams,
-    SessionMetadata,
-};
+use tddy_core::{write_session_metadata, SessionMetadata};
 use tddy_rpc::{Response, Status};
-use tddy_service::proto::session::{ResumeSessionResponse, StartSessionResponse};
-use uuid::Uuid;
+use tddy_service::proto::session::StartSessionResponse;
 
-use crate::branch_intent::{
-    resolve_branch_workflow, BranchIntentPolicy, BranchIntentRequest, ResolvedBranchWorkflow,
-};
+use crate::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::{resolve_cursor_binary_path, DaemonConfig};
 use crate::connection_service::{
-    effective_spawn_branch, session_worktree_source, spawn_blocking_with_timeout,
-    spawned_branch_of_session, WorktreeSource,
+    effective_spawn_branch, session_worktree_source, spawned_branch_of_session, WorktreeSource,
 };
 use crate::project_storage;
-use crate::user_sessions_path::projects_path_for_user;
 
-/// Write `.cursor/hooks.json` under `worktree_path` for a cursor-cli session.
-///
-/// Returns the generated per-session hook token (also embedded in hook commands).
-pub fn install_cursor_hooks_in_worktree(
-    config: &DaemonConfig,
-    worktree_path: &Path,
-    session_id: &str,
-    os_user: &str,
-) -> String {
-    let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
-        crate::config::resolve_cursor_cli_tddy_tools_path(config).as_deref(),
-    );
-
-    // `cursor_cli.daemon_url`, then `claude_cli.daemon_url`, then this daemon's own web listener —
-    // the same last resort every hook URL falls back to.
-    let daemon_url = crate::config::resolve_cursor_cli_daemon_url(config)
-        .unwrap_or_else(|| crate::connection_service::local_daemon_hook_url(config));
-
-    let hook_token = Uuid::new_v4().to_string();
-    let hooks_settings = build_cursor_hooks_settings(&HookCommandParams {
-        tddy_tools_path: &tddy_tools_path,
-        daemon_url: &daemon_url,
-        session_id,
-        os_user,
-        hook_token: &hook_token,
-    });
-    let cursor_dir = worktree_path.join(".cursor");
-    if let Err(e) = std::fs::create_dir_all(&cursor_dir).and_then(|_| {
-        serde_json::to_string_pretty(&hooks_settings)
-            .map_err(|e| std::io::Error::other(e.to_string()))
-            .and_then(|json| {
-                tddy_core::atomic_file::write_atomic(&cursor_dir.join("hooks.json"), json)
-            })
-    }) {
-        log::warn!(
-            "session {session_id}: failed to write .cursor/hooks.json — hooks will not fire: {e}"
-        );
-    }
-    hook_token
-}
-
-/// The chat id printed by `cursor-agent create-chat`, or a description of what came out instead.
-///
-/// `create-chat` prints a **bare** chat id on stdout and exits 0 ("Create a new empty chat and
-/// return its ID" — cursor-agent 2026.07.23). Anything else — no output, a banner, a prompt, an
-/// error message — is not a chat id, and pinning it to the session would send every later resume
-/// into a chat that does not exist.
-pub fn parse_created_chat_id(stdout: &str) -> Result<String, String> {
-    let chat_id = stdout.trim();
-    if chat_id.is_empty() {
-        return Err("printed no chat id on stdout".to_string());
-    }
-    if chat_id.split_whitespace().count() > 1 {
-        return Err(format!(
-            "printed {chat_id:?} on stdout, which is not a bare chat id"
-        ));
-    }
-    Ok(chat_id.to_string())
-}
-
-/// Mint the Cursor chat a session will own by running `<binary_path> create-chat` in `worktree_path`.
-///
-/// Only `create-chat` mints real chat ids, so a failure here is returned to the caller: starting the
-/// agent without one would produce a session no resume can reattach to.
-pub async fn mint_cursor_chat_id(
-    binary_path: &str,
-    worktree_path: &Path,
-) -> Result<String, String> {
-    let output = tokio::process::Command::new(binary_path)
-        .arg("create-chat")
-        .current_dir(worktree_path)
-        .output()
-        .await
-        .map_err(|e| format!("`{binary_path} create-chat` could not be run: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "`{binary_path} create-chat` exited with {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    parse_created_chat_id(&String::from_utf8_lossy(&output.stdout))
-        .map_err(|e| format!("`{binary_path} create-chat` {e}"))
-}
+mod chat;
+pub use chat::*;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn spawn_cursor_cli_session_inner(
@@ -168,10 +78,7 @@ pub async fn spawn_cursor_cli_session_inner(
 
     // No project default branch is consulted here: this path may run against a client-supplied
     // `repo_path` with no registered project at all, and it never read one before the extraction.
-    let ResolvedBranchWorkflow {
-        intent,
-        workflow: cs_workflow,
-    } = resolve_branch_workflow(
+    let intent = crate::connection_service::write_initial_changeset(
         session_id,
         &BranchIntentRequest {
             branch_worktree_intent,
@@ -181,21 +88,10 @@ pub async fn spawn_cursor_cli_session_inner(
         },
         BranchIntentPolicy::cursor_cli(),
         None,
+        &session_dir,
+        stack_parent.session_id(),
+        managed_recipe.as_deref(),
     )?;
-    let mut cs = Changeset {
-        workflow: Some(cs_workflow),
-        orchestrator_session_id: stack_parent.session_id().map(str::to_string),
-        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-        ..Changeset::default()
-    };
-    if let Some(recipe) = &managed_recipe {
-        tddy_core::changeset::update_state(
-            &mut cs,
-            tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
-        );
-    }
-    tddy_core::write_changeset(&session_dir, &cs)
-        .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
     let timeout = config.spawn_worker_request_timeout();
     let worktree_path = match session_worktree_source(repo_path, project_id) {
@@ -205,17 +101,9 @@ pub async fn spawn_cursor_cli_session_inner(
                     "project_id is required for cursor-cli sessions",
                 ));
             }
-            let projects_dir = projects_path_for_user(os_user, Some(tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-            let project = project_storage::find_project(&projects_dir, &pid)
-                .map_err(|e| Status::internal(e.to_string()))?
-                .ok_or_else(|| Status::not_found("project not found"))?;
-            let repo_root = PathBuf::from(&project.main_repo_path);
-            if !repo_root.exists() {
-                return Err(Status::invalid_argument(
-                    "project main repo path does not exist",
-                ));
-            }
+            let (projects_dir, project) =
+                crate::connection_service::find_registered_project(tddy_data_dir, os_user, &pid)?;
+            let repo_root = crate::connection_service::project_repo_root(&project)?;
             let chain_base_ref = stack_parent
                 .chain_base_ref(
                     &pid,
@@ -225,29 +113,14 @@ pub async fn spawn_cursor_cli_session_inner(
                     selected_integration_base_ref,
                 )
                 .await?;
-            let worktree_base_ref =
-                tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
-            let repo_root_clone = repo_root.clone();
-            let session_dir_clone = session_dir.clone();
-            let wt = spawn_blocking_with_timeout(
-                timeout,
-                "start_cursor_cli_session: create worktree",
-                move || {
-                    tddy_core::setup_worktree_for_session_with_optional_chain_base(
-                        &repo_root_clone,
-                        &session_dir_clone,
-                        worktree_base_ref.as_deref(),
-                    )
-                    .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
-                },
-            )
-            .await?;
-            crate::connection_service::push_new_branch_to_origin_if_requested(
+            let wt = cut_cursor_cli_worktree(
+                selected_integration_base_ref,
                 create_remote_branch,
-                intent,
                 &session_dir,
-                &wt,
+                intent,
                 timeout,
+                &repo_root,
+                chain_base_ref,
             )
             .await?;
             // The child's branch now exists, so the planned node it materializes can record it —
@@ -259,18 +132,15 @@ pub async fn spawn_cursor_cli_session_inner(
             //
             // Keyed on the branch the session's changeset records rather than on the requested name
             // — it may carry a collision suffix — and a failed link is logged, not raised (D36).
-            let remote =
-                project_storage::effective_remote_name_for_project(&projects_dir, &pid, &repo_root)
-                    .map_err(|e| Status::internal(e.to_string()))?;
-            let spawned_branch = spawned_branch_of_session(
+            let spawned_branch = spawned_cursor_cli_branch(
+                branch_worktree_intent,
+                new_branch_name,
+                selected_branch_to_work_on,
                 &session_dir,
-                effective_spawn_branch(
-                    branch_worktree_intent,
-                    new_branch_name,
-                    selected_branch_to_work_on,
-                    &remote,
-                ),
-            );
+                pid,
+                projects_dir,
+                repo_root,
+            )?;
             stack_parent
                 .link_spawned_branch_without_failing_the_spawn(
                     &sessions_base,
@@ -322,110 +192,57 @@ pub async fn spawn_cursor_cli_session_inner(
         )
         .await?;
 
-    let hook_token = install_cursor_hooks_in_worktree(config, &worktree_path, session_id, os_user);
+    let hook_token =
+        chat::install_cursor_hooks_in_worktree(config, &worktree_path, session_id, os_user);
 
-    let binary_path = resolve_cursor_binary_path(config);
-    let initial_prompt_opt = {
-        let p = initial_prompt.trim();
-        if p.is_empty() {
-            None
-        } else {
-            Some(p.to_string())
-        }
-    };
-    if managed_recipe.is_some() {
-        let rules_dir = worktree_path.join(".cursor").join("rules");
-        let _ = std::fs::create_dir_all(&rules_dir);
-        if let Some(recipe) = &managed_recipe {
-            let _ = std::fs::write(
-                rules_dir.join("tddy-managed-workflow.mdc"),
-                format!("Managed workflow recipe: {}\n", recipe.name()),
-            );
-        }
-    }
-    let _ = managed_codebase;
+    let (binary_path, initial_prompt_opt) = prepare_cursor_cli_launch(
+        config,
+        initial_prompt,
+        managed_codebase,
+        &managed_recipe,
+        &worktree_path,
+    );
 
     // Semantic index: index the worktree into the session dir before launch (blocking; a missing
     // embedder or a failed index aborts the start — no unindexed fallback), and point the
     // `SemanticSearch` tool at the per-session index DB via the process env.
-    let mut session_env: Vec<(String, String)> = Vec::new();
-    if semantic_index {
-        let embedder = tddy_semantic_index::production_embedder(tddy_data_dir).map_err(|e| {
-            Status::failed_precondition(format!(
-                "semantic index requested but no embedder is available: {e}"
-            ))
-        })?;
-        tddy_semantic_index::semantic_index::run_semantic_index_blocking(
-            &worktree_path,
-            &session_dir,
-            embedder,
-            task_registry,
-            session_id,
-        )
-        .await
-        .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
-        session_env.push(tddy_semantic_index::semantic_index::semantic_index_env(
-            &session_dir,
-        ));
-    }
+    let session_env = cursor_cli_semantic_env(
+        tddy_data_dir,
+        session_id,
+        semantic_index,
+        task_registry,
+        &session_dir,
+        &worktree_path,
+    )
+    .await?;
 
     // The Cursor chat this session owns for its whole lifetime: minted here, persisted in
     // `.session.yaml` below, and passed as `--resume <id>` on every later spawn so a resume
     // continues this chat instead of opening a new one.
-    let cursor_chat_id = mint_cursor_chat_id(&binary_path, &worktree_path)
-        .await
-        .map_err(|e| {
-            Status::internal(format!(
-                "failed to create the Cursor chat for session {session_id}: {e}"
-            ))
-        })?;
-
-    let handle = cli_manager
-        .start_cursor(
-            session_id,
-            worktree_path.clone(),
-            model,
-            &binary_path,
-            Some(&cursor_chat_id),
-            initial_prompt_opt.as_deref(),
-            session_env,
-        )
-        .await
-        .map_err(|e| Status::internal(format!("failed to spawn cursor-cli: {}", e)))?;
+    let (cursor_chat_id, handle) = spawn_cursor_cli_process(
+        cli_manager,
+        session_id,
+        model,
+        &worktree_path,
+        binary_path,
+        initial_prompt_opt,
+        session_env,
+    )
+    .await?;
 
     let pid = handle.pid;
-    let now = chrono::Utc::now().to_rfc3339();
-    let meta = SessionMetadata {
-        session_id: session_id.to_string(),
-        project_id: project_id.to_string(),
-        created_at: now.clone(),
-        updated_at: now,
-        status: "active".to_string(),
-        repo_path: Some(worktree_path.to_string_lossy().to_string()),
-        pid: Some(pid),
-        tool: None,
-        livekit_room: None,
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: Some("cursor-cli".to_string()),
-        model: Some(model.to_string()),
-        cursor_chat_id: Some(cursor_chat_id),
-        activity_status: None,
-        hook_token: Some(hook_token),
-        sandbox: None,
-        agent: None,
-        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-        agents_rev: crate::connection_service::started_roster_rev(agents),
-        agents: agents.to_vec(),
-        legacy_specialized_agents: Vec::new(),
-        codebase_daemon_instance_id: None,
-        codebase_session_id: None,
-        agent_daemon_instance_id: None,
-        agent_session_id: None,
-        ssh_config_host: None,
-    };
-    write_session_metadata(&session_dir, &meta)
-        .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
+    write_cursor_cli_session_metadata(CursorCliSessionRecord {
+        session_id,
+        model,
+        agents,
+        managed_recipe,
+        project_id,
+        session_dir,
+        worktree_path: &worktree_path,
+        hook_token,
+        cursor_chat_id,
+        pid,
+    })?;
     // The roster naming them is on disk now, so the clones belong to the session rather than to the
     // start that claimed them.
     seeded_clones.keep();
@@ -448,77 +265,181 @@ pub async fn spawn_cursor_cli_session_inner(
     }))
 }
 
-pub async fn resume_cursor_cli_session(
-    cli_manager: &Arc<CliSessionManager>,
-    config: &DaemonConfig,
-    session_id: &str,
+async fn cut_cursor_cli_worktree(
+    selected_integration_base_ref: &str,
+    create_remote_branch: bool,
     session_dir: &Path,
-    meta: SessionMetadata,
-) -> Result<Response<ResumeSessionResponse>, Status> {
-    let model = meta.model.clone().unwrap_or_default();
-    let worktree_path = meta
-        .repo_path
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| session_dir.to_path_buf());
+    intent: tddy_core::BranchWorktreeIntent,
+    timeout: std::time::Duration,
+    repo_root: &Path,
+    chain_base_ref: Option<String>,
+) -> Result<PathBuf, Status> {
+    let worktree_base_ref =
+        tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
+    let wt = crate::connection_service::create_session_worktree(
+        timeout,
+        "start_cursor_cli_session: create worktree",
+        repo_root,
+        session_dir,
+        worktree_base_ref,
+    )
+    .await?;
+    crate::connection_service::push_new_branch_to_origin_if_requested(
+        create_remote_branch,
+        intent,
+        session_dir,
+        &wt,
+        timeout,
+    )
+    .await?;
+    Ok(wt)
+}
 
-    if !worktree_path.exists() {
-        return Err(Status::failed_precondition(
-            "worktree no longer exists; cannot resume cursor-cli session",
+fn spawned_cursor_cli_branch(
+    branch_worktree_intent: &str,
+    new_branch_name: &str,
+    selected_branch_to_work_on: &str,
+    session_dir: &Path,
+    pid: String,
+    projects_dir: PathBuf,
+    repo_root: PathBuf,
+) -> Result<String, Status> {
+    let remote =
+        project_storage::effective_remote_name_for_project(&projects_dir, &pid, &repo_root)
+            .map_err(|e| Status::internal(e.to_string()))?;
+    let spawned_branch = spawned_branch_of_session(
+        session_dir,
+        effective_spawn_branch(
+            branch_worktree_intent,
+            new_branch_name,
+            selected_branch_to_work_on,
+            &remote,
+        ),
+    );
+    Ok(spawned_branch)
+}
+
+fn prepare_cursor_cli_launch(
+    config: &DaemonConfig,
+    initial_prompt: &str,
+    managed_codebase: bool,
+    managed_recipe: &Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
+    worktree_path: &Path,
+) -> (String, Option<String>) {
+    let binary_path = resolve_cursor_binary_path(config);
+    let initial_prompt_opt = tddy_daemon_kernel::trim_to_option(initial_prompt);
+    if managed_recipe.is_some() {
+        let rules_dir = worktree_path.join(".cursor").join("rules");
+        let _ = std::fs::create_dir_all(&rules_dir);
+        if let Some(recipe) = managed_recipe {
+            let _ = std::fs::write(
+                rules_dir.join("tddy-managed-workflow.mdc"),
+                format!("Managed workflow recipe: {}\n", recipe.name()),
+            );
+        }
+    }
+    let _ = managed_codebase;
+    (binary_path, initial_prompt_opt)
+}
+
+async fn cursor_cli_semantic_env(
+    tddy_data_dir: &Path,
+    session_id: &str,
+    semantic_index: bool,
+    task_registry: &tddy_task::TaskRegistry,
+    session_dir: &Path,
+    worktree_path: &Path,
+) -> Result<Vec<(String, String)>, Status> {
+    let mut session_env: Vec<(String, String)> = Vec::new();
+    if semantic_index {
+        crate::connection_service::index_session_worktree(
+            tddy_data_dir,
+            task_registry,
+            session_id,
+            worktree_path,
+            session_dir,
+        )
+        .await?;
+        session_env.push(tddy_semantic_index::semantic_index::semantic_index_env(
+            session_dir,
         ));
     }
+    Ok(session_env)
+}
 
-    let binary_path = resolve_cursor_binary_path(config);
-    // The chat to reattach to. A session started before chat ids were recorded has no way back to
-    // its original chat, so its first resume adopts a fresh one and pins it below — every later
-    // resume then reattaches instead of starting over again.
-    let chat_id = match meta
-        .cursor_chat_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-    {
-        Some(id) => id.to_string(),
-        None => {
-            let adopted = mint_cursor_chat_id(&binary_path, &worktree_path)
-                .await
-                .map_err(|e| {
-                    Status::internal(format!(
-                        "failed to create the Cursor chat for session {session_id}: {e}"
-                    ))
-                })?;
-            log::info!(
-                target: "tddy_daemon::cursor_cli_spawn",
-                "resume_cursor_cli_session {session_id}: no cursor_chat_id on record; adopted chat {adopted} for this and every later resume"
-            );
-            adopted
-        }
-    };
-
+async fn spawn_cursor_cli_process(
+    cli_manager: &Arc<CliSessionManager>,
+    session_id: &str,
+    model: &str,
+    worktree_path: &Path,
+    binary_path: String,
+    initial_prompt_opt: Option<String>,
+    session_env: Vec<(String, String)>,
+) -> Result<(String, Arc<crate::claude_cli_session::PtyHandle>), Status> {
+    let cursor_chat_id = chat::mint_cursor_chat_id(&binary_path, worktree_path)
+        .await
+        .map_err(|e| {
+            Status::internal(format!(
+                "failed to create the Cursor chat for session {session_id}: {e}"
+            ))
+        })?;
     let handle = cli_manager
-        .resume_cursor(
+        .start_cursor(
             session_id,
-            worktree_path.clone(),
-            &model,
+            worktree_path.to_path_buf(),
+            model,
             &binary_path,
-            Some(&chat_id),
+            Some(&cursor_chat_id),
+            initial_prompt_opt.as_deref(),
+            session_env,
         )
         .await
-        .map_err(|e| Status::internal(format!("failed to resume cursor-cli: {}", e)))?;
-
-    let pid = handle.pid;
-    let mut updated = meta;
-    updated.cursor_chat_id = Some(chat_id);
-    updated.pid = Some(pid);
-    updated.status = "active".to_string();
-    updated.updated_at = chrono::Utc::now().to_rfc3339();
-    write_session_metadata(session_dir, &updated)
-        .map_err(|e| Status::internal(format!("failed to update session metadata: {}", e)))?;
-
-    Ok(Response::new(ResumeSessionResponse {
-        session_id: session_id.to_string(),
-        livekit_room: String::new(),
-        livekit_url: String::new(),
-        livekit_server_identity: String::new(),
-    }))
+        .map_err(|e| Status::internal(format!("failed to spawn cursor-cli: {}", e)))?;
+    Ok((cursor_chat_id, handle))
 }
+
+/// What a started cursor-cli session's `.session.yaml` records.
+struct CursorCliSessionRecord<'a> {
+    session_id: &'a str,
+    model: &'a str,
+    agents: &'a mut [tddy_core::SessionAgentRecord],
+    managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
+    project_id: &'a str,
+    session_dir: PathBuf,
+    worktree_path: &'a Path,
+    hook_token: String,
+    cursor_chat_id: String,
+    pid: u32,
+}
+
+fn write_cursor_cli_session_metadata(launch: CursorCliSessionRecord<'_>) -> Result<(), Status> {
+    let CursorCliSessionRecord {
+        session_id,
+        model,
+        agents,
+        managed_recipe,
+        project_id,
+        session_dir,
+        worktree_path,
+        hook_token,
+        cursor_chat_id,
+        pid,
+    } = launch;
+    let meta = SessionMetadata {
+        repo_path: Some(worktree_path.to_string_lossy().to_string()),
+        pid: Some(pid),
+        model: Some(model.to_string()),
+        cursor_chat_id: Some(cursor_chat_id),
+        hook_token: Some(hook_token),
+        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
+        agents_rev: crate::connection_service::started_roster_rev(agents),
+        agents: agents.to_vec(),
+        ..crate::connection_service::starting_session_metadata(session_id, project_id, "cursor-cli")
+    };
+    write_session_metadata(&session_dir, &meta)
+        .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
+    Ok(())
+}
+
+mod resume;
+pub use resume::*;

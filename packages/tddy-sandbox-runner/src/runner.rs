@@ -30,6 +30,8 @@ use tddy_sandbox::{
     append_line, egress_log_path, session_id_from_env, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
 };
 use tddy_sandbox_recipes::{append_claude_mcp_args, claude_scratch_mcp_dir};
+// The in-jail PTY decodes the resize escape the same way every other PTY host does.
+use tddy_pty::strip_resize as strip_resize_escape;
 
 /// The terminal id a sandbox session's single PTY is exposed under: the reserved main terminal (the
 /// daemon serves no other `terminal_id` for a sandbox session). Duplicated from
@@ -995,52 +997,6 @@ pub fn resolve_secret_envs(
         }
     }
     resolved
-}
-
-// ---------------------------------------------------------------------------
-// Resize escape parsing
-// ---------------------------------------------------------------------------
-
-/// In-jail counterpart of `tddy_daemon::claude_cli_session::strip_resize`: strips an OSC resize
-/// sequence (`\x1b]resize;{cols};{rows}\x07`) from `data`.
-///
-/// Returns `(Some((cols, rows)), remaining)` when found, or `(None, original)` otherwise. The
-/// escape sequence is removed from the returned bytes so it is not forwarded to the PTY stdin.
-fn strip_resize_escape(data: &[u8]) -> (Option<(u16, u16)>, Bytes) {
-    let prefix = b"\x1b]resize;";
-    let start = match (0..data.len().saturating_sub(prefix.len()))
-        .find(|&i| data[i..].starts_with(prefix))
-    {
-        Some(i) => i,
-        None => return (None, Bytes::copy_from_slice(data)),
-    };
-    let after = &data[start + prefix.len()..];
-    let bel = match after.iter().position(|&b| b == 0x07) {
-        Some(i) => i,
-        None => return (None, Bytes::copy_from_slice(data)),
-    };
-    let inner = &after[..bel];
-    let semi = match inner.iter().position(|&b| b == b';') {
-        Some(i) => i,
-        None => return (None, Bytes::copy_from_slice(data)),
-    };
-    let parsed = std::str::from_utf8(&inner[..semi])
-        .ok()
-        .and_then(|s| s.parse::<u16>().ok())
-        .zip(
-            std::str::from_utf8(&inner[semi + 1..])
-                .ok()
-                .and_then(|s| s.parse::<u16>().ok()),
-        );
-    match parsed {
-        Some((cols, rows)) => {
-            let end = start + prefix.len() + bel + 1;
-            let mut remaining = data[..start].to_vec();
-            remaining.extend_from_slice(&data[end..]);
-            (Some((cols, rows)), Bytes::from(remaining))
-        }
-        None => (None, Bytes::copy_from_slice(data)),
-    }
 }
 
 struct PtyState {

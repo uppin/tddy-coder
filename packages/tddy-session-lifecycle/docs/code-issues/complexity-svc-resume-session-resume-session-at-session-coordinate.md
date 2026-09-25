@@ -1,13 +1,14 @@
 # complexity: resume_session_at_session_coordinate
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/session_coordinate_handlers.rs:271` — `resume_session_at_session_coordinate`
+**Location:** `packages/tddy-session-lifecycle/src/connection_service/session_coordinate_handlers/svc_resume_session.rs:29` — `resume_session_at_session_coordinate`
+**Moved:** 2026-09-24 by #524 plan `08`, from `connection_service/session_coordinate_handlers.rs:271`; this record was `complexity-session-coordinate-handlers-resume-session-at-session-coordinate.md`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **241 lines** · **nesting depth 6** · 1 parameters · 9 branch/match lines · 12 early exits
 **CRAP:** **CRAP 462** · complexity 21 · rank 9/50 in this crate · **never executed by any test**
 **Thresholds breached:** length 241 > 60; nesting 6 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — narrowed 2026-09-24 by #524 (242 → 137); still over the 60-line budget — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -16,6 +17,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 241 | 6 | 9 | 12 | first detection |
 | 2026-09-24 | 241 | 6 | 9 | 12 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: `let os_user = self` → `&self` (the live `users:` holder), same line count, nesting, branches and exits; still at `session_coordinate_handlers.rs:271`. Hand structural scan (fn line to closing brace; nesting by indentation; `return`/`?` count), identical method on the merge-base with `origin/master` (`4e7157d2`) and HEAD. CRAP not re-run |
+| 2026-09-24 | 137 | — | — | — | #524: moved by plan `08`; DRY #2 folded its inline `tddy-coder` spawn into `spawn_tddy_coder(ToolSpawnPlan)` (242 → 137 by the plan's count). Nesting, branches and exits not re-derived |
 
 ## What the tool found
 

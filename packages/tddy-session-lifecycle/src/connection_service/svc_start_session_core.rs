@@ -1,13 +1,5 @@
-use crate::{
-    connection_service::{seed_codebase, service_util, stack_parent},
-    project_storage, session_deletion, workspace_session,
-};
-use tddy_spawn::{
-    spawn_worker,
-    spawner::{self, SpawnOptions},
-};
-
-use super::recipe_enables_conversation_spawn;
+use crate::connection_service::service_util;
+use tddy_spawn::spawner;
 
 use std::sync::Arc;
 
@@ -17,12 +9,6 @@ use uuid::Uuid;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
-use std::path::Path;
-
-use super::validate_stack_seed_base_session;
-
-use crate::user_sessions_path::projects_path_for_user;
-
 use super::CodebasePlacement;
 
 use super::resolve_split_agent_placement;
@@ -30,8 +16,6 @@ use super::resolve_split_agent_placement;
 use super::resolve_caller_chosen_session_id;
 
 use super::{classify_placement, PlacementRequest};
-
-use crate::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_rpc::Status;
 
@@ -44,6 +28,19 @@ use super::AttachmentProgressSink;
 use tddy_service::proto::session::StartSessionRequest;
 
 use super::DaemonSessionHost;
+
+use tddy_daemon_kernel::trim_to_option;
+
+mod tool_spawn_plan;
+pub(in crate::connection_service) use tool_spawn_plan::*;
+
+/// What a CLI-agent start holds once its prelude has run: where the session lives, the id it was
+/// given, and the first prompt, with any attached changeset named in it.
+struct CliStart {
+    sessions_base: std::path::PathBuf,
+    session_id: String,
+    initial_prompt: String,
+}
 
 impl DaemonSessionHost {
     /// The one implementation behind both `StartSession` and `StreamStartSession`.
@@ -83,15 +80,7 @@ impl DaemonSessionHost {
         }
 
         let requested_daemon = req.daemon_instance_id.trim();
-        let local_id = local_instance_id_for_config(&self.config);
-        let eligible_rows = self
-            .peer_routing
-            .eligible_daemon_source()
-            .list_eligible_daemons();
-        let eligible_ids: Vec<String> = eligible_rows
-            .iter()
-            .map(|e| e.instance_id.0.clone())
-            .collect();
+        let (local_id, eligible_ids) = self.eligible_daemon_ids();
         let route =
             match tddy_daemon_livekit::livekit_peer_discovery::classify_start_session_peer_route(
                 &local_id,
@@ -109,27 +98,7 @@ impl DaemonSessionHost {
             tddy_daemon_livekit::livekit_peer_discovery::StartSessionPeerRoute::Forward {
                 peer_instance_id,
             } => {
-                log::info!(
-                    "StartSession: forwarding RPC to remote daemon_instance_id={}",
-                    peer_instance_id
-                );
-                let slot = self.peer_routing.common_room_livekit_room().ok_or_else(|| {
-                    Status::failed_precondition(
-                        "cannot forward StartSession: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
-                    )
-                })?;
-                let inner =
-                    tddy_daemon_livekit::livekit_peer_discovery::forward_start_session_via_livekit(
-                        slot,
-                        &peer_instance_id,
-                        &req,
-                    )
-                    .await?;
-                log::info!(
-                    "StartSession: forward succeeded session_id={} livekit_server_identity={}",
-                    inner.session_id,
-                    inner.livekit_server_identity
-                );
+                let inner = self.forward_start_session(&req, peer_instance_id).await?;
                 return Ok(Response::new(inner));
             }
             tddy_daemon_livekit::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
@@ -139,21 +108,7 @@ impl DaemonSessionHost {
         // refused split is a malformed request, so it is classified before anything is created and
         // before the project is provisioned — a session whose codebase host is wrong should not
         // leave a clone behind on the way to being rejected.
-        let placement = classify_placement(&PlacementRequest {
-            local_instance_id: local_id.clone(),
-            requested_codebase_id: req.codebase_daemon_instance_id.clone(),
-            eligible_ids: eligible_ids.clone(),
-            managed_codebase: req.managed_codebase,
-            sandbox: req.sandbox,
-            sandboxed_codebase: req.sandboxed_codebase,
-            session_type: req.session_type.trim().to_string(),
-            recipe: req.recipe.clone(),
-            dangerously_skip_permissions: req.dangerously_skip_permissions,
-        })
-        .map_err(|msg| {
-            log::info!("StartSession: rejected codebase placement: {msg}");
-            Status::invalid_argument(msg)
-        })?;
+        let placement = classify_start_placement(&req, local_id, eligible_ids)?;
 
         // Checked here, alongside the other request-shape decisions, so a session type that does not
         // honour a caller-chosen id refuses it before anything is created rather than generating one
@@ -206,19 +161,7 @@ impl DaemonSessionHost {
         // peer), clone it into the host's base location so the session can start on a host that
         // doesn't have the project yet. A truly unknown project surfaces as NotFound.
         {
-            let project_id = req.project_id.trim();
-            if !project_id.is_empty() {
-                let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-                    .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-                self.ensure_project_available_for_start(
-                    os_user,
-                    &projects_dir,
-                    project_id,
-                    &req.session_token,
-                    req.agent_clone.as_ref(),
-                )
-                .await?;
-            }
+            self.provision_project_for_start(&req, os_user).await?;
         }
 
         // A base session that cannot seed a stack is refused here, before the session-type dispatch
@@ -240,18 +183,7 @@ impl DaemonSessionHost {
                     "project_id is required to seed a PR stack from a base session",
                 ));
             }
-            let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-            let project = project_storage::find_project(&projects_dir, project_id)
-                .map_err(|e| Status::internal(e.to_string()))?
-                .ok_or_else(|| Status::not_found("project not found"))?;
-            validate_stack_seed_base_session(
-                &sessions_base,
-                &req.recipe,
-                &req.pr_stack_base_session_id,
-                Path::new(&project.main_repo_path),
-            )
-            .map_err(tddy_service::to_rpc_status)?;
+            self.validate_stack_seed_against_project(&req, os_user, sessions_base, project_id)?;
         }
 
         // A requested new branch another session already owns is refused here, before the
@@ -321,34 +253,15 @@ impl DaemonSessionHost {
                 // for the codebase half of a split session the roster lives here, so "co-located"
                 // means "owned by this daemon" and an agent of any other host is the one that needs
                 // a clone (docs/ft/daemon/session-agent-roster.md § Remote agents).
-                let seed = self.seeded_roster_records(&req.specialized_agents).await?;
-                let started = workspace_session::start_workspace_session(
-                    os_user,
-                    &session_id,
-                    sessions_base.clone(),
-                    req.project_id.trim(),
-                    &workspace_session::WorkspaceBranchIntent {
-                        branch_worktree_intent: req.branch_worktree_intent.trim(),
-                        new_branch_name: req.new_branch_name.trim(),
-                        selected_integration_base_ref: req.selected_integration_base_ref.trim(),
-                        selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
-                    },
-                    paired_agent.as_ref(),
-                    req.sandbox,
-                    &self.tddy_data_dir,
-                    timeout,
-                )
-                .await?;
-                // Written before this call answers, because the answer is what releases the agent
-                // host to spawn its agent — and that spawn fixes the tool allowlist at launch. A
-                // roster written afterwards would leave a seeded agent's `replaces` unenforced until
-                // the first resume. The seed takes its own artifacts back out on failure; the
-                // session it was recorded on is the caller's to reclaim, which is what the split
-                // start's teardown does with the id it minted.
-                let session_dir = unified_session_dir_path(&sessions_base, &session_id);
-                let codebase = seed_codebase::SeedCodebase::read(&session_id, &session_dir)?;
-                let seeded = self
-                    .seed_session_agent_roster(&session_id, &codebase, &req.session_token, seed)
+                let (started, codebase, seeded) = self
+                    .seed_and_start_workspace_session(
+                        &req,
+                        os_user,
+                        paired_agent,
+                        &sessions_base,
+                        &session_id,
+                        timeout,
+                    )
                     .await?;
                 if req.semantic_index {
                     // Unwound here rather than inside the seed, because the seed cannot see this
@@ -381,255 +294,93 @@ impl DaemonSessionHost {
                         // The failed index's unwind, plus the session directory itself: a session
                         // surviving a start that answered with an error is one the operator can
                         // see, list and resume, whose tools were never confined.
-                        self.unwind_seeded_roster(
+                        self.remove_unconfined_workspace_session(
+                            &req,
+                            os_user,
+                            &sessions_base,
                             &session_id,
-                            &codebase,
-                            &req.session_token,
+                            codebase,
                             seeded,
                         )
                         .await;
-                        let projects_dir =
-                            projects_path_for_user(os_user, Some(&self.tddy_data_dir));
-                        if let Err(e) = session_deletion::delete_session_directory(
-                            &sessions_base,
-                            &session_id,
-                            projects_dir.as_deref(),
-                        ) {
-                            log::warn!(
-                                "StartSession: could not remove session {session_id} after its \
-                                 jail could not be provisioned: {}",
-                                e.message()
-                            );
-                        }
                         return Err(status);
                     }
                 }
                 return Ok(started);
             };
-            let started = workspace_session::start_agent_clone_session(
-                os_user,
-                &session_id,
-                sessions_base.clone(),
-                req.project_id.trim(),
-                &self.tddy_data_dir,
-                timeout,
-            )
-            .await?;
-            self.start_hosted_agent_clone(
-                &placement,
-                &sessions_base,
-                &session_id,
-                req.project_id.trim(),
-                &req.session_token,
-            )
-            .await?;
+            let started = self
+                .start_agent_clone_workspace_session(
+                    &req,
+                    os_user,
+                    sessions_base,
+                    session_id,
+                    timeout,
+                    placement,
+                )
+                .await?;
             return Ok(started);
         }
 
         // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
         if req.session_type.trim() == "claude-cli" {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
-                os_user,
-                Some(&self.tddy_data_dir),
-            )
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-            let session_id = Uuid::now_v7().to_string();
-            let materialized = self
-                .prepare_session_attachments(&AttachmentMaterialization {
-                    session_token: &req.session_token,
-                    os_user,
-                    sessions_base: &sessions_base,
-                    session_id: &session_id,
-                    attachments: &req.attachments,
-                    progress,
-                })
-                .await?;
             // A child of a planned PR is told where its boundaries are, however it was started: the
             // dialog opens with the node's documents pre-attached but carries only the node's title
             // and description as the prompt, so the line is added here rather than in the browser.
             // Derived from what materialized, so it can only name a document the child holds.
-            let initial_prompt = crate::stack_doc_attachments::prompt_with_attached_changeset(
-                req.initial_prompt.trim(),
-                &materialized,
-            );
-            let stack_parent_for_claude_cli: Option<String> = {
-                let t = req.stack_parent.trim();
-                if t.is_empty() {
-                    None
-                } else {
-                    Some(t.to_string())
-                }
-            };
+            let start = self.cli_start_prelude(&req, progress, os_user).await?;
+            let stack_parent_for_claude_cli = trim_to_option(&req.stack_parent);
             // A managed-codebase claude-cli session with a recipe is launched workflow-aware. An
             // unknown recipe is a request error (never silently ignored). Non-managed sessions and
             // managed sessions without a recipe keep the plain launch (managed_recipe = None).
-            let managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>> =
-                if req.managed_codebase && !req.recipe.trim().is_empty() {
-                    Some(
-                        tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(
-                            req.recipe.trim(),
-                        )
-                        .map_err(Status::invalid_argument)?,
-                    )
-                } else {
-                    None
-                };
-
+            let managed_recipe = managed_recipe_for(&req)?;
             if req.sandbox {
                 return self
-                    .start_sandboxed_claude_cli_session(
+                    .start_sandboxed_claude_cli_from_request(
+                        &req,
                         os_user,
-                        &session_id,
-                        &req.session_token,
-                        sessions_base,
-                        req.model.trim(),
-                        req.project_id.trim(),
-                        req.repo_path.trim(),
-                        req.branch_worktree_intent.trim(),
-                        req.new_branch_name.trim(),
-                        req.selected_integration_base_ref.trim(),
-                        req.selected_branch_to_work_on.trim(),
-                        &initial_prompt,
-                        &req.claude_args,
-                        req.permission_mode.trim(),
-                        req.dangerously_skip_permissions,
+                        start,
                         stack_parent_for_claude_cli.as_deref(),
-                        req.stack_parent_daemon_instance_id.trim(),
-                        req.stack_node_id.trim(),
-                        req.managed_codebase,
-                        &req.specialized_agents,
                         managed_recipe,
-                        req.semantic_index,
-                        req.create_remote_branch,
                     )
                     .await;
             }
             return self
-                .start_claude_cli_session(
+                .start_claude_cli_from_request(
+                    &req,
                     os_user,
-                    &session_id,
-                    sessions_base,
-                    req.model.trim(),
-                    req.project_id.trim(),
-                    req.branch_worktree_intent.trim(),
-                    req.new_branch_name.trim(),
-                    req.selected_integration_base_ref.trim(),
-                    req.selected_branch_to_work_on.trim(),
-                    &initial_prompt,
-                    req.permission_mode.trim(),
-                    req.dangerously_skip_permissions,
-                    stack_parent_for_claude_cli.as_deref(),
-                    req.stack_parent_daemon_instance_id.trim(),
-                    req.stack_node_id.trim(),
-                    &req.session_token,
+                    start,
+                    stack_parent_for_claude_cli,
                     managed_recipe,
-                    req.semantic_index,
-                    req.create_remote_branch,
-                    req.ssh_config_host.trim(),
                 )
                 .await;
         }
 
         // --- cursor-cli branch: no LiveKit; spawns Cursor Agent CLI in a PTY worktree ---
         if req.session_type.trim() == "cursor-cli" {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
-                os_user,
-                Some(&self.tddy_data_dir),
-            )
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-            let session_id = Uuid::now_v7().to_string();
-            let materialized = self
-                .prepare_session_attachments(&AttachmentMaterialization {
-                    session_token: &req.session_token,
-                    os_user,
-                    sessions_base: &sessions_base,
-                    session_id: &session_id,
-                    attachments: &req.attachments,
-                    progress,
-                })
-                .await?;
             // Same rule as the claude-cli branch above: which agent runs a planned PR's child is
             // not a reason for it to come up without its boundaries.
-            let initial_prompt = crate::stack_doc_attachments::prompt_with_attached_changeset(
-                req.initial_prompt.trim(),
-                &materialized,
-            );
-            let managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>> =
-                if req.managed_codebase && !req.recipe.trim().is_empty() {
-                    Some(
-                        tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(
-                            req.recipe.trim(),
-                        )
-                        .map_err(Status::invalid_argument)?,
-                    )
-                } else {
-                    None
-                };
+            let start = self.cli_start_prelude(&req, progress, os_user).await?;
+            let managed_recipe = managed_recipe_for(&req)?;
             if req.sandbox {
                 return self
-                    .start_sandboxed_cursor_cli_session(
-                        os_user,
-                        &session_id,
-                        &req.session_token,
-                        sessions_base,
-                        req.model.trim(),
-                        req.project_id.trim(),
-                        req.branch_worktree_intent.trim(),
-                        req.new_branch_name.trim(),
-                        req.selected_integration_base_ref.trim(),
-                        req.selected_branch_to_work_on.trim(),
-                        Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
-                        req.stack_parent_daemon_instance_id.trim(),
-                        req.stack_node_id.trim(),
-                        &initial_prompt,
-                        req.managed_codebase,
-                        &req.specialized_agents,
-                        managed_recipe,
-                        req.semantic_index,
-                        req.create_remote_branch,
-                    )
+                    .start_sandboxed_cursor_cli_from_request(&req, os_user, start, managed_recipe)
                     .await;
             }
             // Resolved before the spawn, not after: an agent the request names and this daemon
             // cannot resolve fails the start, exactly as it does on the sandboxed paths, rather
             // than persisting a roster entry that resolves to nothing on the next resume.
-            let mut started_agents = self.seeded_roster_records(&req.specialized_agents).await?;
+            let started_agents = self.seeded_roster_records(&req.specialized_agents).await?;
             let clones = self.seed_clone_claimant();
-            return crate::cursor_cli_spawn::spawn_cursor_cli_session_inner(
-                &self.config,
-                &self.tddy_data_dir,
-                &self.claude_cli_manager,
-                os_user,
-                &session_id,
-                &req.session_token,
-                sessions_base,
-                req.model.trim(),
-                req.project_id.trim(),
-                req.branch_worktree_intent.trim(),
-                req.new_branch_name.trim(),
-                req.selected_integration_base_ref.trim(),
-                req.selected_branch_to_work_on.trim(),
-                req.repo_path.trim(),
-                match Some(req.stack_parent.trim()).filter(|s| !s.is_empty()) {
-                    Some(session_id) => stack_parent::SpawnStackParent::OwnedBy {
-                        session_id,
-                        daemon_instance_id: req.stack_parent_daemon_instance_id.trim(),
-                        stack_node_id: req.stack_node_id.trim(),
-                        session_token: &req.session_token,
-                        host: self,
-                    },
-                    None => stack_parent::SpawnStackParent::NoParent,
-                },
-                &initial_prompt,
-                req.managed_codebase,
-                &mut started_agents,
-                managed_recipe,
-                req.semantic_index,
-                req.create_remote_branch,
-                &self.task_registry,
-                &clones,
-            )
-            .await;
+            return self
+                .spawn_cursor_cli_from_request(
+                    &req,
+                    os_user,
+                    start,
+                    managed_recipe,
+                    started_agents,
+                    clones,
+                )
+                .await;
         }
 
         let livekit = spawner::livekit_creds_from_config(&self.config)
@@ -640,266 +391,13 @@ impl DaemonSessionHost {
             return Err(Status::invalid_argument("project_id is required"));
         }
 
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        let project = project_storage::find_project(&projects_dir, project_id_req)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
+        let (_, project) =
+            service_util::find_registered_project(&self.tddy_data_dir, os_user, project_id_req)?;
+        service_util::project_repo_root(&project)?;
 
-        let repo_path = Path::new(&project.main_repo_path);
-        if !repo_path.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
-
-        log::debug!("StartSession: entering spawn_blocking session_id=new");
-        let spawn_client = self.spawn_client.clone();
-        let spawn_mouse = self.config.spawn_mouse;
-        let os_user = os_user.to_string();
-        // The spawn closure below takes ownership; the presenter observer started afterwards needs
-        // the same user to resolve the session's label from its sessions directory.
-        let observer_os_user = os_user.clone();
-        let tool_path = req.tool_path.clone();
-        let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
-        let repo_path = repo_path.to_path_buf();
-        let livekit = livekit.clone();
-        let pid_for_spawn = project.project_id.clone();
-        let agent_for_spawn: Option<String> = {
-            let t = req.agent.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
-        // A spawned `tddy-coder` resolves `--agent` against the builtins and `<tddyhome>/agents`
-        // only; this daemon's registry is a source it cannot read. So the def this daemon already
-        // resolved travels with the spawn as `--agent-def`, and the child creates its backend from
-        // that rather than falling through to a different agent entirely.
-        let agent_def_for_spawn: Option<String> = agent_def
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|e| Status::internal(format!("failed to serialize agent def: {e}")))?;
-        let recipe_for_spawn: Option<String> = {
-            let t = req.recipe.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
-        let stack_parent_for_spawn: Option<String> = {
-            let t = req.stack_parent.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
-        // The planned node the surface that rendered Start-session named. Carried to the child as
-        // `--stack-node-id`, which is what puts the association in its participant metadata (D37).
-        let stack_node_id_for_spawn: Option<String> = {
-            let t = req.stack_node_id.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
-        // Already validated above; the orchestrator's own process is what seeds the stack, because
-        // the session that owns a `changeset.yaml` is the process that writes it.
-        let stack_seed_base_session_for_spawn: Option<String> = {
-            let t = req.pr_stack_base_session_id.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
-        let model_for_spawn: Option<String> = {
-            let t = req.model.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
-        let timeout = self.config.spawn_worker_request_timeout();
-        let daemon_log = self.config.log.clone();
-        let startup_watch = spawner::StartupWatch::from_config(&self.config);
-        let coder_config_path = self.config.coder_config_path.clone();
-        // Grill-me tool sessions relay `spawn_conversation` back over a per-session unix socket.
-        // Because the coder needs the socket path (and orchestrator id) at spawn time — and the
-        // socket path is what crosses the forked `spawn_worker` boundary — bind it and pre-generate
-        // the session id BEFORE the spawn, so both the worker and direct paths carry it identically.
-        let enable_conversation_spawn = recipe_for_spawn
-            .as_deref()
-            .map(recipe_enables_conversation_spawn)
-            .unwrap_or(false);
-        let (mut pre_session_id, host_session_socket): (Option<String>, Option<String>) =
-            if enable_conversation_spawn {
-                let sid = Uuid::now_v7().to_string();
-                let sock = self
-                    .spawn_host_session_socket(
-                        &sid,
-                        &os_user,
-                        &pid_for_spawn,
-                        model_for_spawn.clone(),
-                    )
-                    .await;
-                (Some(sid), sock)
-            } else {
-                (None, None)
-            };
-        let tool_session_id = pre_session_id
-            .clone()
-            .unwrap_or_else(|| Uuid::now_v7().to_string());
-        if enable_conversation_spawn || !req.attachments.is_empty() {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
-                &os_user,
-                Some(&self.tddy_data_dir),
-            )
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-            self.prepare_session_attachments(&AttachmentMaterialization {
-                session_token: &req.session_token,
-                os_user: &os_user,
-                sessions_base: &sessions_base,
-                session_id: &tool_session_id,
-                attachments: &req.attachments,
-                progress,
-            })
+        let result = self
+            .spawn_tool_session(req, progress, os_user, agent_def, livekit, &project)
             .await?;
-            pre_session_id = Some(tool_session_id);
-        }
-        let result = match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
-            tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
-                let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
-                let spawn_req = spawn_worker::build_spawn_request(
-                    &os_user,
-                    &tool_path,
-                    &tddy_data_dir_for_spawn,
-                    &repo_path,
-                    &livekit,
-                    SpawnOptions {
-                        resume_session_id: None,
-                        new_session_id: pre_session_id.as_deref(),
-                        project_id: Some(pid_for_spawn.as_str()),
-                        agent: agent_for_spawn.as_deref(),
-                        agent_def_json: agent_def_for_spawn.as_deref(),
-                        mouse: spawn_mouse,
-                        recipe: recipe_for_spawn.as_deref(),
-                        stack_parent: stack_parent_for_spawn.as_deref(),
-                        stack_node_id: stack_node_id_for_spawn.as_deref(),
-                        stack_seed_base_session: stack_seed_base_session_for_spawn.as_deref(),
-                        model: model_for_spawn.as_deref(),
-                        host_session_socket: host_session_socket.as_deref(),
-                    },
-                    daemon_log.as_ref(),
-                    coder_log_yaml,
-                    startup_watch,
-                );
-                service_util::await_supervised_with_timeout(
-                    timeout,
-                    "StartSession: spawn via tddy-supervisor",
-                    tddy_spawn::supervisor_spawn::spawn_session_via_supervisor(
-                        &socket_path,
-                        &spawn_req,
-                    ),
-                )
-                .await?
-            }
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                service_util::spawn_blocking_with_timeout(
-                    timeout,
-                    "StartSession: spawn",
-                    move || {
-                        log::debug!(
-                            "StartSession: spawn_blocking running, using_spawn_worker={}",
-                            spawn_client.is_some()
-                        );
-                        let pid = Some(pid_for_spawn.as_str());
-                        let agent = agent_for_spawn.as_deref();
-                        let agent_def = agent_def_for_spawn.as_deref();
-                        let recipe = recipe_for_spawn.as_deref();
-                        let stack_parent = stack_parent_for_spawn.as_deref();
-                        let stack_node_id = stack_node_id_for_spawn.as_deref();
-                        let stack_seed_base_session = stack_seed_base_session_for_spawn.as_deref();
-                        let model = model_for_spawn.as_deref();
-                        let new_session_id = pre_session_id.as_deref();
-                        let host_socket = host_session_socket.as_deref();
-                        let coder_log_yaml =
-                            spawner::coder_log_config_yaml(coder_config_path.as_deref());
-                        if let Some(ref client) = spawn_client {
-                            let spawn_req = spawn_worker::build_spawn_request(
-                                &os_user,
-                                &tool_path,
-                                &tddy_data_dir_for_spawn,
-                                &repo_path,
-                                &livekit,
-                                SpawnOptions {
-                                    resume_session_id: None,
-                                    new_session_id,
-                                    project_id: pid,
-                                    agent,
-                                    agent_def_json: agent_def,
-                                    mouse: spawn_mouse,
-                                    recipe,
-                                    stack_parent,
-                                    stack_node_id,
-                                    stack_seed_base_session,
-                                    model,
-                                    host_session_socket: host_socket,
-                                },
-                                daemon_log.as_ref(),
-                                coder_log_yaml,
-                                startup_watch,
-                            );
-                            client.spawn(spawn_req)
-                        } else {
-                            let (child_log_level, child_log_format) =
-                                spawner::child_log_yaml_tuning(daemon_log.as_ref());
-                            spawner::spawn_as_user(
-                                &os_user,
-                                &tool_path,
-                                &tddy_data_dir_for_spawn,
-                                &repo_path,
-                                &livekit,
-                                SpawnOptions {
-                                    resume_session_id: None,
-                                    new_session_id,
-                                    project_id: pid,
-                                    agent,
-                                    agent_def_json: agent_def,
-                                    mouse: spawn_mouse,
-                                    recipe,
-                                    stack_parent,
-                                    stack_node_id,
-                                    stack_seed_base_session,
-                                    model,
-                                    host_session_socket: host_socket,
-                                },
-                                child_log_level.as_str(),
-                                child_log_format.as_str(),
-                                coder_log_yaml.as_deref(),
-                                startup_watch,
-                            )
-                        }
-                    },
-                )
-                .await?
-            }
-        };
-        log::debug!(
-            "StartSession: spawn returned, session_id={}",
-            result.session_id
-        );
-        self.maybe_spawn_presenter_observer(
-            &observer_os_user,
-            &result.session_id,
-            result.grpc_port,
-        );
         Ok(Response::new(StartSessionResponse {
             session_id: result.session_id,
             livekit_room: result.livekit_room,
@@ -908,4 +406,50 @@ impl DaemonSessionHost {
             branch_conflict: None,
         }))
     }
+}
+
+mod start_request_checks;
+
+mod workspace_branch_start;
+
+mod cli_branch_starts;
+
+mod tool_session_spawn;
+
+fn classify_start_placement(
+    req: &StartSessionRequest,
+    local_id: String,
+    eligible_ids: Vec<String>,
+) -> Result<CodebasePlacement, Status> {
+    let placement = classify_placement(&PlacementRequest {
+        local_instance_id: local_id.clone(),
+        requested_codebase_id: req.codebase_daemon_instance_id.clone(),
+        eligible_ids: eligible_ids.clone(),
+        managed_codebase: req.managed_codebase,
+        sandbox: req.sandbox,
+        sandboxed_codebase: req.sandboxed_codebase,
+        session_type: req.session_type.trim().to_string(),
+        recipe: req.recipe.clone(),
+        dangerously_skip_permissions: req.dangerously_skip_permissions,
+    })
+    .map_err(|msg| {
+        log::info!("StartSession: rejected codebase placement: {msg}");
+        Status::invalid_argument(msg)
+    })?;
+    Ok(placement)
+}
+
+fn managed_recipe_for(
+    req: &StartSessionRequest,
+) -> Result<Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>, Status> {
+    let managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>> =
+        if req.managed_codebase && !req.recipe.trim().is_empty() {
+            Some(
+                tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
+                    .map_err(Status::invalid_argument)?,
+            )
+        } else {
+            None
+        };
+    Ok(managed_recipe)
 }
