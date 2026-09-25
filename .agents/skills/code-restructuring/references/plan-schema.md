@@ -76,6 +76,15 @@ not define is refused rather than ignored.
   not an edge. A module **staying behind** that names the moved one is **not** a finding. A facade
   keeps its `crate::…` path resolving, and without a facade `apply` re-points it, so it compiles
   either way.
+
+  **Staying behind is read at each operation's point in the plan**, because `apply` runs one
+  operation at a time. A module moved by the same operation, or by an **earlier** one, has already
+  left the origin, so naming it is fine. A module moved by a **later** operation is still there when
+  this one runs. So a whole mutually-referencing set written as one `move_module_to_crate` per
+  member is reported at its first operation, naming the later operation that moves the sibling and
+  `move_cluster_to_crate` as the remedy. The same set as one `move_cluster_to_crate` reports
+  nothing. Order still matters for a one-way reference: moving a module after what it names is
+  clean, and moving it before is the finding.
 - **A test binary moves with `move_test_binary_to_crate`, never with `move_module_to_crate`.** The
   anchor is `<crate>/tests/<name>.rs` and `to` is the destination crate's directory. `reexport` is
   refused — nothing can reference a test binary, so a facade would keep nothing resolving — and

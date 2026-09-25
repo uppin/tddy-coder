@@ -257,7 +257,14 @@ impl MergedChanges {
 /// its `crate::…` path resolving, and without one `apply` re-points it at the destination; either
 /// way it compiles, and reporting it made every move of a module anything still calls look broken.
 ///
-/// Empty when no moved module names a sibling staying behind, or nothing left behind names it back.
+/// **Staying behind is read at each operation's point in the plan**, because `apply` runs one
+/// operation at a time. A sibling moved by the same operation, or by an earlier one, is already gone
+/// from the origin. A sibling moved by a *later* operation is still there when this one runs, so a
+/// mutually-referencing set spread over several `move_module_to_crate` operations is refused at its
+/// first. That is what `move_cluster_to_crate` exists for, and the finding names it.
+///
+/// Empty when no moved module names a sibling still in the origin at that point, or nothing there
+/// names it back.
 ///
 /// # Errors
 ///
@@ -308,18 +315,35 @@ pub(crate) fn stranded_siblings(
             "the facade it leaves there names the destination".to_string()
         };
 
+        let whereabouts = match moved_later(&names_the_origin, module, &moving).as_slice() {
+            [] => format!("stays behind in `{}`", module.crate_dir()),
+            [later] => format!(
+                "is still in `{}` at that point (operation {later} moves it only afterwards)",
+                module.crate_dir()
+            ),
+            later => format!(
+                "is still in `{}` at that point (operations {} move it only afterwards)",
+                module.crate_dir(),
+                later
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        };
+
         findings.push((
             module.op,
             format!(
                 "`{source}`, which operation {op} moves to `{destination}`, names `{paths}`, which \
-                 stays behind in `{origin}` — so the destination would depend on the crate it \
-                 left, while {origin_names_it_back}: a cycle `apply` refuses. Move what those \
-                 paths reach with the set, or leave `{named}` where it is",
+                 {whereabouts}. So the destination would depend on the crate it left, while \
+                 {origin_names_it_back}: a cycle `apply` refuses. Move them in one \
+                 `move_cluster_to_crate`, with this module as its anchor and what those paths \
+                 reach in `also`, or leave `{named}` where it is",
                 source = module.source,
                 op = module.op,
                 destination = module.moving.destination.dir,
                 paths = names_the_origin.join("`, `"),
-                origin = module.crate_dir(),
                 named = module.path().join("::"),
             ),
         ));
@@ -332,16 +356,15 @@ pub(crate) fn stranded_siblings(
 /// `destination → origin` edges.
 ///
 /// Read by the header pass and the re-export resolution `apply` itself uses, so the check and the
-/// refusal agree about which paths count: one reaching a module the plan also moves out of this
-/// crate is not an edge, nor is one the origin only re-exports from a third crate.
+/// refusal agree about which paths count: one reaching a module that has left this crate by the
+/// time `module`'s operation runs is not an edge, nor is one the origin only re-exports from a
+/// third crate.
 fn paths_naming_the_origin(
     workspace: &Workspace<'_>,
     module: &MovingModule,
     moving: &[MovingModule],
 ) -> Result<Vec<String>> {
-    let co_moving: BTreeSet<String> = moving
-        .iter()
-        .filter(|other| other.crate_dir() == module.crate_dir())
+    let co_moving: BTreeSet<String> = gone_by_then(module, moving)
         .map(|other| other.path().join("::"))
         .collect();
     let text = workspace.read(&module.source)?;
@@ -449,12 +472,51 @@ fn siblings_naming(
         .collect()
 }
 
-/// Whether the file at module path `home` is moving with the set — itself, or as part of a member.
+/// Whether the file at module path `home` has left the origin by the time `module`'s operation
+/// runs, as a module moved by it or by an earlier operation, or as part of one.
+///
+/// A file a later operation moves is still in the origin then, so `apply` re-points it like any
+/// other caller.
 fn travelling(home: &[String], module: &MovingModule, moving: &[MovingModule]) -> bool {
+    gone_by_then(module, moving).any(|other| home.starts_with(other.path()))
+}
+
+/// The modules of `module`'s crate that have left it by the time `module`'s operation runs: its own
+/// operation's, which move with it, and every earlier operation's, which are already in their
+/// destination.
+fn gone_by_then<'a>(
+    module: &'a MovingModule,
+    moving: &'a [MovingModule],
+) -> impl Iterator<Item = &'a MovingModule> {
     moving
         .iter()
-        .filter(|other| other.crate_dir() == module.crate_dir())
-        .any(|other| home.starts_with(other.path()))
+        .filter(|other| other.crate_dir() == module.crate_dir() && other.op <= module.op)
+}
+
+/// The later operations moving a module one of `paths` reaches, in plan order.
+///
+/// `paths` are the moved header's, re-pointed at the origin, so each reads
+/// `<origin>::<module path>::…`.
+fn moved_later(paths: &[String], module: &MovingModule, moving: &[MovingModule]) -> Vec<usize> {
+    let origin = &module.moving.origin.extern_name;
+    let within: Vec<Vec<&str>> = paths
+        .iter()
+        .filter_map(|path| path.strip_prefix(origin.as_str())?.strip_prefix("::"))
+        .map(|path| path.split("::").collect())
+        .collect();
+
+    let later: BTreeSet<usize> = moving
+        .iter()
+        .filter(|other| other.crate_dir() == module.crate_dir() && other.op > module.op)
+        .filter(|other| {
+            within.iter().any(|path| {
+                path.len() >= other.path().len()
+                    && path.iter().zip(other.path()).all(|(one, two)| *one == two)
+            })
+        })
+        .map(|other| other.op)
+        .collect();
+    later.into_iter().collect()
 }
 
 /// The module path a file under a crate's `src/` carries — `[]` for the crate root.
