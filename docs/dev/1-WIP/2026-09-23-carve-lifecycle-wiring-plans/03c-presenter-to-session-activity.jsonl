@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"move_cluster_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/presenter_observer_task.rs","path":"presenter_observer_task"},"also":[{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/presenter_intent_client.rs","path":"presenter_intent_client"}],"to":"packages/tddy-session-activity","reexport":"glob"}

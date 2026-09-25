@@ -378,6 +378,116 @@ correct, and it is the blocker. T10 also needs **`tonic`** on `tddy-session-acti
 use `tonic::transport::Endpoint`), which is not approved. `03b-…` was not written and `03-…` was
 kept.
 
+### Third move run (2026-09-25, T5a → T5b → T10): every move stopped before `apply`
+
+Every restructure command ran against this worktree's own warm index daemon (pid 72639). Its binary
+and `tddy-tools` post-date every engine commit. **Nothing was applied.** No package file changed, and
+the only commit is the plans and these findings. Line counts use the previous run's counter, which
+reads HEAD's lifecycle as 21,821, the same figure that run ended on.
+
+**Baselines on HEAD `261fd28a`:**
+- Lifecycle: **607 passed, 22 failed, 1 ignored**, the same 22 by name. The failures are 5 in
+  `sandbox_behavior_acceptance`, 5 in `sandboxed_claude_cli_acceptance`, 4 in
+  `sandboxed_cursor_cli_acceptance`, 2 in `sandboxed_session_lifecycle_acceptance` and 6 in
+  `session_sync_livekit_acceptance`. The flaky session-room test passed.
+- `tddy-session-catalog`: 18 passed (5 unit, 1 `session_catalog_acceptance`, 12
+  `session_catalog_red`).
+- `tddy-session-activity`: no tests.
+- `tddy-coder`'s catalog tests were not run, because no catalog path changed.
+
+Since nothing was applied, there was no after-run, no post-move check or clippy, and no `verify`.
+
+| Move | Plan | Engine result | Outcome |
+|---|---|---|---|
+| T5a `user_sessions_path`, `session_reader` → `tddy-session-catalog` | `03a-session-catalog-cli-half-to-session-catalog.jsonl` (two `move_module_to_crate`, `reexport: glob`) | plain `check`: no findings. `check --deep`: no findings (3s, warm). Dry run: 2 of 2 resolved (6 and 5 files) | **stopped: new catalog edges.** See below |
+| T5b `session_list_enrichment`, `session_deletion` → `tddy-session-activity` | `03b-session-catalog-daemon-half-to-session-activity.jsonl` (two `move_module_to_crate`, `reexport: glob`) | plain `check`: 1 finding. `check --deep`: op 0 clean, op 1 refused (quoted below) | **stopped.** `session_deletion` depends on T5a; both modules need edges nobody approved |
+| T10 `presenter_observer_task`, `presenter_intent_client` → `tddy-session-activity` | `03c-presenter-to-session-activity.jsonl` (one `move_cluster_to_crate`, `reexport: glob`; replaces the untracked `03-…`) | plain `check`: 1 finding. `check --deep`: refused (quoted below) | **stopped: it still names a module that stays behind** |
+
+#### T5a: the premise holds for `tddy-coder`, but catalog gains five edges
+
+Moving the two modules gives `tddy-session-catalog` five direct dependencies it does not have today:
+
+| New catalog edge | Needed by |
+|---|---|
+| `tddy-daemon-kernel` | `user_sessions_path` re-exports `tddy_daemon_kernel::user_paths::{home_dir_for_user, …}` |
+| `tddy-worktree-service` | `session_reader::DaemonSessionListing` implements `tddy_worktree_service::branch_owner::SessionListing` |
+| `tddy-core` | `session_reader` reads `SessionMetadata` and `SESSIONS_SUBDIR` |
+| `anyhow` | `list_sessions_in_dir` returns `anyhow::Result` |
+| `libc` | `username_for_uid` (`getpwuid_r`) and `is_pid_alive` (`kill`) |
+
+The rule for this move was **any new catalog edge: stop and report**, so nothing was applied. What
+the edges would do to each graph, measured with `cargo tree -e normal` as the union of the kernel's
+and the worktree service's trees against each consumer's graph on HEAD:
+
+| Graph | Packages on HEAD | Packages T5a would add |
+|---|---:|---:|
+| `tddy-coder` | 452 | **0**: it already carries all five |
+| `tddy-tools` (default and `--no-default-features`) | 462 | **0** |
+| `tddy-bsp` (catalog's other normal consumer) | 343 | **85**, among them `tddy-daemon-kernel`, `tddy-worktree-service`, `tddy-livekit`, `tddy-sandbox`, `tddy-github`, `tddy-projects`, `tddy-discovery`, `tddy-credentials` and `tddy-session-tool-client` |
+
+So State B's claim is true for every binary: `tddy-bsp` is reached only through `tddy-coder`,
+`tddy-tools`, `tddy-daemon` and lifecycle, which all carry these crates already. It is false for
+`tddy-bsp` built on its own. No cycle: nothing that `tddy-daemon-kernel`, `tddy-worktree-service` or
+`tddy-core` depends on reaches catalog.
+
+**Hand fixes an apply would need.** Neither has a todo, because nothing was applied.
+- `session_reader::is_pid_alive` is `pub(crate)`, and `session_deletion`, which stays, calls it.
+  The fix is `pub` visibility.
+- A root `pub use tddy_session_catalog::*;` would also re-export catalog's `entry`, `error`,
+  `populate`, `provider`, `read` and `store` beside lifecycle's two other root globs. The fix is a
+  named `pub use tddy_session_catalog::{session_reader, user_sessions_path};`, the cause already
+  filed as the glob-facade todo.
+
+The survey found no consumer that a facade leaves unserved: 17 callers across `tddy-daemon`,
+`tddy-daemon-rpc`, `tddy-telegram-control`, `tddy-worktree-service`'s tests and lifecycle itself.
+
+Production lines if applied: lifecycle 21,821 → 21,641 (−180); catalog 747 → 927.
+
+#### T5b: `session_deletion` waits on T5a, and both modules need unapproved edges
+
+The engine refused op 1 (`session_deletion`), statically and deep:
+
+```text
+1: plan is malformed: `packages/tddy-session-lifecycle/src/session_deletion.rs` still names `tddy-session-lifecycle` (tddy_session_lifecycle::session_reader::is_pid_alive), so the destination would depend on the crate it left while that crate goes on naming the module it lost — move what those paths reach, or move the module's own dependencies with it
+```
+
+The engine classes it `plan is malformed`, but the plan is not the problem. The only plan-side fix
+is to take `session_reader` along, which moves T5a into the wrong receiver. The real remedy is T5a
+first. `session_list_enrichment` (op 0) is clean under `check --deep` and could move on its own. Both
+modules still need edges outside the approved four (`tddy-session-catalog`, `tddy-session-files`,
+`tddy-projects`, `chrono`):
+
+| Module | Edges it needs on activity | Approved? |
+|---|---|---|
+| `session_list_enrichment` | `tddy-session-files` (`session_context_docs`), `chrono` | yes |
+| | `tddy-telegram`, `tddy-core`, `tddy-service`, `anyhow`, `log`, `serde_json` | already activity's |
+| | **dev:** `tddy-workflow` (`session_attachments_root`, test line 1428), `tempfile` (test lines 330, 1429) | **no** |
+| `session_deletion` | `tddy-projects` (`project_storage`), `tddy-session-catalog` (after T5a) | yes |
+| | `tddy-daemon-sandbox` (`RUNNER_PID_FILE`), `tddy-daemon-livekit` (`SessionRoomRegistry`) | named in State B's 5b row, not in the decision |
+| | **`libc`** (`kill` in `signal_pid` and `teardown_workspace_sandbox`), dev `tempfile` | **no** |
+
+No cycle: only lifecycle, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-desktop` and
+`tddy-telegram-control` depend on activity (`cargo tree -i -e normal`).
+
+Production lines if both moved: lifecycle −782 (`session_deletion` 459, `session_list_enrichment`
+323); activity 1,573 → 2,355.
+
+#### T10: `SessionNotificationPublishing` still stays behind
+
+```text
+0: plan is malformed: `packages/tddy-session-lifecycle/src/presenter_observer_task.rs` still names `tddy-session-lifecycle` (tddy_session_lifecycle::session_notifications::{), so the destination would depend on the crate it left while that crate goes on naming the module it lost — move what those paths reach, or move the module's own dependencies with it
+```
+
+`presenter_observer_task.rs:16` still imports
+`crate::session_notifications::{notification_for_presenter_event, SessionNotificationPublishing}`.
+`SessionNotificationPublishing` is defined only in lifecycle's `session_notifications.rs` (the
+96-line half that now stays as wiring), and is used as a parameter type in
+`spawn_presenter_observer_task`. **Activity's `session_notifications` defines no equivalent.** It
+holds the bus, the event, the subscriber trait and the builders (`notification_for_presenter_event`
+among them), and names `SessionNotificationPublishing` only in its module doc (`:28`). T10 cannot
+move while that type stays behind. Per the instruction, nothing was redesigned around it.
+`presenter_intent_client` names nothing in lifecycle, but it is only half of the cluster.
+
 ## TODO
 
 - [x] Phase 2 design checked against the dependency graph

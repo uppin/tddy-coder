@@ -1,0 +1,3 @@
+{"v":1,"snapshot":{}}
+{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/user_sessions_path.rs","path":"user_sessions_path"},"to":"packages/tddy-session-catalog","reexport":"glob"}
+{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/session_reader.rs","path":"session_reader"},"to":"packages/tddy-session-catalog","reexport":"glob"}
