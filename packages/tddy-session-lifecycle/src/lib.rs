@@ -88,6 +88,9 @@ pub use tddy_daemon_livekit::{
     common_room_supervisor, livekit_peer_discovery, livekit_rooms_stream, livekit_service,
     session_room,
 };
+/// Which daemon serves an addressed request, shared with the families served above this crate, and
+/// room admission. Both now live in `tddy-daemon-livekit`.
+pub use tddy_daemon_livekit::{peer_routing, session_admission_service};
 /// The nine host modules and the four host-key ones, which now live in `tddy-host-service`.
 ///
 /// Named one by one for the reason above; see `tddy_worktree_service`'s facade.
@@ -96,14 +99,11 @@ pub use tddy_host_service::{
     host_prompts, host_registry, host_session_service, host_stats, host_tooling, multi_host,
     remote_desktop_probe, ssh_agent, ssh_agent_add,
 };
-/// Which daemon serves an addressed request, shared with the families served above this crate.
-pub mod peer_routing;
 pub mod presenter_intent_client;
 /// The per-session presenter observer: one gRPC stream feeding the notification bus and, through the
 /// kernel's `PresenterEventSink` port, whichever chat surface the daemon injected.
 pub mod presenter_observer_task;
 pub use tddy_terminal_rpc::{pty_runtime, tddy_user_config};
-pub mod session_admission_service;
 /// Where a clone's checkout is on this host, plus a re-export of the clone store and the mirror
 /// that moved to `tddy-session-agents` with `#unbundle` node 7. All are reached as
 /// `crate::session_agent_clone::X`, as before.

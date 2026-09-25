@@ -529,6 +529,42 @@ was re-run from scratch.
 | Clippy `-D warnings`, `cargo fmt` | clean on activity and lifecycle |
 | Tests | activity **45 passed** (40 inline: 12 `session_deletion`, 27 `session_list_enrichment`, 1 `session_reader`; plus 5 `worktree_removal_eligibility`); lifecycle **562 passed, 22 failed, 1 ignored** (607 − 45), the same 22 by name. `acceptance_daemon.rs` stays in lifecycle: it mostly tests the kernel's `DaemonConfig` and reaches `session_reader` through the facade |
 
+#### Move 2 (T7): routing and admission → `tddy-daemon-livekit`: two modules moved, the rest is a wrong premise
+
+The ~800 lines State B counts for T7 are three files. Only two can move:
+
+| File | Production | Verdict |
+|---|---:|---|
+| `peer_routing.rs` | 228 | **moved**: free of the host (`PeerRouting` is a value the host holds) |
+| `session_admission_service.rs` | 227 | **moved**: free of the host |
+| `connection_service/svc_resolve_os_user.rs` | 231 (+150 in two submodules) | **stays, and mixes topics.** See below |
+
+`svc_resolve_os_user.rs` holds four things:
+
+| Items | Lines | Topic | Why it cannot go to livekit as it stands |
+|---|---|---|---|
+| `impl DaemonSessionHost { resolve_os_user, eligible_instance_ids, classify_*_route, resolve_exec_tool_worktree, context_globs_for_session, common_room_slot, rpc_served_by_peer, stream_served_by_peer }` | 28–143 | host wiring (one-line delegations to `PeerRouting` and the free fns) | an inherent `impl` of lifecycle's type cannot leave lifecycle (`E0116`). The `AdmissionState`/`OsUserResolver` state struct that State B assumes **does not exist**. Activity already exports an unrelated `OsUserResolver` type alias, so that name would collide |
+| `resolve_os_user`, `authorize_exec_tool_caller` (free fns) | 146–212 | OS user, exec-tool caller authentication | movable only after an `extract_module` (`to_file: true`) grouping these two whole items. Then a second plan's `move_module_to_crate` on the nested module. **Not done:** `authorize_exec_tool_caller` is as much T3's exec-tool code as T7's, and its partner stays behind (next row) |
+| `resolve_exec_tool_worktree` (free fn) | 214–231 | exec tool | its body calls `workspace_session::resolve_worktree_root_for_session`, and `workspace_session` stays in lifecycle, so it can move nowhere below lifecycle |
+| `mod local_exec_tool_dispatch` (25) and `mod session_attachment_materialization` (125) | submodules | T3 (`run_exec_tool_locally`) and T8 | both are `impl DaemonSessionHost` blocks. The misplacement the plan names is real: the file carries T3's and T8's code |
+
+So the split the file needs first is: `extract_module` for `resolve_os_user` and `authorize_exec_tool_caller` (a pure grouping), plus the two submodules re-parented under their own topics. That second step is not a grouping, so it is out of scope. Whether the free-fn pair goes to livekit at all is the developer's call.
+
+| Measure | Result |
+|---|---|
+| Plan | `04a-routing-admission-to-daemon-livekit.jsonl`: one `move_cluster_to_crate` (`peer_routing`, `session_admission_service`; `reexport: glob`). The two do not reference each other; a cluster gives them one facade line |
+| Blind-spot read before apply | the body paths are `crate::livekit_peer_discovery::…` (×4, the destination's own module, which resolves once moved) and `crate::remote_git_service::UserResolver` (×2, a facade over `tddy-worktree-service`, which livekit already has). None reaches a module that stays behind. No name collides with livekit's `common_room_supervisor`, `livekit_peer_discovery`, `livekit_rooms_stream`, `livekit_service` or `session_room`. No inline tests, and no lifecycle test binary exercises either module |
+| Engine | plain `check`: no findings. `check --deep`: no findings. Dry run: 1 of 1 resolved (7 files). `apply`: 1 of 1 applied, then **the tree no longer compiles** (`tddy-daemon-livekit` depends on itself) |
+| Hand fixes | `tddy-daemon-livekit = { path = "" }` removed from its own manifest, and `use tddy_daemon_livekit::{livekit_peer_discovery, session_room}::…` → `use crate::…` (×3) ([existing](../todo/2026-09-25-restructure-move-to-crate-follows-a-facade-back-to-the-destination.md) [causes](../todo/2026-09-25-restructure-move-to-crate-leaves-the-destinations-own-extern-name.md)). `crate::remote_git_service::UserResolver` → `tddy_worktree_service::remote_git_service::UserResolver` (×2, body path, documented limitation). `PeerRouting::{set_eligible_daemon_source, eligible_instance_ids, classify_daemon_route, stream_served_by_peer}` `pub(crate)` → `pub`: lifecycle's host delegations call them (`E0624` ×4, [existing cause](../todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md) item 3). The two root globs became one named `pub use` ([existing cause](../todo/2026-09-25-restructure-glob-facade-re-exports-a-name-the-origin-shadows.md)). **No new cause, so no new todo** |
+| Facade | `pub use tddy_daemon_livekit::{peer_routing, session_admission_service};` in lifecycle's `lib.rs`. `tddy-daemon-rpc`'s `tddy_session_lifecycle::peer_routing::PeerRouting` and `tddy-daemon`'s `…::session_admission_service::SessionAdmissionServiceImpl` resolve through it |
+| New edges | **none**. Livekit already had `tddy-daemon-kernel`, `tddy-host-service` (`multi_host`), `tddy-worktree-service`, `tddy-livekit`, `tddy-rpc` and `tddy-service`. Livekit has no path to lifecycle, normal or dev |
+| Consumers edited | none |
+| Production lines | lifecycle 20,861 → **20,406**; livekit 5,409 → 5,863 |
+| `restructure verify --against HEAD` (`15374089`) | 397,654 → 397,652 statements. The 10 lost and 8 gained are the 4 widenings, the 2 qualifications and the facade comment, plus fmt joining `classify_daemon_route`'s signature onto one line |
+| `cargo check --all-targets` | clean on livekit, lifecycle, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control` |
+| Clippy `-D warnings`, `cargo fmt` | clean on livekit and lifecycle |
+| Tests | livekit **174 passed** (as on HEAD; nothing moved with the code); lifecycle **562 passed, 22 failed, 1 ignored**, the same 22 by name |
+
 ## TODO
 
 - [x] Phase 2 design checked against the dependency graph
