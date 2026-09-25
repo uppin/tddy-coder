@@ -5,7 +5,7 @@
 //! is wired to `tddy-tools session-hook` with session id, daemon URL, os_user, and hook_token
 //! baked in. Event names are read from stdin JSON (`hook_event_name`) by the hook binary.
 
-use crate::claude_hooks::HookCommandParams;
+use crate::claude_hooks::{shell_quote, HookCommandParams};
 
 /// Cursor lifecycle hooks wired for activity status reporting.
 const CURSOR_HOOK_EVENTS: &[&str] = &[
@@ -25,7 +25,11 @@ pub fn build_cursor_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
     for event in CURSOR_HOOK_EVENTS {
         let cmd = format!(
             "{} session-hook --session {} --daemon {} --os-user {} --hook-token {}",
-            p.tddy_tools_path, p.session_id, p.daemon_url, p.os_user, p.hook_token,
+            shell_quote(p.tddy_tools_path),
+            p.session_id,
+            p.daemon_url,
+            p.os_user,
+            p.hook_token,
         );
         hooks_obj.insert(
             (*event).to_string(),
@@ -78,6 +82,32 @@ mod tests {
             assert!(
                 !cmd.contains("--event"),
                 "{event_name}: cursor hooks must not bake --event; got: {cmd}"
+            );
+        }
+    }
+
+    /// Cursor hands the `command` to a shell too, so the desktop install's spaced tools path must
+    /// come out quoted here as well.
+    #[test]
+    fn cursor_hook_command_quotes_a_tools_path_containing_a_space() {
+        // Given
+        let params = HookCommandParams {
+            tddy_tools_path: "/Users/dev/Applications/Tddy Desktop.app/Contents/MacOS/tddy-tools",
+            ..test_params()
+        };
+
+        // When
+        let value = build_cursor_hooks_settings(&params);
+
+        // Then
+        let hooks = value["hooks"].as_object().unwrap();
+        for (event_name, entries) in hooks {
+            let cmd = entries[0]["command"].as_str().unwrap();
+            assert!(
+                cmd.starts_with(
+                    "'/Users/dev/Applications/Tddy Desktop.app/Contents/MacOS/tddy-tools' "
+                ),
+                "{event_name}: a tools path with a space must be shell-quoted; got: {cmd}"
             );
         }
     }

@@ -7,6 +7,22 @@
 //!
 //! All functions in this module are pure (no I/O) to maximize unit testability.
 
+/// Wrap `arg` so the shell that runs a hook command sees it as a single word.
+///
+/// A hook `command` is a **shell string**, not an argv: Claude Code and Cursor both hand it to
+/// `/bin/sh -c`. The desktop install puts `tddy-tools` inside `Tddy Desktop.app`, so an unquoted
+/// path splits at the space and the hook dies with
+/// `/bin/sh: /Users/<user>/Applications/Tddy: No such file or directory` — the session then reports
+/// no status at all, and nothing but the hook's own stderr says why.
+///
+/// Single quotes rather than backslashes: inside them the shell expands nothing, so a path
+/// containing `$`, backticks or spaces is passed through verbatim. An embedded single quote is
+/// closed, escaped and reopened (`'\''`), the one sequence single quoting cannot contain.
+#[must_use]
+pub fn shell_quote(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', r"'\''"))
+}
+
 /// Parameters for generating the per-worktree hook command strings.
 pub struct HookCommandParams<'a> {
     /// Absolute path to the `tddy-tools` binary (baked in at session-start time).
@@ -51,7 +67,12 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
     for event in &events {
         let cmd = format!(
             "{} session-hook --session {} --daemon {} --os-user {} --hook-token {} --event {}",
-            p.tddy_tools_path, p.session_id, p.daemon_url, p.os_user, p.hook_token, event,
+            shell_quote(p.tddy_tools_path),
+            p.session_id,
+            p.daemon_url,
+            p.os_user,
+            p.hook_token,
+            event,
         );
         let hook_entry = serde_json::json!([{
             "matcher": "",
@@ -199,9 +220,106 @@ mod tests {
         for (event_name, entries) in hooks {
             let cmd = entries[0]["hooks"][0]["command"].as_str().unwrap();
             assert!(
-                cmd.starts_with("/usr/local/bin/tddy-tools"),
-                "{event_name}: command must start with the configured tools path; got: {cmd}"
+                cmd.starts_with("'/usr/local/bin/tddy-tools' "),
+                "{event_name}: command must start with the quoted tools path; got: {cmd}"
             );
         }
+    }
+
+    /// A hook `command` is handed to `/bin/sh -c`, so a tools path containing a space must be
+    /// quoted. The desktop install puts `tddy-tools` inside `Tddy Desktop.app`, and an unquoted
+    /// path there fails with `/bin/sh: /…/Tddy: No such file or directory` — a session that
+    /// silently reports no status.
+    #[test]
+    fn hook_command_quotes_a_tools_path_containing_a_space() {
+        // Given
+        let params = HookCommandParams {
+            tddy_tools_path: "/Users/dev/Applications/Tddy Desktop.app/Contents/MacOS/tddy-tools",
+            ..test_params()
+        };
+
+        // When
+        let value = build_claude_hooks_settings(&params);
+
+        // Then
+        let hooks = value["hooks"].as_object().unwrap();
+        for (event_name, entries) in hooks {
+            let cmd = entries[0]["hooks"][0]["command"].as_str().unwrap();
+            assert!(
+                cmd.starts_with(
+                    "'/Users/dev/Applications/Tddy Desktop.app/Contents/MacOS/tddy-tools' "
+                ),
+                "{event_name}: a tools path with a space must be shell-quoted; got: {cmd}"
+            );
+        }
+    }
+
+    /// The quoting must survive the shell it is written for: running the generated command under
+    /// `/bin/sh -c` must reach the binary at the spaced path, not a prefix of it.
+    #[cfg(unix)]
+    #[test]
+    fn generated_command_runs_under_sh_from_a_directory_with_a_space() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Given a `tddy-tools` inside a directory whose name contains a space
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("Tddy Desktop.app");
+        std::fs::create_dir_all(&dir).expect("create dir");
+        let tools = dir.join("tddy-tools");
+        let mut f = std::fs::File::create(&tools).expect("create stub");
+        writeln!(f, "#!/bin/sh\necho \"$1\"").expect("write stub");
+        drop(f);
+        std::fs::set_permissions(&tools, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+        let tools_path = tools.to_string_lossy().into_owned();
+        let value = build_claude_hooks_settings(&HookCommandParams {
+            tddy_tools_path: &tools_path,
+            ..test_params()
+        });
+        let cmd = value["hooks"]["Stop"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+
+        // When
+        let out = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(cmd)
+            .output()
+            .expect("run hook command");
+
+        // Then
+        assert!(
+            out.status.success(),
+            "hook command must run under sh; stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "session-hook",
+            "the stub must receive 'session-hook' as its first argument"
+        );
+    }
+
+    /// A single quote in the path must not end the quoting early.
+    #[test]
+    fn hook_command_escapes_a_single_quote_in_the_tools_path() {
+        // Given
+        let params = HookCommandParams {
+            tddy_tools_path: "/home/o'brien/bin/tddy-tools",
+            ..test_params()
+        };
+
+        // When
+        let cmd = build_claude_hooks_settings(&params)["hooks"]["Stop"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Then
+        assert!(
+            cmd.starts_with(r"'/home/o'\''brien/bin/tddy-tools' "),
+            "a single quote must be escaped for sh; got: {cmd}"
+        );
     }
 }
