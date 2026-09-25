@@ -264,19 +264,54 @@ impl LspRegistry {
     }
 }
 
-/// Resolve the workspace root for a target directory: the nearest ancestor that is the
-/// root of a workspace (for Rust, the `Cargo.toml` workspace root). Getting this stable
-/// is what makes two targets in one workspace actually share a server.
-pub fn workspace_root_for(target_dir: &Path) -> PathBuf {
-    // Walk from the target dir outward; the outermost ancestor holding a `Cargo.toml`
-    // is the workspace root (ancestors iterate inner→outer, so the last hit wins).
-    let mut root = None;
+/// Resolve the workspace root for a target directory. Getting this stable is what makes two
+/// targets in one workspace actually share a server.
+///
+/// The rule is `cargo locate-project --workspace`'s, bounded by the repository: walking outward
+/// from `target_dir`, the nearest `Cargo.toml` that declares `[workspace]` is the root; failing
+/// that, the nearest manifest, since a package in no workspace is its own root; failing that,
+/// `target_dir` itself. The walk ends at the first directory holding `.git` — a directory for a
+/// checkout, a file for a linked worktree — because a repository nested inside another (a worktree
+/// under `<main>/.worktrees/`) is a separate tree, and rooting it at the enclosing checkout serves,
+/// and edits, the wrong one.
+///
+/// Cargo itself does not stop at `.git`, and it honours `package.workspace` and `exclude`. Neither
+/// changes the answer for a tree cargo accepts: a package below a `[workspace]` that does not list
+/// it is an error to cargo unless it declares its own `[workspace]`, which this walk finds first.
+///
+/// # Errors
+///
+/// [`LspError::Io`] when a `Cargo.toml` on the walk cannot be read, since whether it declares a
+/// workspace is the whole question.
+pub fn workspace_root_for(target_dir: &Path) -> Result<PathBuf, LspError> {
+    let mut nearest_manifest = None;
     for ancestor in target_dir.ancestors() {
-        if ancestor.join("Cargo.toml").is_file() {
-            root = Some(ancestor.to_path_buf());
+        let manifest = ancestor.join("Cargo.toml");
+        if manifest.is_file() {
+            let text = std::fs::read_to_string(&manifest)
+                .map_err(|err| LspError::Io(format!("{}: {err}", manifest.display())))?;
+            if declares_workspace(&text) {
+                return Ok(ancestor.to_path_buf());
+            }
+            nearest_manifest.get_or_insert_with(|| ancestor.to_path_buf());
+        }
+        if ancestor.join(".git").exists() {
+            break;
         }
     }
-    root.unwrap_or_else(|| target_dir.to_path_buf())
+    Ok(nearest_manifest.unwrap_or_else(|| target_dir.to_path_buf()))
+}
+
+/// Whether a manifest opens a `[workspace]` table, or one of its `[workspace.*]` subtables — either
+/// makes the directory holding it a workspace root.
+fn declares_workspace(manifest: &str) -> bool {
+    let without_comment = |line: &str| line.split('#').next().unwrap_or_default().trim().to_owned();
+    manifest.lines().map(without_comment).any(|line| {
+        line == "[workspace]"
+            || line
+                .strip_prefix("[workspace.")
+                .is_some_and(|rest| rest.ends_with(']'))
+    })
 }
 
 /// Expand a target's `srcs` (glob patterns rooted at `root`, relative to `repo_dir`) into

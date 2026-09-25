@@ -86,7 +86,7 @@ impl TddyLspExecutor {
             return Err(format!("language '{}' is not allowed", language.id()));
         }
         let key = LspKey {
-            root: workspace_root_for(repo_dir),
+            root: workspace_root_for(repo_dir).map_err(|e| e.to_string())?,
             language,
         };
         Ok((language, key))
@@ -195,7 +195,7 @@ impl LspExecutor for TddyLspExecutor {
             .first_available_language(repo_dir)
             .ok_or_else(|| "no language server available for this workspace".to_string())?;
         let key = LspKey {
-            root: workspace_root_for(repo_dir),
+            root: workspace_root_for(repo_dir).map_err(|e| e.to_string())?,
             language,
         };
         block_on(async {

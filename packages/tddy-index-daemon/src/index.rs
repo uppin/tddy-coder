@@ -113,7 +113,11 @@ impl WorkspaceIndex {
                 "workspace_root `{requested}` is not a directory this process can reach"
             )));
         }
-        Ok(workspace_root_for(named))
+        workspace_root_for(named).map_err(|err| {
+            Status::failed_precondition(format!(
+                "workspace_root `{requested}` has a manifest this process cannot read: {err}"
+            ))
+        })
     }
 
     /// Wait for this root's turn, and hold it until the returned guard is dropped.
@@ -300,6 +304,29 @@ mod tests {
             outcome.expect_err("a relative root is refused").code(),
             Code::InvalidArgument
         );
+    }
+
+    /// A worktree under `<main>/.worktrees/` is its own tree. Serving the enclosing checkout instead
+    /// answered `check` from another branch, and would have had `apply` write there.
+    #[test]
+    fn serves_a_nested_worktree_at_its_own_root_rather_than_the_enclosing_checkout() {
+        // Given a main checkout and a worktree nested under it, each its own cargo workspace
+        let main = tempfile::tempdir().expect("a temporary directory");
+        let main_root = main.path().canonicalize().expect("the root resolves");
+        let worktree = main_root.join(".worktrees/x");
+        std::fs::create_dir_all(main_root.join(".git")).expect("the main checkout's .git");
+        std::fs::create_dir_all(&worktree).expect("the worktree directory");
+        std::fs::write(main_root.join("Cargo.toml"), "[workspace]\n").expect("the main manifest");
+        std::fs::write(worktree.join("Cargo.toml"), "[workspace]\n")
+            .expect("the worktree manifest");
+        std::fs::write(worktree.join(".git"), "gitdir: ../../.git/worktrees/x\n")
+            .expect("the worktree's .git file");
+
+        // When the worktree is named as a request's root
+        let root = WorkspaceIndex::workspace_root_of(worktree.to_str().expect("a UTF-8 path"));
+
+        // Then the worktree is served, not the checkout around it
+        assert_eq!(root.expect("the worktree is a root"), worktree);
     }
 
     #[test]
