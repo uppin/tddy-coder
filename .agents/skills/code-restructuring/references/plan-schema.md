@@ -67,8 +67,15 @@ not define is refused rather than ignored.
   A path reaching a module **staying behind** is re-pointed at the origin, exactly as a single move
   does. A set of one is refused: that is `move_module_to_crate`.
 
-  A plain `check` names the sibling a **partial** set would strand, statically and with no index —
-  which is the finding that used to be discovered only when `apply` refused.
+  A plain `check` names a **partial** set statically and with no index, which is the refusal that
+  used to be discovered only at `apply`. The finding is about a *moved* module whose header still
+  names a module staying behind: that makes the destination depend on the crate it left. The crate
+  it left names the destination back through the facade, or, with `reexport: none`, from each
+  caller `apply` re-points, so the two edges form a cycle. It reads the header with the same
+  re-export resolution `apply` uses, so a path the origin only re-exports from another crate is
+  not an edge. A module **staying behind** that names the moved one is **not** a finding. A facade
+  keeps its `crate::…` path resolving, and without a facade `apply` re-points it, so it compiles
+  either way.
 - **A test binary moves with `move_test_binary_to_crate`, never with `move_module_to_crate`.** The
   anchor is `<crate>/tests/<name>.rs` and `to` is the destination crate's directory. `reexport` is
   refused — nothing can reference a test binary, so a facade would keep nothing resolving — and
