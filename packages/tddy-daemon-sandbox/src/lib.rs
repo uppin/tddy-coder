@@ -35,8 +35,10 @@
 //! value to. `Box<dyn Trait>` drops through the vtable, so the destructor that runs is still
 //! `ManagedWorkflow`'s.
 
+pub mod action_service;
 pub mod sandbox_action;
 pub mod sandbox_plan_builder;
 pub mod sandbox_runtime;
 pub mod sandbox_session;
+pub mod task_service;
 pub mod workspace_tool_sandbox;

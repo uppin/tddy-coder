@@ -20,7 +20,7 @@ pub enum SessionError {
     StartFailed { reason: String },
 }
 
-pub mod action_service;
+pub use tddy_daemon_sandbox::*;
 /// The per-chat active-elicitation lease, which now lives in `tddy-telegram`.
 ///
 /// Re-exported under its own name so `crate::active_elicitation::X` — and
@@ -132,7 +132,6 @@ pub mod session_notifications;
 pub mod session_reader;
 pub mod session_toolcall;
 pub mod split_session;
-pub mod task_service;
 pub mod tddy_user_config;
 pub use tddy_telegram::telegram_github_link;
 pub use tddy_telegram::telegram_tracked_session;

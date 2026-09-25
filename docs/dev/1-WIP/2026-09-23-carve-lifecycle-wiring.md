@@ -226,6 +226,56 @@ delegation and port impls. The size target is **the developer's to choose** from
 
 ## Validation results
 
+All runs are scoped to the packages named, on macOS (Darwin 25.6). The whole workspace is CI's to report.
+
+### Baseline (HEAD `d9f8f7b3`, 2026-09-25)
+
+`./dev cargo test -p tddy-session-lifecycle --no-fail-fast -- --test-threads=1 --skip sandboxed_bash_pty_action_streams_output`:
+**621 passed, 23 failed, 1 ignored**. That is #524's 22 failures by name, plus
+`session_room_acceptance::the_first_connect_makes_the_sessions_terminal_drivable_over_livekit`,
+which **passes when re-run alone**. It is flaky, not a regression.
+
+`tddy-daemon-sandbox` **does not compile its test targets on HEAD on macOS**:
+`tests/sandbox_stdio_seatbelt_acceptance.rs` (`#![cfg(target_os = "macos")]`) has 3 × `E0425`
+(`SandboxHandle` not imported). Linux CI never builds it. It stays broken here, since fixing it is
+outside this change. Every `tddy-daemon-sandbox` run below excludes that one binary, and its
+`--all-targets` check and clippy report only those 3 errors.
+
+### Moves 1–3 (run of 2026-09-25): one engine-applied move, the rest refused or wrong premises
+
+| Move | Plan | Engine result | Outcome |
+|---|---|---|---|
+| 1a `relay_idle`, `local_token_tonic_adapter` → kernel | (not committed) | `check` gate: 3 findings, `… stays behind … and names relay_idle` | **stopped.** It also needs kernel → `tddy-task` and kernel → `tddy-github`, edges the plan does not name |
+| 1b demo VM → `tddy-demo-runner` | (not committed) | `plan is malformed: … still names tddy-session-lifecycle (…activity_hub, …DaemonSessionHost)` | **stopped: wrong premise.** The handlers are `impl DaemonSessionHost`, and `DemoVmState` does not exist yet. `activity_hub.rs` holds *only* `DemoVmHandle`, so there is nothing to split out |
+| 2a `pty_runtime`, `tddy_user_config` → `tddy-terminal-rpc` | `02a-…` | `check` gate: 2 findings, `cli_session_manager/pty_handle.rs` and `pty_spawn.rs` name `pty_runtime` | **stopped** |
+| 2b `task_service`, `action_service` → `tddy-daemon-sandbox` | `02b-…` | `check --deep` clean; `apply` 4 of 4, then **the tree no longer compiles** | **engine-applied**, then build fixes by hand ([extern-name todo](../todo/2026-09-25-restructure-move-to-crate-leaves-the-destinations-own-extern-name.md), [glob-facade todo](../todo/2026-09-25-restructure-test-binary-move-cannot-see-through-a-glob-facade.md)) |
+| 3 T10 → `tddy-session-activity` | (not committed) | `plan is malformed: … presenter_observer_task.rs still names tddy-session-lifecycle (…session_notifications::{)` | **stopped: wrong premise.** T10 is not a leaf; it uses T5b's `SessionNotificationPublishing` |
+
+The warm index daemon **served the main checkout** to this nested worktree
+([todo](../todo/2026-09-25-restructure-warm-index-serves-the-main-checkout-for-a-nested-worktree.md)).
+Plan 02b's `check --deep`, dry run and apply were all run cold (`TDDY_INDEX_SOCKET` unset). The
+`check` gate findings for 1a, 2a and 3 are static, so they read this tree. The `plan is malformed`
+refusals quoted for 1b and 3 came from warm runs against the other tree. Cold re-runs against this
+tree (after 2b) returned the same refusals, word for word.
+
+**Move 2b in numbers:**
+
+| Measure | Result |
+|---|---|
+| Production lines (this changeset's counter) | lifecycle 22,939 → 22,237; `tddy-daemon-sandbox` 2,536 → 3,239 |
+| New edges | none (zero, as planned); no receiver depends on lifecycle |
+| Facade | `pub use tddy_daemon_sandbox::*;` in lifecycle's `lib.rs` |
+| Consumers edited | none (`tddy-daemon/src/runtime.rs` resolves through the facade) |
+| `cargo check --all-targets` | clean on lifecycle, `tddy-daemon-sandbox`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, apart from the pre-existing seatbelt errors |
+| Clippy `-D warnings` | clean on lifecycle and `tddy-daemon-sandbox`, apart from the pre-existing seatbelt errors |
+| `restructure verify --against HEAD` | 396,995 statements before and after, every one accounted for |
+| `tddy-daemon-sandbox` tests (seatbelt binary excluded) | 32 passed, 1 failed, 1 ignored. The failure, `sandbox_session_stdio_acceptance::real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_over_stdio` (`tool dispatch timed out`), is **pre-existing**: it fails identically with HEAD's `lib.rs`. `sandboxed_bash_pty_action_streams_output` is skipped here as in lifecycle's baseline, since it moved with its binary |
+| Lifecycle tests | **615 passed, 22 failed, 1 ignored**, with zero new failures by name. The 22 are #524's 22; the flaky session-room test passed. 622 − 7 = 615: the 7 tests that moved with `action_service_acceptance` (2) and `action_sandbox_acceptance` (5 run, 1 skipped) pass in `tddy-daemon-sandbox` |
+
+`task_service_acceptance.rs` **stays in lifecycle**. Three of its tests drive
+`claude_cli_session::ClaudeCliSessionManager` (lifecycle's `CliSessionManager`, T6c, which stays),
+so moving it would make the receiver dev-depend on lifecycle.
+
 ## TODO
 
 - [x] Phase 2 design checked against the dependency graph
