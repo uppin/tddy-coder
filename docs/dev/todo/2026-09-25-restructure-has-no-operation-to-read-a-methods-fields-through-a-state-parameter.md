@@ -76,6 +76,12 @@ What it would do:
 The compile gate catches the one case a lexical check cannot: a borrow of `state` alive across an
 `.await` in a future that must be `Send`.
 
+A borrowed state field is already a reference, so a token-for-token substitution of `&self.<field>`
+leaves `&state.<field>`, a `&&T` the compiler dereferences again. That compiles, and clippy fails it as
+`needless_borrow` (`start_hosted_agent_clone`, plan 22: `local_instance_id_for_config(&state.config)`
+and `Arc::clone(&state.hosted_agent_clones)`). The operation should drop the `&` when the builder's
+field is a reference, and keep it when it is a `Copy` value (`roster_keepalive_interval`).
+
 ## Where it was needed
 
 The second T3 run counts every hand substitution per method in the changeset's "Port-move pilot (T3),

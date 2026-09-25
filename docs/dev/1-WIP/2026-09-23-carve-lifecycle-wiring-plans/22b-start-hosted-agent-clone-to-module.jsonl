@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_start_hosted_agent_clone.rs","start":{"line":317,"col":1},"end":{"line":377,"col":2}},"name":"hosted_clone_start","reexport":"glob","to_file":true}
