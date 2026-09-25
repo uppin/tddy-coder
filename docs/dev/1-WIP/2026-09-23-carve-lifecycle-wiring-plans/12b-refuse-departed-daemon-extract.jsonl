@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_start_hosted_agent_clone.rs","start":{"line":157,"col":9},"end":{"line":166,"col":12}},"name":"refuse_departed_daemon"}

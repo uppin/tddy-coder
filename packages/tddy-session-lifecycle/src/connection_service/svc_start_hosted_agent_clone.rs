@@ -152,17 +152,8 @@ impl DaemonSessionHost {
         &self,
         daemon_instance_id: &str,
     ) -> Result<(), Status> {
-        if self
-            .eligible_instance_ids()
-            .iter()
-            .any(|candidate| candidate == daemon_instance_id)
-        {
-            return Ok(());
-        }
-        Err(Status::unavailable(format!(
-            "daemon '{daemon_instance_id}' has left the common room, so the agents it owns on this \
-             session cannot be reached; the rest of the roster is unaffected"
-        )))
+        let eligible = self.eligible_instance_ids();
+        departed_daemon::refuse_departed_daemon(daemon_instance_id, eligible)
     }
 
     /// Ask the owning daemon to open the conversation on its side, under the id this daemon minted.
@@ -379,6 +370,8 @@ impl DaemonSessionHost {
         );
     }
 }
+
+use tddy_session_agents::departed_daemon;
 
 use tddy_session_agents::conversation_open_forward;
 

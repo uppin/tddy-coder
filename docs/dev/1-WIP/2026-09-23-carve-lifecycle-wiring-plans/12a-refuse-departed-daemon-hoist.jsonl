@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"extract_variable","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_start_hosted_agent_clone.rs","start":{"line":155,"col":12},"end":{"line":156,"col":37}},"name":"eligible"}
