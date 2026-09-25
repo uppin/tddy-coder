@@ -221,6 +221,12 @@ delegation and port impls. The size target is **the developer's to choose** from
   - 1a's edges are approved: `tddy-daemon-kernel` gains `tddy-task`, `tddy-github` and `tonic` (neither closes a cycle);
   - the 2a `check --deep` hang ("waiting for type inference at the anchor") is an engine defect, fixed test-first before 2a runs;
   - `check` is tightened to predict `apply`'s cycle refusal for a mutual set split across separate `move_module_to_crate` ops.
+- **After moves 1a/2a, T5b re-planned** (developer, 2026-09-25):
+  - T5a (`user_sessions_path`, `session_reader`, holding `is_pid_alive`) moves into `tddy-session-catalog` first; `tddy-session-activity` → `tddy-session-catalog` edge approved;
+  - lifecycle's `session_notifications` stays as wiring (it collides with the receiver's own module; no engine op merges files);
+  - `workspace_session` stays until the host-port moves (it calls private host fns);
+  - edges approved for T5b: `tddy-session-files`, `tddy-projects`, `chrono`;
+  - `tonic` approved on `tddy-session-activity` for T10.
 - **Receivers were chosen by the dependency graph, not by topic name.** Four first-draft placements
   were cycles or layering breaks:
   - routing → kernel is a cycle;
