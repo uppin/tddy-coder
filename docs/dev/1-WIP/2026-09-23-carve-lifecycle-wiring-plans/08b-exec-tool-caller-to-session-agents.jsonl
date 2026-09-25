@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/connection_service/svc_resolve_os_user/exec_tool_caller.rs","path":"exec_tool_caller"},"to":"packages/tddy-session-agents","reexport":"glob"}

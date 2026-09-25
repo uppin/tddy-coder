@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_resolve_os_user.rs","start":{"line":167,"col":1},"end":{"line":210,"col":2}},"name":"exec_tool_caller","reexport":"glob","to_file":true}

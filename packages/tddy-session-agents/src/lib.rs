@@ -24,6 +24,7 @@
 
 pub mod agent_conversations;
 pub mod clone_readiness;
+pub mod exec_tool_caller;
 pub mod ports;
 pub mod service;
 pub mod session_agent_clone;
