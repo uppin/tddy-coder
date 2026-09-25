@@ -173,6 +173,19 @@ not define is refused rather than ignored.
   says so on the progress line. Every item's callers are surveyed only under the cfg the server
   evaluated, so a caller inside inactive code elsewhere is not re-pointed. An operation acting *at*
   such code, such as a rename, is refused as `this seam cannot be cut here:`, naming the line.
+- **A file in no crate's module tree is refused instead of waited on.** rust-analyzer lists the
+  symbols of a file no `mod` declares and resolves nothing in it, however long it is given. Once the
+  index is loaded, a `null` hover is checked against the server's pull diagnostics, and an
+  `unlinked-file` diagnostic there refuses the operation as `this seam cannot be cut here:`, naming
+  the file and quoting the server. That is how a warm `check --deep` anchored in a module the
+  previous `apply` created used to run for ever: the server had never been told of it.
+- **A warm `tddy-index-daemon` tells its server what changed on disk between requests.** Before a
+  warm server is handed to a request, the daemon compares the root's `*.rs`, `Cargo.toml` and
+  `Cargo.lock` files (not under `target/`, `node_modules/` or any hidden directory) with what they
+  were at the previous request, and sends `workspace/didChangeWatchedFiles` for each one created,
+  changed or deleted. So a module an earlier `apply` wrote, or a file written by hand, is seen by the
+  next `check --deep` without restarting the daemon. rust-analyzer's own watcher did not see them on
+  this workspace. The walk costs about a fifth of a second per request here.
 - **`extract_module` restores the imports its own assist loses, and refuses when it cannot.** The
   items move out of the scope of the file's `use` declarations, so the backend asks rust-analyzer for
   an import at each name left unresolved. Where the server offers several paths for one name, the

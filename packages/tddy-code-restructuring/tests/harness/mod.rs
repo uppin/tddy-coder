@@ -133,6 +133,21 @@ pub fn a_workspace_a_module_can_move_across() -> AFixtureWorkspace {
         .tracked_by_git()
 }
 
+/// The file [`a_workspace_whose_module_file_no_module_declares`] writes and no `mod` declares.
+pub const AN_UNDECLARED_MODULE_FILE: &str = "crates/origin/src/clock_face.rs";
+
+/// [`a_workspace_a_module_can_move_across`], plus a module file that no `mod` declares.
+///
+/// rust-analyzer loads such a file, lists its symbols from the syntax tree and resolves nothing in
+/// it, however long it is given: it reports it as `unlinked-file`. The warm index met the same state
+/// when a server was never told of a module an earlier apply had created.
+pub fn a_workspace_whose_module_file_no_module_declares() -> AFixtureWorkspace {
+    a_workspace_a_module_can_move_across().writing(
+        AN_UNDECLARED_MODULE_FILE,
+        "pub fn face() -> u32 {\n    7\n}\n",
+    )
+}
+
 impl AFixtureWorkspace {
     pub fn path(&self) -> &Path {
         &self.root

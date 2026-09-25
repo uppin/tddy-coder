@@ -91,6 +91,7 @@ package(tddy-code-restructuring) and (
     or binary(index_health_acceptance)
     or binary(extract_method_control_flow_acceptance)
     or binary(extract_variable_acceptance)
+    or binary(unlinked_file_acceptance)
 )
 """
 test-group = "rust-analyzer"

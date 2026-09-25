@@ -15,6 +15,9 @@ use crate::{RestructureError, Result};
 /// The code rust-analyzer gives the diagnostic it attaches to code a `#[cfg]` has switched off.
 const INACTIVE_CODE: &str = "inactive-code";
 
+/// The code rust-analyzer gives the diagnostic it attaches to a file no crate's module tree reaches.
+const UNLINKED_FILE: &str = "unlinked-file";
+
 /// Where a wait for one position ended.
 pub(super) enum Answerable {
     /// The server resolves names here.
@@ -91,14 +94,18 @@ impl RustBackend {
 
     /// Block until the server either resolves names at `position` or says it never will.
     ///
-    /// A hover is `null` in two cases, and only one of them passes. Until the crate graph is loaded,
-    /// nothing resolves anywhere. Once it is, a `null` can also mean the position is in code a
-    /// `#[cfg]` has switched off, which rust-analyzer lists in the outline but never resolves. The
+    /// A hover is `null` in three cases, and only one of them passes. Until the crate graph is
+    /// loaded, nothing resolves anywhere. Once it is, a `null` can also mean the position is in code
+    /// a `#[cfg]` has switched off, which rust-analyzer lists in the outline but never resolves. The
     /// wait once treated both cases as the first and polled until its caller gave up: lifecycle plan
     /// 02a's `check --deep` never finished, on `pty_runtime.rs`'s
-    /// `#[cfg(not(unix))] fn resolve_final_argv_env` on macOS. The server does say which case it
-    /// is, through its pull diagnostics, and that answer is asked for only once the index is loaded.
-    /// Before that, a missing `inactive-code` diagnostic proves nothing.
+    /// `#[cfg(not(unix))] fn resolve_final_argv_env` on macOS. Or the file is in no crate's module
+    /// tree as the server has loaded it — no `mod` declares it, or the server was never told of the
+    /// one that does — which is how a warm `check --deep` of a module an earlier apply had created
+    /// never answered. The server says which case it is through its pull diagnostics, and that
+    /// answer is asked for only once the index is loaded. Before that, a missing diagnostic proves
+    /// nothing. A file the server reports `unlinked-file` is refused, since nothing resolves there
+    /// however long the wait; code it reports inactive ends the wait for the caller to decide.
     pub(super) fn wait_until_answerable(
         &mut self,
         uri: &str,
@@ -118,7 +125,14 @@ impl RustBackend {
                 return Ok(Answerable::Ready);
             }
             if hover.is_null() && self.indexed && !self.chatter.loading() {
-                if let Some(said) = self.inactive_code_at(uri, position)? {
+                let report = self.pull_diagnostics(uri)?;
+                if let Some(said) = unlinked_file_in(&report) {
+                    self.refuse_degraded_index()?;
+                    return Err(unlinked_file_refusal(uri, &said)?);
+                }
+                if let Some(said) =
+                    inactive_code_covering(&report, &LspPoint::read(Some(position))?)
+                {
                     self.refuse_degraded_index()?;
                     return Ok(Answerable::Inactive(said));
                 }
@@ -129,16 +143,12 @@ impl RustBackend {
         }
     }
 
-    /// The server's reason, when it reports the code at `position` as inactive.
-    fn inactive_code_at(&mut self, uri: &str, position: &Value) -> Result<Option<String>> {
-        let report = self.request_settled(
+    /// The server's pull-diagnostics report for `uri`.
+    fn pull_diagnostics(&mut self, uri: &str) -> Result<Value> {
+        self.request_settled(
             "textDocument/diagnostic",
             json!({ "textDocument": { "uri": uri } }),
-        )?;
-        Ok(inactive_code_covering(
-            &report,
-            &LspPoint::read(Some(position))?,
-        ))
+        )
     }
 
     /// Refuse to go on once ready, when rust-analyzer has said its index is degraded.
@@ -183,6 +193,34 @@ fn inactive_code_covering(report: &Value, point: &LspPoint) -> Option<String> {
                 .unwrap_or_default()
                 .to_string()
         })
+}
+
+/// The first paragraph of the `unlinked-file` diagnostic in a pull-diagnostics report, if any.
+///
+/// The diagnostic covers the whole file, so its range says nothing about any one position. Its
+/// message goes on to say how to silence it in an editor, which is no advice for this caller.
+fn unlinked_file_in(report: &Value) -> Option<String> {
+    report
+        .get("items")?
+        .as_array()?
+        .iter()
+        .find(|item| item.get("code").and_then(Value::as_str) == Some(UNLINKED_FILE))
+        .map(|item| {
+            let message = item
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            message.split("\n\n").next().unwrap_or(message).to_string()
+        })
+}
+
+fn unlinked_file_refusal(uri: &str, said: &str) -> Result<RestructureError> {
+    Ok(seam_refusal(format!(
+        "{} is in no crate's module tree as rust-analyzer has loaded it (\"{said}\"), so nothing \
+         resolves there however long the wait. Declare it with `mod` in its parent module, or \
+         anchor the operation in a file that is declared.",
+        path_of(uri)?.display()
+    )))
 }
 
 /// Where a position is, as `path:line`, for a message a reader has to find it from.
@@ -254,6 +292,58 @@ mod tests {
                 character: 3,
             },
         );
+
+        // Then
+        assert_eq!(said, None);
+    }
+
+    /// rust-analyzer's own answer for a file no `mod` declares, as a live server gave it.
+    fn a_report_of_an_unlinked_file() -> Value {
+        json!({
+            "kind": "full",
+            "resultId": "rust-analyzer",
+            "items": [{
+                "range": {
+                    "start": { "line": 0, "character": 0 },
+                    "end": { "line": 3, "character": 0 }
+                },
+                "severity": 4,
+                "code": "unlinked-file",
+                "source": "rust-analyzer",
+                "message": "This file is not included anywhere in the module tree, so \
+                            rust-analyzer can't offer IDE services.\n\nIf you're intentionally \
+                            working on unowned files, you can silence this warning by adding \
+                            \"unlinked-file\" to rust-analyzer.diagnostics.disabled in your \
+                            settings."
+            }]
+        })
+    }
+
+    #[test]
+    fn reads_the_server_s_reason_for_a_file_no_module_declares() {
+        // Given
+        let report = a_report_of_an_unlinked_file();
+
+        // When
+        let said = unlinked_file_in(&report);
+
+        // Then
+        assert_eq!(
+            said.as_deref(),
+            Some(
+                "This file is not included anywhere in the module tree, so rust-analyzer can't \
+                 offer IDE services."
+            )
+        );
+    }
+
+    #[test]
+    fn finds_no_unlinked_file_in_a_report_of_inactive_code() {
+        // Given
+        let report = a_report_of_inactive_code_on_lines_9_to_12();
+
+        // When
+        let said = unlinked_file_in(&report);
 
         // Then
         assert_eq!(said, None);
