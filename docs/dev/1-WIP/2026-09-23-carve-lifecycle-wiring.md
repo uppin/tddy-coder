@@ -313,6 +313,23 @@ same 22 by name.
 | Clippy `-D warnings`, `cargo fmt` | clean on kernel and lifecycle |
 | Tests | kernel 122 passed; lifecycle 615 passed, 22 failed, 1 ignored, the same 22 by name. Neither file had tests of its own, and no lifecycle integration test exercises them, so none moved |
 
+#### Move 2a: `pty_runtime`, `tddy_user_config` → `tddy-terminal-rpc`
+
+| Measure | Result |
+|---|---|
+| Plan | `02a-pty-runtime-to-terminal-rpc.jsonl`, one `move_cluster_to_crate` with `reexport: glob` |
+| Engine | plain `check`: no findings. `check --deep`: no findings (1.5s, warm). It reported `pty_runtime.rs:159` (`#[cfg(not(unix))] fn resolve_final_argv_env`) as inactive, so only the unix cfg was surveyed. Dry run: 1 of 1 resolved. `apply`: 1 of 1 applied, then **the tree no longer compiles** (`tddy_user_config`'s inline tests: 2 × `E0433`, `tempfile` unlinked) |
+| Hand fixes | `tempfile = "3"` added to terminal-rpc's `[dev-dependencies]` ([new cause: a crate named only in a body path](../todo/2026-09-25-restructure-move-to-crate-misses-a-crate-named-only-in-a-body-path.md)). The engine's two `pub use tddy_terminal_rpc::*;` lines became one `pub use tddy_terminal_rpc::{pty_runtime, tddy_user_config};`: the root glob re-exports terminal-rpc's `service`, which lifecycle's private `mod service;` shadows (`hidden_glob_reexports`, so clippy fails) ([new cause: a root glob facade](../todo/2026-09-25-restructure-glob-facade-re-exports-a-name-the-origin-shadows.md)) |
+| Facade | `pub use tddy_terminal_rpc::{pty_runtime, tddy_user_config};` in lifecycle's `lib.rs` |
+| New edges | terminal-rpc → `tddy-daemon-kernel` (named in State B). No cycle: the kernel does not reach terminal-rpc. It adds nothing to any binary's graph, because `tddy-coder`, `tddy-sandbox-app` and `tddy-tools --no-default-features` already carry the kernel, `livekit`, `tddy-github` and `tddy-task`. Dev: `tempfile` (already in `Cargo.lock`) |
+| Consumers edited | none |
+| Non-unix read-through | `resolve_final_argv_env`'s `cfg(not(unix))` body names only `PtySpawnSpec` and `ResolvedArgvEnv`, both unconditional items of the same moved file, so it resolves unchanged. No fix was needed. **Pre-existing, not caused by the move:** the file's unconditional `pub use tddy_daemon_kernel::privilege_drop::{…, resolve_pty_os_user, ResolvedPtyUser}` names two `#[cfg(unix)]` kernel items, so neither lifecycle on HEAD nor terminal-rpc now builds on non-unix. The line moved byte for byte |
+| Production lines | lifecycle 21,998 → 21,821; terminal-rpc 2,348 → 2,526 |
+| `restructure verify --against HEAD` | 397,648 statements before and after, every one accounted for |
+| `cargo check --all-targets` | clean on terminal-rpc, lifecycle, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control` |
+| Clippy `-D warnings`, `cargo fmt` | clean on terminal-rpc and lifecycle |
+| Tests | terminal-rpc 63 passed (55 + the 8 inline tests that moved: 6 in `pty_runtime`, 2 in `tddy_user_config`); lifecycle 607 passed, 22 failed, 1 ignored (615 − 8), the same 22 by name |
+
 ## TODO
 
 - [x] Phase 2 design checked against the dependency graph

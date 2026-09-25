@@ -102,7 +102,7 @@ pub mod presenter_intent_client;
 /// The per-session presenter observer: one gRPC stream feeding the notification bus and, through the
 /// kernel's `PresenterEventSink` port, whichever chat surface the daemon injected.
 pub mod presenter_observer_task;
-pub mod pty_runtime;
+pub use tddy_terminal_rpc::{pty_runtime, tddy_user_config};
 pub mod session_admission_service;
 /// Where a clone's checkout is on this host, plus a re-export of the clone store and the mirror
 /// that moved to `tddy-session-agents` with `#unbundle` node 7. All are reached as
@@ -131,7 +131,6 @@ pub mod session_notifications;
 pub mod session_reader;
 pub mod session_toolcall;
 pub mod split_session;
-pub mod tddy_user_config;
 pub use tddy_telegram::telegram_github_link;
 pub use tddy_telegram::telegram_tracked_session;
 pub mod terminal_session_adapter;
