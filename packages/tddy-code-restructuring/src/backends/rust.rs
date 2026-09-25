@@ -30,6 +30,7 @@ mod documents;
 mod early_return;
 mod impl_seam;
 mod imports;
+mod introduced;
 mod nested_modules;
 mod readiness;
 
@@ -37,9 +38,9 @@ pub use chatter::ServerChatter;
 
 use early_return::refuse_early_returns;
 
-use impl_seam::{refuse_impl_sibling_references, with_method_calls_restored};
+use impl_seam::refuse_impl_sibling_references;
 use imports::names_bound;
-use nested_modules::with_nested_references_restored;
+use introduced::{introduced_by, Introduced};
 
 /// LSP `SymbolKind::Object` — how rust-analyzer reports an `impl` block. Its members are reached
 /// through the type, never through a module path, which is why a seam may move a whole `impl` freely
@@ -237,17 +238,16 @@ pub fn server_settings() -> Value {
 #[derive(Clone, Copy)]
 struct Placeholder {
     keyword: &'static str,
-    name: &'static str,
+    /// The fixed name the assist writes, or `None` when the server names the symbol itself and it is
+    /// found by what the assist added ([`introduced::introduced_by`]).
+    name: Option<&'static str>,
 }
 
 impl Placeholder {
-    fn declaration(&self) -> String {
-        format!("{} {}", self.keyword, self.name)
-    }
-
-    /// Offset of the identifier within the declaration.
-    fn identifier_offset(&self) -> usize {
-        self.keyword.len() + 1
+    /// Whether the declaration is an item signature, where `_` is not a type (`E0121`). A `let` may
+    /// carry one (`let v: Vec<_> = …`), and rust-analyzer's initializer may too (`collect::<Vec<_>>()`).
+    fn declares_a_signature(&self) -> bool {
+        self.keyword != "let"
     }
 }
 
@@ -259,7 +259,7 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             at_caret: false,
             placeholder: Some(Placeholder {
                 keyword: "fn",
-                name: "fun_name",
+                name: Some("fun_name"),
             }),
             multi_file: false,
             needs_inference: true,
@@ -271,7 +271,7 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             at_caret: false,
             placeholder: Some(Placeholder {
                 keyword: "let",
-                name: "var_name",
+                name: None,
             }),
             multi_file: false,
             needs_inference: true,
@@ -283,7 +283,7 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             at_caret: false,
             placeholder: Some(Placeholder {
                 keyword: "mod",
-                name: "modname",
+                name: Some("modname"),
             }),
             multi_file: false,
             needs_inference: false,
@@ -305,7 +305,7 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             at_caret: true,
             placeholder: Some(Placeholder {
                 keyword: "trait",
-                name: "NewTrait",
+                name: Some("NewTrait"),
             }),
             multi_file: false,
             needs_inference: false,
@@ -1354,12 +1354,17 @@ impl RustBackend {
         let placeholder = assist_for(op.op)
             .and_then(|assist| assist.placeholder)
             .ok_or_else(|| failure(format!("{:?} introduces nothing to name", op.op)))?;
-        let extracted = with_method_calls_restored(&extracted, placeholder.name, &impl_members);
-        let extracted = with_nested_references_restored(&extracted, placeholder.name, &moved);
+        let (extracted, introduced) =
+            introduced_by(placeholder, original, extracted, &impl_members, &moved)?;
 
-        let named = self.rename_placeholder(uri, &extracted, placeholder, &name)?;
-        refuse_residual_placeholder(original, &named, placeholder.name)?;
-        refuse_inferred_placeholder(&named, &format!("{} {name}", placeholder.keyword))?;
+        let named = self.rename_placeholder(uri, &extracted, &introduced, &name)?;
+        // A symbol already bearing the plan's name was not renamed, so every site of it is meant.
+        if introduced.name != name {
+            refuse_residual_placeholder(original, &named, &introduced.name)?;
+        }
+        if placeholder.declares_a_signature() {
+            refuse_inferred_placeholder(&named, &format!("{} {name}", placeholder.keyword))?;
+        }
 
         if !relocates {
             return Ok((named, Vec::new(), Vec::new()));
@@ -1859,28 +1864,23 @@ impl RustBackend {
         Ok(apply_lsp_edit(original, edits_for(&resolved, uri)?))
     }
 
-    /// Give the extracted function its real name.
+    /// Give the symbol the assist introduced its real name.
     ///
     /// The rename is asked of the server rather than performed here, so no identifier in the
-    /// result — and no reference to it anywhere else — is written by this backend.
+    /// result — and no reference to it anywhere else — is written by this backend. A symbol the
+    /// server already named as the plan asks is left as it is.
     fn rename_placeholder(
         &mut self,
         uri: &str,
         extracted: &str,
-        placeholder: Placeholder,
+        introduced: &Introduced,
         name: &str,
     ) -> Result<String> {
         self.did_change(uri, extracted)?;
-
-        let declaration = placeholder.declaration();
-        let definition = extracted
-            .find(&declaration)
-            .map(|offset| offset + placeholder.identifier_offset())
-            .ok_or_else(|| {
-                server_defect(format!(
-                    "rust-analyzer did not produce a `{declaration}` to name"
-                ))
-            })?;
+        if introduced.name == name {
+            return Ok(extracted.to_string());
+        }
+        let definition = introduced.offset;
 
         // An assist that introduces a top-level item leaves the server rebuilding the module tree,
         // and a rename that arrives first is refused outright rather than deferred.

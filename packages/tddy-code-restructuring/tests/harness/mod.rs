@@ -1066,6 +1066,32 @@ pub fn a_crate_whose_function_reads_a_borrowed_view() -> AFixtureWorkspace {
         )
 }
 
+/// A crate whose method reads one of its host's fields in the middle of an expression.
+///
+/// The shape of the port-move pilot's `refuse_unready_clone`: `self.clones` is the read an
+/// `extract_variable` hoists into a local, so that a later `extract_method` can take it as a
+/// parameter. Line 9 holds the read.
+pub fn a_crate_whose_method_reads_a_field() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A host whose method reads one of its fields.",
+                "",
+                "pub struct Host {",
+                "    clones: Vec<u32>,",
+                "}",
+                "",
+                "impl Host {",
+                "    pub fn highest(&self) -> u32 {",
+                "        self.clones.iter().copied().max().unwrap_or(0)",
+                "    }",
+                "}",
+            ]),
+        )
+}
+
 /// A crate whose build script fails, so rust-analyzer loads it without what the script generates.
 ///
 /// The shape behind E2 on the real repository, reduced: a code generator that fails inside
@@ -1363,6 +1389,41 @@ pub fn an_extract_method_of(
     an_extraction(
         RefactorKind::ExtractMethod,
         a_range_over(fixture, file, lines),
+        name,
+    )
+}
+
+/// `extract_variable` over the first occurrence of `expression` on one line, into a binding called
+/// `name`.
+///
+/// The columns are read off the fixture's own text, so the range covers the expression exactly.
+pub fn an_extract_variable_of(
+    fixture: &AFixtureWorkspace,
+    file: &str,
+    line: u32,
+    expression: &str,
+    name: &str,
+) -> RefactorOp {
+    let text = fixture.read(file);
+    let written = text
+        .split('\n')
+        .nth(line as usize - 1)
+        .unwrap_or_else(|| panic!("{file} has no line {line}"));
+    let at = written
+        .find(expression)
+        .unwrap_or_else(|| panic!("line {line} of {file} does not hold `{expression}`"));
+    let col = written[..at].chars().count() as u32 + 1;
+
+    an_extraction(
+        RefactorKind::ExtractVariable,
+        Anchor::Range {
+            file: file.to_string(),
+            start: Position { line, col },
+            end: Position {
+                line,
+                col: col + expression.chars().count() as u32,
+            },
+        },
         name,
     )
 }

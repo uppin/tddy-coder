@@ -269,6 +269,14 @@ not define is refused rather than ignored.
   operation that reported success. The operation now refuses when the placeholder occurs more often
   than it did before the assist ran, naming the lines.
 
+  **`extract_variable` has no fixed placeholder.** rust-analyzer names the binding from the
+  expression (a read of `self.clones` becomes `let clones`), so the engine finds the one `let` the
+  assist added and renames that to the plan's `name`. A `name` equal to rust-analyzer's own choice is
+  kept without a rename. The operation is refused as `rust-analyzer's answer was unusable:` only when
+  the assist introduced no `let` binding, or more than one. Two limits are rust-analyzer's: each
+  operation replaces **one** occurrence of the expression (a field read three times needs three
+  operations), and the assist decides between `&self.x` and `self.x` from the autoref it sees.
+
   The refusal names **which of two causes** it hit, because they want opposite advice. A leftover
   inside an already-extracted *module* is an ordering mistake, and the rule that avoids it entirely is:
   **extract a definition before anything that references it.** Line order and dependency order are
