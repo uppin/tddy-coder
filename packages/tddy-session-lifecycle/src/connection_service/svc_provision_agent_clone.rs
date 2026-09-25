@@ -372,23 +372,8 @@ impl DaemonSessionHost {
         agent_id: &str,
     ) -> Result<crate::session_agent_clone::AgentClone, Status> {
         let session_dir = self.session_dir_for(session_id)?;
-        let record = self
-            .session_agent_rosters
-            .entry(session_id, &session_dir, agent_id)?
-            .ok_or_else(|| {
-                Status::not_found(format!(
-                    "agent '{agent_id}' is not attached to session '{session_id}'"
-                ))
-            })?;
-        self.session_agent_clones
-            .get(session_id, &record.daemon_instance_id)
-            .ok_or_else(|| {
-                Status::failed_precondition(format!(
-                    "agent '{agent_id}' is served locally by daemon \
-                     '{}', which works the session's own worktree and has no clone",
-                    record.daemon_instance_id
-                ))
-            })
+        let state = self.agent_roster_state();
+        agent_clone_lookup::agent_clone_for(session_id, agent_id, session_dir, state)
     }
 
     /// [`LocalExecTools::hosted_clone_for`](super::LocalExecTools::hosted_clone_for) over this
@@ -412,3 +397,5 @@ impl DaemonSessionHost {
             .await
     }
 }
+
+use tddy_session_agents::agent_clone_lookup;
