@@ -236,6 +236,10 @@ delegation and port impls. The size target is **the developer's to choose** from
   - method bodies are never re-typed: they are turned into functions and moved by the engine (`extract_method`, `extract_module`, the move ops); hand edits to them stay post-move build corrections;
   - T3 is piloted first and reported before T4 and T1;
   - `authorize_exec_tool_caller` (`svc_resolve_os_user.rs`) goes with T3 into `tddy-session-agents`.
+- **After the T3 pilot** (developer, 2026-09-25):
+  - fix the engine first, test-first, one commit each: `'_` refused as an untyped placeholder; `extract_variable` expecting a `var_name` placeholder; a `return` refused where the range runs to the end of the method; the warm `check --deep` hang on a module an earlier apply created. Then re-run the T3 pilot;
+  - `tddy-model-registry` edge on `tddy-session-agents` approved (agent-def resolution);
+  - widening `AgentHostCallbacks` with the seven further host methods is **not** approved yet.
 - **Receivers were chosen by the dependency graph, not by topic name.** Four first-draft placements
   were cycles or layering breaks:
   - routing → kernel is a cycle;
