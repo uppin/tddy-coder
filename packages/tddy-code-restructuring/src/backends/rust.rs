@@ -1281,18 +1281,7 @@ impl RustBackend {
         position: &Value,
         workspace: &Workspace<'_>,
     ) -> Result<Vec<Reference>> {
-        // References answer empty rather than pending while the crate graph is still loading, so an
-        // empty answer is only worth believing once the position resolves at all.
-        self.wait_until_resolved(uri, position)?;
-
-        let references = self.request_settled(
-            "textDocument/references",
-            json!({
-                "textDocument": { "uri": uri },
-                "position": position,
-                "context": { "includeDeclaration": false }
-            }),
-        )?;
+        let references = self.references_at(uri, position)?;
 
         let mut sites = Vec::new();
         for reference in references.as_array().into_iter().flatten() {
@@ -1524,20 +1513,36 @@ impl RustBackend {
         Ok(items)
     }
 
-    /// Where the references to one item sit, relative to the range about to be relocated.
-    fn reach_of(&mut self, uri: &str, position: &Value, range: Range) -> Result<Reach> {
-        // References answer empty rather than pending while the crate graph is still loading, so an
-        // empty answer is only worth believing once the position resolves at all.
-        self.wait_until_resolved(uri, position)?;
+    /// The server's `textDocument/references` for the item at `position`, once it can be believed.
+    ///
+    /// References answer empty rather than pending while the crate graph is still loading, so an
+    /// empty answer is only worth believing once the position resolves at all — or once the server
+    /// has said it never will, because a `#[cfg]` has switched the item off. That item is still
+    /// asked about, so its empty answer is the server's own. The survey is of references under the
+    /// cfg the server evaluated, for every item alike, so this says so on the progress line rather
+    /// than presenting an unseen caller as none.
+    fn references_at(&mut self, uri: &str, position: &Value) -> Result<Value> {
+        if let readiness::Answerable::Inactive(said) = self.wait_until_answerable(uri, position)? {
+            (self.progress)(&format!(
+                "{} is inactive to rust-analyzer (\"{said}\"): only code under the cfg it \
+                 evaluated is surveyed for references to it",
+                readiness::located(uri, position)?
+            ));
+        }
 
-        let references = self.request_settled(
+        self.request_settled(
             "textDocument/references",
             json!({
                 "textDocument": { "uri": uri },
                 "position": position,
                 "context": { "includeDeclaration": false }
             }),
-        )?;
+        )
+    }
+
+    /// Where the references to one item sit, relative to the range about to be relocated.
+    fn reach_of(&mut self, uri: &str, position: &Value, range: Range) -> Result<Reach> {
+        let references = self.references_at(uri, position)?;
 
         let mut reach = Reach::default();
 

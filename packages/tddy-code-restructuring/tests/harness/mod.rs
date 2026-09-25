@@ -606,6 +606,23 @@ pub fn a_workspace_whose_origin_re_exports_what_moves_reaches() -> AFixtureWorks
 /// reads as the origin" a claim `cargo check` can settle, and it is what the destination has to
 /// gain a dependency on — while never gaining one on itself.
 pub fn a_workspace_whose_modules_reference_each_other() -> AFixtureWorkspace {
+    a_pair_whose_spawner_ends_with("")
+}
+
+/// The same pair, `spawner` also holding an item **rust-analyzer never resolves a name in**.
+///
+/// rust-analyzer sets `cfg(rust_analyzer)` and the compiler does not, so the item is inactive code to
+/// the server on every platform while `cargo check` still builds it. That is the shape of
+/// `pty_runtime.rs`'s `#[cfg(not(unix))] fn resolve_final_argv_env` on macOS: the outline lists it,
+/// and a hover on its name answers `null` however long the server has been ready.
+pub fn a_workspace_whose_moving_module_holds_code_the_server_treats_as_inactive(
+) -> AFixtureWorkspace {
+    a_pair_whose_spawner_ends_with(
+        "\n#[cfg(not(rust_analyzer))]\nfn on_other_targets() -> Limit {\n    Limit\n}\n",
+    )
+}
+
+fn a_pair_whose_spawner_ends_with(tail: &str) -> AFixtureWorkspace {
     an_empty_fixture()
         .writing(
             "Cargo.toml",
@@ -623,7 +640,10 @@ pub fn a_workspace_whose_modules_reference_each_other() -> AFixtureWorkspace {
         .writing("crates/origin/src/limits.rs", "pub struct Limit;\n")
         .writing(
             "crates/origin/src/spawner.rs",
-            "use crate::limits::Limit;\nuse crate::spawn_worker::Worker;\n\n             pub struct Spawner;\n\nimpl Spawner {\n    pub fn worker(&self) -> Worker {\n                     Worker\n    }\n\n    pub fn limit(&self) -> Limit {\n        Limit\n    }\n}\n",
+            &format!(
+                "{}{tail}",
+                "use crate::limits::Limit;\nuse crate::spawn_worker::Worker;\n\n             pub struct Spawner;\n\nimpl Spawner {\n    pub fn worker(&self) -> Worker {\n                     Worker\n    }\n\n    pub fn limit(&self) -> Limit {\n        Limit\n    }\n}\n"
+            ),
         )
         .writing(
             "crates/origin/src/spawn_worker.rs",
@@ -733,10 +753,15 @@ pub fn a_move_of_the_host_registry(
 
 /// Renaming a symbol the module declares, which another file in the crate reaches.
 pub fn a_rename_of(symbol: &str, to: &str) -> RefactorOp {
+    a_rename_in("crates/origin/src/host_registry.rs", symbol, to)
+}
+
+/// Renaming a symbol declared in `file`.
+pub fn a_rename_in(file: &str, symbol: &str, to: &str) -> RefactorOp {
     RefactorOp {
         op: RefactorKind::RenameSymbol,
         anchor: Anchor::Symbol {
-            file: "crates/origin/src/host_registry.rs".to_string(),
+            file: file.to_string(),
             path: symbol.to_string(),
         },
         name: Some(to.to_string()),

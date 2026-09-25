@@ -17,7 +17,9 @@
 mod harness;
 
 use harness::{
-    a_cluster_move_of, a_workspace_whose_modules_reference_each_other, assert_compiles, performing,
+    a_cluster_move_of, a_rename_in, a_workspace_whose_modules_reference_each_other,
+    a_workspace_whose_moving_module_holds_code_the_server_treats_as_inactive, assert_compiles,
+    performing, refusal_from,
 };
 
 const SPAWNER: &str = "crates/origin/src/spawner.rs";
@@ -98,4 +100,66 @@ async fn reads_a_co_moving_sibling_in_the_destination_and_one_left_behind_in_the
         "the destination was made to depend on itself:\n{manifest}"
     );
     assert_compiles(&workspace);
+}
+
+/// A member holding code rust-analyzer treats as inactive still moves, and the wait for it ends.
+///
+/// The caller survey waits, per item, for a hover on the item's name before it believes an empty
+/// reference set. On an item under a `#[cfg]` the server has switched off, that hover is `null`
+/// forever, so `check --deep` of lifecycle plan 02a (`pty_runtime`, whose
+/// `#[cfg(not(unix))] fn resolve_final_argv_env` is inactive on macOS) waited until it was killed.
+/// The server does answer for such an item: its pull diagnostics report the code as inactive,
+/// and inactive code names nothing and is named by nothing the server can see.
+///
+/// Guarded by the harness: it cancels every wait after `A_WAIT_A_TEST_CAN_OUTLAST`. Before the fix,
+/// this test ends there, on "rust-analyzer had not finished indexing", rather than hanging.
+#[tokio::test(flavor = "multi_thread")]
+async fn relocates_a_member_holding_code_the_server_treats_as_inactive() {
+    // Given
+    let workspace = a_workspace_whose_moving_module_holds_code_the_server_treats_as_inactive();
+
+    // When
+    performing(
+        &workspace,
+        a_cluster_move_of(&["spawner", "spawn_worker"], None),
+    )
+    .await;
+
+    // Then
+    assert!(
+        workspace
+            .read(SPAWNER_MOVED_TO)
+            .contains("#[cfg(not(rust_analyzer))]\nfn on_other_targets() -> Limit {"),
+        "the inactive item did not move with its module"
+    );
+    assert_compiles(&workspace);
+}
+
+/// Asked to act *at* inactive code, the operation refuses by name instead of waiting.
+///
+/// A rename there has nothing to resolve: rust-analyzer reports the code as inactive, and waiting
+/// would only have run until the caller gave up, then reported that as a slow index.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_to_rename_a_symbol_the_server_treats_as_inactive() {
+    // Given
+    let workspace = a_workspace_whose_moving_module_holds_code_the_server_treats_as_inactive();
+
+    // When
+    let refusal = refusal_from(
+        &workspace,
+        a_rename_in(SPAWNER, "on_other_targets", "elsewhere"),
+    )
+    .await;
+
+    // Then
+    assert_eq!(
+        refusal,
+        format!(
+            "this seam cannot be cut here: {}:17 is code rust-analyzer treats as inactive \
+             (\"code is inactive due to #[cfg] directives: rust_analyzer is enabled\"), so it \
+             resolves nothing there. Run against a server configured with the cfg that activates \
+             it, or leave that code out of the operation.",
+            workspace.path().join(SPAWNER).display()
+        )
+    );
 }

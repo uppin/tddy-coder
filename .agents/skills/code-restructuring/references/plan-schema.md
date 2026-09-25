@@ -139,6 +139,16 @@ not define is refused rather than ignored.
   says so only through its `experimental/serverStatus` health; any health but `ok` — `warning`
   included — refuses the run as `rust-analyzer's answer was unusable:`, quoting the server's message.
   This holds against a warm `tddy-index-daemon` too.
+- **Code rust-analyzer treats as inactive ends a wait instead of stalling it.** An item under a
+  `#[cfg]` the server has switched off (`#[cfg(not(unix))]` on macOS) is listed in the outline but
+  never resolves: a hover on its name is `null` however long the index has been ready, which is how
+  lifecycle plan 02a's `check --deep` ran until it was killed. Once the index is loaded, a `null`
+  hover is checked against the server's pull diagnostics, and an `inactive-code` diagnostic there
+  ends the wait. A caller survey (`move_module_to_crate`, `move_cluster_to_crate`, the
+  `extract_module` reach) still asks for the item's references, takes the server's empty answer and
+  says so on the progress line. Every item's callers are surveyed only under the cfg the server
+  evaluated, so a caller inside inactive code elsewhere is not re-pointed. An operation acting *at*
+  such code, such as a rename, is refused as `this seam cannot be cut here:`, naming the line.
 - **`extract_module` restores the imports its own assist loses, and refuses when it cannot.** The
   items move out of the scope of the file's `use` declarations, so the backend asks rust-analyzer for
   an import at each name left unresolved. Where the server offers several paths for one name, the
