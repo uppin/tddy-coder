@@ -1,0 +1,5 @@
+{"v":1,"snapshot":{}}
+{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/session_list_enrichment.rs","path":"session_list_enrichment"},"to":"packages/tddy-session-activity","reexport":"glob"}
+{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/session_notifications.rs","path":"session_notifications"},"to":"packages/tddy-session-activity","reexport":"glob"}
+{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/session_deletion.rs","path":"session_deletion"},"to":"packages/tddy-session-activity","reexport":"glob"}
+{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/workspace_session.rs","path":"workspace_session"},"to":"packages/tddy-session-activity","reexport":"glob"}

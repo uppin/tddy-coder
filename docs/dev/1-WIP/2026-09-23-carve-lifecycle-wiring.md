@@ -330,6 +330,48 @@ same 22 by name.
 | Clippy `-D warnings`, `cargo fmt` | clean on terminal-rpc and lifecycle |
 | Tests | terminal-rpc 63 passed (55 + the 8 inline tests that moved: 6 in `pty_runtime`, 2 in `tddy_user_config`); lifecycle 607 passed, 22 failed, 1 ignored (615 − 8), the same 22 by name |
 
+#### Move 3 (T5b): session catalog, daemon half → `tddy-session-activity`: **stopped, wrong premise**
+
+Plan `03a-session-catalog-daemon-half-to-session-activity.jsonl`. It has four `move_module_to_crate`
+ops, not a cluster, because the four modules reference each other one way only
+(`session_notifications` → `session_list_enrichment`, which is ordered first). The plain `check`
+gate refused it:
+
+```text
+2: `packages/tddy-session-lifecycle/src/session_deletion.rs`, which operation 2 moves to `packages/tddy-session-activity`, names `tddy_session_lifecycle::session_reader::is_pid_alive`, which stays behind in `packages/tddy-session-lifecycle`. So the destination would depend on the crate it left, while the facade it leaves there names the destination: a cycle `apply` refuses. Move them in one `move_cluster_to_crate`, with this module as its anchor and what those paths reach in `also`, or leave `session_deletion` where it is
+```
+
+T5b is **not a leaf**, and none of the four modules can move on its own terms:
+
+| Module | Blocker | Kind |
+|---|---|---|
+| `session_deletion` | `use crate::session_reader::is_pid_alive;`. `session_reader` is T5a, bound for `tddy-session-catalog`. Taking it along moves T5a into the wrong receiver, and sending it to catalog first adds an activity → catalog edge the changeset does not name | cycle (engine finding) |
+| `workspace_session` | body paths `crate::connection_service::{find_registered_project, project_repo_root, starting_session_metadata}`: the host's `service_util`, all three `pub(crate)` | cycle and private path. **`check --deep` did not see it** ([todo](../todo/2026-09-25-restructure-check-misses-a-body-path-to-a-module-staying-behind.md)) |
+| `session_notifications` | `tddy-session-activity` **already has** a `session_notifications` module (403 lines, `#unbundle` node 7's half), and lifecycle's 96-line half globs it back in. Moving it is a merge, which no operation performs | name collision. **`check --deep` did not see it** ([todo](../todo/2026-09-25-restructure-check-misses-a-module-name-the-destination-already-has.md)) |
+| `session_list_enrichment` | movable in isolation, but it needs edges the changeset does not name for T5b: `tddy-session-files` (`session_context_docs`; its tests use `session_attachments`), and **`chrono`**, a new external dependency for activity. Its tests add `tddy-workflow` and `tempfile` | unnamed edges |
+
+The other edges T5b needs are named or existing: `tddy-daemon-sandbox`, `tddy-daemon-livekit` and
+`tddy-telegram` (checked: none reaches `tddy-session-activity`), `tddy-worktree-service`, and
+`tddy-projects` (`project_storage`), which is not named either. A diagnostic `check --deep` without
+`session_deletion` reported `no findings`. Nothing was applied.
+
+**What it would take** (the developer's call): `service_util` moved down first (it is already part
+of the ~3.4k target), which unblocks `workspace_session`; T5a into catalog first plus an approved
+activity → catalog edge, or `is_pid_alive` moved to the kernel; lifecycle's `session_notifications`
+half kept as wiring or merged by hand (a manual write, which the engine-only rule forbids); and the
+edges to `tddy-session-files`, `tddy-projects` and `chrono` approved.
+
+#### Move 4 (T10): presenter observation → `tddy-session-activity`: **not run, depends on T5b**
+
+`presenter_observer_task` imports `crate::session_notifications::{notification_for_presenter_event,
+SessionNotificationPublishing}`. The first is activity's own, re-exported through lifecycle's glob.
+The second is defined in lifecycle's half and stays behind with T5b. The static `check` of the existing
+`03-…` plan reports it as `names tddy_session_lifecycle::session_notifications::{, which stays
+behind`. The `::{` quote is cosmetic: a grouped `use` printed unexpanded. The finding itself is
+correct, and it is the blocker. T10 also needs **`tonic`** on `tddy-session-activity` (both files
+use `tonic::transport::Endpoint`), which is not approved. `03b-…` was not written and `03-…` was
+kept.
+
 ## TODO
 
 - [x] Phase 2 design checked against the dependency graph
