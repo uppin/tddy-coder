@@ -492,6 +492,43 @@ among them), and names `SessionNotificationPublishing` only in its module doc (`
 move while that type stays behind. Per the instruction, nothing was redesigned around it.
 `presenter_intent_client` names nothing in lifecycle, but it is only half of the cluster.
 
+### Fourth move run (2026-09-25: T5a + T5b, then T7, then T8)
+
+Every restructure command ran against this worktree's warm index daemon (pid 72639). Line counts use
+the same counter as the previous runs, which reads HEAD's lifecycle as 21,821.
+
+`target/` was deleted during the run (to free disk). The half-finished baseline was discarded. After
+the deletion finished, `./test`'s prebuild set and `tddy-index-daemon` were rebuilt, and the baseline
+was re-run from scratch.
+
+**Baselines on HEAD `8f0d9302`:**
+- Lifecycle: **607 passed, 22 failed, 1 ignored**, the same 22 by name (5 `sandbox_behavior_acceptance`,
+  5 `sandboxed_claude_cli_acceptance`, 4 `sandboxed_cursor_cli_acceptance`, 2
+  `sandboxed_session_lifecycle_acceptance`, 6 `session_sync_livekit_acceptance`). The flaky
+  session-room test passed.
+- `tddy-session-activity`: no tests.
+- `tddy-daemon-livekit`: 174 passed.
+- `tddy-session-files`: 160 passed.
+
+#### Move 1 (T5a + T5b): session catalog → `tddy-session-activity`
+
+| Measure | Result |
+|---|---|
+| Plan | `03b-session-catalog-daemon-half-to-session-activity.jsonl`, reworked. One `move_cluster_to_crate` (`session_deletion`, `session_reader`, `user_sessions_path`, `session_list_enrichment`; `reexport: glob`), then `move_test_binary_to_crate` for `tests/worktree_removal_eligibility.rs`. `03a-…` (T5a → catalog) was **deleted**, because the "After the third move run" decision makes it wrong |
+| Blind-spot read before apply | No body path reaches a module that stays behind. `session_list_enrichment`'s body paths `crate::elicitation::…` and `crate::session_context_docs::…` are facades over `tddy-telegram` and `tddy-session-files`. No module name collides: activity has `service`, `session_notification_subscribers`, `session_notifications` and `streams` |
+| Kernel callers | `tddy-daemon-kernel/src/user_paths.rs` and `lib.rs` mention `user_sessions_path` in comments only. The kernel's own module is `user_paths`, so nothing collides and there is no kernel → activity need |
+| Engine | plain `check`: no findings. `check --deep`: no findings (2.4s, warm). Dry run: 2 of 2 resolved (11 and 3 files). `apply`: 2 of 2 applied, then **the tree no longer compiles** (18 errors in activity's lib) |
+| What the engine did right | re-pointed the top-level `use crate::project_storage`/`worktrees`/`session_context_docs` lines to `tddy_projects`, `tddy_worktree_service` and `tddy_session_files`; kept `crate::session_reader::is_pid_alive` for the co-moving module; added `chrono`, `tddy-projects` and `tddy-session-files` to activity |
+| Hand fixes | **Manifest:** activity gains `tddy-daemon-sandbox`, `tddy-daemon-livekit` (named only in body paths: [existing cause](../todo/2026-09-25-restructure-move-to-crate-misses-a-crate-named-only-in-a-body-path.md)), `libc` under `[target.'cfg(unix)'.dependencies]` as in lifecycle (registry crate, documented limitation), and dev `tddy-workflow` and `tempfile`. The engine's dev edge `tddy-session-lifecycle` was removed ([existing cause](../todo/2026-09-25-restructure-test-binary-move-cannot-see-through-a-glob-facade.md)). **Qualification:** `crate::elicitation::` → `tddy_telegram::elicitation::` (×2), and `crate::session_context_docs::` → `tddy_session_files::session_context_docs::` in bodies (documented limitation). **`use` lines:** the two `use crate::…` inside `session_list_enrichment`'s `mod tests` → `tddy_session_files::…` ([**new cause**](../todo/2026-09-25-restructure-move-to-crate-skips-the-use-lines-of-the-moved-files-test-module.md)), and the moved test binary's `use tddy_session_lifecycle::session_deletion::…` → `tddy_session_activity::…`. **Visibility:** `session_deletion::signal_pid` `pub(crate)` → `pub`, since lifecycle's `cli_session_manager/terminals.rs` calls it ([existing cause](../todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md), item 3). `is_pid_alive` needed no widening: both its callers moved. **Facade:** the four identical `pub use tddy_session_activity::*;` became one named `pub use tddy_session_activity::{session_deletion, session_list_enrichment, session_reader, user_sessions_path};` ([existing cause](../todo/2026-09-25-restructure-glob-facade-re-exports-a-name-the-origin-shadows.md)) |
+| Facade | the named `pub use` above, in lifecycle's `lib.rs` |
+| New edges | activity → `tddy-session-files`, `tddy-projects`, `chrono`, `libc`, `tddy-daemon-sandbox`, `tddy-daemon-livekit`; dev `tddy-workflow`, `tempfile`. All approved; `tddy-session-catalog` was not needed. `tddy-daemon-kernel`, `tddy-worktree-service`, `tddy-core` and `anyhow` were already activity's. No cycle: `cargo tree -i tddy-session-activity -e normal` lists only lifecycle, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-desktop` and `tddy-telegram-control`. Activity has no path to lifecycle, normal or dev |
+| Consumers edited | none. No test reads lifecycle source by path for these files (`tddy-daemon/tests/test_placement.rs` and `unbundle_endpoint.rs` name `user_sessions_path.rs` under **`tddy-daemon/src`**) |
+| Production lines | lifecycle 21,821 → **20,861**; activity 1,573 → 2,541 |
+| `restructure verify --against HEAD` | 397,648 → 397,654 statements. The 5 lost and 11 gained are exactly the hand fixes above (3 qualifications, 1 widening, the named facade and its comment) and fmt's re-wrapping of the lengthened calls |
+| `cargo check --all-targets` | clean on lifecycle, activity, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, `tddy-worktree-service` (its `branch_owner_unit` test names `tddy_session_lifecycle::session_reader`) and `tddy-daemon-kernel` |
+| Clippy `-D warnings`, `cargo fmt` | clean on activity and lifecycle |
+| Tests | activity **45 passed** (40 inline: 12 `session_deletion`, 27 `session_list_enrichment`, 1 `session_reader`; plus 5 `worktree_removal_eligibility`); lifecycle **562 passed, 22 failed, 1 ignored** (607 − 45), the same 22 by name. `acceptance_daemon.rs` stays in lifecycle: it mostly tests the kernel's `DaemonConfig` and reaches `session_reader` through the facade |
+
 ## TODO
 
 - [x] Phase 2 design checked against the dependency graph

@@ -10,9 +10,9 @@ use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::Status;
 
-use crate::project_storage;
 use crate::session_reader::is_pid_alive;
-use crate::worktrees;
+use tddy_projects::project_storage;
+use tddy_worktree_service::worktrees;
 
 /// Pure: does `worktree` sit under the daemon's managed worktree layout?
 ///
@@ -91,7 +91,7 @@ pub fn resolve_session_directory_for_delete(
 }
 
 #[cfg(unix)]
-pub(crate) fn signal_pid(pid: i32, sig: libc::c_int) -> Result<(), Status> {
+pub fn signal_pid(pid: i32, sig: libc::c_int) -> Result<(), Status> {
     let ret = unsafe { libc::kill(pid, sig) };
     if ret == 0 {
         return Ok(());

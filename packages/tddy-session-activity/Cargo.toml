@@ -46,7 +46,17 @@ prost = "0.13"
 serde_json = "1"
 # `ReportAgentActivity` mints the `call_id` a PreToolUse row is paired to its PostToolUse row by.
 uuid = { version = "1", features = ["v4", "v7"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+tddy-projects = { path = "../tddy-projects" }
+tddy-session-files = { path = "../tddy-session-files" }
+tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
+tddy-workflow = { path = "../tddy-workflow" }
+tempfile = "3"

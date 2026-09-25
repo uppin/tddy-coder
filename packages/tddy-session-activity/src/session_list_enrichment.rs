@@ -23,7 +23,7 @@ use tddy_service::proto::session::{
     SessionContextDocKind as ProtoContextDocKind, SessionEntry as ProtoSessionEntry,
 };
 
-use crate::session_context_docs::ContextDocKind;
+use tddy_session_files::session_context_docs::ContextDocKind;
 
 /// Display strings aligned with the TUI status bar (goal, state, elapsed, agent, model).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -302,21 +302,23 @@ pub fn apply_session_list_status_to_proto(
     entry.stack_plan_json = status.stack_plan_json;
     entry.branch = status.branch;
     entry.pending_elicitation =
-        crate::elicitation::pending_elicitation_for_session_dir(session_dir);
-    entry.context_docs =
-        crate::session_context_docs::context_docs_for_session(&status.recipe, session_dir)
-            .into_iter()
-            .map(|doc| tddy_service::proto::session::SessionContextDoc {
-                key: doc.key,
-                basename: doc.basename,
-                path: doc.path.to_string_lossy().into_owned(),
-                relative_path: doc.relative_path,
-                description: doc.description,
-                exists: doc.exists,
-                kind: proto_context_doc_kind(doc.kind) as i32,
-                size_bytes: doc.size_bytes,
-            })
-            .collect();
+        tddy_telegram::elicitation::pending_elicitation_for_session_dir(session_dir);
+    entry.context_docs = tddy_session_files::session_context_docs::context_docs_for_session(
+        &status.recipe,
+        session_dir,
+    )
+    .into_iter()
+    .map(|doc| tddy_service::proto::session::SessionContextDoc {
+        key: doc.key,
+        basename: doc.basename,
+        path: doc.path.to_string_lossy().into_owned(),
+        relative_path: doc.relative_path,
+        description: doc.description,
+        exists: doc.exists,
+        kind: proto_context_doc_kind(doc.kind) as i32,
+        size_bytes: doc.size_bytes,
+    })
+    .collect();
     entry.recipe = status.recipe;
     Ok(())
 }
@@ -935,7 +937,7 @@ sessions:
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(
-            crate::elicitation::pending_elicitation_for_session_dir(&session_dir),
+            tddy_telegram::elicitation::pending_elicitation_for_session_dir(&session_dir),
             "pending_elicitation in .session.yaml must map to the Connection list flag"
         );
     }
@@ -1420,11 +1422,11 @@ recipe: pr-stack
     // Acceptance tests: attachments on context_docs
     // ---------------------------------------------------------------------------
 
-    use crate::session_attachments::copy_attachment_into_session;
-    use crate::session_context_docs::ATTACHMENT_DOC_DESCRIPTION;
     use tddy_service::proto::session::{
         SessionContextDoc as ProtoContextDoc, SessionContextDocKind,
     };
+    use tddy_session_files::session_attachments::copy_attachment_into_session;
+    use tddy_session_files::session_context_docs::ATTACHMENT_DOC_DESCRIPTION;
     use tddy_workflow::session_attachments_root;
     use tempfile::TempDir;
 

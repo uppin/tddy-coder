@@ -18,9 +18,13 @@
 //! the crate that stamps the ticks.
 
 pub mod service;
+pub mod session_deletion;
+pub mod session_list_enrichment;
 pub mod session_notification_subscribers;
 pub mod session_notifications;
+pub mod session_reader;
 pub mod streams;
+pub mod user_sessions_path;
 
 pub use service::{
     ActivityPorts, ActivityServiceImpl, DeltaLookup, DeltaScope, MeasuredDelta, OsUserResolver,

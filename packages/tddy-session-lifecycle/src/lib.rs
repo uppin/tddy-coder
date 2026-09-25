@@ -118,17 +118,20 @@ pub use tddy_session_agents::{
     session_agent_inference, session_agent_roster, session_agent_status,
 };
 pub mod remote_git_pack_execution;
-pub mod session_deletion;
-pub mod session_list_enrichment;
 /// The stream subscriber `tddy-web` reads, which moved to `tddy-session-activity` with `#unbundle`
 /// node 7 and is still reached as `crate::session_notification_subscribers::X`. The Telegram
 /// subscriber that used to sit beside it left with the control plane for `tddy-telegram-control`.
 pub use tddy_session_activity::session_notification_subscribers;
+/// The session catalog's daemon side — listing with enrichment, reading and deletion — which now
+/// lives in `tddy-session-activity`. Named one by one, not globbed, for the reason the facades above
+/// give; every module keeps its name, so `crate::session_reader::X` goes on resolving here.
+pub use tddy_session_activity::{
+    session_deletion, session_list_enrichment, session_reader, user_sessions_path,
+};
 /// A session's display label and the publish context built on it, plus a re-export of the
 /// notification bus, its event and its subscriber trait, which moved to `tddy-session-activity`
 /// with `#unbundle` node 7. All are reached as `crate::session_notifications::X`, as before.
 pub mod session_notifications;
-pub mod session_reader;
 pub mod session_toolcall;
 pub mod split_session;
 pub use tddy_telegram::telegram_github_link;
@@ -139,7 +142,6 @@ pub mod pr_stack_rpc;
 pub use pr_stack_rpc::{build_pr_stack_entry, PrStackHandler, PrStackServiceImpl};
 pub mod rpc_families;
 pub use rpc_families::DaemonRpcFamilies;
-pub mod user_sessions_path;
 pub mod workspace_session;
 
 // Re-export the shared tool engine so legacy `crate::tool_engine::...` references inside the
