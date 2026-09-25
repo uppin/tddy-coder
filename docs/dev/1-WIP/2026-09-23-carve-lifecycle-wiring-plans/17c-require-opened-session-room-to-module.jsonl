@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_ensure_session_room_for_agents.rs","start":{"line":415,"col":1},"end":{"line":434,"col":2}},"name":"opened_session_room","reexport":"glob","to_file":true}

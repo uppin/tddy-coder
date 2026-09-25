@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"extract_variable","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_ensure_session_room_for_agents.rs","start":{"line":42,"col":15},"end":{"line":44,"col":20}},"name":"opened"}

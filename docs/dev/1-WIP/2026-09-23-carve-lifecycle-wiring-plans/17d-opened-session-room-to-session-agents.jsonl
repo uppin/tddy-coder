@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/connection_service/svc_ensure_session_room_for_agents/opened_session_room.rs","path":"opened_session_room"},"to":"packages/tddy-session-agents","reexport":"glob"}
