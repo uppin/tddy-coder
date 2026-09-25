@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/connection_service/svc_resolve_listed_worktree/spawn_agent_def.rs","path":"spawn_agent_def"},"to":"packages/tddy-session-agents","reexport":"glob"}

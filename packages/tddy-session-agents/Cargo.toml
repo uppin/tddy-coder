@@ -21,6 +21,9 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 # `LiveAgentRoster`, node 5's — the roster as a *client* process sees it.
 tddy-discovery = { path = "../tddy-discovery" }
+# `ModelRegistryStore` and `registry_agent_def_with_credential`: a registry assistant is an agent def
+# like a `<tddyhome>/agents` one, and `spawn_agent_def` resolves a session's agent against both.
+tddy-model-registry = { path = "../tddy-model-registry" }
 # The session room the clone mirror joins: `RpcClient` for the calls it makes back to the
 # facilitating daemon, `BroadcastChannel` for the activity it watches, `TokenGenerator` for the
 # self-mint fallback.

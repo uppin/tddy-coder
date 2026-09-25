@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_resolve_listed_worktree.rs","start":{"line":289,"col":1},"end":{"line":305,"col":2}},"name":"spawn_agent_def","reexport":"glob","to_file":true}

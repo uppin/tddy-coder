@@ -13216,6 +13216,7 @@ dependencies = [
  "tddy-daemon-livekit",
  "tddy-discovery",
  "tddy-livekit",
+ "tddy-model-registry",
  "tddy-rpc",
  "tddy-service",
  "tddy-session-sync",

@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"extract_variable","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_resolve_listed_worktree.rs","start":{"line":186,"col":34},"end":{"line":186,"col":53}},"name":"model_registry"}
