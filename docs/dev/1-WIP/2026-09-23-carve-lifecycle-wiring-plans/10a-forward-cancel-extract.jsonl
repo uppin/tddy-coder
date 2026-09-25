@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_turn_end_reporter.rs","start":{"line":27,"col":9},"end":{"line":43,"col":15}},"name":"forward_cancel_agent_conversation"}

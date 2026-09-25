@@ -8,8 +8,6 @@ use crate::{
     connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
 };
 
-use tddy_service::proto::session_agents_svc::CancelAgentConversationRequest;
-
 use tddy_rpc::Status;
 
 use super::DaemonSessionHost;
@@ -24,23 +22,14 @@ impl DaemonSessionHost {
         conversation_id: &str,
     ) -> Result<(), Status> {
         let slot = self.common_room_slot("CancelAgentConversation")?;
-        crate::livekit_peer_discovery::forward_to_peer(
-            slot,
+        conversation_cancel_forward::forward_cancel_agent_conversation(
+            session_token,
+            session_id,
             daemon_instance_id,
-            tddy_session_agents::SERVICE_NAME,
-            "CancelAgentConversation",
-            CancelAgentConversationRequest {
-                // The detaching caller's own token: the peer authenticates a cancel exactly as it
-                // authenticated the open, and this daemon holds no other credential to present.
-                session_token: session_token.to_string(),
-                session_id: session_id.to_string(),
-                daemon_instance_id: daemon_instance_id.to_string(),
-                conversation_id: conversation_id.to_string(),
-            }
-            .encode_to_vec(),
+            conversation_id,
+            slot,
         )
-        .await?;
-        Ok(())
+        .await
     }
 
     /// The roster entry a qualified `agent_id` attaches as.
@@ -163,5 +152,7 @@ impl DaemonSessionHost {
         })
     }
 }
+
+use tddy_session_agents::conversation_cancel_forward;
 
 mod jail_env_builders;
