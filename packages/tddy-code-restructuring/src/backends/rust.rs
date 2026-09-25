@@ -3057,10 +3057,23 @@ fn refuse_inferred_placeholder(text: &str, declaration: &str) -> Result<()> {
 /// Whether a declaration line carries `_` where a type belongs.
 ///
 /// Tokenised on identifier boundaries, so `fun_name` and `var_name` — which contain an underscore but
-/// are not one — do not register.
+/// are not one — do not register. A `_` straight after `'` is the elided lifetime `'_`, which is legal
+/// in a signature and is what rust-analyzer writes for a borrowed view (`state: RosterState<'_>`).
 fn carries_placeholder_type(line: &str) -> bool {
-    line.split(|character: char| !is_identifier_char(character))
-        .any(|token| token == "_")
+    let mut previous = None;
+    let mut token = String::new();
+    for character in line.chars().chain(std::iter::once(' ')) {
+        if is_identifier_char(character) {
+            token.push(character);
+            continue;
+        }
+        if token == "_" && previous != Some('\'') {
+            return true;
+        }
+        previous = Some(character);
+        token.clear();
+    }
+    false
 }
 
 /// Refuse a result the placeholder survived into.
@@ -5272,6 +5285,43 @@ mod tests {
         assert!(carries_placeholder_type("fn f() -> _ {"));
         assert!(carries_placeholder_type("fn f(value: _) -> f64 {"));
         assert!(carries_placeholder_type("fn f() -> Vec<_> {"));
+        assert!(carries_placeholder_type("fn f(s: _) {"));
+        assert!(carries_placeholder_type("fn f() -> (_, _) {"));
+    }
+
+    /// `'_` is an elided lifetime, legal in a parameter's type, and the signature rust-analyzer
+    /// writes for a borrowed view (`state: AgentRosterState<'_>`) — not an untyped `_`.
+    #[test]
+    fn reads_no_placeholder_type_out_of_an_elided_lifetime() {
+        assert!(!carries_placeholder_type(
+            "fn f(state: AgentRosterState<'_>) -> Result<(), Status> {"
+        ));
+        assert!(!carries_placeholder_type("fn f(s: &'_ str) {"));
+    }
+
+    /// An elided lifetime beside a real placeholder hides nothing: the `_` that is a type is still
+    /// read as one.
+    #[test]
+    fn reads_a_placeholder_type_beside_an_elided_lifetime() {
+        assert!(carries_placeholder_type(
+            "fn f(state: AgentRosterState<'_>, value: _) {"
+        ));
+        assert!(carries_placeholder_type("fn f(s: &'_ str) -> Vec<_> {"));
+    }
+
+    /// The signature the port-move pilot's cold `check --deep` refused, whose every type was
+    /// inferred.
+    #[test]
+    fn accepts_a_signature_borrowing_a_view_through_an_elided_lifetime() {
+        // Given
+        let text = "fn agent_clone_for(session_id: &str, agent_id: &str, session_dir: PathBuf, \
+                    state: tddy_session_agents::AgentRosterState<'_>) -> Result<AgentClone, Status> {\n";
+
+        // When
+        let checked = refuse_inferred_placeholder(text, "fn agent_clone_for");
+
+        // Then
+        assert!(checked.is_ok(), "{checked:?}");
     }
 
     // ---- D8: an alias the parent binds ----

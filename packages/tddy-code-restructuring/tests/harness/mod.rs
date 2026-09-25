@@ -1031,6 +1031,41 @@ pub fn a_crate_whose_request_type_a_slow_build_script_generates() -> AFixtureWor
         )
 }
 
+/// A crate whose function lends its state as a **borrowed view**, `Roster<'a>`, and reads it in its
+/// tail.
+///
+/// The shape of the port-move pilot's `DaemonSessionHost::agent_clone_for`: the host builds a view
+/// of its fields and the statements after it read `roster.<field>`. Extracted, the view is a
+/// parameter, and rust-analyzer writes its type with the lifetime elided: `roster: Roster<'_>`.
+///
+/// Lines 14–15 are the tail that reads the view.
+pub fn a_crate_whose_function_reads_a_borrowed_view() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A host that lends its fields as a borrowed view.",
+                "",
+                "pub struct Roster<'a> {",
+                "    pub levels: &'a [u32],",
+                "}",
+                "",
+                "pub struct Host {",
+                "    levels: Vec<u32>,",
+                "}",
+                "",
+                "impl Host {",
+                "    pub fn highest(&self, floor: u32) -> u32 {",
+                "        let roster = Roster { levels: &self.levels };",
+                "        let above = roster.levels.iter().filter(|level| **level > floor).count() as u32;",
+                "        above + floor",
+                "    }",
+                "}",
+            ]),
+        )
+}
+
 /// A crate whose build script fails, so rust-analyzer loads it without what the script generates.
 ///
 /// The shape behind E2 on the real repository, reduced: a code generator that fails inside

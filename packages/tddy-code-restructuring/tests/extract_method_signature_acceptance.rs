@@ -17,12 +17,43 @@ mod harness;
 use std::ops::RangeInclusive;
 
 use harness::{
+    a_crate_whose_function_reads_a_borrowed_view,
     a_crate_whose_request_type_a_slow_build_script_generates, an_extract_method_of,
     assert_compiles, performing, ORIGIN_LIB,
 };
 
 /// `let session = req.session_id * 2; let resumed = …;`: statements reading the generated request.
 const STATEMENTS_READING_THE_REQUEST: RangeInclusive<u32> = 10..=11;
+
+/// `let above = roster.levels…; above + floor`: the tail that reads the borrowed view.
+const THE_TAIL_READING_THE_VIEW: RangeInclusive<u32> = 14..=15;
+
+/// An elided lifetime is a type rust-analyzer inferred, not one it left as `_`.
+///
+/// The port-move pilot's cold `check --deep` was refused with `state: AgentRosterState<'_>` in the
+/// signature, read as an untyped placeholder (`E0121`) with advice to retry against a warm server.
+#[tokio::test(flavor = "multi_thread")]
+async fn names_a_parameter_whose_type_borrows_through_an_elided_lifetime() {
+    // Given
+    let workspace = a_crate_whose_function_reads_a_borrowed_view();
+    let tail = an_extract_method_of(
+        &workspace,
+        ORIGIN_LIB,
+        THE_TAIL_READING_THE_VIEW,
+        "count_above",
+    );
+
+    // When
+    performing(&workspace, tail).await;
+
+    // Then
+    let lib = workspace.read(ORIGIN_LIB);
+    assert!(
+        lib.contains("fn count_above(floor: u32, roster: Roster<'_>) -> u32 {"),
+        "the extracted signature does not borrow the view through `'_`:\n{lib}"
+    );
+    assert_compiles(&workspace);
+}
 
 /// The request type is named in the signature, not left as `_`.
 ///

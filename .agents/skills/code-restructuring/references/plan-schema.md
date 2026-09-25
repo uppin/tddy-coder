@@ -148,6 +148,10 @@ not define is refused rather than ignored.
   says so only through its `experimental/serverStatus` health; any health but `ok` — `warning`
   included — refuses the run as `rust-analyzer's answer was unusable:`, quoting the server's message.
   This holds against a warm `tddy-index-daemon` too.
+- **An extracted signature holding an untyped `_` is refused.** rust-analyzer writes `_` for a type
+  it has not inferred (`x: _`, `-> Vec<_>`, `-> (_, _)`), which is `E0121` in an item signature. The
+  elided lifetime `'_` is not one: `state: RosterState<'_>`, a borrowed view passed as a parameter, is
+  accepted.
 - **Code rust-analyzer treats as inactive ends a wait instead of stalling it.** An item under a
   `#[cfg]` the server has switched off (`#[cfg(not(unix))]` on macOS) is listed in the outline but
   never resolves: a hover on its name is `null` however long the index has been ready, which is how
