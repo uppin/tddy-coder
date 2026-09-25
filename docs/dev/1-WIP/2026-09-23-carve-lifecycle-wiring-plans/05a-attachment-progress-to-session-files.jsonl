@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{}}
+{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/connection_service/attachment_progress.rs","path":"attachment_progress"},"to":"packages/tddy-session-files","reexport":"glob"}

@@ -275,8 +275,7 @@ mod conversation_spawn_handler;
 mod roster_replacement;
 pub use roster_replacement::*;
 
-mod attachment_progress;
-pub(crate) use attachment_progress::*;
+pub(crate) use tddy_session_files::attachment_progress::*;
 
 mod placement;
 pub use placement::*;

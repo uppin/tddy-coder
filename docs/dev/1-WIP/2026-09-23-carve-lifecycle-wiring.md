@@ -565,6 +565,52 @@ So the split the file needs first is: `extract_module` for `resolve_os_user` and
 | Clippy `-D warnings`, `cargo fmt` | clean on livekit and lifecycle |
 | Tests | livekit **174 passed** (as on HEAD; nothing moved with the code); lifecycle **562 passed, 22 failed, 1 ignored**, the same 22 by name |
 
+#### Move 3 (T8): attachments → `tddy-session-files`: the progress types moved, the rest is a wrong premise
+
+The ~919 lines State B counts for T8 are these:
+
+| File | Production | Verdict |
+|---|---:|---|
+| `connection_service/attachment_progress.rs` | 115 | **moved**: `AttachmentProgressSink`, `AttachmentProgressReporter`, `AttachmentMaterialization`, `cleanup_materialized_attachments`, `attachment_size_bytes`. All free of the host |
+| `connection_service/svc_materialize_staged_attachment.rs` | 245 | **stays**: one `impl DaemonSessionHost` that reads `self.config`, `self.tddy_data_dir`, `self.staging_base_dir`, `self.classify_daemon_route` and `self.common_room_slot`. **It still declares `mod split_claude_cli_start;` (178 lines, T4's `start_split_claude_cli_session`)**, so the misplacement the plan names is still here |
+| `connection_service/svc_resolve_os_user/session_attachment_materialization.rs` | 125 | **stays**: one `impl DaemonSessionHost` (`materialize_session_attachments`), and a child of T7's mixed file (see move 2) |
+| `svc_session_files_ports.rs` + `svc_peer_routed_session_files.rs` | ~560 | **stays**: ports and `PeerRouted*`, wiring by the Boundaries |
+
+The `AttachmentState` port State B assumes (`config`, `tddy_data_dir`, `staging_base_dir`,
+`peer_routing`) **does not exist**, so neither `impl DaemonSessionHost` block can leave lifecycle.
+That is the same wrong premise as T7's `AdmissionState` and 1b's `DemoVmState`. Moving
+`split_claude_cli_start` out from under the attachment file is a re-parenting, not a grouping, and is
+left for the T4 move. The `tddy-daemon-livekit` edge State B names for T8 is needed only by the
+host-impl half (`PeerRoute`, `local_instance_id_for_config`). It was not added.
+
+| Measure | Result |
+|---|---|
+| Plan | `05a-attachment-progress-to-session-files.jsonl`: one `move_module_to_crate` (`reexport: glob`) of the nested `connection_service::attachment_progress` |
+| Blind-spot read before apply | body paths `tddy_workflow::session_attachments_root`, `log::warn!` and `tokio::sync::mpsc`, all crates session-files already has. No path reaches a module that stays behind. No name collides with session-files' eleven modules. No inline tests, and no test binary exercises it on its own |
+| Engine | plain `check`: no findings. `check --deep`: no findings, survey `5 item(s) reached from outside, 0 caller(s)`. Dry run: 1 of 1 resolved (4 files). `apply`: 1 of 1 applied, then **the tree no longer compiles** (19 errors in lifecycle: 17 × `E0432` in ten `connection_service` children, plus 2 `E0308` cascades) |
+| Hand fixes | In `connection_service.rs`, the engine's `pub use tddy_session_files::*;` and the dangling `pub(crate) use attachment_progress::*;` became one `pub(crate) use tddy_session_files::attachment_progress::*;` ([**new cause**](../todo/2026-09-25-restructure-move-to-crate-leaves-a-nested-modules-parent-glob-dangling.md)). Every `pub(crate)` in the moved file → `pub` (21 statements: 3 structs, 11 fields, 5 methods, 2 fns), since lifecycle uses all of them ([existing cause](../todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md), item 3). **Left as-is:** two rustdoc links in the moved file (`crate::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT`, `DaemonSessionHost::start_session_core`) now name items session-files cannot reach. That is a `cargo doc` warning, not a build failure, and CI runs no rustdoc gate |
+| Facade | `pub(crate) use tddy_session_files::attachment_progress::*;` in `connection_service.rs`. The module was `pub(crate)`-re-exported before, so no public `tddy_session_lifecycle::…` path existed or was lost |
+| New edges | **none** |
+| Consumers edited | none |
+| Production lines | lifecycle 20,406 → **20,290**; session-files 4,600 → 4,716 |
+| `restructure verify --against HEAD` (`96531fcc`) | 397,652 statements before and after; the 21 lost and 21 gained are the 21 widenings |
+| `cargo check --all-targets` | clean on session-files, lifecycle, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control` |
+| Clippy `-D warnings`, `cargo fmt` | clean on session-files and lifecycle |
+| Tests | session-files **160 passed** (as on HEAD); lifecycle **562 passed, 22 failed, 1 ignored**, the same 22 by name |
+
+#### Where the fourth run leaves lifecycle
+
+| Crate | HEAD `8f0d9302` | After |
+|---|---:|---:|
+| `tddy-session-lifecycle` | 21,821 | **20,290** (−1,531) |
+| `tddy-session-activity` | 1,573 | 2,541 |
+| `tddy-daemon-livekit` | 5,409 | 5,863 |
+| `tddy-session-files` | 4,600 | 4,716 |
+
+Every receiver is under 10k, and none depends on lifecycle, normal or dev. What T7 and T8 left
+behind is `impl DaemonSessionHost` code. Like 1b and T10, it needs the host-port moves (7–9), whose
+state structs do not exist yet.
+
 ## TODO
 
 - [x] Phase 2 design checked against the dependency graph
