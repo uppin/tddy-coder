@@ -231,6 +231,11 @@ delegation and port impls. The size target is **the developer's to choose** from
   - T5a goes to `tddy-session-activity`, not `tddy-session-catalog`: into catalog it would pull kernel, worktree-service and core in (`tddy-bsp` +85 packages), and every caller is daemon-side. It moves as one cluster with `session_deletion`; the edges T5a brings (`tddy-daemon-kernel`, `tddy-worktree-service`, `tddy-core`, `anyhow`, `libc`) come with that choice;
   - T5b's edges approved: `libc`, `tddy-daemon-sandbox`, `tddy-daemon-livekit`; dev `tddy-workflow`, `tempfile`;
   - T10 is deferred to the port moves (7–9): `SessionNotificationPublishing` lives only in lifecycle's staying `session_notifications`.
+- **Port moves: hand-written ports, engine-moved bodies** (developer, 2026-09-25, after the fourth move run):
+  - each receiver's state struct, callback trait and lifecycle's trait impl may be hand-written: they are new wiring, not moved code;
+  - method bodies are never re-typed: they are turned into functions and moved by the engine (`extract_method`, `extract_module`, the move ops); hand edits to them stay post-move build corrections;
+  - T3 is piloted first and reported before T4 and T1;
+  - `authorize_exec_tool_caller` (`svc_resolve_os_user.rs`) goes with T3 into `tddy-session-agents`.
 - **Receivers were chosen by the dependency graph, not by topic name.** Four first-draft placements
   were cycles or layering breaks:
   - routing → kernel is a cycle;
