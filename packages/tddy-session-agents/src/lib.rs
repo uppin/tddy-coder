@@ -23,6 +23,7 @@
 //! mechanical one is exactly what a stack like this makes easy and must not do.
 
 pub mod agent_conversations;
+pub mod clone_readiness;
 pub mod ports;
 pub mod service;
 pub mod session_agent_clone;
