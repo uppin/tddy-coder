@@ -211,6 +211,12 @@ delegation and port impls. The size target is **the developer's to choose** from
 - **Two PRs** (developer, 2026-09-23). #524 restructures, this PR extracts.
 - **Wiring target ~3.4k** (developer, 2026-09-25): the moves, plus `test_util` gated or moved to a testkit and `service_util` moved down. `PeerRouted*` stays in lifecycle.
 - **No shape tests** (developer, 2026-09-25). The plan is the contract.
+- **Engine moves only** (developer, 2026-09-25): every move goes through `tddy-tools restructure`; a refusal stops for the developer; hand edits only as post-move build fixes, each cause filed in `docs/dev/todo/`.
+- **After the first move run** (developer, 2026-09-25):
+  - the "stays behind … names" `check` finding that blocked 1a and 2a is an engine defect. Fix it in `tddy-code-restructuring`, then move. 1a needs no unnamed edges (kernel → `tddy-task`/`tddy-github` are not approved); find a receiver that needs none, or report;
+  - move 3 is re-sequenced: T5b moves into `tddy-session-activity` first, T10 follows;
+  - 1b (demo VM) is deferred to the port moves (7–9): `DemoVmState` does not exist and the handlers are `impl DaemonSessionHost`;
+  - the warm index resolving a nested worktree to the enclosing checkout is fixed first, in its own commit.
 - **Receivers were chosen by the dependency graph, not by topic name.** Four first-draft placements
   were cycles or layering breaks:
   - routing → kernel is a cycle;
