@@ -344,13 +344,7 @@ impl DaemonSessionHost {
         agent_id: &str,
     ) -> Result<PathBuf, Status> {
         let clone = self.agent_clone_for(session_id, agent_id)?;
-        clone.worktree_path.ok_or_else(|| {
-            Status::failed_precondition(format!(
-                "the daemon owning '{agent_id}' has not reported where session {session_id}'s \
-                 clone landed (its state is {:?})",
-                clone.state
-            ))
-        })
+        agent_clone_worktree::agent_clone_worktree_path(session_id, agent_id, clone)
     }
 
     /// Every reconcile the daemon owning `agent_id` has reported for this session's clone.
@@ -397,5 +391,7 @@ impl DaemonSessionHost {
             .await
     }
 }
+
+use tddy_session_agents::agent_clone_worktree;
 
 use tddy_session_agents::agent_clone_lookup;
