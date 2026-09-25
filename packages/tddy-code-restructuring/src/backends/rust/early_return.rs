@@ -15,12 +15,22 @@ use crate::Result;
 /// Where the types happen to agree it is worse — the caller's early exit is silently skipped. No
 /// rewrite of the extracted text repairs that, so the range is refused before the server is asked.
 ///
+/// **Except at the end of the function.** A range that runs to the function body's own closing
+/// brace, ending with its tail expression, is the function's tail: rust-analyzer keeps the `return`
+/// verbatim, the call replaces the range as the tail expression, and the new function's return type
+/// is the tail's, which is the caller's. A `return` there returns the same value from the same call,
+/// so nothing is skipped and nothing changes type. A range ending with a statement instead (the
+/// body's last `return …;`) is still refused: rust-analyzer then rewrites every `return` into an
+/// `Option` it matches at the call, and the caller is left with no tail (`E0317`). What
+/// [`runs_to_the_end_of_a_function`] reads is stated there; a signature rust-analyzer infers
+/// differently from the caller's (an `impl Trait` it spells out) is left to `apply`'s compile gate.
+///
 /// Read from the text, so it costs no index, and the same refusal reaches a plain `check`, a
 /// `check --deep` (whose static tier runs first) and an `apply`. What [`early_returns`] relies on is
 /// stated there.
 pub(super) fn refuse_early_returns(text: &str, range: Range) -> Result<()> {
     let found = early_returns(text, range);
-    if found.is_empty() {
+    if found.is_empty() || runs_to_the_end_of_a_function(text, range) {
         return Ok(());
     }
 
@@ -39,8 +49,9 @@ pub(super) fn refuse_early_returns(text: &str, range: Range) -> Result<()> {
         "the range returns early from the function around it, on {}. An extracted function cannot \
          carry an early exit of its caller: the assist copies the `return` verbatim, so it returns \
          from the new function instead — whose return type differs, which is `E0308` at best and a \
-         silently skipped exit at worst. Cut the range so it holds no `return`, or end it before the \
-         first one.",
+         silently skipped exit at worst. Cut the range so it holds no `return`, end it before the \
+         first one, or run it to the end of the function's tail expression, where the call becomes \
+         the tail and a `return` means what it did.",
         named.join(" and ")
     )))
 }
@@ -86,6 +97,89 @@ fn early_returns(text: &str, range: Range) -> Vec<u32> {
         .collect();
     lines.dedup();
     lines
+}
+
+/// Whether `range` ends with the tail expression of a named function's body.
+///
+/// Read over the masked code, like [`early_returns`]: the range may not end with `;`, and after it
+/// there may be only whitespace (a comment is masked to it) before a `}`, which must close a
+/// function's body. The body's
+/// `{` is found by matching braces backwards, and it is a function's when the tokens before it, back
+/// to the previous `;`, `{` or `}`, hold `fn name`. Anything else — a closure's `|…| {`, an `if` or
+/// `match` arm, an `async` block — is a body of its own or a block inside the function, whose end
+/// is not the caller's. A `{` inside an unclosed `(` or `[` is an argument (a closure passed to a
+/// call), never a function body.
+fn runs_to_the_end_of_a_function(text: &str, range: Range) -> bool {
+    let Some(to) = byte_offset(text, range.end) else {
+        return false;
+    };
+    let masked = masked_to_code(text);
+    let code = masked.as_bytes();
+    let ends_with_a_statement = code[..to]
+        .iter()
+        .rev()
+        .find(|byte| !byte.is_ascii_whitespace())
+        .is_some_and(|byte| *byte == b';');
+    if ends_with_a_statement {
+        return false;
+    }
+    let Some(close) = (to..code.len()).find(|at| !code[*at].is_ascii_whitespace()) else {
+        return false;
+    };
+    if code[close] != b'}' {
+        return false;
+    }
+    let Some(open) = matching_open_brace(code, close) else {
+        return false;
+    };
+    opens_a_function_body(code, open)
+}
+
+/// The `{` that the `}` at `close` closes.
+fn matching_open_brace(code: &[u8], close: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for at in (0..close).rev() {
+        match code[at] {
+            b'}' => depth += 1,
+            b'{' if depth == 0 => return Some(at),
+            b'{' => depth -= 1,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Whether the `{` at `open` starts a function's body: `fn name` among the tokens of its header.
+fn opens_a_function_body(code: &[u8], open: usize) -> bool {
+    let mut depth = 0isize;
+    let mut start = 0usize;
+    for at in (0..open).rev() {
+        match code[at] {
+            b')' | b']' => depth += 1,
+            b'(' | b'[' if depth == 0 => return false,
+            b'(' | b'[' => depth -= 1,
+            b';' | b'{' | b'}' if depth == 0 => {
+                start = at + 1;
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let header = &code[start..open];
+    let mut at = 0usize;
+    while at < header.len() {
+        if header[at].is_ascii_alphabetic() || header[at] == b'_' {
+            let end = word_end(header, at);
+            if &header[at..end] == b"fn" && next_is_identifier(header, end) {
+                return true;
+            }
+            at = end;
+        } else {
+            at += 1;
+        }
+    }
+    false
 }
 
 /// The byte offset of a one-based line and character column, clamped to the end of its line.
@@ -570,6 +664,126 @@ mod tests {
         assert_eq!(found, Vec::<u32>::new());
     }
 
+    /// The call replaces the function's own tail, so a `return` in the new function returns what
+    /// the caller would have: its return type is the tail's, which is the caller's.
+    #[test]
+    fn allows_a_return_in_a_range_that_runs_to_the_end_of_the_function() {
+        // Given
+        let text = a_body(&[
+            "fn start(x: bool) -> Result<u32, String> {",
+            "    let level = 2;",
+            "    if x {",
+            "        return Ok(1);",
+            "    }",
+            "    Ok(level) // the tail",
+            "}",
+        ]);
+
+        // When
+        let checked = refuse_early_returns(&text, lines(2, 6));
+
+        // Then
+        assert!(checked.is_ok(), "{checked:?}");
+    }
+
+    #[test]
+    fn allows_a_return_in_the_tail_of_a_method_whose_signature_spans_lines() {
+        // Given
+        let text = a_body(&[
+            "impl Host {",
+            "    pub(crate) fn start(",
+            "        &self,",
+            "        x: bool,",
+            "    ) -> Result<u32, String>",
+            "    where",
+            "        Self: Sized,",
+            "    {",
+            "        if x { return Ok(1); }",
+            "        Ok(2)",
+            "    }",
+            "}",
+        ]);
+
+        // When
+        let checked = refuse_early_returns(&text, lines(9, 10));
+
+        // Then
+        assert!(checked.is_ok(), "{checked:?}");
+    }
+
+    /// A body ending in `return …;` has no tail expression, and rust-analyzer rewrites the returns
+    /// of such a range into an `Option` matched at the call, which leaves the caller without a tail.
+    #[test]
+    fn refuses_a_return_in_a_range_that_ends_with_the_functions_last_return() {
+        // Given
+        let text = a_body(&[
+            "fn start(x: bool) -> Result<u32, String> {",
+            "    let level = 2;",
+            "    if x { return Ok(1); }",
+            "    return Ok(level);",
+            "}",
+        ]);
+
+        // When
+        let found = refuse_early_returns(&text, lines(2, 4)).map_err(|error| error.to_string());
+
+        // Then
+        assert!(
+            found.as_ref().is_err_and(|refusal| refusal
+                .contains("on line 3 (`if x { return Ok(1); }`) and line 4 (`return Ok(level);`)")),
+            "{found:?}"
+        );
+    }
+
+    /// The end of a block inside the function is not the end of the function: the statements after
+    /// that block still run once the extracted code has returned.
+    #[test]
+    fn refuses_a_return_in_a_range_that_runs_to_the_end_of_an_inner_block() {
+        // Given
+        let text = a_body(&[
+            "fn start(x: bool) -> u32 {",
+            "    let level = if x {",
+            "        if level_is_known() { return 1; }",
+            "        2",
+            "    } else { 3 };",
+            "    level",
+            "}",
+        ]);
+
+        // When
+        let checked = refuse_early_returns(&text, lines(3, 4));
+
+        // Then
+        assert!(
+            checked.is_err(),
+            "the range ends at an `if` block, not the function"
+        );
+    }
+
+    /// A closure's body is not the enclosing function's, so a range at its end does not end the
+    /// function the `return` would leave.
+    #[test]
+    fn refuses_a_return_in_a_range_that_runs_to_the_end_of_a_closure_body() {
+        // Given
+        let text = a_body(&[
+            "fn start(items: &[u32]) -> Vec<u32> {",
+            "    items.iter().map(|item| {",
+            "        if *item > 2 { return 0; }",
+            "        *item",
+            "    }).collect()",
+            "}",
+        ]);
+
+        // When
+        let checked = refuse_early_returns(&text, lines(3, 4));
+
+        // Then
+        assert!(
+            checked.is_err(),
+            "the range ends at a closure body, not the function"
+        );
+    }
+
     #[test]
     fn refuses_naming_each_line_and_why_the_extraction_cannot_carry_it() {
         // Given
@@ -595,7 +809,9 @@ mod tests {
                  An extracted function cannot carry an early exit of its caller: the assist copies \
                  the `return` verbatim, so it returns from the new function instead — whose return \
                  type differs, which is `E0308` at best and a silently skipped exit at worst. Cut \
-                 the range so it holds no `return`, or end it before the first one."
+                 the range so it holds no `return`, end it before the first one, or run it to the \
+                 end of the function's tail expression, where the call becomes the tail and a \
+                 `return` means what it did."
                 .to_string())
         );
     }

@@ -136,6 +136,17 @@ not define is refused rather than ignored.
   `fn` within the range leaves that body, not the caller's, and is allowed. The check is lexical:
   strings and comments are masked first, and a `return` a macro expands to (`bail!`) is not seen —
   `apply`'s compile gate catches what that leaves.
+
+  **Except a range that runs to the end of the function, ending with its tail expression.** There
+  rust-analyzer keeps the `return` verbatim, writes the new function's return type from the tail's
+  (which is the caller's), and the call replaces the range as the caller's tail
+  (`fn level(x: bool) -> Result<u32, String> { base_or_early(x) }`), so a `return` means what it
+  did. A `?` in the same tail propagates the same error type. The end must be the body of a named
+  `fn`: the end of an `if` block, a `match` arm, a closure or an `async` block inside it is refused
+  as before. A range ending with a **statement** — the body's last `return …;` — is refused too:
+  rust-analyzer then rewrites every `return` into an `Option` it matches at the call, and the caller
+  is left with no tail (`E0317`). Where the types could still differ (an `impl Trait` return the
+  assist spells out) nothing lexical can tell, and the compile gate is what catches it.
 - **`apply` is judged by the compiler.** After its operations, `apply` runs `cargo check
   --all-targets` over every package owning a file it changed (test targets included, because moves
   re-point imports tests use). A failure fails the run with the compiler's errors; the edits stay on

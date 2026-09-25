@@ -1150,6 +1150,51 @@ pub fn a_crate_whose_function_returns_early() -> AFixtureWorkspace {
         )
 }
 
+/// A crate whose function's **last statement** is a `return`, after an early one.
+///
+/// Lines 4–8 run to the end of the body, and the range ends with `return Ok(base);` rather than a
+/// tail expression.
+pub fn a_crate_whose_function_ends_with_a_return() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A function whose last statement is a `return`.",
+                "",
+                "pub fn level(x: bool) -> Result<u32, String> {",
+                "    let base = 2;",
+                "    if x {",
+                "        return Ok(1);",
+                "    }",
+                "    return Ok(base);",
+                "}",
+            ]),
+        )
+}
+
+/// A crate whose function's tail both propagates an error with `?` and returns early.
+///
+/// Lines 4–8 are the whole body.
+pub fn a_crate_whose_function_propagates_and_returns_early() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A function that propagates an error and returns early.",
+                "",
+                "pub fn capped(text: &str) -> Result<u32, std::num::ParseIntError> {",
+                "    let value: u32 = text.parse()?;",
+                "    if value > 9 {",
+                "        return Ok(9);",
+                "    }",
+                "    Ok(value)",
+                "}",
+            ]),
+        )
+}
+
 /// The test binary the compile-gate fixtures move, from `origin` to `destination`.
 pub const THE_TEST_BINARY: &str = "crates/origin/tests/golden.rs";
 
