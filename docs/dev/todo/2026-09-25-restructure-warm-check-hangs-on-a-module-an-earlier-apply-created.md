@@ -37,6 +37,22 @@ no findings
 
 The daemon was stopped and restarted to go on.
 
+## A second symptom: a new file written by hand is invisible too
+
+Pilot step 2 hand-wrote the state struct into a **new** file,
+`packages/tddy-session-agents/src/agent_roster_state.rs` (declared in `lib.rs`), and lent it from
+lifecycle as `let state = self.agent_roster_state();`. `cargo check` was clean. Plan
+`09a-agent-clone-for-extract.jsonl` (`extract_method` over the tail that reads `state`) was then
+refused by the warm daemon twice, identically:
+
+```text
+0: rust-analyzer's answer was unusable: rust-analyzer wrote `fn agent_clone_for(session_id: &str, agent_id: &str, session_dir: PathBuf, state: _) -> Result<…, Status> {` — it produced the extraction before it could infer the types the signature needs, and `_` is not legal there (E0121). The crate graph was most likely still loading; retrying the operation against a warm server resolves it.
+```
+
+The server could not type `state` because the type lives in a file it has never loaded. The
+remedy the refusal prints ("retrying against a warm server") is wrong here: the server *is* warm,
+and every retry gives the same answer.
+
 ## Likely cause (not confirmed)
 
 The warm server was never told the file exists. The backend closes every document it opened when an
