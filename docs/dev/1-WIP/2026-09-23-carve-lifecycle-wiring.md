@@ -217,6 +217,10 @@ delegation and port impls. The size target is **the developer's to choose** from
   - move 3 is re-sequenced: T5b moves into `tddy-session-activity` first, T10 follows;
   - 1b (demo VM) is deferred to the port moves (7–9): `DemoVmState` does not exist and the handlers are `impl DaemonSessionHost`;
   - the warm index resolving a nested worktree to the enclosing checkout is fixed first, in its own commit.
+- **After the engine fixes** (developer, 2026-09-25):
+  - 1a's edges are approved: `tddy-daemon-kernel` gains `tddy-task`, `tddy-github` and `tonic` (neither closes a cycle);
+  - the 2a `check --deep` hang ("waiting for type inference at the anchor") is an engine defect, fixed test-first before 2a runs;
+  - `check` is tightened to predict `apply`'s cycle refusal for a mutual set split across separate `move_module_to_crate` ops.
 - **Receivers were chosen by the dependency graph, not by topic name.** Four first-draft placements
   were cycles or layering breaks:
   - routing → kernel is a cycle;
