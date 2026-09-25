@@ -748,6 +748,176 @@ next step is the developer's call: fix those three engine defects first (the pil
 the gray zone to cover `self.<delegation>(…)` → `state.<field>.<method>(…)` and approve the callback
 list above.
 
+### Port-move pilot (T3), second run (2026-09-25/26): eleven landed, the rest blocked
+
+This run followed the four engine fixes (`cb367ac6`, `cc19d3a4`, `ff73fcb6`, `841545dd`), under the
+same rules as the first run.
+
+**Engine binaries.** `tddy-tools` and `tddy-index-daemon` were rebuilt on `841545dd`. `target/` was
+deleted mid-run, at the developer's instruction, so both were rebuilt again afterwards. This
+worktree's warm daemon was restarted each time. Every restructure command went through it, wrapped in
+`timeout 1200`. Its rust-analyzer runs a `cargo check --workspace` flycheck of its own on start. The
+first one outlived its daemon and was stopped by hand.
+
+**Baselines on HEAD `841545dd`:**
+- lifecycle **562 passed, 22 failed, 1 ignored**, the known 22 by name;
+- session-agents 72 passed;
+- kernel 122 passed.
+
+After every commit below, the same three runs were identical by name. The flaky session-room test
+passed every time. The other gates also ran after every commit:
+- `cargo check --all-targets` on lifecycle, session-agents, kernel, `tddy-daemon-rpc`, `tddy-daemon`
+  and `tddy-telegram-control` was clean, plus `tddy-model-registry` after 13;
+- clippy `-D warnings` and `cargo fmt` were clean on the two touched crates;
+- `restructure verify --against HEAD` was accounted for: every lost statement is a gray-zone
+  substitution, a build correction or an engine-written hoist line.
+
+Line counts use the first run's counter: lifecycle 20,226, session-agents 3,680 on the base.
+
+#### What landed
+
+"Hoist" is an `extract_variable` that moves a host read ahead of the range, so the host computes the
+value and the moved function takes it as a parameter. "Head" is a host read that already opens the
+method, so the range starts after it.
+
+| # | Method (commit) | Route | Plans | Gray zone | Build/lint corrections | Lifecycle / agents |
+|---|---|---|---|---:|---|---|
+| 2 | `agent_clone_for` (`d1bba493`) | `AgentRosterState` (hand-written struct + builder) | 09a–c | **2** | extern name ×2, `pub`, origin glob pair | 20,231 / 3,757 |
+| 3 | `forward_cancel_agent_conversation` (`85fec0d0`) | head (`common_room_slot`) | 10a–c | 0 | `prost::Message as _`, body path `crate::livekit_peer_discovery`, extern name, `pub`, glob pair, unused import | 20,222 / 3,791 |
+| 4 | `forward_open_agent_conversation` (`f1be8323`) | head; the range holds an early `return Err` and runs to the tail | 11a–c | 0 | as 3, plus 2 unused imports | 20,202 / 3,835 |
+| 5 | `refuse_departed_daemon` (`05781306`) | hoist `self.eligible_instance_ids()` | 12a–d | 0 | `pub`, glob pair | 20,195 / 3,853 |
+| 6 | `agent_clone_worktree_path` (`8a97e4e0`) | head (`agent_clone_for`) | 13a–c | 0 | extern name, `pub`, glob pair | 20,191 / 3,871 |
+| 8 | `session_room_participant_identities` (`956e607e`) | hoist `self.room_roster` | 15a–d | 0 | `use RoomRoster` (`extract_method` has no import pass), `pub`, glob pair | 20,183 / 3,901 |
+| 9 | `broadcast_roster` (`995fdcb0`) | the `let … else` lookup stays; the publish tail moves | 16c–e (16a–b rolled back) | 0 | `prost::Message as _`, body path `crate::session_room`, `pub`, glob pair, unused import | 20,176 / 3,923 |
+| 10 | `ensure_session_room_for_agents` (`d551d3fa`) | hoist `self.ensure_session_room(..).await?` | 17a–d | 0 | `pub`, glob pair | 20,162 / 3,948 |
+| 11 | the four record helpers of `agent_roster.rs` (`b237dee8`) | already free functions: group and move | 19a–b | 0 | `pub` ×2, nested parent glob → `pub use …::agent_records::*` | 20,095 / 4,022 |
+| 13 | `agent_def_for_spawn` (`d82ff14f`) | hoist `self.model_registry`, then `AgentRosterState` | 21a–d | **1** | `&` on the engine's hoist (**new cause**), `tddy-model-registry` edge, extern name, `pub`, glob pair | 20,085 / 4,047 |
+| 14 | `start_hosted_agent_clone` (`63fcd0ca`) | `AgentRosterState`; the head stays (it calls `workspace_session`) | 22a–c | **3** | extern name, `pub`, glob pair, unused import, `too_many_arguments` allow, `needless_borrow` ×2 | 20,041 / 4,132 |
+
+**Totals:**
+- lifecycle 20,226 → **20,041** (−185), session-agents 3,680 → **4,132** (+452), both under 10k;
+- gray-zone substitutions: **6** across 3 methods, each `self.<field>` → `state.<field>`, token for token;
+- hand-written wiring: `AgentRosterState<'a>` (46 lines) and `DaemonSessionHost::agent_roster_state`
+  (17 lines). **No callback trait**, because no body that moved calls one.
+
+**Invariants:**
+- New edges on session-agents: `tddy-model-registry` and `tddy-projects`, both approved. Neither closes
+  a cycle. `tddy-model-registry` **dev**-depends on lifecycle and `tddy-daemon` for its own tests, the
+  same shape lifecycle already had with it.
+- Session-agents has no path to lifecycle, normal or dev.
+- No consumer was edited, and no test reads a touched file by path.
+- The public methods (`session_room_participant_identities`, `agent_clone_worktree_path`,
+  `agent_def_for_spawn`) stay as delegations, and `connection_service::{def_tool_names,
+  qualified_agent_id}` resolve as before.
+- None of the moved code had tests of its own, so no test moved.
+- The comment multiset of the two crates is unchanged from `841545dd`: nothing the engine moved lost a
+  comment.
+
+**Why session-agents grew more than lifecycle shrank.** Each move leaves a delegation in the host (the
+signature and a call, which fmt spreads over many lines) and writes a module header in the receiver.
+The state struct and its builder are new wiring. At this rate the wiring target is far away: T3's
+host code keeps its heads, and the heads are where the unapproved callbacks are read.
+
+**What the engine fixes bought.**
+- `extract_variable` (`cc19d3a4`) is the workhorse. Four of the eleven moves use it to hoist a host
+  read (an unapproved one in 5 and 10) so the method needs no port.
+- The `return`-to-tail rule (`ff73fcb6`) carried 4, 5 and 13.
+- The warm daemon saw every file an apply created (`841545dd`).
+- The borrowed state struct passed with `'_` (`cb367ac6`).
+
+#### Refusals
+
+| Method | Plan | Class | Exact text (abridged only where marked) |
+|---|---|---|---|
+| 7 `delete_clone_on_peer` (with `peer_has_no_such_session` moved first by 14a–b) | 14e | `plan is malformed` (InvalidArgument), and the static cycle finding | `still names tddy-session-lifecycle (tddy_session_lifecycle::super::peer_has_no_such_session), so the destination would depend on the crate it left while that crate goes on naming the module it lost — move what those paths reach, or move the module's own dependencies with it` |
+| 12 `remote_roster_record_for` | 20c | `plan is malformed` (InvalidArgument), and the static cycle finding | `still names tddy-session-lifecycle (tddy_session_lifecycle::connection_service::agent_roster), so the destination would depend on the crate it left …` |
+| `resolve_specialized_agent_defs` (probe, rolled back) | 23c | `plan is malformed` (InvalidArgument) | the same text, naming `…::agent_roster` |
+| `report_shadowed_agent_def` | 18a | `this seam cannot be cut here` (FailedPrecondition) | `the range returns early from the function around it, on line 154 (return;). … Cut the range so it holds no return, end it before the first one, or run it to the end of the function's tail expression …` |
+
+The first three are the same engine gap in two shapes, filed in
+[a new todo](../todo/2026-09-25-restructure-move-to-crate-reads-an-import-reaching-the-destination-as-an-edge.md).
+In each, the moved file's header import reaches the destination through lifecycle's re-exports, and
+the engine reads it as an edge back to lifecycle:
+- a relative `super::super::peer_has_no_such_session`, printed as `tddy_session_lifecycle::super::…`;
+- a module import (`use crate::connection_service::agent_roster;`) whose every used item now lives in
+  `tddy_session_agents::agent_records`.
+
+The plans are not malformed, and there is no plan-side fix: a cluster would have to take
+`agent_roster.rs`, which holds `impl RemoteSnapshotSource for DaemonSessionHost`. Every such method was
+rolled back, with nothing done by hand.
+
+#### Stopped for other reasons
+
+- **16b (`broadcast_roster`, whole body).** `check --deep` and the dry run were clean, but
+  rust-analyzer rewrote the `let … else { return; }` into a `ControlFlow<()>` protocol the method never
+  had, and nothing imported it (`E0433` ×4). Adding `use std::ops::ControlFlow;` would have compiled,
+  but it would have left the protocol in production code. So it was rolled back and 16c took the
+  narrower range. [New todo](../todo/2026-09-25-restructure-extract-method-accepts-a-return-before-a-unit-if-tail.md):
+  the tail-range rule accepts a unit `if` tail that rust-analyzer treats as a statement.
+- **15 `roster_session_dir`'s auth head (24a–b, rolled back).** It compiled after the known `&` fix,
+  but the extraction dropped the three-line comment explaining why the OS-user lookup is there (the
+  existing comment-dropping cause, P). Restoring it by hand is outside this run's hand-edit rules.
+- **Two warm-daemon stalls, both at 0% CPU.**
+  - After the 20a–c rollback, which deleted a module an apply had created, rust-analyzer re-indexed
+    and stopped at `working: tddy_daemon_rpc (lib)` before `crate index ready`. The cause is not
+    established.
+  - An `extract_variable` range opening on `&` (`&self.model_registry`) waited for ever at
+    `waiting for type inference at the anchor`, in both `check --deep` and the dry run, while the same
+    line anchored at `self` answered in 0.3 s. Killing the client left the request running in the
+    daemon, and it wedged the next one.
+
+  Both were recovered by restarting the daemon. [New todo](../todo/2026-09-25-restructure-extract-variable-waits-forever-on-a-range-opening-with-a-borrow.md).
+  The `self` anchor hoists by value (`E0507`, twice), which is also
+  [a new todo](../todo/2026-09-25-restructure-extract-variable-hoists-a-borrowed-field-by-value.md).
+- The gray-zone capability itself has
+  [a todo](../todo/2026-09-25-restructure-has-no-operation-to-read-a-methods-fields-through-a-state-parameter.md).
+  The first run filed none.
+
+#### Blocked T3 methods and what each needs
+
+| Method | Needs |
+|---|---|
+| `provision_agent_clone` | `split_forward_deadline` (unapproved, read mid-body, so it cannot be hoisted ahead of any useful range); `delete_clone_on_peer`; `hooks_and_urls::advertise_daemon_url` (lifecycle's own) |
+| `delete_clone_on_peer`, `tear_down_agent_clone` | the import refusal above (`peer_has_no_such_session`). `tear_down_agent_clone` would also read `session_admissions` (a plain state field, which is fine). Predicted from the shared import, not run |
+| `tear_down_every_agent_clone`, `unwind_agent_clone_claim`, `unwind_seeded_roster` | the host methods `tear_down_agent_clone` / `delete_clone_on_peer` (blocked above) |
+| `publish_roster_change` | `self.broadcast_roster(..)` in its tail (a host call; rewriting it is outside the gray zone) |
+| `claim_agent_clone`, `claim_co_located_seed_clones`, `seed_session_agent_roster` | `self.clone()` handed to a spawned task or `SeededCloneGuard` (the whole host), plus `provision_agent_clone`, `publish_roster_change` and `claim_agent_clone`; `refuse_unenforceable_withdrawal` takes lifecycle's `SeedCodebase` |
+| `open_local_agent_session`, `local_agent_codebase_access` | `resolve_exec_tool_worktree` (unapproved) and `self.clone()` in a `'static` closure; `agent_def_for_spawn` and `note_agent_activity` as host calls. The self-free tail is only the session constructor, the same in both `open_*` methods, so extracting it twice would duplicate it |
+| `open_owned_agent_session`, `owned_agent_codebase_access` | `self.clone()` in a `'static` closure calling `run_hosted_clone_tool`. That is `local_exec_tools` (approved), but replacing `self.clone()` with a callbacks handle is not a token-for-token edit; `resolvable_agent_defs` as a host call |
+| `roster_record_for`, `seeded_roster_records` | `remote_roster_record_for` and `resolvable_agent_defs` as host calls; the `agent_roster` import refusal |
+| `remote_roster_record_for`, `resolve_specialized_agent_defs` | the `agent_roster` import refusal |
+| `roster_session_dir` | `session_dir_for` (unapproved) in the tail; the head loses its comment (above) |
+| `ensure_project_available_for_start` | a `tddy-spawn` edge (not approved) and a `spawn_client` state field of its type |
+| `resolvable_agent_defs` (free fn), `registry_agent_defs`, `report_shadowed_agent_def` | the `this seam cannot be cut here` refusal on `report_shadowed_agent_def`'s dedupe |
+| `index_workspace_worktree`, `provision_workspace_tool_sandbox` | lifecycle's `service_util` / `workspace_session` (not T3; they sit in T3's file) |
+| `agent_clone_divergences`, `hosted_clone_for`, `run_hosted_clone_tool`, `note_agent_activity`, `refuse_unready_clone`, `resolvable_agent_defs` (method), `roster_record_for_agent_id` | nothing: already one-line delegations, which is wiring |
+
+#### Assessment for T4 and T1
+
+The recipe now works, and its cost is predictable: per method, three or four plans plus about four
+mechanical build corrections, every one an existing cause except the three filed above.
+- Where a method's host reads sit at its head, or in one statement ahead of the range, it needs no port
+  at all, and the approved callbacks were never needed.
+- Where they sit mid-body, the borrowed state struct costs 1–3 substitutions and one builder call.
+
+What it moves is **the tails**. For T3 that was eleven methods and about 180 production lines out of
+lifecycle. The heads stay, and so do all the methods that call other host methods. Those are most of
+T3's orchestration: claim, seed, unwind, teardown, provision, conversations.
+
+T4 and T1 are built of exactly that orchestration. Split re-enters `start_session_core` and
+`delete_session`, and launch calls the roster, split and attachment code. Nearly every method there
+calls another host method mid-body, and most hand `self.clone()` to a task. **Without callback traits
+the recipe reaches only their leaf helpers.** Moving their cores needs:
+- the callback traits (`SplitHost`, `LaunchHost`, and the seven `AgentHostCallbacks` methods listed in
+  the first run), with a gray zone widened to `self.<method>(…)` → `host.<method>(…)` and
+  `self.clone()` → a callbacks handle;
+- the import-reaching-the-destination fix. It blocked three T3 methods here, and the same shapes
+  (`super::` paths, `agent_roster`-style module imports) are all over T4 and T1.
+
+So the recommendation stands, with the engine now further along: fix that import gap first (it is a
+defect, not new vocabulary). Then decide on widening the gray zone and the callback list, which is a
+design call. A T4 pilot without both would move T4's leaves only.
+
 ## TODO
 
 - [x] Phase 2 design checked against the dependency graph
