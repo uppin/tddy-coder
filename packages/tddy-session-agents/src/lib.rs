@@ -27,6 +27,7 @@ pub mod agent_conversations;
 pub mod agent_roster_state;
 pub mod clone_readiness;
 pub mod conversation_cancel_forward;
+pub mod conversation_open_forward;
 pub mod exec_tool_caller;
 pub mod ports;
 pub mod service;

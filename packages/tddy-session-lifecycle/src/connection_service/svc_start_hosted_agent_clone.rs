@@ -1,9 +1,4 @@
-// `encode_to_vec` is a `prost::Message` method; the trait is imported anonymously because
-// only its methods are used.
-use prost::Message as _;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
-
-use tddy_service::proto::session_agents_svc::OpenAgentConversationResponse;
 
 use tddy_service::proto::session_agents_svc::OpenAgentConversationRequest;
 
@@ -181,30 +176,13 @@ impl DaemonSessionHost {
         conversation_id: &str,
     ) -> Result<(), Status> {
         let slot = self.common_room_slot("OpenAgentConversation")?;
-        let forwarded = OpenAgentConversationRequest {
-            conversation_id: conversation_id.to_string(),
-            daemon_instance_id: owner.to_string(),
-            ..req.clone()
-        };
-        let answered = crate::livekit_peer_discovery::forward_to_peer(
-            slot,
+        conversation_open_forward::forward_open_agent_conversation(
+            req,
             owner,
-            tddy_session_agents::SERVICE_NAME,
-            "OpenAgentConversation",
-            forwarded.encode_to_vec(),
+            conversation_id,
+            slot,
         )
-        .await?;
-        let opened = OpenAgentConversationResponse::decode(answered.as_slice())
-            .map_err(|e| Status::internal(format!("decode OpenAgentConversationResponse: {e}")))?;
-        if opened.conversation_id != conversation_id {
-            return Err(Status::internal(format!(
-                "daemon '{owner}' opened conversation {:?} instead of the requested \
-                 {conversation_id:?}, so a prompt to it could not be routed and a cancel could not \
-                 name it",
-                opened.conversation_id
-            )));
-        }
-        Ok(())
+        .await
     }
 
     /// A turn loop for an agent this daemon resolves and serves from the session's own worktree.
@@ -401,5 +379,7 @@ impl DaemonSessionHost {
         );
     }
 }
+
+use tddy_session_agents::conversation_open_forward;
 
 use tddy_session_agents::clone_readiness;
