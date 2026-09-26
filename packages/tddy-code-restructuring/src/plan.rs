@@ -418,8 +418,26 @@ pub enum Reexport {
     None,
 }
 
+/// An operation's stable identity inside its plan.
+///
+/// Opaque, assigned by the plan store to any operation loaded without one and written back on the
+/// next flush, so an operation keeps its identity when a human reorders or inserts lines. The
+/// journal, the events and `--from` name operations by it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct OpId(pub String);
+
+impl std::fmt::Display for OpId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RefactorOp {
+    /// This operation's stable id; absent only in a plan no store has loaded yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<OpId>,
     pub op: RefactorKind,
     pub anchor: Anchor,
     /// New symbol name, for extractions and renames.
@@ -595,6 +613,13 @@ impl Plan {
             })
             .map(|(path, _)| path.clone())
             .collect()
+    }
+
+    /// This plan as JSONL: the header its schema version writes, then one line per operation in
+    /// order — what the plan store flushes back to disk.
+    pub fn to_jsonl(&self) -> String {
+        // TODO(plan-store): implement
+        todo!("plan-store: serialise a plan back to JSONL")
     }
 
     /// Verify every snapshot hash still matches the working tree. Fails loudly on drift.
@@ -1445,5 +1470,25 @@ mod tests {
     #[test]
     fn an_unbalanced_qualified_segment_is_not_an_item_path() {
         assert!(ItemPath::parse("a::<Stack as Debug::fmt").is_err());
+    }
+
+    #[test]
+    fn a_plan_written_back_reads_as_the_same_plan() {
+        // Given a v1 plan with an op that carries an id and one that does not
+        let jsonl = concat!(
+            r#"{"v":1,"snapshot":{"src/a.rs":"sha256:ab"}}"#,
+            "\n",
+            r#"{"id":"op-1","op":"rename_symbol","anchor":{"kind":"symbol","file":"src/a.rs","path":"A"},"name":"B"}"#,
+            "\n",
+            r#"{"op":"rename_symbol","anchor":{"kind":"symbol","file":"src/a.rs","path":"C"},"name":"D"}"#,
+            "\n"
+        );
+        let plan = Plan::parse(jsonl).unwrap();
+
+        // When it is written back
+        let written = plan.to_jsonl();
+
+        // Then it is the same text, line for line
+        assert_eq!(written, jsonl);
     }
 }

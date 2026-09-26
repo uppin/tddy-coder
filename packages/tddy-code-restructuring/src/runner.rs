@@ -22,8 +22,8 @@ mod rehearsal;
 pub use comparison::verify;
 pub use compile_gate::{refuse_a_broken_baseline, refuse_a_broken_result, AppliedRun};
 pub use entry_points::{
-    apply, check, dispatch, item_anchors, open_run_resolving_anchors, registry_for,
-    resolve_item_anchors, run, snapshot, status,
+    apply, apply_from_store, check, dispatch, item_anchors, open_run_resolving_anchors,
+    registry_for, resolve_item_anchors, run, snapshot, status,
 };
 pub use options::{command_of, parse_options, Command, Options};
 pub use outcome::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};

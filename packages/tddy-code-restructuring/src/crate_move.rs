@@ -338,6 +338,7 @@ mod tests {
 
     fn a_move_of(module: &str, to: &str) -> RefactorOp {
         RefactorOp {
+            id: None,
             op: RefactorKind::MoveModuleToCrate,
             anchor: Anchor::Symbol {
                 file: format!("packages/tddy-daemon/src/{module}.rs"),

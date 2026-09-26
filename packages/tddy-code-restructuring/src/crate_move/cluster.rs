@@ -1225,6 +1225,7 @@ mod tests {
 
     fn a_move_of(module: &str) -> RefactorOp {
         RefactorOp {
+            id: None,
             op: RefactorKind::MoveModuleToCrate,
             anchor: Anchor::Symbol {
                 file: format!("{ORIGIN}/src/{module}.rs"),

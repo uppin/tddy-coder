@@ -35,6 +35,15 @@ service CodeIndexService {
   // How far a plan's journal got: completed, in flight, pending, failed.
   rpc PlanStatus(PlanStatusRequest) returns (PlanStatusResponse);
 
+  // Load plans into this root's store: read once, ops given ids, then executed by reference.
+  rpc LoadPlans(LoadPlansRequest) returns (PlansResponse);
+
+  // Flush and drop plans from this root's store — named ones, or all of them.
+  rpc UnloadPlans(UnloadPlansRequest) returns (PlansResponse);
+
+  // The plans this root's store holds.
+  rpc ListPlans(ListPlansRequest) returns (PlansResponse);
+
   // Statement-multiset comparison of the tree against a git ref.
   rpc Verify(VerifyRequest) returns (VerifyResponse);
 
@@ -173,6 +182,35 @@ message SourcePosition {
 message SourceRange {
   SourcePosition start = 1;
   SourcePosition end   = 2;
+}
+
+message LoadPlansRequest {
+  string          workspace_root = 1;
+  // Plan paths, absolute or relative to `workspace_root`.
+  repeated string plans          = 2;
+}
+
+message UnloadPlansRequest {
+  string          workspace_root = 1;
+  repeated string plans          = 2;
+  // Every plan the root holds; `plans` must then be empty.
+  bool            all            = 3;
+}
+
+message ListPlansRequest {
+  string workspace_root = 1;
+}
+
+// One plan the store holds, keyed by its path relative to the workspace root.
+message LoadedPlan {
+  string plan  = 1;
+  uint32 ops   = 2;
+  bool   dirty = 3;
+}
+
+// The plans the root's store holds after the request.
+message PlansResponse {
+  repeated LoadedPlan plans = 1;
 }
 
 message PlanStatusRequest {

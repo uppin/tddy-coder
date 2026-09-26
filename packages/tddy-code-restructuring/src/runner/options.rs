@@ -40,6 +40,12 @@ pub enum Command {
     Anchors,
     Verify,
     Snapshot,
+    /// Load plans into the index daemon's store — a daemon-only command.
+    Load,
+    /// Flush and drop plans from the index daemon's store — a daemon-only command.
+    Unload,
+    /// List the plans the index daemon holds — a daemon-only command.
+    Plans,
 }
 
 /// What a restructuring run was asked for, and where its live account goes.
@@ -64,6 +70,10 @@ pub struct Options {
     pub budget: Option<usize>,
     /// The items `anchors` must cover.
     pub items: Vec<String>,
+    /// The plans `load` / `unload` name.
+    pub plans: Vec<PathBuf>,
+    /// `unload --all`.
+    pub all: bool,
     /// The position `anchors --at` names: the innermost item enclosing it is what is anchored.
     pub at: Option<crate::edit::Range>,
     /// The git ref `verify` compares against.
@@ -103,6 +113,8 @@ impl Default for Options {
             budget: None,
             items: Vec::new(),
             at: None,
+            plans: Vec::new(),
+            all: false,
             against: None,
             progress: discard(),
             account: discard(),

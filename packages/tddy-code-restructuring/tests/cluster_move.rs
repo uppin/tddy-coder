@@ -71,6 +71,7 @@ fn a_workspace_with_an_entangled_cluster() -> tempfile::TempDir {
 
 fn a_move_of(module: &str) -> RefactorOp {
     RefactorOp {
+        id: None,
         op: RefactorKind::MoveModuleToCrate,
         anchor: Anchor::Symbol {
             file: format!("crates/origin/src/{module}.rs"),

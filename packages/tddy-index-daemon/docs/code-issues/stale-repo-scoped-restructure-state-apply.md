@@ -6,7 +6,8 @@
 **Metrics:** 1 call site · 1 line to change · 4 doc comments + 1 committed package doc to reconcile
 **Restructure:** no — a one-line call change, not a seam
 **Status:** Open
-**Claimed by:** nobody
+**Claimed by:** [#538](https://github.com/uppin/tddy-coder/pull/538) — `#live-plan 2/7`
+**Lands after:** #537 (`#live-plan 1/7`)
 
 `#490` made `tddy-code-restructuring`'s run state **plan-scoped**: `StatePaths::for_plan(root, plan)`
 puts the journal and ledger in `<root>/.restructure/<plan stem>-<digest>`, so a completed plan no

@@ -12,7 +12,7 @@ Full codebase exploration that grounded this plan:
 ## Stack
 
 `#live-plan` 2/7 — branch `feature/live-plan/plan-store`, base `feature/live-plan/item-anchors`.
-PR: _recorded in wave 2_
+PR: [#538](https://github.com/uppin/tddy-coder/pull/538)
 
 ## Responsibility
 
@@ -187,30 +187,53 @@ harness fixtures. The RPCs, shutdown flush and code-issue fix are acceptance-tes
 
 - `loading_a_plan_without_ids_assigns_them_and_the_flush_writes_them`
 - `two_ops_sharing_an_id_are_refused_as_malformed`
-- `apply_executes_the_loaded_ops_not_the_edited_file`
-- `a_resume_from_op_two_applies_the_same_edit_as_a_clean_run`
-- `the_applied_plans_pending_op_follows_an_edit_inside_its_item`
 - `a_flush_onto_a_plan_changed_on_disk_is_refused_and_leaves_the_file`
-- `apply_without_a_daemon_still_flushes_the_plan_at_exit`
+- `apply_executes_the_loaded_ops_not_the_edited_file` (live rust-analyzer)
+- `apply_without_a_daemon_still_flushes_the_plan_at_exit` (live rust-analyzer)
+
+### tddy-code-restructuring — `src/plan_store.rs` (unit, no server — a stub `ItemResolver`)
+
+The per-op refresh is pinned here rather than through a real extraction, whose inserted line count
+is rust-analyzer's to choose and not something a test can state:
+
+- `a_pending_range_anchor_moves_down_past_lines_an_applied_op_inserted_above_it`
+- `a_pending_item_anchors_hint_and_fingerprint_follow_an_edit_to_its_item`
+- `a_pending_anchor_follows_a_file_the_applied_op_moved`
+- `flush_dirty_leaves_a_plan_dirty_for_less_than_the_debounce`
+- `loading_a_plan_already_held_keeps_the_held_copy`
+- `plan.rs`: `a_plan_written_back_reads_as_the_same_plan`
 
 ### tddy-index-daemon — `tests/code_index_service_acceptance.rs`
 
 - `apply_of_an_unloaded_plan_loads_it_and_list_plans_shows_it`
 - `unload_all_flushes_and_drops_every_plan_of_the_root`
-- `a_second_plan_applies_after_a_first_completed_under_the_same_root`
+- `a_second_plan_applies_after_a_first_ran_under_the_same_root` — the code issue, reproduced:
+  today it fails with `a journal already exists for this plan — pass --resume to continue it`
 - `a_dirty_plan_reaches_disk_within_the_flush_interval`
 
-### tddy-index-daemon — `tests/detached_daemon_production.rs`
+### tddy-index-daemon — `tests/dual_transport_acceptance.rs`
 
-- `sigterm_flushes_every_dirty_plan_before_exit`
+- `sigterm_flushes_every_dirty_plan_before_exit` — the real binary, served over gRPC, sent
+  `SIGTERM` (in this suite rather than `detached_daemon_production.rs`, whose tests are all
+  `#[ignore]`d behind `nix develop`)
 
 ### tddy-tools — `tests/restructure_cli_acceptance.rs`
 
 - `restructure_load_without_a_daemon_is_refused_as_needing_one`
 
+All fail at this node's own `TODO(plan-store)` stubs (or, for the code-issue test, at today's
+repo-scoped journal).
+
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- Draft-PR-contract stubs: `TODO(plan-store)` in `plan.rs` (`to_jsonl`), `plan_store.rs`,
+  `runner/entry_points.rs` (`apply_from_store`, the daemon-only command arms),
+  `tddy-index-daemon/src/queries.rs` (three RPCs answer `unimplemented`), `tddy-tools/src/index_client.rs`.
+- Still to add in green (no successor compiles against them): `load` / `unload` / `plans` on the
+  `tddy-index-daemon` single-shot command line (`cli.rs`), the store per root in `index.rs`, the
+  flush on shutdown in `serve.rs` / `main.rs`, `StatePaths::for_plan` in `apply.rs`.
+- New error variants: `PlanChangedOnDisk`, `NeedsIndexDaemon` (both `FailedPrecondition`).
+- `RefactorOp.id` added; 14 struct literals across the crate and its tests gained `id: None`.
 
 ## Decisions & Trade-offs
 
@@ -238,10 +261,10 @@ _(populated by validation commands)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
