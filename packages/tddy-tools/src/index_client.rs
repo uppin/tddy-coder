@@ -205,6 +205,8 @@ async fn anchors(
             workspace_root,
             file: file.clone(),
             items: normalised(args.items),
+            // TODO(item-anchors): implement — carry `--at` to the daemon.
+            at: None,
         })
         .await
         .map_err(refused)?

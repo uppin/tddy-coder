@@ -153,10 +153,14 @@ message AnchorsRequest {
   string          workspace_root = 1;
   string          file           = 2;
   repeated string items          = 3;
+  // `anchors --at`: anchor the innermost item enclosing this position instead of named items.
+  optional SourceRange at        = 4;
 }
 
 message AnchorsResponse {
   SourceRange range = 1;
+  // The anchor a plan carries, as its JSON line fragment: `items` for named items, `item` for `at`.
+  string anchor_json = 2;
 }
 
 // One-based line, one-based column, counted in bytes — the encoding this client negotiates and

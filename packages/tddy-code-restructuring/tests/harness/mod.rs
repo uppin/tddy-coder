@@ -228,6 +228,30 @@ impl AFixtureWorkspace {
         plan
     }
 
+    /// A schema-v2 plan of `ops`: its header carries a hint (hash + update time) per anchored file
+    /// rather than a refusing snapshot.
+    pub fn a_hinted_plan_of(&self, ops: &[RefactorOp]) -> PathBuf {
+        let mut files = serde_json::Map::new();
+        for op in ops {
+            let file = op.anchor.file();
+            let hash = hash_file(&self.root.join(file)).expect("the anchored file hashes");
+            files.insert(
+                file.to_string(),
+                serde_json::json!({ "sha256": hash, "modified": "2026-09-26T00:00:00Z" }),
+            );
+        }
+
+        let mut lines = vec![serde_json::json!({ "v": 2, "files": files }).to_string()];
+        lines.extend(
+            ops.iter()
+                .map(|op| serde_json::to_string(op).expect("the operation serialises")),
+        );
+
+        let plan = self.root.join("hinted-plan.jsonl");
+        std::fs::write(&plan, lines.join("\n") + "\n").expect("the plan is written");
+        plan
+    }
+
     pub fn removing(&self, relative: &str) {
         std::fs::remove_file(self.root.join(relative))
             .unwrap_or_else(|error| panic!("removing {relative}: {error}"));
@@ -1809,4 +1833,188 @@ fn a_crate_whose_tests_reach_base_through(import: &str) -> AFixtureWorkspace {
                 "}",
             ]),
         )
+}
+
+/// The file the item-anchor fixture's items live in.
+pub const WORKFLOW: &str = "crates/stacks/src/workflow.rs";
+
+/// `Stack::new` exactly as the item-anchor fixture writes it — the text its fingerprint covers.
+pub const STACK_NEW: &str = "    pub fn new() -> Self {\n        let items = Vec::new();\n        \
+                             let depth = items.len();\n        Stack { items, depth }\n    }";
+
+/// `Queue::new`, the second inherent `new` in the same file.
+pub const QUEUE_NEW: &str =
+    "    pub fn new() -> Self {\n        let items = Vec::with_capacity(4);\n        \
+                             Queue { items }\n    }";
+
+/// One crate, `stacks`, whose `workflow` module holds two types that each have an inherent `new`,
+/// and two trait impls of `Stack` that each define `fmt` — every ambiguity an item path must be
+/// able to name its way out of.
+///
+/// `Stack::new` sits on lines 7–11; its body's two `let` lines are lines 2–3 relative to it.
+pub fn a_crate_with_two_inherent_news_and_two_fmts() -> AFixtureWorkspace {
+    an_empty_fixture()
+        .writing(
+            "Cargo.toml",
+            "[workspace]\nresolver = \"2\"\nmembers = [\"crates/stacks\"]\n",
+        )
+        .writing(
+            "crates/stacks/Cargo.toml",
+            "[package]\nname = \"stacks\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .writing("crates/stacks/src/lib.rs", "pub mod workflow;\n")
+        .writing(
+            WORKFLOW,
+            &format!(
+                "pub struct Stack {{\n    items: Vec<u32>,\n    depth: usize,\n}}\n\n\
+                 impl Stack {{\n{STACK_NEW}\n}}\n\n\
+                 pub struct Queue {{\n    items: Vec<u32>,\n}}\n\n\
+                 impl Queue {{\n{QUEUE_NEW}\n}}\n\n\
+                 impl std::fmt::Display for Stack {{\n    \
+                 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{\n        \
+                 write!(f, \"{{}}\", self.depth)\n    }}\n}}\n\n\
+                 impl std::fmt::Debug for Stack {{\n    \
+                 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{\n        \
+                 write!(f, \"{{:?}}\", self.items)\n    }}\n}}\n"
+            ),
+        )
+        .tracked_by_git()
+}
+
+/// An `item` anchor into `item` in `file`, fingerprinted over `item_text` and carrying `hint`.
+pub fn an_item_anchor(
+    file: &str,
+    item: &str,
+    item_text: &str,
+    relative: Option<(Position, Position)>,
+    hint: Option<Position>,
+) -> Anchor {
+    Anchor::Item {
+        item: tddy_code_restructuring::ItemPath::parse(item).expect("the item path parses"),
+        file: file.to_string(),
+        start: relative.map(|(start, _)| start),
+        end: relative.map(|(_, end)| end),
+        fingerprint: tddy_code_restructuring::Fingerprint::of(item_text),
+        hint,
+    }
+}
+
+/// One-based `line:col`.
+pub fn at(line: u32, col: u32) -> Position {
+    Position { line, col }
+}
+
+/// `extract_method` addressed at `anchor`, into a function called `name`.
+pub fn an_extract_method_at(anchor: Anchor, name: &str) -> RefactorOp {
+    an_extraction(RefactorKind::ExtractMethod, anchor, name)
+}
+
+/// Write `ops` as a plan with a v1 header over every file they anchor in, then apply it through the
+/// runner against a live rust-analyzer — the path `tddy-tools restructure apply` takes.
+pub async fn applying_a_plan_of(
+    fixture: &AFixtureWorkspace,
+    ops: &[RefactorOp],
+) -> Result<tddy_code_restructuring::runner::RunSummary, String> {
+    let plan = fixture.a_plan_of(ops);
+    applying_the_plan_at(fixture, plan).await
+}
+
+/// Apply the plan file at `plan` through the runner against a live rust-analyzer.
+pub async fn applying_the_plan_at(
+    fixture: &AFixtureWorkspace,
+    plan: PathBuf,
+) -> Result<tddy_code_restructuring::runner::RunSummary, String> {
+    let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
+    let root = fixture.path().to_path_buf();
+    let client = a_rust_analyzer_rooted_at(&root).await;
+    let cancel = a_token_cancelled_after(A_WAIT_A_TEST_CAN_OUTLAST);
+    let options = runner::Options {
+        command: runner::Command::Apply,
+        target: Some(plan),
+        ..runner::Options::default()
+    };
+    tokio::task::spawn_blocking(move || {
+        runner::apply(&root, options, Some(client), cancel).map_err(|error| error.to_string())
+    })
+    .await
+    .expect("the blocking half of the apply joins")
+}
+
+/// Resolve `item` in `file` through rust-analyzer's outline.
+pub async fn resolving_the_item(
+    fixture: &AFixtureWorkspace,
+    file: &str,
+    item: &str,
+) -> Result<tddy_code_restructuring::item_anchor::ResolvedItem, String> {
+    let path = tddy_code_restructuring::ItemPath::parse(item).map_err(|error| error.to_string())?;
+    let file = file.to_string();
+    with_a_rust_backend(fixture, move |backend| {
+        use tddy_code_restructuring::item_anchor::ItemResolver;
+        backend
+            .resolve_item(&file, &path)
+            .map_err(|error| error.to_string())
+    })
+    .await
+}
+
+/// The anchor `restructure anchors --at` would emit for `range` in `file`.
+pub async fn anchoring_at(
+    fixture: &AFixtureWorkspace,
+    file: &str,
+    range: tddy_code_restructuring::Range,
+) -> Result<Anchor, String> {
+    let root = fixture.path().to_path_buf();
+    let file = file.to_string();
+    with_a_rust_backend(fixture, move |backend| {
+        tddy_code_restructuring::item_anchor::item_anchor_at(&root, &file, range, backend)
+            .map_err(|error| error.to_string())
+    })
+    .await
+}
+
+/// Run `work` against a `RustBackend` over a live rust-analyzer rooted at the fixture.
+async fn with_a_rust_backend<T: Send + 'static>(
+    fixture: &AFixtureWorkspace,
+    work: impl FnOnce(&mut tddy_code_restructuring::backends::rust::RustBackend) -> T + Send + 'static,
+) -> T {
+    let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
+    let root = fixture.path().to_path_buf();
+    let client = a_rust_analyzer_rooted_at(&root).await;
+    let cancel = a_token_cancelled_after(A_WAIT_A_TEST_CAN_OUTLAST);
+    tokio::task::spawn_blocking(move || {
+        let mut backend = tddy_code_restructuring::backends::rust::RustBackend::from_lsp_client(
+            client,
+            Some(cancel),
+            discard(),
+        );
+        work(&mut backend)
+    })
+    .await
+    .expect("the blocking half joins")
+}
+
+/// What `restructure anchors <file> --items …` / `--at …` emits, through the runner.
+pub async fn the_anchor_command_emits(
+    fixture: &AFixtureWorkspace,
+    file: &str,
+    items: &[&str],
+    at: Option<tddy_code_restructuring::Range>,
+) -> Result<Anchor, String> {
+    let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
+    let root = fixture.path().to_path_buf();
+    let client = a_rust_analyzer_rooted_at(&root).await;
+    let cancel = a_token_cancelled_after(A_WAIT_A_TEST_CAN_OUTLAST);
+    let options = runner::Options {
+        command: runner::Command::Anchors,
+        target: Some(PathBuf::from(file)),
+        items: items.iter().map(|item| item.to_string()).collect(),
+        at,
+        ..runner::Options::default()
+    };
+    tokio::task::spawn_blocking(move || {
+        runner::item_anchors(&root, options, Some(client), cancel)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .expect("the blocking half joins")
 }

@@ -3,6 +3,8 @@
 **Category:** broken
 **Command:** `tddy-tools restructure anchors <file> --items …`
 **Measured:** `#carve` 5/11, against master tip `d5a157cc`
+**Claimed by:** [#537](https://github.com/uppin/tddy-coder/pull/537) — `#live-plan 1/7`
+**Lands after:** nothing — the stack's root
 
 ## What happens
 

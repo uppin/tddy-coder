@@ -29,6 +29,7 @@ use crate::console;
 use crate::restructure_args::options_for;
 use crate::runner::{Command, Options, Outcome};
 
+pub use crate::restructure_args::parse_position_range;
 pub use crate::restructure_args::{
     RestructureAnchorsArgs, RestructureArgs, RestructureCheckArgs, RestructureCommand,
     RestructurePlanArgs, RestructureSnapshotArgs, RestructureVerifyArgs,
