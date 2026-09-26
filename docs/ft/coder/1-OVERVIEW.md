@@ -78,6 +78,7 @@ its changeset wraps.
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
 | [Restructure item anchors](1-WIP/PRD-2026-09-26-restructure-item-anchors.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
 | [Index daemon plan store](1-WIP/PRD-2026-09-26-index-daemon-plan-store.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
+| [Index daemon live plans](1-WIP/PRD-2026-09-26-index-daemon-live-plans.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
 
 ## Integration Points
 
