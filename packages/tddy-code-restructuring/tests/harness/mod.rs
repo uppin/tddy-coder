@@ -2084,3 +2084,32 @@ pub async fn rebasing_the_plan_file(
     })
     .await
 }
+
+/// A committed workspace holding exactly `files` — for a test whose shape no shared fixture has.
+pub fn a_workspace_holding_files(files: &[(&str, &str)]) -> AFixtureWorkspace {
+    let mut fixture = an_empty_fixture();
+    for (path, text) in files {
+        fixture = fixture.writing(path, text);
+    }
+    fixture.tracked_by_git()
+}
+
+/// A three-crate workspace manifest over `shared`, `origin` and `destination`.
+pub const THREE_CRATES: &str =
+    "[workspace]\nresolver = \"2\"\nmembers = [\n    \"crates/shared\",\n    \
+                                \"crates/origin\",\n    \"crates/destination\",\n]\n";
+
+/// `shared`'s manifest and root, which every three-crate fixture carries unchanged.
+pub const SHARED_MANIFEST: &str =
+    "[package]\nname = \"shared\"\nversion = \"0.1.0\"\nedition = \"2021\"\n";
+pub const SHARED_LIB: &str = "pub struct Clock;\n";
+
+/// `destination`'s manifest with no dependencies.
+pub const DESTINATION_MANIFEST: &str =
+    "[package]\nname = \"destination\"\nversion = \"0.1.0\"\nedition = \"2021\"\n";
+
+/// `origin`'s manifest depending on `shared` and on `destination`.
+pub const ORIGIN_OVER_BOTH: &str =
+    "[package]\nname = \"origin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+                                    [dependencies]\nshared = { path = \"../shared\" }\n\
+                                    destination = { path = \"../destination\" }\n";

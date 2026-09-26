@@ -12,7 +12,7 @@ Full codebase exploration that grounded this plan:
 ## Stack
 
 `#live-plan` 4/7 — branch `feature/live-plan/move-paths`, base `feature/live-plan/live-plans`.
-PR: _recorded in wave 2_
+PR: [#540](https://github.com/uppin/tddy-coder/pull/540)
 
 ## Responsibility
 
@@ -145,22 +145,40 @@ following over in-memory module trees.
 
 ## Acceptance Tests
 
-### tddy-code-restructuring — `tests/move_module_to_crate_acceptance.rs`
+### tddy-code-restructuring — `tests/move_paths_acceptance.rs` (new suite, live rust-analyzer)
 
-- `a_crate_path_through_an_origin_facade_to_the_destination_becomes_crate_relative`
-- `a_path_naming_the_destination_by_extern_name_becomes_crate_relative_in_headers_and_bodies`
-- `the_destination_is_never_added_to_its_own_manifest`
-- `an_extern_crate_named_only_in_a_body_is_carried_to_dependencies`
-- `an_extern_crate_named_only_under_cfg_test_is_carried_to_dev_dependencies`
+One three-crate fixture per recorded defect, built with the harness's new
+`a_workspace_holding_files`; each asserts the written text and that the tree compiles. Today each
+fails with exactly the defect its backlog entry records:
 
-### tddy-code-restructuring — `tests/nested_module_move_acceptance.rs`
+- `a_crate_path_through_an_origin_facade_to_the_destination_becomes_crate_relative` — the header is
+  left naming the facade path
+- `a_path_naming_the_destination_by_extern_name_becomes_crate_relative_in_headers_and_bodies` —
+  `destination::clock_face` left as written
+- `the_destination_is_never_added_to_its_own_manifest` — today writes `destination = { path = "" }`
+- `an_extern_crate_named_only_in_a_body_is_carried_to_dependencies` — `shared` not carried
+- `an_extern_crate_named_only_under_cfg_test_is_carried_to_dev_dependencies` — not carried
+- `a_super_import_resolved_through_a_glob_reexport_of_the_destination_is_not_an_edge` — today
+  refused: "still names `origin` (origin::helper)"
+- `a_module_import_whose_items_the_destination_defines_is_rewritten_to_the_destination` — today
+  refused: "still names `origin` (origin::roster)"
 
-- `a_super_import_resolved_through_a_glob_reexport_of_the_destination_is_not_an_edge`
-- `a_module_import_whose_items_the_destination_defines_is_rewritten_to_the_destination`
+(A new suite rather than additions to `move_module_to_crate_acceptance.rs` /
+`nested_module_move_acceptance.rs`, so this node's diff does not interleave with those suites'
+existing fixtures.)
+
+### tddy-code-restructuring — `src/crate_move/survey.rs` (unit)
+
+- `super_resolves_to_the_parent_module`, `super_super_climbs_two_modules`,
+  `self_resolves_to_the_module_itself`, `crate_resolves_to_the_crate_root`,
+  `a_path_that_climbs_above_the_crate_root_is_refused`, `an_extern_path_is_left_as_written` — all
+  fail at `TODO(move-paths)`
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- Draft-PR-contract stubs: `TODO(move-paths)` in `crate_move/survey.rs` (`survey_moved_file`,
+  `resolved_against`, both `#[allow(dead_code)]` until the header pass reads them).
+- `crate_move/survey.rs` is `pub(crate)`: `check-parity` consumes it inside this crate.
 
 ## Decisions & Trade-offs
 
@@ -186,10 +204,10 @@ _(populated by validation commands)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
