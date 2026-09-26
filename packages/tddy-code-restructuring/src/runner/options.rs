@@ -64,6 +64,8 @@ pub struct Options {
     pub budget: Option<usize>,
     /// The items `anchors` must cover.
     pub items: Vec<String>,
+    /// The position `anchors --at` names: the innermost item enclosing it is what is anchored.
+    pub at: Option<crate::edit::Range>,
     /// The git ref `verify` compares against.
     pub against: Option<String>,
     /// Where the language server's own indexing lines go while an operation waits for an index.
@@ -100,6 +102,7 @@ impl Default for Options {
             deep: false,
             budget: None,
             items: Vec::new(),
+            at: None,
             against: None,
             progress: discard(),
             account: discard(),

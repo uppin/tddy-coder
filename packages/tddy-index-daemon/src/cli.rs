@@ -17,7 +17,8 @@ use std::path::{Path, PathBuf};
 use clap::{Args, Parser, Subcommand};
 use tddy_index_daemon::proto::code_index::{
     AnchorsRequest, ApplyRequest, CheckRequest, ComplexityRequest, CoverageRequest,
-    DuplicateTestsRequest, PlanStatusRequest, ReportRequest, VerifyRequest,
+    DuplicateTestsRequest, PlanStatusRequest, ReportRequest, SourcePosition, SourceRange,
+    VerifyRequest,
 };
 
 use crate::cli::analyze::AnalyzeCommand;
@@ -158,6 +159,28 @@ pub(crate) struct AnchorsArgs {
     /// The items the anchor must cover, in source order.
     #[arg(long, value_delimiter = ',', value_name = "NAMES")]
     pub(crate) items: Vec<String>,
+
+    /// `LINE:COL` or `LINE:COL-LINE:COL`: anchor the innermost item enclosing this position.
+    #[arg(
+        long,
+        value_parser = tddy_code_restructuring::restructure_cli::parse_position_range,
+        conflicts_with = "items"
+    )]
+    pub(crate) at: Option<tddy_code_restructuring::Range>,
+}
+
+/// A one-based range as the wire carries it.
+fn source_range(range: tddy_code_restructuring::Range) -> SourceRange {
+    SourceRange {
+        start: Some(SourcePosition {
+            line: range.start.line,
+            column: range.start.col,
+        }),
+        end: Some(SourcePosition {
+            line: range.end.line,
+            column: range.end.col,
+        }),
+    }
 }
 
 #[derive(Args)]
@@ -294,6 +317,7 @@ fn restructuring(command: RestructureCommand) -> Result<Requested, String> {
             workspace_root: named(&anchors.root.workspace_root)?,
             file: named(&anchors.file)?,
             items: normalised(anchors.items),
+            at: anchors.at.map(source_range),
         }),
         RestructureCommand::Status(status) => Requested::PlanStatus(PlanStatusRequest {
             workspace_root: named(&status.root.workspace_root)?,
@@ -478,6 +502,39 @@ mod tests {
     }
 
     #[test]
+    fn anchors_at_carries_the_position_rather_than_items() {
+        // Given an anchors run over a position rather than named items
+        let requested = requested_by(&[
+            "restructure",
+            "anchors",
+            "--workspace-root",
+            "/trees/one",
+            "src/lib.rs",
+            "--at",
+            "188:9-198:11",
+        ]);
+
+        // Then the request carries the position and no items
+        let Requested::Anchors(anchors) = requested else {
+            panic!("expected an anchors request");
+        };
+        assert_eq!(
+            anchors.at,
+            Some(SourceRange {
+                start: Some(SourcePosition {
+                    line: 188,
+                    column: 9
+                }),
+                end: Some(SourcePosition {
+                    line: 198,
+                    column: 11
+                }),
+            })
+        );
+        assert_eq!(anchors.items, Vec::<String>::new());
+    }
+
+    #[test]
     fn anchors_carries_the_items_as_a_list_rather_than_a_comma_joined_string() {
         // Given an anchors run over three items, spelled the way a human writes them
         let requested = requested_by(&[
@@ -500,6 +557,7 @@ mod tests {
                 workspace_root: "/trees/one".to_string(),
                 file: "src/lib.rs".to_string(),
                 items: vec!["One".to_string(), "Two".to_string(), "Three".to_string()],
+                at: None,
             }
         );
     }

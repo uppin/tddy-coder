@@ -662,6 +662,7 @@ async fn emits_the_range_anchor_its_language_server_outlines_for_a_named_item() 
             workspace_root: workspace.path().to_string_lossy().to_string(),
             file: "src/lib.rs".to_string(),
             items: vec!["foo".to_string()],
+            at: None,
         },
     )
     .await
@@ -669,19 +670,17 @@ async fn emits_the_range_anchor_its_language_server_outlines_for_a_named_item() 
 
     // Then it covers that item, in the one-based byte coordinates a plan is written in
     assert_eq!(
-        anchor,
-        AnchorsResponse {
-            range: Some(SourceRange {
-                start: Some(SourcePosition {
-                    line: 11,
-                    column: 1
-                }),
-                end: Some(SourcePosition {
-                    line: 13,
-                    column: 2
-                }),
+        anchor.range,
+        Some(SourceRange {
+            start: Some(SourcePosition {
+                line: 11,
+                column: 1
             }),
-        }
+            end: Some(SourcePosition {
+                line: 13,
+                column: 2
+            }),
+        })
     );
 }
 

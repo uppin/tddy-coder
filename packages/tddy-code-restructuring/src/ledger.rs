@@ -132,6 +132,12 @@ impl PositionLedger {
                     end: self.translate(origin, *end)?,
                 }
             }
+            // Item anchors are lowered into range and symbol anchors at run open
+            // (`runner::resolve_item_anchors`), so the ledger only ever sees snapshot coordinates.
+            Anchor::Item { .. } | Anchor::Items { .. } => {
+                // TODO(item-anchors): implement — refuse an unlowered item anchor as a defect.
+                todo!("item-anchors: an item anchor reached the ledger unlowered")
+            }
         })
     }
 

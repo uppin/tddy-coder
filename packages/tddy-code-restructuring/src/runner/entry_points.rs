@@ -478,6 +478,19 @@ pub fn anchors(
         )
 }
 
+/// The anchor `restructure anchors` emits: an `items` anchor over `options.items`, or — with
+/// `options.at` — the `item` anchor of the innermost item enclosing that position.
+pub fn item_anchors(
+    root: &Path,
+    options: Options,
+    client: Option<Arc<LspClient>>,
+    cancel: CancellationToken,
+) -> Result<crate::plan::Anchor> {
+    // TODO(item-anchors): implement — and route `Command::Anchors` through it.
+    let _ = (root, options, client, cancel);
+    todo!("item-anchors: the anchor `restructure anchors` emits")
+}
+
 fn read_plan(path: &Path) -> Result<Plan> {
     Plan::parse(&std::fs::read_to_string(path)?)
 }

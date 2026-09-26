@@ -14,7 +14,7 @@ State A below is distilled from that file.
 ## Stack
 
 `#live-plan` 1/7 — branch `feature/live-plan/item-anchors`, base `master`.
-PR: _recorded in wave 2_
+PR: [#537](https://github.com/uppin/tddy-coder/pull/537)
 
 ## Responsibility
 
@@ -222,13 +222,36 @@ Every refusal the resolver can produce has a test naming it; every anchor field 
 - `anchors_items_emits_an_items_anchor_for_adjacent_module_items`
 - `anchors_at_emits_an_item_anchor_relative_to_the_innermost_enclosing_item`
 
-### tddy-index-daemon — `tests/code_index_service_acceptance.rs`
+### tddy-index-daemon — `src/cli.rs` (unit)
 
-- `the_anchors_rpc_answers_an_item_anchor_for_a_position`
+- `anchors_at_carries_the_position_rather_than_items` — the daemon's command line carries `--at`
+  into `AnchorsRequest.at`. The RPC's own behaviour is the library's `item_anchors`, which the two
+  acceptance suites above drive against a live server; the daemon's existing fake-server anchors test
+  now asserts `range` only, since the fake outline has no text to fingerprint.
+
+### Unit tests (red)
+
+- `plan.rs`: `an_item_path_names_its_crate_and_its_segments`,
+  `a_trait_qualified_segment_names_its_type_and_its_trait`, `an_item_path_of_one_segment_is_refused`,
+  `an_item_path_displays_as_it_was_written`, `a_fingerprint_is_the_sha256_of_the_items_text`,
+  `a_v2_header_carries_its_file_hints`, `an_item_anchor_round_trips_through_its_json`;
+  `rejects_a_plan_written_for_a_different_schema_version` now uses `v:3` (v2 is a real schema).
+- `item_anchor.rs`: relative → absolute ranges (3), module paths (4).
+- `backends/rust/item_path.rs`: outline walk (4).
+- `restructure_args.rs`: `--at` parsing (3).
+
+All fail at this node's own `TODO(item-anchors)` stubs; `a_v1_plan_with_the_same_drift_is_still_refused`
+passes today by design — it is the v1 regression guard.
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- Draft-PR-contract stubs: every `TODO(item-anchors)` in `plan.rs`, `item_anchor.rs`,
+  `backends/rust/item_path.rs` (with `#[allow(dead_code)]` on `walk_outline`/`OutlineHit` until
+  `resolve_item` calls them), `ledger.rs`, `backends/rust.rs` (`unlowered_item_anchor`),
+  `runner/entry_points.rs` (`item_anchors`), `restructure_args.rs` (`parse_position_range`),
+  `tddy-index-daemon/src/queries.rs` (`anchor_json`), `tddy-tools/src/index_client.rs` (`--at`).
+- Fingerprint text is defined as the item's whole lines (indentation included), not the exact
+  server range — recorded on `Fingerprint`.
 
 ## Decisions & Trade-offs
 
@@ -259,10 +282,10 @@ _(populated by validation commands)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
