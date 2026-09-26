@@ -482,7 +482,7 @@ mod tests {
     fn a_range_ending_in_the_tail_of_a_unit_function_ends_in_a_unit_tail() {
         // Given `f`, which returns `()`, and a range from its `let` to its end
         let text = "fn f(x: Option<u32>) {\n    let Some(v) = x else { return; };\n    \
-                    if v > 1 {\n        println!(\"{v}\");\n    }\n}\n";
+                    if v > 1 {\n        drop(v);\n    }\n}\n";
         let range = Range {
             start: crate::edit::Position { line: 2, col: 5 },
             end: crate::edit::Position { line: 5, col: 6 },
