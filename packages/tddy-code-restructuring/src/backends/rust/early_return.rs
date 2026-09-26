@@ -56,6 +56,19 @@ pub(super) fn refuse_early_returns(text: &str, range: Range) -> Result<()> {
     )))
 }
 
+/// Whether the range ends in its function's tail expression **and** that function returns `()`.
+///
+/// The tail-range exception lets a range holding a `return` through when it runs to the end of
+/// the function, because the extracted function can then return what the tail did. A `()` tail
+/// has nothing to return, and rust-analyzer rewrites the early `return` into `ControlFlow` — which
+/// the tree does not import. Such a range is refused instead.
+#[allow(dead_code)] // TODO(extraction-defects): `refuse_early_returns` consults this.
+pub(super) fn ends_in_a_unit_tail(text: &str, range: Range) -> bool {
+    // TODO(extraction-defects): implement
+    let _ = (text, range);
+    todo!("extraction-defects: a range ending in a unit tail")
+}
+
 /// The one-based lines inside `range` holding a `return` whose target is the enclosing function.
 ///
 /// **What this relies on.** The text, lexed — not the server, because a plain `check` has none, and
@@ -465,6 +478,31 @@ fn closure_parameters_end(code: &[u8], from: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_range_ending_in_the_tail_of_a_unit_function_ends_in_a_unit_tail() {
+        // Given `f`, which returns `()`, and a range from its `let` to its end
+        let text = "fn f(x: Option<u32>) {\n    let Some(v) = x else { return; };\n    \
+                    if v > 1 {\n        println!(\"{v}\");\n    }\n}\n";
+        let range = Range {
+            start: crate::edit::Position { line: 2, col: 5 },
+            end: crate::edit::Position { line: 5, col: 6 },
+        };
+
+        assert!(ends_in_a_unit_tail(text, range));
+    }
+
+    #[test]
+    fn a_range_ending_in_the_tail_of_a_function_returning_a_value_does_not() {
+        let text = "fn f(x: Option<u32>) -> u32 {\n    let Some(v) = x else { return 0; };\n    \
+                    v + 1\n}\n";
+        let range = Range {
+            start: crate::edit::Position { line: 2, col: 5 },
+            end: crate::edit::Position { line: 3, col: 10 },
+        };
+
+        assert!(!ends_in_a_unit_tail(text, range));
+    }
+
     use super::*;
     use crate::edit::Position;
 

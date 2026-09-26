@@ -12,7 +12,7 @@ Full codebase exploration that grounded this plan:
 ## Stack
 
 `#live-plan` 6/7 — branch `feature/live-plan/extraction-defects`, base `feature/live-plan/move-facades`.
-PR: _recorded in wave 2_
+PR: [#542](https://github.com/uppin/tddy-coder/pull/542)
 
 ## Responsibility
 
@@ -140,29 +140,40 @@ the compile gate; the bounded probe asserted by elapsed-time against the ready-i
 
 ## Acceptance Tests
 
-### tddy-code-restructuring — `tests/extract_variable_acceptance.rs`
+### tddy-code-restructuring — `tests/extraction_defects_acceptance.rs` (new suite, live rust-analyzer)
 
-- `extracting_a_range_that_opens_with_a_borrow_resolves_within_the_ready_bound`
-- `a_hover_that_stays_null_past_the_bound_is_refused_as_unusable_naming_the_position`
-- `extracting_a_borrowed_field_binds_the_borrow_and_compiles`
+Fixtures are the ones each backlog entry sketched. Today each fails with its recorded defect:
 
-### tddy-code-restructuring — `tests/wedged_request_acceptance.rs`
+- `extracting_a_range_that_opens_with_a_borrow_resolves_within_the_ready_bound` — today the probe
+  waits until the harness cancels it (~176 s, "had not finished indexing … wait was cancelled");
+  asserts resolution within 60 s
+- `extracting_a_borrowed_field_binds_the_borrow_and_compiles` — today hoisted by value
+- `a_range_with_an_early_return_ending_in_a_unit_if_is_refused_before_any_edit` — today resolves
+  to an edit; asserts the existing early-return refusal now reaches it, and an unchanged file
+- `a_function_local_use_is_carried_into_the_extracted_function` — today `E0425`/`E0433 BTreeMap`
 
-- `the_warm_workspace_answers_the_next_request_after_a_refused_probe`
+Planned but not written as acceptance tests, with why:
 
-### tddy-code-restructuring — `tests/extract_method_control_flow_acceptance.rs`
+- *a hover that stays `null` past the bound is refused as unusable* — the only real-server way to get
+  a permanently `null` hover is the `&` range, which the fix removes; the bound is pinned when green
+  adds it, with the probe's own unit test
+- *the warm workspace answers the next request after a refused probe* — server-side cancellation is
+  outside `## Boundaries`
+- *`check --deep` refuses the same range* — `refuse_early_returns` is the static tier `check`,
+  `check --deep` and `apply` share, so the apply-path test covers it
 
-- `a_range_with_an_early_return_ending_in_a_unit_if_is_refused_before_any_edit`
-- `check_deep_refuses_the_same_range`
+### tddy-code-restructuring — unit
 
-### tddy-code-restructuring — `tests/extract_method_signature_acceptance.rs`
-
-- `a_function_local_use_is_carried_into_the_extracted_function`
-- `the_origin_keeps_a_function_local_use_only_while_it_still_names_it`
+- `backends/rust/selection.rs`: probe position (3), borrow widening (2)
+- `backends/rust/early_return.rs`: `ends_in_a_unit_tail` (2)
+- `backends/rust/imports.rs`: `function_local_uses_reaching` (2)
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- Draft-PR-contract stubs, `#[allow(dead_code)]` until called: `TODO(extraction-defects)` in
+  `backends/rust/selection.rs` (new), `backends/rust/early_return.rs` (`ends_in_a_unit_tail`),
+  `backends/rust/imports.rs` (`function_local_uses_reaching`).
+- The hang test costs the harness ceiling (~3 min) while red; it is ~seconds once green.
 
 ## Decisions & Trade-offs
 
@@ -186,10 +197,10 @@ _(populated by validation commands)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
