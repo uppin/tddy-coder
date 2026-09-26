@@ -12,6 +12,7 @@ Full codebase exploration that grounded this plan:
 ## Stack
 
 `#live-plan` 7/7 — branch `feature/live-plan/check-parity`, base `feature/live-plan/extraction-defects`.
+PR: [#543](https://github.com/uppin/tddy-coder/pull/543)
 PR: _recorded in wave 2_
 
 ## Responsibility
@@ -121,17 +122,29 @@ written.
 
 ## Acceptance Tests
 
-### tddy-code-restructuring — `tests/check_precondition_parity.rs`
+### tddy-code-restructuring — `tests/check_precondition_parity.rs` (static, no server)
 
-- `a_body_path_to_a_module_staying_behind_is_a_deep_check_finding_naming_the_line`
+Through the public `unrunnable_moves`, the static tier `check` and `check --deep` share. Today each
+gets no finding at all:
+
+- `a_body_path_to_a_module_staying_behind_is_a_finding_naming_the_line` — exact finding text
 - `the_body_path_remedy_does_not_suggest_a_cluster_for_the_host_module`
 - `a_destination_that_already_declares_the_module_is_reported_as_a_merge`
 - `a_destination_with_a_file_at_the_target_path_is_reported_as_a_merge`
-- `a_move_free_of_both_shapes_still_has_no_findings`
+- *a move free of both shapes still has no findings* — the suite's existing
+  `reports_nothing_for_a_plan_that_can_run`, which still passes
+
+**Sequencing fact:** the two body-path tests go green only once `move-paths`' survey reaches
+bodies; the two merge tests need nothing from any other node.
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- Draft-PR-contract stubs, `#[allow(dead_code)]` until `move_preconditions` reports them:
+  `TODO(check-parity)` in `crate_move/preconditions.rs` (`stays_behind_through_a_body`,
+  `destination_already_has_the_module`).
+- The body-path finding's text drops the PRD's "host-aware" wording for a simpler rule: it never
+  suggests `move_cluster_to_crate`, since a body's reach into the code hosting it is never a sibling
+  that can come along.
 
 ## Decisions & Trade-offs
 
@@ -155,10 +168,10 @@ _(populated by validation commands)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
