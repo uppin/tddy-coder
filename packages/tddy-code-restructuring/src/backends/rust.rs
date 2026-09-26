@@ -35,6 +35,7 @@ mod introduced;
 mod item_path;
 mod nested_modules;
 mod readiness;
+mod selection;
 
 pub use chatter::ServerChatter;
 
