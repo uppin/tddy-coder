@@ -20,8 +20,9 @@ use crate::activity::Activity;
 use crate::index::WorkspaceIndex;
 use crate::operations::{joined, plan_path};
 use crate::proto::code_index::{
-    AnchorsRequest, AnchorsResponse, PlanStatusRequest, PlanStatusResponse, SourcePosition,
-    SourceRange, VerifyRequest, VerifyResponse,
+    AnchorsRequest, AnchorsResponse, ListPlansRequest, LoadPlansRequest, PlanStatusRequest,
+    PlanStatusResponse, PlansResponse, SourcePosition, SourceRange, UnloadPlansRequest,
+    VerifyRequest, VerifyResponse,
 };
 use crate::status::status_of;
 
@@ -200,4 +201,34 @@ fn logged_progress() -> tddy_code_restructuring::backends::rust::ProgressSink {
 /// same reason: a line this process writes to stdout is a line in somebody's RPC frame.
 fn logged_trace(line: &str) {
     log::debug!(target: "tddy_index_daemon::operations", "trace: {line}");
+}
+
+/// Load plans into the root's store, answering every plan the store then holds.
+pub(crate) async fn serve_load_plans(
+    index: &WorkspaceIndex,
+    request: LoadPlansRequest,
+) -> Result<PlansResponse, Status> {
+    // TODO(plan-store): implement
+    let _ = (index, request);
+    Err(Status::unimplemented("LoadPlans: TODO(plan-store)"))
+}
+
+/// Flush and drop plans from the root's store, answering what it still holds.
+pub(crate) async fn serve_unload_plans(
+    index: &WorkspaceIndex,
+    request: UnloadPlansRequest,
+) -> Result<PlansResponse, Status> {
+    // TODO(plan-store): implement
+    let _ = (index, request);
+    Err(Status::unimplemented("UnloadPlans: TODO(plan-store)"))
+}
+
+/// The plans the root's store holds.
+pub(crate) async fn serve_list_plans(
+    index: &WorkspaceIndex,
+    request: ListPlansRequest,
+) -> Result<PlansResponse, Status> {
+    // TODO(plan-store): implement
+    let _ = (index, request);
+    Err(Status::unimplemented("ListPlans: TODO(plan-store)"))
 }

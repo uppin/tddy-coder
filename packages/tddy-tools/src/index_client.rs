@@ -53,7 +53,10 @@ fn answered_without_an_index(command: &RestructureCommand) -> bool {
         | RestructureCommand::Status(_)
         | RestructureCommand::Check(_)
         | RestructureCommand::Anchors(_)
-        | RestructureCommand::Verify(_) => false,
+        | RestructureCommand::Verify(_)
+        | RestructureCommand::Load(_)
+        | RestructureCommand::Unload(_)
+        | RestructureCommand::Plans => false,
     }
 }
 
@@ -102,6 +105,10 @@ async fn restructure_at(socket: &Path, args: RestructureArgs) -> Result<()> {
                 command: RestructureCommand::Snapshot(snapshot),
             })
             .await
+        }
+        RestructureCommand::Load(_) | RestructureCommand::Unload(_) | RestructureCommand::Plans => {
+            // TODO(plan-store): implement — LoadPlans / UnloadPlans / ListPlans, rendered.
+            todo!("plan-store: route load, unload and plans to the daemon")
         }
     }
 }

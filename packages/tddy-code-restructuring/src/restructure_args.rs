@@ -32,6 +32,30 @@ pub enum RestructureCommand {
     Verify(RestructureVerifyArgs),
     /// Rewrite a plan's snapshot header to the working tree as it stands.
     Snapshot(RestructureSnapshotArgs),
+    /// Load plans into the index daemon, which then keeps them current and flushes them back.
+    Load(RestructureLoadArgs),
+    /// Flush and drop plans the index daemon holds.
+    Unload(RestructureUnloadArgs),
+    /// List the plans the index daemon holds.
+    Plans,
+}
+
+#[derive(Parser)]
+pub struct RestructureLoadArgs {
+    /// The plan JSONL files to load.
+    #[arg(required = true)]
+    pub plans: Vec<PathBuf>,
+}
+
+#[derive(Parser)]
+pub struct RestructureUnloadArgs {
+    /// The plans to flush and drop.
+    #[arg(required_unless_present = "all", conflicts_with = "all")]
+    pub plans: Vec<PathBuf>,
+
+    /// Flush and drop every plan the daemon holds for this tree.
+    #[arg(long)]
+    pub all: bool,
 }
 
 #[derive(Parser)]
@@ -146,6 +170,21 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
         RestructureCommand::Snapshot(snapshot) => Options {
             command: Command::Snapshot,
             target: Some(snapshot.plan),
+            ..Options::default()
+        },
+        RestructureCommand::Load(load) => Options {
+            command: Command::Load,
+            plans: load.plans,
+            ..Options::default()
+        },
+        RestructureCommand::Unload(unload) => Options {
+            command: Command::Unload,
+            plans: unload.plans,
+            all: unload.all,
+            ..Options::default()
+        },
+        RestructureCommand::Plans => Options {
+            command: Command::Plans,
             ..Options::default()
         },
     }

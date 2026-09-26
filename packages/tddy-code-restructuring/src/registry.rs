@@ -252,6 +252,7 @@ mod tests {
     fn resolves_an_operation_through_the_backend_it_routed_to() {
         let mut registry = registry();
         let op = RefactorOp {
+            id: None,
             op: RefactorKind::ExtractMethod,
             anchor: Anchor::Symbol {
                 file: "src/lib.rs".to_string(),

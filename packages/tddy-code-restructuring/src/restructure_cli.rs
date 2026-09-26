@@ -274,7 +274,14 @@ fn needs_lsp_client(options: &Options) -> bool {
         // A snapshot re-hashes the files the plan's header names against the working tree. There
         // is no seam to resolve and nothing to ask a server about, so starting one would cost
         // minutes of indexing to produce an answer `sha256` already has.
-        Command::Status | Command::Verify | Command::Snapshot => false,
+        // The store's commands are answered by the index daemon; without one they are refused
+        // before any server would be needed.
+        Command::Status
+        | Command::Verify
+        | Command::Snapshot
+        | Command::Load
+        | Command::Unload
+        | Command::Plans => false,
     }
 }
 
