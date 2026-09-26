@@ -2188,4 +2188,36 @@ pub fn assert_lints_clean(fixture: &AFixtureWorkspace) {
         "the workspace does not lint clean:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
+
+/// Re-resolve the store's anchors in `files` through a live rust-analyzer, as the daemon does when
+/// the tree changes underneath it.
+pub async fn re_resolving_in_the_store(
+    fixture: &AFixtureWorkspace,
+    store: tddy_code_restructuring::plan_store::PlanStore,
+    files: Vec<String>,
+) -> (
+    tddy_code_restructuring::plan_store::PlanStore,
+    Result<(), String>,
+) {
+    with_a_rust_backend(fixture, move |backend| {
+        let mut store = store;
+        let outcome = store
+            .reresolve_files(&files, backend)
+            .map_err(|error| error.to_string());
+        (store, outcome)
+    })
+    .await
+}
+
+/// `restructure snapshot` for an item-anchored plan: re-resolve it once and write it back.
+pub async fn rebasing_the_plan_file(
+    fixture: &AFixtureWorkspace,
+    plan: PathBuf,
+) -> Result<Vec<tddy_code_restructuring::plan_store::OpStaleness>, String> {
+    let root = fixture.path().to_path_buf();
+    with_a_rust_backend(fixture, move |backend| {
+        tddy_code_restructuring::plan_store::rebase_plan_file(&root, &plan, backend)
+            .map_err(|error| error.to_string())
+    })
+    .await
 }
