@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file session_agents.proto.
  */
 export const file_session_agents: GenFile = /*@__PURE__*/
-  fileDesc("ChRzZXNzaW9uX2FnZW50cy5wcm90bxIOc2Vzc2lvbl9hZ2VudHMiUgoWQWdlbnRDb252ZXJzYXRpb25DaHVuaxIVCg1jb250ZW50X2NodW5rGAEgASgJEhMKC3N0b3BfcmVhc29uGAIgASgJEgwKBGxhc3QYAyABKAgidAoZQXR0YWNoU2Vzc2lvbkFnZW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhAKCGFnZW50X2lkGAQgASgJIoABCh5DYW5jZWxBZ2VudENvbnZlcnNhdGlvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBCABKAkiIQofQ2FuY2VsQWdlbnRDb252ZXJzYXRpb25SZXNwb25zZSJ0ChlEZXRhY2hTZXNzaW9uQWdlbnRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkiYQoYTGlzdFNlc3Npb25BZ2VudHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkikAEKHE9wZW5BZ2VudENvbnZlcnNhdGlvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIQCghhZ2VudF9pZBgEIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBSABKAkiOAodT3BlbkFnZW50Q29udmVyc2F0aW9uUmVzcG9uc2USFwoPY29udmVyc2F0aW9uX2lkGAEgASgJIpABCh5Qcm9tcHRBZ2VudENvbnZlcnNhdGlvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBCABKAkSDgoGcHJvbXB0GAUgASgJIvkBChxSZXBvcnRBZ2VudENsb25lU3RhdGVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSGwoTY29kZWJhc2Vfc2Vzc2lvbl9pZBgEIAEoCRI0CgtjbG9uZV9zdGF0ZRgFIAEoDjIfLnNlc3Npb25fYWdlbnRzLkFnZW50Q2xvbmVTdGF0ZRITCgtjbG9uZV9lcnJvchgGIAEoCRIVCg13b3JrdHJlZV9wYXRoGAcgASgJEhMKC2RpdmVyZ2VuY2VzGAggAygJIh8KHVJlcG9ydEFnZW50Q2xvbmVTdGF0ZVJlc3BvbnNlIroBCiNSZXBvcnRBZ2VudENvbnZlcnNhdGlvblN0YXRlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhAKCGFnZW50X2lkGAQgASgJEikKBnN0YXR1cxgFIAEoDjIZLnR5cGVzLlNlc3Npb25BZ2VudFN0YXR1cxIPCgdzdW1tYXJ5GAYgASgJIiYKJFJlcG9ydEFnZW50Q29udmVyc2F0aW9uU3RhdGVSZXNwb25zZSLVAgoRU2Vzc2lvbkFnZW50RW50cnkSEAoIYWdlbnRfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSDQoFbGFiZWwYBCABKAkSDQoFbW9kZWwYBSABKAkSEAoIcmVwbGFjZXMYBiADKAkSDQoFdG9vbHMYByADKAkSGwoTY29kZWJhc2Vfc2Vzc2lvbl9pZBgIIAEoCRI0CgtjbG9uZV9zdGF0ZRgJIAEoDjIfLnNlc3Npb25fYWdlbnRzLkFnZW50Q2xvbmVTdGF0ZRITCgtjbG9uZV9lcnJvchgKIAEoCRIpCgZzdGF0dXMYCyABKA4yGS50eXBlcy5TZXNzaW9uQWdlbnRTdGF0dXMSMgoNbGFzdF9hY3Rpdml0eRgMIAEoCzIbLnR5cGVzLlNlc3Npb25BZ2VudEFjdGl2aXR5ImgKElNlc3Npb25BZ2VudFJvc3RlchISCgpzZXNzaW9uX2lkGAEgASgJEgsKA3JldhgCIAEoBBIxCgZhZ2VudHMYAyADKAsyIS5zZXNzaW9uX2FnZW50cy5TZXNzaW9uQWdlbnRFbnRyeSJjChpTdHJlYW1TZXNzaW9uQWdlbnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJKq8BCg9BZ2VudENsb25lU3RhdGUSIQodQUdFTlRfQ0xPTkVfU1RBVEVfVU5TUEVDSUZJRUQQABIbChdBR0VOVF9DTE9ORV9TVEFURV9MT0NBTBABEiIKHkFHRU5UX0NMT05FX1NUQVRFX1BST1ZJU0lPTklORxACEhsKF0FHRU5UX0NMT05FX1NUQVRFX1JFQURZEAMSGwoXQUdFTlRfQ0xPTkVfU1RBVEVfRVJST1IQBDKUCAoTU2Vzc2lvbkFnZW50U2VydmljZRJjChJBdHRhY2hTZXNzaW9uQWdlbnQSKS5zZXNzaW9uX2FnZW50cy5BdHRhY2hTZXNzaW9uQWdlbnRSZXF1ZXN0GiIuc2Vzc2lvbl9hZ2VudHMuU2Vzc2lvbkFnZW50Um9zdGVyEmMKEkRldGFjaFNlc3Npb25BZ2VudBIpLnNlc3Npb25fYWdlbnRzLkRldGFjaFNlc3Npb25BZ2VudFJlcXVlc3QaIi5zZXNzaW9uX2FnZW50cy5TZXNzaW9uQWdlbnRSb3N0ZXISYQoRTGlzdFNlc3Npb25BZ2VudHMSKC5zZXNzaW9uX2FnZW50cy5MaXN0U2Vzc2lvbkFnZW50c1JlcXVlc3QaIi5zZXNzaW9uX2FnZW50cy5TZXNzaW9uQWdlbnRSb3N0ZXISZwoTU3RyZWFtU2Vzc2lvbkFnZW50cxIqLnNlc3Npb25fYWdlbnRzLlN0cmVhbVNlc3Npb25BZ2VudHNSZXF1ZXN0GiIuc2Vzc2lvbl9hZ2VudHMuU2Vzc2lvbkFnZW50Um9zdGVyMAESdAoVT3BlbkFnZW50Q29udmVyc2F0aW9uEiwuc2Vzc2lvbl9hZ2VudHMuT3BlbkFnZW50Q29udmVyc2F0aW9uUmVxdWVzdBotLnNlc3Npb25fYWdlbnRzLk9wZW5BZ2VudENvbnZlcnNhdGlvblJlc3BvbnNlEnMKF1Byb21wdEFnZW50Q29udmVyc2F0aW9uEi4uc2Vzc2lvbl9hZ2VudHMuUHJvbXB0QWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0GiYuc2Vzc2lvbl9hZ2VudHMuQWdlbnRDb252ZXJzYXRpb25DaHVuazABEnoKF0NhbmNlbEFnZW50Q29udmVyc2F0aW9uEi4uc2Vzc2lvbl9hZ2VudHMuQ2FuY2VsQWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0Gi8uc2Vzc2lvbl9hZ2VudHMuQ2FuY2VsQWdlbnRDb252ZXJzYXRpb25SZXNwb25zZRJ0ChVSZXBvcnRBZ2VudENsb25lU3RhdGUSLC5zZXNzaW9uX2FnZW50cy5SZXBvcnRBZ2VudENsb25lU3RhdGVSZXF1ZXN0Gi0uc2Vzc2lvbl9hZ2VudHMuUmVwb3J0QWdlbnRDbG9uZVN0YXRlUmVzcG9uc2USiQEKHFJlcG9ydEFnZW50Q29udmVyc2F0aW9uU3RhdGUSMy5zZXNzaW9uX2FnZW50cy5SZXBvcnRBZ2VudENvbnZlcnNhdGlvblN0YXRlUmVxdWVzdBo0LnNlc3Npb25fYWdlbnRzLlJlcG9ydEFnZW50Q29udmVyc2F0aW9uU3RhdGVSZXNwb25zZWIGcHJvdG8z", [file_types]);
+  fileDesc("ChRzZXNzaW9uX2FnZW50cy5wcm90bxIOc2Vzc2lvbl9hZ2VudHMiwgEKFkFnZW50Q29udmVyc2F0aW9uQ2h1bmsSFQoNY29udGVudF9jaHVuaxgBIAEoCRITCgtzdG9wX3JlYXNvbhgCIAEoCRIMCgRsYXN0GAMgASgIEjgKCG1lc3NhZ2VzGAQgAygLMiYuc2Vzc2lvbl9hZ2VudHMuQWdlbnRNZXNzYWdlRGVzY3JpcHRvchIeChFjbGFtcGVkX21heF90dXJucxgFIAEoDUgAiAEBQhQKEl9jbGFtcGVkX21heF90dXJucyJ3ChZBZ2VudE1lc3NhZ2VEZXNjcmlwdG9yEgoKAmlkGAEgASgJEgwKBHJvbGUYAiABKAkSDAoEdG9vbBgDIAEoCRISCgp0b29sX2NhbGxzGAQgAygJEhAKCGlzX2Vycm9yGAUgASgIEg8KB3ByZXZpZXcYBiABKAkidAoZQXR0YWNoU2Vzc2lvbkFnZW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhAKCGFnZW50X2lkGAQgASgJIoABCh5DYW5jZWxBZ2VudENvbnZlcnNhdGlvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBCABKAkiIQofQ2FuY2VsQWdlbnRDb252ZXJzYXRpb25SZXNwb25zZSJ0ChlEZXRhY2hTZXNzaW9uQWdlbnRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkiYQoYTGlzdFNlc3Npb25BZ2VudHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkikAEKHE9wZW5BZ2VudENvbnZlcnNhdGlvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIQCghhZ2VudF9pZBgEIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBSABKAkiOAodT3BlbkFnZW50Q29udmVyc2F0aW9uUmVzcG9uc2USFwoPY29udmVyc2F0aW9uX2lkGAEgASgJIrYBCh5Qcm9tcHRBZ2VudENvbnZlcnNhdGlvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBCABKAkSDgoGcHJvbXB0GAUgASgJEhYKCW1heF90dXJucxgGIAEoDUgAiAEBQgwKCl9tYXhfdHVybnMi+QEKHFJlcG9ydEFnZW50Q2xvbmVTdGF0ZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIbChNjb2RlYmFzZV9zZXNzaW9uX2lkGAQgASgJEjQKC2Nsb25lX3N0YXRlGAUgASgOMh8uc2Vzc2lvbl9hZ2VudHMuQWdlbnRDbG9uZVN0YXRlEhMKC2Nsb25lX2Vycm9yGAYgASgJEhUKDXdvcmt0cmVlX3BhdGgYByABKAkSEwoLZGl2ZXJnZW5jZXMYCCADKAkiHwodUmVwb3J0QWdlbnRDbG9uZVN0YXRlUmVzcG9uc2UiugEKI1JlcG9ydEFnZW50Q29udmVyc2F0aW9uU3RhdGVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkSKQoGc3RhdHVzGAUgASgOMhkudHlwZXMuU2Vzc2lvbkFnZW50U3RhdHVzEg8KB3N1bW1hcnkYBiABKAkiJgokUmVwb3J0QWdlbnRDb252ZXJzYXRpb25TdGF0ZVJlc3BvbnNlIoACCh5SZXN1bWVBZ2VudENvbnZlcnNhdGlvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBCABKAkSHAoPZnJvbV9tZXNzYWdlX2lkGAUgASgJSACIAQESFwoKY29ycmVjdGlvbhgGIAEoCUgBiAEBEhYKCW1heF90dXJucxgHIAEoDUgCiAEBQhIKEF9mcm9tX21lc3NhZ2VfaWRCDQoLX2NvcnJlY3Rpb25CDAoKX21heF90dXJucyLVAgoRU2Vzc2lvbkFnZW50RW50cnkSEAoIYWdlbnRfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSDQoFbGFiZWwYBCABKAkSDQoFbW9kZWwYBSABKAkSEAoIcmVwbGFjZXMYBiADKAkSDQoFdG9vbHMYByADKAkSGwoTY29kZWJhc2Vfc2Vzc2lvbl9pZBgIIAEoCRI0CgtjbG9uZV9zdGF0ZRgJIAEoDjIfLnNlc3Npb25fYWdlbnRzLkFnZW50Q2xvbmVTdGF0ZRITCgtjbG9uZV9lcnJvchgKIAEoCRIpCgZzdGF0dXMYCyABKA4yGS50eXBlcy5TZXNzaW9uQWdlbnRTdGF0dXMSMgoNbGFzdF9hY3Rpdml0eRgMIAEoCzIbLnR5cGVzLlNlc3Npb25BZ2VudEFjdGl2aXR5ImgKElNlc3Npb25BZ2VudFJvc3RlchISCgpzZXNzaW9uX2lkGAEgASgJEgsKA3JldhgCIAEoBBIxCgZhZ2VudHMYAyADKAsyIS5zZXNzaW9uX2FnZW50cy5TZXNzaW9uQWdlbnRFbnRyeSJjChpTdHJlYW1TZXNzaW9uQWdlbnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJKq8BCg9BZ2VudENsb25lU3RhdGUSIQodQUdFTlRfQ0xPTkVfU1RBVEVfVU5TUEVDSUZJRUQQABIbChdBR0VOVF9DTE9ORV9TVEFURV9MT0NBTBABEiIKHkFHRU5UX0NMT05FX1NUQVRFX1BST1ZJU0lPTklORxACEhsKF0FHRU5UX0NMT05FX1NUQVRFX1JFQURZEAMSGwoXQUdFTlRfQ0xPTkVfU1RBVEVfRVJST1IQBDKJCQoTU2Vzc2lvbkFnZW50U2VydmljZRJjChJBdHRhY2hTZXNzaW9uQWdlbnQSKS5zZXNzaW9uX2FnZW50cy5BdHRhY2hTZXNzaW9uQWdlbnRSZXF1ZXN0GiIuc2Vzc2lvbl9hZ2VudHMuU2Vzc2lvbkFnZW50Um9zdGVyEmMKEkRldGFjaFNlc3Npb25BZ2VudBIpLnNlc3Npb25fYWdlbnRzLkRldGFjaFNlc3Npb25BZ2VudFJlcXVlc3QaIi5zZXNzaW9uX2FnZW50cy5TZXNzaW9uQWdlbnRSb3N0ZXISYQoRTGlzdFNlc3Npb25BZ2VudHMSKC5zZXNzaW9uX2FnZW50cy5MaXN0U2Vzc2lvbkFnZW50c1JlcXVlc3QaIi5zZXNzaW9uX2FnZW50cy5TZXNzaW9uQWdlbnRSb3N0ZXISZwoTU3RyZWFtU2Vzc2lvbkFnZW50cxIqLnNlc3Npb25fYWdlbnRzLlN0cmVhbVNlc3Npb25BZ2VudHNSZXF1ZXN0GiIuc2Vzc2lvbl9hZ2VudHMuU2Vzc2lvbkFnZW50Um9zdGVyMAESdAoVT3BlbkFnZW50Q29udmVyc2F0aW9uEiwuc2Vzc2lvbl9hZ2VudHMuT3BlbkFnZW50Q29udmVyc2F0aW9uUmVxdWVzdBotLnNlc3Npb25fYWdlbnRzLk9wZW5BZ2VudENvbnZlcnNhdGlvblJlc3BvbnNlEnMKF1Byb21wdEFnZW50Q29udmVyc2F0aW9uEi4uc2Vzc2lvbl9hZ2VudHMuUHJvbXB0QWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0GiYuc2Vzc2lvbl9hZ2VudHMuQWdlbnRDb252ZXJzYXRpb25DaHVuazABEnMKF1Jlc3VtZUFnZW50Q29udmVyc2F0aW9uEi4uc2Vzc2lvbl9hZ2VudHMuUmVzdW1lQWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0GiYuc2Vzc2lvbl9hZ2VudHMuQWdlbnRDb252ZXJzYXRpb25DaHVuazABEnoKF0NhbmNlbEFnZW50Q29udmVyc2F0aW9uEi4uc2Vzc2lvbl9hZ2VudHMuQ2FuY2VsQWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0Gi8uc2Vzc2lvbl9hZ2VudHMuQ2FuY2VsQWdlbnRDb252ZXJzYXRpb25SZXNwb25zZRJ0ChVSZXBvcnRBZ2VudENsb25lU3RhdGUSLC5zZXNzaW9uX2FnZW50cy5SZXBvcnRBZ2VudENsb25lU3RhdGVSZXF1ZXN0Gi0uc2Vzc2lvbl9hZ2VudHMuUmVwb3J0QWdlbnRDbG9uZVN0YXRlUmVzcG9uc2USiQEKHFJlcG9ydEFnZW50Q29udmVyc2F0aW9uU3RhdGUSMy5zZXNzaW9uX2FnZW50cy5SZXBvcnRBZ2VudENvbnZlcnNhdGlvblN0YXRlUmVxdWVzdBo0LnNlc3Npb25fYWdlbnRzLlJlcG9ydEFnZW50Q29udmVyc2F0aW9uU3RhdGVSZXNwb25zZWIGcHJvdG8z", [file_types]);
 
 /**
  * @generated from message session_agents.AgentConversationChunk
@@ -40,6 +40,30 @@ export type AgentConversationChunk = Message<"session_agents.AgentConversationCh
    * @generated from field: bool last = 3;
    */
   last: boolean;
+
+  /**
+   * The messages THIS TURN appended, in the order they happened — not the whole history. Carried
+   * on the final frame only, as `stop_reason` is, because a turn's transcript is not known until
+   * the turn has ended.
+   *
+   * What makes a conversation whose loop runs on another host as addressable as a local one: a
+   * caller reads these ids to choose a point to send the conversation back to, and until they
+   * crossed this wire the remote half returned none and could not be rewound into at all.
+   *
+   * @generated from field: repeated session_agents.AgentMessageDescriptor messages = 4;
+   */
+  messages: AgentMessageDescriptor[];
+
+  /**
+   * The budget this turn actually ran under, when the caller asked for more than the ceiling and
+   * was given the ceiling instead; unset when the caller got what it asked for. Final frame only.
+   *
+   * Reported rather than silently applied: a caller given fewer turns than it asked for otherwise
+   * reads an early stop as a finished search.
+   *
+   * @generated from field: optional uint32 clamped_max_turns = 5;
+   */
+  clampedMaxTurns?: number;
 };
 
 /**
@@ -48,6 +72,68 @@ export type AgentConversationChunk = Message<"session_agents.AgentConversationCh
  */
 export const AgentConversationChunkSchema: GenMessage<AgentConversationChunk> = /*@__PURE__*/
   messageDesc(file_session_agents, 0);
+
+/**
+ * One message of a conversation's history, as the caller of a turn reads it.
+ *
+ * A handle, not a copy: `preview` is cut to a bound by the host that owns the history, because a
+ * turn outcome carrying whole tool payloads would put the agent's context back into its caller's —
+ * the cost the agent exists to avoid.
+ *
+ * @generated from message session_agents.AgentMessageDescriptor
+ */
+export type AgentMessageDescriptor = Message<"session_agents.AgentMessageDescriptor"> & {
+  /**
+   * Opaque, and unique for the life of the conversation. An id a rewind discarded is never minted
+   * again, so an id held from before a rewind addresses nothing rather than a different message.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * "system", "user", "assistant" or "tool". A spelling the reader does not know is refused naming
+   * it rather than defaulted — describing a message as the wrong speaker misreports who said it.
+   *
+   * @generated from field: string role = 2;
+   */
+  role: string;
+
+  /**
+   * The tool that produced a `tool`-role message, by name. Empty for every other role.
+   *
+   * @generated from field: string tool = 3;
+   */
+  tool: string;
+
+  /**
+   * The tools an `assistant`-role message called, in the order it called them.
+   *
+   * @generated from field: repeated string tool_calls = 4;
+   */
+  toolCalls: string[];
+
+  /**
+   * Whether this message reports a tool call that produced no result.
+   *
+   * @generated from field: bool is_error = 5;
+   */
+  isError: boolean;
+
+  /**
+   * The message's own text, cut to the host's preview bound.
+   *
+   * @generated from field: string preview = 6;
+   */
+  preview: string;
+};
+
+/**
+ * Describes the message session_agents.AgentMessageDescriptor.
+ * Use `create(AgentMessageDescriptorSchema)` to create a new message.
+ */
+export const AgentMessageDescriptorSchema: GenMessage<AgentMessageDescriptor> = /*@__PURE__*/
+  messageDesc(file_session_agents, 1);
 
 /**
  * @generated from message session_agents.AttachSessionAgentRequest
@@ -85,7 +171,7 @@ export type AttachSessionAgentRequest = Message<"session_agents.AttachSessionAge
  * Use `create(AttachSessionAgentRequestSchema)` to create a new message.
  */
 export const AttachSessionAgentRequestSchema: GenMessage<AttachSessionAgentRequest> = /*@__PURE__*/
-  messageDesc(file_session_agents, 1);
+  messageDesc(file_session_agents, 2);
 
 /**
  * @generated from message session_agents.CancelAgentConversationRequest
@@ -117,7 +203,7 @@ export type CancelAgentConversationRequest = Message<"session_agents.CancelAgent
  * Use `create(CancelAgentConversationRequestSchema)` to create a new message.
  */
 export const CancelAgentConversationRequestSchema: GenMessage<CancelAgentConversationRequest> = /*@__PURE__*/
-  messageDesc(file_session_agents, 2);
+  messageDesc(file_session_agents, 3);
 
 /**
  * @generated from message session_agents.CancelAgentConversationResponse
@@ -130,7 +216,7 @@ export type CancelAgentConversationResponse = Message<"session_agents.CancelAgen
  * Use `create(CancelAgentConversationResponseSchema)` to create a new message.
  */
 export const CancelAgentConversationResponseSchema: GenMessage<CancelAgentConversationResponse> = /*@__PURE__*/
-  messageDesc(file_session_agents, 3);
+  messageDesc(file_session_agents, 4);
 
 /**
  * @generated from message session_agents.DetachSessionAgentRequest
@@ -162,7 +248,7 @@ export type DetachSessionAgentRequest = Message<"session_agents.DetachSessionAge
  * Use `create(DetachSessionAgentRequestSchema)` to create a new message.
  */
 export const DetachSessionAgentRequestSchema: GenMessage<DetachSessionAgentRequest> = /*@__PURE__*/
-  messageDesc(file_session_agents, 4);
+  messageDesc(file_session_agents, 5);
 
 /**
  * @generated from message session_agents.ListSessionAgentsRequest
@@ -189,7 +275,7 @@ export type ListSessionAgentsRequest = Message<"session_agents.ListSessionAgents
  * Use `create(ListSessionAgentsRequestSchema)` to create a new message.
  */
 export const ListSessionAgentsRequestSchema: GenMessage<ListSessionAgentsRequest> = /*@__PURE__*/
-  messageDesc(file_session_agents, 5);
+  messageDesc(file_session_agents, 6);
 
 /**
  * @generated from message session_agents.OpenAgentConversationRequest
@@ -232,7 +318,7 @@ export type OpenAgentConversationRequest = Message<"session_agents.OpenAgentConv
  * Use `create(OpenAgentConversationRequestSchema)` to create a new message.
  */
 export const OpenAgentConversationRequestSchema: GenMessage<OpenAgentConversationRequest> = /*@__PURE__*/
-  messageDesc(file_session_agents, 6);
+  messageDesc(file_session_agents, 7);
 
 /**
  * @generated from message session_agents.OpenAgentConversationResponse
@@ -249,7 +335,7 @@ export type OpenAgentConversationResponse = Message<"session_agents.OpenAgentCon
  * Use `create(OpenAgentConversationResponseSchema)` to create a new message.
  */
 export const OpenAgentConversationResponseSchema: GenMessage<OpenAgentConversationResponse> = /*@__PURE__*/
-  messageDesc(file_session_agents, 7);
+  messageDesc(file_session_agents, 8);
 
 /**
  * @generated from message session_agents.PromptAgentConversationRequest
@@ -279,6 +365,19 @@ export type PromptAgentConversationRequest = Message<"session_agents.PromptAgent
    * @generated from field: string prompt = 5;
    */
   prompt: string;
+
+  /**
+   * The most model turns this ONE call may spend, in place of the agent definition's own budget.
+   * Unset leaves the definition's budget alone, which is what every caller that does not care
+   * sends. Above the serving host's ceiling it is clamped, and the clamp comes back on the final
+   * frame's `clamped_max_turns`.
+   *
+   * Presence-tracked rather than "0 means unset": zero turns is a budget a caller can legitimately
+   * name, and reading it as "use the definition's" would run a search the caller asked not to run.
+   *
+   * @generated from field: optional uint32 max_turns = 6;
+   */
+  maxTurns?: number;
 };
 
 /**
@@ -286,7 +385,7 @@ export type PromptAgentConversationRequest = Message<"session_agents.PromptAgent
  * Use `create(PromptAgentConversationRequestSchema)` to create a new message.
  */
 export const PromptAgentConversationRequestSchema: GenMessage<PromptAgentConversationRequest> = /*@__PURE__*/
-  messageDesc(file_session_agents, 8);
+  messageDesc(file_session_agents, 9);
 
 /**
  * @generated from message session_agents.ReportAgentCloneStateRequest
@@ -351,7 +450,7 @@ export type ReportAgentCloneStateRequest = Message<"session_agents.ReportAgentCl
  * Use `create(ReportAgentCloneStateRequestSchema)` to create a new message.
  */
 export const ReportAgentCloneStateRequestSchema: GenMessage<ReportAgentCloneStateRequest> = /*@__PURE__*/
-  messageDesc(file_session_agents, 9);
+  messageDesc(file_session_agents, 10);
 
 /**
  * @generated from message session_agents.ReportAgentCloneStateResponse
@@ -364,7 +463,7 @@ export type ReportAgentCloneStateResponse = Message<"session_agents.ReportAgentC
  * Use `create(ReportAgentCloneStateResponseSchema)` to create a new message.
  */
 export const ReportAgentCloneStateResponseSchema: GenMessage<ReportAgentCloneStateResponse> = /*@__PURE__*/
-  messageDesc(file_session_agents, 10);
+  messageDesc(file_session_agents, 11);
 
 /**
  * Authenticated exactly as the conversation RPCs are, and that is not ceremony: the (session,
@@ -423,7 +522,7 @@ export type ReportAgentConversationStateRequest = Message<"session_agents.Report
  * Use `create(ReportAgentConversationStateRequestSchema)` to create a new message.
  */
 export const ReportAgentConversationStateRequestSchema: GenMessage<ReportAgentConversationStateRequest> = /*@__PURE__*/
-  messageDesc(file_session_agents, 11);
+  messageDesc(file_session_agents, 12);
 
 /**
  * @generated from message session_agents.ReportAgentConversationStateResponse
@@ -436,7 +535,74 @@ export type ReportAgentConversationStateResponse = Message<"session_agents.Repor
  * Use `create(ReportAgentConversationStateResponseSchema)` to create a new message.
  */
 export const ReportAgentConversationStateResponseSchema: GenMessage<ReportAgentConversationStateResponse> = /*@__PURE__*/
-  messageDesc(file_session_agents, 12);
+  messageDesc(file_session_agents, 13);
+
+/**
+ * Continue an open conversation without asking it anything new.
+ *
+ * Every field but the conversation is optional, and the request with none of them set is the plain
+ * case: a chain cut short by its budget, carried on rather than re-asked — re-asking would make the
+ * agent re-read everything it has already read, which is the cost a resume exists to avoid.
+ *
+ * @generated from message session_agents.ResumeAgentConversationRequest
+ */
+export type ResumeAgentConversationRequest = Message<"session_agents.ResumeAgentConversationRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
+   *
+   * @generated from field: string daemon_instance_id = 3;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * @generated from field: string conversation_id = 4;
+   */
+  conversationId: string;
+
+  /**
+   * Send the conversation back to this message first, discarding everything appended after it.
+   * An id the conversation does not hold is refused naming it, never a continue from the end — the
+   * caller asked to go back, and carrying on instead does the opposite of what was asked.
+   *
+   * @generated from field: optional string from_message_id = 5;
+   */
+  fromMessageId?: string;
+
+  /**
+   * One corrective instruction, appended after the rewind point.
+   *
+   * What makes a rewind able to change anything at all: turns go out at `temperature: 0.0`, so
+   * re-running an identical history reproduces the same turn byte for byte. A rewind offered
+   * without a correction is a feature that silently does nothing.
+   *
+   * @generated from field: optional string correction = 6;
+   */
+  correction?: string;
+
+  /**
+   * As on PromptAgentConversationRequest, and clamped and reported the same way.
+   *
+   * @generated from field: optional uint32 max_turns = 7;
+   */
+  maxTurns?: number;
+};
+
+/**
+ * Describes the message session_agents.ResumeAgentConversationRequest.
+ * Use `create(ResumeAgentConversationRequestSchema)` to create a new message.
+ */
+export const ResumeAgentConversationRequestSchema: GenMessage<ResumeAgentConversationRequest> = /*@__PURE__*/
+  messageDesc(file_session_agents, 14);
 
 /**
  * @generated from message session_agents.SessionAgentEntry
@@ -543,7 +709,7 @@ export type SessionAgentEntry = Message<"session_agents.SessionAgentEntry"> & {
  * Use `create(SessionAgentEntrySchema)` to create a new message.
  */
 export const SessionAgentEntrySchema: GenMessage<SessionAgentEntry> = /*@__PURE__*/
-  messageDesc(file_session_agents, 13);
+  messageDesc(file_session_agents, 15);
 
 /**
  * Every roster read is a WHOLE snapshot. A consumer rebuilds its registry from it and never applies
@@ -581,7 +747,7 @@ export type SessionAgentRoster = Message<"session_agents.SessionAgentRoster"> & 
  * Use `create(SessionAgentRosterSchema)` to create a new message.
  */
 export const SessionAgentRosterSchema: GenMessage<SessionAgentRoster> = /*@__PURE__*/
-  messageDesc(file_session_agents, 14);
+  messageDesc(file_session_agents, 16);
 
 /**
  * @generated from message session_agents.StreamSessionAgentsRequest
@@ -608,7 +774,7 @@ export type StreamSessionAgentsRequest = Message<"session_agents.StreamSessionAg
  * Use `create(StreamSessionAgentsRequestSchema)` to create a new message.
  */
 export const StreamSessionAgentsRequestSchema: GenMessage<StreamSessionAgentsRequest> = /*@__PURE__*/
-  messageDesc(file_session_agents, 15);
+  messageDesc(file_session_agents, 17);
 
 /**
  * @generated from enum session_agents.AgentCloneState
@@ -721,6 +887,28 @@ export const SessionAgentService: GenService<{
   promptAgentConversation: {
     methodKind: "server_streaming";
     input: typeof PromptAgentConversationRequestSchema;
+    output: typeof AgentConversationChunkSchema;
+  },
+  /**
+   * Take a turn on an open conversation WITHOUT asking it anything new — optionally after sending
+   * it back to a message it already holds, and optionally with one corrective instruction.
+   *
+   * A method of its own rather than a flag on PromptAgentConversation, because the two requests
+   * differ in the one field that decides what the turn does: a resume carries no prompt, and a
+   * `prompt` field left empty to mean "resume" is a field two builds can read differently. The
+   * cost of the flag is the failure this whole coordinate is written against — a peer that
+   * predates the flag ignores it and runs the turn as an ordinary prompt, so a caller that asked
+   * to go back is carried forward with nothing saying so. A peer that predates this method
+   * answers `not_found`, which fails closed and *loudly*.
+   *
+   * Server-streaming for the same reason PromptAgentConversation is, and its frames are the same
+   * AgentConversationChunk: a resume is a turn, and a caller reads its answer the same way.
+   *
+   * @generated from rpc session_agents.SessionAgentService.ResumeAgentConversation
+   */
+  resumeAgentConversation: {
+    methodKind: "server_streaming";
+    input: typeof ResumeAgentConversationRequestSchema;
     output: typeof AgentConversationChunkSchema;
   },
   /**
