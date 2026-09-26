@@ -113,6 +113,13 @@ pub enum RestructureError {
          again"
     )]
     PlanChangedOnDisk { plan: String },
+    /// The next operation of a held plan is stale, so the run is refused before any write.
+    #[error("operation `{op}` of {plan} is stale ({reason}) — re-anchor it before applying")]
+    StaleOperation {
+        plan: String,
+        op: String,
+        reason: String,
+    },
     /// A command only the index daemon's plan store can answer, asked of a run without one.
     #[error(
         "`restructure {command}` needs the index daemon — start one with ./run-index-daemon and \

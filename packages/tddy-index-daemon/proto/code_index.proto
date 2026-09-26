@@ -206,6 +206,14 @@ message LoadedPlan {
   string plan  = 1;
   uint32 ops   = 2;
   bool   dirty = 3;
+  // Operations that can no longer run as written, in plan order.
+  repeated StaleOp stale = 4;
+}
+
+// One stale operation and why: `item changed`, `item not found in <file>`, `edited by <plan>#<op>`.
+message StaleOp {
+  string op     = 1;
+  string reason = 2;
 }
 
 // The plans the root's store holds after the request.
@@ -223,6 +231,8 @@ message PlanStatusResponse {
   uint32 in_flight = 2;
   uint32 pending   = 3;
   uint32 failed    = 4;
+  // Held operations that can no longer run as written.
+  repeated StaleOp stale = 5;
 }
 
 message VerifyRequest {
