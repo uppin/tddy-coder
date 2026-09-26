@@ -35,6 +35,7 @@ pub fn status_of(error: &RestructureError) -> Status {
         // rewrote its plan on this would ask again and be refused the same way.
         RestructureError::SeamRefused(_)
         | RestructureError::SnapshotMismatch { .. }
+        | RestructureError::ItemChanged { .. }
         | RestructureError::AnchorInvalidated { .. }
         | RestructureError::JournalExists
         | RestructureError::RepoScopedJournal { .. }

@@ -84,6 +84,9 @@ async fn anchor_covering(
     .map_err(|refusal| status_of(&refusal))?;
 
     Ok(AnchorsResponse {
+        // TODO(item-anchors): implement — the `items` anchor for named items, the `item` anchor for
+        // `at` (which this function also has to route rather than refuse for empty `items`).
+        anchor_json: String::new(),
         range: Some(SourceRange {
             start: Some(SourcePosition {
                 line: range.start.line,

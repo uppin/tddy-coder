@@ -116,6 +116,7 @@ mod tests {
         Plan {
             version: 1,
             snapshot: BTreeMap::new(),
+            files: BTreeMap::new(),
             ops: files
                 .iter()
                 .map(|file| RefactorOp {

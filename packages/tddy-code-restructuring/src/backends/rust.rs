@@ -31,6 +31,7 @@ mod early_return;
 mod impl_seam;
 mod imports;
 mod introduced;
+mod item_path;
 mod nested_modules;
 mod readiness;
 
@@ -1769,6 +1770,7 @@ impl RustBackend {
                 };
                 Ok(Range { start, end: start })
             }
+            Anchor::Item { .. } | Anchor::Items { .. } => Err(unlowered_item_anchor()),
         }
     }
 
@@ -1798,6 +1800,7 @@ impl RustBackend {
                 json!({ "line": start.line - 1, "character": start.col - 1 })
             }
             Anchor::Symbol { path, .. } => self.locate_symbol(uri, path)?,
+            Anchor::Item { .. } | Anchor::Items { .. } => return Err(unlowered_item_anchor()),
         };
 
         self.wait_until_resolved(uri, &position)?;
@@ -2223,6 +2226,17 @@ impl LspPoint {
 }
 
 /// The start of a named symbol's selection range, searching nested symbols depth-first.
+/// An item anchor reached an operation without having been resolved at run open.
+///
+/// `runner::resolve_item_anchors` lowers every item anchor into the snapshot coordinates the
+/// ledger translates, so arriving here is this crate's own defect, never the plan's.
+fn unlowered_item_anchor() -> crate::RestructureError {
+    // TODO(item-anchors): implement — name the operation and the item.
+    crate::RestructureError::ServerDefect(
+        "an item anchor reached an operation without being resolved at run open".to_string(),
+    )
+}
+
 fn find_symbol(symbols: &Value, name: &str) -> Option<Value> {
     for symbol in symbols.as_array()? {
         if symbol.get("name").and_then(Value::as_str) == Some(name) {
