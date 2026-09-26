@@ -45,8 +45,10 @@ pub mod local_pty_relay;
 mod local_terminal;
 pub mod login_shell;
 pub mod pty_relay;
+pub mod pty_runtime;
 pub mod service;
 pub mod session;
+pub mod tddy_user_config;
 
 pub use bridge::{
     serve_get_terminal_history, serve_get_terminal_history_with, serve_send_terminal_input,

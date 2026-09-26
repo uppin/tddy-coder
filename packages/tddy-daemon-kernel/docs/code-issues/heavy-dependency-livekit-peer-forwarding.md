@@ -13,6 +13,7 @@
 | Run | SDK consumers in crate | Dependents | Inheriting for nothing | Note |
 |---|---|---|---|---|
 | 2026-09-19 | 1 of 7 modules | 14 | 6 | first detection |
+| 2026-09-26 | 1 of 15 modules | 17 | not re-derived | #526 (`#carve` 15/21) added `relay_idle` and `local_token_tonic_adapter` (neither names the SDK; 13 → 15 modules, 4,947 → 5,066 lines) and a dependent, `tddy-terminal-rpc`, whose `pty_runtime` now reaches `privilege_drop` directly. `peer_forwarding.rs` is still the only SDK consumer (`:18`, `:132`, `:150`). Module and dependent counts by `git ls-tree` and `grep tddy-daemon-kernel packages/*/Cargo.toml` at `22787218` |
 
 ## What the tool found
 
@@ -114,6 +115,14 @@ its merits.
   `grep -ln "tddy-daemon-kernel" packages/*/Cargo.toml`, then checked each one's own manifest for a
   LiveKit dependency to separate "inherits it for nothing" from "has it anyway".
 - Read both module comments quoted above at their cited lines rather than trusting a search snippet.
+
+**2026-09-26.** `tddy-terminal-rpc` depends on the kernel unconditionally since #526, which moved
+`pty_runtime` there — the move this record's *What would close it* named as the prize, taken without
+the split. #526's changeset measured with `cargo tree` that the edge adds nothing to any binary's
+graph: `tddy-coder`, `tddy-sandbox-app` and `tddy-tools --no-default-features` already carried the
+kernel and `livekit`. That was not re-run for this entry. If it holds, the in-jail-build premise in
+*Why it matters here* needs re-checking before it is planned around; the cost to `tddy-bsp` and the
+six crates that inherit the SDK for nothing stands either way.
 
 **What an automated pass would have got wrong.** A dependency-graph tool reports 14 crates reaching
 `livekit` through this edge and stops there. It cannot see that the cost already landed — that a

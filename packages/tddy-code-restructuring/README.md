@@ -58,7 +58,9 @@ requests reads the tree on disk again after each one. See
 `also` names the rest — in a single edit, so the tree is never half-moved. That is what makes a
 mutually-referencing group movable at all: moved one at a time, each module's reference to a sibling
 still in the origin would make the destination depend on the crate it left, and no ordering of
-one-module operations can resolve a cycle.
+one-module operations can resolve a cycle. A plain `check` reports such a set when a plan spreads it
+over separate moves, at its first operation — see
+[docs/readiness-and-gates.md](docs/readiness-and-gates.md#the-partial-cluster-finding).
 
 `move_test_binary_to_crate` moves `<crate>/tests/<name>.rs` to the crate it exercises. A test binary
 is a different shape from a module — cargo auto-discovers it, so there is no `mod` line to remove;

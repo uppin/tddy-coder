@@ -144,6 +144,25 @@ Three of that adapter's answers are synthesised, because a jail's stdio bridge d
 the acked-offset watch is dropped immediately, so the bridge emits no ACK frames; `resize` is a no-op
 and `resizable()` is `false`; and `pty_done` is derived from the stdout broadcast closing.
 
+## The PTY action runtime and per-user settings
+
+Two modules here serve the daemon's PTY sessions rather than the RPC surface. Both are reached by
+`tddy-session-lifecycle`'s `CliSessionManager` through that crate's facade
+(`pub use tddy_terminal_rpc::{pty_runtime, tddy_user_config};`), so its `crate::pty_runtime::…`
+paths resolve unchanged.
+
+| Module | Holds |
+|---|---|
+| `pty_runtime` | `PtyRuntime` and `PtySpawnSpec`: spawns an interactive tool as a registered `tddy_task` task. It resolves a target `os_user` up front — uid, gid and home through `tddy_daemon_kernel::privilege_drop` (re-exported here), a front-loaded `setpriv` launcher when the user differs from the daemon's, and the child's `HOME`/`PATH` overrides — then hands the resolved argv and env to `tddy_pty::PtyRuntime`, which has no notion of an OS user. An unresolvable user fails the task and reports the reason, without leaking a PTY pair |
+| `tddy_user_config` | a re-export of `tddy_daemon_kernel::user_paths::{load_tddy_user_config, spawn_path_extra_for_home, TddyUserHomeConfig}`: per-OS-user settings from `~/.tddy/config.yaml` |
+
+They are why this crate depends on `tddy-daemon-kernel`. The dependency is unconditional, unlike
+the optional `livekit` feature.
+
+**Unix only, as it stands.** `pty_runtime`'s unconditional `pub use` of `privilege_drop` names two
+`#[cfg(unix)]` kernel items (`resolve_pty_os_user`, `ResolvedPtyUser`), so the crate does not build
+on a non-unix target.
+
 ## Login shells
 
 `StartTerminalSession` spawns the user's login shell in the session's checkout.
@@ -159,5 +178,7 @@ named.
 | `terminal_session_service_acceptance.rs` | all nine methods answer at the registered coordinate |
 | `terminal_session_bidi_acceptance.rs` | `StreamSessionTerminalIO` carries a session end to end |
 | `terminal_history_parity_acceptance.rs` | `GetTerminalHistory` frames and offsets |
+| `src/pty_runtime.rs` (6 unit) | the spawn spec carrying its target OS user; and, through the re-export, `tddy_daemon_kernel::privilege_drop`'s helpers: the `HOME`/`PATH` overrides for a target user, when a privilege drop is and is not required, and the `setpriv` launcher wrapping |
+| `src/tddy_user_config.rs` (2 unit) | the `PATH` extra read from `~/.tddy/config.yaml`, and a missing file read as none |
 | `packages/tddy-session-lifecycle/tests/sandbox_terminal_parity_acceptance.rs` | a real sandbox session's served frames against literal expectations, across both replay modes, the prologue, forward fill and drifted-offset clamping |
 | `packages/tddy-coder/tests/two_server_parity_acceptance.rs` | the daemon and the coder answer one session identically |

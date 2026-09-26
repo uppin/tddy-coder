@@ -39,6 +39,8 @@ pub mod common_room_supervisor;
 pub mod livekit_peer_discovery;
 pub mod livekit_rooms_stream;
 pub mod livekit_service;
+pub mod peer_routing;
+pub mod session_admission_service;
 pub mod session_room;
 
 pub use common_room_supervisor::{CommonRoomSupervisor, SupervisedCommonRoom};

@@ -24,9 +24,9 @@ use tddy_service::proto::tasks::{
 use tddy_task::TaskRegistry;
 
 use tddy_daemon_kernel::SessionUserResolver;
+use tddy_daemon_sandbox::action_service::ActionServiceImpl;
 use tddy_daemon_sandbox::sandbox_runtime::{attach_sandbox_request, SandboxRuntime};
-use tddy_session_lifecycle::action_service::ActionServiceImpl;
-use tddy_session_lifecycle::task_service::TaskServiceImpl;
+use tddy_daemon_sandbox::task_service::TaskServiceImpl;
 
 const GOOD_TOKEN: &str = "valid-token";
 

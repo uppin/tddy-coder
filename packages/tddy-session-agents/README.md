@@ -48,7 +48,7 @@ An allowlist that no longer matches the served coordinate fails **closed** — s
 
 ### Technical Implementation (How)
 - [session-agent-service.md](./docs/session-agent-service.md) — the nine methods, the ports, the routing split and the allowlist
-- [session-agent-roster.md](./docs/session-agent-roster.md) — the roster store, the clone's two sides, the mirror and the status mapping
+- [session-agent-roster.md](./docs/session-agent-roster.md) — the roster store, the clone's two sides, the mirror, the status mapping, and the roster and clone functions the session host delegates to over `AgentRosterState`
 - [agent-session-status.md](./docs/agent-session-status.md) — `session_agent_inference`, which travels here but is read only by `ListSessions`
 
 ## Related Packages

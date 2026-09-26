@@ -243,14 +243,28 @@ impl MergedChanges {
     }
 }
 
-/// The modules a plan's cross-crate moves leave behind that still reference what moved.
+/// The moves in a plan that would leave the crate they left and the destination depending on
+/// each other — each named with the paths that make it so.
 ///
 /// The cluster defect's worse half is that `check` cannot see it: a four-operation plan reported
-/// `no findings` and was then rejected by `apply`. This names, for a plan that moves some of a
-/// mutually-referencing set, the members it left behind — which is the finding that would have made
-/// that plan legible before it ran.
+/// `no findings` and was then rejected by `apply`. This is that rejection read statically: a moved
+/// module whose header still names a module staying behind makes the destination depend on the
+/// crate it left, and that crate goes on naming the destination — through its facade, or, with
+/// `reexport: none`, from every caller `apply` re-points. Two edges, one cycle, which
+/// [`refusals::refuse_a_dependency_cycle`] refuses.
 ///
-/// Empty when every move's siblings either come along or do not reference it.
+/// A module staying behind that names one leaving is **not** a finding on its own. A facade keeps
+/// its `crate::…` path resolving, and without one `apply` re-points it at the destination; either
+/// way it compiles, and reporting it made every move of a module anything still calls look broken.
+///
+/// **Staying behind is read at each operation's point in the plan**, because `apply` runs one
+/// operation at a time. A sibling moved by the same operation, or by an earlier one, is already gone
+/// from the origin. A sibling moved by a *later* operation is still there when this one runs, so a
+/// mutually-referencing set spread over several `move_module_to_crate` operations is refused at its
+/// first. That is what `move_cluster_to_crate` exists for, and the finding names it.
+///
+/// Empty when no moved module names a sibling still in the origin at that point, or nothing there
+/// names it back.
 ///
 /// # Errors
 ///
@@ -273,73 +287,138 @@ pub(crate) fn stranded_siblings(
 ) -> Result<Vec<(usize, String)>> {
     let moving = modules_the_plan_moves(workspace, ops);
 
-    // Read each crate's sources once rather than once per module moving out of it: a plan that
-    // moves five modules out of one crate asks the same question of the same files five times.
+    // Read each crate's sources at most once rather than once per module moving out of it, and only
+    // for a move that needs them: a plan that moves five modules out of one crate asks the same
+    // question of the same files five times.
     let mut sources = BTreeMap::new();
-    for crate_dir in moving
-        .iter()
-        .map(|module| module.crate_dir.clone())
-        .collect::<BTreeSet<String>>()
-    {
-        let read = sources_of(workspace, &crate_dir)?;
-        sources.insert(crate_dir, read);
-    }
-
     let mut findings = Vec::new();
     for module in &moving {
-        for sibling in siblings_naming(&sources[&module.crate_dir], module, &moving) {
-            findings.push((
-                module.op,
-                format!(
-                    "`{sibling}` stays behind in `{origin}` and names `{named}`, which operation \
-                     {op} moves to `{destination}` — a path re-pointed at a crate the module \
-                     holding it is not in. Move `{sibling}` with the set, or leave `{named}` where \
-                     it is",
-                    origin = module.crate_dir,
-                    named = module.path.join("::"),
-                    op = module.op,
-                    destination = module.destination,
-                ),
-            ));
+        let names_the_origin = paths_naming_the_origin(workspace, module, &moving)?;
+        if names_the_origin.is_empty() {
+            continue;
         }
+
+        let origin_names_it_back = if module.moving.reexport == Reexport::None {
+            let crate_dir = module.crate_dir();
+            if !sources.contains_key(crate_dir) {
+                sources.insert(crate_dir.to_string(), sources_of(workspace, crate_dir)?);
+            }
+            let callers = siblings_naming(&sources[crate_dir], module, &moving);
+            if callers.is_empty() {
+                continue;
+            }
+            format!(
+                "`apply` re-points its callers there (`{}`) at the destination",
+                callers.join("`, `")
+            )
+        } else {
+            "the facade it leaves there names the destination".to_string()
+        };
+
+        let whereabouts = match moved_later(&names_the_origin, module, &moving).as_slice() {
+            [] => format!("stays behind in `{}`", module.crate_dir()),
+            [later] => format!(
+                "is still in `{}` at that point (operation {later} moves it only afterwards)",
+                module.crate_dir()
+            ),
+            later => format!(
+                "is still in `{}` at that point (operations {} move it only afterwards)",
+                module.crate_dir(),
+                later
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        };
+
+        findings.push((
+            module.op,
+            format!(
+                "`{source}`, which operation {op} moves to `{destination}`, names `{paths}`, which \
+                 {whereabouts}. So the destination would depend on the crate it left, while \
+                 {origin_names_it_back}: a cycle `apply` refuses. Move them in one \
+                 `move_cluster_to_crate`, with this module as its anchor and what those paths \
+                 reach in `also`, or leave `{named}` where it is",
+                source = module.source,
+                op = module.op,
+                destination = module.moving.destination.dir,
+                paths = names_the_origin.join("`, `"),
+                named = module.path().join("::"),
+            ),
+        ));
     }
 
     Ok(findings)
+}
+
+/// The paths `module`'s header names the crate it left by once it is re-pointed — its
+/// `destination → origin` edges.
+///
+/// Read by the header pass and the re-export resolution `apply` itself uses, so the check and the
+/// refusal agree about which paths count: one reaching a module that has left this crate by the
+/// time `module`'s operation runs is not an edge, nor is one the origin only re-exports from a
+/// third crate.
+fn paths_naming_the_origin(
+    workspace: &Workspace<'_>,
+    module: &MovingModule,
+    moving: &[MovingModule],
+) -> Result<Vec<String>> {
+    let co_moving: BTreeSet<String> = gone_by_then(module, moving)
+        .map(|other| other.path().join("::"))
+        .collect();
+    let text = workspace.read(&module.source)?;
+    let header = header::repointed_header(workspace, &text, &module.moving.origin, &co_moving)?;
+    refusals::origin_named_dependencies(workspace, &module.moving, &header)
 }
 
 /// One module a plan moves out of the crate that holds it.
 struct MovingModule {
     /// Which operation moves it, by index in the plan.
     op: usize,
+    /// The module file the plan names, relative to the repository root.
+    source: String,
+    /// The move as `apply` reads it: both crates, the module's home and the facade it leaves.
+    moving: moving::Move,
+}
+
+impl MovingModule {
     /// The crate it is leaving.
-    crate_dir: String,
+    fn crate_dir(&self) -> &str {
+        &self.moving.home.crate_dir
+    }
+
     /// Its module path inside that crate, outermost first.
-    path: Vec<String>,
-    /// The destination directory the operation names.
-    destination: String,
+    fn path(&self) -> &[String] {
+        &self.moving.home.path
+    }
 }
 
 /// Every module the plan's cross-crate moves take out of a crate — each member of a cluster
 /// operation, not only the one its anchor names, so a set moving together is not read as
 /// stranding itself.
 ///
-/// An operation whose module resolves to no home is left out rather than reported: that is exactly
-/// what [`move_preconditions`](super::move_preconditions) refuses, and naming it again here would
-/// report one defect twice under two descriptions.
+/// A module [`move_preconditions`](super::move_preconditions) refuses is left out rather than
+/// reported: `check` already names it, and naming it again here would report one defect twice
+/// under two descriptions. It is not moving, either, so it is not counted as travelling with the
+/// rest.
 fn modules_the_plan_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Vec<MovingModule> {
     ops.iter()
         .enumerate()
         .filter(|(_, op)| op.op.moves_across_crates())
         .flat_map(|(index, op)| op.anchors().map(move |anchor| (index, op, anchor)))
         .filter_map(|(index, op, anchor)| {
+            super::move_preconditions(workspace, &op.with_anchor(anchor.clone())).ok()?;
             let source = anchor.file();
             let module = module_home::module_name(source).ok()?;
             let home = module_home::module_home(workspace, source, &module).ok()?;
+            let destination =
+                destination::Destination::read(workspace.root, op.to.as_deref()?).ok()?;
+            let reexport = op.reexport.unwrap_or(Reexport::None);
             Some(MovingModule {
                 op: index,
-                crate_dir: home.crate_dir,
-                path: home.path,
-                destination: op.to.clone()?,
+                source: source.to_string(),
+                moving: moving::Move::of(workspace, &home, &destination, reexport).ok()?,
             })
         })
         .collect()
@@ -388,17 +467,56 @@ fn siblings_naming(
     sources
         .iter()
         .filter(|source| !travelling(&source.home, module, moving))
-        .filter(|source| names_the_module(&source.text, &module.path, &source.home))
+        .filter(|source| names_the_module(&source.text, module.path(), &source.home))
         .map(|source| source.path.clone())
         .collect()
 }
 
-/// Whether the file at module path `home` is moving with the set — itself, or as part of a member.
+/// Whether the file at module path `home` has left the origin by the time `module`'s operation
+/// runs, as a module moved by it or by an earlier operation, or as part of one.
+///
+/// A file a later operation moves is still in the origin then, so `apply` re-points it like any
+/// other caller.
 fn travelling(home: &[String], module: &MovingModule, moving: &[MovingModule]) -> bool {
+    gone_by_then(module, moving).any(|other| home.starts_with(other.path()))
+}
+
+/// The modules of `module`'s crate that have left it by the time `module`'s operation runs: its own
+/// operation's, which move with it, and every earlier operation's, which are already in their
+/// destination.
+fn gone_by_then<'a>(
+    module: &'a MovingModule,
+    moving: &'a [MovingModule],
+) -> impl Iterator<Item = &'a MovingModule> {
     moving
         .iter()
-        .filter(|other| other.crate_dir == module.crate_dir)
-        .any(|other| home.starts_with(&other.path))
+        .filter(|other| other.crate_dir() == module.crate_dir() && other.op <= module.op)
+}
+
+/// The later operations moving a module one of `paths` reaches, in plan order.
+///
+/// `paths` are the moved header's, re-pointed at the origin, so each reads
+/// `<origin>::<module path>::…`.
+fn moved_later(paths: &[String], module: &MovingModule, moving: &[MovingModule]) -> Vec<usize> {
+    let origin = &module.moving.origin.extern_name;
+    let within: Vec<Vec<&str>> = paths
+        .iter()
+        .filter_map(|path| path.strip_prefix(origin.as_str())?.strip_prefix("::"))
+        .map(|path| path.split("::").collect())
+        .collect();
+
+    let later: BTreeSet<usize> = moving
+        .iter()
+        .filter(|other| other.crate_dir() == module.crate_dir() && other.op > module.op)
+        .filter(|other| {
+            within.iter().any(|path| {
+                path.len() >= other.path().len()
+                    && path.iter().zip(other.path()).all(|(one, two)| *one == two)
+            })
+        })
+        .map(|other| other.op)
+        .collect();
+    later.into_iter().collect()
 }
 
 /// The module path a file under a crate's `src/` carries — `[]` for the crate root.
@@ -970,6 +1088,139 @@ mod tests {
             vec![1],
             "the findings are not the second operation's: {findings:?}"
         );
+    }
+
+    /// A module staying behind that names the one moving is what a facade serves: the path it
+    /// writes, `crate::spawner::…`, resolves through `pub use destination::spawner::*;` exactly as
+    /// before. Flagging it made every move of a module anything still calls look like a defect.
+    #[test]
+    fn does_not_report_a_module_staying_behind_that_names_one_leaving_behind_a_facade() {
+        // Given a module that names nothing staying, called by two modules that are staying
+        let workspace = a_workspace_with_an_entangled_pair()
+            .with(SPAWNER, "pub struct Spawner;\n")
+            .with(
+                "crates/origin/src/runtime.rs",
+                "use crate::spawner::Spawner;\n\npub fn boot(spawner: &Spawner) {}\n",
+            );
+        let plan = [a_move_of("spawner")];
+
+        // When
+        let findings = stranded_siblings(&workspace.workspace(), &plan)
+            .expect("the check reads the workspace");
+
+        // Then
+        assert_eq!(findings, Vec::<(usize, String)>::new());
+    }
+
+    /// The protection the finding exists for: a moved module naming a sibling that stays behind
+    /// makes the destination depend on the crate it left, while the facade keeps that crate naming
+    /// the destination — a cycle `apply` refuses.
+    #[test]
+    fn reports_a_moving_module_that_names_a_sibling_staying_behind_a_facade() {
+        // Given a module that names a sibling the plan does not move
+        let workspace = a_workspace_with_an_entangled_pair().with(WORKER, "pub struct Worker;\n");
+        let plan = [a_move_of("spawner")];
+
+        // When
+        let findings = stranded_siblings(&workspace.workspace(), &plan)
+            .expect("the check reads the workspace");
+
+        // Then
+        assert_findings(findings)
+            .are_about_operations(&[0])
+            .naming("origin::spawn_worker::Worker");
+    }
+
+    /// With no facade, `apply` re-points every caller it finds at the destination, so a module
+    /// staying behind that names the one leaving is rewritten rather than broken.
+    #[test]
+    fn does_not_report_a_module_staying_behind_that_names_one_leaving_without_a_facade() {
+        // Given a module that names nothing staying, called by a module that is staying
+        let workspace = a_workspace_with_an_entangled_pair().with(SPAWNER, "pub struct Spawner;\n");
+        let plan = [a_move_without_a_facade_of("spawner")];
+
+        // When
+        let findings = stranded_siblings(&workspace.workspace(), &plan)
+            .expect("the check reads the workspace");
+
+        // Then
+        assert_eq!(findings, Vec::<(usize, String)>::new());
+    }
+
+    /// Without a facade the crate left behind still names the destination wherever a caller of the
+    /// moved module is re-pointed — so a moved module naming that crate back is the same cycle.
+    #[test]
+    fn reports_a_mutually_referencing_pair_split_by_a_move_without_a_facade() {
+        // Given a pair that name each other, one of which moves
+        let workspace = a_workspace_with_an_entangled_pair();
+        let plan = [a_move_without_a_facade_of("spawner")];
+
+        // When
+        let findings = stranded_siblings(&workspace.workspace(), &plan)
+            .expect("the check reads the workspace");
+
+        // Then
+        assert_findings(findings)
+            .are_about_operations(&[0])
+            .naming("origin::spawn_worker::Worker")
+            .naming(WORKER);
+    }
+
+    /// Without a facade and with nothing left behind naming it, the moved module depending on the
+    /// crate it left is one edge, not a cycle — `points_a_path_reaching_a_module_staying_behind_at_the_origin`
+    /// is `apply` resolving exactly that move.
+    #[test]
+    fn does_not_report_a_module_leaving_without_a_facade_that_nothing_left_behind_names() {
+        // Given a module naming a sibling staying behind, which nothing staying names back
+        let workspace = a_workspace_with_an_entangled_pair()
+            .with(
+                SPAWNER,
+                "use crate::runtime::Clock;\n\npub struct Spawner;\n",
+            )
+            .with(WORKER, "pub struct Worker;\n");
+        let plan = [a_move_without_a_facade_of("spawner")];
+
+        // When
+        let findings = stranded_siblings(&workspace.workspace(), &plan)
+            .expect("the check reads the workspace");
+
+        // Then
+        assert_eq!(findings, Vec::<(usize, String)>::new());
+    }
+
+    fn a_move_without_a_facade_of(module: &str) -> RefactorOp {
+        RefactorOp {
+            reexport: Some(Reexport::None),
+            ..a_move_of(module)
+        }
+    }
+
+    /// What a check found, read as the plan's reader reads it: by operation, then by what it says.
+    struct TheFindings(Vec<(usize, String)>);
+
+    fn assert_findings(findings: Vec<(usize, String)>) -> TheFindings {
+        TheFindings(findings)
+    }
+
+    impl TheFindings {
+        fn are_about_operations(self, expected: &[usize]) -> Self {
+            assert_eq!(
+                self.0.iter().map(|(op, _)| *op).collect::<Vec<_>>(),
+                expected,
+                "the findings are not about the expected operations: {:?}",
+                self.0
+            );
+            self
+        }
+
+        fn naming(self, fragment: &str) -> Self {
+            assert!(
+                self.0.iter().all(|(_, said)| said.contains(fragment)),
+                "expected every finding to name `{fragment}`: {:?}",
+                self.0
+            );
+            self
+        }
     }
 
     fn a_move_of(module: &str) -> RefactorOp {

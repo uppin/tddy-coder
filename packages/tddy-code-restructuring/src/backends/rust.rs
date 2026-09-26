@@ -30,6 +30,7 @@ mod documents;
 mod early_return;
 mod impl_seam;
 mod imports;
+mod introduced;
 mod nested_modules;
 mod readiness;
 
@@ -37,9 +38,9 @@ pub use chatter::ServerChatter;
 
 use early_return::refuse_early_returns;
 
-use impl_seam::{refuse_impl_sibling_references, with_method_calls_restored};
+use impl_seam::refuse_impl_sibling_references;
 use imports::names_bound;
-use nested_modules::with_nested_references_restored;
+use introduced::{introduced_by, Introduced};
 
 /// LSP `SymbolKind::Object` — how rust-analyzer reports an `impl` block. Its members are reached
 /// through the type, never through a module path, which is why a seam may move a whole `impl` freely
@@ -237,17 +238,16 @@ pub fn server_settings() -> Value {
 #[derive(Clone, Copy)]
 struct Placeholder {
     keyword: &'static str,
-    name: &'static str,
+    /// The fixed name the assist writes, or `None` when the server names the symbol itself and it is
+    /// found by what the assist added ([`introduced::introduced_by`]).
+    name: Option<&'static str>,
 }
 
 impl Placeholder {
-    fn declaration(&self) -> String {
-        format!("{} {}", self.keyword, self.name)
-    }
-
-    /// Offset of the identifier within the declaration.
-    fn identifier_offset(&self) -> usize {
-        self.keyword.len() + 1
+    /// Whether the declaration is an item signature, where `_` is not a type (`E0121`). A `let` may
+    /// carry one (`let v: Vec<_> = …`), and rust-analyzer's initializer may too (`collect::<Vec<_>>()`).
+    fn declares_a_signature(&self) -> bool {
+        self.keyword != "let"
     }
 }
 
@@ -259,7 +259,7 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             at_caret: false,
             placeholder: Some(Placeholder {
                 keyword: "fn",
-                name: "fun_name",
+                name: Some("fun_name"),
             }),
             multi_file: false,
             needs_inference: true,
@@ -271,7 +271,7 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             at_caret: false,
             placeholder: Some(Placeholder {
                 keyword: "let",
-                name: "var_name",
+                name: None,
             }),
             multi_file: false,
             needs_inference: true,
@@ -283,7 +283,7 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             at_caret: false,
             placeholder: Some(Placeholder {
                 keyword: "mod",
-                name: "modname",
+                name: Some("modname"),
             }),
             multi_file: false,
             needs_inference: false,
@@ -305,7 +305,7 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             at_caret: true,
             placeholder: Some(Placeholder {
                 keyword: "trait",
-                name: "NewTrait",
+                name: Some("NewTrait"),
             }),
             multi_file: false,
             needs_inference: false,
@@ -1281,18 +1281,7 @@ impl RustBackend {
         position: &Value,
         workspace: &Workspace<'_>,
     ) -> Result<Vec<Reference>> {
-        // References answer empty rather than pending while the crate graph is still loading, so an
-        // empty answer is only worth believing once the position resolves at all.
-        self.wait_until_resolved(uri, position)?;
-
-        let references = self.request_settled(
-            "textDocument/references",
-            json!({
-                "textDocument": { "uri": uri },
-                "position": position,
-                "context": { "includeDeclaration": false }
-            }),
-        )?;
+        let references = self.references_at(uri, position)?;
 
         let mut sites = Vec::new();
         for reference in references.as_array().into_iter().flatten() {
@@ -1365,12 +1354,17 @@ impl RustBackend {
         let placeholder = assist_for(op.op)
             .and_then(|assist| assist.placeholder)
             .ok_or_else(|| failure(format!("{:?} introduces nothing to name", op.op)))?;
-        let extracted = with_method_calls_restored(&extracted, placeholder.name, &impl_members);
-        let extracted = with_nested_references_restored(&extracted, placeholder.name, &moved);
+        let (extracted, introduced) =
+            introduced_by(placeholder, original, extracted, &impl_members, &moved)?;
 
-        let named = self.rename_placeholder(uri, &extracted, placeholder, &name)?;
-        refuse_residual_placeholder(original, &named, placeholder.name)?;
-        refuse_inferred_placeholder(&named, &format!("{} {name}", placeholder.keyword))?;
+        let named = self.rename_placeholder(uri, &extracted, &introduced, &name)?;
+        // A symbol already bearing the plan's name was not renamed, so every site of it is meant.
+        if introduced.name != name {
+            refuse_residual_placeholder(original, &named, &introduced.name)?;
+        }
+        if placeholder.declares_a_signature() {
+            refuse_inferred_placeholder(&named, &format!("{} {name}", placeholder.keyword))?;
+        }
 
         if !relocates {
             return Ok((named, Vec::new(), Vec::new()));
@@ -1524,20 +1518,36 @@ impl RustBackend {
         Ok(items)
     }
 
-    /// Where the references to one item sit, relative to the range about to be relocated.
-    fn reach_of(&mut self, uri: &str, position: &Value, range: Range) -> Result<Reach> {
-        // References answer empty rather than pending while the crate graph is still loading, so an
-        // empty answer is only worth believing once the position resolves at all.
-        self.wait_until_resolved(uri, position)?;
+    /// The server's `textDocument/references` for the item at `position`, once it can be believed.
+    ///
+    /// References answer empty rather than pending while the crate graph is still loading, so an
+    /// empty answer is only worth believing once the position resolves at all — or once the server
+    /// has said it never will, because a `#[cfg]` has switched the item off. That item is still
+    /// asked about, so its empty answer is the server's own. The survey is of references under the
+    /// cfg the server evaluated, for every item alike, so this says so on the progress line rather
+    /// than presenting an unseen caller as none.
+    fn references_at(&mut self, uri: &str, position: &Value) -> Result<Value> {
+        if let readiness::Answerable::Inactive(said) = self.wait_until_answerable(uri, position)? {
+            (self.progress)(&format!(
+                "{} is inactive to rust-analyzer (\"{said}\"): only code under the cfg it \
+                 evaluated is surveyed for references to it",
+                readiness::located(uri, position)?
+            ));
+        }
 
-        let references = self.request_settled(
+        self.request_settled(
             "textDocument/references",
             json!({
                 "textDocument": { "uri": uri },
                 "position": position,
                 "context": { "includeDeclaration": false }
             }),
-        )?;
+        )
+    }
+
+    /// Where the references to one item sit, relative to the range about to be relocated.
+    fn reach_of(&mut self, uri: &str, position: &Value, range: Range) -> Result<Reach> {
+        let references = self.references_at(uri, position)?;
 
         let mut reach = Reach::default();
 
@@ -1854,28 +1864,23 @@ impl RustBackend {
         Ok(apply_lsp_edit(original, edits_for(&resolved, uri)?))
     }
 
-    /// Give the extracted function its real name.
+    /// Give the symbol the assist introduced its real name.
     ///
     /// The rename is asked of the server rather than performed here, so no identifier in the
-    /// result — and no reference to it anywhere else — is written by this backend.
+    /// result — and no reference to it anywhere else — is written by this backend. A symbol the
+    /// server already named as the plan asks is left as it is.
     fn rename_placeholder(
         &mut self,
         uri: &str,
         extracted: &str,
-        placeholder: Placeholder,
+        introduced: &Introduced,
         name: &str,
     ) -> Result<String> {
         self.did_change(uri, extracted)?;
-
-        let declaration = placeholder.declaration();
-        let definition = extracted
-            .find(&declaration)
-            .map(|offset| offset + placeholder.identifier_offset())
-            .ok_or_else(|| {
-                server_defect(format!(
-                    "rust-analyzer did not produce a `{declaration}` to name"
-                ))
-            })?;
+        if introduced.name == name {
+            return Ok(extracted.to_string());
+        }
+        let definition = introduced.offset;
 
         // An assist that introduces a top-level item leaves the server rebuilding the module tree,
         // and a rename that arrives first is refused outright rather than deferred.
@@ -3052,10 +3057,23 @@ fn refuse_inferred_placeholder(text: &str, declaration: &str) -> Result<()> {
 /// Whether a declaration line carries `_` where a type belongs.
 ///
 /// Tokenised on identifier boundaries, so `fun_name` and `var_name` — which contain an underscore but
-/// are not one — do not register.
+/// are not one — do not register. A `_` straight after `'` is the elided lifetime `'_`, which is legal
+/// in a signature and is what rust-analyzer writes for a borrowed view (`state: RosterState<'_>`).
 fn carries_placeholder_type(line: &str) -> bool {
-    line.split(|character: char| !is_identifier_char(character))
-        .any(|token| token == "_")
+    let mut previous = None;
+    let mut token = String::new();
+    for character in line.chars().chain(std::iter::once(' ')) {
+        if is_identifier_char(character) {
+            token.push(character);
+            continue;
+        }
+        if token == "_" && previous != Some('\'') {
+            return true;
+        }
+        previous = Some(character);
+        token.clear();
+    }
+    false
 }
 
 /// Refuse a result the placeholder survived into.
@@ -5267,6 +5285,43 @@ mod tests {
         assert!(carries_placeholder_type("fn f() -> _ {"));
         assert!(carries_placeholder_type("fn f(value: _) -> f64 {"));
         assert!(carries_placeholder_type("fn f() -> Vec<_> {"));
+        assert!(carries_placeholder_type("fn f(s: _) {"));
+        assert!(carries_placeholder_type("fn f() -> (_, _) {"));
+    }
+
+    /// `'_` is an elided lifetime, legal in a parameter's type, and the signature rust-analyzer
+    /// writes for a borrowed view (`state: AgentRosterState<'_>`) — not an untyped `_`.
+    #[test]
+    fn reads_no_placeholder_type_out_of_an_elided_lifetime() {
+        assert!(!carries_placeholder_type(
+            "fn f(state: AgentRosterState<'_>) -> Result<(), Status> {"
+        ));
+        assert!(!carries_placeholder_type("fn f(s: &'_ str) {"));
+    }
+
+    /// An elided lifetime beside a real placeholder hides nothing: the `_` that is a type is still
+    /// read as one.
+    #[test]
+    fn reads_a_placeholder_type_beside_an_elided_lifetime() {
+        assert!(carries_placeholder_type(
+            "fn f(state: AgentRosterState<'_>, value: _) {"
+        ));
+        assert!(carries_placeholder_type("fn f(s: &'_ str) -> Vec<_> {"));
+    }
+
+    /// The signature the port-move pilot's cold `check --deep` refused, whose every type was
+    /// inferred.
+    #[test]
+    fn accepts_a_signature_borrowing_a_view_through_an_elided_lifetime() {
+        // Given
+        let text = "fn agent_clone_for(session_id: &str, agent_id: &str, session_dir: PathBuf, \
+                    state: tddy_session_agents::AgentRosterState<'_>) -> Result<AgentClone, Status> {\n";
+
+        // When
+        let checked = refuse_inferred_placeholder(text, "fn agent_clone_for");
+
+        // Then
+        assert!(checked.is_ok(), "{checked:?}");
     }
 
     // ---- D8: an alias the parent binds ----

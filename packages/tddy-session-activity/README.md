@@ -2,9 +2,12 @@
 
 What an agent is doing, what a session's status is, and the transcript of both:
 `activity.ActivityService`, eight RPCs. Agent activity records and session-status hooks come in;
-live activity streams, session notifications, worktree deltas and ACP transcript replay go out.
+live activity streams, session notifications, worktree deltas and ACP transcript replay go out. It
+also holds the session catalog's daemon side: reading, enriching and deleting the sessions under an
+OS user's sessions tree.
 
-Extracted from `tddy-daemon` by `#unbundle` node 7.
+Extracted from `tddy-daemon` by `#unbundle` node 7; the catalog modules came from
+`tddy-session-lifecycle` in `#carve` 15 ([#526](https://github.com/uppin/tddy-coder/pull/526)).
 
 ## Quick Start
 
@@ -13,11 +16,12 @@ Extracted from `tddy-daemon` by `#unbundle` node 7.
 cargo test -p tddy-session-activity
 ```
 
-⚠ **That command runs nothing.** This crate has no `tests/` directory and no `#[cfg(test)]` module,
-across 1,573 production lines. Every assertion about the subsystem is made from
-`packages/tddy-daemon/tests/` — the notification, activity-delta and ACP-replay suites stayed there
-because each is pinned by `ConnectionServiceImpl` or `test_util::{test_service, TEST_TOKEN}`. That
-is a recorded gap, not a design:
+That runs 45 tests across 2,541 production lines, and every one is the session catalog's (40 unit
+tests in its modules, and `tests/worktree_removal_eligibility.rs`). ⚠ **The activity service itself
+has no test of its own.** Every assertion about it is made from `packages/tddy-daemon/tests/` — the
+notification, activity-delta and ACP-replay suites stayed there because each is pinned by
+`ConnectionServiceImpl` or `test_util::{test_service, TEST_TOKEN}`. That is a recorded gap, not a
+design:
 [`docs/dev/todo/2026-09-12-tddy-session-activity-has-no-tests-of-its-own.md`](../../docs/dev/todo/2026-09-12-tddy-session-activity-has-no-tests-of-its-own.md).
 
 ## Architecture
@@ -53,6 +57,7 @@ LiveKit-routed sessions, at the same coordinate.
 - [activity-service.md](./docs/activity-service.md) — the eight methods, the ports, the tick rule and the routing split
 - [agent-activity.md](./docs/agent-activity.md) — the log, the hub, the stream modes, the ACP transcript and the lazy tool bodies
 - [session-notifications.md](./docs/session-notifications.md) — the bus, the classification table, the subscribers and their interest filters
+- [session-catalog.md](./docs/session-catalog.md) — reading, enriching and deleting sessions: `session_reader`, `user_sessions_path`, `session_list_enrichment`, `session_deletion`
 
 ## Related Packages
 - [tddy-service](../tddy-service/docs/) — owns `activity.proto`, `types.proto` and the tick constants

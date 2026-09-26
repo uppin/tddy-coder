@@ -45,6 +45,10 @@
 //! for, in arrival order. A test asserts that abandoning a request told the server to stop working
 //! on it, rather than only that the caller stopped waiting.
 //!
+//! `tddy/watchedFileChanges` replays the `workspace/didChangeWatchedFiles` changes the client sent,
+//! flattened in arrival order, as `[{ uri, type }, …]`. A test asserts that a host told the server
+//! about files that changed on disk behind it.
+//!
 //! `tddy/floodStderr` writes [`STDERR_FLOOD_BYTES`] to stderr before replying. A host that pipes
 //! the server's stderr without draining it fills the pipe buffer, and the server then blocks
 //! mid-write — so both this reply and every later one go unanswered.
@@ -101,6 +105,9 @@ static REQUEST_METHODS: std::sync::Mutex<Option<Vec<(Value, String)>>> =
 
 /// The methods of the requests the client asked to cancel, in arrival order.
 static CANCELLED_REQUESTS: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
+
+/// Every `workspace/didChangeWatchedFiles` change received, flattened in arrival order.
+static WATCHED_FILE_CHANGES: std::sync::Mutex<Vec<Value>> = std::sync::Mutex::new(Vec::new());
 
 /// How many `textDocument/hover` requests have been answered with `null` so far.
 static COLD_HOVERS_SERVED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -376,6 +383,15 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
         "textDocument/didChange" | "textDocument/didClose" => record_document_sync(message, method),
         // Records which request the client asked to stop working on.
         "$/cancelRequest" => record_cancellation(message),
+        "workspace/didChangeWatchedFiles" => WATCHED_FILE_CHANGES.lock().unwrap().extend(
+            message
+                .pointer("/params/changes")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        ),
+        // Replays the watched-file changes the client announced, in arrival order.
+        "tddy/watchedFileChanges" => reply(id, json!(WATCHED_FILE_CHANGES.lock().unwrap().clone())),
         // Replays the document versions the client sent, per URI, in arrival order.
         "tddy/documentVersions" => reply(id, recorded_document_versions()),
         // Replays the document-sync notifications themselves, method included.

@@ -243,6 +243,42 @@ The handler authenticates `session_token` before recording anything: the
 (session, daemon, codebase_session_id) triple is published in the `session.agents` broadcast, so it
 identifies a clone but does not authorize a claim about it.
 
+## Roster and clone code the session host calls
+
+`tddy-session-lifecycle`'s `DaemonSessionHost` owns the roster's and the clones' state, and sits
+above this crate. The parts of its roster and clone methods that need no host method live here as
+free functions; each host method keeps its signature and path and delegates:
+
+| Module | Function | The host method it serves |
+|---|---|---|
+| `clone_readiness` | `refuse_unready_clone` | `refuse_unready_clone`: refuses a clone that has not reported ready |
+| `agent_clone_lookup` | `agent_clone_for` | `agent_clone_for`: the clone record an agent id names in a session |
+| `agent_clone_worktree` | `agent_clone_worktree_path` | `agent_clone_worktree_path` |
+| `conversation_open_forward`, `conversation_cancel_forward` | `forward_open_agent_conversation`, `forward_cancel_agent_conversation` | the forwards to an agent's owning daemon, after the host has chosen the common-room slot |
+| `departed_daemon` | `refuse_departed_daemon` | `refuse_departed_daemon`, over the eligible instance ids the host reads |
+| `session_room_participants` | `session_room_participant_identities` | `session_room_participant_identities`, over the room roster |
+| `roster_broadcast` | `broadcast_roster` | `broadcast_roster`: publishing a roster once the host has found the session's room |
+| `opened_session_room` | `require_opened_session_room` | `ensure_session_room_for_agents`, after the host has opened the room |
+| `spawn_agent_def` | `agent_def_for_spawn` | `agent_def_for_spawn`: the def an agent spawns with, the model registry's assistant winning over a YAML def |
+| `hosted_clone_start` | `start_hosted_agent_clone` | `start_hosted_agent_clone`, after its head (which resolves the workspace session) has run |
+| `agent_records` | `def_tool_names`, `roster_record`, `qualified_agent_id`, `started_agent_id` | already free functions, re-exported by lifecycle's `agent_roster` so `connection_service::{def_tool_names, qualified_agent_id}` resolve |
+| `exec_tool_caller` | `authorize_exec_tool_caller` | lifecycle's `resolve_exec_tool_worktree`, and `tddy-daemon-rpc`'s exec-tool handler through lifecycle's `connection_service` re-export. It authenticates the caller before the hosted-clone branch and names this daemon in both refusals |
+
+Where a function reads host fields, it takes `AgentRosterState<'a>` (`agent_roster_state`): the ten
+fields the roster, its clones and agent-def resolution read (`config`, `tddy_data_dir`,
+`user_resolver`, `peer_routing`, `room_roster`, `session_rooms`, `session_agent_rosters`,
+`session_agent_clones`, `hosted_agent_clones`, `roster_keepalive_interval`), each borrowed for one
+call rather than cloned. Every shared field is lent as the `Arc` the host holds, so code that hands a
+store to a task clones the same handle the host would. The host builds it with
+`DaemonSessionHost::agent_roster_state()`. There is no callback trait: nothing here calls back into
+the host.
+
+`agent_def_for_spawn` is why this crate depends on `tddy-model-registry`, and `start_hosted_agent_clone`
+why it depends on `tddy-projects`. The rest of the roster's host code — claiming, seeding,
+provisioning, tearing down and unwinding clones, and the roster records that call other host
+methods — is `DaemonSessionHost`'s, and is converted to a state view and an `AgentHostCallbacks`
+port by [#532](https://github.com/uppin/tddy-coder/pull/532) (`#carve` 17).
+
 ## The sandbox-IPC bridge
 
 A managed-codebase session's agent runs in a jail, and its tool calls reach the

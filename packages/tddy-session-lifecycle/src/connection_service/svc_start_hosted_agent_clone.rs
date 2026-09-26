@@ -1,19 +1,12 @@
-// `encode_to_vec` is a `prost::Message` method; the trait is imported anonymously because
-// only its methods are used.
-use prost::Message as _;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
-
-use tddy_service::proto::session_agents_svc::OpenAgentConversationResponse;
 
 use tddy_service::proto::session_agents_svc::OpenAgentConversationRequest;
 
 use std::{path::Path, sync::Arc};
 
-use std::path::PathBuf;
-
 use crate::{
     connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
-    project_storage, workspace_session,
+    workspace_session,
 };
 
 use crate::user_sessions_path::projects_path_for_user;
@@ -70,65 +63,21 @@ impl DaemonSessionHost {
             Some(&self.tddy_data_dir),
         )
         .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        let project = project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| {
-                Status::not_found(format!(
-                    "project '{project_id}' is not registered here, so an agent clone of it has \
-                     nothing to fetch the session's WIP ref from"
-                ))
-            })?;
-
-        // Only a checkout that was cloned *from the facilitating daemon* fetches its WIP ref over
-        // `tddy-remote-git-repo` — its `origin` is the facilitator's `{instance_id}:{project_id}` URL,
-        // the only place that ref lives. A checkout the owning daemon already had on the shared
-        // filesystem fetches the ref from that local repo directly (the facilitating daemon
-        // published it there), so it must NOT carry the transport-shim env var: `origin` there is the
-        // forge URL, which `tddy-remote-git-repo` would try to reach and fail. (PRD AC37.)
-        let facilitator_origin_prefix = format!("{facilitating}:");
-        let is_facilitator_clone = project.git_url.starts_with(&facilitator_origin_prefix);
-
-        let spec = crate::session_agent_clone::CloneMirrorSpec {
-            session_id: session_id.to_string(),
-            facilitating_daemon_instance_id: facilitating.to_string(),
-            owning_daemon_instance_id: local_instance_id_for_config(&self.config),
-            codebase_session_id: codebase_session_id.to_string(),
+        let state = self.agent_roster_state();
+        hosted_clone_start::start_hosted_agent_clone(
+            placement,
+            codebase_session_id,
+            project_id,
+            session_token,
+            session_id,
+            facilitating,
+            url,
+            api_key,
+            api_secret,
             worktree_path,
-            project_repo_path: PathBuf::from(&project.main_repo_path),
-            project_id: project_id.to_string(),
-            session_token: session_token.to_string(),
-            livekit_url: url,
-            livekit_api_key: api_key,
-            livekit_api_secret: api_secret,
-            facilitating_daemon_url: if is_facilitator_clone {
-                let u = placement.facilitating_daemon_url.trim();
-                if u.is_empty() {
-                    None
-                } else {
-                    Some(u.to_string())
-                }
-            } else {
-                None
-            },
-            first_admission_token: placement.first_admission_token.clone(),
-            first_admission_url: placement.first_admission_url.clone(),
-            first_admission_room: placement.first_admission_room.clone(),
-            common_room_slot: self.peer_routing.common_room_livekit_room().cloned(),
-        };
-        let hosted = Arc::clone(&self.hosted_agent_clones);
-        let clone_id = codebase_session_id.to_string();
-        tokio::spawn(async move {
-            if let Err(status) = crate::session_agent_clone::run_clone_mirror(spec, hosted).await {
-                // Loud and final: the facilitating daemon has already been told the clone failed
-                // (the mirror reports before it returns), and there is nothing here that could
-                // repair a room this daemon cannot reach.
-                log::error!(
-                    "agent clone {clone_id} stopped mirroring: {}",
-                    status.message()
-                );
-            }
-        });
-        Ok(())
+            projects_dir,
+            state,
+        )
     }
 
     /// Refuse a prompt to an agent whose checkout is not ready to serve reads, naming the state.
@@ -141,32 +90,10 @@ impl DaemonSessionHost {
         session_id: &str,
         record: &tddy_core::SessionAgentRecord,
     ) -> Result<(), Status> {
-        use tddy_service::proto::session_agents_svc::AgentCloneState;
         let clone = self
             .session_agent_clones
             .get(session_id, &record.daemon_instance_id);
-        let (state, error) = match clone {
-            Some(clone) => (clone.state, clone.error),
-            None => (AgentCloneState::Unspecified, String::new()),
-        };
-        match state {
-            AgentCloneState::Ready | AgentCloneState::Local => Ok(()),
-            AgentCloneState::Provisioning => Err(Status::failed_precondition(format!(
-                "agent '{}' cannot be prompted yet: its clone on daemon '{}' is still \
-                 provisioning",
-                record.agent_id, record.daemon_instance_id
-            ))),
-            AgentCloneState::Error => Err(Status::failed_precondition(format!(
-                "agent '{}' cannot be prompted: its clone on daemon '{}' is in the error state \
-                 ({error})",
-                record.agent_id, record.daemon_instance_id
-            ))),
-            AgentCloneState::Unspecified => Err(Status::failed_precondition(format!(
-                "agent '{}' cannot be prompted: this daemon has no clone on daemon '{}' for \
-                 session '{session_id}' — the state is unknown, which is not the same as ready",
-                record.agent_id, record.daemon_instance_id
-            ))),
-        }
+        clone_readiness::refuse_unready_clone(session_id, record, clone)
     }
 
     /// Refuse to address an owning daemon that is no longer in the common room.
@@ -179,17 +106,8 @@ impl DaemonSessionHost {
         &self,
         daemon_instance_id: &str,
     ) -> Result<(), Status> {
-        if self
-            .eligible_instance_ids()
-            .iter()
-            .any(|candidate| candidate == daemon_instance_id)
-        {
-            return Ok(());
-        }
-        Err(Status::unavailable(format!(
-            "daemon '{daemon_instance_id}' has left the common room, so the agents it owns on this \
-             session cannot be reached; the rest of the roster is unaffected"
-        )))
+        let eligible = self.eligible_instance_ids();
+        departed_daemon::refuse_departed_daemon(daemon_instance_id, eligible)
     }
 
     /// Ask the owning daemon to open the conversation on its side, under the id this daemon minted.
@@ -203,30 +121,13 @@ impl DaemonSessionHost {
         conversation_id: &str,
     ) -> Result<(), Status> {
         let slot = self.common_room_slot("OpenAgentConversation")?;
-        let forwarded = OpenAgentConversationRequest {
-            conversation_id: conversation_id.to_string(),
-            daemon_instance_id: owner.to_string(),
-            ..req.clone()
-        };
-        let answered = crate::livekit_peer_discovery::forward_to_peer(
-            slot,
+        conversation_open_forward::forward_open_agent_conversation(
+            req,
             owner,
-            tddy_session_agents::SERVICE_NAME,
-            "OpenAgentConversation",
-            forwarded.encode_to_vec(),
+            conversation_id,
+            slot,
         )
-        .await?;
-        let opened = OpenAgentConversationResponse::decode(answered.as_slice())
-            .map_err(|e| Status::internal(format!("decode OpenAgentConversationResponse: {e}")))?;
-        if opened.conversation_id != conversation_id {
-            return Err(Status::internal(format!(
-                "daemon '{owner}' opened conversation {:?} instead of the requested \
-                 {conversation_id:?}, so a prompt to it could not be routed and a cancel could not \
-                 name it",
-                opened.conversation_id
-            )));
-        }
-        Ok(())
+        .await
     }
 
     /// A turn loop for an agent this daemon resolves and serves from the session's own worktree.
@@ -423,3 +324,11 @@ impl DaemonSessionHost {
         );
     }
 }
+
+use tddy_session_agents::hosted_clone_start;
+
+use tddy_session_agents::departed_daemon;
+
+use tddy_session_agents::conversation_open_forward;
+
+use tddy_session_agents::clone_readiness;

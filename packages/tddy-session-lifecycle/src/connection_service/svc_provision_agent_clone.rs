@@ -1,6 +1,3 @@
-// `encode_to_vec` is a `prost::Message` method; the trait is imported anonymously because
-// only its methods are used.
-use prost::Message as _;
 use tddy_service::proto::exec_tools::ExecuteToolResponse;
 
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
@@ -297,13 +294,7 @@ impl DaemonSessionHost {
         let Some(publisher) = self.session_rooms.agents_publisher(session_id) else {
             return;
         };
-        if let Err(e) = publisher.publish(&roster.encode_to_vec()).await {
-            log::warn!(
-                "could not broadcast session {session_id}'s roster on \
-                 {}: {e}",
-                crate::session_room::SESSION_AGENTS_TOPIC
-            );
-        }
+        roster_broadcast::broadcast_roster(session_id, roster, publisher).await;
     }
 
     /// The identities currently joined to a session's room, as the LiveKit server reports them.
@@ -315,23 +306,13 @@ impl DaemonSessionHost {
         session_id: &str,
     ) -> Result<Vec<String>, Status> {
         let room_name = tddy_daemon_livekit::session_room::session_room_name(session_id);
-        let rooms = self.room_roster.list_rooms().await.map_err(Status::from)?;
-        let room = rooms
-            .into_iter()
-            .find(|room| room.name == room_name)
-            .ok_or_else(|| {
-                Status::not_found(format!(
-                    "the LiveKit server has no room called {room_name}; session {session_id} is \
-                     not being facilitated in one"
-                ))
-            })?;
-        let mut identities: Vec<String> = room
-            .participants
-            .into_iter()
-            .map(|participant| participant.identity)
-            .collect();
-        identities.sort();
-        Ok(identities)
+        let room_roster = &self.room_roster;
+        session_room_participants::session_room_participant_identities(
+            session_id,
+            room_name,
+            room_roster,
+        )
+        .await
     }
 
     /// Where the checkout serving `agent_id` is, on the daemon that owns it.
@@ -344,13 +325,7 @@ impl DaemonSessionHost {
         agent_id: &str,
     ) -> Result<PathBuf, Status> {
         let clone = self.agent_clone_for(session_id, agent_id)?;
-        clone.worktree_path.ok_or_else(|| {
-            Status::failed_precondition(format!(
-                "the daemon owning '{agent_id}' has not reported where session {session_id}'s \
-                 clone landed (its state is {:?})",
-                clone.state
-            ))
-        })
+        agent_clone_worktree::agent_clone_worktree_path(session_id, agent_id, clone)
     }
 
     /// Every reconcile the daemon owning `agent_id` has reported for this session's clone.
@@ -372,23 +347,8 @@ impl DaemonSessionHost {
         agent_id: &str,
     ) -> Result<crate::session_agent_clone::AgentClone, Status> {
         let session_dir = self.session_dir_for(session_id)?;
-        let record = self
-            .session_agent_rosters
-            .entry(session_id, &session_dir, agent_id)?
-            .ok_or_else(|| {
-                Status::not_found(format!(
-                    "agent '{agent_id}' is not attached to session '{session_id}'"
-                ))
-            })?;
-        self.session_agent_clones
-            .get(session_id, &record.daemon_instance_id)
-            .ok_or_else(|| {
-                Status::failed_precondition(format!(
-                    "agent '{agent_id}' is served locally by daemon \
-                     '{}', which works the session's own worktree and has no clone",
-                    record.daemon_instance_id
-                ))
-            })
+        let state = self.agent_roster_state();
+        agent_clone_lookup::agent_clone_for(session_id, agent_id, session_dir, state)
     }
 
     /// [`LocalExecTools::hosted_clone_for`](super::LocalExecTools::hosted_clone_for) over this
@@ -412,3 +372,11 @@ impl DaemonSessionHost {
             .await
     }
 }
+
+use tddy_session_agents::roster_broadcast;
+
+use tddy_session_agents::session_room_participants;
+
+use tddy_session_agents::agent_clone_worktree;
+
+use tddy_session_agents::agent_clone_lookup;

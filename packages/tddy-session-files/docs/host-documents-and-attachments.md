@@ -130,6 +130,22 @@ reused rather than reimplemented, but wrapped by `validate_attachment_basename` 
 instead of the uploads path's message about `upload_id` / `file_name` — fields that do not exist in
 the attachment API. The staging RPCs keep the original message, where those fields are real.
 
+### Materialisation progress
+
+`attachment_progress` holds the types a start carries its attachments through, which hold no
+session-host state:
+
+| Item | What it is |
+|---|---|
+| `AttachmentProgressSink` | where progress goes: `streaming(tx)` for `StreamStartSession`, `discarding()` for unary `StartSession`, so both entry points run one code path. A receiver that hung up is ignored; the start is not abandoned because nobody is watching |
+| `AttachmentProgressReporter` | one attachment bound to its sink, reporting bytes as they arrive. A forwarded stream ends a relay that goes its per-frame idle timeout without a frame, so reporting only once an attachment has landed would leave that deadline covering a whole cross-host transfer |
+| `AttachmentMaterialization` | one request's context: token, OS user, sessions base, session id, the attachments and the sink, with `session_dir()` |
+| `cleanup_materialized_attachments`, `attachment_size_bytes` | removing a failed request's partial writes; the size of a stored attachment |
+
+The materialisation itself reads the host's config, data directory and routing, so it stays in
+`tddy-session-lifecycle`, which brings these types into scope with
+`pub(crate) use tddy_session_files::attachment_progress::*;`.
+
 ## Context documents and PR-stack children
 
 `session_context_docs` is the *list* of a session's planning documents — surfaced on `SessionEntry`

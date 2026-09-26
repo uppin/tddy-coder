@@ -22,16 +22,31 @@
 //! identical; only the service name each tuple carries changes. Hiding a security change inside a
 //! mechanical one is exactly what a stack like this makes easy and must not do.
 
+pub mod agent_clone_lookup;
+pub mod agent_clone_worktree;
 pub mod agent_conversations;
+pub mod agent_records;
+pub mod agent_roster_state;
+pub mod clone_readiness;
+pub mod conversation_cancel_forward;
+pub mod conversation_open_forward;
+pub mod departed_daemon;
+pub mod exec_tool_caller;
+pub mod hosted_clone_start;
+pub mod opened_session_room;
 pub mod ports;
+pub mod roster_broadcast;
 pub mod service;
 pub mod session_agent_clone;
 pub mod session_agent_inference;
 pub mod session_agent_roster;
 pub mod session_agent_status;
+pub mod session_room_participants;
+pub mod spawn_agent_def;
 pub mod status_reporting;
 
 pub use agent_conversations::{AgentConversation, OpenAgentConversations, PromptRouting};
+pub use agent_roster_state::AgentRosterState;
 pub use ports::{
     AdmittedAgent, AgentAdmission, AgentCatalog, AgentConversationPeers, AgentSessions,
     RosterBroadcast, SessionAgentPorts, SessionDirResolver,

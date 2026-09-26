@@ -20,7 +20,7 @@ pub enum SessionError {
     StartFailed { reason: String },
 }
 
-pub mod action_service;
+pub use tddy_daemon_sandbox::*;
 /// The per-chat active-elicitation lease, which now lives in `tddy-telegram`.
 ///
 /// Re-exported under its own name so `crate::active_elicitation::X` — and
@@ -51,7 +51,7 @@ pub mod claude_cli_session;
 pub mod cli_session_manager;
 pub use tddy_daemon_kernel::config;
 pub mod connection_service;
-pub mod local_token_tonic_adapter;
+pub use tddy_daemon_kernel::*;
 /// The ten session-file-I/O modules, which now live in `tddy-session-files`.
 ///
 /// Named one by one rather than globbed, for the reason the worktree, host and LiveKit facades
@@ -88,6 +88,9 @@ pub use tddy_daemon_livekit::{
     common_room_supervisor, livekit_peer_discovery, livekit_rooms_stream, livekit_service,
     session_room,
 };
+/// Which daemon serves an addressed request, shared with the families served above this crate, and
+/// room admission. Both now live in `tddy-daemon-livekit`.
+pub use tddy_daemon_livekit::{peer_routing, session_admission_service};
 /// The nine host modules and the four host-key ones, which now live in `tddy-host-service`.
 ///
 /// Named one by one for the reason above; see `tddy_worktree_service`'s facade.
@@ -96,14 +99,11 @@ pub use tddy_host_service::{
     host_prompts, host_registry, host_session_service, host_stats, host_tooling, multi_host,
     remote_desktop_probe, ssh_agent, ssh_agent_add,
 };
-/// Which daemon serves an addressed request, shared with the families served above this crate.
-pub mod peer_routing;
 pub mod presenter_intent_client;
 /// The per-session presenter observer: one gRPC stream feeding the notification bus and, through the
 /// kernel's `PresenterEventSink` port, whichever chat surface the daemon injected.
 pub mod presenter_observer_task;
-pub mod pty_runtime;
-pub mod session_admission_service;
+pub use tddy_terminal_rpc::{pty_runtime, tddy_user_config};
 /// Where a clone's checkout is on this host, plus a re-export of the clone store and the mirror
 /// that moved to `tddy-session-agents` with `#unbundle` node 7. All are reached as
 /// `crate::session_agent_clone::X`, as before.
@@ -117,23 +117,23 @@ pub mod session_agent_clone;
 pub use tddy_session_agents::{
     session_agent_inference, session_agent_roster, session_agent_status,
 };
-pub mod relay_idle;
 pub mod remote_git_pack_execution;
-pub mod session_deletion;
-pub mod session_list_enrichment;
 /// The stream subscriber `tddy-web` reads, which moved to `tddy-session-activity` with `#unbundle`
 /// node 7 and is still reached as `crate::session_notification_subscribers::X`. The Telegram
 /// subscriber that used to sit beside it left with the control plane for `tddy-telegram-control`.
 pub use tddy_session_activity::session_notification_subscribers;
+/// The session catalog's daemon side — listing with enrichment, reading and deletion — which now
+/// lives in `tddy-session-activity`. Named one by one, not globbed, for the reason the facades above
+/// give; every module keeps its name, so `crate::session_reader::X` goes on resolving here.
+pub use tddy_session_activity::{
+    session_deletion, session_list_enrichment, session_reader, user_sessions_path,
+};
 /// A session's display label and the publish context built on it, plus a re-export of the
 /// notification bus, its event and its subscriber trait, which moved to `tddy-session-activity`
 /// with `#unbundle` node 7. All are reached as `crate::session_notifications::X`, as before.
 pub mod session_notifications;
-pub mod session_reader;
 pub mod session_toolcall;
 pub mod split_session;
-pub mod task_service;
-pub mod tddy_user_config;
 pub use tddy_telegram::telegram_github_link;
 pub use tddy_telegram::telegram_tracked_session;
 pub mod terminal_session_adapter;
@@ -142,7 +142,6 @@ pub mod pr_stack_rpc;
 pub use pr_stack_rpc::{build_pr_stack_entry, PrStackHandler, PrStackServiceImpl};
 pub mod rpc_families;
 pub use rpc_families::DaemonRpcFamilies;
-pub mod user_sessions_path;
 pub mod workspace_session;
 
 // Re-export the shared tool engine so legacy `crate::tool_engine::...` references inside the

@@ -16,6 +16,7 @@
 | 2026-09-18 | 157 | 8 | 9 | 2 | first detection |
 | 2026-09-23 | 158 | 8 | — | — | +1 from #520 (`#carve` 11/12): the peer-project read goes through `self.peer_routing.eligible_daemon_source()`, which rustfmt splits over one more line. No control flow added: nesting and `return`/`?` count identical to master; branches not re-derived |
 | 2026-09-24 | 99 | — | — | — | #524 plan `20`: the blocking-pool clone task → `spawn_project_clone` (158 → 99). The placement `match` and its early return stay; nesting not re-derived |
+| 2026-09-26 | 99 | — | — | — | touched by #526 (`#carve` 15/21) and **unchanged by it**: its file gained the `agent_def_for_spawn` delegation to `tddy_session_agents::spawn_agent_def`; this function is identical at `2688227f` and `22787218` (fn line to closing brace), still at `:30` |
 
 ## What the tool found
 

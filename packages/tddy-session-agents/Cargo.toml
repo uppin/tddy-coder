@@ -21,6 +21,9 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 # `LiveAgentRoster`, node 5's — the roster as a *client* process sees it.
 tddy-discovery = { path = "../tddy-discovery" }
+# `ModelRegistryStore` and `registry_agent_def_with_credential`: a registry assistant is an agent def
+# like a `<tddyhome>/agents` one, and `spawn_agent_def` resolves a session's agent against both.
+tddy-model-registry = { path = "../tddy-model-registry" }
 # The session room the clone mirror joins: `RpcClient` for the calls it makes back to the
 # facilitating daemon, `BroadcastChannel` for the activity it watches, `TokenGenerator` for the
 # self-mint fallback.
@@ -51,6 +54,9 @@ serde_json = "1"
 # The roster broadcast every `StreamSessionAgents` subscriber reads, the mutexes the stores lock,
 # and the deadlines the clone mirror's streams are bounded by.
 tokio = { version = "1", features = ["sync", "time", "process"] }
+# `project_storage::find_project`: a hosted clone fetches its WIP ref from the project repository
+# the owning daemon registered.
+tddy-projects = { path = "../tddy-projects" }
 
 [dev-dependencies]
 rstest = { workspace = true }

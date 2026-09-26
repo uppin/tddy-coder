@@ -86,6 +86,17 @@ fn a_move_of(module: &str) -> RefactorOp {
     }
 }
 
+/// One `move_cluster_to_crate` of `modules`, anchored on the first and naming the rest in `also`.
+fn a_cluster_move_of(modules: &[&str]) -> RefactorOp {
+    let mut members = modules.iter().map(|module| a_move_of(module).anchor);
+    RefactorOp {
+        op: RefactorKind::MoveClusterToCrate,
+        anchor: members.next().expect("a cluster names at least one module"),
+        also: members.collect(),
+        ..a_move_of(modules[0])
+    }
+}
+
 fn stranded_by(root: &Path, ops: &[RefactorOp]) -> Vec<String> {
     let overlay = Overlay::new();
     let workspace = Workspace {
@@ -160,12 +171,15 @@ fn reports_the_sibling_a_partial_cluster_move_would_strand() {
     );
 }
 
-/// AC7 — moving the whole set is reported as having nothing wrong with it.
+/// AC7 — a mutually-referencing set spread over one `move_module_to_crate` per member is reported
+/// at the first operation that `apply` would refuse.
 ///
-/// A preflight that cries wolf is as useless as one that says nothing.
+/// `apply` runs one operation at a time, so when operation 0 moves `spawner`, the `spawn_worker` it
+/// names is still in the origin. Only that operation is reported: each later one names modules that
+/// earlier operations have already moved.
 #[test]
-fn reports_nothing_when_the_whole_cluster_moves() {
-    // Given a plan that moves every member that references another
+fn reports_a_whole_set_spread_over_separate_moves_at_its_first_operation() {
+    // Given a plan that moves every member that references another, one operation each
     let workspace = a_workspace_with_an_entangled_cluster();
     let plan = [
         a_move_of("spawner"),
@@ -178,9 +192,85 @@ fn reports_nothing_when_the_whole_cluster_moves() {
     let stranded = stranded_by(workspace.path(), &plan);
 
     // Then
-    assert!(
-        stranded.is_empty(),
-        "a complete cluster move was reported as stranding something: {stranded:?}"
+    assert_eq!(
+        stranded,
+        [
+            "`crates/origin/src/spawner.rs`, which operation 0 moves to `crates/destination`, names \
+             `origin::spawn_worker::Worker`, which is still in `crates/origin` at that point \
+             (operation 1 moves it only afterwards). So the destination would depend on the crate \
+             it left, while the facade it leaves there names the destination: a cycle `apply` \
+             refuses. Move them in one `move_cluster_to_crate`, with this module as its anchor and \
+             what those paths reach in `also`, or leave `spawner` where it is"
+        ]
+    );
+}
+
+/// AC7 — moving the whole set in one `move_cluster_to_crate` is reported as having nothing wrong
+/// with it.
+///
+/// A preflight that cries wolf is as useless as one that says nothing.
+#[test]
+fn reports_nothing_when_one_cluster_operation_moves_the_whole_set() {
+    // Given a plan that moves every member that references another, in one operation
+    let workspace = a_workspace_with_an_entangled_cluster();
+    let plan = [a_cluster_move_of(&[
+        "spawner",
+        "spawn_worker",
+        "supervisor_spawn",
+        "supervisor_client",
+    ])];
+
+    // When
+    let stranded = stranded_by(workspace.path(), &plan);
+
+    // Then
+    assert_eq!(stranded, Vec::<String>::new());
+}
+
+/// A module an **earlier** operation moved is already in the destination, so naming it is not an
+/// edge back to the origin.
+#[test]
+fn reports_nothing_for_a_module_naming_one_an_earlier_operation_moved() {
+    // Given the pair moved first, then a module naming one of them
+    let workspace = a_workspace_with_an_entangled_cluster();
+    let plan = [
+        a_cluster_move_of(&["spawner", "spawn_worker"]),
+        a_move_of("supervisor_spawn"),
+    ];
+
+    // When
+    let stranded = stranded_by(workspace.path(), &plan);
+
+    // Then
+    assert_eq!(stranded, Vec::<String>::new());
+}
+
+/// The same two operations the other way round: the module now leaves while what it names is still
+/// in the origin, and only the order changed.
+#[test]
+fn reports_a_module_naming_one_a_later_operation_moves() {
+    // Given a module naming `spawner` moved first, then the pair
+    let workspace = a_workspace_with_an_entangled_cluster();
+    let plan = [
+        a_move_of("supervisor_spawn"),
+        a_cluster_move_of(&["spawner", "spawn_worker"]),
+    ];
+
+    // When
+    let stranded = stranded_by(workspace.path(), &plan);
+
+    // Then
+    assert_eq!(
+        stranded,
+        [
+            "`crates/origin/src/supervisor_spawn.rs`, which operation 0 moves to \
+             `crates/destination`, names `origin::spawner::Spawner`, which is still in \
+             `crates/origin` at that point (operation 1 moves it only afterwards). So the \
+             destination would depend on the crate it left, while the facade it leaves there names \
+             the destination: a cycle `apply` refuses. Move them in one `move_cluster_to_crate`, \
+             with this module as its anchor and what those paths reach in `also`, or leave \
+             `supervisor_spawn` where it is"
+        ]
     );
 }
 

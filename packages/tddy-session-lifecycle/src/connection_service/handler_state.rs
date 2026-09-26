@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use livekit::prelude::Room;
 use tddy_model_registry::ModelRegistryStore;
+use tddy_session_agents::AgentRosterState;
 use tddy_spawn::spawn_worker::SpawnClient;
 
 use super::{DaemonSessionHost, LocalExecTools};
@@ -92,5 +93,22 @@ impl DaemonSessionHost {
             Arc::clone(&self.workspace_sandboxes),
             Arc::clone(&self.hosted_agent_clones),
         )
+    }
+
+    /// The fields the agent roster, its clones and agent-def resolution read, lent to the code in
+    /// `tddy-session-agents` that works them for the length of one call.
+    pub(crate) fn agent_roster_state(&self) -> AgentRosterState<'_> {
+        AgentRosterState {
+            config: &self.config,
+            tddy_data_dir: &self.tddy_data_dir,
+            user_resolver: &self.user_resolver,
+            peer_routing: &self.peer_routing,
+            room_roster: &self.room_roster,
+            session_rooms: &self.session_rooms,
+            session_agent_rosters: &self.session_agent_rosters,
+            session_agent_clones: &self.session_agent_clones,
+            hosted_agent_clones: &self.hosted_agent_clones,
+            roster_keepalive_interval: self.roster_keepalive_interval,
+        }
     }
 }

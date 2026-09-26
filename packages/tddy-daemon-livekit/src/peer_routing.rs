@@ -10,9 +10,9 @@ use std::sync::Arc;
 use livekit::prelude::Room;
 use tddy_rpc::Status;
 
-use crate::config::DaemonConfig;
 use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
-use crate::multi_host::EligibleDaemonSource;
+use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_host_service::multi_host::EligibleDaemonSource;
 
 /// This daemon's routing identity, the peers it may route to, and the common-room slot a forward
 /// travels through.
@@ -55,14 +55,14 @@ impl PeerRouting {
         self.common_room_livekit_room.as_ref()
     }
 
-    pub(crate) fn set_eligible_daemon_source(
+    pub fn set_eligible_daemon_source(
         &mut self,
         eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     ) {
         self.eligible_daemon_source = eligible_daemon_source;
     }
 
-    pub(crate) fn eligible_instance_ids(&self) -> Vec<String> {
+    pub fn eligible_instance_ids(&self) -> Vec<String> {
         self.eligible_daemon_source
             .list_eligible_daemons()
             .into_iter()
@@ -70,10 +70,7 @@ impl PeerRouting {
             .collect()
     }
 
-    pub(crate) fn classify_daemon_route(
-        &self,
-        requested_daemon: &str,
-    ) -> Result<PeerRoute, Status> {
+    pub fn classify_daemon_route(&self, requested_daemon: &str) -> Result<PeerRoute, Status> {
         let local_id = local_instance_id_for_config(&self.config);
         crate::livekit_peer_discovery::classify_peer_route(
             &local_id,
@@ -191,7 +188,7 @@ impl PeerRouting {
     /// context reads are `session_files.SessionFilesService`' since `#unbundle` node 6, and a
     /// forward addressed to the coordinate the caller happened to reach would be answered by a
     /// service that no longer declares the method.
-    pub(crate) async fn stream_served_by_peer<Req, Frame>(
+    pub async fn stream_served_by_peer<Req, Frame>(
         &self,
         service: &'static str,
         rpc_name: &str,

@@ -13,6 +13,13 @@ stream.
 | `common_room_supervisor` | the `CommonRoomSupervisor` trait and `SupervisedCommonRoom` — joining the common room and keeping it joined |
 | `livekit_rooms_stream` | `RoomRoster`, `RosterError`, and `pump_rooms`, the 3 s poller behind the rooms stream |
 | `livekit_service` | `LiveKitServiceImpl` and `build_livekit_entry` — **authored here**, because family T needs a service to be served by once it leaves `ConnectionServiceImpl` |
+| `peer_routing` | `PeerRouting`: this daemon's routing identity, the eligible peers (`set_eligible_daemon_source`, `eligible_instance_ids`), the route an addressed request takes (`classify_daemon_route`, `classify_addressed_daemon_route`, `stream_served_by_peer`) and the common-room slot a forward travels through. Shared, not copied, by the session host and the RPC families above it, so a session RPC and an exec-tool RPC addressed at one daemon agree on who owns the call |
+| `session_admission_service` | the room-admission handshake: `SessionAdmissionRegistry`, the short-TTL admission token (`ADMISSION_TOKEN_TTL`, `ADMISSION_RENEW_MARGIN`) and `SessionAdmissionServiceImpl`, whose `AdmitOwningDaemon` re-mints a token only for a daemon the registry still holds, so a revoked daemon stays out of the room |
+
+`peer_routing` and `session_admission_service` hold no session-host state. `tddy-session-lifecycle`
+re-exports both by name (`pub use tddy_daemon_livekit::{peer_routing, session_admission_service};`),
+and its host keeps one-line delegations to `PeerRouting` for the methods it serves itself, which is
+why those `PeerRouting` methods are `pub`.
 
 ## `livekit.LiveKitService`
 

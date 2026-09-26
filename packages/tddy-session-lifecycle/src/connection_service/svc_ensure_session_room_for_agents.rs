@@ -39,26 +39,10 @@ impl DaemonSessionHost {
                  to mirror"
             ))
         })?;
-        match self
+        let opened = self
             .ensure_session_room(session_id, codebase.session_dir.as_path(), &worktree_root)
-            .await?
-        {
-            Some(room) => {
-                log::info!(
-                    "AttachSessionAgent: opened {} as {} so an owning daemon can be admitted to it",
-                    room.room,
-                    room.server_identity
-                );
-                Ok(())
-            }
-            // A daemon with no LiveKit credentials hosts no rooms, which is fine for a local agent
-            // and impossible for a remote one: there would be no room to sync the clone from and no
-            // route to the owning daemon.
-            None => Err(Status::failed_precondition(format!(
-                "session '{session_id}' cannot take an agent from another daemon: this daemon has \
-                 no LiveKit configuration, so it hosts no session room for that daemon to join"
-            ))),
-        }
+            .await?;
+        opened_session_room::require_opened_session_room(session_id, opened)
     }
 
     /// Claim the clone serving `daemon_instance_id`'s agents on this session, and start building it
@@ -427,3 +411,5 @@ impl DaemonSessionHost {
         }
     }
 }
+
+use tddy_session_agents::opened_session_room;

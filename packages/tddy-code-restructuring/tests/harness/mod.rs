@@ -133,6 +133,21 @@ pub fn a_workspace_a_module_can_move_across() -> AFixtureWorkspace {
         .tracked_by_git()
 }
 
+/// The file [`a_workspace_whose_module_file_no_module_declares`] writes and no `mod` declares.
+pub const AN_UNDECLARED_MODULE_FILE: &str = "crates/origin/src/clock_face.rs";
+
+/// [`a_workspace_a_module_can_move_across`], plus a module file that no `mod` declares.
+///
+/// rust-analyzer loads such a file, lists its symbols from the syntax tree and resolves nothing in
+/// it, however long it is given: it reports it as `unlinked-file`. The warm index met the same state
+/// when a server was never told of a module an earlier apply had created.
+pub fn a_workspace_whose_module_file_no_module_declares() -> AFixtureWorkspace {
+    a_workspace_a_module_can_move_across().writing(
+        AN_UNDECLARED_MODULE_FILE,
+        "pub fn face() -> u32 {\n    7\n}\n",
+    )
+}
+
 impl AFixtureWorkspace {
     pub fn path(&self) -> &Path {
         &self.root
@@ -606,6 +621,23 @@ pub fn a_workspace_whose_origin_re_exports_what_moves_reaches() -> AFixtureWorks
 /// reads as the origin" a claim `cargo check` can settle, and it is what the destination has to
 /// gain a dependency on — while never gaining one on itself.
 pub fn a_workspace_whose_modules_reference_each_other() -> AFixtureWorkspace {
+    a_pair_whose_spawner_ends_with("")
+}
+
+/// The same pair, `spawner` also holding an item **rust-analyzer never resolves a name in**.
+///
+/// rust-analyzer sets `cfg(rust_analyzer)` and the compiler does not, so the item is inactive code to
+/// the server on every platform while `cargo check` still builds it. That is the shape of
+/// `pty_runtime.rs`'s `#[cfg(not(unix))] fn resolve_final_argv_env` on macOS: the outline lists it,
+/// and a hover on its name answers `null` however long the server has been ready.
+pub fn a_workspace_whose_moving_module_holds_code_the_server_treats_as_inactive(
+) -> AFixtureWorkspace {
+    a_pair_whose_spawner_ends_with(
+        "\n#[cfg(not(rust_analyzer))]\nfn on_other_targets() -> Limit {\n    Limit\n}\n",
+    )
+}
+
+fn a_pair_whose_spawner_ends_with(tail: &str) -> AFixtureWorkspace {
     an_empty_fixture()
         .writing(
             "Cargo.toml",
@@ -623,7 +655,10 @@ pub fn a_workspace_whose_modules_reference_each_other() -> AFixtureWorkspace {
         .writing("crates/origin/src/limits.rs", "pub struct Limit;\n")
         .writing(
             "crates/origin/src/spawner.rs",
-            "use crate::limits::Limit;\nuse crate::spawn_worker::Worker;\n\n             pub struct Spawner;\n\nimpl Spawner {\n    pub fn worker(&self) -> Worker {\n                     Worker\n    }\n\n    pub fn limit(&self) -> Limit {\n        Limit\n    }\n}\n",
+            &format!(
+                "{}{tail}",
+                "use crate::limits::Limit;\nuse crate::spawn_worker::Worker;\n\n             pub struct Spawner;\n\nimpl Spawner {\n    pub fn worker(&self) -> Worker {\n                     Worker\n    }\n\n    pub fn limit(&self) -> Limit {\n        Limit\n    }\n}\n"
+            ),
         )
         .writing(
             "crates/origin/src/spawn_worker.rs",
@@ -733,10 +768,15 @@ pub fn a_move_of_the_host_registry(
 
 /// Renaming a symbol the module declares, which another file in the crate reaches.
 pub fn a_rename_of(symbol: &str, to: &str) -> RefactorOp {
+    a_rename_in("crates/origin/src/host_registry.rs", symbol, to)
+}
+
+/// Renaming a symbol declared in `file`.
+pub fn a_rename_in(file: &str, symbol: &str, to: &str) -> RefactorOp {
     RefactorOp {
         op: RefactorKind::RenameSymbol,
         anchor: Anchor::Symbol {
-            file: "crates/origin/src/host_registry.rs".to_string(),
+            file: file.to_string(),
             path: symbol.to_string(),
         },
         name: Some(to.to_string()),
@@ -1006,6 +1046,67 @@ pub fn a_crate_whose_request_type_a_slow_build_script_generates() -> AFixtureWor
         )
 }
 
+/// A crate whose function lends its state as a **borrowed view**, `Roster<'a>`, and reads it in its
+/// tail.
+///
+/// The shape of the port-move pilot's `DaemonSessionHost::agent_clone_for`: the host builds a view
+/// of its fields and the statements after it read `roster.<field>`. Extracted, the view is a
+/// parameter, and rust-analyzer writes its type with the lifetime elided: `roster: Roster<'_>`.
+///
+/// Lines 14–15 are the tail that reads the view.
+pub fn a_crate_whose_function_reads_a_borrowed_view() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A host that lends its fields as a borrowed view.",
+                "",
+                "pub struct Roster<'a> {",
+                "    pub levels: &'a [u32],",
+                "}",
+                "",
+                "pub struct Host {",
+                "    levels: Vec<u32>,",
+                "}",
+                "",
+                "impl Host {",
+                "    pub fn highest(&self, floor: u32) -> u32 {",
+                "        let roster = Roster { levels: &self.levels };",
+                "        let above = roster.levels.iter().filter(|level| **level > floor).count() as u32;",
+                "        above + floor",
+                "    }",
+                "}",
+            ]),
+        )
+}
+
+/// A crate whose method reads one of its host's fields in the middle of an expression.
+///
+/// The shape of the port-move pilot's `refuse_unready_clone`: `self.clones` is the read an
+/// `extract_variable` hoists into a local, so that a later `extract_method` can take it as a
+/// parameter. Line 9 holds the read.
+pub fn a_crate_whose_method_reads_a_field() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A host whose method reads one of its fields.",
+                "",
+                "pub struct Host {",
+                "    clones: Vec<u32>,",
+                "}",
+                "",
+                "impl Host {",
+                "    pub fn highest(&self) -> u32 {",
+                "        self.clones.iter().copied().max().unwrap_or(0)",
+                "    }",
+                "}",
+            ]),
+        )
+}
+
 /// A crate whose build script fails, so rust-analyzer loads it without what the script generates.
 ///
 /// The shape behind E2 on the real repository, reduced: a code generator that fails inside
@@ -1059,6 +1160,51 @@ pub fn a_crate_whose_function_returns_early() -> AFixtureWorkspace {
                 "        return Ok(1);",
                 "    }",
                 "    Ok(base)",
+                "}",
+            ]),
+        )
+}
+
+/// A crate whose function's **last statement** is a `return`, after an early one.
+///
+/// Lines 4–8 run to the end of the body, and the range ends with `return Ok(base);` rather than a
+/// tail expression.
+pub fn a_crate_whose_function_ends_with_a_return() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A function whose last statement is a `return`.",
+                "",
+                "pub fn level(x: bool) -> Result<u32, String> {",
+                "    let base = 2;",
+                "    if x {",
+                "        return Ok(1);",
+                "    }",
+                "    return Ok(base);",
+                "}",
+            ]),
+        )
+}
+
+/// A crate whose function's tail both propagates an error with `?` and returns early.
+///
+/// Lines 4–8 are the whole body.
+pub fn a_crate_whose_function_propagates_and_returns_early() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A function that propagates an error and returns early.",
+                "",
+                "pub fn capped(text: &str) -> Result<u32, std::num::ParseIntError> {",
+                "    let value: u32 = text.parse()?;",
+                "    if value > 9 {",
+                "        return Ok(9);",
+                "    }",
+                "    Ok(value)",
                 "}",
             ]),
         )
@@ -1303,6 +1449,41 @@ pub fn an_extract_method_of(
     an_extraction(
         RefactorKind::ExtractMethod,
         a_range_over(fixture, file, lines),
+        name,
+    )
+}
+
+/// `extract_variable` over the first occurrence of `expression` on one line, into a binding called
+/// `name`.
+///
+/// The columns are read off the fixture's own text, so the range covers the expression exactly.
+pub fn an_extract_variable_of(
+    fixture: &AFixtureWorkspace,
+    file: &str,
+    line: u32,
+    expression: &str,
+    name: &str,
+) -> RefactorOp {
+    let text = fixture.read(file);
+    let written = text
+        .split('\n')
+        .nth(line as usize - 1)
+        .unwrap_or_else(|| panic!("{file} has no line {line}"));
+    let at = written
+        .find(expression)
+        .unwrap_or_else(|| panic!("line {line} of {file} does not hold `{expression}`"));
+    let col = written[..at].chars().count() as u32 + 1;
+
+    an_extraction(
+        RefactorKind::ExtractVariable,
+        Anchor::Range {
+            file: file.to_string(),
+            start: Position { line, col },
+            end: Position {
+                line,
+                col: col + expression.chars().count() as u32,
+            },
+        },
         name,
     )
 }

@@ -30,6 +30,7 @@ tonic = "0.12"
 portable-pty = "0.9"
 # `pty_relay`'s connectrpc client: unary POSTs plus one envelope-framed streaming read.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 
 [features]
 livekit = ["dep:tddy-livekit"]
@@ -43,6 +44,8 @@ tddy-codegen = { path = "../tddy-codegen", features = ["tonic"] }
 tonic-build = "0.12"
 
 [dev-dependencies]
+# `tddy_user_config`'s tests write a `.tddy/config.yaml` under a temporary home.
+tempfile = "3"
 tokio = { version = "1", features = ["rt", "macros", "sync", "time", "test-util"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }

@@ -24,6 +24,7 @@ use crate::activity::{reaped_line, Warmth};
 use crate::graph::GraphLoad;
 use crate::proto::code_index::WarmWorkspace;
 use crate::status::status_of_lsp;
+use crate::tree_changes::{watched_files_params, FileChange, TreeSnapshot};
 
 /// How long one LSP request may go unanswered before the transport gives up on it.
 ///
@@ -53,6 +54,11 @@ struct RootState {
     /// when the watcher behind it has ended, because that means the server it was about is gone and
     /// the registry has spawned another — whose graph starts unloaded again.
     graph: Option<GraphLoad>,
+    /// The source tree as it stood when this root's server was last handed to a request, which is
+    /// what the next request's changes are told against ([`crate::tree_changes`]).
+    ///
+    /// Replaced together with `graph`: a new server reads the tree for itself.
+    tree: Option<TreeSnapshot>,
 }
 
 /// The roots this process holds an index for, and their queues.
@@ -113,7 +119,11 @@ impl WorkspaceIndex {
                 "workspace_root `{requested}` is not a directory this process can reach"
             )));
         }
-        Ok(workspace_root_for(named))
+        workspace_root_for(named).map_err(|err| {
+            Status::failed_precondition(format!(
+                "workspace_root `{requested}` has a manifest this process cannot read: {err}"
+            ))
+        })
     }
 
     /// Wait for this root's turn, and hold it until the returned guard is dropped.
@@ -141,7 +151,13 @@ impl WorkspaceIndex {
     ///
     /// Concurrent cold callers on one root are the registry's problem and it solves them: its
     /// per-key spawn gate hands every one of them the single server it started.
+    ///
+    /// A server this process already held is first told of every source file created, changed or
+    /// deleted under `root` since the previous request was handed it (see [`crate::tree_changes`]).
+    /// The tree is read before the server is reached, so a server spawned here loads a tree no older
+    /// than the one the next request is compared against.
     pub async fn client_for(&self, root: &Path) -> Result<Arc<LspClient>, Status> {
+        let tree = read_tree(root).await?;
         let key = LspKey {
             root: root.to_path_buf(),
             language: Language::Rust,
@@ -154,7 +170,29 @@ impl WorkspaceIndex {
         service
             .client
             .set_request_timeout(REQUEST_BOUND_ABOVE_ANY_COLD_INDEX);
-        self.record_use(root, &service.client).await;
+        let changes = self.record_use(root, &service.client, tree).await;
+        if !changes.is_empty() {
+            service
+                .client
+                .notify_raw(
+                    "workspace/didChangeWatchedFiles",
+                    watched_files_params(&changes),
+                )
+                .await
+                .map_err(|failure| status_of_lsp(&failure))?;
+            log::info!(
+                target: "tddy_index_daemon::index",
+                "told the server for {} of {} file change(s) on disk since its last request",
+                root.display(),
+                changes.len()
+            );
+            log::debug!(
+                target: "tddy_index_daemon::index",
+                "changes told for {}: {}",
+                root.display(),
+                described(&changes)
+            );
+        }
         log::debug!(
             target: "tddy_index_daemon::index",
             "serving {} from the warm index", root.display()
@@ -239,20 +277,58 @@ impl WorkspaceIndex {
     /// a host has a client to attach one to — and `experimental/serverStatus` is reported on the
     /// transition only, so anything later would be too late. Attached once per server: a latch
     /// whose watcher has ended is about a server that is gone, and is replaced rather than read.
-    async fn record_use(&self, root: &Path, client: &LspClient) {
+    ///
+    /// Returns what changed on disk since the server was last handed out, for the caller to tell it:
+    /// nothing for a server reached for the first time, which reads the tree for itself.
+    async fn record_use(
+        &self,
+        root: &Path,
+        client: &LspClient,
+        tree: TreeSnapshot,
+    ) -> Vec<(PathBuf, FileChange)> {
         let mut roots = self.roots.lock().await;
         let state = roots
             .entry(root.to_path_buf())
             .or_insert_with(RootState::new);
         state.last_used = Instant::now();
-        if !state
+        let same_server = state
             .graph
             .as_ref()
-            .is_some_and(|graph| graph.still_watching())
-        {
+            .is_some_and(|graph| graph.still_watching());
+        if !same_server {
             state.graph = Some(GraphLoad::watching(client));
         }
+        let changes = match (&state.tree, same_server) {
+            (Some(earlier), true) => tree.changes_since(earlier),
+            _ => Vec::new(),
+        };
+        state.tree = Some(tree);
+        changes
     }
+}
+
+/// The source tree under `root`, read off the async runtime since it walks the whole tree.
+async fn read_tree(root: &Path) -> Result<TreeSnapshot, Status> {
+    let walked = root.to_path_buf();
+    tokio::task::spawn_blocking(move || TreeSnapshot::read(&walked))
+        .await
+        .map_err(|join| Status::internal(format!("the tree walk did not finish: {join}")))?
+        .map_err(|error| {
+            Status::failed_precondition(format!(
+                "the tree under `{}` could not be read to tell its language server what changed \
+                 on disk: {error}",
+                root.display()
+            ))
+        })
+}
+
+/// The changes, as a log line can carry them.
+fn described(changes: &[(PathBuf, FileChange)]) -> String {
+    changes
+        .iter()
+        .map(|(path, change)| format!("{change:?} {}", path.display()))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl RootState {
@@ -261,6 +337,7 @@ impl RootState {
             gate: Arc::new(Mutex::new(())),
             last_used: Instant::now(),
             graph: None,
+            tree: None,
         }
     }
 }
@@ -300,6 +377,29 @@ mod tests {
             outcome.expect_err("a relative root is refused").code(),
             Code::InvalidArgument
         );
+    }
+
+    /// A worktree under `<main>/.worktrees/` is its own tree. Serving the enclosing checkout instead
+    /// answered `check` from another branch, and would have had `apply` write there.
+    #[test]
+    fn serves_a_nested_worktree_at_its_own_root_rather_than_the_enclosing_checkout() {
+        // Given a main checkout and a worktree nested under it, each its own cargo workspace
+        let main = tempfile::tempdir().expect("a temporary directory");
+        let main_root = main.path().canonicalize().expect("the root resolves");
+        let worktree = main_root.join(".worktrees/x");
+        std::fs::create_dir_all(main_root.join(".git")).expect("the main checkout's .git");
+        std::fs::create_dir_all(&worktree).expect("the worktree directory");
+        std::fs::write(main_root.join("Cargo.toml"), "[workspace]\n").expect("the main manifest");
+        std::fs::write(worktree.join("Cargo.toml"), "[workspace]\n")
+            .expect("the worktree manifest");
+        std::fs::write(worktree.join(".git"), "gitdir: ../../.git/worktrees/x\n")
+            .expect("the worktree's .git file");
+
+        // When the worktree is named as a request's root
+        let root = WorkspaceIndex::workspace_root_of(worktree.to_str().expect("a UTF-8 path"));
+
+        // Then the worktree is served, not the checkout around it
+        assert_eq!(root.expect("the worktree is a root"), worktree);
     }
 
     #[test]

@@ -183,21 +183,9 @@ impl DaemonSessionHost {
         agent: &str,
         caller: &str,
     ) -> Result<Option<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
-        if let Some(registry) = &self.model_registry {
-            // The registry wins over a YAML def of the same name, the same way it does in
-            // `resolvable_agent_defs`.
-            if let Some(def) =
-                tddy_model_registry::registry_agent_def_with_credential(registry, agent, caller)
-                    .await
-                    .map_err(Status::from)?
-            {
-                return Ok(Some(def));
-            }
-        }
-        let agents_dir = self.tddy_data_dir.join("agents");
-        Ok(tddy_discovery::agent_def::resolve_agent_defs(&agents_dir)
-            .into_iter()
-            .find(|d| d.name == agent))
+        let model_registry = &self.model_registry;
+        let state = self.agent_roster_state();
+        spawn_agent_def::agent_def_for_spawn(agent, caller, model_registry, state).await
     }
 
     /// Resolve the `specialized_agents` references that name **this** daemon against
@@ -297,6 +285,8 @@ impl DaemonSessionHost {
     //
     // docs/ft/daemon/session-agent-roster.md § Remote agents, § Clones.
 }
+
+use tddy_session_agents::spawn_agent_def;
 
 /// What provisioning a project's working copy on the blocking pool needs: the clone backend, and
 /// where the project comes from.

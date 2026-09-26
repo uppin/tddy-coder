@@ -67,8 +67,24 @@ not define is refused rather than ignored.
   A path reaching a module **staying behind** is re-pointed at the origin, exactly as a single move
   does. A set of one is refused: that is `move_module_to_crate`.
 
-  A plain `check` names the sibling a **partial** set would strand, statically and with no index —
-  which is the finding that used to be discovered only when `apply` refused.
+  A plain `check` names a **partial** set statically and with no index, which is the refusal that
+  used to be discovered only at `apply`. The finding is about a *moved* module whose header still
+  names a module staying behind: that makes the destination depend on the crate it left. The crate
+  it left names the destination back through the facade, or, with `reexport: none`, from each
+  caller `apply` re-points, so the two edges form a cycle. It reads the header with the same
+  re-export resolution `apply` uses, so a path the origin only re-exports from another crate is
+  not an edge. A module **staying behind** that names the moved one is **not** a finding. A facade
+  keeps its `crate::…` path resolving, and without a facade `apply` re-points it, so it compiles
+  either way.
+
+  **Staying behind is read at each operation's point in the plan**, because `apply` runs one
+  operation at a time. A module moved by the same operation, or by an **earlier** one, has already
+  left the origin, so naming it is fine. A module moved by a **later** operation is still there when
+  this one runs. So a whole mutually-referencing set written as one `move_module_to_crate` per
+  member is reported at its first operation, naming the later operation that moves the sibling and
+  `move_cluster_to_crate` as the remedy. The same set as one `move_cluster_to_crate` reports
+  nothing. Order still matters for a one-way reference: moving a module after what it names is
+  clean, and moving it before is the finding.
 - **A test binary moves with `move_test_binary_to_crate`, never with `move_module_to_crate`.** The
   anchor is `<crate>/tests/<name>.rs` and `to` is the destination crate's directory. `reexport` is
   refused — nothing can reference a test binary, so a facade would keep nothing resolving — and
@@ -120,6 +136,17 @@ not define is refused rather than ignored.
   `fn` within the range leaves that body, not the caller's, and is allowed. The check is lexical:
   strings and comments are masked first, and a `return` a macro expands to (`bail!`) is not seen —
   `apply`'s compile gate catches what that leaves.
+
+  **Except a range that runs to the end of the function, ending with its tail expression.** There
+  rust-analyzer keeps the `return` verbatim, writes the new function's return type from the tail's
+  (which is the caller's), and the call replaces the range as the caller's tail
+  (`fn level(x: bool) -> Result<u32, String> { base_or_early(x) }`), so a `return` means what it
+  did. A `?` in the same tail propagates the same error type. The end must be the body of a named
+  `fn`: the end of an `if` block, a `match` arm, a closure or an `async` block inside it is refused
+  as before. A range ending with a **statement** — the body's last `return …;` — is refused too:
+  rust-analyzer then rewrites every `return` into an `Option` it matches at the call, and the caller
+  is left with no tail (`E0317`). Where the types could still differ (an `impl Trait` return the
+  assist spells out) nothing lexical can tell, and the compile gate is what catches it.
 - **`apply` is judged by the compiler.** After its operations, `apply` runs `cargo check
   --all-targets` over every package owning a file it changed (test targets included, because moves
   re-point imports tests use). A failure fails the run with the compiler's errors; the edits stay on
@@ -132,6 +159,33 @@ not define is refused rather than ignored.
   says so only through its `experimental/serverStatus` health; any health but `ok` — `warning`
   included — refuses the run as `rust-analyzer's answer was unusable:`, quoting the server's message.
   This holds against a warm `tddy-index-daemon` too.
+- **An extracted signature holding an untyped `_` is refused.** rust-analyzer writes `_` for a type
+  it has not inferred (`x: _`, `-> Vec<_>`, `-> (_, _)`), which is `E0121` in an item signature. The
+  elided lifetime `'_` is not one: `state: RosterState<'_>`, a borrowed view passed as a parameter, is
+  accepted.
+- **Code rust-analyzer treats as inactive ends a wait instead of stalling it.** An item under a
+  `#[cfg]` the server has switched off (`#[cfg(not(unix))]` on macOS) is listed in the outline but
+  never resolves: a hover on its name is `null` however long the index has been ready, which is how
+  lifecycle plan 02a's `check --deep` ran until it was killed. Once the index is loaded, a `null`
+  hover is checked against the server's pull diagnostics, and an `inactive-code` diagnostic there
+  ends the wait. A caller survey (`move_module_to_crate`, `move_cluster_to_crate`, the
+  `extract_module` reach) still asks for the item's references, takes the server's empty answer and
+  says so on the progress line. Every item's callers are surveyed only under the cfg the server
+  evaluated, so a caller inside inactive code elsewhere is not re-pointed. An operation acting *at*
+  such code, such as a rename, is refused as `this seam cannot be cut here:`, naming the line.
+- **A file in no crate's module tree is refused instead of waited on.** rust-analyzer lists the
+  symbols of a file no `mod` declares and resolves nothing in it, however long it is given. Once the
+  index is loaded, a `null` hover is checked against the server's pull diagnostics, and an
+  `unlinked-file` diagnostic there refuses the operation as `this seam cannot be cut here:`, naming
+  the file and quoting the server. That is how a warm `check --deep` anchored in a module the
+  previous `apply` created used to run for ever: the server had never been told of it.
+- **A warm `tddy-index-daemon` tells its server what changed on disk between requests.** Before a
+  warm server is handed to a request, the daemon compares the root's `*.rs`, `Cargo.toml` and
+  `Cargo.lock` files (not under `target/`, `node_modules/` or any hidden directory) with what they
+  were at the previous request, and sends `workspace/didChangeWatchedFiles` for each one created,
+  changed or deleted. So a module an earlier `apply` wrote, or a file written by hand, is seen by the
+  next `check --deep` without restarting the daemon. rust-analyzer's own watcher did not see them on
+  this workspace. The walk costs about a fifth of a second per request here.
 - **`extract_module` restores the imports its own assist loses, and refuses when it cannot.** The
   items move out of the scope of the file's `use` declarations, so the backend asks rust-analyzer for
   an import at each name left unresolved. Where the server offers several paths for one name, the
@@ -238,6 +292,14 @@ not define is refused rather than ignored.
   rename an unresolved path. That once produced nine such sites and fifteen compile errors from an
   operation that reported success. The operation now refuses when the placeholder occurs more often
   than it did before the assist ran, naming the lines.
+
+  **`extract_variable` has no fixed placeholder.** rust-analyzer names the binding from the
+  expression (a read of `self.clones` becomes `let clones`), so the engine finds the one `let` the
+  assist added and renames that to the plan's `name`. A `name` equal to rust-analyzer's own choice is
+  kept without a rename. The operation is refused as `rust-analyzer's answer was unusable:` only when
+  the assist introduced no `let` binding, or more than one. Two limits are rust-analyzer's: each
+  operation replaces **one** occurrence of the expression (a field read three times needs three
+  operations), and the assist decides between `&self.x` and `self.x` from the autoref it sees.
 
   The refusal names **which of two causes** it hit, because they want opposite advice. A leftover
   inside an already-extracted *module* is an ordering mistake, and the rule that avoids it entirely is:

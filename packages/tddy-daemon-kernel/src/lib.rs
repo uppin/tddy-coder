@@ -71,6 +71,8 @@ pub mod presenter_observer;
 pub mod privilege_drop;
 pub mod spawn_as_user;
 pub use agent_tool_socket::agent_tool_socket_path;
+pub mod local_token_tonic_adapter;
+pub mod relay_idle;
 pub mod toolchain;
 pub mod user_paths;
 

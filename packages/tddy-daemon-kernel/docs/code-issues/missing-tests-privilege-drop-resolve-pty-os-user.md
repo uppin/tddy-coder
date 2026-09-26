@@ -14,6 +14,7 @@
 | Run | Tests entering | Production call sites | Note |
 |---|---|---|---|
 | 2026-09-19 | 0 | 3 | first detection |
+| 2026-09-26 | 0 | 3 | #526 (`#carve` 15/21) moved `pty_runtime` to `tddy-terminal-rpc`: the call sites are `tddy-terminal-rpc/src/pty_runtime.rs:128`, `tddy-host-service/src/ssh_agent.rs:452` and `tddy-worktree-service/src/remote_git_service.rs:222`. The four tested symbols' tests moved with it, unchanged |
 
 ## What the tool found
 

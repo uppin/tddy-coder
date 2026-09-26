@@ -48,7 +48,7 @@ pub(crate) fn refuse_a_dependency_cycle(
 }
 
 /// Paths in the moved header that genuinely name the crate the module left, after re-export resolution.
-fn origin_named_dependencies(
+pub(crate) fn origin_named_dependencies(
     workspace: &Workspace<'_>,
     moving: &moving::Move,
     header: &header::Header,

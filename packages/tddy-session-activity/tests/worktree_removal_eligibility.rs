@@ -10,7 +10,7 @@
 //! not-yet-existing symbol into it would turn that runnable proof into a compile error and lose the
 //! evidence.
 
-use tddy_session_lifecycle::session_deletion::worktree_removal_applies_to;
+use tddy_session_activity::session_deletion::worktree_removal_applies_to;
 
 #[test]
 fn a_workspace_session_is_eligible_for_worktree_removal() {

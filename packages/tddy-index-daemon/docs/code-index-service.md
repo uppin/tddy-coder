@@ -26,7 +26,8 @@ code path rather than a second one.
 | Module | Responsibility |
 |---|---|
 | `service.rs` | The generated trait's seven restructuring and four analysis methods, each a one-line delegation. `CodeIndexPorts`, `build_code_index_entry`, `EventStream` |
-| `index.rs` | `WorkspaceIndex`: root validation, the per-root request queue, warm-root enumeration, the process-wide complexity cache |
+| `index.rs` | `WorkspaceIndex`: root validation, the per-root request queue, warm-root enumeration, the process-wide complexity cache, and telling a warm server what changed on disk before a request reaches it (`client_for`) |
+| `tree_changes.rs` | The per-root snapshot of the source tree (`*.rs`, `Cargo.toml`, `Cargo.lock`) and the `workspace/didChangeWatchedFiles` notification built from its difference |
 | `operations.rs` | `Warm`, `Workspaces`, `Check`, `Apply` — the streaming half, the event channel, the per-request progress sink |
 | `queries.rs` | `Anchors`, `PlanStatus`, `Verify` — the unary half |
 | `apply.rs` | The host-driven apply loop over the promoted `StatePaths` / `open_run_after` / `restore_ledger` / `commit_operation`, bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event) |
@@ -56,17 +57,37 @@ workspace. A versioned name for one new service would be the partial adoption th
 
 ## Warm state, per workspace root
 
+A request names a path; `WorkspaceIndex::workspace_root_of` turns it into the root its state is kept
+under with `tddy_lsp::registry::workspace_root_for`, which follows `cargo locate-project --workspace`,
+bounded by the repository. Walking outward from the path, the root is the nearest `Cargo.toml` that
+declares `[workspace]` (or a `[workspace.*]` table); failing that, the nearest manifest, since a
+package in no workspace is its own root; failing that, the path itself. The walk stops at the first
+directory holding `.git` — a directory for a checkout, a file for a linked worktree — so a worktree
+nested inside another checkout (`<main>/.worktrees/<name>`) is served its own tree, never the
+enclosing one. An unreadable manifest on the walk is a `FailedPrecondition`, not skipped.
+`tddy-lsp-executor` resolves its roots with the same function.
+
 | State | Held by |
 |---|---|
 | rust-analyzer process and its `LspClient` | `tddy_lsp::LspRegistry`, keyed `(root, Rust)`, idle-reaped, respawned when its task dies |
 | `BackendRegistry` / `RustBackend` | rebuilt per request through `runner::registry_for` — so the readiness probe is re-paid even against a warm server, and holds the same quiescence and health rules as the cold path |
 | rust-analyzer's latest `experimental/serverStatus` | `LspClient::server_status`, kept on the client for every reader. A status is sent only on a transition, so without it a request arriving after another had drained the transition would never learn the index is degraded |
 | Open-document versions | `LspClient`, per URI |
+| The source-tree snapshot taken at the previous request | `WorkspaceIndex`, per root, replaced together with the crate-graph latch |
 | Complexity scores | process-wide, keyed by a hash of the content scored |
 | `Overlay`, `PositionLedger`, `Journal` | per request, never shared |
 
-Index freshness is rust-analyzer's own: the client auto-acknowledges `client/registerCapability`, so
-the server registers and drives its own file watching. No filesystem-watching dependency is taken.
+**A warm server is told what changed on disk between requests.** The client auto-acknowledges
+`client/registerCapability`, so rust-analyzer registers its own file watching, but on this workspace
+it does not see a module an earlier `apply` wrote or a file written by hand. So `client_for` reads
+the root's `*.rs`, `Cargo.toml` and `Cargo.lock` files before handing a server over — skipping
+`target/`, `node_modules/` and hidden directories, and following no symlinks — and compares them by
+modification time and length with the snapshot kept for the previous request. A server this process
+already held is sent `workspace/didChangeWatchedFiles` naming each file created, changed or deleted,
+and rust-analyzer re-reads each one; a newly spawned server is sent nothing, since it loads the tree
+itself. It is a notification rather than an open and close, so a document some request holds open is
+unaffected. A tree that cannot be read is a `FailedPrecondition`. The walk costs about 0.2 s per
+request on this repository (1,843 files). No filesystem-watching dependency is taken.
 
 ## Cancellation
 
@@ -114,6 +135,7 @@ Every suite runs against `fake_lsp`, `tddy-lsp`'s deterministic fake, reached th
 |---|---|
 | `code_index_service_acceptance.rs` | Every RPC dispatched at the registered coordinate through `handle_rpc`, plus the coordinate-integrity trio — including one test that reads the `.proto` off disk and asserts the published constant matches the schema — and an `Apply` the compile gate fails |
 | `dual_transport_acceptance.rs` | The binary as a process: single-shot exit codes, both transports concurrently, stdout silence under `--stdio`, fail-fast with no transport |
+| `tree_changes_acceptance.rs` | A warm server told of a module written since its last request (created and changed), of one removed (deleted), of each change once, and of nothing when the tree has not changed — against `fake_lsp`, which replays the notifications it received as `tddy/watchedFileChanges` |
 | `activity_log_acceptance.rs` | The whole journal of one request, through a capturing logger — which caught a double-logged outcome that no test of the pure composer could see |
 | `warm_index_production.rs` | `#[ignore]`. Real rust-analyzer; the index-reuse claim, asserted as a ratio against the cold run the test creates itself |
 | `detached_daemon_production.rs` | `#[ignore]`. The real `run-index-daemon` script: the daemon outlives its starting shell, runs with the dev shell's whole environment, and a restart announces the daemon it started rather than the previous one's log line. A drop guard owns the runtime directory and runs `--stop` when a test ends, pass or panic. The restart test guards a scheduling race it cannot force, so a pass is evidence, not proof |
