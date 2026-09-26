@@ -36,15 +36,42 @@ use tokio_stream::wrappers::ReceiverStream;
 /// Where the jail runner records its pid so a later daemon can tear down an orphaned process.
 pub const RUNNER_PID_FILE: &str = "runner.pid";
 
+/// What became of one tool call sent into a jail.
+///
+/// The two cases are the two different things that can go wrong, and they call for opposite
+/// answers: a tool that ran and said no is the caller's business, while a call that never reached
+/// a tool leaves the jail unusable and is the daemon's.
+pub enum ToolDispatchOutcome {
+    /// The tool ran inside the jail and this is what it answered — including when it answered
+    /// `is_error`, which is a tool result like any other and says nothing about the jail.
+    Ran(ExecuteToolResponse),
+    /// The call never reached a tool: the jail could not be spoken to, or did not answer. Carries
+    /// what failed, already named after the session, for whoever reports or repairs it.
+    ///
+    /// The jail is not usable afterwards — see [`WorkspaceSandbox::execute_tool`].
+    TransportFailed(String),
+}
+
 /// A live jail serving one sandboxed workspace session.
 #[async_trait]
 pub trait WorkspaceSandbox: Send + Sync {
     /// Run one tool call inside the jail.
     ///
-    /// A tool that failed answers with `is_error`, exactly as the host tool engine does: only the
-    /// dispatch is this trait's concern, so the caller cannot tell "the tool said no" from "the
-    /// jail said no" by the shape of the answer alone.
-    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse;
+    /// A tool that ran and failed answers `Ran` with `is_error`, exactly as the host tool engine
+    /// does; a call that never reached a tool answers `TransportFailed`. The distinction is the
+    /// jail's to draw because it is the only layer that knows which happened — and it exists for
+    /// exactly one caller decision, whether to rebuild the jail: a dead jail refuses every call
+    /// for the rest of the session, while a failing command is ordinary traffic on a healthy one
+    /// (`docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md`).
+    ///
+    /// It is **not** a licence to treat the two differently anywhere else. `TransportFailed` is
+    /// still a failure the caller must report; the one thing it must never become is a reason to
+    /// run the call on the host worktree the session was jailed away from.
+    ///
+    /// A jail that answers `TransportFailed` stays failed: the call is not retried in the same
+    /// jail, because a channel that lost its answer would match the next response to the wrong
+    /// request. Repair means replacing the jail, not reviving its channel.
+    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ToolDispatchOutcome;
 
     /// Tear the jail down. Idempotent: a jail already stopped stays stopped.
     fn stop(&self);
@@ -408,7 +435,7 @@ struct JailedWorkspaceSandbox {
 
 #[async_trait]
 impl WorkspaceSandbox for JailedWorkspaceSandbox {
-    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse {
+    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ToolDispatchOutcome {
         // The jail runs this session's own tools and authenticates nothing, so the caller's
         // session token stays on the host rather than crossing into the jail with the call.
         let request = ExecuteToolRequest {
@@ -425,22 +452,19 @@ impl WorkspaceSandbox for JailedWorkspaceSandbox {
             None => Err("its channel is closed".to_string()),
         };
         match outcome {
-            Ok(response) => response,
+            Ok(response) => ToolDispatchOutcome::Ran(response),
             Err(reason) => {
                 // A channel that lost its answer cannot be reused: the next response would be
-                // matched to the wrong request.
+                // matched to the wrong request. Replacing this jail is the only repair, and it is
+                // the dispatching caller's to make — this one reports what happened and stays
+                // dead.
                 *guard = None;
                 let message = format!(
-                    "session {}: the tool call could not be run in its jail ({reason}); refusing \
-                     to run it on the host worktree instead",
+                    "session {}: the tool call could not be run in its jail ({reason})",
                     self.session_id
                 );
                 log::warn!(target: "tddy_daemon_sandbox::workspace_tool_sandbox", "{message}");
-                ExecuteToolResponse {
-                    is_error: true,
-                    error_message: message,
-                    ..Default::default()
-                }
+                ToolDispatchOutcome::TransportFailed(message)
             }
         }
     }

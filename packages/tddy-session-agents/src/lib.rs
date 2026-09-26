@@ -51,7 +51,10 @@ pub use ports::{
     AdmittedAgent, AgentAdmission, AgentCatalog, AgentConversationPeers, AgentSessions,
     RosterBroadcast, SessionAgentPorts, SessionDirResolver,
 };
-pub use service::{agent_conversation_frames, agent_stop_reason, SessionAgentServiceImpl};
+pub use service::{
+    agent_conversation_frames, agent_message_role, agent_stop_reason, agent_turn_frames,
+    SessionAgentServiceImpl,
+};
 pub use status_reporting::{note_agent_activity, republish_quietly};
 
 /// The coordinate this crate serves, and the `(service, method)` pairs an in-jail agent may relay
@@ -67,10 +70,18 @@ pub use tddy_service::session_agents::{IN_JAIL_RELAYABLE, SESSION_AGENT_SERVICE 
 mod tests {
     use super::*;
 
-    /// The permitted operation set is unchanged by this move — only the service name each tuple
-    /// carries. Widening or narrowing it here would hide a security change inside a mechanical one.
+    /// What a jailed process may reach on its host, as a **closed** set: a widening or a narrowing
+    /// has to be made here, in a diff of its own, rather than hidden inside a mechanical change.
+    ///
+    /// `ResumeAgentConversation` is the one addition since `#unbundle` node 7 moved this list onto
+    /// this coordinate. It grants nothing the four conversation operations beside it did not: the
+    /// same authenticated `(session, conversation)` pair, one more turn on a conversation the
+    /// caller already opened. It is here because the in-jail `tddy-tools`
+    /// advertises `subagent_resume`, and an operation advertised in a jail and refused by the
+    /// relay is the "tool that is offered and cannot be called" defect this coordinate's own
+    /// history is full of.
     #[test]
-    fn relays_exactly_the_five_operations_the_jail_allowed_before() {
+    fn relays_exactly_the_six_operations_the_jail_is_allowed() {
         let methods: Vec<&str> = IN_JAIL_RELAYABLE.iter().map(|(_, m)| *m).collect();
 
         assert_eq!(
@@ -79,6 +90,7 @@ mod tests {
                 "StreamSessionAgents",
                 "OpenAgentConversation",
                 "PromptAgentConversation",
+                "ResumeAgentConversation",
                 "CancelAgentConversation",
                 "ReportAgentConversationState",
             ]

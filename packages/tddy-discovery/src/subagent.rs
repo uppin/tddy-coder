@@ -21,6 +21,14 @@ use crate::openai::{
     ToolCall,
 };
 
+mod transcript;
+mod turn_request;
+
+use transcript::Transcript;
+
+pub use transcript::{MessageDescriptor, MessageId, MessageRole, MESSAGE_PREVIEW_CHARS};
+pub use turn_request::{TurnRequest, SUBAGENT_MAX_TURNS_CEILING};
+
 /// A single block of subagent response content — currently text-only, mirroring ACP's
 /// `ContentBlock`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -55,13 +63,38 @@ pub enum StopReason {
     ContextExhausted,
 }
 
-/// Result of one [`SubagentSession::prompt`] call — the loop's yield point.
+/// Result of one [`SubagentSession::take_turn`] call — the loop's yield point.
 #[derive(Debug, Clone)]
 pub struct PromptOutcome {
     pub stop_reason: StopReason,
     pub content: Vec<ContentBlock>,
-    /// Tokens spent by this `prompt()` call — the sum across every model turn it ran.
+    /// Tokens spent by this call — the sum across every model turn it ran.
     pub usage: TokenUsage,
+    /// The messages **this turn appended**, in the order they happened — not the whole history.
+    ///
+    /// What a caller reads to see what the agent actually did, and the only way it can learn an id
+    /// to rewind to. A turn that is a `{stopReason, content, usage}` and nothing else cannot say
+    /// that its 54 tool calls were all refused, which is how incident 2026-09-26 ran to two
+    /// fabricated summaries with two readers watching.
+    pub messages: Vec<MessageDescriptor>,
+    /// The budget actually applied, when the caller asked for more than
+    /// [`SUBAGENT_MAX_TURNS_CEILING`] and was given the ceiling instead; `None` when the caller got
+    /// what it asked for.
+    pub clamped_max_turns: Option<u32>,
+}
+
+impl PromptOutcome {
+    /// An outcome with no per-turn transcript and no clamp to report — the shape of every
+    /// construction site that is not a subagent turn loop.
+    pub fn new(stop_reason: StopReason, content: Vec<ContentBlock>, usage: TokenUsage) -> Self {
+        Self {
+            stop_reason,
+            content,
+            usage,
+            messages: Vec::new(),
+            clamped_max_turns: None,
+        }
+    }
 }
 
 /// Error from a subagent session or the codebase-access layer it uses internally.
@@ -91,6 +124,12 @@ impl From<&str> for SubagentError {
 /// A live, stateful conversation with a subagent. One instance per conversation id.
 #[async_trait]
 pub trait SubagentSession: Send {
+    /// Take one turn on this conversation: ask something new, carry on from where it stopped, or
+    /// rewind to a named message and try again — see [`TurnRequest`].
+    async fn take_turn(&mut self, request: TurnRequest) -> Result<PromptOutcome, SubagentError>;
+
+    /// Ask this conversation a new question under the agent definition's own turn budget — the
+    /// plain case, and the one nearly every caller wants.
     async fn prompt(&mut self, text: &str) -> Result<PromptOutcome, SubagentError>;
 
     /// The model this conversation talks to (e.g. an Ollama tag or a hosted model id).
@@ -527,9 +566,109 @@ pub struct SubagentConfig {
     pub access: CodebaseAccess,
 }
 
-/// Dispatch one model-issued tool call against `access`, returning the raw JSON result (or a JSON
-/// error envelope) as a string, ready to carry back as a `tool`-role message.
-async fn dispatch_tool_call(access: &CodebaseAccess, tool_call: &ToolCall) -> String {
+/// What one model-issued tool call produced — and the thing a bare result string cannot say:
+/// whether the tool **ran**.
+///
+/// The distinction is load-bearing, not cosmetic. A tool that ran and produced a result describes
+/// a search that happened, whatever the result says. A call that produced no result at all — the
+/// jail's tool channel refusing it, which [`CodebaseAccess::parse_dispatch_result`] surfaces from
+/// the `is_error` envelope; a path that could not be read; a tool this subagent cannot run — read
+/// nothing, and [`SpecializedSubagentSession::run_turn_loop`] must recognise a whole prompt of
+/// those before it asks a model to summarize findings that do not exist.
+///
+/// Honest limit: on the managed path the `is_error` envelope is today the *only* signal there is,
+/// so a tool that ran and reported its own failure is counted here as having produced no result.
+/// That is why the rule built on this is "**nothing at all** came back", never "something failed":
+/// a single unreadable file among successful reads is an ordinary result, and one prompt in which
+/// every call failed is the case worth refusing whichever half of the ambiguity produced it.
+enum ToolDispatch {
+    /// The tool ran and produced a result.
+    Ran(serde_json::Value),
+    /// No result came back, and the reason why.
+    NeverRan(SubagentError),
+}
+
+impl ToolDispatch {
+    /// A tool this subagent cannot run at all — unbound by its def, or not in the catalog. Not a
+    /// transport failure, but not a result either: nothing was read.
+    fn unavailable(reason: String) -> Self {
+        ToolDispatch::NeverRan(SubagentError(reason))
+    }
+
+    /// The reason no result came back, or `None` when one did.
+    fn produced_nothing(&self) -> Option<&SubagentError> {
+        match self {
+            ToolDispatch::Ran(_) => None,
+            ToolDispatch::NeverRan(error) => Some(error),
+        }
+    }
+
+    /// The `tool`-role message body carried back to the model.
+    ///
+    /// Built with `serde_json` rather than `format!`: a failure text carrying a quote or a newline
+    /// — a jail refusal quoting the command it would not run, say — would otherwise produce a tool
+    /// result that is not valid JSON, and the model would be handed a broken payload on the one
+    /// turn it most needs to read the reason.
+    fn tool_result_payload(&self) -> String {
+        match self {
+            ToolDispatch::Ran(value) => value.to_string(),
+            ToolDispatch::NeverRan(error) => serde_json::json!({ "error": error.0 }).to_string(),
+        }
+    }
+}
+
+/// What one `prompt()` call's tool calls have done so far — enough to answer, when the budget runs
+/// out, whether this was a search or an outage.
+#[derive(Default)]
+struct ToolCallTally {
+    ran: usize,
+    produced_nothing: usize,
+    /// The most recent reason no result came back — the state the prompt ended in, and the one
+    /// worth quoting when every call ended that way.
+    last_failure: Option<String>,
+}
+
+impl ToolCallTally {
+    fn note(&mut self, dispatch: &ToolDispatch) {
+        match dispatch.produced_nothing() {
+            None => self.ran += 1,
+            Some(reason) => {
+                self.produced_nothing += 1;
+                self.last_failure = Some(reason.0.clone());
+            }
+        }
+    }
+
+    /// The reason this prompt has nothing to summarize, when it has nothing: every tool call it
+    /// made produced no result, so nothing was read and any citation would be invented.
+    ///
+    /// `None` when anything ran — one unreadable file among successful reads is an ordinary
+    /// result — and `None` when the prompt called no tool at all, which is a model that answered
+    /// in prose rather than a search that failed.
+    ///
+    /// Read at exactly one place — immediately before
+    /// [`SpecializedSubagentSession::run_synthesis_turn`], whose instruction asks for "the
+    /// specific file:line locations you found" and checks nothing. Asking that of a model that
+    /// read nothing is an invitation to invent one, whichever way the reading failed, which is why
+    /// the reasons are not sifted further. A prompt the **model** ended never reaches here: it
+    /// answered of its own accord, having been told in its own tool results what came back, and
+    /// that is a conversation rather than an outage.
+    fn total_outage(&self) -> Option<String> {
+        if self.ran > 0 {
+            return None;
+        }
+        let reason = self.last_failure.as_deref()?;
+        Some(format!(
+            "nothing was read: all {} tool calls in this prompt produced no result, the last of \
+             them failing with — {reason}",
+            self.produced_nothing
+        ))
+    }
+}
+
+/// Dispatch one model-issued tool call against `access`, returning its result — or the reason no
+/// result came back — as a [`ToolDispatch`], ready to carry back as a `tool`-role message.
+async fn dispatch_tool_call(access: &CodebaseAccess, tool_call: &ToolCall) -> ToolDispatch {
     let args: serde_json::Value =
         serde_json::from_str(&tool_call.function.arguments).unwrap_or(serde_json::Value::Null);
 
@@ -581,24 +720,26 @@ async fn dispatch_tool_call(access: &CodebaseAccess, tool_call: &ToolCall) -> St
             let path = args["path"].as_str();
             access.semantic_search(query, path).await
         }
-        unknown => return format!("{{\"error\": \"unknown tool: {unknown}\"}}"),
+        unknown => return ToolDispatch::unavailable(format!("unknown tool: {unknown}")),
     };
 
     match result {
-        Ok(value) => value.to_string(),
-        Err(e) => format!("{{\"error\": \"{e}\"}}"),
+        Ok(value) => ToolDispatch::Ran(value),
+        Err(e) => ToolDispatch::NeverRan(e),
     }
 }
 
-/// Shared prefix of a subagent turn loop: send the current history, then short-circuit with
-/// `EndTurn` if the model produced a non-empty `<final_answer>`. Returns `Ok(Some(outcome))` on a
-/// final answer (the assistant message has already been appended to `messages`); returns
-/// `Ok(None)` with `messages` unchanged otherwise, leaving the model's `ChatMessage` in
-/// `last_message` for the caller to handle tool-calls / plain prose itself.
+/// Shared prefix of a subagent turn loop: send `messages` as the history, then short-circuit with
+/// `EndTurn` if the model produced a non-empty `<final_answer>`.
+///
+/// Appends nothing itself. Both [`TurnStep`] variants hand the model's message back for the caller
+/// to record, because the caller is the only one that knows where it belongs: the turn loop mints
+/// an id for every message it keeps, and the synthesis turn keeps its instruction out of the
+/// history on purpose.
 async fn send_turn_and_check_final_answer(
     client: &OpenAiClient,
     model: &str,
-    messages: &mut Vec<ChatMessage>,
+    messages: &[ChatMessage],
     tools: Vec<crate::openai::ToolDefinition>,
     error_context: &str,
 ) -> Result<(TurnStep, TokenUsage), SubagentError> {
@@ -610,7 +751,7 @@ async fn send_turn_and_check_final_answer(
     );
     let request = ChatCompletionRequest {
         model: model.to_string(),
-        messages: messages.clone(),
+        messages: messages.to_vec(),
         tools,
         tool_choice: serde_json::json!("auto"),
         temperature: 0.0,
@@ -649,13 +790,15 @@ async fn send_turn_and_check_final_answer(
         .filter(|a| !a.is_empty())
     {
         let answer = answer.to_string();
-        messages.push(ChatMessage::assistant(message.content.clone(), None));
         return Ok((
-            TurnStep::FinalAnswer(PromptOutcome {
-                stop_reason: StopReason::EndTurn,
-                content: vec![ContentBlock::text(answer)],
-                usage: turn_usage,
-            }),
+            TurnStep::FinalAnswer {
+                outcome: PromptOutcome::new(
+                    StopReason::EndTurn,
+                    vec![ContentBlock::text(answer)],
+                    turn_usage,
+                ),
+                message: ChatMessage::assistant(message.content.clone(), None),
+            },
             turn_usage,
         ));
     }
@@ -663,9 +806,14 @@ async fn send_turn_and_check_final_answer(
 }
 
 /// Result of [`send_turn_and_check_final_answer`] — either the loop is done, or the caller must
-/// still handle the model's tool-calls / plain-prose message itself.
+/// still handle the model's tool-calls / plain-prose message itself. Neither has been recorded in
+/// any history yet.
 enum TurnStep {
-    FinalAnswer(PromptOutcome),
+    FinalAnswer {
+        outcome: PromptOutcome,
+        /// The assistant message that carried the answer, for the caller to record.
+        message: ChatMessage,
+    },
     Continue(ChatMessage),
 }
 
@@ -786,9 +934,12 @@ fn brief_section(title: &str, entries: &[String], when_empty: &str) -> String {
 pub struct SpecializedSubagentSession {
     client: OpenAiClient,
     model: String,
+    /// The agent definition's turn budget — what a call that names none of its own runs under.
     max_turns: u32,
     access: CodebaseAccess,
-    messages: Vec<ChatMessage>,
+    /// The conversation so far, every message of it addressable by a [`MessageId`] so a caller can
+    /// be told what a turn did and can send the conversation back to a point in it.
+    transcript: Transcript,
     tools: Vec<crate::agent_def::SubagentTool>,
     cumulative: TokenUsage,
     /// Prompt tokens the most recent model turn reported — what the history costs to send now.
@@ -806,16 +957,16 @@ impl SpecializedSubagentSession {
         system_prompt: Option<String>,
         tools: Vec<crate::agent_def::SubagentTool>,
     ) -> Self {
-        let mut messages = Vec::new();
+        let mut transcript = Transcript::default();
         if let Some(prompt) = system_prompt {
-            messages.push(ChatMessage::system(prompt));
+            transcript.push(ChatMessage::system(prompt));
         }
         Self {
             client: OpenAiClient::new(base_url).api_key(api_key),
             model: model.into(),
             max_turns,
             access,
-            messages,
+            transcript,
             tools,
             cumulative: TokenUsage::default(),
             context_tokens: 0,
@@ -847,49 +998,60 @@ impl SpecializedSubagentSession {
 
     /// Dispatches a model-issued tool call, rejecting one that names a tool the def did not bind
     /// (a typed error tool-result, not a silent execution and not a panic).
-    async fn dispatch_bounded(&self, tool_call: &ToolCall) -> String {
+    async fn dispatch_bounded(&self, tool_call: &ToolCall) -> ToolDispatch {
         let bound = self
             .tools
             .iter()
             .any(|t| tool_name(*t) == tool_call.function.name);
         if !bound {
-            return format!(
-                "{{\"error\": \"tool '{}' is not bound for this subagent\"}}",
+            return ToolDispatch::unavailable(format!(
+                "tool '{}' is not bound for this subagent",
                 tool_call.function.name
-            );
+            ));
         }
         dispatch_tool_call(&self.access, tool_call).await
     }
 
-    async fn run_one_turn(&mut self) -> Result<(Option<PromptOutcome>, TokenUsage), SubagentError> {
+    /// One pass of the turn loop, adding what its tool calls did to `tools_called`.
+    async fn run_one_turn(
+        &mut self,
+        tools_called: &mut ToolCallTally,
+    ) -> Result<(Option<PromptOutcome>, TokenUsage), SubagentError> {
         let tools = self.tool_definitions();
         let (step, turn_usage) = send_turn_and_check_final_answer(
             &self.client,
             &self.model,
-            &mut self.messages,
+            &self.transcript.messages(),
             tools,
             "SpecializedSubagentSession",
         )
         .await?;
         self.note_context_occupancy(turn_usage);
         let message = match step {
-            TurnStep::FinalAnswer(outcome) => return Ok((Some(outcome), turn_usage)),
+            TurnStep::FinalAnswer { outcome, message } => {
+                self.transcript.push(message);
+                return Ok((Some(outcome), turn_usage));
+            }
             TurnStep::Continue(message) => message,
         };
 
         match message.tool_calls {
             Some(ref tool_calls) if !tool_calls.is_empty() => {
-                self.messages.push(ChatMessage::assistant(
+                self.transcript.push(ChatMessage::assistant(
                     message.content.clone(),
                     message.tool_calls.clone(),
                 ));
                 for tool_call in tool_calls {
-                    let result_str = self.dispatch_bounded(tool_call).await;
-                    self.messages.push(ChatMessage::tool_result(
-                        result_str,
-                        tool_call.id.clone(),
-                        tool_call.function.name.clone(),
-                    ));
+                    let dispatch = self.dispatch_bounded(tool_call).await;
+                    tools_called.note(&dispatch);
+                    self.transcript.push_marked(
+                        ChatMessage::tool_result(
+                            dispatch.tool_result_payload(),
+                            tool_call.id.clone(),
+                            tool_call.function.name.clone(),
+                        ),
+                        dispatch.produced_nothing().is_some(),
+                    );
                 }
                 Ok((None, turn_usage))
             }
@@ -898,14 +1060,14 @@ impl SpecializedSubagentSession {
             // to keep spending turns.
             _ => {
                 let content = message.content.clone().unwrap_or_default();
-                self.messages
+                self.transcript
                     .push(ChatMessage::assistant(message.content.clone(), None));
                 Ok((
-                    Some(PromptOutcome {
-                        stop_reason: StopReason::EndTurn,
-                        content: vec![ContentBlock::text(content)],
-                        usage: turn_usage,
-                    }),
+                    Some(PromptOutcome::new(
+                        StopReason::EndTurn,
+                        vec![ContentBlock::text(content)],
+                        turn_usage,
+                    )),
                     turn_usage,
                 ))
             }
@@ -937,7 +1099,7 @@ impl SpecializedSubagentSession {
         let mut goals: Vec<String> = Vec::new();
         let mut findings: Vec<String> = Vec::new();
         let mut examined: Vec<String> = Vec::new();
-        for message in &self.messages {
+        for message in self.transcript.iter() {
             let text = message.content.as_deref().unwrap_or("").trim();
             match message.role.as_str() {
                 "user" => {
@@ -963,7 +1125,7 @@ impl SpecializedSubagentSession {
             }
         }
 
-        let where_it_got_to = match self.messages.last() {
+        let where_it_got_to = match self.transcript.last() {
             Some(message) if message.role == "tool" => format!(
                 "The window filled on the turn after {}, so that result is not in this brief.",
                 message.name.as_deref().unwrap_or("its last tool call")
@@ -1020,7 +1182,7 @@ impl SpecializedSubagentSession {
             "SpecializedSubagentSession: model={} refused the turn for a full context after {} messages; \
              landing with a handoff brief",
             self.model,
-            self.messages.len(),
+            self.transcript.len(),
         );
         // Both halves in one response: the compacted brief, and the verbatim tail under it. A
         // caller that has just been told its conversation is unusable should not need another call
@@ -1030,14 +1192,14 @@ impl SpecializedSubagentSession {
             0,
             "## The last exchanges, verbatim (long messages cut)".to_string(),
         );
-        PromptOutcome {
-            stop_reason: StopReason::ContextExhausted,
-            content: vec![
+        PromptOutcome::new(
+            StopReason::ContextExhausted,
+            vec![
                 ContentBlock::text(self.handoff_brief()),
                 ContentBlock::text(tail.join("\n")),
             ],
-            usage: call_usage,
-        }
+            call_usage,
+        )
     }
 
     /// The turn budget is spent with no `<final_answer>`. Rather than discard everything gathered
@@ -1048,13 +1210,18 @@ impl SpecializedSubagentSession {
     /// The turn advertises **no tools**, so the model cannot keep searching — without that the
     /// budget is not a budget, it is one more search turn.
     ///
+    /// It is reached only when at least one tool call produced a result. The instruction asks for
+    /// "the specific file:line locations you found" and checks nothing, so on a prompt that read
+    /// nothing it is an invitation to invent one — which is why [`Self::run_turn_loop`] errors out
+    /// before calling this rather than sifting what it returns.
+    ///
     /// The instruction is spliced into *this request* and never retained: the session is long-lived
     /// and multi-prompt, so an instruction left in the history would be replayed as prior context
     /// on the next `subagent_prompt` — and a model that honours it would stop calling tools for the
     /// rest of the conversation, on a budget that was just refilled. The summary it produces *is*
     /// kept: it answers the user prompt that is still in the history.
     async fn run_synthesis_turn(&mut self) -> Result<PromptOutcome, SubagentError> {
-        let mut request_messages = self.messages.clone();
+        let mut request_messages = self.transcript.messages();
         request_messages.push(ChatMessage::user(
             "You have reached your search budget and may not call any more tools. \
              Summarize your findings now from what you have already read, citing the specific \
@@ -1065,19 +1232,19 @@ impl SpecializedSubagentSession {
         let (step, turn_usage) = send_turn_and_check_final_answer(
             &self.client,
             &self.model,
-            &mut request_messages,
+            &request_messages,
             Vec::new(),
             "SpecializedSubagentSession synthesis",
         )
         .await?;
         self.note_context_occupancy(turn_usage);
         let content = match step {
-            TurnStep::FinalAnswer(outcome) => outcome.content,
+            TurnStep::FinalAnswer { outcome, .. } => outcome.content,
             TurnStep::Continue(message) => {
                 vec![ContentBlock::text(message.content.unwrap_or_default())]
             }
         };
-        self.messages.push(ChatMessage::assistant(
+        self.transcript.push(ChatMessage::assistant(
             Some(
                 content
                     .iter()
@@ -1087,22 +1254,20 @@ impl SpecializedSubagentSession {
             ),
             None,
         ));
-        Ok(PromptOutcome {
-            stop_reason: StopReason::MaxTurnRequests,
+        Ok(PromptOutcome::new(
+            StopReason::MaxTurnRequests,
             content,
-            usage: turn_usage,
-        })
+            turn_usage,
+        ))
     }
-}
 
-#[async_trait]
-impl SubagentSession for SpecializedSubagentSession {
-    async fn prompt(&mut self, text: &str) -> Result<PromptOutcome, SubagentError> {
-        self.messages.push(ChatMessage::user(text.to_string()));
-
+    /// The turn loop proper, over a history [`SubagentSession::take_turn`] has already put in the
+    /// shape this call should run against (prompted, resumed, or rewound and corrected).
+    async fn run_turn_loop(&mut self, max_turns: u32) -> Result<PromptOutcome, SubagentError> {
         let mut call_usage = TokenUsage::default();
-        for _turn in 0..self.max_turns {
-            let (maybe_outcome, turn_usage) = match self.run_one_turn().await {
+        let mut tools_called = ToolCallTally::default();
+        for _turn in 0..max_turns {
+            let (maybe_outcome, turn_usage) = match self.run_one_turn(&mut tools_called).await {
                 Ok(turn) => turn,
                 // A full context is a stop condition, not a failure: the caller gets what was
                 // gathered, with a brief for a fresh conversation. The turns already spent are
@@ -1123,13 +1288,34 @@ impl SubagentSession for SpecializedSubagentSession {
         }
 
         // Budget exhausted — one tool-less turn, so the caller gets what was gathered rather than
-        // nothing (see [`Self::run_synthesis_turn`]).
+        // nothing (see [`Self::run_synthesis_turn`]), unless nothing was gathered at all.
         //
         // The turns already spent are charged *before* that call: they were spent whatever it does,
         // and folding them in afterwards discards the whole prompt's usage when the one extra call
         // times out or is refused — the conversation's running total would then under-report every
         // turn the prompt paid for.
         self.cumulative = self.cumulative + call_usage;
+
+        // A budget spent entirely on tool calls that produced nothing is a search that never
+        // started, and it is the one case the synthesis turn must not be reached on: it asks for
+        // "the specific file:line locations you found" without checking that anything was found,
+        // and a model at `temperature: 0.0` obliges with an invented one (incident 2026-09-26).
+        // So this is an error rather than a soft landing — and it is returned *before* any model
+        // call, because the guarantee is that nothing was asked to summarize, not that its answer
+        // was discarded afterwards.
+        //
+        // The conversation is left exactly as the failed prompt built it, and stays promptable:
+        // its history is the record of what was attempted, and the caller that fixes the tool
+        // channel can carry on from here.
+        if let Some(nothing_was_read) = tools_called.total_outage() {
+            log::warn!(
+                target: "tddy_discovery::subagent",
+                "SpecializedSubagentSession: model={} {nothing_was_read}",
+                self.model
+            );
+            return Err(SubagentError(nothing_was_read));
+        }
+
         let synthesis = match self.run_synthesis_turn().await {
             Ok(synthesis) => synthesis,
             // The synthesis turn re-sends the same history plus an instruction, so it can be
@@ -1141,11 +1327,50 @@ impl SubagentSession for SpecializedSubagentSession {
         };
         self.cumulative = self.cumulative + synthesis.usage;
         let call_usage = call_usage + synthesis.usage;
-        Ok(PromptOutcome {
-            stop_reason: StopReason::MaxTurnRequests,
-            content: synthesis.content,
-            usage: call_usage,
-        })
+        Ok(PromptOutcome::new(
+            StopReason::MaxTurnRequests,
+            synthesis.content,
+            call_usage,
+        ))
+    }
+}
+
+#[async_trait]
+impl SubagentSession for SpecializedSubagentSession {
+    /// Shape the history this call runs against — rewind, prompt, correct — then run the loop and
+    /// report what it appended.
+    ///
+    /// The order is the contract. A rewind happens **before** anything is appended, so a
+    /// correction lands after the rewind point rather than after a history the rewind was about to
+    /// discard; and an unknown rewind point is refused here, before a single model call, because
+    /// spending a turn on a request that was never valid is the silent-continue this refuses to be
+    /// (AC17).
+    async fn take_turn(&mut self, request: TurnRequest) -> Result<PromptOutcome, SubagentError> {
+        let budget = request.budget_within(self.max_turns);
+        if let Some(rewind_point) = request.rewind_point() {
+            self.transcript
+                .rewind_to(rewind_point)
+                .map_err(|e| SubagentError(e.to_string()))?;
+        }
+        // Taken after the rewind: what this turn appended is what is new relative to the history
+        // it actually ran against.
+        let appended_from = self.transcript.len();
+        if let Some(text) = request.prompt_text() {
+            self.transcript.push(ChatMessage::user(text.to_string()));
+        }
+        if let Some(correction) = request.correction() {
+            self.transcript
+                .push(ChatMessage::user(correction.to_string()));
+        }
+
+        let mut outcome = self.run_turn_loop(budget.turns).await?;
+        outcome.messages = self.transcript.descriptors_from(appended_from);
+        outcome.clamped_max_turns = budget.clamped_to;
+        Ok(outcome)
+    }
+
+    async fn prompt(&mut self, text: &str) -> Result<PromptOutcome, SubagentError> {
+        self.take_turn(TurnRequest::prompting(text)).await
     }
 
     fn model(&self) -> &str {
@@ -1161,11 +1386,9 @@ impl SubagentSession for SpecializedSubagentSession {
     }
 
     fn tail(&self, max_messages: usize) -> Vec<String> {
-        let start = self.messages.len().saturating_sub(max_messages);
-        self.messages[start..]
-            .iter()
-            .map(render_tail_message)
-            .collect()
+        let messages = self.transcript.messages();
+        let start = messages.len().saturating_sub(max_messages);
+        messages[start..].iter().map(render_tail_message).collect()
     }
 }
 

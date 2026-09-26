@@ -43,8 +43,8 @@ const MAIN_TERMINAL_ID: &str = "main";
 /// protocol (which silently truncated payloads that didn't arrive in one syscall).
 ///
 /// Also forwards the roster and conversation RPCs — `StreamSessionAgents`,
-/// `OpenAgentConversation`, `PromptAgentConversation`, `CancelAgentConversation` and
-/// `ReportAgentConversationState`, the five
+/// `OpenAgentConversation`, `PromptAgentConversation`, `ResumeAgentConversation`,
+/// `CancelAgentConversation` and `ReportAgentConversationState`, the six
 /// `tddy_service::session_agents::IN_JAIL_RELAYABLE` names — to the
 /// facilitating daemon over the `SessionChannel`, multiplexed by `request_id` so a
 /// lifetime-long `StreamSessionAgents` shares the channel with the tool calls behind it. The
@@ -83,8 +83,9 @@ impl tddy_rpc::RpcService for ToolExecService {
         // The roster and conversation RPCs live on the facilitating daemon's
         // `session_agents.SessionAgentService`, not on the runner — forward them over the
         // `SessionChannel` as a multiplexed `RpcRequest` and hand the caller the response stream.
-        // `StreamSessionAgents` and `PromptAgentConversation` are server streams (held for the turn
-        // / the process lifetime); `OpenAgentConversation` and `CancelAgentConversation` are unary.
+        // `StreamSessionAgents`, `PromptAgentConversation` and `ResumeAgentConversation` are
+        // server streams (held for the turn / the process lifetime); `OpenAgentConversation` and
+        // `CancelAgentConversation` are unary.
         // The runner does not know which is which, and does not need to: a unary RPC is a stream
         // that ends after one frame, and the caller drains the receiver the same way either way.
         //

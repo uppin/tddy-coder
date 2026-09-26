@@ -61,13 +61,19 @@ pub const SESSION_AGENT_SERVICE: &str = "session_agents.SessionAgentService";
 /// every jail to share five string pairs. `tddy-service` is a dependency of both already, and it
 /// owns `session_agents.proto` — the file that declares the coordinate these name.
 ///
-/// The permitted operation *set* is not this constant's to change. It is exactly the five family-B
-/// operations the jail allowed before `#unbundle` node 7 moved them; only the service name each
-/// tuple carries moved with them.
-pub const IN_JAIL_RELAYABLE: [(&str, &str); 5] = [
+/// Widening this list widens what a jailed process may reach on its host, so an entry is added
+/// only for an operation an in-jail agent has to perform and cannot perform any other way.
+/// `ResumeAgentConversation` is here because a conversation an in-jail `tddy-tools` opened over
+/// this relay is one it must also be able to continue: without the entry the resume fails
+/// `not_found` — closed, which is the safe direction, but it would leave every jailed
+/// conversation able to be started and never carried on. It grants nothing the four conversation
+/// operations beside it did not already grant: the same authenticated `(session, conversation)`
+/// pair, one more turn on a conversation the caller already opened.
+pub const IN_JAIL_RELAYABLE: [(&str, &str); 6] = [
     (SESSION_AGENT_SERVICE, "StreamSessionAgents"),
     (SESSION_AGENT_SERVICE, "OpenAgentConversation"),
     (SESSION_AGENT_SERVICE, "PromptAgentConversation"),
+    (SESSION_AGENT_SERVICE, "ResumeAgentConversation"),
     (SESSION_AGENT_SERVICE, "CancelAgentConversation"),
     (SESSION_AGENT_SERVICE, "ReportAgentConversationState"),
 ];

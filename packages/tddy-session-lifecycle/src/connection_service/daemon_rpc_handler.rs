@@ -1,7 +1,8 @@
 use futures_util::StreamExt;
 use tddy_service::proto::session_agents_svc::{
     CancelAgentConversationRequest, OpenAgentConversationRequest, PromptAgentConversationRequest,
-    ReportAgentConversationStateRequest, StreamSessionAgentsRequest,
+    ReportAgentConversationStateRequest, ResumeAgentConversationRequest,
+    StreamSessionAgentsRequest,
 };
 // The calls below are `SessionAgentService` trait methods on the daemon's family-B surface, so the
 // trait must be in scope.
@@ -99,6 +100,38 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 match conn
                     .session_agents_service()
                     .prompt_agent_conversation(Request::direct(req))
+                    .await
+                {
+                    Ok(resp) => {
+                        let mut stream = resp.into_inner();
+                        let (tx, rx) = tokio::sync::mpsc::channel(16);
+                        tokio::spawn(async move {
+                            while let Some(frame) = stream.next().await {
+                                let encoded = frame.map(|chunk| chunk.encode_to_vec());
+                                if tx.send(encoded).await.is_err() {
+                                    return;
+                                }
+                            }
+                        });
+                        tddy_rpc::RpcResult::ServerStream(Ok(rx))
+                    }
+                    Err(status) => tddy_rpc::RpcResult::ServerStream(Err(status)),
+                }
+            }
+            (SESSION_AGENT_SERVICE, "ResumeAgentConversation") => {
+                let req = match ResumeAgentConversationRequest::decode(payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return tddy_rpc::RpcResult::Unary(Err(
+                            tddy_rpc::Status::invalid_argument(format!(
+                                "decode ResumeAgentConversationRequest: {e}"
+                            )),
+                        ));
+                    }
+                };
+                match conn
+                    .session_agents_service()
+                    .resume_agent_conversation(Request::direct(req))
                     .await
                 {
                     Ok(resp) => {

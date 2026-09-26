@@ -15,6 +15,8 @@ use tddy_service::proto::session_agents_svc::CancelAgentConversationRequest;
 
 use tddy_service::proto::session_agents_svc::PromptAgentConversationRequest;
 
+use tddy_service::proto::session_agents_svc::ResumeAgentConversationRequest;
+
 use tddy_service::proto::session_agents_svc::AgentConversationChunk;
 
 use tddy_service::proto::session_agents_svc::OpenAgentConversationResponse;
@@ -43,7 +45,7 @@ use tddy_session_agents::SessionAgentServiceImpl;
 
 use super::super::DaemonSessionHost;
 
-/// The crate's nine handlers, with the seven routed ones answered by the daemon that holds the
+/// The crate's ten handlers, with the eight routed ones answered by the daemon that holds the
 /// roster.
 ///
 /// The wrapper is *this* side of the boundary for the reason node 6's `PeerRoutedSessionFiles`
@@ -216,6 +218,33 @@ impl SessionAgentService for PeerRoutedSessionAgents {
             return Ok(Response::new(MpscResultStream::from(rx)));
         }
         self.local.prompt_agent_conversation(request).await
+    }
+
+    type ResumeAgentConversationStream = MpscResultStream<AgentConversationChunk>;
+
+    /// Routed exactly as [`Self::prompt_agent_conversation`] is, and for the same reason: a
+    /// conversation opened on the daemon holding the roster is not one this daemon can take a turn
+    /// on, so served here it would report "not open" for a conversation that is — and a resume
+    /// refused that way looks to its caller like a rewind point that has gone missing.
+    async fn resume_agent_conversation(
+        &self,
+        request: Request<ResumeAgentConversationRequest>,
+    ) -> Result<Response<Self::ResumeAgentConversationStream>, Status> {
+        self.record_activity();
+        let req = request.get_ref();
+        if let Some(rx) = self
+            .connection
+            .stream_served_by_peer::<_, tddy_service::proto::session_agents_svc::AgentConversationChunk>(
+                SESSION_AGENT_SERVICE,
+                "ResumeAgentConversation",
+                &req.daemon_instance_id,
+                req,
+            )
+            .await?
+        {
+            return Ok(Response::new(MpscResultStream::from(rx)));
+        }
+        self.local.resume_agent_conversation(request).await
     }
 
     /// Routed BEFORE session lookup, and before the conversation map: a cancel that does not reach

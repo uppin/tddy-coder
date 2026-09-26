@@ -50,3 +50,25 @@ Fix the stdio-bridge attach race first — it gates this suite and `sandbox_sess
 equally. Then decide what the Linux story is: either a Linux sandbox backend the suite can drive, or
 an explicit `#[ignore]` with a name that says *why*, so a zero-test binary stops reading as a passing
 one.
+
+## Re-read 2026-09-26, by `2026-09-26-subagent-turn-control-and-honest-tool-failure`
+
+Open and unchanged — and it cost that change a real piece of coverage, which is worth recording
+while the cost is visible.
+
+**One correction to the path.** This entry reads as though the suite lives under
+`packages/tddy-daemon/tests/`. It is
+`packages/tddy-daemon-rpc/tests/in_jail_conversation_acceptance.rs`, and the gate is at `:28`.
+It is **not** `#[ignore]`d: it is `#![cfg(target_os = "macos")]` while every CI job is
+`runs-on: ubuntu-*` (`.github/workflows/ci.yml:35,73,148,275,318,354`), so on CI it compiles to an
+empty binary — which is this entry's point, stated more precisely.
+
+**What it blocked.** That change added `ResumeAgentConversation` to `session_agents.proto` and to
+the in-jail relay allowlist. This suite is the only one that would drive an in-jail agent opening,
+prompting and now **resuming** a conversation across the relay. So the new RPC ships
+compile-checked and clippy-clean but with **no test that it crosses the wire**; cover stops at
+`tddy-discovery`'s local-session tests on one side and the `tddy-tools` MCP acceptance tests on
+the other, with the relay itself in the gap between them.
+
+The suite is now more valuable than when this entry was written: it guards two security-relevant
+edits to the allowlist rather than one.

@@ -1,7 +1,7 @@
 //! The `session_agents.SessionAgentService` implementation, and the entry the daemon's wiring
 //! layer registers.
 //!
-//! All nine methods answer about a session's **live** roster: which agents are attached to it right
+//! All ten methods answer about a session's **live** roster: which agents are attached to it right
 //! now, what each is doing, and what has been asked of them. Every one starts by resolving the
 //! session directory from the caller's own token — a caller holding a valid token must not be able
 //! to name a roster it does not own — which is why [`crate::ports::SessionDirResolver`] is a
@@ -29,10 +29,15 @@ use tddy_service::proto::session_agents_svc::{
     CancelAgentConversationResponse, DetachSessionAgentRequest, ListSessionAgentsRequest,
     OpenAgentConversationRequest, OpenAgentConversationResponse, PromptAgentConversationRequest,
     ReportAgentCloneStateRequest, ReportAgentCloneStateResponse,
-    ReportAgentConversationStateRequest, ReportAgentConversationStateResponse, SessionAgentRoster,
-    StreamSessionAgentsRequest,
+    ReportAgentConversationStateRequest, ReportAgentConversationStateResponse,
+    ResumeAgentConversationRequest, SessionAgentRoster, StreamSessionAgentsRequest,
 };
 use tddy_worktree_service::stream::MpscResultStream;
+
+use tddy_discovery::subagent::{
+    MessageDescriptor, MessageId, MessageRole, PromptOutcome, TurnRequest,
+};
+use tddy_service::proto::session_agents_svc::AgentMessageDescriptor;
 
 use crate::agent_conversations::{AgentConversation, PromptRouting};
 use crate::ports::SessionAgentPorts;
@@ -145,6 +150,214 @@ impl SessionAgentServiceImpl {
         });
         rx
     }
+
+    /// Run one turn of an open conversation — prompted or resumed — and stream its answer.
+    ///
+    /// The whole of both handlers. What differs between them is [`TurnOnAConversation`]: the
+    /// turn it asks for, the line the roster row shows, and which forward the owning daemon is
+    /// reached by. Everything else — resolving the session, refusing a departed owner, stamping
+    /// the badge, serialising on the conversation's own lock, and framing the answer — is one
+    /// implementation, because two copies of it are two chances for a resume to behave unlike a
+    /// prompt in a way nobody asked for.
+    async fn take_a_turn(
+        &self,
+        turn: TurnOnAConversation,
+    ) -> Result<Response<MpscResultStream<AgentConversationChunk>>, Status> {
+        let session_dir = self.session_dir(turn.session_token(), turn.session_id())?;
+
+        // Everything the turn needs is taken out of the map under one lock, and the guard is
+        // dropped before anything is awaited on it. The agent id comes out with it: the request
+        // names a conversation, not an agent, and the status is recorded per agent.
+        let (routing, agent_id) = self
+            .ports
+            .conversations
+            .routing_for(turn.conversation_id())
+            .await
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "conversation '{}' is not open on session '{}'",
+                    turn.conversation_id(),
+                    turn.session_id()
+                ))
+            })?;
+
+        // Stamped before either branch runs, so the badge changes when the turn starts rather than
+        // when it is first observed to have started.
+        self.note_agent_activity(
+            turn.session_id(),
+            &session_dir,
+            &agent_id,
+            ManagedAgentState::Prompting,
+            turn.activity_summary(),
+        );
+
+        let (session, closed) = match routing {
+            PromptRouting::Local { session, closed } => (session, closed),
+            PromptRouting::Remote(daemon_instance_id) => {
+                self.ports
+                    .sessions
+                    .refuse_departed_owner(&daemon_instance_id)
+                    .await?;
+                let rx = match &turn {
+                    TurnOnAConversation::Prompt(req) => {
+                        self.ports.peers.prompt(req, &daemon_instance_id).await?
+                    }
+                    TurnOnAConversation::Resume(req) => {
+                        self.ports.peers.resume(req, &daemon_instance_id).await?
+                    }
+                };
+                // Relayed rather than handed straight back, for one reason: the roster this host
+                // holds is what reports the status, and the end of the peer's stream is the only
+                // moment this side learns the turn is over. Passed through unchanged — the caller
+                // sees the peer's frames in the peer's order, errors included.
+                return Ok(Response::new(MpscResultStream::from(
+                    self.relay_watching_for_the_turn_to_end(
+                        rx,
+                        turn.session_id(),
+                        &session_dir,
+                        &agent_id,
+                    ),
+                )));
+            }
+        };
+
+        // The turn loop runs here. Spawned rather than awaited so the stream's frames are produced
+        // while the caller reads them, and awaited on the *conversation's* lock alone: two turns on
+        // one conversation are still serialized, but the map of open conversations is not held, so a
+        // cancel can land while this turn is in flight — which is the only moment a cancel matters.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let conversation_id = turn.conversation_id().to_string();
+        let requested = turn.turn_request();
+        let turn_ended = self.turn_end_reporter(turn.session_id(), &session_dir, &agent_id);
+        tokio::spawn(async move {
+            let outcome = tokio::select! {
+                // Biased so a conversation already closed is reported as closed rather than racing
+                // one more turn out of a model.
+                biased;
+                _ = closed.notified() => {
+                    let _ = tx.send(Err(Status::failed_precondition(format!(
+                        "conversation '{conversation_id}' was closed while its turn was in flight"
+                    ))));
+                    return;
+                }
+                outcome = async { session.lock().await.take_turn(requested).await } => outcome,
+            };
+            match outcome {
+                // Framed rather than sent whole: over LiveKit anything past MAX_CHUNK_FRAME_BYTES is
+                // chunk-framed, and one lost chunk frame wedges the call with no error at all.
+                Ok(outcome) => {
+                    let frames = agent_turn_frames(&outcome);
+                    // Reported after the frames are on the wire, not before: a badge that drops to
+                    // idle while the answer is still arriving is one a reader acts on too early.
+                    let answered = format!(
+                        "answered ({} chars)",
+                        outcome
+                            .content
+                            .iter()
+                            .map(|block| block.text.chars().count())
+                            .sum::<usize>()
+                    );
+                    for frame in frames {
+                        if tx.send(Ok(frame)).is_err() {
+                            // The caller hung up mid-answer. The turn is over either way, and a
+                            // badge left up would strand it.
+                            turn_ended(answered);
+                            return;
+                        }
+                    }
+                    turn_ended(answered);
+                }
+                Err(e) => {
+                    // Idle, not ERROR: the agent is still attached and still promptable, and it is
+                    // the *clone* that ERROR is reserved for. The summary is what says what happened.
+                    turn_ended(format!("turn failed: {e}"));
+                    let _ = tx.send(Err(Status::internal(format!(
+                        "agent conversation '{conversation_id}' failed: {e}"
+                    ))));
+                }
+            }
+        });
+        Ok(Response::new(MpscResultStream::from(rx)))
+    }
+}
+
+/// One request to take a turn on an open conversation, in whichever of the two shapes the wire
+/// carried it.
+///
+/// Held as the decoded request rather than reduced to a [`TurnRequest`] straight away, because a
+/// turn addressed to an agent another daemon owns is **forwarded**, and what is forwarded is the
+/// request as it arrived.
+enum TurnOnAConversation {
+    Prompt(PromptAgentConversationRequest),
+    Resume(ResumeAgentConversationRequest),
+}
+
+impl TurnOnAConversation {
+    fn session_token(&self) -> &str {
+        match self {
+            Self::Prompt(req) => &req.session_token,
+            Self::Resume(req) => &req.session_token,
+        }
+    }
+
+    fn session_id(&self) -> &str {
+        match self {
+            Self::Prompt(req) => &req.session_id,
+            Self::Resume(req) => &req.session_id,
+        }
+    }
+
+    fn conversation_id(&self) -> &str {
+        match self {
+            Self::Prompt(req) => &req.conversation_id,
+            Self::Resume(req) => &req.conversation_id,
+        }
+    }
+
+    /// One line for the agent's roster row, saying what the turn was asked to do.
+    ///
+    /// A resume says what it changed rather than repeating a prompt it does not have: an operator
+    /// watching the row needs to see that the conversation went back, and "prompted:" followed by
+    /// nothing would read as an agent asked an empty question.
+    fn activity_summary(&self) -> String {
+        match self {
+            Self::Prompt(req) => format!("prompted: {}", req.prompt),
+            Self::Resume(req) => match (&req.from_message_id, &req.correction) {
+                (Some(id), Some(correction)) => {
+                    format!("resumed from message '{id}', corrected: {correction}")
+                }
+                (Some(id), None) => format!("resumed from message '{id}'"),
+                (None, Some(correction)) => format!("resumed, corrected: {correction}"),
+                (None, None) => "resumed".to_string(),
+            },
+        }
+    }
+
+    /// What this request asks the conversation to do, in the conversation's own vocabulary.
+    fn turn_request(&self) -> TurnRequest {
+        match self {
+            Self::Prompt(req) => within(TurnRequest::prompting(&req.prompt), req.max_turns),
+            Self::Resume(req) => {
+                let mut requested = TurnRequest::resuming();
+                if let Some(id) = &req.from_message_id {
+                    requested = requested.from_message(MessageId::from(id.clone()));
+                }
+                if let Some(correction) = &req.correction {
+                    requested = requested.with_correction(correction.clone());
+                }
+                within(requested, req.max_turns)
+            }
+        }
+    }
+}
+
+/// Apply a caller's turn budget where it sent one, leaving the agent definition's own alone where
+/// it did not.
+fn within(requested: TurnRequest, max_turns: Option<u32>) -> TurnRequest {
+    match max_turns {
+        Some(max_turns) => requested.within_turns(max_turns),
+        None => requested,
+    }
 }
 
 /// The stop reason a turn ended with, as the wire names it.
@@ -191,6 +404,55 @@ pub fn agent_conversation_frames(content: &str, stop_reason: &str) -> Vec<AgentC
     last.stop_reason = stop_reason.to_string();
     last.last = true;
     frames
+}
+
+/// One turn's whole answer as the frames a caller reads it from.
+///
+/// Everything a turn knows only once it has ended rides the **final** frame, beside the stop
+/// reason and for the same reason: the transcript a turn appended and the budget it actually ran
+/// under are not facts about the answer's text, and a consumer that read them off an early frame
+/// would be reading them before they existed.
+#[must_use]
+pub fn agent_turn_frames(outcome: &PromptOutcome) -> Vec<AgentConversationChunk> {
+    let content = outcome
+        .content
+        .iter()
+        .map(|block| block.text.as_str())
+        .collect::<Vec<_>>()
+        .join("");
+    let mut frames = agent_conversation_frames(&content, agent_stop_reason(outcome.stop_reason));
+    let last = frames.last_mut().expect("at least one frame");
+    last.messages = outcome.messages.iter().map(message_descriptor).collect();
+    last.clamped_max_turns = outcome.clamped_max_turns;
+    frames
+}
+
+/// One history message as the wire describes it.
+///
+/// The role is spelled out rather than sent as an enum ordinal: a reader that does not know a
+/// spelling refuses it naming the spelling (`RemoteAgentSession`), which is the same contract the
+/// stop reason is carried under and for the same reason — a message described as the wrong speaker
+/// is worse than one the reader admits it cannot describe.
+fn message_descriptor(described: &MessageDescriptor) -> AgentMessageDescriptor {
+    AgentMessageDescriptor {
+        id: described.id.to_string(),
+        role: agent_message_role(described.role).to_string(),
+        tool: described.tool.clone().unwrap_or_default(),
+        tool_calls: described.tool_calls.clone(),
+        is_error: described.is_error,
+        preview: described.preview.clone(),
+    }
+}
+
+/// The wire spelling of a history message's role.
+#[must_use]
+pub fn agent_message_role(role: MessageRole) -> &'static str {
+    match role {
+        MessageRole::System => "system",
+        MessageRole::User => "user",
+        MessageRole::Assistant => "assistant",
+        MessageRole::Tool => "tool",
+    }
 }
 
 #[async_trait]
@@ -538,114 +800,30 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         &self,
         request: Request<PromptAgentConversationRequest>,
     ) -> Result<Response<Self::PromptAgentConversationStream>, Status> {
-        let req = request.into_inner();
-        let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
-
-        // Everything the turn needs is taken out of the map under one lock, and the guard is
-        // dropped before anything is awaited on it. The agent id comes out with it: the request
-        // names a conversation, not an agent, and the status is recorded per agent.
-        let (routing, agent_id) = self
-            .ports
-            .conversations
-            .routing_for(&req.conversation_id)
+        self.take_a_turn(TurnOnAConversation::Prompt(request.into_inner()))
             .await
-            .ok_or_else(|| {
-                Status::not_found(format!(
-                    "conversation '{}' is not open on session '{}'",
-                    req.conversation_id, req.session_id
-                ))
-            })?;
+    }
 
-        // Stamped before either branch runs, so the badge changes when the turn starts rather than
-        // when it is first observed to have started.
-        self.note_agent_activity(
-            &req.session_id,
-            &session_dir,
-            &agent_id,
-            ManagedAgentState::Prompting,
-            format!("prompted: {}", req.prompt),
-        );
+    type ResumeAgentConversationStream = MpscResultStream<AgentConversationChunk>;
 
-        let (session, closed) = match routing {
-            PromptRouting::Local { session, closed } => (session, closed),
-            PromptRouting::Remote(daemon_instance_id) => {
-                self.ports
-                    .sessions
-                    .refuse_departed_owner(&daemon_instance_id)
-                    .await?;
-                let rx = self.ports.peers.prompt(&req, &daemon_instance_id).await?;
-                // Relayed rather than handed straight back, for one reason: the roster this host
-                // holds is what reports the status, and the end of the peer's stream is the only
-                // moment this side learns the turn is over. Passed through unchanged — the caller
-                // sees the peer's frames in the peer's order, errors included.
-                return Ok(Response::new(MpscResultStream::from(
-                    self.relay_watching_for_the_turn_to_end(
-                        rx,
-                        &req.session_id,
-                        &session_dir,
-                        &agent_id,
-                    ),
-                )));
-            }
-        };
-
-        // The turn loop runs here. Spawned rather than awaited so the stream's frames are produced
-        // while the caller reads them, and awaited on the *conversation's* lock alone: two prompts on
-        // one conversation are still serialized, but the map of open conversations is not held, so a
-        // cancel can land while this turn is in flight — which is the only moment a cancel matters.
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let conversation_id = req.conversation_id.clone();
-        let prompt = req.prompt.clone();
-        let turn_ended = self.turn_end_reporter(&req.session_id, &session_dir, &agent_id);
-        tokio::spawn(async move {
-            let outcome = tokio::select! {
-                // Biased so a conversation already closed is reported as closed rather than racing
-                // one more turn out of a model.
-                biased;
-                _ = closed.notified() => {
-                    let _ = tx.send(Err(Status::failed_precondition(format!(
-                        "conversation '{conversation_id}' was closed while its turn was in flight"
-                    ))));
-                    return;
-                }
-                outcome = async { session.lock().await.prompt(&prompt).await } => outcome,
-            };
-            match outcome {
-                // Framed rather than sent whole: over LiveKit anything past MAX_CHUNK_FRAME_BYTES is
-                // chunk-framed, and one lost chunk frame wedges the call with no error at all.
-                Ok(outcome) => {
-                    let content = outcome
-                        .content
-                        .iter()
-                        .map(|block| block.text.as_str())
-                        .collect::<Vec<_>>()
-                        .join("");
-                    // Reported after the frames are on the wire, not before: a badge that drops to
-                    // idle while the answer is still arriving is one a reader acts on too early.
-                    let answered = format!("answered ({} chars)", content.chars().count());
-                    for frame in
-                        agent_conversation_frames(&content, agent_stop_reason(outcome.stop_reason))
-                    {
-                        if tx.send(Ok(frame)).is_err() {
-                            // The caller hung up mid-answer. The turn is over either way, and a
-                            // badge left up would strand it.
-                            turn_ended(answered);
-                            return;
-                        }
-                    }
-                    turn_ended(answered);
-                }
-                Err(e) => {
-                    // Idle, not ERROR: the agent is still attached and still promptable, and it is
-                    // the *clone* that ERROR is reserved for. The summary is what says what happened.
-                    turn_ended(format!("turn failed: {e}"));
-                    let _ = tx.send(Err(Status::internal(format!(
-                        "agent conversation '{conversation_id}' failed: {e}"
-                    ))));
-                }
-            }
-        });
-        Ok(Response::new(MpscResultStream::from(rx)))
+    /// Take a turn on an open conversation without asking it anything new.
+    ///
+    /// The same turn, the same frames and the same routing as
+    /// [`Self::prompt_agent_conversation`] — literally, because both build one
+    /// [`TurnRequest`] and hand it to [`Self::take_a_turn`]. Two handlers over one
+    /// implementation rather than two implementations: a resume that drifted from a prompt in how
+    /// it locks the conversation, stamps the roster or frames its answer would be a second set of
+    /// those behaviours to get wrong.
+    ///
+    /// A rewind to a message the conversation does not hold fails the turn naming the id; it is
+    /// never served as a continue from the end, which is the opposite of what the caller asked
+    /// for.
+    async fn resume_agent_conversation(
+        &self,
+        request: Request<ResumeAgentConversationRequest>,
+    ) -> Result<Response<Self::ResumeAgentConversationStream>, Status> {
+        self.take_a_turn(TurnOnAConversation::Resume(request.into_inner()))
+            .await
     }
 
     /// Cancel an open conversation. An id nothing holds is `NOT_FOUND`, never a silent success — a

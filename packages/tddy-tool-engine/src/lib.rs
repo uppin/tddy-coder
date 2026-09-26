@@ -7,6 +7,8 @@
 //! participant `ExecuteTool` / `ListExecTools`).
 
 pub mod catalog;
+pub(crate) mod contained_shell;
+pub(crate) mod read_window;
 pub mod shell;
 
 pub use catalog::{tool_catalog, ToolDef};
@@ -125,13 +127,9 @@ struct ShellTaskBody {
 #[async_trait]
 impl TaskBody for ShellTaskBody {
     async fn run(self: Box<Self>, ctx: TaskContext) -> TaskStatus {
-        let result = tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(&self.command)
-            .current_dir(&self.root)
-            .envs(self.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-            .output()
-            .await;
+        // No budget: a background job is awaited through the registry, not timed out here.
+        let result =
+            contained_shell::run_contained(&self.command, &self.root, &self.env, None).await;
 
         match result {
             Ok(out) => {
@@ -146,7 +144,7 @@ impl TaskBody for ShellTaskBody {
                 }
             }
             Err(e) => TaskStatus::Failed {
-                message: format!("Shell: spawn failed: {e}"),
+                message: format!("Shell: {e}"),
             },
         }
     }
@@ -310,8 +308,13 @@ fn tool_read(root: &Path, args: &serde_json::Value) -> ToolOutcome {
         Err(e) => return ToolOutcome::err(format!("Read: {e}")),
     };
 
+    let offset = args.get("offset").and_then(|v| v.as_u64());
+    let limit = args.get("limit").and_then(|v| v.as_u64());
+
     match std::fs::read_to_string(&resolved) {
-        Ok(content) => ToolOutcome::ok(serde_json::json!({ "content": content }).to_string()),
+        Ok(content) => {
+            ToolOutcome::ok(read_window::line_window(&content, offset, limit).to_string())
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => ToolOutcome {
             result_json: serde_json::json!({ "error": "file not found" }).to_string(),
             is_error: true,
@@ -518,32 +521,25 @@ async fn tool_shell(
         };
     }
 
-    // Blocking execution with timeout.
-    let timeout = Duration::from_millis(block_until_ms as u64);
-    let fut = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(&command)
-        .current_dir(root)
-        .envs(extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-        .output();
-
-    let outcome = match tokio::time::timeout(timeout, fut).await {
-        Ok(Ok(out)) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-            let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-            let exit_code = out.status.code().unwrap_or(-1);
-            ToolOutcome::ok(
-                serde_json::json!({
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "exit_code": exit_code,
-                })
-                .to_string(),
-            )
-        }
-        Ok(Err(e)) => ToolOutcome::err(format!("Shell: spawn failed: {e}")),
-        Err(_) => ToolOutcome::err(format!("Shell: timed out after {}ms", block_until_ms)),
-    };
+    // Blocking execution: the budget bounds the command itself, not merely the wait for it.
+    let budget = Duration::from_millis(block_until_ms as u64);
+    let outcome =
+        match contained_shell::run_contained(&command, root, extra_env, Some(budget)).await {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+                let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+                let exit_code = out.status.code().unwrap_or(-1);
+                ToolOutcome::ok(
+                    serde_json::json!({
+                        "stdout": stdout,
+                        "stderr": stderr,
+                        "exit_code": exit_code,
+                    })
+                    .to_string(),
+                )
+            }
+            Err(e) => ToolOutcome::err(format!("Shell: {e}")),
+        };
 
     let task_id = register_sync_task(registry, session_id, kind, &outcome).await;
     let mut o = outcome;

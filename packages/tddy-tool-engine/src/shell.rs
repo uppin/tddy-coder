@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use tddy_core::{contain_remote_path, run_ssh_batch, shell_single_quote};
 
+use crate::contained_shell::run_contained;
 use crate::{contain_path, execute_tool_with_env, ToolOutcome};
 use tddy_task::TaskRegistry;
 
@@ -85,11 +86,8 @@ impl Shell for LocalShell {
     }
 
     async fn run(&self, command: &str) -> Result<std::process::Output, ShellError> {
-        tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .current_dir(&self.root)
-            .output()
+        // No budget: this surface has never carried one, and the caller owns the deadline.
+        run_contained(command, &self.root, &[], None)
             .await
             .map_err(|e| ShellError::Io(e.to_string()))
     }

@@ -25,6 +25,11 @@ tddy-service = { path = "../tddy-service" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }
 futures-util = "0.3"
 
+# Signalling a timed-out shell's whole *process group* — `kill(-pid, …)`, which neither `std` nor
+# `tokio` exposes. Same escalation `tddy-daemon-sandbox` applies to a jail leader.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 futures-util = "0.3"
 pretty_assertions = { workspace = true }

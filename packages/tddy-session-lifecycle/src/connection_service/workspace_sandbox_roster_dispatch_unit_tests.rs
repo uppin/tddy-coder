@@ -2,7 +2,7 @@ use super::*;
 use crate::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use std::sync::Mutex;
 use tddy_daemon_sandbox::workspace_tool_sandbox::{
-    WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
+    ToolDispatchOutcome, WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
 use tddy_sandbox::SandboxError;
 use tddy_service::proto::exec_tools::ExecuteToolResponse;
@@ -26,15 +26,15 @@ impl RecordingSandbox {
 
 #[async_trait::async_trait]
 impl WorkspaceSandbox for RecordingSandbox {
-    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse {
+    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ToolDispatchOutcome {
         self.tools.lock().unwrap().push(req.tool_name.clone());
-        ExecuteToolResponse {
+        ToolDispatchOutcome::Ran(ExecuteToolResponse {
             result_json: serde_json::json!({ "marker": JAIL_MARKER }).to_string(),
             is_error: false,
             error_message: String::new(),
             job_id: String::new(),
             job_running: false,
-        }
+        })
     }
 
     fn stop(&self) {}

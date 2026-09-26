@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_rpc::test_util::{test_service, TestDaemon};
 use tddy_daemon_sandbox::workspace_tool_sandbox::{
-    WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
+    ToolDispatchOutcome, WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
 use tddy_rpc::{Request, Status};
 use tddy_sandbox::SandboxError;
@@ -73,20 +73,20 @@ impl RecordingSandbox {
 
 #[async_trait]
 impl WorkspaceSandbox for RecordingSandbox {
-    async fn execute_tool(&self, req: &ConnExecuteToolRequest) -> ConnExecuteToolResponse {
+    async fn execute_tool(&self, req: &ConnExecuteToolRequest) -> ToolDispatchOutcome {
         self.calls.lock().unwrap().push(JailedCall {
             session_id: req.session_id.clone(),
             tool_name: req.tool_name.clone(),
             args_json: req.args_json.clone(),
         });
-        ConnExecuteToolResponse {
+        ToolDispatchOutcome::Ran(ConnExecuteToolResponse {
             result_json: serde_json::json!({ "marker": JAIL_MARKER, "tool": req.tool_name })
                 .to_string(),
             is_error: false,
             error_message: String::new(),
             job_id: String::new(),
             job_running: false,
-        }
+        })
     }
 
     fn stop(&self) {}
@@ -409,10 +409,10 @@ struct LingeringProcessSandbox {
 
 #[async_trait]
 impl WorkspaceSandbox for LingeringProcessSandbox {
-    async fn execute_tool(&self, _req: &ConnExecuteToolRequest) -> ConnExecuteToolResponse {
+    async fn execute_tool(&self, _req: &ConnExecuteToolRequest) -> ToolDispatchOutcome {
         // The delete test never dispatches a tool; the jail exists only so its process lifetime is
         // observable.
-        ConnExecuteToolResponse::default()
+        ToolDispatchOutcome::Ran(ConnExecuteToolResponse::default())
     }
 
     fn stop(&self) {

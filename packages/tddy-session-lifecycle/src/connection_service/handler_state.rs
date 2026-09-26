@@ -91,6 +91,8 @@ impl DaemonSessionHost {
         LocalExecTools::new(
             self.task_registry.clone(),
             Arc::clone(&self.workspace_sandboxes),
+            Arc::clone(&self.workspace_sandbox_provisioner),
+            Arc::clone(&self.jail_relaunch),
             Arc::clone(&self.hosted_agent_clones),
         )
     }

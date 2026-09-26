@@ -170,6 +170,7 @@ impl ADaemonInTheCommonRoom {
                 daemon_instance_id: daemon.to_string(),
                 conversation_id: "conversation-under-routing".to_string(),
                 prompt: "which files define the roster store?".to_string(),
+                max_turns: None,
             }))
             .await
             .map(|_| ())

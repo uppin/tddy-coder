@@ -109,6 +109,9 @@ pub struct DaemonSessionHost {
     /// dispatch, refusal and ordering contracts are testable without booting one.
     workspace_sandbox_provisioner:
         Arc<dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner>,
+    /// What rebuilds one that died mid-call. Shared across clones for the same reason the registry
+    /// is: "rebuilt once" is only true if every tool call of a session queues on the same gate.
+    jail_relaunch: Arc<jail_relaunch::JailRelaunch>,
     /// Registry for Tasks created by tool invocations (every ExecuteTool call).
     task_registry: TaskRegistry,
     /// The relay's idle tracker, when it has one — bumped on every RPC call, here and by the
@@ -289,6 +292,9 @@ mod svc_resolve_os_user;
 pub use svc_resolve_os_user::{
     authorize_exec_tool_caller, resolve_exec_tool_worktree, resolve_os_user,
 };
+
+/// How a sandboxed `workspace` session's jail is specified, and rebuilt when it dies mid-call.
+mod jail_relaunch;
 
 /// Where an exec tool runs on this daemon, shared with `tddy-daemon-rpc`'s exec-tool family.
 mod local_exec_tools;
@@ -488,3 +494,9 @@ mod workspace_start_request_unit_tests;
 /// the outside, over the RPC surface.
 #[cfg(test)]
 mod workspace_sandbox_roster_dispatch_unit_tests;
+
+/// A jail whose tool channel died is rebuilt once and the call retried, and an ordinary tool
+/// failure is not mistaken for one. Driven through the same private
+/// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.
+#[cfg(test)]
+mod jail_relaunch_unit_tests;

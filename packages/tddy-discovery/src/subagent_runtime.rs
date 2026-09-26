@@ -20,7 +20,7 @@ use std::sync::OnceLock;
 use tddy_core::spawn_env::env_non_empty;
 use tddy_service::proto::types::SessionAgentStatus;
 
-use crate::subagent::{PromptOutcome, SubagentError, SubagentSession};
+use crate::subagent::{PromptOutcome, SubagentError, SubagentSession, TurnRequest};
 
 /// The error envelope a subagent tool returns, so a failure is a *result* an agent can read rather
 /// than a transport error it never sees.
@@ -328,8 +328,20 @@ pub async fn wait_for_turn(
     }
 }
 
+/// One turn's outcome as its caller reads it.
+///
+/// `messages` enumerates what the turn appended — id, role, tool, `isError` and a bounded preview
+/// each — and it is the field whose absence let incident 2026-09-26 run for 54 refused tool calls
+/// with two readers watching: an outcome that is a `{stopReason, content, usage}` and nothing else
+/// cannot say that every call in it failed. The ids are also the only way a caller learns a point
+/// it can send the conversation back to.
+///
+/// `clampedMaxTurns` is present **only** when the caller asked for more turns than the ceiling and
+/// was given the ceiling instead. Omitted otherwise rather than echoed: a figure that is always
+/// there says nothing, while one that appears only when a request was reshaped is a caller being
+/// told its request was reshaped.
 pub fn prompt_outcome_json(outcome: PromptOutcome) -> String {
-    serde_json::json!({
+    let mut body = serde_json::json!({
         "stopReason": outcome.stop_reason,
         "content": outcome.content,
         "usage": {
@@ -337,8 +349,12 @@ pub fn prompt_outcome_json(outcome: PromptOutcome) -> String {
             "outputTokens": outcome.usage.output_tokens,
             "totalTokens": outcome.usage.total(),
         },
-    })
-    .to_string()
+        "messages": outcome.messages,
+    });
+    if let (Some(object), Some(clamped)) = (body.as_object_mut(), outcome.clamped_max_turns) {
+        object.insert("clampedMaxTurns".to_string(), serde_json::json!(clamped));
+    }
+    body.to_string()
 }
 
 /// One conversation as the shared [`tddy_core::token_accounting::ConversationRecord`] shape used by
@@ -429,19 +445,39 @@ pub fn write_accounting_file(conversations: &SubagentConversations) {
     }
 }
 
-/// One prompt turn, and everything it needs to run without the table lock.
+/// One turn, and everything it needs to run without the table lock.
 pub struct DeferredTurn {
     pub response_id: String,
     pub conversation_id: String,
-    pub prompt_text: String,
+    /// What the turn was asked to do — a new prompt, or a resume that sends none.
+    ///
+    /// The whole request rather than a prompt string, because a resume has no prompt: a `String`
+    /// here would have forced an empty one, and an empty prompt is a user message the agent can
+    /// see, not the absence of one.
+    pub request: TurnRequest,
     pub session: std::sync::Arc<tokio::sync::Mutex<Box<dyn SubagentSession>>>,
     /// The agent to report this conversation's state as, when the loop runs in this process.
     pub reported_agent: Option<String>,
 }
 
+/// One line for the roster row, saying what a turn was asked to do.
+fn turn_summary(request: &TurnRequest) -> String {
+    match request.prompt_text() {
+        Some(prompt) => format!("prompted: {prompt}"),
+        None => match (request.rewind_point(), request.correction()) {
+            (Some(id), Some(correction)) => {
+                format!("resumed from message '{id}', corrected: {correction}")
+            }
+            (Some(id), None) => format!("resumed from message '{id}'"),
+            (None, Some(correction)) => format!("resumed, corrected: {correction}"),
+            (None, None) => "resumed".to_string(),
+        },
+    }
+}
+
 /// Run one turn to completion, whether or not the call that started it is still waiting.
 ///
-/// Acquires the conversation's turn lock first and prompts second, so a prompt that arrives
+/// Acquires the conversation's turn lock first and takes the turn second, so a turn that arrives
 /// mid-turn queues behind the running one and runs against the history it leaves (criterion 30).
 /// At the end it takes the table lock once — for the conversation's accounting, the accounting
 /// file, and the publication of the result — so no awaiter can read a turn as done before what it
@@ -452,11 +488,11 @@ pub async fn run_turn(turn: DeferredTurn) {
         report_local_conversation_state(
             agent_id,
             SessionAgentStatus::Running,
-            &format!("prompted: {}", turn.prompt_text),
+            &turn_summary(&turn.request),
         )
         .await;
     }
-    let ended = TurnEnd::from(session.prompt(&turn.prompt_text).await);
+    let ended = TurnEnd::from(session.take_turn(turn.request).await);
     // Read while the turn lock is still held, and kept held until the table is updated: releasing
     // it first would let the next queued turn end and record its own totals underneath this one.
     let usage = session.cumulative_usage();
@@ -464,13 +500,15 @@ pub async fn run_turn(turn: DeferredTurn) {
 
     let mut sessions = subagent_sessions().lock().await;
     if let Some(conv) = sessions.open.get_mut(&turn.conversation_id) {
-        // A turn that failed still counts what it spent reaching that failure, but is not a turn
-        // the conversation took: nothing was added to its history.
+        // Counted whether the turn answered or failed. A failed turn is still a turn the
+        // conversation took: `prompt` appends the user message before its first model call and
+        // the loop pushes as it runs, so the history grew — and a prompt that failed because no
+        // tool call produced a result leaves that history deliberately intact, to be read and
+        // carried on from. A turn whose tokens are counted but whose turn is not would leave
+        // `subagent_list` disagreeing with the transcript it describes.
         conv.usage = usage;
         conv.context_tokens = context_tokens;
-        if ended.took_a_turn {
-            conv.turns += 1;
-        }
+        conv.turns += 1;
     }
     write_accounting_file(&sessions);
     sessions.pending.resolve(&turn.response_id, ended.result);
@@ -485,16 +523,18 @@ pub async fn run_turn(turn: DeferredTurn) {
     }
 }
 
-/// How a turn ended, in the three forms its end is recorded in: the result its caller collects, the
-/// line the roster row shows, and whether the conversation's history grew by it.
+/// How a turn ended, in the two forms its end is recorded in: the result its caller collects and
+/// the line the roster row shows.
+///
+/// It used to carry a third, `took_a_turn`, set false on a failure because *"a failure spent
+/// tokens but added nothing to the history"*. That was never true — the loop pushes as it runs —
+/// and a failed prompt is now explicitly resumable, so every end is a turn the conversation took
+/// and there is nothing left to distinguish.
 struct TurnEnd {
     /// The serialized answer — an outcome or a failure, since both are answers.
     result: String,
     /// One line for the agent's roster row, saying what happened.
     summary: String,
-    /// Whether this counts as a turn the conversation took. A failure spent tokens but added
-    /// nothing to the history, so it is not one.
-    took_a_turn: bool,
 }
 
 impl From<Result<PromptOutcome, SubagentError>> for TurnEnd {
@@ -509,13 +549,11 @@ impl From<Result<PromptOutcome, SubagentError>> for TurnEnd {
                 Self {
                     result: prompt_outcome_json(outcome),
                     summary: format!("answered ({chars} chars)"),
-                    took_a_turn: true,
                 }
             }
             Err(e) => Self {
                 result: subagent_error_json(&e),
                 summary: format!("turn failed: {e}"),
-                took_a_turn: false,
             },
         }
     }
@@ -568,14 +606,14 @@ mod tests {
     }
 
     fn an_end_turn_outcome(answer: &str) -> PromptOutcome {
-        PromptOutcome {
-            stop_reason: StopReason::EndTurn,
-            content: vec![ContentBlock::text(answer)],
-            usage: TokenUsage {
+        PromptOutcome::new(
+            StopReason::EndTurn,
+            vec![ContentBlock::text(answer)],
+            TokenUsage {
                 input_tokens: 30,
                 output_tokens: 12,
             },
-        }
+        )
     }
 
     /// What a `watch` receiver is holding right now, as a test reads it.

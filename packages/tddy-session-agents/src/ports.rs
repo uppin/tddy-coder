@@ -20,6 +20,7 @@ use tddy_discovery::subagent::SubagentSession;
 use tddy_rpc::Status;
 use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, OpenAgentConversationRequest, PromptAgentConversationRequest,
+    ResumeAgentConversationRequest,
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -204,6 +205,17 @@ pub trait AgentConversationPeers: Send + Sync {
     async fn prompt(
         &self,
         request: &PromptAgentConversationRequest,
+        owner: &str,
+    ) -> Result<UnboundedReceiver<Result<AgentConversationChunk, Status>>, Status>;
+
+    /// Resume a conversation whose turn loop runs on `owner`, handing back its frames verbatim.
+    ///
+    /// Its own forward rather than [`Self::prompt`] with an empty prompt: the rewind point and the
+    /// correction have nowhere to ride on a prompt request, and an owner that cannot serve a
+    /// resume must answer `not_found` rather than quietly take one more turn forward.
+    async fn resume(
+        &self,
+        request: &ResumeAgentConversationRequest,
         owner: &str,
     ) -> Result<UnboundedReceiver<Result<AgentConversationChunk, Status>>, Status>;
 
