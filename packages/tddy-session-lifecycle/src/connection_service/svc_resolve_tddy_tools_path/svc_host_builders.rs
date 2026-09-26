@@ -81,6 +81,7 @@ impl DaemonSessionHost {
             workspace_sandbox_provisioner: Arc::new(
                 tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,
             ),
+            jail_relaunch: Arc::new(super::super::jail_relaunch::JailRelaunch::default()),
             task_registry,
             rpc_activity: crate::relay_idle::RpcActivity::default(),
             room_roster,

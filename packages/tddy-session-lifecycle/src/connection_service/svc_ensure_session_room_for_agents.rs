@@ -216,14 +216,7 @@ impl DaemonSessionHost {
         sessions_base: &Path,
         session_id: &str,
     ) -> Result<(), Status> {
-        let spec = tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxSpec {
-            session_id: session_id.to_string(),
-            session_dir: unified_session_dir_path(sessions_base, session_id),
-            worktree_path: workspace_session::resolve_worktree_root_for_session(
-                sessions_base,
-                session_id,
-            )?,
-        };
+        let spec = super::jail_relaunch::workspace_sandbox_spec(sessions_base, session_id)?;
         let jail = self
             .workspace_sandbox_provisioner
             .provision(&spec)

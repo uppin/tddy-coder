@@ -68,6 +68,7 @@ impl ConversingSession {
                 daemon_instance_id: String::new(),
                 conversation_id: conversation_id.to_string(),
                 prompt: "where is main?".to_string(),
+                max_turns: None,
             }))
             .await
             .expect("prompting an open conversation must succeed")

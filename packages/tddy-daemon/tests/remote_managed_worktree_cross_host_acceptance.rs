@@ -39,7 +39,7 @@ use tddy_daemon_livekit::livekit_peer_discovery::{
 };
 use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_daemon_sandbox::workspace_tool_sandbox::{
-    WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
+    ToolDispatchOutcome, WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
 use tddy_github::{GitHubUser, TokenKind};
 use tddy_livekit_testkit::LiveKitTestkit;
@@ -570,20 +570,20 @@ impl RecordingSandbox {
 
 #[async_trait]
 impl WorkspaceSandbox for RecordingSandbox {
-    async fn execute_tool(&self, req: &ConnExecuteToolRequest) -> ConnExecuteToolResponse {
+    async fn execute_tool(&self, req: &ConnExecuteToolRequest) -> ToolDispatchOutcome {
         self.calls.lock().unwrap().push(JailedCall {
             session_id: req.session_id.clone(),
             tool_name: req.tool_name.clone(),
             args_json: req.args_json.clone(),
         });
-        ConnExecuteToolResponse {
+        ToolDispatchOutcome::Ran(ConnExecuteToolResponse {
             result_json: serde_json::json!({ "marker": SPLIT_JAIL_MARKER, "tool": req.tool_name })
                 .to_string(),
             is_error: false,
             error_message: String::new(),
             job_id: String::new(),
             job_running: false,
-        }
+        })
     }
 
     fn stop(&self) {}

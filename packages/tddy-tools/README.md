@@ -51,8 +51,8 @@ they lived here.
 
 ## The MCP surface
 
-A session advertises **43** tools when its host claims it serves the session-action surface
-(`TDDY_SESSION_ACTION_TOOLS`), and **40** when it does not — `request_action`, `list_actions` and
+A session advertises **44** tools when its host claims it serves the session-action surface
+(`TDDY_SESSION_ACTION_TOOLS`), and **41** when it does not — `request_action`, `list_actions` and
 `invoke_action` are the difference. A transport alone cannot answer that question: the in-jail socket
 serves both a handler that implements all three and one that implements none, and the server cannot
 tell them apart from the socket. Only the host knows, so only the host says.

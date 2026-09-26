@@ -56,3 +56,28 @@ So the repo has two good answers and the sandbox path uses neither. Deferred bec
 touches session lifecycle and shutdown ordering — the daemon's most load-bearing paths — and the
 warm-index changeset has no business rewriting them to land an unrelated feature. It is named in
 that changeset's `## Prerequisites` as a pattern deliberately not copied.
+
+## Narrowed — 2026-09-26, by `2026-09-26-subagent-turn-control-and-honest-tool-failure`
+
+**§2 is partly closed, for the workspace tool jail only.** A dead channel is now torn down,
+re-provisioned and the call retried exactly once, at `LocalExecTools::run_exec_tool_locally` —
+the only layer that holds `WorkspaceSandboxRegistry` and sits beneath all three dispatch entries.
+The trait gained `ToolDispatchOutcome { Ran, TransportFailed }`, which is what makes the retry
+possible without rebuilding the jail on every command that exits non-zero.
+
+**One correction to this entry.** It points at `relaunch_sandboxed_runner` as the
+existing-but-unreachable relaunch. That function serves the **claude-cli** jail
+(`sandbox_manager`) and never touches `workspace_sandboxes`; it is the wrong family for the jail
+described in §2. The workspace jail's relaunch primitive already existed and is smaller:
+`JailedWorkspaceSandboxProvisioner::provision` is stateless, and
+`provision_workspace_tool_sandbox` / `reprovision_colocated_checkout_jail` already wrap it.
+
+**What is still open, and why this entry is not deleted:**
+
+- **§1 in full.** Shutdown still orphans sandboxed runners; nothing in that change touched
+  `main.rs`'s SIGTERM path or the shutdown ordering.
+- **The crash detector, still missing.** Death is discovered *per call*, exactly as this entry
+  describes — the retry reacts to a failed call, it does not watch `child.wait()`. No backoff, no
+  `Starting → Running → Backoff → GaveUp` state machine. The `tddy-lsp` and `tddy-supervisor`
+  patterns this entry holds up are still not copied.
+- **The claude-cli jail family is untouched.**

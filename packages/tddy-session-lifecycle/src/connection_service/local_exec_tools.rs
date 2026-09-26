@@ -8,11 +8,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry;
+use tddy_daemon_sandbox::workspace_tool_sandbox::{
+    ToolDispatchOutcome, WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxRegistry,
+};
 use tddy_sandbox_runner::ExecuteToolResponse;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_task::TaskRegistry;
 
+use super::jail_relaunch::{self, JailRelaunch};
 use super::{agent_roster, ExecToolRoute};
 use crate::session_agent_clone::{HostedAgentClones, HostedClone};
 use crate::tool_engine;
@@ -25,6 +28,11 @@ use crate::tool_engine;
 pub struct LocalExecTools {
     task_registry: TaskRegistry,
     workspace_sandboxes: Arc<WorkspaceSandboxRegistry>,
+    /// What builds a jail, held here so a session whose jail died mid-call can be given a new one
+    /// on the spot — this is the only layer beneath all three ways a tool call arrives.
+    workspace_sandbox_provisioner: Arc<dyn WorkspaceSandboxProvisioner>,
+    /// Shared, so two calls that watch the same jail die rebuild it once between them.
+    jail_relaunch: Arc<JailRelaunch>,
     hosted_agent_clones: Arc<HostedAgentClones>,
 }
 
@@ -33,11 +41,15 @@ impl LocalExecTools {
     pub(crate) fn new(
         task_registry: TaskRegistry,
         workspace_sandboxes: Arc<WorkspaceSandboxRegistry>,
+        workspace_sandbox_provisioner: Arc<dyn WorkspaceSandboxProvisioner>,
+        jail_relaunch: Arc<JailRelaunch>,
         hosted_agent_clones: Arc<HostedAgentClones>,
     ) -> Self {
         Self {
             task_registry,
             workspace_sandboxes,
+            workspace_sandbox_provisioner,
+            jail_relaunch,
             hosted_agent_clones,
         }
     }
@@ -116,17 +128,15 @@ impl LocalExecTools {
                     job_running: outcome.job_running,
                 }
             }
-            ExecToolRoute::Jail(jail) => jail.execute_tool(req).await,
-            ExecToolRoute::Refused(reason) => {
-                log::warn!("exec tool: {reason}");
-                ExecuteToolResponse {
-                    result_json: String::new(),
-                    is_error: true,
-                    error_message: reason,
-                    job_id: String::new(),
-                    job_running: false,
+            ExecToolRoute::Jail(jail) => match jail.execute_tool(req).await {
+                ToolDispatchOutcome::Ran(response) => response,
+                // The jail died, not the tool — the one failure that is repairable here.
+                ToolDispatchOutcome::TransportFailed(reason) => {
+                    self.retry_in_a_rebuilt_jail(req, sessions_base, &jail, &reason)
+                        .await
                 }
-            }
+            },
+            ExecToolRoute::Refused(reason) => refused(reason),
         };
 
         // Durably record the tool call (non-fatal on failure). One log for both routes: which side
@@ -153,6 +163,57 @@ impl LocalExecTools {
         }
 
         response
+    }
+
+    /// Rebuild the jail a call just died in, and run that call in the replacement.
+    ///
+    /// Exactly once, and only for a transport failure. A jail whose channel broke refuses every
+    /// later call of that session for the life of the daemon
+    /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox), so the
+    /// choice here is between one rebuild and a session that can no longer run a tool. A second
+    /// failure is not a transient: the replacement is a freshly spawned runner, and a host that
+    /// cannot keep one alive will not keep the third one alive either — so it is reported, and
+    /// the caller decides.
+    ///
+    /// What it never becomes is a way onto the host worktree. A rebuild that cannot be made, or a
+    /// replacement that dies the same way, answers with the failure — the session asked to be
+    /// confined, and the one outcome nobody can see afterwards is a tool that ran unconfined.
+    async fn retry_in_a_rebuilt_jail(
+        &self,
+        req: &ExecuteToolRequest,
+        sessions_base: &Path,
+        dead: &Arc<dyn WorkspaceSandbox>,
+        reason: &str,
+    ) -> ExecuteToolResponse {
+        let rebuilt = match jail_relaunch::workspace_sandbox_spec(sessions_base, &req.session_id) {
+            Ok(spec) => {
+                self.jail_relaunch
+                    .rebuild(
+                        &self.workspace_sandboxes,
+                        self.workspace_sandbox_provisioner.as_ref(),
+                        &spec,
+                        dead,
+                    )
+                    .await
+            }
+            Err(status) => Err(status.message().to_string()),
+        };
+        let rebuilt = match rebuilt {
+            Ok(jail) => jail,
+            Err(e) => {
+                return refused(format!(
+                    "{reason}, and its jail could not be rebuilt ({e}); refusing to run it on the \
+                     host worktree instead"
+                ))
+            }
+        };
+        match rebuilt.execute_tool(req).await {
+            ToolDispatchOutcome::Ran(response) => response,
+            ToolDispatchOutcome::TransportFailed(again) => refused(format!(
+                "{again}, in a jail rebuilt moments earlier because the first one failed the same \
+                 way; refusing to run it on the host worktree instead"
+            )),
+        }
     }
 
     /// The clone this daemon hosts for `session_id`, when it holds one.
@@ -227,5 +288,20 @@ impl LocalExecTools {
             job_id: outcome.job_id,
             job_running: outcome.job_running,
         }
+    }
+}
+
+/// A tool call this daemon would not run, answered as the failure it is.
+///
+/// Carried in the response rather than raised, exactly as a tool's own failure is: the agent
+/// asked for a tool, and what it needs to read is why it did not happen.
+fn refused(reason: String) -> ExecuteToolResponse {
+    log::warn!("exec tool: {reason}");
+    ExecuteToolResponse {
+        result_json: String::new(),
+        is_error: true,
+        error_message: reason,
+        job_id: String::new(),
+        job_running: false,
     }
 }

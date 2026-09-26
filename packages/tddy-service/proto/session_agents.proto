@@ -8,12 +8,14 @@ import "types.proto";
 //
 // Split out of `the pre-unbundle monolithic RPC coordinate` by `#unbundle` node 7 — family B.
 //
-// Five of these nine methods are named in a **security boundary**:
+// Six of these ten methods are named in a **security boundary**:
 // `packages/tddy-sandbox-runner/src/runner.rs`'s `(service, method)` tuple allowlist is what an
 // in-jail agent may relay to its host, and `StreamSessionAgents`, `OpenAgentConversation`,
-// `PromptAgentConversation`, `CancelAgentConversation` and `ReportAgentConversationState` are all
-// in it. Moving the coordinate without moving the allowlist makes every in-jail conversation fail
-// *closed* — the safe direction, but silently and at runtime.
+// `PromptAgentConversation`, `ResumeAgentConversation`, `CancelAgentConversation` and
+// `ReportAgentConversationState` are all in it. Moving the coordinate without moving the allowlist
+// makes every in-jail conversation fail *closed* — the safe direction, but silently and at
+// runtime. Adding a method an in-jail agent must reach without adding it to the allowlist fails
+// the same way.
 //
 // Imports `types.proto` for `SessionAgentStatus` and `SessionAgentActivity`, which `ListSessions`
 // reaches too.
@@ -43,6 +45,20 @@ service SessionAgentService {
   // where one lost frame wedges the call with no error rather than failing it. Frames are bounded
   // below that budget instead.
   rpc PromptAgentConversation(PromptAgentConversationRequest) returns (stream AgentConversationChunk);
+  // Take a turn on an open conversation WITHOUT asking it anything new — optionally after sending
+  // it back to a message it already holds, and optionally with one corrective instruction.
+  //
+  // A method of its own rather than a flag on PromptAgentConversation, because the two requests
+  // differ in the one field that decides what the turn does: a resume carries no prompt, and a
+  // `prompt` field left empty to mean "resume" is a field two builds can read differently. The
+  // cost of the flag is the failure this whole coordinate is written against — a peer that
+  // predates the flag ignores it and runs the turn as an ordinary prompt, so a caller that asked
+  // to go back is carried forward with nothing saying so. A peer that predates this method
+  // answers `not_found`, which fails closed and *loudly*.
+  //
+  // Server-streaming for the same reason PromptAgentConversation is, and its frames are the same
+  // AgentConversationChunk: a resume is a turn, and a caller reads its answer the same way.
+  rpc ResumeAgentConversation(ResumeAgentConversationRequest) returns (stream AgentConversationChunk);
   rpc CancelAgentConversation(CancelAgentConversationRequest) returns (CancelAgentConversationResponse);
   // The owning daemon tells the facilitating daemon how its clone is doing: whether it is ready to
   // serve reads, where the checkout landed, and every reconcile it had to perform. The facilitating
@@ -80,6 +96,42 @@ message AgentConversationChunk {
   // Final-frame marker. A stream that ends without it was truncated, not completed — a partial
   // answer returned as if complete is exactly what a wedged chunk-framed payload looks like.
   bool last = 3;
+  // The messages THIS TURN appended, in the order they happened — not the whole history. Carried
+  // on the final frame only, as `stop_reason` is, because a turn's transcript is not known until
+  // the turn has ended.
+  //
+  // What makes a conversation whose loop runs on another host as addressable as a local one: a
+  // caller reads these ids to choose a point to send the conversation back to, and until they
+  // crossed this wire the remote half returned none and could not be rewound into at all.
+  repeated AgentMessageDescriptor messages = 4;
+  // The budget this turn actually ran under, when the caller asked for more than the ceiling and
+  // was given the ceiling instead; unset when the caller got what it asked for. Final frame only.
+  //
+  // Reported rather than silently applied: a caller given fewer turns than it asked for otherwise
+  // reads an early stop as a finished search.
+  optional uint32 clamped_max_turns = 5;
+}
+
+// One message of a conversation's history, as the caller of a turn reads it.
+//
+// A handle, not a copy: `preview` is cut to a bound by the host that owns the history, because a
+// turn outcome carrying whole tool payloads would put the agent's context back into its caller's —
+// the cost the agent exists to avoid.
+message AgentMessageDescriptor {
+  // Opaque, and unique for the life of the conversation. An id a rewind discarded is never minted
+  // again, so an id held from before a rewind addresses nothing rather than a different message.
+  string id = 1;
+  // "system", "user", "assistant" or "tool". A spelling the reader does not know is refused naming
+  // it rather than defaulted — describing a message as the wrong speaker misreports who said it.
+  string role = 2;
+  // The tool that produced a `tool`-role message, by name. Empty for every other role.
+  string tool = 3;
+  // The tools an `assistant`-role message called, in the order it called them.
+  repeated string tool_calls = 4;
+  // Whether this message reports a tool call that produced no result.
+  bool is_error = 5;
+  // The message's own text, cut to the host's preview bound.
+  string preview = 6;
 }
 
 message AttachSessionAgentRequest {
@@ -137,6 +189,14 @@ message PromptAgentConversationRequest {
   string daemon_instance_id = 3;
   string conversation_id = 4;
   string prompt = 5;
+  // The most model turns this ONE call may spend, in place of the agent definition's own budget.
+  // Unset leaves the definition's budget alone, which is what every caller that does not care
+  // sends. Above the serving host's ceiling it is clamped, and the clamp comes back on the final
+  // frame's `clamped_max_turns`.
+  //
+  // Presence-tracked rather than "0 means unset": zero turns is a budget a caller can legitimately
+  // name, and reading it as "use the definition's" would run a search the caller asked not to run.
+  optional uint32 max_turns = 6;
 }
 
 message ReportAgentCloneStateRequest {
@@ -182,6 +242,31 @@ message ReportAgentConversationStateRequest {
 }
 
 message ReportAgentConversationStateResponse {}
+
+// Continue an open conversation without asking it anything new.
+//
+// Every field but the conversation is optional, and the request with none of them set is the plain
+// case: a chain cut short by its budget, carried on rather than re-asked — re-asking would make the
+// agent re-read everything it has already read, which is the cost a resume exists to avoid.
+message ResumeAgentConversationRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
+  string daemon_instance_id = 3;
+  string conversation_id = 4;
+  // Send the conversation back to this message first, discarding everything appended after it.
+  // An id the conversation does not hold is refused naming it, never a continue from the end — the
+  // caller asked to go back, and carrying on instead does the opposite of what was asked.
+  optional string from_message_id = 5;
+  // One corrective instruction, appended after the rewind point.
+  //
+  // What makes a rewind able to change anything at all: turns go out at `temperature: 0.0`, so
+  // re-running an identical history reproduces the same turn byte for byte. A rewind offered
+  // without a correction is a feature that silently does nothing.
+  optional string correction = 6;
+  // As on PromptAgentConversationRequest, and clamped and reported the same way.
+  optional uint32 max_turns = 7;
+}
 
 message SessionAgentEntry {
   // "explorer@ws-01" — the id the main agent addresses and the entry's identity.

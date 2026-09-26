@@ -61,13 +61,29 @@ pub const SESSION_AGENT_SERVICE: &str = "session_agents.SessionAgentService";
 /// every jail to share five string pairs. `tddy-service` is a dependency of both already, and it
 /// owns `session_agents.proto` — the file that declares the coordinate these name.
 ///
-/// The permitted operation *set* is not this constant's to change. It is exactly the five family-B
-/// operations the jail allowed before `#unbundle` node 7 moved them; only the service name each
-/// tuple carries moved with them.
-pub const IN_JAIL_RELAYABLE: [(&str, &str); 5] = [
+/// Widening this list widens what a jailed process may reach on its host, so an entry is added
+/// only for an operation an in-jail agent has to perform and cannot perform any other way.
+/// `ResumeAgentConversation` is here because a conversation an in-jail `tddy-tools` opened over
+/// this relay is one it must also be able to continue: without the entry the resume fails
+/// `not_found` — closed, which is the safe direction, but it would leave every jailed
+/// conversation able to be started and never carried on.
+///
+/// What the entry costs, stated exactly. `ResumeAgentConversation` reaches the same code path as
+/// `PromptAgentConversation`, under the same authentication — the session token is resolved to an
+/// OS user by `session_dirs`, and the conversation is looked up by id — so it opens no route that
+/// is weaker than one already open. It is **not** the case that a caller is confined to its own
+/// session's conversations: `SessionAgentServiceImpl::session_dir` never cross-checks `session_id`
+/// against the token, and `OpenAgentConversations::routing_for` reads a host-global map keyed on
+/// conversation id alone. That gap is pre-existing — `Prompt` and `Cancel` were already relayable
+/// through it — and is recorded in
+/// `docs/dev/todo/2026-09-26-a-conversation-id-is-not-bound-to-the-session-that-opened-it.md`.
+/// What resume does add over prompt is a **destructive write** rather than one more turn:
+/// `from_message_id` truncates a transcript and `correction` injects into it.
+pub const IN_JAIL_RELAYABLE: [(&str, &str); 6] = [
     (SESSION_AGENT_SERVICE, "StreamSessionAgents"),
     (SESSION_AGENT_SERVICE, "OpenAgentConversation"),
     (SESSION_AGENT_SERVICE, "PromptAgentConversation"),
+    (SESSION_AGENT_SERVICE, "ResumeAgentConversation"),
     (SESSION_AGENT_SERVICE, "CancelAgentConversation"),
     (SESSION_AGENT_SERVICE, "ReportAgentConversationState"),
 ];

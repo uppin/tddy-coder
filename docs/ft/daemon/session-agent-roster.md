@@ -611,21 +611,62 @@ clone is not `READY` is refused naming the state, never queued.
 Unchanged in shape, generalized in reach. The main agent uses the existing MCP surface:
 
 ```
-subagent_new_session { agent: "explorer@ws-01" }   → { sessionId }
-subagent_prompt      { sessionId, prompt: [...] }  → { stopReason, content }
+subagent_new_session { agent: "explorer@ws-01" }        → { sessionId }
+subagent_prompt      { sessionId, prompt: [...],
+                       maxTurns? }                      → { stopReason, content, usage, messages }
+subagent_resume      { sessionId, fromMessageId?,
+                       correction?, maxTurns? }         → the same outcome shape, no new prompt turn
 subagent_cancel      { sessionId }
-subagent_status      { }                           → { sessionId, appliedRev, agents:[…] }
-subagent_status      { agent, waitFor: "ready" }   → …the same, once it can be prompted
+subagent_status      { }                                → { sessionId, appliedRev, agents:[…] }
+subagent_status      { agent, waitFor: "ready" }        → …the same, once it can be prompted
 ```
 
 `tddy-tools` resolves `agent` against its **live roster**, not `TDDY_SUBAGENT`:
 
 - **Local entry** → a `SpecializedSubagentSession` built from the entry's def, as today.
-- **Remote entry** → an `OpenAgentConversation` / `PromptAgentConversation` / `CancelAgentConversation`
-  RPC on `session_agents.SessionAgentService` to the **facilitating daemon**, which forwards it to
-  the owning daemon in the session room. The in-jail transport does not change: `tddy-tools` still
+- **Remote entry** → an `OpenAgentConversation` / `PromptAgentConversation` /
+  `ResumeAgentConversation` / `CancelAgentConversation` RPC on
+  `session_agents.SessionAgentService` to the **facilitating daemon**, which forwards it to the
+  owning daemon in the session room. The in-jail transport does not change: `tddy-tools` still
   speaks only to daemon A, over whichever of `SandboxIpc` / `LiveKit` / `DaemonHttp` it already
   detected.
+
+### A conversation's turn control crosses the wire
+
+A jail holds no agent definition, so in a jailed deployment **every** conversation is a remote one
+and everything a caller can say about a turn has to be a field on this service, not merely a Rust
+argument:
+
+| Carried | Where | What it means |
+|---|---|---|
+| `max_turns` | `PromptAgentConversationRequest`, `ResumeAgentConversationRequest` | how many model turns this one call may spend, in place of the agent definition's budget. Above the serving host's ceiling it is clamped, and the clamp comes back on the final frame |
+| `from_message_id`, `correction` | `ResumeAgentConversationRequest` | rewind to a message the conversation holds, and append one corrective instruction after it |
+| `messages` | `AgentConversationChunk`, **final frame only** | the messages that turn appended, as `AgentMessageDescriptor { id, role, tool, tool_calls, is_error, preview }` |
+| `clamped_max_turns` | `AgentConversationChunk`, final frame only | the budget actually applied, unset when the caller got what it asked for |
+
+`ResumeAgentConversation` is a server stream like `PromptAgentConversation`, and is a member of the
+in-jail relay allowlist for the reason stated in
+[remote-codebase-mode.md](remote-codebase-mode.md) § What else a jailed agent may reach — including
+what that entry does and does not guarantee about which session a conversation id belongs to.
+
+The descriptors and the budget are what make a conversation whose loop runs on another host as
+addressable as a local one: until they crossed this wire the remote half returned no history at all
+and could not be rewound into. `messages` and `clamped_max_turns` ride the **final** frame, as
+`stop_reason` does, because neither is known until the turn has ended.
+
+**The crossing is not proven end to end.** `ResumeAgentConversation` is compile-checked and covered
+on either side of the wire — the local session's own tests for the turn loop, the `--mcp` stdio
+acceptance tests for the tool shape — but the suite that would drive it across this service runs on
+no CI machine
+([`2026-09-12`](../../dev/todo/2026-09-12-the-in-jail-conversation-suite-runs-nowhere.md)), and no
+other test does. Recorded in
+[`docs/dev/todo/2026-09-26-the-resume-rpc-and-its-turn-budget-have-no-wire-level-test.md`](../../dev/todo/2026-09-26-the-resume-rpc-and-its-turn-budget-have-no-wire-level-test.md).
+A long `messages` list on the final frame can also overflow the chunk-framing threshold —
+[`docs/dev/todo/2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md`](../../dev/todo/2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md).
+
+One shape the wire deliberately does not carry: a turn that is **both** a new prompt and a rewind.
+The local session supports it, no MCP caller can construct it, so no field was invented for it. It
+becomes real work only if `subagent_prompt` ever gains a rewind.
 
 `TDDY_SUBAGENT`'s role as a default agent name is **removed**. `subagent_new_session` without an
 `agent` field is an error listing the roster's ids — with an unbounded roster there is no defensible
@@ -884,7 +925,8 @@ says why on its row. An unreadable roster is not an empty one, at any depth.
 27. The owning daemon joins `session-{session_id}` and serves its agent surface there; the
     facilitating daemon remains the identity every file-access RPC is addressed to.
 28. `subagent_prompt` to a remote agent runs the loop **on the owning daemon** and returns the same
-    `{stopReason, content}` shape a local agent returns — the main agent cannot tell them apart.
+    `{stopReason, content, usage, messages}` shape a local agent returns — the main agent cannot
+    tell them apart.
 29. Two agents owned by the **same** remote daemon share **one** clone.
 30. Two agents owned by **different** remote daemons get one clone each.
 31. A remote agent's `READ`/`GLOB`/`GREP` is served from its own clone, with no `ExecuteTool` to the
@@ -897,6 +939,11 @@ says why on its row. An unreadable roster is not an empty one, at any depth.
     room membership left behind.
 35. An owning daemon that becomes unreachable mid-session fails that agent's prompts with an error
     naming the daemon; the rest of the roster keeps working.
+36. A per-call turn budget, a resume with an optional rewind point and correction, and the per-turn
+    message descriptors are fields on `session_agents.SessionAgentService`, so a conversation whose
+    loop runs on the facilitating daemon is as controllable and as rewindable as one running
+    in-process. **Implemented and compile-checked, not proven across the wire** — see § A
+    conversation's turn control crosses the wire.
 
 ### Clones
 

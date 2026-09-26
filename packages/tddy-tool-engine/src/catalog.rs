@@ -17,7 +17,12 @@ pub fn tool_catalog() -> Vec<ToolDef> {
     vec![
         ToolDef {
             name: "Read".to_string(),
-            description: "Read file contents from the workspace.".to_string(),
+            description: "Read file contents from the workspace. 'offset' is the 0-based first \
+                          line to return (default: the start of the file) and 'limit' the greatest \
+                          number of lines to return (default: all that remain). Answers with the \
+                          window's 'content', 'truncated' (whether further lines follow it) and \
+                          'total_lines' (the file's full length)."
+                .to_string(),
             input_schema_json: r#"{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}"#.to_string(),
         },
         ToolDef {

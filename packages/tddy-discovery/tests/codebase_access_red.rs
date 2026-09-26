@@ -29,8 +29,10 @@ fn managed_access_with(response: &'static str) -> (RecordedCalls, CodebaseAccess
 
 // ─── Managed: name mapping ─────────────────────────────────────────────────────
 
-/// A managed READ dispatches the capitalized `"Read"` tool name with a `{"path": ...}` argument
-/// payload — the same shape `tddy-tools`' exec-tool catalog expects.
+/// A managed READ dispatches the capitalized `"Read"` tool name with the argument payload
+/// `tddy-tools`' exec-tool catalog expects — the path, plus the resolved line window. The window's
+/// defaults are the subject of `read_window_red::an_unwindowed_managed_read_forwards_the_default_line_cap`;
+/// they are asserted here too so this test keeps naming the whole payload rather than part of it.
 #[tokio::test]
 async fn managed_codebase_access_maps_read_to_the_capitalized_read_tool_name() {
     // Given
@@ -50,7 +52,10 @@ async fn managed_codebase_access_maps_read_to_the_capitalized_read_tool_name() {
         recorded[0].0, "Read",
         "dispatched tool name must be 'Read', not 'READ'"
     );
-    assert_eq!(recorded[0].1, serde_json::json!({"path": "src/main.rs"}));
+    assert_eq!(
+        recorded[0].1,
+        serde_json::json!({"path": "src/main.rs", "offset": 0, "limit": 200})
+    );
 }
 
 /// A managed GLOB dispatches the capitalized `"Glob"` tool name with a `{"pattern": ...}` payload.

@@ -13,8 +13,11 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::path::PathBuf;
 use tddy_discovery::roster::seed_subagents_or_report;
-use tddy_discovery::subagent::{resolve_replaced_tools_for_defs, SubagentRegistry};
-// The conversation runtime the six `subagent_*` tools drive: the table of open conversations, the
+use tddy_discovery::subagent::{
+    resolve_replaced_tools_for_defs, MessageId, SubagentRegistry, TurnRequest,
+    SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS,
+};
+// The conversation runtime the seven `subagent_*` tools drive: the table of open conversations, the
 // turns that outlived the calls that started them, and the accounting of both. It moved to
 // `tddy-discovery` with the roster at `#unbundle` node 5 — it is logic over that crate's own
 // session types — while the tool bodies, their schemas and the router stayed here.
@@ -1799,16 +1802,14 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
 }
 
 /// `subagent_prompt` (ACP `session/prompt`-shaped): sends one prompt turn to an already-open
-/// session and returns `{stopReason, content, usage}` once the subagent yields — or
+/// session and returns `{stopReason, content, usage, messages}` once the subagent yields — or
 /// `{responseId, pending: true}` when it has not yielded within the caller's grace period.
 ///
-/// The turn itself is never bounded; only the wait for it is. A turn still running when `graceMs`
-/// elapses keeps going in a background task, and `subagent_await` collects its outcome under the
-/// returned id (docs/ft/coder/managed-codebase-subagents.md § Long turns).
-///
-/// A conversation whose agent was detached underneath it is refused naming the detach rather than
-/// prompted: the main agent waits on this call, so a conversation that can no longer be answered has
-/// to fail rather than hang.
+/// The *wait* is what `graceMs` bounds; `maxTurns` is what bounds the turn itself, and only when
+/// the caller sends one — absent, the agent definition's own budget applies unchanged. A turn
+/// still running when `graceMs` elapses keeps going in a background task, and `subagent_await`
+/// collects its outcome under the returned id
+/// (docs/ft/coder/managed-codebase-subagents.md § Long turns).
 async fn subagent_prompt_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: sessionId");
@@ -1830,7 +1831,91 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
         Ok(grace) => grace,
         Err(e) => return subagent_error_json(e),
     };
+    let request = match turn_budget(&args, TurnRequest::prompting(prompt_text)) {
+        Ok(request) => request,
+        Err(e) => return subagent_error_json(e),
+    };
+    take_a_turn(session_id, request, grace).await
+}
 
+/// `subagent_resume`: take another turn on an open conversation **without** asking it anything
+/// new, optionally after sending it back to a message it already holds and optionally with one
+/// corrective instruction.
+///
+/// A rewind alone changes nothing — turns go out at `temperature: 0.0`, so an identical history
+/// reproduces an identical turn — which is why `correction` exists beside `fromMessageId` rather
+/// than as a separate tool.
+///
+/// Queues exactly as a prompt does: a conversation runs one turn at a time, so a resume accepted
+/// while a turn is in flight waits behind it and reports `queuePosition` / `queueSize`.
+async fn subagent_resume_tool(args: serde_json::Value) -> String {
+    let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
+        return subagent_error_json("missing required field: sessionId");
+    };
+    let grace = match blocking_budget(&args, "graceMs", SUBAGENT_PROMPT_GRACE) {
+        Ok(grace) => grace,
+        Err(e) => return subagent_error_json(e),
+    };
+    let mut request = TurnRequest::resuming();
+    // Present-but-empty is refused rather than treated as absent, for both fields and for the
+    // reason `subagent_prompt` refuses an empty prompt: a caller that sent a field meant to send
+    // something in it, and honouring the request as though the field were missing would silently
+    // do less than it asked for. An empty id addresses no message; an empty correction corrects
+    // nothing, which makes the rewind it accompanies a no-op.
+    match args.get("fromMessageId").and_then(|v| v.as_str()) {
+        Some("") => {
+            return subagent_error_json(
+                "fromMessageId must name a message to rewind to; omit it to continue from the end",
+            )
+        }
+        Some(id) => request = request.from_message(MessageId::from(id)),
+        None => {}
+    }
+    match args.get("correction").and_then(|v| v.as_str()) {
+        Some("") => {
+            return subagent_error_json(
+                "correction must say what to do differently; omit it to resume unchanged",
+            )
+        }
+        Some(correction) => request = request.with_correction(correction),
+        None => {}
+    }
+    let request = match turn_budget(&args, request) {
+        Ok(request) => request,
+        Err(e) => return subagent_error_json(e),
+    };
+    take_a_turn(session_id, request, grace).await
+}
+
+/// Apply a caller's `maxTurns` to `request`, or say why the value cannot be read.
+///
+/// Refused naming the field rather than ignored, for the reason [`blocking_budget`] refuses a
+/// malformed budget: a turn budget silently dropped has the caller reading an early stop as a
+/// finished search. A value above the ceiling is **not** refused — it is clamped by the session
+/// and the clamp comes back in the outcome's `clampedMaxTurns`.
+fn turn_budget(args: &serde_json::Value, request: TurnRequest) -> Result<TurnRequest, String> {
+    match args.get("maxTurns") {
+        None | Some(serde_json::Value::Null) => Ok(request),
+        Some(value) => match value.as_u64().and_then(|turns| u32::try_from(turns).ok()) {
+            Some(max_turns) => Ok(request.within_turns(max_turns)),
+            None => Err(format!(
+                "maxTurns must be a whole number of model turns to spend on this call, got: {value}"
+            )),
+        },
+    }
+}
+
+/// Run one turn of an open conversation, whatever the turn was asked to do.
+///
+/// The body both conversation tools share, because everything after "what is this turn" is the
+/// same: the conversation is looked up on the live roster, the turn is spawned so it survives its
+/// caller, and the call blocks for at most `grace` before handing back a receipt. Two copies of
+/// this would be two chances for a resume to queue, refuse or report unlike a prompt.
+///
+/// A conversation whose agent was detached underneath it is refused naming the detach rather than
+/// prompted: the main agent waits on this call, so a conversation that can no longer be answered
+/// has to fail rather than hang.
+async fn take_a_turn(session_id: &str, request: TurnRequest, grace: std::time::Duration) -> String {
     let mut sessions = subagent_sessions().lock().await;
     if sessions.open.contains_key(session_id) {
         let roster = crate::session_agents::session_agent_roster();
@@ -1865,7 +1950,7 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
     let turn = DeferredTurn {
         response_id: uuid::Uuid::new_v4().to_string(),
         conversation_id: session_id.to_string(),
-        prompt_text,
+        request,
         session: conv.session.clone(),
         // Only a loop running here is reported on; one the daemon runs it already sees.
         reported_agent: conv.remote.is_none().then(|| conv.agent.clone()),
@@ -2323,9 +2408,64 @@ fn subagent_prompt_schema() -> std::sync::Arc<serde_json::Map<String, serde_json
                 "minimum": 0,
                 "description": "How long to block for the turn before returning a responseId to \
                                 collect it with. Defaults to 25000; 0 defers immediately."
-            }
+            },
+            "maxTurns": max_turns_property(),
         }
     }))
+}
+
+/// The `subagent_resume` input schema: the conversation is required, everything that reshapes the
+/// turn is not.
+fn subagent_resume_schema() -> std::sync::Arc<serde_json::Map<String, serde_json::Value>> {
+    schema_object(serde_json::json!({
+        "type": "object",
+        "required": ["sessionId"],
+        "properties": {
+            "sessionId": {"type": "string"},
+            "fromMessageId": {
+                "type": "string",
+                "description": "Send the conversation back to this message first, discarding \
+                                everything after it. The ids come from a turn outcome's \
+                                `messages`. A rewind landing between a tool call and its results \
+                                keeps the results, so the history stays one the model accepts. An \
+                                id this conversation does not hold is an error, never a silent \
+                                continue. Omit to carry on from the end."
+            },
+            "correction": {
+                "type": "string",
+                "description": "One instruction appended after the rewind point, saying what to \
+                                do differently. Rewinding WITHOUT this usually changes nothing: \
+                                turns run at temperature 0, so an identical history reproduces \
+                                an identical turn."
+            },
+            "graceMs": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "How long to block for the turn before returning a responseId to \
+                                collect it with. Defaults to 25000; 0 defers immediately."
+            },
+            "maxTurns": max_turns_property(),
+        }
+    }))
+}
+
+/// The `maxTurns` property, spelled once for the two tools that accept it.
+///
+/// Stated in the description rather than as a schema `maximum`, because the ceiling is not a
+/// refusal: a request above it is clamped and the clamp is reported back in the outcome, so a
+/// caller that asks for too much keeps working and still learns what it actually got.
+fn max_turns_property() -> serde_json::Value {
+    serde_json::json!({
+        "type": "integer",
+        "minimum": SUBAGENT_MIN_TURNS,
+        "description": format!(
+            "How many model turns this ONE call may spend, in place of the agent definition's \
+             own budget. Omit to leave the definition's budget alone. Outside \
+             {SUBAGENT_MIN_TURNS}..={SUBAGENT_MAX_TURNS_CEILING} it is cut to the nearer bound, and \
+             the outcome then carries `clampedMaxTurns` saying so — a turn that stopped early on a \
+             clamped budget has not finished searching."
+        )
+    })
 }
 
 /// The `subagent_await` input schema: the receipt is required, bounding the wait is not.
@@ -2374,10 +2514,13 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
          accepted, but it WAITS ITS TURN rather than running alongside it. To get work running in \
          parallel, open a second conversation — more prompts to one conversation is a queue. \
          Blocks for at most `graceMs` (default 25000). A turn that yields in time returns \
-         {stopReason, content, usage}. A turn still running when that elapses is NOT cancelled: \
-         the call returns {responseId, pending: true, queuePosition, queueSize}, the turn keeps \
-         running, and `subagent_await` collects its outcome — in the same {stopReason, content, \
-         usage} shape — under that responseId. A responseId is a receipt, not an error. \
+         {stopReason, content, usage, messages}. `messages` is what the turn appended, each with \
+         an id, a role, `isError` and a short preview: read it to see whether the agent's tool \
+         calls actually worked, and to pick an id to hand `subagent_resume` a `fromMessageId`. \
+         Pass `maxTurns` to bound this one call. A turn still running when the grace elapses is \
+         NOT cancelled: the call returns {responseId, pending: true, queuePosition, queueSize}, \
+         the turn keeps running, and `subagent_await` collects its outcome — in the same shape — \
+         under that responseId. A responseId is a receipt, not an error. \
          `queuePosition` is how many turns on this conversation were accepted before this one and \
          have not ended yet — 0 means nothing is ahead of it, so it is the turn running now; \
          `queueSize` counts every turn still outstanding on this conversation, this one included. \
@@ -2389,11 +2532,32 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
         Box::pin(subagent_prompt_tool(args))
     }));
 
+    let resume_tool = rmcp::model::Tool::new(
+        "subagent_resume",
+        "Take another turn on an open subagent conversation WITHOUT sending it a new prompt. \
+         Use it when a conversation stopped on its turn budget and you want it to carry on from \
+         where it was — re-prompting would make the agent re-read everything it has already read. \
+         Pass `fromMessageId` (an id from a turn outcome's `messages`) to send the conversation \
+         back to that message first, discarding everything after it; pass `correction` to append \
+         one instruction saying what to do differently. A rewind on its own usually changes \
+         nothing: turns run at temperature 0, so an identical history reproduces an identical \
+         turn — rewind WITH a correction. A conversation runs ONE turn at a time, so a resume is \
+         queued exactly like a prompt: it returns {stopReason, content, usage, messages} if it \
+         yields within `graceMs` (default 25000), otherwise {responseId, pending: true, \
+         queuePosition, queueSize} for `subagent_await` to collect. An unknown sessionId or \
+         fromMessageId is an error naming it, never a silent continue.",
+        subagent_resume_schema(),
+    );
+    router.add_route(subagent_route(resume_tool, |args| {
+        Box::pin(subagent_resume_tool(args))
+    }));
+
     let await_tool = rmcp::model::Tool::new(
         "subagent_await",
-        "Collect the outcome of a subagent turn that subagent_prompt handed back a responseId \
-         for. Blocks for at most `timeoutMs` (default 25000). Returns the turn's {stopReason, \
-         content, usage} once it has ended, or {responseId, pending: true, queuePosition, \
+        "Collect the outcome of a subagent turn that subagent_prompt or subagent_resume handed \
+         back a responseId for. Blocks for at most `timeoutMs` (default 25000). Returns the \
+         turn's {stopReason, content, usage, messages} once it has ended, or {responseId, \
+         pending: true, queuePosition, \
          queueSize} if it is still running — in which case call again with the same responseId. \
          A conversation runs one turn at a time, so a turn with a `queuePosition` above 0 has not \
          started: that many turns accepted before it on the same conversation are still \
@@ -3233,14 +3397,14 @@ mod tests {
     use tddy_discovery::subagent_runtime::prompt_outcome_json;
 
     fn an_end_turn_outcome(answer: &str) -> PromptOutcome {
-        PromptOutcome {
-            stop_reason: StopReason::EndTurn,
-            content: vec![ContentBlock::text(answer)],
-            usage: TokenUsage {
+        PromptOutcome::new(
+            StopReason::EndTurn,
+            vec![ContentBlock::text(answer)],
+            TokenUsage {
                 input_tokens: 30,
                 output_tokens: 12,
             },
-        }
+        )
     }
 
     // ─── The dual return shape ────────────────────────────────────────────────

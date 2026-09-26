@@ -16,8 +16,8 @@
 //! every call answered `{"error":"unknown tool: ListActions","is_error":true}`. They are now
 //! merged only where the host claims to serve them, with
 //! `tddy_core::session_actions::SESSION_ACTION_TOOLS_ENV`, which `tddy-sandbox-app`'s spawn path
-//! sets and the daemon path does not. The surface is therefore **43** where they are served and
-//! **40** where they are not, differing in exactly those three.
+//! sets and the daemon path does not. The surface is therefore **44** where they are served and
+//! **41** where they are not, differing in exactly those three.
 
 use std::collections::BTreeSet;
 use std::process::Stdio;
@@ -32,9 +32,9 @@ const IO_TIMEOUT: Duration = Duration::from_secs(10);
 /// Every tool a session with all four of its optional surfaces present advertises, sorted.
 ///
 /// Held as names rather than a length so that a tool renamed, dropped or re-homed during a crate
-/// move fails here by name. The count is the array's own length — `[&str; 43]` is the "exactly 43"
+/// move fails here by name. The count is the array's own length — `[&str; 44]` is the "exactly 44"
 /// half of the assertion, checked by the compiler.
-const EVERY_ADVERTISED_TOOL: [&str; 43] = [
+const EVERY_ADVERTISED_TOOL: [&str; 44] = [
     "Await",
     "Delete",
     "Glob",
@@ -77,6 +77,7 @@ const EVERY_ADVERTISED_TOOL: [&str; 43] = [
     "subagent_list",
     "subagent_new_session",
     "subagent_prompt",
+    "subagent_resume",
     "subagent_status",
 ];
 
@@ -240,10 +241,10 @@ async fn initialize_mcp_session(stdin: &mut ChildStdin, stdout: &mut BufReader<C
 // ─── The audit ────────────────────────────────────────────────────────────────
 
 /// The headline number of the `tddy-tools` thinning: with the tool bodies now living in six
-/// crates, a session that has every optional surface still advertises the same 43 names it did
+/// crates, a session that has every optional surface still advertises the same 44 names it did
 /// when they all lived in one.
 #[tokio::test]
-async fn advertises_all_forty_three_tool_names_where_the_host_serves_the_action_tools() {
+async fn advertises_all_forty_four_tool_names_where_the_host_serves_the_action_tools() {
     // Given
     let session = a_fully_configured_session().whose_host_serves_the_action_tools();
 
@@ -254,15 +255,15 @@ async fn advertises_all_forty_three_tool_names_where_the_host_serves_the_action_
     assert_eq!(
         advertised,
         names(&EVERY_ADVERTISED_TOOL),
-        "the fully configured MCP surface must be exactly these 43 tools"
+        "the fully configured MCP surface must be exactly these 44 tools"
     );
 }
 
-/// The daemon path advertises 40, and the audit records that rather than reconciling it: the
+/// The daemon path advertises 41, and the audit records that rather than reconciling it: the
 /// daemon's tool handler has no arm for any of the three action tools, so advertising them there
 /// was a false advertisement an agent could only discover by calling one.
 #[tokio::test]
-async fn advertises_forty_tool_names_on_the_daemon_path_which_serves_no_action_tool() {
+async fn advertises_forty_one_tool_names_on_the_daemon_path_which_serves_no_action_tool() {
     // Given
     let session = a_fully_configured_session();
 

@@ -59,7 +59,14 @@ remote `tddy-daemon`) so that my agent can plan, read, write, and test code in a
 4. `ListExecTools` returns a list of `ToolDef` records — one per supported tool — each with a non-empty
    `name`, `description`, and a valid JSON Schema in `input_schema_json`.
 5. `ExecuteTool` with `tool_name:"Read"` and a valid path returns the file contents as
-   `result_json:{content:"..."}`. `is_error` is false.
+   `result_json:{content:"...", truncated, total_lines}`. `is_error` is false. `Read` honours the
+   `offset` (0-based first line) and `limit` (greatest number of lines) it advertises: a window is
+   exactly the lines asked for, `truncated` says whether further lines follow it, and `total_lines`
+   is the file's own length rather than the window's. A window starting past the last line is empty
+   rather than an error, so a caller paging forward can tell running off the end from a failed
+   read. A `Read` with **no** window returns the whole file byte for byte, trailing newline
+   included — the engine applies no default cap, because narrowing a bare `Read` would silently
+   truncate for every caller that has ever issued one.
 6. `ExecuteTool` with `tool_name:"Write"` creates or overwrites a file in the worktree. A subsequent
    `ExecuteTool("Read")` on the same path returns the written content.
 7. `ExecuteTool` with a path that escapes the worktree root (e.g. `../../etc/passwd`) returns an
@@ -151,16 +158,27 @@ injected by tddy — pass them explicitly when using print mode.
 
 Details: [cursor-cli-session.md](cursor-cli-session.md#sandbox-mode).
 
-**What else a jailed agent may reach.** Besides `exec_tools.ExecToolService/ExecuteTool`, the runner forwards exactly five
-roster and conversation operations to the facilitating daemon over the `SessionChannel` —
-`StreamSessionAgents`, `OpenAgentConversation`, `PromptAgentConversation`, `CancelAgentConversation`
-and `ReportAgentConversationState`, addressed at `session_agents.SessionAgentService`
-(see [session-agent-roster.md](session-agent-roster.md)). Any other `(service, method)` pair is
-refused at the jail boundary with `not_found`. The set is unchanged from when those methods lived on
-`connection.ConnectionService`; what changed is that the jail side
-(`packages/tddy-sandbox-runner/src/runner.rs`) now reads it from
-`tddy_service::session_agents::IN_JAIL_RELAYABLE` instead of repeating the strings, because an
+**What else a jailed agent may reach.** Besides `exec_tools.ExecToolService/ExecuteTool`, the runner
+forwards exactly six roster and conversation operations to the facilitating daemon over the
+`SessionChannel` — `StreamSessionAgents`, `OpenAgentConversation`, `PromptAgentConversation`,
+`ResumeAgentConversation`, `CancelAgentConversation` and `ReportAgentConversationState`, addressed
+at `session_agents.SessionAgentService` (see [session-agent-roster.md](session-agent-roster.md)).
+Any other `(service, method)` pair is refused at the jail boundary with `not_found`. The jail side
+(`packages/tddy-sandbox-runner/src/runner.rs`) reads the set from
+`tddy_service::session_agents::IN_JAIL_RELAYABLE` rather than repeating the strings, because an
 allowlist that no longer names the served coordinate fails **closed** — silently, at runtime.
+
+`ResumeAgentConversation` is in the set because a conversation an in-jail `tddy-tools` opened over
+this relay is one it must also be able to continue; without the entry every jailed conversation
+could be started and never carried on. What the entry costs, stated exactly: it reaches the same
+code path as `PromptAgentConversation` under the same authentication, so it opens no route weaker
+than one already open. It is **not** the case that a caller is confined to its own session's
+conversations — the session token resolves to an OS user and is never cross-checked against the
+`session_id`, and a conversation is looked up in a host-global map keyed on its id alone. That gap
+is pre-existing (`Prompt` and `Cancel` were already relayable through it) and is recorded in
+[`docs/dev/todo/2026-09-26-a-conversation-id-is-not-bound-to-the-session-that-opened-it.md`](../../dev/todo/2026-09-26-a-conversation-id-is-not-bound-to-the-session-that-opened-it.md).
+What resume genuinely adds over prompt is a **destructive write** rather than one more turn:
+`from_message_id` truncates a transcript and `correction` injects into it.
 
 ## Workspace tool sandbox (`session_type:"workspace"`, `sandbox:true`)
 
@@ -201,6 +219,32 @@ tools directly on the host worktree.
 5. A platform with no sandbox backend is refused with `failed_precondition`, and a jail that will
    not provision leaves no session behind. **Neither falls back to direct host execution** — a
    session that came up unconfined is indistinguishable from the one that was asked for.
+6. A tool call sent into the jail comes back as one of **two outcomes, not one**: the tool *ran*
+   inside the jail and this is what it answered — `is_error` included, which is a tool result like
+   any other and says nothing about the jail — or the call **never reached a tool**, because the
+   jail could not be spoken to or did not answer within the in-jail deadline.
+7. A call that never reached a tool leaves the jail unusable, so the jail is torn down,
+   re-provisioned, and that call retried **exactly once**. A tool that ran and exited non-zero
+   never triggers a rebuild. A second transport failure in the freshly spawned replacement is
+   reported to the caller rather than retried again: a host that cannot keep one runner alive will
+   not keep the third alive either.
+8. **Neither the rebuild nor its failure is a route onto the host worktree.** A jail that cannot be
+   rebuilt, and a replacement that dies the same way, answer with the failure. The distinction
+   between the two outcomes exists for exactly one decision — whether to rebuild — and for no
+   other.
+
+**What the retry can cost, stated plainly.** A transport failure says the *answer* did not come
+back; it does not say the tool did not run. A mutating call retried in a rebuilt jail can therefore
+execute twice. That is an accepted risk rather than an oversight, recorded in
+[`docs/dev/todo/2026-09-26-a-jail-rebuild-can-re-run-a-tool-call-that-already-executed.md`](../../dev/todo/2026-09-26-a-jail-rebuild-can-re-run-a-tool-call-that-already-executed.md);
+the alternative is a session that cannot run another tool for the life of the daemon.
+
+**What the rebuild does not add.** Jail death is still discovered per call rather than watched for
+— there is no `child.wait()` observer and no backoff — and the seam is proven with a test double
+rather than a real runner, because the real-jail suite runs on no CI machine
+([`2026-09-12`](../../dev/todo/2026-09-12-the-in-jail-conversation-suite-runs-nowhere.md)). §2 of
+[`2026-09-15`](../../dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md) is
+partly closed by the restart policy above; its shutdown half is untouched.
 
 Split placement (`codebase_daemon_instance_id` together with `sandbox`) is still refused; see
 [remote-managed-worktree.md](remote-managed-worktree.md) § What a split session cannot also ask

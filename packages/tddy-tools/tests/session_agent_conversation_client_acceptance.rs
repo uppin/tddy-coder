@@ -46,6 +46,7 @@ fn a_content_frame(chunk: &str) -> AgentConversationChunk {
         content_chunk: chunk.to_string(),
         stop_reason: String::new(),
         last: false,
+        ..Default::default()
     }
 }
 
@@ -55,6 +56,7 @@ fn a_final_frame(chunk: &str, stop_reason: &str) -> AgentConversationChunk {
         content_chunk: chunk.to_string(),
         stop_reason: stop_reason.to_string(),
         last: true,
+        ..Default::default()
     }
 }
 

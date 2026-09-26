@@ -7,26 +7,32 @@
 //! transport the roster stream and the exec tools already use
 //! (docs/ft/daemon/session-agent-roster.md § Invoking an agent).
 //!
-//! The three RPCs mirror the MCP surface one for one, so nothing here decides policy: which agents
+//! The four RPCs mirror the MCP surface one for one, so nothing here decides policy: which agents
 //! are addressable is the roster's, and resolving the entry to an owning daemon is the daemon's.
 //! What is here is the wire: one request per call, and what its frames mean.
 //!
-//! Two of those meanings are load-bearing, and both are about a partial answer:
+//! Three of those meanings are load-bearing, and the first two are about a partial answer:
 //!
 //! - a turn ends with exactly one frame marked `last`, so a stream that ends without one was
 //!   **truncated** and is refused rather than handed back as a complete answer;
 //! - a stop reason this build cannot spell is refused naming the spelling, because reading an
-//!   unknown one as `EndTurn` would report a turn that was cut short as one that finished.
+//!   unknown one as `EndTurn` would report a turn that was cut short as one that finished;
+//! - a message **role** this build cannot spell is refused the same way. A descriptor is what a
+//!   caller picks a rewind point out of, and one attributed to the wrong speaker would have it
+//!   send the conversation back to a message it never meant.
 
 use std::sync::Arc;
 
 use crate::openai::TokenUsage;
-use crate::subagent::{ContentBlock, PromptOutcome, StopReason, SubagentError, SubagentSession};
+use crate::subagent::{
+    ContentBlock, MessageDescriptor, MessageId, MessageRole, PromptOutcome, StopReason,
+    SubagentError, SubagentSession, TurnRequest,
+};
 use prost::Message;
 use tddy_service::proto::session_agents_svc::{
-    AgentConversationChunk, CancelAgentConversationRequest, OpenAgentConversationRequest,
-    OpenAgentConversationResponse, PromptAgentConversationRequest,
-    ReportAgentConversationStateRequest,
+    AgentConversationChunk, AgentMessageDescriptor, CancelAgentConversationRequest,
+    OpenAgentConversationRequest, OpenAgentConversationResponse, PromptAgentConversationRequest,
+    ReportAgentConversationStateRequest, ResumeAgentConversationRequest,
 };
 use tddy_service::proto::types::SessionAgentStatus;
 
@@ -89,60 +95,116 @@ impl AgentConversationLink {
         Ok(response.conversation_id)
     }
 
-    /// Run one turn of `conversation_id` and return the agent's whole answer.
+    /// Ask `conversation_id` something new and return the agent's whole answer.
     pub async fn prompt(
         &self,
         conversation_id: &str,
         prompt: &str,
     ) -> Result<PromptOutcome, String> {
-        let request = PromptAgentConversationRequest {
+        self.take_turn(conversation_id, &TurnRequest::prompting(prompt))
+            .await
+    }
+
+    /// Run one turn of `conversation_id` and return the agent's whole answer.
+    ///
+    /// Which RPC carries the turn is decided by the request, not by the caller: a turn that asks
+    /// something new is a `PromptAgentConversation`, and one that continues what the conversation
+    /// already holds is a `ResumeAgentConversation`. Both carry the caller's turn budget, and the
+    /// resume carries the rewind point and the correction as well.
+    pub async fn take_turn(
+        &self,
+        conversation_id: &str,
+        request: &TurnRequest,
+    ) -> Result<PromptOutcome, String> {
+        let call = self.turn_call(conversation_id, request)?;
+        let mut frames = self
+            .client
+            .call_server_stream(SESSION_AGENT_SERVICE, call.method(), call.encode())
+            .await
+            .map_err(|e| format!("{}: {e}", call.method()))?;
+
+        let method = call.method();
+        let mut answer = String::new();
+        // TODO(livekit-rpc-deadline): this await is unbounded, as every other client-side stream in
+        // this crate is — a daemon that dies mid-turn hangs the turn rather than failing it. The
+        // fix belongs on `tddy_rpc`'s client engine, not in a timeout wrapped around this loop;
+        // recorded in docs/dev/TODO.md, "No LiveKit RPC call has a client-side deadline".
+        while let Some(frame) = frames.recv().await {
+            let frame = frame.map_err(|e| format!("{method} stream: {e}"))?;
+            let frame = AgentConversationChunk::decode(frame.as_slice())
+                .map_err(|e| format!("{method} decode frame ({} bytes): {e}", frame.len()))?;
+            answer.push_str(&frame.content_chunk);
+            if !frame.last {
+                continue;
+            }
+            // The turn ran on the owning daemon, which accounts for what it spent; nothing was
+            // spent here. Reporting the daemon's total as this process's would double-count it in
+            // the session's own accounting file.
+            let mut outcome = PromptOutcome::new(
+                parse_stop_reason(&frame.stop_reason)?,
+                vec![ContentBlock::text(answer)],
+                TokenUsage::default(),
+            );
+            // The ids are the *owning* daemon's, minted against the history it holds, and they are
+            // passed through untouched: a caller reads one to choose a rewind point, and an id
+            // this host renumbered would address a different message than the one it described.
+            outcome.messages = frame
+                .messages
+                .iter()
+                .map(parse_message_descriptor)
+                .collect::<Result<Vec<_>, String>>()?;
+            outcome.clamped_max_turns = frame.clamped_max_turns;
+            return Ok(outcome);
+        }
+        Err(format!(
+            "{method} for conversation '{conversation_id}' was truncated: the stream ended after \
+             {} bytes with no final frame, so the answer is partial",
+            answer.len()
+        ))
+    }
+
+    /// The call `request` travels as, or the reason no RPC on this coordinate can carry it.
+    ///
+    /// Refused by name rather than degraded. `PromptAgentConversation` has no rewind point and no
+    /// correction, so a prompt that also rewinds would run as an ordinary prompt: the caller asked
+    /// to go back and the agent would carry on instead, which is the class of silent substitution
+    /// this whole surface exists to remove. Nothing can build that combination through the MCP
+    /// tools — `subagent_prompt` takes no `fromMessageId` and `subagent_resume` sends no prompt —
+    /// so it is refused here rather than given a wire shape with no caller.
+    fn turn_call(&self, conversation_id: &str, request: &TurnRequest) -> Result<TurnCall, String> {
+        let Some(prompt) = request.prompt_text() else {
+            return Ok(TurnCall::Resume(ResumeAgentConversationRequest {
+                session_token: self.envelope.session_token.clone(),
+                session_id: self.envelope.session_id.clone(),
+                daemon_instance_id: self.envelope.daemon_instance_id.clone(),
+                conversation_id: conversation_id.to_string(),
+                from_message_id: request.rewind_point().map(MessageId::to_string),
+                correction: request.correction().map(str::to_string),
+                max_turns: request.requested_max_turns(),
+            }));
+        };
+        if let Some(rewind_point) = request.rewind_point() {
+            return Err(format!(
+                "cannot rewind to message '{rewind_point}' and send a new prompt in one turn: \
+                 PromptAgentConversation carries no rewind point, and ResumeAgentConversation \
+                 sends no prompt — resume with a correction instead"
+            ));
+        }
+        if let Some(correction) = request.correction() {
+            return Err(format!(
+                "cannot send a new prompt and a correction in one turn: \
+                 PromptAgentConversation carries no correction ('{correction}') — send the \
+                 correction as the prompt, or resume with it"
+            ));
+        }
+        Ok(TurnCall::Prompt(PromptAgentConversationRequest {
             session_token: self.envelope.session_token.clone(),
             session_id: self.envelope.session_id.clone(),
             daemon_instance_id: self.envelope.daemon_instance_id.clone(),
             conversation_id: conversation_id.to_string(),
             prompt: prompt.to_string(),
-        };
-        let mut frames = self
-            .client
-            .call_server_stream(
-                SESSION_AGENT_SERVICE,
-                "PromptAgentConversation",
-                request.encode_to_vec(),
-            )
-            .await
-            .map_err(|e| format!("PromptAgentConversation: {e}"))?;
-
-        let mut answer = String::new();
-        // TODO(livekit-rpc-deadline): this await is unbounded, as every other client-side stream in
-        // this crate is — a daemon that dies mid-turn hangs the prompt rather than failing it. The
-        // fix belongs on `tddy_rpc`'s client engine, not in a timeout wrapped around this loop;
-        // recorded in docs/dev/TODO.md, "No LiveKit RPC call has a client-side deadline".
-        while let Some(frame) = frames.recv().await {
-            let frame = frame.map_err(|e| format!("PromptAgentConversation stream: {e}"))?;
-            let frame = AgentConversationChunk::decode(frame.as_slice()).map_err(|e| {
-                format!(
-                    "PromptAgentConversation decode frame ({} bytes): {e}",
-                    frame.len()
-                )
-            })?;
-            answer.push_str(&frame.content_chunk);
-            if !frame.last {
-                continue;
-            }
-            return Ok(PromptOutcome {
-                stop_reason: parse_stop_reason(&frame.stop_reason)?,
-                content: vec![ContentBlock::text(answer)],
-                // The turn ran on the owning daemon, which accounts for what it spent; nothing was
-                // spent here. Reporting the daemon's total as this process's would double-count it
-                // in the session's own accounting file.
-                usage: TokenUsage::default(),
-            });
-        }
-        Err(format!(
-            "PromptAgentConversation for conversation '{conversation_id}' was truncated: the \
-             stream ended after {} bytes with no final frame, so the answer is partial",
-            answer.len()
-        ))
+            max_turns: request.requested_max_turns(),
+        }))
     }
 
     /// Close `conversation_id` on the daemon holding it.
@@ -259,11 +321,18 @@ pub struct RemoteAgentSession {
 
 #[async_trait::async_trait]
 impl SubagentSession for RemoteAgentSession {
-    async fn prompt(&mut self, text: &str) -> Result<PromptOutcome, SubagentError> {
+    /// The turn runs on the daemon holding the conversation, whichever shape it takes. What comes
+    /// back is the same [`PromptOutcome`] a local session returns — message descriptors and the
+    /// clamped budget included — so nothing above this layer can tell which host ran the loop.
+    async fn take_turn(&mut self, request: TurnRequest) -> Result<PromptOutcome, SubagentError> {
         self.link
-            .prompt(&self.conversation_id, text)
+            .take_turn(&self.conversation_id, &request)
             .await
             .map_err(SubagentError::from)
+    }
+
+    async fn prompt(&mut self, text: &str) -> Result<PromptOutcome, SubagentError> {
+        self.take_turn(TurnRequest::prompting(text)).await
     }
 
     fn model(&self) -> &str {
@@ -293,6 +362,68 @@ impl SubagentSession for RemoteAgentSession {
     /// TODO: add a conversation-tail RPC so a remote conversation can be read the same way.
     fn tail(&self, _max_messages: usize) -> Vec<String> {
         Vec::new()
+    }
+}
+
+/// One turn on its way to the daemon, as the RPC that carries it.
+///
+/// The two are not interchangeable and the difference is the point: a resume with no prompt sent
+/// down `PromptAgentConversation` would ask the agent an empty question, and a peer too old to
+/// serve `ResumeAgentConversation` answers `not_found` — closed and loud — rather than taking one
+/// more turn forward while the caller believes it went back.
+enum TurnCall {
+    Prompt(PromptAgentConversationRequest),
+    Resume(ResumeAgentConversationRequest),
+}
+
+impl TurnCall {
+    fn method(&self) -> &'static str {
+        match self {
+            Self::Prompt(_) => "PromptAgentConversation",
+            Self::Resume(_) => "ResumeAgentConversation",
+        }
+    }
+
+    fn encode(&self) -> Vec<u8> {
+        match self {
+            Self::Prompt(request) => request.encode_to_vec(),
+            Self::Resume(request) => request.encode_to_vec(),
+        }
+    }
+}
+
+/// One message descriptor as the daemon holding the history described it.
+fn parse_message_descriptor(
+    described: &AgentMessageDescriptor,
+) -> Result<MessageDescriptor, String> {
+    Ok(MessageDescriptor {
+        id: MessageId::from(described.id.clone()),
+        role: parse_message_role(&described.role)?,
+        // Empty is the wire's spelling of "no tool", since proto3 has no absent string. Mapped
+        // back to `None` here so a descriptor built from the wire is indistinguishable from one
+        // built locally — a caller must not be able to tell which host ran the turn.
+        tool: Some(described.tool.clone()).filter(|tool| !tool.is_empty()),
+        tool_calls: described.tool_calls.clone(),
+        is_error: described.is_error,
+        preview: described.preview.clone(),
+    })
+}
+
+/// The wire spelling of a message's role, as the daemon writes it (`agent_message_role`).
+///
+/// An unknown spelling is an error rather than a default, for the reason [`parse_stop_reason`]
+/// gives one: the two builds disagree about the history, and a message attributed to the wrong
+/// speaker is one a caller could rewind to believing it was something else.
+fn parse_message_role(role: &str) -> Result<MessageRole, String> {
+    match role {
+        "system" => Ok(MessageRole::System),
+        "user" => Ok(MessageRole::User),
+        "assistant" => Ok(MessageRole::Assistant),
+        "tool" => Ok(MessageRole::Tool),
+        other => Err(format!(
+            "a turn described one of its messages as role '{other}', which this build does not \
+             recognise — the two hosts disagree about what a conversation holds"
+        )),
     }
 }
 

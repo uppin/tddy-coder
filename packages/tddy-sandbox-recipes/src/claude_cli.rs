@@ -173,6 +173,12 @@ const SUBAGENT_TOOLS: &[&str] = &[
     // an agent allowed to be handed one and not allowed to redeem it holds a receipt it can never
     // cash (docs/ft/coder/managed-codebase-subagents.md criterion 33).
     "mcp__tddy-tools__subagent_await",
+    // A conversation a sandboxed agent may open and prompt is one it must be able to carry on:
+    // without this it would have to re-prompt to continue a chain its budget cut short, making
+    // the agent re-read everything it has already read — the exact cost the subagent exists to
+    // avoid. Advertised where `subagent_prompt` is, so withholding it here would put a visible,
+    // uncallable tool in front of a sandboxed Claude.
+    "mcp__tddy-tools__subagent_resume",
     "mcp__tddy-tools__subagent_cancel",
 ];
 
@@ -467,6 +473,39 @@ mod tests {
                 "allowlist must contain {tool} when a subagent is enabled; got: {allowlist:?}"
             );
         }
+    }
+
+    /// A subagent's turn budget is the caller's to extend, and `subagent_resume` is the only way
+    /// to spend the extension on a conversation that already exists. A sandboxed Claude that can
+    /// open and prompt but not resume can only ever restart a search that ran out of turns,
+    /// re-reading everything it already read.
+    ///
+    /// This list is hand-maintained beside the MCP router, and has been forgotten before — which
+    /// is why its sibling test above exists. An unlisted tool is advertised and uncallable.
+    #[test]
+    fn claude_allowlist_offers_subagent_resume_exactly_where_it_offers_subagent_prompt() {
+        // Given the allowlist with a subagent wired in, and the one without
+        let with_subagent: HashSet<_> = build_claude_allowlist(true, &[]).into_iter().collect();
+        let without_subagent: HashSet<_> = build_claude_allowlist(false, &[]).into_iter().collect();
+
+        // Then the resume tool travels with the prompt tool, in both directions
+        assert_eq!(
+            with_subagent.contains("mcp__tddy-tools__subagent_resume"),
+            with_subagent.contains("mcp__tddy-tools__subagent_prompt"),
+            "subagent_resume must be offered exactly where subagent_prompt is; got: \
+             {with_subagent:?}"
+        );
+        assert_eq!(
+            without_subagent.contains("mcp__tddy-tools__subagent_resume"),
+            without_subagent.contains("mcp__tddy-tools__subagent_prompt"),
+            "subagent_resume must be withheld exactly where subagent_prompt is; got: \
+             {without_subagent:?}"
+        );
+        assert!(
+            with_subagent.contains("mcp__tddy-tools__subagent_resume"),
+            "a session with a subagent wired in must be able to continue a conversation it \
+             already opened; got: {with_subagent:?}"
+        );
     }
 
     /// Feature: docs/ft/coder/managed-codebase-subagents.md (criterion 33)

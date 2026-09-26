@@ -237,12 +237,12 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
         let slot = self
             .connection
             .common_room_slot("PromptAgentConversation")?;
+        // Re-addressed and otherwise forwarded whole: a field this daemon dropped on the way
+        // through — the caller's turn budget, say — would have the owner run a turn nobody asked
+        // for, with nothing on either side saying the request was reshaped.
         let forwarded = tddy_service::proto::session_agents_svc::PromptAgentConversationRequest {
-            session_token: request.session_token.clone(),
-            session_id: request.session_id.clone(),
             daemon_instance_id: owner.to_string(),
-            conversation_id: request.conversation_id.clone(),
-            prompt: request.prompt.clone(),
+            ..request.clone()
         };
         let peer = crate::livekit_peer_discovery::forward_server_stream_to_peer(
             slot,
@@ -261,6 +261,37 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
         )
         .await?;
         Ok(peer)
+    }
+
+    async fn resume(
+        &self,
+        request: &tddy_service::proto::session_agents_svc::ResumeAgentConversationRequest,
+        owner: &str,
+    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<Result<AgentConversationChunk, Status>>, Status>
+    {
+        let slot = self
+            .connection
+            .common_room_slot("ResumeAgentConversation")?;
+        let forwarded = tddy_service::proto::session_agents_svc::ResumeAgentConversationRequest {
+            daemon_instance_id: owner.to_string(),
+            ..request.clone()
+        };
+        crate::livekit_peer_discovery::forward_server_stream_to_peer(
+            slot,
+            owner,
+            SESSION_AGENT_SERVICE,
+            "ResumeAgentConversation",
+            forwarded.encode_to_vec(),
+            |bytes| {
+                tddy_service::proto::session_agents_svc::AgentConversationChunk::decode(
+                    bytes.as_slice(),
+                )
+                .map_err(|e| {
+                    Status::internal(format!("decode AgentConversationChunk from peer: {e}"))
+                })
+            },
+        )
+        .await
     }
 
     async fn cancel(
